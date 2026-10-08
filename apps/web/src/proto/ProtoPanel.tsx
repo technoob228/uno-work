@@ -11,6 +11,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { cn } from "~/lib/utils";
 import type { getRouter } from "../router";
 import { useStore } from "../store";
+import { toastManager } from "../components/ui/toast";
 import { MACHINES } from "./fixtures";
 import { MODES, VARIANTS, useProtoStore } from "./protoState";
 
@@ -22,15 +23,23 @@ function useActiveFollowsOpenChat(router: ProtoRouter) {
   const mode = useProtoStore((state) => state.mode);
   useEffect(() => {
     if (mode !== "all") return;
-    const sync = () => {
+    const sync = (announce: boolean) => {
       const environmentId = router.state.location.pathname.split("/")[1] ?? "";
       if (!MACHINES[environmentId]) return;
       if (useStore.getState().activeEnvironmentId !== environmentId) {
         useStore.getState().setActiveEnvironmentId(environmentId as EnvironmentId);
+        // Critics 3–4: the computer changed under them without a word — say it once.
+        if (announce) {
+          toastManager.add({
+            type: "info",
+            title: `Now on ${MACHINES[environmentId]!.label}`,
+            description: "This chat lives there. Files and new chats use it too — switch on top.",
+          });
+        }
       }
     };
-    sync();
-    return router.subscribe("onResolved", sync);
+    sync(false);
+    return router.subscribe("onResolved", () => sync(true));
   }, [mode, router]);
 }
 

@@ -198,6 +198,8 @@ function DoneFold(props: {
   chats: ReadonlyArray<SidebarThreadSummary>;
   nested?: boolean;
   renderRow: ProtoSidebarListProps["renderRow"];
+  /** Done chats say where they are too (critic 4). */
+  subtitleOf?: (thread: SidebarThreadSummary) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   if (props.chats.length === 0) return null;
@@ -222,6 +224,7 @@ function DoneFold(props: {
         ? props.chats.map((thread) =>
             props.renderRow(thread, {
               section: thread.settledOverride === "settled" ? "settled" : "snoozed",
+              subtitle: props.subtitleOf?.(thread) ?? null,
             }),
           )
         : null}
@@ -411,12 +414,12 @@ function ViewButton(props: {
       <PopoverTrigger
         data-testid="proto-view-button"
         className={cn(
-          "-my-1 inline-flex h-7 max-w-[11rem] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2 text-xs font-medium text-sidebar-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover",
+          "-my-1 inline-flex h-7 max-w-[calc(100%-2.5rem)] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2 text-xs font-medium text-sidebar-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover",
         )}
         aria-label={`Group and filter chats — now: ${current.short}`}
       >
         <SlidersHorizontalIcon className="size-3.5 shrink-0" />
-        <span className="truncate">Group: {current.short}</span>
+        <span className="truncate">View: {current.short}</span>
         <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverPopup
@@ -425,7 +428,7 @@ function ViewButton(props: {
         className="w-[min(18rem,calc(100vw-1.5rem))]"
         data-testid="proto-view-popup"
       >
-        <div className="flex flex-col gap-4">
+        <div className="-my-1 flex max-h-[calc(var(--available-height)-2.5rem)] flex-col gap-4 overflow-y-auto py-1">
           <Segmented
             label="Group chats by"
             value={effective}
@@ -574,23 +577,27 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       (project) => project.environmentId === environmentId && isHomeProject(project),
     ) ?? null;
 
-  const row = (
+  const hasProjects = logical.list.some((entry) => !entry.home);
+  const subtitleFor = (
     thread: SidebarThreadSummary,
     show: { project: boolean; computer: boolean },
-    nested = false,
   ) => {
     const parts = placeParts({
       environmentId: thread.environmentId,
       project: logical.projectOfThread(thread),
       showProject: show.project && projectFilter === null,
       showComputer: show.computer && multi && computerFilter === null,
-      sayNoProject: true,
+      // With a computer filter the project still shows, so no row is left bare (critic 4).
+      // "No project" only when there are projects to tell it from.
+      sayNoProject: hasProjects,
     });
-    return props.renderRow(thread, {
-      nested,
-      subtitle: parts.project || parts.computer ? <PlaceLine parts={parts} /> : null,
-    });
+    return parts.project || parts.computer ? <PlaceLine parts={parts} /> : null;
   };
+  const row = (
+    thread: SidebarThreadSummary,
+    show: { project: boolean; computer: boolean },
+    nested = false,
+  ) => props.renderRow(thread, { nested, subtitle: subtitleFor(thread, show) });
 
   const projectsInView = logical.list.filter(
     (entry) =>
@@ -605,9 +612,11 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       <>
         {visible.length === 0 ? <EmptyLine text="No chats here yet." /> : null}
         {visible.map((thread) => row(thread, { project: true, computer: true }))}
-        {projectFilter !== null || computerFilter !== null || groupBy !== "none" ? (
-          <DoneFold chats={visibleDone} renderRow={props.renderRow} />
-        ) : null}
+        <DoneFold
+          chats={visibleDone}
+          renderRow={props.renderRow}
+          subtitleOf={(thread) => subtitleFor(thread, { project: true, computer: true })}
+        />
       </>
     );
   } else if (effective === "project") {
@@ -654,7 +663,14 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
                 {chats.map((thread) =>
                   row(thread, { project: false, computer: entry.home || joinedHere }, true),
                 )}
-                <DoneFold chats={done} nested renderRow={props.renderRow} />
+                <DoneFold
+                  chats={done}
+                  nested
+                  renderRow={props.renderRow}
+                  subtitleOf={(thread) =>
+                    subtitleFor(thread, { project: false, computer: entry.home || joinedHere })
+                  }
+                />
               </>
             )}
           </ul>
@@ -681,7 +697,12 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
           <>
             {chats.length === 0 ? <EmptyLine nested text="No chats here yet." /> : null}
             {chats.map((thread) => row(thread, { project: true, computer: false }, true))}
-            <DoneFold chats={done} nested renderRow={props.renderRow} />
+            <DoneFold
+              chats={done}
+              nested
+              renderRow={props.renderRow}
+              subtitleOf={(thread) => subtitleFor(thread, { project: true, computer: false })}
+            />
           </>
         );
       } else {

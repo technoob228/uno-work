@@ -56,13 +56,13 @@ export const GROUP_BY: ReadonlyArray<{
   /** Needs 2+ computers. */
   multi?: boolean;
 }> = [
-  { id: "none", name: "None — one list", short: "None" },
-  { id: "project", name: "Project", short: "Project" },
-  { id: "computer", name: "Computer", short: "Computer", multi: true },
+  { id: "none", name: "Nothing — newest first", short: "Newest first" },
+  { id: "project", name: "Project", short: "By project" },
+  { id: "computer", name: "Computer", short: "By computer", multi: true },
   {
     id: "computer-project",
     name: "Computer, then project",
-    short: "Computer, project",
+    short: "Computer & project",
     multi: true,
   },
 ];
@@ -85,27 +85,31 @@ interface ProtoState extends ProtoView {
   readonly setComputerFilter: (computer: string | null) => void;
 }
 
-const VIEW_KEY = "proto:view:v2";
+const viewKey = (variant: ProtoVariant) => `proto:view:v2:${variant}`;
 const DEFAULT_VIEW: ProtoView = { groupBy: "none", project: null, computer: null };
+/** Critics 3–4: G reads best grouped by project; C already shows projects on top. */
+const defaultViewOf = (variant: ProtoVariant): ProtoView =>
+  variant === "G" ? { ...DEFAULT_VIEW, groupBy: "project" } : DEFAULT_VIEW;
 
-function readView(): ProtoView {
+function readView(variant: ProtoVariant): ProtoView {
+  const fallback = defaultViewOf(variant);
   try {
-    const raw = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ProtoView> | null;
-    if (!raw) return DEFAULT_VIEW;
-    const groupBy = GROUP_BY.find((item) => item.id === raw.groupBy)?.id ?? "none";
+    const raw = JSON.parse(localStorage.getItem(viewKey(variant)) ?? "null") as Partial<ProtoView> | null;
+    if (!raw) return fallback;
+    const groupBy = GROUP_BY.find((item) => item.id === raw.groupBy)?.id ?? fallback.groupBy;
     return {
       groupBy,
       project: typeof raw.project === "string" ? raw.project : null,
       computer: typeof raw.computer === "string" ? raw.computer : null,
     };
   } catch {
-    return DEFAULT_VIEW;
+    return fallback;
   }
 }
 
-function writeView(view: ProtoView) {
+function writeView(variant: ProtoVariant, view: ProtoView) {
   localStorage.setItem(
-    VIEW_KEY,
+    viewKey(variant),
     JSON.stringify({ groupBy: view.groupBy, project: view.project, computer: view.computer }),
   );
 }
@@ -138,14 +142,15 @@ function writeUrl(variant: ProtoVariant, mode: ProtoMode) {
 export const useProtoStore = create<ProtoState>((set, get) => {
   const persist = (patch: Partial<ProtoView>) => {
     set(patch);
-    const { groupBy, project, computer } = get();
-    writeView({ groupBy, project, computer });
+    const { groupBy, project, computer, variant } = get();
+    writeView(variant, { groupBy, project, computer });
   };
+  const initial = PROTO ? readInitial() : { variant: "D" as const, mode: "one" as const };
   return {
-    ...(PROTO ? readInitial() : { variant: "D" as const, mode: "one" as const }),
-    ...(PROTO ? readView() : DEFAULT_VIEW),
+    ...initial,
+    ...(PROTO ? readView(initial.variant) : DEFAULT_VIEW),
     setVariant: (variant) => {
-      set({ variant });
+      set({ variant, ...readView(variant) });
       writeUrl(variant, get().mode);
     },
     setMode: (mode) => {
@@ -195,10 +200,5 @@ export function effectiveGroupBy(groupBy: ProtoGroupBy, multi: boolean): ProtoGr
  * than in the shelf at the bottom of the real sidebar.
  */
 export function useProtoDoneInsideList(): boolean {
-  return useProtoStore(
-    (state) =>
-      PROTO &&
-      state.variant !== "D" &&
-      (state.groupBy !== "none" || state.project !== null || state.computer !== null),
-  );
+  return useProtoStore((state) => PROTO && state.variant !== "D");
 }

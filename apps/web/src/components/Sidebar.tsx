@@ -1150,7 +1150,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           tabIndex={0}
           data-testid="sidebar-row-slim"
           data-sidebar-section={section}
-          className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+          className={cn(
+            rowSurfaceClassName,
+            "flex items-center gap-2.5 px-2.5",
+            props.subtitle ? "min-h-11 py-1" : "h-9",
+          )}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           onKeyDown={handleKeyDown}
@@ -1176,7 +1180,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           </span>
           {spawnedBadge}
-          {title}
+          {props.subtitle && !isRenaming ? (
+            // Sidebar prototype (w0115): Done chats say "project · computer" too.
+            <span className="flex min-w-0 flex-1 flex-col">
+              {title}
+              <span className="flex min-w-0 opacity-80" data-testid="proto-row-place">
+                {props.subtitle}
+              </span>
+            </span>
+          ) : (
+            title
+          )}
           {pinIndicator}
           {terminalStatusIcon}
           {PROTO ? null : machineMark}
@@ -3044,7 +3058,9 @@ export default function Sidebar() {
                 doneThreads={[...snoozedThreads, ...settledThreads]}
                 renderRow={(thread, rowOptions) =>
                   rowOptions.section
-                    ? renderRow(thread, rowOptions.section)
+                    ? renderRow(thread, rowOptions.section, {
+                        subtitle: rowOptions.subtitle ?? null,
+                      })
                     : renderRow(thread, "active", {
                         d: true,
                         nested: rowOptions.nested ?? false,
