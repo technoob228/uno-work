@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer, Queue } from "effect";
+import { Cause, Effect, Exit, Layer, Queue } from "effect";
 
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig } from "./config.ts";
@@ -31,11 +31,16 @@ export const CLONE_IDENTITY_SIGNAL = "SIGUSR2";
 export const rotateCloneIdentity = Effect.gen(function* () {
   const sessions = yield* SessionCredentialService;
   const environment = yield* ServerEnvironment;
-  if (sessions.rotateSigningKey) {
-    yield* sessions.rotateSigningKey;
-  }
+  // Both halves, whatever happens to the first: a key that failed to rotate
+  // must not leave this clone with the snapshot's environment id as well.
+  const signingKey = sessions.rotateSigningKey
+    ? yield* Effect.exit(sessions.rotateSigningKey)
+    : Exit.void;
   if (environment.rotateEnvironmentId) {
     yield* environment.rotateEnvironmentId;
+  }
+  if (Exit.isFailure(signingKey)) {
+    return yield* Effect.failCause(signingKey.cause);
   }
   yield* Effect.logInfo("clone identity rotated in place (no daemon restart)");
 });
