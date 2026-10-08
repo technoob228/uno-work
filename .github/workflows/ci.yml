@@ -80,8 +80,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: server
-            filter: --filter=t3
+          # Server tests are the long pole (~5 min alone): two vitest shards.
+          - name: server 1/2
+            filter: --filter=t3 -- --shard=1/2
+          - name: server 2/2
+            filter: --filter=t3 -- --shard=2/2
           - name: web
             filter: --filter=@t3tools/web
           - name: contracts and the rest
