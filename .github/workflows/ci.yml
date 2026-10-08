@@ -1,40 +1,214 @@
 name: CI
 
+# Every push to main and to a release branch is checked and packed here, so a
+# release starts from a commit that is already green and already built:
+# `scripts/release-work.sh` (fishcode) refuses a commit whose "Release gate" is
+# not green and takes the server tarball + lite bundle from the "server-bundle"
+# artifact of this run instead of building them again.
+# Public repository: GitHub-hosted runners cost nothing. No secrets are used.
+
 on:
   pull_request:
   push:
     branches:
       - main
+      - "release/**"
+      - "ci/**"
+
+# A PR keeps only its newest run. A push never waits for an older run (a
+# pending group would hold the gate back behind a slow browser job).
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The server typecheck does not fit Node's default heap (OOM at 0.0.111).
+  NODE_OPTIONS: --max-old-space-size=6144
 
 jobs:
-  quality:
-    name: Format, Lint, Typecheck, Test, Browser Test, Build
+  fmt_lint:
+    name: Format and lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version-file: package.json
-
-      - name: Cache Bun and Turbo
+      - name: Cache Bun
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.bun/install/cache
-            .turbo
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
           restore-keys: |
-            ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Format
+        run: bun run fmt:check
+      - name: Lint
+        run: bun run lint
 
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - name: Cache Bun
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+
+  test:
+    name: Unit tests (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Server tests are the long pole (~5 min alone): two vitest shards.
+          - name: server 1/2
+            filter: --filter=t3 -- --shard=1/2
+          - name: server 2/2
+            filter: --filter=t3 -- --shard=2/2
+          - name: web
+            filter: --filter=@t3tools/web
+          - name: contracts and the rest
+            filter: --filter=!t3 --filter=!@t3tools/web --filter=!@t3tools/marketing --filter=!@uno/marketing-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - name: Cache Bun
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Test
+        run: bunx turbo run test --concurrency=1 ${{ matrix.filter }}
+
+  pack:
+    name: Server bundle and lite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - name: Cache Bun
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Build web, server, lite and pack
+        run: |
+          set -euo pipefail
+          (cd apps/web && bun run build)
+          (cd apps/server && bun run build)
+          bun deploy/pack.ts
+          (cd apps/web && bun run build:lite)
+      - name: Collect the bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./apps/server/package.json").version')"
+          tarball="uno-work-server-${version}.tar.gz"
+          out="$RUNNER_TEMP/server-bundle"
+          mkdir -p "$out"
+          cp "dist-tarball/${tarball}" "$out/"
+          tar -C apps/web/dist-lite -czf "$out/lite.tgz" .
+          tar -xzOf "$out/${tarball}" package/deploy/install.sh > "$out/install.sh"
+          # Sanity: the right version inside, no macOS litter, the updater is in.
+          test "$(tar -xzOf "$out/${tarball}" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')" = "${version}"
+          if tar -tzf "$out/${tarball}" | grep -q '/\._'; then echo "macOS ._ files in the tarball" >&2; exit 1; fi
+          grep -q uno-work-update "$out/install.sh"
+          lite_main="$(grep -oE 'main-[A-Za-z0-9_-]+\.js' apps/web/dist-lite/index.html | head -1)"
+          bin_sha="$(sha256sum apps/server/dist/bin.mjs | cut -d' ' -f1)"
+          (cd "$out" && sha256sum "${tarball}" lite.tgz install.sh > SHA256SUMS)
+          {
+            echo "version=${version}"
+            echo "commit=${GITHUB_SHA}"
+            echo "tarball=${tarball}"
+            echo "bin_mjs_sha256=${bin_sha}"
+            echo "lite_main=${lite_main}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > "$out/BUILDINFO"
+          cat "$out/BUILDINFO" "$out/SHA256SUMS"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-bundle
+          path: ${{ steps.bundle.outputs.dir }}
+          retention-days: 30
+          compression-level: 0
+
+  release_gate:
+    name: Release gate
+    if: ${{ always() }}
+    needs: [fmt_lint, typecheck, test, pack]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: All release checks are green
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: ${RESULTS}"
+          for r in ${RESULTS}; do [ "$r" = success ] || exit 1; done
+
+  # Slower and historically flaky (hung past the old 10-minute job limit and
+  # cancelled the whole run on main). Reported, but not part of the gate.
+  browser:
+    name: Browser tests (not in the gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - name: Cache Bun
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
@@ -42,33 +216,13 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Format
-        run: bun run fmt:check
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Test
-        run: bun run test
-
+      - run: bun install --frozen-lockfile
       - name: Install browser test runtime
-        run: |
-          cd apps/web
-          bunx playwright install --with-deps chromium
-
+        run: cd apps/web && bunx playwright install --with-deps chromium
       - name: Browser test
         run: bun run --cwd apps/web test:browser
-
       - name: Build desktop pipeline
         run: bun run build:desktop
-
       - name: Verify preload bundle output
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
@@ -79,21 +233,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version-file: package.json
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
+      - run: bun install --frozen-lockfile
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
