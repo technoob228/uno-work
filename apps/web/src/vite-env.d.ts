@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_UNO_WORK_LITE?: string;
   /** "1" on a local stand: assistants run against an in-memory account (lib/assistantsDemo.ts). */
   readonly VITE_ASSISTANTS_DEMO?: string;
+  /** "1" in the w0115 sidebar prototype build (mock computers, not for merge). */
+  readonly VITE_SIDEBAR_PROTO?: string;
 }
 
 interface ImportMeta {

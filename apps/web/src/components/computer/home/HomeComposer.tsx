@@ -48,6 +48,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
+import { ProtoMachineChip } from "../../../proto/ProtoMachineChip";
 import { homeStartModelSelection } from "./homeStartModel";
 import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
@@ -238,6 +239,7 @@ export function HomeComposer({
               className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
+              <ProtoMachineChip environmentId={environmentId} />
               <FolderChipMenu
                 environmentId={environmentId}
                 folder={folder}

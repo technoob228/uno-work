@@ -46,6 +46,7 @@ import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
+import { useProtoChatPlace } from "../../proto/protoPlace";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
@@ -220,6 +221,8 @@ const BellItem = memo(function BellItem({
   const unread = item.readAt === null;
   const threadId = item.open?.kind === "thread" ? item.open.threadId : null;
   const isApproval = item.kind === "agent.approval" && threadId !== null;
+  // Sidebar prototype (w0115): "MacBook · brand-kit" — where the chat lives.
+  const place = useProtoChatPlace(item.environmentId, threadId);
   // A question the chat still waits on is answered in the chat, not cleared here.
   const openRequests = useChatOpenRequests(item.environmentId, threadId);
   const canDismiss = canDismissInboxItem(item.kind, openRequests);
@@ -261,6 +264,11 @@ const BellItem = memo(function BellItem({
             {item.body ? (
               <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
                 {item.body}
+              </span>
+            ) : null}
+            {place ? (
+              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                {place}
               </span>
             ) : null}
             {item.source.kind === "app" || item.count > 1 ? (

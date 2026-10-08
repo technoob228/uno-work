@@ -13,8 +13,17 @@ import { handleUncaughtRenderError } from "./fatalRecovery";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
 
+const ProtoPanelLazy = React.lazy(() => import("./proto/ProtoPanel"));
+
+// Sidebar prototype (w0115, not for merge): mock computers in the page.
+const PROTO = import.meta.env.VITE_SIDEBAR_PROTO === "1";
+if (PROTO) {
+  const { startProto } = await import("./proto/protoBoot");
+  await startProto();
+}
+
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-const history = isElectron ? createHashHistory() : createBrowserHistory();
+const history = isElectron || PROTO ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
 
@@ -31,5 +40,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
 }).render(
   <React.StrictMode>
     <RouterProvider router={router} />
+    {PROTO ? <ProtoPanelLazy /> : null}
   </React.StrictMode>,
 );
