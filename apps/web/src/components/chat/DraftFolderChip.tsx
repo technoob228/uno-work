@@ -34,7 +34,7 @@ export const DraftFolderChip = memo(function DraftFolderChip({
     <FolderChipMenu
       environmentId={environmentId}
       folder={inHome ? null : { cwd: projectCwd, name: projectName }}
-      className="h-6 shrink-0"
+      className="h-6 min-w-0 shrink"
       testId="draft-folder-chip"
       onPick={(next, projectRef) => {
         if (next === null ? inHome : next.cwd === projectCwd) return;

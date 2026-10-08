@@ -106,7 +106,7 @@ export function FolderChipMenu({
               title={folder ? folder.cwd : (home ?? "Home folder")}
             >
               {folder ? <FolderIcon /> : <HouseIcon />}
-              <span className="max-w-48 truncate">{folder ? folder.name : "Home folder"}</span>
+              <span className="min-w-0 max-w-48 truncate">{folder ? folder.name : "Home folder"}</span>
               <ChevronDownIcon className="opacity-60" />
             </Button>
           }
