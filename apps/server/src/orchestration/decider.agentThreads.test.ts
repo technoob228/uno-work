@@ -314,10 +314,7 @@ describe("decider agent-spawned threads: thread.turn.start", () => {
 
   it("delivers again once the person opens the chat to agents", async () => {
     const closed = await decideAndApply(await seedChild(), agentsAccess(OTHER_ID, CLOSED_AT));
-    const opened = await decideAndApply(
-      closed.readModel,
-      agentsAccess(OTHER_ID, null, "cmd-open"),
-    );
+    const opened = await decideAndApply(closed.readModel, agentsAccess(OTHER_ID, null, "cmd-open"));
     expect(threadOf(opened.readModel, OTHER_ID).agentsClosedAt).toBeNull();
     await expect(
       decide(opened.readModel, turnStart(OTHER_ID), agentOrigin(CHILD_ID)),

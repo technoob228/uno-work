@@ -113,7 +113,11 @@ export function resolveThreadControlBarState(input: {
       closedToAgents,
       ...(spawned
         ? parentLinkText
-          ? sentence(`${AGENTS_ACCESS_COPY.closedStatus} · started by the agent in `, parentLinkText, "")
+          ? sentence(
+              `${AGENTS_ACCESS_COPY.closedStatus} · started by the agent in `,
+              parentLinkText,
+              "",
+            )
           : sentence("", null, `${AGENTS_ACCESS_COPY.closedStatus} · started by an agent`)
         : sentence("", null, AGENTS_ACCESS_COPY.closedStatus)),
       action: { kind: "agents-access", label: AGENTS_ACCESS_COPY.open, nextClosed: false },

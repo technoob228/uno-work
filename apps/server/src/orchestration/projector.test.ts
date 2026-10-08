@@ -212,11 +212,15 @@ describe("orchestration projector", () => {
         commandId: `cmd-meta-${sequence}`,
         payload: { threadId: "thread-1", updatedAt: now, ...payload },
       });
-    const closed = await Effect.runPromise(projectEvent(created, meta(2, { agentsClosedAt: later })));
+    const closed = await Effect.runPromise(
+      projectEvent(created, meta(2, { agentsClosedAt: later })),
+    );
     expect(closed.threads[0]?.agentsClosedAt).toBe(later);
     const renamed = await Effect.runPromise(projectEvent(closed, meta(3, { title: "renamed" })));
     expect(renamed.threads[0]?.agentsClosedAt).toBe(later);
-    const opened = await Effect.runPromise(projectEvent(renamed, meta(4, { agentsClosedAt: null })));
+    const opened = await Effect.runPromise(
+      projectEvent(renamed, meta(4, { agentsClosedAt: null })),
+    );
     expect(opened.threads[0]?.agentsClosedAt).toBeNull();
   });
 
