@@ -56,13 +56,13 @@ export const GROUP_BY: ReadonlyArray<{
   /** Needs 2+ computers. */
   multi?: boolean;
 }> = [
-  { id: "none", name: "Nothing — one list", short: "One list" },
-  { id: "project", name: "Project", short: "By project" },
-  { id: "computer", name: "Computer", short: "By computer", multi: true },
+  { id: "none", name: "None — one list", short: "None" },
+  { id: "project", name: "Project", short: "Project" },
+  { id: "computer", name: "Computer", short: "Computer", multi: true },
   {
     id: "computer-project",
     name: "Computer, then project",
-    short: "By computer & project",
+    short: "Computer, project",
     multi: true,
   },
 ];

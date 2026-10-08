@@ -64,10 +64,19 @@ export function placeParts(input: {
   project: Pick<Project, "name" | "cwd" | "environmentId"> | null | undefined;
   showProject: boolean;
   showComputer: boolean;
+  /** Say "No project" for a Home-folder chat when its computer is said too (critic 3). */
+  sayNoProject?: boolean;
 }): PlaceParts {
   const home = !input.project || isHomeProject(input.project);
+  const project = !input.showProject
+    ? null
+    : home
+      ? input.sayNoProject && input.showComputer
+        ? NO_PROJECT
+        : null
+      : input.project!.name;
   return {
-    project: input.showProject && !home ? input.project!.name : null,
+    project,
     computer: input.showComputer ? machineLabel(input.environmentId) : null,
     computerKind: input.showComputer ? machineKind(input.environmentId) : null,
   };

@@ -21,8 +21,7 @@ import {
   SlidersHorizontalIcon,
   XIcon,
 } from "lucide-react";
-import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { openNewProject } from "../navigation/newProjectStore";
@@ -164,10 +163,14 @@ function ComputerIcon({ environmentId, className }: { environmentId: string; cla
 function PlaceLine({ parts }: { parts: PlaceParts }) {
   if (!parts.project && !parts.computer) return null;
   return (
-    <span className="inline-flex min-w-0 items-center gap-2.5 text-xs leading-4 text-sidebar-foreground/75">
+    <span className="inline-flex min-w-0 items-center gap-2.5 text-xs leading-4 text-sidebar-foreground/85">
       {parts.project ? (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <FolderIcon className="size-3 shrink-0 opacity-70" />
+          {parts.project === NO_PROJECT ? (
+            <HomeIcon className="size-3 shrink-0 opacity-70" />
+          ) : (
+            <FolderIcon className="size-3 shrink-0 opacity-70" />
+          )}
           <span className="truncate">{parts.project}</span>
         </span>
       ) : null}
@@ -251,7 +254,11 @@ function GroupHeader(props: {
   icon: ReactNode;
   label: string;
   aside?: string | null;
-  count: number;
+  /** An empty project: a quieter label. */
+  quiet?: boolean;
+  /** The aside on its own line (a project on 2+ computers — never cut). */
+  asideBelow?: boolean;
+  count: number | string;
   folded: boolean;
   onToggle: () => void;
   onNewChat?: (() => void) | undefined;
@@ -276,7 +283,8 @@ function GroupHeader(props: {
           "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pr-2 text-left outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
           props.level === 1
             ? "h-7 pl-4 text-[13px] text-sidebar-foreground/90"
-            : "h-8 pl-2.5 text-sm font-medium text-foreground",
+            : "min-h-8 pl-2.5 text-sm font-medium text-foreground",
+          props.quiet && "font-normal text-sidebar-foreground/70",
         )}
       >
         <span
@@ -287,21 +295,32 @@ function GroupHeader(props: {
         >
           {props.icon}
         </span>
-        <span
-          className="min-w-0 shrink-0 truncate"
-          style={{ maxWidth: props.aside ? "62%" : undefined }}
-        >
-          {props.label}
-        </span>
-        {props.aside ? (
-          <span className="min-w-0 shrink truncate text-xs font-normal text-sidebar-foreground/70">
-            {props.aside}
+        {props.aside && props.asideBelow ? (
+          <span className="flex min-w-0 flex-col py-1">
+            <span className="min-w-0 truncate">{props.label}</span>
+            <span className="min-w-0 truncate text-xs font-normal text-sidebar-foreground/75">
+              {props.aside}
+            </span>
           </span>
-        ) : null}
+        ) : (
+          <>
+            <span
+              className="min-w-0 shrink-0 truncate"
+              style={{ maxWidth: props.aside ? "62%" : undefined }}
+            >
+              {props.label}
+            </span>
+            {props.aside ? (
+              <span className="min-w-0 shrink truncate text-xs font-normal text-sidebar-foreground/75">
+                {props.aside}
+              </span>
+            ) : null}
+          </>
+        )}
         <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
           {props.folded && props.mark && props.renderMark ? props.renderMark(props.mark) : null}
           <span className="text-xs font-normal text-muted-foreground tabular-nums">
-            {props.count > 0 ? props.count : ""}
+            {props.count === 0 ? "" : props.count}
           </span>
           <ChevronDownIcon
             className={cn(
@@ -387,7 +406,6 @@ function ViewButton(props: {
   const setComputerFilter = useProtoStore((state) => state.setComputerFilter);
   const effective = effectiveGroupBy(groupBy, props.multi);
   const current = GROUP_BY.find((item) => item.id === effective)!;
-  const narrowed = projectFilter !== null || (props.multi && computerFilter !== null);
   return (
     <Popover>
       <PopoverTrigger
@@ -398,10 +416,7 @@ function ViewButton(props: {
         aria-label={`Group and filter chats — now: ${current.short}`}
       >
         <SlidersHorizontalIcon className="size-3.5 shrink-0" />
-        <span className="truncate">{current.short}</span>
-        {narrowed ? (
-          <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-label="filtered" />
-        ) : null}
+        <span className="truncate">Group: {current.short}</span>
         <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverPopup
@@ -456,13 +471,11 @@ function ViewButton(props: {
               testId="proto-filter-computer"
             />
           ) : null}
-          <p className="text-xs leading-snug text-muted-foreground">
-            A project on several computers (a shared folder) is one project here.
-          </p>
-          <Button size="sm" variant="outline" className="self-start" onClick={() => openNewProject()}>
-            <PlusIcon />
-            New project
-          </Button>
+          {props.multi ? (
+            <p className="text-xs leading-snug text-muted-foreground">
+              A project on several computers (a shared folder) is one project here.
+            </p>
+          ) : null}
         </div>
       </PopoverPopup>
     </Popover>
@@ -542,24 +555,9 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
   const computerFilter = multi ? computerFilterRaw : null;
   const effective = effectiveGroupBy(groupBy, multi);
 
-  // Looking at one project in (Б) makes a computer it is on the active one, so
-  // "New chat" and the computer chip on Home start there.
+  // Filters only change what the list shows — they never switch the computer
+  // you work on (critic 3: "Only MacBook" silently made MacBook the active one).
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
-  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
-  useEffect(() => {
-    if (mode !== "all") return;
-    const target =
-      computerFilter ??
-      (projectFilter && projectFilter !== NO_PROJECT_KEY
-        ? (() => {
-            const computersOf = logical.byKey.get(projectFilter)?.computers ?? [];
-            return computersOf.includes(activeEnvironmentId ?? "") ? null : (computersOf[0] ?? null);
-          })()
-        : null);
-    if (target && activeEnvironmentId !== target) {
-      setActiveEnvironmentId(target as EnvironmentId);
-    }
-  }, [activeEnvironmentId, computerFilter, logical, mode, projectFilter, setActiveEnvironmentId]);
 
   const passes = (thread: SidebarThreadSummary) =>
     (projectFilter === null || logical.logicalKeyOfThread(thread) === projectFilter) &&
@@ -586,6 +584,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       project: logical.projectOfThread(thread),
       showProject: show.project && projectFilter === null,
       showComputer: show.computer && multi && computerFilter === null,
+      sayNoProject: true,
     });
     return props.renderRow(thread, {
       nested,
@@ -617,7 +616,9 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
       const chats = visible.filter((thread) => logical.logicalKeyOfThread(thread) === entry.key);
       const done = visibleDone.filter((thread) => logical.logicalKeyOfThread(thread) === entry.key);
       if (entry.home && chats.length === 0 && done.length === 0) return null;
-      const isFolded = folded.has(key);
+      const empty = chats.length === 0 && done.length === 0;
+      // An empty project shows as one quiet row; a click opens "No chats yet · New chat".
+      const isFolded = empty ? !folded.has(key) : folded.has(key);
       // A project on 2+ computers: say so on the header, and each chat says its computer.
       const joinedHere = entry.computers.length > 1;
       return (
@@ -626,8 +627,14 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             <GroupHeader
               icon={entry.home ? <HomeIcon /> : <FolderIcon />}
               label={entry.name}
-              aside={multi && computerFilter === null && !entry.home ? computersText(entry.computers) : null}
-              count={chats.length}
+              aside={
+                multi && computerFilter === null && !entry.home
+                  ? computersText(entry.computers)
+                  : null
+              }
+              asideBelow={joinedHere}
+              count={chats.length + done.length}
+              quiet={empty}
               folded={isFolded}
               onToggle={() => toggle(key)}
               onNewChat={entry.home ? undefined : () => props.onNewChatIn(memberFor(entry))}
@@ -697,7 +704,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
                     level={1}
                     icon={entry.home ? <HomeIcon /> : <FolderIcon />}
                     label={entry.name}
-                    count={subChats.length}
+                    count={subChats.length + subDone.length}
                     folded={subFolded}
                     onToggle={() => toggle(subKey)}
                     onNewChat={() => props.onNewChatIn(memberFor(entry, environmentId))}
@@ -726,7 +733,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             <GroupHeader
               icon={<ComputerIcon environmentId={environmentId} />}
               label={machineLabel(environmentId)}
-              count={chats.length}
+              count={chats.length + done.length}
               folded={isFolded}
               onToggle={() => toggle(key)}
               onNewChat={home ? () => props.onNewChatIn(home) : undefined}
@@ -767,6 +774,11 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             (thread) => logical.logicalKeyOfThread(thread) === entry.key,
           );
           const mark = mostUrgent(chats.map(props.markOf));
+          // Done chats count too (critic 3: "brand-kit 3" while it has 5 chats).
+          const total =
+            chats.length +
+            props.doneThreads.filter((thread) => logical.logicalKeyOfThread(thread) === entry.key)
+              .length;
           return (
             <li key={entry.key} className="list-none" data-testid="proto-project-row">
               <button
@@ -790,7 +802,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
                 <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
                   {mark ? props.renderMark(mark) : null}
                   <span className="text-xs text-muted-foreground tabular-nums">
-                    {chats.length === 0 ? "" : chats.length}
+                    {total === 0 ? "" : total}
                   </span>
                 </span>
               </button>
