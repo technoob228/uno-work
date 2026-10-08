@@ -28,7 +28,9 @@ function proc(
 }
 
 const daemon = proc(DAEMON, 1, "node", { cmdline: "node /opt/uno-work/app/dist/bin.mjs serve" });
-const hermes = proc(8144, DAEMON, "hermes", { cmdline: "python /home/unowork/.local/bin/hermes acp" });
+const hermes = proc(8144, DAEMON, "hermes", {
+  cmdline: "python /home/unowork/.local/bin/hermes acp",
+});
 const opencode = proc(1165, DAEMON, "opencode", {
   cmdline: "/home/unowork/.unowork/opencode/bin/opencode serve --port=33605",
   listening: true,
@@ -58,7 +60,11 @@ describe("pickWorkCommands", () => {
     const shell = proc(7000, DAEMON, "bash");
     expect(pickWorkCommands(DAEMON, [daemon, shell])).toEqual([]);
     expect(
-      pickWorkCommands(DAEMON, [daemon, shell, proc(7001, 7000, "cargo", { cmdline: "cargo build" })]),
+      pickWorkCommands(DAEMON, [
+        daemon,
+        shell,
+        proc(7001, 7000, "cargo", { cmdline: "cargo build" }),
+      ]),
     ).toEqual(["cargo"]);
   });
 
