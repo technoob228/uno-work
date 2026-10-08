@@ -13,8 +13,9 @@ export type NewProjectSource = "upload" | "folder" | "empty" | "github" | "templ
 
 /**
  * Sources the dialog offers, in order (01.10): your own files first, then
- * GitHub, then an empty folder. "A folder on this computer" (one already on
- * the computer) is for Dev mode. "From a template" stays out until the
+ * GitHub, then an empty folder, then "A folder on this computer" (one already
+ * on the computer — for everyone since 08.10: on a fresh machine it was the
+ * missing way to open a folder). "From a template" stays out until the
  * product has project templates (today there is only the onboarding tutorial).
  */
 export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
@@ -24,14 +25,20 @@ export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
   "folder",
 ];
 
-export function newProjectSources(devMode: boolean): ReadonlyArray<NewProjectSource> {
-  return devMode
-    ? NEW_PROJECT_SOURCES
-    : NEW_PROJECT_SOURCES.filter((source) => source !== "folder");
+export function newProjectSources(): ReadonlyArray<NewProjectSource> {
+  return NEW_PROJECT_SOURCES;
 }
 
-/** Uploaded projects land in `~/projects/<name>`, like the legacy upload and Move. */
+/**
+ * New folders — uploaded, cloned or empty — land in `~/projects/<name>`
+ * (like the legacy upload and Move), so a person's folders are in one place.
+ */
 export const UPLOADED_PROJECTS_FOLDER = "projects";
+
+/** `~/projects` for a home folder. */
+export function projectsFolderPath(home: string): string {
+  return `${trimSlashes(home)}/${UPLOADED_PROJECTS_FOLDER}`;
+}
 
 export function uploadedProjectPath(home: string, name: string): string {
   return `${trimSlashes(home)}/${UPLOADED_PROJECTS_FOLDER}/${name}`;
@@ -149,9 +156,9 @@ export type NameCheck =
   | { readonly ok: true; readonly name: string }
   | { readonly ok: false; readonly error: string };
 
-/** A new folder's name: letters, digits, dot, dash, underscore; not taken. */
+/** A new folder's name: letters, digits, dot, dash, underscore; not taken in `~/projects`. */
 export function checkNewFolderName(raw: string, taken: ReadonlySet<string>): NameCheck {
-  if (raw.trim().length === 0) return { ok: false, error: "Give the project a name." };
+  if (raw.trim().length === 0) return { ok: false, error: "Type a name." };
   const name = normalizeProjectName(raw);
   if (name.length === 0 || name === "." || name === "..") {
     return { ok: false, error: "Use letters, numbers, dashes or dots." };
@@ -159,7 +166,7 @@ export function checkNewFolderName(raw: string, taken: ReadonlySet<string>): Nam
   if (taken.has(name)) {
     return {
       ok: false,
-      error: `There is already a folder “${name}” in your home folder — open it with “A folder on this computer”.`,
+      error: `There is already a folder “${name}” in ~/projects. Pick another name.`,
     };
   }
   return { ok: true, name };
@@ -190,7 +197,7 @@ export function checkRepositoryInput(raw: string, taken: ReadonlySet<string>): R
   if (taken.has(name)) {
     return {
       ok: false,
-      error: `There is already a folder “${name}” in your home folder.`,
+      error: `There is already a folder “${name}” in ~/projects.`,
     };
   }
   return { ok: true, remoteUrl, name };

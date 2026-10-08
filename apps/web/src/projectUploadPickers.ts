@@ -3,7 +3,7 @@
  * drag-and-drop. Чистая логика загрузки — в `projectUpload.ts`.
  */
 
-import type { ProjectUploadFile } from "./projectUpload";
+import { type DroppedItemShape, type ProjectUploadFile, isFolderOrZipDrop } from "./projectUpload";
 
 /**
  * Жёсткий потолок обхода перетащенной папки: перетаскивание каталога с
@@ -139,4 +139,29 @@ export async function readDroppedUploadFiles(
     await collectEntry(entry!, out);
   }
   return out;
+}
+
+/**
+ * Was a folder or a .zip dropped? Reads the DataTransfer — call it
+ * synchronously in the drop handler (the items are gone after it returns).
+ */
+export function dataTransferHasFolderOrZip(dataTransfer: DataTransfer): boolean {
+  const shapes: DroppedItemShape[] = [];
+  for (const item of Array.from(dataTransfer.items ?? [])) {
+    if (item.kind !== "file") continue;
+    const entry =
+      typeof item.webkitGetAsEntry === "function"
+        ? (item.webkitGetAsEntry() as { isDirectory: boolean; name: string } | null)
+        : null;
+    shapes.push({
+      isDirectory: entry?.isDirectory === true,
+      name: entry?.name ?? item.getAsFile()?.name ?? "",
+    });
+  }
+  if (shapes.length === 0) {
+    for (const file of Array.from(dataTransfer.files ?? [])) {
+      shapes.push({ isDirectory: false, name: file.name });
+    }
+  }
+  return isFolderOrZipDrop(shapes);
 }

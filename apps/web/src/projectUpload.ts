@@ -174,3 +174,18 @@ export function formatUploadBytes(bytes: number): string {
   }
   return `${bytes} B`;
 }
+
+/** A dropped item, as far as "is it a folder to work in?" goes. */
+export interface DroppedItemShape {
+  readonly isDirectory: boolean;
+  readonly name: string;
+}
+
+/**
+ * A folder or a .zip among what was dropped on a new chat: it comes in as a
+ * folder of its own (Upload a folder…), not as attachments. Images, videos and
+ * other loose files stay attachments.
+ */
+export function isFolderOrZipDrop(items: ReadonlyArray<DroppedItemShape>): boolean {
+  return items.some((item) => item.isDirectory || /\.zip$/i.test(item.name));
+}

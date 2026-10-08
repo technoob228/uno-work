@@ -2,7 +2,8 @@
  * The folder chip on a new chat that hasn't been sent yet: "Home folder ▾"
  * (or the folder's name). Picking another folder moves the chat there with
  * what was typed — a new chat always starts right away in the home folder,
- * and this is the one click to work somewhere else.
+ * and this is the one click to work somewhere else (or to make a new folder,
+ * upload one or clone a repository and work there).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { memo } from "react";
@@ -35,15 +36,17 @@ export const DraftFolderChip = memo(function DraftFolderChip({
       folder={inHome ? null : { cwd: projectCwd, name: projectName }}
       className="h-6 shrink-0"
       testId="draft-folder-chip"
-      onPick={(next) => {
+      onPick={(next, projectRef) => {
         if (next === null ? inHome : next.cwd === projectCwd) return;
-        moveDraftToFolder(draftId, next?.cwd ?? null).catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Couldn't switch the folder",
-            description: error instanceof Error ? error.message : String(error),
-          });
-        });
+        return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch(
+          (error: unknown) => {
+            toastManager.add({
+              type: "error",
+              title: "Couldn't switch the folder",
+              description: error instanceof Error ? error.message : String(error),
+            });
+          },
+        );
       }}
     />
   );

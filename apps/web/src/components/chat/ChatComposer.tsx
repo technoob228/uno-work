@@ -148,6 +148,8 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { readLocalApi } from "../../localApi";
 import { isDictationSupported, useDictation } from "../../hooks/useDictation";
+import type { ProjectUploadFile } from "../../projectUpload";
+import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projectUploadPickers";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
@@ -522,6 +524,11 @@ export interface ChatComposerProps {
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
+  /**
+   * A new chat only: a folder or a .zip dropped on the box comes in as a
+   * folder to work in (Upload a folder…) instead of as attachments.
+   */
+  onDropFolder?: ((files: ReadonlyArray<ProjectUploadFile>) => void) | undefined;
 
   // Thread context
   activeThreadId: ThreadId | null;
@@ -645,6 +652,7 @@ export const ChatComposer = memo(
       routeKind,
       routeThreadRef,
       draftId,
+      onDropFolder,
       activeThreadId,
       activeThreadEnvironmentId: _activeThreadEnvironmentId,
       activeThread,
@@ -2438,6 +2446,13 @@ export const ChatComposer = memo(
       event.preventDefault();
       dragDepthRef.current = 0;
       setIsDragOverComposer(false);
+      if (onDropFolder && dataTransferHasFolderOrZip(event.dataTransfer)) {
+        // Read now: the dropped items are gone once this handler returns.
+        void readDroppedUploadFiles(event.dataTransfer).then((dropped) => {
+          if (dropped.length > 0) onDropFolder(dropped);
+        });
+        return;
+      }
       const files = Array.from(event.dataTransfer.files);
       addComposerFiles(files);
       focusComposer();

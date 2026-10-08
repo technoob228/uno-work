@@ -135,6 +135,9 @@ import {
   resolveSelectableProvider,
 } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
+import { useFolderChats } from "../hooks/useFolderChats";
+import { openFolderForChat } from "../navigation/newProjectStore";
+import type { ProjectUploadFile } from "../projectUpload";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -934,6 +937,20 @@ export default function ChatView(props: ChatViewProps) {
   const activeProject = useStore(
     useMemo(() => createProjectSelectorByRef(activeProjectRef), [activeProjectRef]),
   );
+  // A folder or a .zip dropped on a new chat's box = the folder chip's "Upload
+  // a folder…": once it's on the computer, this chat moves there with what was
+  // typed. Other files stay attachments (ChatComposer decides on drop).
+  const { moveDraftToFolder } = useFolderChats(activeThread?.environmentId ?? null);
+  const hasDraftFolder = routeKind === "draft" && draftId !== null && activeProject !== undefined;
+  const onDropFolder = useMemo(() => {
+    if (!hasDraftFolder || draftId === null) return undefined;
+    return (files: ReadonlyArray<ProjectUploadFile>) =>
+      openFolderForChat(
+        "upload",
+        ({ folder, projectRef }) => moveDraftToFolder(draftId, folder, projectRef),
+        files,
+      );
+  }, [draftId, hasDraftFolder, moveDraftToFolder]);
 
   useEffect(() => {
     if (routeKind !== "server") {
@@ -4228,6 +4245,7 @@ export default function ChatView(props: ChatViewProps) {
                     routeKind={routeKind}
                     routeThreadRef={routeThreadRef}
                     draftId={draftId}
+                    onDropFolder={onDropFolder}
                     activeThreadId={activeThreadId}
                     activeThreadEnvironmentId={activeThread?.environmentId}
                     activeThread={activeThread}

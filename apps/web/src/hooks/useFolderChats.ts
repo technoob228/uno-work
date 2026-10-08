@@ -141,9 +141,16 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
   /**
    * The folder chip on a new (unsent) chat: the chat moves to `folder` (null
    * = home) with what was typed, the model and the permissions carried over.
+   * `projectRef`: the folder's project, when the caller has just made it (New
+   * folder… / Upload a folder… / Clone from GitHub…) — it may not be in the
+   * store yet, and looking it up by path would make a second one.
    */
   const moveDraftToFolder = useCallback(
-    async (draftId: DraftId, folder: string | null): Promise<void> => {
+    async (
+      draftId: DraftId,
+      folder: string | null,
+      projectRef?: ScopedProjectRef,
+    ): Promise<void> => {
       if (environmentId === null) return;
       const target = folder ?? (await resolveHomeFolder(environmentId));
       if (!target) throw new Error("Couldn't find the home folder on this computer.");
@@ -154,7 +161,8 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
         ? before.modelSelectionByProvider[before.activeProvider]
         : undefined;
       const runtimeMode = before?.runtimeMode ?? null;
-      await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
+      if (projectRef) await handleNewThread(projectRef, { envMode: "local" });
+      else await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
       // The draft the chat opened on — read from the route: a project can have
       // drafts under two keys (scoped id / logical path), the route is the truth.
       const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
@@ -172,7 +180,7 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
         next.setDraftThreadContext(moved, { runtimeMode });
       }
     },
-    [chatInFolder, environmentId, router],
+    [chatInFolder, environmentId, handleNewThread, router],
   );
 
   return { ensureFolderProject, chatInFolder, chatInHomeFolder, moveDraftToFolder };

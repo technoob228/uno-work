@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PROJECT_UPLOAD_CHUNK_BYTES,
   PROJECT_UPLOAD_MAX_FILE_BYTES,
+  isFolderOrZipDrop,
   planProjectUpload,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
@@ -160,5 +161,25 @@ describe("uploadFilesIntoDirectory", () => {
       { relativePath: "node_modules/junk.js", reason: "ignored" },
     ]);
     expect(writes.map((write) => write.relativePath)).toEqual(["src/app.ts"]);
+  });
+});
+
+describe("a drop on a new chat", () => {
+  it("takes a folder or a .zip as a folder to work in", () => {
+    expect(isFolderOrZipDrop([{ isDirectory: true, name: "site" }])).toBe(true);
+    expect(isFolderOrZipDrop([{ isDirectory: false, name: "Shop.ZIP" }])).toBe(true);
+    expect(
+      isFolderOrZipDrop([
+        { isDirectory: false, name: "photo.png" },
+        { isDirectory: false, name: "site.zip" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("leaves images, videos and other files as attachments", () => {
+    expect(isFolderOrZipDrop([{ isDirectory: false, name: "photo.png" }])).toBe(false);
+    expect(isFolderOrZipDrop([{ isDirectory: false, name: "clip.mp4" }])).toBe(false);
+    expect(isFolderOrZipDrop([{ isDirectory: false, name: "notes.zip.txt" }])).toBe(false);
+    expect(isFolderOrZipDrop([])).toBe(false);
   });
 });

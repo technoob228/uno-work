@@ -36,6 +36,7 @@ import {
   FolderGit2Icon,
   ChevronRightIcon,
   FolderIcon,
+  FolderPlusIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -134,6 +135,7 @@ import {
   selectSidebarThreadsForEnvironment,
   useStore,
 } from "../store";
+import { openNewProject } from "../navigation/newProjectStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
@@ -3058,6 +3060,17 @@ export default function Sidebar() {
                 <PlusIcon className="-mx-0.5 size-3" />
                 New chat
               </Button>
+              {/* A fresh computer (08.10): the way to bring your own folder in. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => openNewProject()}
+                data-testid="sidebar-empty-add-folder"
+              >
+                <FolderPlusIcon className="-mx-0.5 size-3" />
+                Add a project
+              </Button>
+              <span className="text-[11px]">Your folders live in ~/projects</span>
             </div>
           ) : (
             <SidebarEmptyProjects

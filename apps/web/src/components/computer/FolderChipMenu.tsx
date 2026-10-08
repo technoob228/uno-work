@@ -1,18 +1,35 @@
 /**
  * The "Home folder ▾" chip: where a new chat works. One click opens the recent
- * folders on this computer and "Another folder…" (the click-through folder
- * picker — no paths to type). Shared by Home's composer and a new chat's
- * header, so both offer the same choice.
+ * folders on this computer, "Another folder…" (the click-through folder
+ * picker — no paths to type) and three ways to bring a folder in (08.10): New
+ * folder…, Upload a folder…, Clone from GitHub… — the New project dialog's
+ * steps, worded as folders; the new folder lands in `~/projects/<name>` and
+ * the chat moves there with what was typed. Shared by Home's composer and a
+ * new chat's header, so both offer the same choice. Nothing changes until the
+ * person picks: the chat works in the home folder.
  */
-import { isAssistantProjectId, type EnvironmentId } from "@t3tools/contracts";
-import { ChevronDownIcon, FolderIcon, FolderOpenIcon, HouseIcon } from "lucide-react";
+import {
+  isAssistantProjectId,
+  type EnvironmentId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
+import {
+  ChevronDownIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  FolderUpIcon,
+  HouseIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "~/lib/utils";
 import { folderDisplayName, useHomeFolderPath } from "../../hooks/useFolderChats";
 import { normalizeProjectPathForComparison } from "../../lib/projectPaths";
+import { type ChatFolderSource, openFolderForChat } from "../../navigation/newProjectStore";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { GitHubIcon } from "../Icons";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -26,6 +43,16 @@ import {
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 
 const MAX_FOLDERS = 8;
+
+const BRING_FOLDER: ReadonlyArray<{
+  source: ChatFolderSource;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { source: "empty", label: "New folder…", Icon: FolderPlusIcon },
+  { source: "upload", label: "Upload a folder…", Icon: FolderUpIcon },
+  { source: "github", label: "Clone from GitHub…", Icon: GitHubIcon },
+];
 
 export interface PickedFolder {
   readonly cwd: string;
@@ -42,8 +69,11 @@ export function FolderChipMenu({
   environmentId: EnvironmentId | null;
   /** The current folder; null = the home folder. */
   folder: PickedFolder | null;
-  /** null = the home folder. */
-  onPick: (folder: PickedFolder | null) => void;
+  /**
+   * null = the home folder. `projectRef` comes with a folder the chip has just
+   * made (its project may not be in the store yet).
+   */
+  onPick: (folder: PickedFolder | null, projectRef?: ScopedProjectRef) => void | Promise<void>;
   className?: string;
   testId?: string;
 }) {
@@ -103,6 +133,20 @@ export function FolderChipMenu({
             <FolderOpenIcon />
             Another folder…
           </MenuItem>
+          {BRING_FOLDER.map(({ source, label, Icon }) => (
+            <MenuItem
+              key={source}
+              data-testid={`folder-chip-${source}`}
+              onClick={() =>
+                openFolderForChat(source, ({ name, folder: cwd, projectRef }) =>
+                  onPick({ cwd, name }, projectRef),
+                )
+              }
+            >
+              <Icon />
+              {label}
+            </MenuItem>
+          ))}
         </MenuPopup>
       </Menu>
       <ChatInFolderDialog
