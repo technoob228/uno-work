@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   closeTab,
   DEFAULT_PREVIEW_BUCKET_STATE,
+  dropChatBuckets,
   getPreviewBucketState,
   isPanelOpen,
   moveTabScope,
@@ -226,5 +227,52 @@ describe("closeTab", () => {
     const result = closeTab(states, chatA, "notes");
     expect(result.closed).toEqual(notes);
     expect(resolvePanelView(result.states, chatA).view.activeFileId).toBe("report");
+  });
+});
+
+describe("a chat marked Done or archived takes its panel with it", () => {
+  it("drops the chat's tabs and view; other chats, project and pinned tabs stay", () => {
+    let states = openTab({}, chatA, "chat", report, "agent");
+    states = updatePanelView(states, chatA, (view) => ({ ...view, width: 640 }));
+    states = openTab(states, chatB, "chat", notes, "agent");
+    states = openTab(states, chatA, "project", file("dashboard"), "person");
+    states = openTab(states, chatA, "global", file("pinned"), "person");
+
+    const result = dropChatBuckets(states, ["thread-a"]);
+
+    expect(result.states[chatScopeKey("thread-a")]).toBeUndefined();
+    expect(result.dropped.map((tab) => tab.id)).toEqual(["report"]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([notes]);
+    expect(result.states[projectScopeKey("proj")]?.files.map((tab) => tab.id)).toEqual([
+      "dashboard",
+    ]);
+    expect(result.states[GLOBAL_SCOPE_KEY]?.files.map((tab) => tab.id)).toEqual(["pinned"]);
+  });
+
+  it("a chat brought back from Done starts with an empty, untouched panel", () => {
+    let states = openTab({}, chatA, "chat", report, "agent");
+    states = setPanelOpen(states, chatA, false);
+    states = dropChatBuckets(states, ["thread-a"]).states;
+    const view = resolvePanelView(states, chatA);
+    expect(view.files).toEqual([]);
+    expect(view.visible).toBe(false);
+    expect(view.view).toEqual(DEFAULT_PREVIEW_BUCKET_STATE);
+    // Агент снова может открыть панель: «закрыто человеком» ушло вместе с чатом.
+    states = openTab(states, chatA, "chat", notes, "agent");
+    expect(resolvePanelView(states, chatA).visible).toBe(true);
+  });
+
+  it("a file also open in another chat is not reported as gone", () => {
+    let states = openTab({}, chatA, "chat", report, "agent");
+    states = openTab(states, chatB, "chat", report, "agent");
+    const result = dropChatBuckets(states, ["thread-a"]);
+    expect(result.dropped).toEqual([]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([report]);
+  });
+
+  it("nothing to drop keeps the same object (no re-render)", () => {
+    const states = openTab({}, chatB, "chat", notes, "agent");
+    expect(dropChatBuckets(states, ["thread-a"]).states).toBe(states);
+    expect(dropChatBuckets(states, []).states).toBe(states);
   });
 });

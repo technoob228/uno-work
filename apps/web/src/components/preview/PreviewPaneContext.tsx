@@ -18,6 +18,7 @@ import {
   closeTab,
   collectVisibleTabs,
   DEFAULT_PREVIEW_BUCKET_STATE,
+  dropChatBuckets,
   EMPTY_BROWSER_CONTEXT,
   findTabScopeKey,
   getPreviewBucketState,
@@ -264,6 +265,8 @@ interface PreviewPaneState {
   /** Все бакеты предпросмотра — для постоянно смонтированных webview. */
   statesByScopeKey: Readonly<Record<string, PreviewBucketState>>;
   closeFile: (id: string) => void;
+  /** Чаты закончены (Done, архив, удалены): закрыть всё, что было открыто в них. */
+  dropChats: (threadIds: ReadonlyArray<string>) => void;
   setActiveFile: (id: string) => void;
   openBrowser: (context: BrowserContext) => void;
   closeBrowser: () => void;
@@ -544,6 +547,19 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     [currentTarget, transition],
   );
 
+  const dropChats = useCallback((threadIds: ReadonlyArray<string>) => {
+    if (threadIds.length === 0) return;
+    setStatesByScopeKey((prev) => {
+      const result = dropChatBuckets(prev, threadIds);
+      // Как в closeFile: освобождаем прямо здесь — повтор (StrictMode) безвреден.
+      for (const file of result.dropped) {
+        if (file.blobUrl) URL.revokeObjectURL(file.blobUrl);
+        forgetScrollPosition(file.id);
+      }
+      return result.states === prev ? prev : (result.states as Record<string, PreviewBucketState>);
+    });
+  }, []);
+
   const toggleSourceView = useCallback(
     (id: string) => {
       updateViewState((current) => ({
@@ -687,6 +703,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setTabScope,
       statesByScopeKey,
       closeFile,
+      dropChats,
       setActiveFile,
       openBrowser,
       closeBrowser,
@@ -722,6 +739,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       setTabScope,
       statesByScopeKey,
       closeFile,
+      dropChats,
       setActiveFile,
       openBrowser,
       closeBrowser,

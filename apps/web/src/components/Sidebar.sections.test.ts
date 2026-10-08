@@ -231,11 +231,12 @@ describe("buildSidebarInboxLayout", () => {
     ...settledThreads,
   ];
 
-  it("renders Pinned, Active, a collapsed Snoozed shelf and the first settled rows", () => {
+  it("an opened Done shelf shows its first rows, the rest behind Show more", () => {
     const layout = buildSidebarInboxLayout(threads, {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: false,
+      doneExpanded: true,
       settledExpanded: false,
       threadKey,
     });
@@ -256,6 +257,11 @@ describe("buildSidebarInboxLayout", () => {
       "settled-toggle",
     ]);
     expect(layout.items[2]).toEqual({ kind: "snoozed-header", count: 2, expanded: false });
+    expect(layout.items[3]).toEqual({
+      kind: "settled-header",
+      count: SIDEBAR_SETTLED_PREVIEW_LIMIT + 2,
+      expanded: true,
+    });
     expect(layout.items.at(-1)).toEqual({
       kind: "settled-toggle",
       hiddenCount: 2,
@@ -274,6 +280,7 @@ describe("buildSidebarInboxLayout", () => {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: true,
+      doneExpanded: true,
       settledExpanded: true,
       threadKey,
     });
@@ -286,6 +293,7 @@ describe("buildSidebarInboxLayout", () => {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: false,
+      doneExpanded: false,
       settledExpanded: false,
       threadKey,
       forceVisibleKey: "snoozed-b",
@@ -305,6 +313,7 @@ describe("buildSidebarInboxLayout", () => {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: false,
+      doneExpanded: false,
       settledExpanded: false,
       threadKey,
       forceVisibleKey: "active-9",
@@ -322,6 +331,7 @@ describe("buildSidebarInboxLayout", () => {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: false,
+      doneExpanded: false,
       settledExpanded: true,
       threadKey,
     });
@@ -334,12 +344,73 @@ describe("buildSidebarInboxLayout", () => {
       now: NOW,
       sortOrder: "updated_at",
       snoozedExpanded: false,
+      doneExpanded: false,
       settledExpanded: false,
       threadKey,
     });
     expect(layout.items).toEqual([
       { kind: "thread", thread: expect.objectContaining({ id: "only" }), section: "active" },
     ]);
+  });
+});
+
+describe("Done shelf folds like Snoozed (0.0.114)", () => {
+  const done = Array.from({ length: 12 }, (_, index) =>
+    makeThread(`done-${index}`, {
+      settledOverride: "settled",
+      settledAt: ago((index + 1) * HOUR_MS),
+    }),
+  );
+  const threads = [
+    makeThread("active"),
+    makeThread("snoozed-a", snoozed(HOUR_MS)),
+    ...done,
+  ];
+  const collapsed = (extra: { forceVisibleKey?: string; settledExpanded?: boolean } = {}) =>
+    buildSidebarInboxLayout(threads, {
+      now: NOW,
+      sortOrder: "updated_at",
+      snoozedExpanded: false,
+      doneExpanded: false,
+      settledExpanded: extra.settledExpanded ?? false,
+      threadKey,
+      forceVisibleKey: extra.forceVisibleKey ?? null,
+    });
+
+  it("a project with 12 Done chats shows one folded Done row and no Show more", () => {
+    const layout = collapsed();
+    expect(
+      layout.items.map((item) =>
+        item.kind === "thread" ? `${item.section}:${item.thread.id}` : item.kind,
+      ),
+    ).toEqual(["active:active", "snoozed-header", "settled-header"]);
+    expect(layout.items.at(-1)).toEqual({ kind: "settled-header", count: 12, expanded: false });
+    expect(layout.hiddenThreads).toHaveLength(13);
+  });
+
+  it("Show more over Active does not unfold Done", () => {
+    const layout = collapsed({ settledExpanded: true });
+    expect(layout.visibleThreads.map((thread) => thread.id)).toEqual(["active"]);
+  });
+
+  it("the open Done chat stays visible under the folded row", () => {
+    const layout = collapsed({ forceVisibleKey: "done-7" });
+    expect(layout.visibleThreads.map((thread) => thread.id)).toEqual(["active", "done-7"]);
+  });
+
+  it("opened, it lists the latest Done chats first, the rest behind Show more", () => {
+    const layout = buildSidebarInboxLayout(threads, {
+      now: NOW,
+      sortOrder: "updated_at",
+      snoozedExpanded: false,
+      doneExpanded: true,
+      settledExpanded: false,
+      threadKey,
+    });
+    expect(
+      layout.visibleThreads.filter((thread) => thread.id.startsWith("done-")).map((t) => t.id),
+    ).toEqual(["done-0", "done-1", "done-2", "done-3", "done-4"]);
+    expect(layout.items.at(-1)).toEqual({ kind: "settled-toggle", hiddenCount: 7, expanded: false });
   });
 });
 
@@ -351,6 +422,7 @@ describe("resolveSidebarProjectThreadList", () => {
     activeThreadKey: null,
     isThreadListExpanded: false,
     snoozedExpanded: false,
+    doneExpanded: false,
     previewLimit: 2,
     threadKey,
   };

@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.114 — 2026-10-08
+
+- Right panel: when a chat is marked Done or archived (or deleted), everything open in that chat's panel closes — browser tabs, site previews, files, apps. On the desktop app their pages are unloaded too. Tabs pinned to the project or "everywhere" stay. A chat brought back from Done or the archive starts with an empty panel.
+- Sidebar (legacy, with projects): Done chats fold into one "Done · N" row under each project, like Snoozed; click to unfold. Archived chats never show in the sidebar (Settings → Archived chats, as before). The standard sidebar already folded them; in Dev mode its shelf now says "Done" instead of "Settled".
+
 ## v0.0.113 — 2026-10-08
 
 - Uno Work updates itself on a cloud computer: "A new version of Uno Work is ready · Update" (above the chat, on Home, in My Uno). The owner presses Update, the computer downloads the release from the Uno console over HTTPS, checks it against the console's checksum list, installs it and restarts Uno Work once (about two minutes); if the new version doesn't start, the computer goes back to the previous one by itself. Chats and files are not touched. Only an owner session can start it; agents have no tool for it. The update shows up in Security ("You updated Uno Work to …"). Computers get the button with 0.0.113 — older ones need one last manual update.

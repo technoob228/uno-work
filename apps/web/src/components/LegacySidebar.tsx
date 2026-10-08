@@ -1027,6 +1027,7 @@ interface SidebarProjectThreadListProps {
   unsnoozeThread: SidebarSnoozeActions["unsnoozeThread"];
   openSnoozePicker: SidebarSnoozeActions["openSnoozePicker"];
   toggleSnoozedShelf: () => void;
+  toggleDoneShelf: () => void;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -1083,6 +1084,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     unsnoozeThread,
     openSnoozePicker,
     toggleSnoozedShelf,
+    toggleDoneShelf,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1156,18 +1158,28 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             );
           }
           if (item.kind === "settled-header") {
+            // Folded like Snoozed (0.0.114): finished chats don't stretch the project.
             return (
               <SidebarMenuSubItem
                 key="settled-header"
                 className="w-full"
                 data-thread-selection-safe
               >
-                <div
+                <button
+                  type="button"
                   data-thread-selection-safe
-                  className="flex h-6 w-full items-center px-2 text-[10px] text-muted-foreground/50"
+                  data-testid={`sidebar-done-shelf-${projectKey}`}
+                  aria-expanded={item.expanded}
+                  className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-md px-2 text-left text-[10px] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-muted-foreground/80"
+                  onClick={toggleDoneShelf}
                 >
+                  <ChevronRightIcon
+                    className={`size-3 shrink-0 transition-transform duration-150 ${
+                      item.expanded ? "rotate-90" : ""
+                    }`}
+                  />
                   <span>Done · {item.count}</span>
-                </div>
+                </button>
               </SidebarMenuSubItem>
             );
           }
@@ -1484,6 +1496,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const isSnoozedShelfExpanded = useUiStateStore(
     (state) => state.sidebarShelfExpandedByProjectKey[project.projectKey]?.snoozed ?? false,
   );
+  const isDoneShelfExpanded = useUiStateStore(
+    (state) => state.sidebarShelfExpandedByProjectKey[project.projectKey]?.settled ?? false,
+  );
   const setSidebarShelfExpanded = useUiStateStore((state) => state.setSidebarShelfExpanded);
   const {
     projectStatus,
@@ -1520,6 +1535,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       activeThreadKey: activeRouteThreadKey,
       isThreadListExpanded,
       snoozedExpanded: isSnoozedShelfExpanded,
+      doneExpanded: isDoneShelfExpanded,
       previewLimit: THREAD_PREVIEW_LIMIT,
       threadKey: sidebarThreadKey,
     });
@@ -1539,6 +1555,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, [
     activeRouteThreadKey,
     inboxSections,
+    isDoneShelfExpanded,
     isSnoozedShelfExpanded,
     isThreadListExpanded,
     projectExpanded,
@@ -2339,6 +2356,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const toggleSnoozedShelf = useCallback(() => {
     setSidebarShelfExpanded(project.projectKey, "snoozed", !isSnoozedShelfExpanded);
   }, [isSnoozedShelfExpanded, project.projectKey, setSidebarShelfExpanded]);
+  const toggleDoneShelf = useCallback(() => {
+    setSidebarShelfExpanded(project.projectKey, "settled", !isDoneShelfExpanded);
+  }, [isDoneShelfExpanded, project.projectKey, setSidebarShelfExpanded]);
 
   const handleThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
@@ -2602,6 +2622,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         unsnoozeThread={unsnoozeThread}
         openSnoozePicker={openSnoozePicker}
         toggleSnoozedShelf={toggleSnoozedShelf}
+        toggleDoneShelf={toggleDoneShelf}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -3915,6 +3936,7 @@ export default function LegacySidebar() {
           activeThreadKey: routeThreadKey,
           isThreadListExpanded: expandedThreadListsByProject.has(project.projectKey),
           snoozedExpanded: sidebarShelfExpandedByProjectKey[project.projectKey]?.snoozed ?? false,
+          doneExpanded: sidebarShelfExpandedByProjectKey[project.projectKey]?.settled ?? false,
           previewLimit: THREAD_PREVIEW_LIMIT,
           threadKey: sidebarThreadKey,
         });

@@ -17,6 +17,7 @@
  */
 
 import {
+  chatScopeKey,
   GLOBAL_SCOPE_KEY,
   scopeKeyForTarget,
   scopeOfKey,
@@ -324,6 +325,33 @@ export function moveTabScope(
   const to = getPreviewBucketState(next, toKey);
   next = { ...next, [toKey]: { ...to, files: [...to.files, tab] } };
   return revealTab(next, target, toKey, id, "person");
+}
+
+/**
+ * Чат закончен (Done, архив, удалён): всё, что жило в нём, — вкладки и вид
+ * панели — уходит целиком (08.10, Миша: «чтобы у меня 100 чатов Done не висело
+ * с открытыми вкладками»). Вкладки проекта и «везде» — не чата, их не трогаем.
+ * Вернули чат из Done/архива — панель в нём начинается с чистого листа.
+ *
+ * `dropped` — вкладки, которых после чистки не осталось нигде (у них можно
+ * освободить blob-URL и забыть прокрутку); копия того же файла в другом чате
+ * живёт дальше.
+ */
+export function dropChatBuckets(
+  states: PreviewStates,
+  threadIds: ReadonlyArray<string>,
+): { readonly states: PreviewStates; readonly dropped: ReadonlyArray<PreviewFile> } {
+  const keys = new Set(threadIds.map(chatScopeKey));
+  if (!Object.keys(states).some((key) => keys.has(key))) return { states, dropped: [] };
+  const next: Record<string, PreviewBucketState> = {};
+  const removed: PreviewFile[] = [];
+  for (const [key, bucket] of Object.entries(states)) {
+    if (keys.has(key)) removed.push(...bucket.files);
+    else next[key] = bucket;
+  }
+  const remainingIds = new Set(Object.values(next).flatMap((bucket) => bucket.files.map((f) => f.id)));
+  const dropped = removed.filter((file) => !remainingIds.has(file.id));
+  return { states: next, dropped };
 }
 
 /**

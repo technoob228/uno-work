@@ -1,5 +1,6 @@
 // Inbox-zero sections for one project's chat list: Pinned -> Active ->
-// Snoozed (collapsed shelf) -> Settled (quiet, time-ordered, first few shown).
+// Snoozed (collapsed shelf) -> Done (collapsed shelf like Snoozed since 0.0.114;
+// opened, it shows the first few, time-ordered).
 //
 // Ported from upstream T3 Code's Sidebar.logic.ts section model, adapted:
 // - Automatic settlement is derived on the client: upstream's inactivity
@@ -25,7 +26,7 @@ export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 
 /** Upstream's default `sidebarAutoSettleAfterDays`. */
 export const SIDEBAR_SETTLE_AFTER_IDLE_MS = 3 * 24 * 60 * 60 * 1_000;
-/** Settled rows shown before "Show more". */
+/** Done rows shown before "Show more" once the Done shelf is open. */
 export const SIDEBAR_SETTLED_PREVIEW_LIMIT = 5;
 /**
  * Active rows shown before "Show more". A busy project easily has a dozen
@@ -186,7 +187,7 @@ export function partitionSidebarThreads<T extends SidebarSectionThread>(
 export type SidebarInboxListItem<T> =
   | { readonly kind: "thread"; readonly thread: T; readonly section: SidebarSection }
   | { readonly kind: "snoozed-header"; readonly count: number; readonly expanded: boolean }
-  | { readonly kind: "settled-header"; readonly count: number }
+  | { readonly kind: "settled-header"; readonly count: number; readonly expanded: boolean }
   | {
       readonly kind: "settled-toggle";
       readonly hiddenCount: number;
@@ -204,10 +205,11 @@ export interface SidebarInboxLayout<T> {
 }
 
 /**
- * Build one project's list. The snoozed shelf renders collapsed by default;
- * active rows show the first SIDEBAR_ACTIVE_PREVIEW_LIMIT and settled rows the
- * first SIDEBAR_SETTLED_PREVIEW_LIMIT until expanded, behind one toggle at the
- * end of the list.
+ * Build one project's list. The Snoozed and Done shelves render collapsed by
+ * default (08.10, Misha: one project must not take half the screen with
+ * finished chats); active rows show the first SIDEBAR_ACTIVE_PREVIEW_LIMIT and
+ * an opened Done shelf the first SIDEBAR_SETTLED_PREVIEW_LIMIT until expanded,
+ * behind one toggle at the end of the list.
  * `forceVisibleKey` keeps the open chat rendered in its section even when
  * its shelf is collapsed, so the selection never disappears.
  */
@@ -217,6 +219,9 @@ export function buildSidebarInboxLayout<T extends SidebarSectionThread>(
     readonly now: string;
     readonly sortOrder: SidebarThreadSortOrder;
     readonly snoozedExpanded: boolean;
+    /** The Done shelf is open (collapsed by default, like Snoozed). */
+    readonly doneExpanded: boolean;
+    /** "Show more": every Active and Done row instead of the first few. */
     readonly settledExpanded: boolean;
     readonly threadKey: (thread: T) => string;
     readonly forceVisibleKey?: string | null | undefined;
@@ -261,12 +266,18 @@ export function buildSidebarInboxLayout<T extends SidebarSectionThread>(
   }
 
   if (sections.settled.length > 0) {
-    items.push({ kind: "settled-header", count: sections.settled.length });
-    if (sections.settled.length > SIDEBAR_SETTLED_PREVIEW_LIMIT) {
+    items.push({
+      kind: "settled-header",
+      count: sections.settled.length,
+      expanded: input.doneExpanded,
+    });
+    if (input.doneExpanded && sections.settled.length > SIDEBAR_SETTLED_PREVIEW_LIMIT) {
       overflowCount += sections.settled.length - SIDEBAR_SETTLED_PREVIEW_LIMIT;
     }
     sections.settled.forEach((thread, index) => {
-      if (input.settledExpanded || index < SIDEBAR_SETTLED_PREVIEW_LIMIT || isForced(thread)) {
+      const shown =
+        input.doneExpanded && (input.settledExpanded || index < SIDEBAR_SETTLED_PREVIEW_LIMIT);
+      if (shown || isForced(thread)) {
         pushThread(thread, "settled");
       } else {
         hiddenThreads.push(thread);
@@ -319,6 +330,7 @@ export function resolveSidebarProjectThreadList<T extends SidebarSectionThread>(
   readonly activeThreadKey: string | null;
   readonly isThreadListExpanded: boolean;
   readonly snoozedExpanded: boolean;
+  readonly doneExpanded: boolean;
   readonly previewLimit: number;
   readonly threadKey: (thread: T) => string;
 }): SidebarProjectThreadList<T> {
@@ -333,6 +345,7 @@ export function resolveSidebarProjectThreadList<T extends SidebarSectionThread>(
       now: input.now,
       sortOrder: input.sortOrder,
       snoozedExpanded: input.snoozedExpanded,
+      doneExpanded: input.doneExpanded,
       settledExpanded: input.isThreadListExpanded,
       threadKey: input.threadKey,
       forceVisibleKey: input.activeThreadKey,

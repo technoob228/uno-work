@@ -17,6 +17,7 @@ import { useSidebarDOpenState } from "./sidebar/sidebarDState";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { BrowserBridgeListener } from "./preview/BrowserBridgeListener";
 import { BrowserLiveListener } from "./preview/BrowserLiveListener";
+import { ChatPanelCleanupListener } from "./preview/ChatPanelCleanupListener";
 import { FileBrowser } from "./preview/FileBrowser";
 import { PreviewPane } from "./preview/PreviewPane";
 import { cn } from "../lib/utils";
@@ -156,6 +157,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <FileBrowser />
       <BrowserBridgeListener />
       <BrowserLiveListener />
+      <ChatPanelCleanupListener />
       <PaymentNoticeBanner />
     </>
   );

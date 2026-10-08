@@ -3027,7 +3027,7 @@ export default function Sidebar() {
               <SidebarSectionHeader
                 kind="settled"
                 className={cn(snoozedThreads.length === 0 && "mt-auto pt-2")}
-                label={settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`}
+                label={doneShelfLabel(settledThreads.length, settledShelfExpanded)}
                 expanded={settledShelfExpanded}
                 onToggle={() => setSettledShelfExpanded((value) => !value)}
               />
@@ -3285,9 +3285,7 @@ export default function Sidebar() {
                       <SidebarSectionHeader
                         kind="settled"
                         className={cn(snoozedThreads.length === 0 && "mt-auto")}
-                        label={
-                          settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`
-                        }
+                        label={doneShelfLabel(settledThreads.length, settledShelfExpanded)}
                         expanded={settledShelfExpanded}
                         onToggle={() => setSettledShelfExpanded((value) => !value)}
                       />
