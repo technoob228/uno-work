@@ -1027,8 +1027,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const response = yield* HttpClient.get("/api/health");
       assert.equal(response.status, 200);
-      const body = (yield* response.json) as { ok: boolean; db: string };
-      assert.deepEqual(body, { ok: true, db: "ok" });
+      const body = (yield* response.json) as { ok: boolean; db: string; version?: string };
+      // 0.0.113: health also names the running version (the self-updater waits for it).
+      assert.deepEqual({ ok: body.ok, db: body.db }, { ok: true, db: "ok" });
+      assert.match(String(body.version), /^\d+\.\d+\.\d+/);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
