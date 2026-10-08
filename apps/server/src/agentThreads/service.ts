@@ -14,8 +14,9 @@
  * - read/write reaches any live thread of the caller's project, other projects
  *   only with `agentThreadsScope: "any-project"` (anything else is 404, not
  *   403 — no probing of foreign threads); release stays parent-only;
- * - an agent never writes into a thread that waits for the human or that the
- *   human took over (plan 22);
+ * - an agent never writes into a thread that waits for the human, and nobody
+ *   writes into a chat the person closed to agents; a human having written in
+ *   a chat does not lock agents out (0.0.115);
  * - an agent never widens its own permissions: a spawned thread runs in at
  *   most the caller's runtime mode, and a turn is never started in a thread
  *   whose runtime mode is wider than the caller's (403 runtime_mode_escalation).
@@ -58,8 +59,8 @@ import {
   clampInteger,
   defaultTitleFromText,
   deriveAgentThreadStatus,
-  HUMAN_ACTIVE_MESSAGE,
-  HUMAN_IN_CONTROL_MESSAGE,
+  agentDeliveryBlock,
+  AGENTS_CLOSED_MESSAGE,
   isCwdInsideOwnProject,
   lastAssistantText,
   messageAuthor,
@@ -67,7 +68,7 @@ import {
   optionalString,
   parseListScope,
   resolveProviderModelSelection,
-  TARGET_BUSY_MESSAGE,
+  isClosedToAgents,
   threadController,
   threadRelation,
 } from "./logic.ts";
@@ -132,7 +133,7 @@ const THREAD_NOT_FOUND_BODY = {
 
 /**
  * Maps a rejected dispatch to the bridge contract. The decider prefixes the
- * invariant details with a machine-readable reason (`human_in_control:` …).
+ * invariant details with a machine-readable reason (`agents_closed:` …).
  * Anything unrecognized is a server bug from the agent's point of view (the
  * bridge pre-checks what it can), so it is a 500, logged by the caller.
  */
@@ -144,10 +145,10 @@ export function replyForDispatchError(error: OrchestrationDispatchError): AgentT
       : "";
   const reason = /^([a-z_]+):/.exec(detail)?.[1];
   switch (reason) {
-    case "human_in_control":
+    case "agents_closed":
       return {
         status: 409,
-        body: { ok: false, error: "human_in_control", message: HUMAN_IN_CONTROL_MESSAGE },
+        body: { ok: false, error: "agents_closed", message: AGENTS_CLOSED_MESSAGE },
       };
     case "cannot_message_self":
       return {
@@ -538,6 +539,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
                 spawnedByThreadId: child.spawnedByThreadId ?? null,
                 status: deriveAgentThreadStatus(child),
                 controller: threadController(child),
+                agentsClosed: isClosedToAgents(child),
                 updatedAt: child.updatedAt,
                 lastAssistantText: Option.isSome(detail)
                   ? lastAssistantText(detail.value.messages)
@@ -590,6 +592,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             status: deriveAgentThreadStatus(shell),
             controller: threadController(shell),
             controlChangedAt: shell.controlChangedAt ?? null,
+            agentsClosed: isClosedToAgents(shell),
             pendingApproval: shell.hasPendingApprovals,
             pendingUserInput: shell.hasPendingUserInput,
             messages: messages.map((message) => {
@@ -612,26 +615,6 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       }),
     );
 
-  /**
-   * Why an agent may not write into `target` right now; null when it may.
-   * A parent keeps driving its own child mid-turn as in plan 21; everyone
-   * else waits for the recipient to be idle.
-   */
-  const deliveryBlock = (caller: OrchestrationThreadShell, target: OrchestrationThreadShell) => {
-    if (target.spawnedByThreadId != null && threadController(target) !== "agent") {
-      return { status: 409, error: "human_in_control", message: HUMAN_IN_CONTROL_MESSAGE };
-    }
-    if (threadRelation(caller, target) === "child") return null;
-    const status = deriveAgentThreadStatus(target);
-    if (status === "waiting") {
-      return { status: 409, error: "human_active", message: HUMAN_ACTIVE_MESSAGE };
-    }
-    if (status === "running") {
-      return { status: 409, error: "target_busy", message: TARGET_BUSY_MESSAGE };
-    }
-    return null;
-  };
-
   const sendMessage = (
     authorization: BridgeAuthorization | null,
     input: { readonly threadId: string | undefined; readonly body: unknown },
@@ -646,16 +629,16 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const text = checkMessageText(body?.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
 
-        // Only a running turn is worth waiting for: a human takeover or a
+        // Only a running turn is worth waiting for: a closed chat or a
         // pending approval does not clear on its own within a request.
         const waitMs = bodyWaitMs(body?.waitMs);
         const startedMs = nowMs();
         const deadline = startedMs + waitMs;
-        let block = deliveryBlock(caller, target);
+        let block = agentDeliveryBlock(caller, target);
         while (block?.error === "target_busy" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
           target = yield* loadReachable(caller, target.id);
-          block = deliveryBlock(caller, target);
+          block = agentDeliveryBlock(caller, target);
         }
         if (block !== null) return yield* fail(block.status, block.error, block.message);
         // The decider runs the turn in the target's own mode, so a caller may

@@ -76,7 +76,7 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime";
 
-import { describeSpawnedThreadOrigin } from "../agentThreads.logic";
+import { AGENTS_ACCESS_COPY, describeSpawnedThreadOrigin } from "../agentThreads.logic";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { isElectron } from "../env";
 import { useEnvironmentSupportsAgentThreads } from "../environments/agentThreadsSupport";
@@ -193,6 +193,8 @@ import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
+import { setThreadAgentsClosed } from "../agentsAccess";
+import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
 import { useDevMode } from "../devMode";
 import { usePins } from "../navigation/usePins";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
@@ -2359,6 +2361,8 @@ export default function Sidebar() {
         const nowDate = new Date();
         const supportsSettlement = readEnvironmentSupportsThreadSettlement(thread.environmentId);
         const supportsSnooze = readEnvironmentSupportsThreadSnooze(thread.environmentId);
+        const supportsAgentsAccess = readEnvironmentSupportsAgentsCloseChat(thread.environmentId);
+        const agentsClosed = thread.agentsClosedAt != null;
         const status = resolveSidebarThreadStatus(thread);
         const snoozePresets = resolveSnoozePresets(nowDate);
         const lifecycleItems: ContextMenuItem[] = [];
@@ -2404,6 +2408,14 @@ export default function Sidebar() {
               { id: "copy-path", label: "Copy Path" },
               { id: "copy-thread-id", label: "Copy chat ID" },
               { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
+              ...(supportsAgentsAccess
+                ? [
+                    {
+                      id: "agents-access",
+                      label: agentsClosed ? AGENTS_ACCESS_COPY.open : AGENTS_ACCESS_COPY.close,
+                    },
+                  ]
+                : []),
               { id: "archive", label: "Archive" },
               { id: "delete", label: "Delete", destructive: true },
             ],
@@ -2457,6 +2469,13 @@ export default function Sidebar() {
             return;
           case "continue-on-machine":
             setContinueThreadTarget(threadRef);
+            return;
+          case "agents-access":
+            await setThreadAgentsClosed({
+              environmentId: thread.environmentId,
+              threadId: thread.id,
+              closed: !agentsClosed,
+            });
             return;
           case "archive": {
             if (confirmThreadArchive) {

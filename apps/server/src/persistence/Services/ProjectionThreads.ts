@@ -50,6 +50,9 @@ export const ProjectionThread = Schema.Struct({
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(Schema.NullOr(ThreadController)),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // "Don't let agents write here" (migration 049). Optional for the same
+  // reason; absent persists as NULL (open to agents).
+  agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Assistant chat / chat started by the assistant (migration 048).
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),

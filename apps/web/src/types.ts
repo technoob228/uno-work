@@ -140,6 +140,8 @@ export interface Thread {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
 }
@@ -165,6 +167,8 @@ export interface ThreadShell {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
 }
@@ -205,6 +209,8 @@ export interface SidebarThreadSummary {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
+  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
 }

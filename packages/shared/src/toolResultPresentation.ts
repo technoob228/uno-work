@@ -295,8 +295,11 @@ interface LabelContext {
 
 type DoneLabel = string | ((context: LabelContext) => string);
 
+/** The failure line; a function when the reason is worth showing the person. */
+type FailedLabel = string | ((resultText: string | undefined) => string);
+
 /** [while it runs, when it is done, when it failed]. */
-type ToolLabels = readonly [running: string, done: DoneLabel, failed: string];
+type ToolLabels = readonly [running: string, done: DoneLabel, failed: FailedLabel];
 
 function text(record: Record<string, unknown>, ...keys: ReadonlyArray<string>): string | undefined {
   for (const key of keys) {
@@ -457,7 +460,12 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
   chat_message: [
     "Writing to another chat…",
     "Wrote to another chat",
-    "Couldn't write to the other chat",
+    // The person's "Don't let agents write here" is worth naming: the sender's
+    // person sees why the message did not arrive.
+    (resultText) =>
+      resultText !== undefined && /agents_closed|closed this chat to agents/.test(resultText)
+        ? "Couldn't write to the other chat: the person closed it to agents"
+        : "Couldn't write to the other chat",
   ],
   chat_status: ["Checking another chat…", "Checked another chat", "Couldn't check the other chat"],
   notify: [
@@ -658,7 +666,9 @@ export function describeToolActivity(input: ToolActivityInput): HumanToolActivit
     label = !facts.finished
       ? running
       : facts.failed
-        ? failedLabel
+        ? typeof failedLabel === "string"
+          ? failedLabel
+          : failedLabel(facts.resultText)
         : typeof done === "string"
           ? done
           : done({ args, result });

@@ -34,8 +34,12 @@ export const AGENT_THREAD_MAX_WAIT_MS = 600_000;
 /** Long-poll cap of `POST /api/threads/:id/messages` waiting for a busy recipient. */
 export const AGENT_THREAD_MAX_SEND_WAIT_MS = 600_000;
 
-export const HUMAN_IN_CONTROL_MESSAGE =
-  "Человек взял управление этим тредом. Не пиши в него, пока он не передаст управление обратно; читать можно.";
+/**
+ * 409 `agents_closed`: the person turned on "Don't let agents write here".
+ * English: the sender's chat shows the gist of it to the person as well.
+ */
+export const AGENTS_CLOSED_MESSAGE =
+  "The person closed this chat to agents. Don't write here and don't try to work around it; you can still read it. If it matters, tell the person in your own chat.";
 
 export type AgentThreadStatus = "idle" | "running" | "waiting" | "error";
 
@@ -122,6 +126,59 @@ export function clampInteger(
 
 export function threadController(shell: Pick<OrchestrationThreadShell, "controller">) {
   return (shell.controller ?? "human") satisfies ThreadController;
+}
+
+/** The person turned on "Don't let agents write here" for this chat. */
+export function isClosedToAgents(shell: Pick<OrchestrationThreadShell, "agentsClosedAt">): boolean {
+  return (shell.agentsClosedAt ?? null) !== null;
+}
+
+export type AgentDeliveryBlock = {
+  readonly status: 409;
+  readonly error: "agents_closed" | "human_active" | "target_busy";
+  readonly message: string;
+};
+
+/**
+ * Why an agent may not write into `target` right now; null when it may.
+ * - the person closed the chat to agents — nobody, not even the parent;
+ * - the parent still drives a child no human wrote in (controller "agent")
+ *   and may write into it even mid-turn (plan 21);
+ * - everyone else — a peer, a child writing to its parent, a parent whose
+ *   child the person wrote in — waits until the chat is free: no approval or
+ *   question open for the person (`human_active`), no turn running
+ *   (`target_busy`, which `waitMs` waits out).
+ * A human having written in the chat does NOT block anyone (0.0.115).
+ */
+export function agentDeliveryBlock(
+  caller: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId">,
+  target: Pick<
+    OrchestrationThreadShell,
+    | "id"
+    | "spawnedByThreadId"
+    | "controller"
+    | "agentsClosedAt"
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "session"
+    | "latestTurn"
+    | "latestUserMessageAt"
+  >,
+): AgentDeliveryBlock | null {
+  if (isClosedToAgents(target)) {
+    return { status: 409, error: "agents_closed", message: AGENTS_CLOSED_MESSAGE };
+  }
+  if (threadRelation(caller, target) === "child" && threadController(target) === "agent") {
+    return null;
+  }
+  const status = deriveAgentThreadStatus(target);
+  if (status === "waiting") {
+    return { status: 409, error: "human_active", message: HUMAN_ACTIVE_MESSAGE };
+  }
+  if (status === "running") {
+    return { status: 409, error: "target_busy", message: TARGET_BUSY_MESSAGE };
+  }
+  return null;
 }
 
 /**

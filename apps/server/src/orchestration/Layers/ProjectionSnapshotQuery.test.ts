@@ -314,6 +314,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           spawnedByThreadId: null,
           controller: "human",
           controlChangedAt: null,
+          agentsClosedAt: null,
           assistantRole: null,
           deletedAt: null,
           messages: [
@@ -434,6 +435,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           spawnedByThreadId: null,
           controller: "human",
           controlChangedAt: null,
+          agentsClosedAt: null,
           assistantRole: null,
           session: {
             threadId: ThreadId.make("thread-1"),
