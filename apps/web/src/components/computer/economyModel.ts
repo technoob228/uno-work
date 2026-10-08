@@ -74,8 +74,15 @@ export function economyShortExplain(
     return "Off: this computer never sleeps by itself. Turn it on and it sleeps when nothing is happening, wakes in about a second, and you don't pay while it sleeps.";
   }
   const tail = economy.locked ? " The free computer always works this way." : "";
-  return `Sleeps after ${idleLabel(economy.idleTimeoutS)} with nothing to do and wakes in about a second. You don't pay while it sleeps.${tail}`;
+  return `Sleeps after ${idleLabel(economy.idleTimeoutS)} with nothing to do and wakes in about a second. ${ECONOMY_NEVER_MID_WORK} You don't pay while it sleeps.${tail}`;
 }
+
+/**
+ * The promise the daemon keeps (server economy/EconomyPresence.ts and
+ * commandScan.ts): a turn in progress and a command it started hold the
+ * computer awake, with the tab closed too.
+ */
+export const ECONOMY_NEVER_MID_WORK = "It never sleeps while your agent is working.";
 
 /** The idle timers the person can pick. */
 export const ECONOMY_IDLE_CHOICES: ReadonlyArray<number> = [300, 600, 1800, 3600, 3 * 3600];
@@ -85,6 +92,7 @@ export function economyDescription(economy: UnoComputerEconomy): string {
   const idle = idleLabel(economy.idleTimeoutS);
   const base =
     `Runs only when needed: after ${idle} with nothing to do, your computer sleeps and you don't pay for it. ` +
+    `${ECONOMY_NEVER_MID_WORK} ` +
     "It wakes in about a second when you open Uno Work, message your assistant in Telegram or Slack, or someone opens one of its apps.";
   if (economy.locked) return `${base} The free computer always works this way.`;
   return base;
@@ -133,7 +141,10 @@ function busyWords(reason: string): string {
     case "clients":
       return "you're using it";
     case "terminal":
-      return "a terminal command is running";
+      return "a command is still running";
+    case "command":
+      // What an agent or a Work terminal started and has not finished.
+      return value ? `${value} is still running` : "a command is still running";
     case "run":
       return "a command is running";
     case "app":

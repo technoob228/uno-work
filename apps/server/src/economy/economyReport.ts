@@ -40,8 +40,13 @@ export interface EconomyProbe {
   readonly clients: number;
   /** Agent turns in progress. */
   readonly runningTurns: number;
-  /** Terminals with a live child process. */
+  /**
+   * Commands still running: what an agent or a Work terminal started and has
+   * not finished (commandScan.ts). The console holds the computer for them.
+   */
   readonly runningTerminals: number;
+  /** Their names, for "Staying awake: python is still running". */
+  readonly commands?: ReadonlyArray<string>;
   /** Explicit reasons to stay awake ("app:<id>"). */
   readonly keepAwake: ReadonlyArray<string>;
   /** Earliest scheduled job (ISO), null — none. */
@@ -53,6 +58,8 @@ export interface EconomyReportBody {
   readonly last_input_at?: string;
   readonly running_turns: number;
   readonly running_terminals: number;
+  /** Names of the running commands (at most 5, 32 chars each). */
+  readonly commands?: ReadonlyArray<string>;
   readonly keep_awake: ReadonlyArray<string>;
   readonly next_wake_at?: string;
   /**
@@ -72,6 +79,9 @@ export function buildReportBody(
     ...(lastInputAt !== null ? { last_input_at: new Date(lastInputAt).toISOString() } : {}),
     running_turns: Math.max(0, probe.runningTurns),
     running_terminals: Math.max(0, probe.runningTerminals),
+    ...(probe.commands && probe.commands.length > 0
+      ? { commands: probe.commands.slice(0, 5).map((name) => name.slice(0, 32)) }
+      : {}),
     keep_awake: probe.keepAwake.slice(0, 16),
     ...(probe.nextWakeAt ? { next_wake_at: probe.nextWakeAt } : {}),
     ...(apps !== null ? { apps: apps.slice(0, REPORT_APPS_MAX) } : {}),

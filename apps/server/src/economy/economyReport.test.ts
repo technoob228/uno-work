@@ -49,6 +49,22 @@ describe("economy report", () => {
     expect(body.running_turns).toBe(1);
   });
 
+  it("names the commands that are still running, clipped", () => {
+    const body = buildReportBody(
+      {
+        ...idle,
+        runningTerminals: 2,
+        commands: ["python3", "x".repeat(40), "c", "d", "e", "f"],
+      },
+      null,
+    );
+    expect(body.running_terminals).toBe(2);
+    expect(body.commands).toEqual(["python3", "x".repeat(32), "c", "d", "e"]);
+    expect(probeSignature({ ...idle, runningTerminals: 1, commands: ["a"] })).not.toBe(
+      probeSignature(idle),
+    );
+  });
+
   it("signature changes only when the verdict could change", () => {
     const one = probeSignature({ ...idle, runningTurns: 1 });
     expect(probeSignature({ ...idle, runningTurns: 3 })).toBe(one);

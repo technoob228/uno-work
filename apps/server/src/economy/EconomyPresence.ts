@@ -47,6 +47,7 @@ import {
   type EconomyProbe,
   type ReportedApp,
 } from "./economyReport.ts";
+import { scanWorkCommands } from "./commandScan.ts";
 import { signalMachineWoke } from "./wakeSignal.ts";
 
 export interface EconomyPresenceShape {
@@ -156,9 +157,21 @@ export const EconomyPresenceLive = Layer.effect(
             Effect.orElseSucceed(() => null),
           )
         : null;
-      // Terminals: the terminal manager does not expose "has a running
-      // child" yet; the console's CPU check covers long builds meanwhile.
-      return { clients, runningTurns, runningTerminals: 0, keepAwake, nextWakeAt };
+      // What a turn left behind or a Work terminal runs: a build, a script
+      // started with nohup, a background shell of the harness (commandScan.ts).
+      // Travels as running_terminals — the console holds the computer for it.
+      const commands = yield* Effect.promise(() => scanWorkCommands()).pipe(
+        Effect.map((scan) => scan.names),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
+      return {
+        clients,
+        runningTurns,
+        runningTerminals: commands.length,
+        commands,
+        keepAwake,
+        nextWakeAt,
+      };
     });
 
     const tick = Effect.gen(function* () {
