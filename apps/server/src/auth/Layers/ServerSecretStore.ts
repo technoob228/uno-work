@@ -88,9 +88,9 @@ export const makeServerSecretStore = Effect.gen(function* () {
         Effect.scoped(
           Effect.gen(function* () {
             const file = yield* fileSystem.open(secretPath, {
-          flag: "wx",
-          mode: 0o600,
-        });
+              flag: "wx",
+              mode: 0o600,
+            });
             yield* file.writeAll(value);
             yield* file.sync;
             yield* fileSystem.chmod(secretPath, 0o600);
