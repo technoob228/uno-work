@@ -1178,7 +1178,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {title}
           {pinIndicator}
           {terminalStatusIcon}
-          {machineMark}
+          {PROTO ? null : machineMark}
           <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
             <span className="inline-flex justify-end tabular-nums text-secondary-label transition-opacity group-hover/sidebar-row:opacity-0">
               {isSnoozedRow && thread.snoozedUntil != null ? (
@@ -1387,7 +1387,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             {terminalStatusIcon}
             {prBadge}
             <span className="ml-auto inline-flex shrink-0 items-center gap-1">
-              {machineMark}
+              {PROTO ? null : machineMark}
               {driverKind ? (
                 <ProviderInstanceIcon
                   driverKind={driverKind}

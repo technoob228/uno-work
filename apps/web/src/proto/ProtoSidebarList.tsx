@@ -9,14 +9,15 @@ import {
   ChevronDownIcon,
   FolderIcon,
   HomeIcon,
-  LaptopIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { openNewProject } from "../navigation/newProjectStore";
+import { useStore } from "../store";
 import type { Project, SidebarThreadSummary } from "../types";
 import {
   Menu,
@@ -30,6 +31,9 @@ import {
 import { Button } from "../components/ui/button";
 import { isHomeProject, machineLabel, placeLabel, projectKeyOf } from "./protoPlace";
 import { useProtoStore } from "./protoState";
+
+/** Chats in the Home folder, said the way people say it (critics 1–2: "Home folder" reads technical). */
+export const NO_PROJECT = "No project";
 
 type Mark = "approval" | "input" | "your-turn" | "failed" | "working" | null;
 
@@ -117,10 +121,10 @@ function filterLabel(
 ) {
   if (machineFilter) return `Everything on ${machineLabel(machineFilter)}`;
   if (filter === null) return "All projects";
-  if (filter === "home") return "Home folder";
+  if (filter === "home") return NO_PROJECT;
   const entry = entries.find((candidate) => candidate.key === filter);
   if (!entry) return "All projects";
-  const name = entry.home ? "Home folder" : entry.project.name;
+  const name = entry.home ? NO_PROJECT : entry.project.name;
   return joined ? `${name} · ${machineLabel(entry.project.environmentId)}` : name;
 }
 
@@ -141,53 +145,53 @@ function applyFilter(
 
 // ── The "All chats ▾" filter (A, B) ──────────────────────────────────────
 
+/**
+ * One flat list: "No project" (every Home folder), then the projects, each with
+ * its computer in (Б). No per-computer groups and no "Everything on …" (critic 2:
+ * the menu was too busy).
+ */
 function ProjectMenuItems(props: {
   entries: ProjectEntry[];
   joined: boolean;
   filter: string | null;
-  onPick: (key: string | null, machine?: string | null) => void;
+  onPick: (key: string | null) => void;
 }) {
-  const machines = props.joined
-    ? [...new Set(props.entries.map((entry) => entry.project.environmentId as string))]
-    : [null];
+  const homeCount = props.entries
+    .filter((entry) => entry.home)
+    .reduce((sum, entry) => sum + entry.chats.length, 0);
   return (
-    <>
-      {machines.map((machine) => {
-        const inMachine = props.entries.filter(
-          (entry) => machine === null || entry.project.environmentId === machine,
-        );
-        return (
-          <MenuGroup key={machine ?? "one"}>
-            {machine !== null ? (
-              <MenuGroupLabel className="flex items-center gap-1.5">
-                <LaptopIcon className="size-3" />
-                On {machineLabel(machine)}
-              </MenuGroupLabel>
-            ) : (
-              <MenuGroupLabel>Projects</MenuGroupLabel>
-            )}
-            {inMachine
-              .toSorted((a, b) => Number(b.home) - Number(a.home))
-              .map((entry) => (
-                <MenuItem
-                  key={entry.key}
-                  onClick={() => props.onPick(entry.key)}
-                  data-testid="proto-filter-project"
-                >
-                  {entry.home ? <HomeIcon /> : <FolderIcon />}
-                  <span className="min-w-0 flex-1 truncate">
-                    {entry.home ? "Home folder" : entry.project.name}
-                  </span>
-                  <span className="ml-3 text-xs text-muted-foreground tabular-nums">
-                    {entry.chats.length === 0 ? "empty" : entry.chats.length}
-                  </span>
-                  {props.filter === entry.key ? <CheckIcon className="text-foreground" /> : null}
-                </MenuItem>
-              ))}
-          </MenuGroup>
-        );
-      })}
-    </>
+    <MenuGroup>
+      <MenuGroupLabel>Projects</MenuGroupLabel>
+      {props.entries
+        .filter((entry) => !entry.home)
+        .map((entry) => (
+          <MenuItem
+            key={entry.key}
+            onClick={() => props.onPick(entry.key)}
+            data-testid="proto-filter-project"
+          >
+            <FolderIcon />
+            <span className="min-w-0 flex-1 truncate">
+              {entry.project.name}
+              {props.joined ? (
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {machineLabel(entry.project.environmentId)}
+                </span>
+              ) : null}
+            </span>
+            <span className="ml-3 text-xs text-muted-foreground tabular-nums">
+              {entry.chats.length === 0 ? "empty" : entry.chats.length}
+            </span>
+            {props.filter === entry.key ? <CheckIcon className="text-foreground" /> : null}
+          </MenuItem>
+        ))}
+      <MenuItem onClick={() => props.onPick("home")} data-testid="proto-filter-home">
+        <HomeIcon />
+        <span className="min-w-0 flex-1 truncate">{NO_PROJECT}</span>
+        <span className="ml-3 text-xs text-muted-foreground tabular-nums">{homeCount}</span>
+        {props.filter === "home" ? <CheckIcon className="text-foreground" /> : null}
+      </MenuItem>
+    </MenuGroup>
   );
 }
 
@@ -204,7 +208,6 @@ function FilterMenu(props: {
   const joined = useProtoStore((state) => state.mode) === "all";
   const label = filterLabel(filter, machineFilter, props.entries, joined);
   const narrowed = filter !== null || machineFilter !== null;
-  const machines = [...new Set(props.entries.map((entry) => entry.project.environmentId as string))];
   return (
     <li className="list-none px-0.5 pt-2 pb-1">
       <div className="flex items-center gap-1">
@@ -230,14 +233,6 @@ function FilterMenu(props: {
               <span className="ml-3 text-xs text-muted-foreground tabular-nums">{props.total}</span>
               {!narrowed ? <CheckIcon className="text-foreground" /> : null}
             </MenuItem>
-            {joined
-              ? machines.map((machine) => (
-                  <MenuItem key={machine} onClick={() => setFilter(null, machine)}>
-                    <span className="min-w-0 flex-1">Everything on {machineLabel(machine)}</span>
-                    {machineFilter === machine ? <CheckIcon className="text-foreground" /> : null}
-                  </MenuItem>
-                ))
-              : null}
             <MenuSeparator />
             <ProjectMenuItems
               entries={props.entries}
@@ -384,7 +379,7 @@ function ProjectRow(props: {
           <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate">
-          {entry.home ? "Home folder" : entry.project.name}
+          {entry.home ? NO_PROJECT : entry.project.name}
           {props.joined ? (
             <span className="ml-1.5 text-xs text-muted-foreground">
               {machineLabel(entry.project.environmentId)}
@@ -417,6 +412,16 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
   const [foldedKeys, setFoldedKeys] = useState<ReadonlySet<string>>(new Set());
 
   const entries = useProjectEntries(props.projects, props.threads);
+  // (Б): looking at a project makes its computer the active one, so "New chat"
+  // and the computer chip on Home start there (critic 2: "Cloud" while in brand-kit).
+  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  useEffect(() => {
+    if (!joined || filter === null || filter === "home") return;
+    const environmentId = filter.split(":")[0] ?? "";
+    if (environmentId && useStore.getState().activeEnvironmentId !== environmentId) {
+      setActiveEnvironmentId(environmentId as EnvironmentId);
+    }
+  }, [filter, joined, setActiveEnvironmentId]);
   const entryByKey = useMemo(() => new Map(entries.map((entry) => [entry.key, entry])), [entries]);
   const visible = applyFilter(props.threads, entries, filter, machineFilter);
   const filteredEntry = filter && filter !== "home" ? (entryByKey.get(filter) ?? null) : null;
@@ -506,7 +511,7 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
             </li>
           );
         })}
-        {homeChats.length > 0 ? <SectionLabel label="Home folder" /> : null}
+        {homeChats.length > 0 ? <SectionLabel label={NO_PROJECT} /> : null}
         {homeChats.map((thread) =>
           props.renderRow(thread, {
             subtitle: joined ? machineLabel(thread.environmentId) : null,

@@ -21,6 +21,7 @@ import {
   selectSidebarThreadsForEnvironment,
   useStore,
 } from "../store";
+import { NO_PROJECT } from "./ProtoSidebarList";
 import { isHomeProject, machineLabel, projectKeyOf } from "./protoPlace";
 import { useProtoAllMachines, useProtoStore } from "./protoState";
 
@@ -108,7 +109,7 @@ export function ProtoProjectsPage() {
                     <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
                   )}
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {home ? "Home folder" : project.name}
+                    {home ? NO_PROJECT : project.name}
                   </span>
                   {joined ? (
                     <span className="shrink-0 text-[11px] text-muted-foreground">

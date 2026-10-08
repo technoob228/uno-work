@@ -84,7 +84,7 @@ import {
   tildePath,
 } from "./newProject.logic";
 import { ProtoMachineChip } from "../../proto/ProtoMachineChip";
-import { useProtoAllMachines } from "../../proto/protoState";
+import { PROTO, useProtoAllMachines } from "../../proto/protoState";
 
 const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
@@ -108,6 +108,21 @@ const SOURCE_COPY: Record<
   github: {
     title: "From GitHub",
     body: "Clone one of your repositories",
+    Icon: GitHubIcon,
+  },
+};
+
+/** Sidebar prototype (w0115): the critics' words — no "laptop", "clone", "repositories". */
+const PROTO_SOURCE_COPY: Partial<typeof SOURCE_COPY> = {
+  upload: {
+    title: "Add a folder or a .zip",
+    body: "From this device — your own files, or what a contractor sent you",
+    Icon: FolderUpIcon,
+  },
+  empty: { title: "Start from scratch", body: "An empty project, Uno names it", Icon: PlusIcon },
+  github: {
+    title: "From a GitHub link",
+    body: "Paste the link a developer gave you",
     Icon: GitHubIcon,
   },
 };
@@ -222,7 +237,7 @@ function SourceCard({
   primary?: boolean;
   onClick: () => void;
 }) {
-  const { title, body, Icon } = SOURCE_COPY[source];
+  const { title, body, Icon } = (PROTO ? PROTO_SOURCE_COPY[source] : null) ?? SOURCE_COPY[source];
   return (
     <button
       type="button"

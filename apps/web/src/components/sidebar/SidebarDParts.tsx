@@ -409,7 +409,12 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
               <InboxIcon />
               <span className="min-w-0 flex-1 truncate">Needs you</span>
               <InboxCountBadge
-                unread={Math.max(badge.unread, badge.needsYou)}
+                unread={
+                  // Sidebar prototype (w0115): the number is the questions waiting, not all news.
+                  protoVariant !== "off" && badge.needsYou > 0
+                    ? badge.needsYou
+                    : Math.max(badge.unread, badge.needsYou)
+                }
                 needsYou={badge.needsYou}
               />
             </PopoverTrigger>
