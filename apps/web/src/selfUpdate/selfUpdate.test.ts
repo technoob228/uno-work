@@ -19,7 +19,11 @@ const base: SelfUpdateStatus = {
   finishedAt: null,
 };
 const view = (status: Partial<SelfUpdateStatus> | null, clientVersion = "0.0.113") =>
-  resolveSelfUpdateView({ status: status ? { ...base, ...status } : null, clientVersion, now: NOW });
+  resolveSelfUpdateView({
+    status: status ? { ...base, ...status } : null,
+    clientVersion,
+    now: NOW,
+  });
 
 describe("resolveSelfUpdateView", () => {
   it("shows nothing on a computer that can't update itself or is up to date", () => {
@@ -68,7 +72,8 @@ describe("resolveSelfUpdateView", () => {
     expect(
       view({
         state: "failed",
-        error: "Uno Work 0.0.114 didn't start within 120 seconds. This computer is back on Uno Work 0.0.113.",
+        error:
+          "Uno Work 0.0.114 didn't start within 120 seconds. This computer is back on Uno Work 0.0.113.",
         rolledBack: true,
         available: true,
         latestVersion: "0.0.114",
