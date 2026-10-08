@@ -223,6 +223,7 @@ import {
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
 } from "../versionSkew";
+import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -1258,7 +1259,10 @@ export default function ChatView(props: ChatViewProps) {
     savedEnvironmentRuntimeById,
     serverConfig?.environment.label,
   ]);
-  const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+  // "A new version of Uno Work is ready · Update" for the computer this chat runs on.
+  const selfUpdate = useSelfUpdate(activeThread?.environmentId ?? primaryEnvironmentId);
+  const selfUpdateBanner = selfUpdateBannerItem(selfUpdate);
+  const environmentBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
     if (activeEnvironmentUnavailableState) {
       items.push({
@@ -1344,6 +1348,14 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchDismissKey,
     versionMismatchServerLabel,
   ]);
+  // While Uno Work updates itself the daemon restarts: "can't reach the
+  // computer" and "versions differ" would only repeat what the update notice says.
+  const composerBannerItems =
+    selfUpdate.view?.kind === "updating" && selfUpdateBanner
+      ? [selfUpdateBanner]
+      : selfUpdateBanner
+        ? [...environmentBannerItems, selfUpdateBanner]
+        : environmentBannerItems;
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   // An explicit picker selection is honored as before; a machine default
   // (thread/project seed, historically hardcoded codex) only sticks when that
@@ -4200,6 +4212,7 @@ export default function ChatView(props: ChatViewProps) {
                   }
                 />
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                {selfUpdate.dialog}
                 <div className="relative z-10">
                   <ChatComposer
                     ref={composerRef}

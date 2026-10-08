@@ -344,6 +344,20 @@ if [ -n "$(ls -A /opt/uno-work/browsers 2>/dev/null)" ]; then
 fi
 rm -f "${STATE_DIR}/browser-setup/request" /var/lib/uno-work-browser/status.json \
   /var/lib/uno-work-browser/setup.log 2>/dev/null || true
+# Кнопка «Update» (install.sh 0.0.113+): юнит должен быть включён, а следы
+# обновлений эталона в клон не едут.
+[ -f /etc/systemd/system/uno-work-update.path ] \
+  || die "uno-work-update.path missing — rerun install.sh from 0.0.113+ (self-update)"
+systemctl enable uno-work-update.path >/dev/null 2>&1 || die "could not enable uno-work-update.path"
+rm -rf "${STATE_DIR}/update/request" /var/lib/uno-work-update/status.json /var/lib/uno-work-update/update.log \
+  /var/lib/uno-work-update/work /var/lib/uno-work-update/state-before-update /opt/uno-work/app.prev \
+  "${STATE_DIR}/userdata/self-update-intent.json" "${STATE_DIR}/userdata/self-update-reported.json" \
+  2>/dev/null || true
+# Тестовая подмена адреса релизов не должна попасть в образ.
+[ ! -e /etc/uno-work/update.conf ] \
+  || die "/etc/uno-work/update.conf (test release URL) is present — remove it and rerun install.sh"
+grep -q 'UNO_WORK_UPDATE_BASE_URL=https://console.uno.place/cli/work$' /etc/systemd/system/uno-work.service.d/update.conf \
+  || die "uno-work.service.d/update.conf does not point at the console — rerun install.sh"
 if command -v Xvfb >/dev/null 2>&1; then
   log "  ВНИМАНИЕ: на эталоне стоят Xvfb и либы браузера (~350 МБ) — снимай образ с чистого бокса"
 fi

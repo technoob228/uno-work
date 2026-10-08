@@ -37,6 +37,8 @@ import { goalState } from "../../setup/goals";
 import { useSetupProgress } from "../../setup/useSetupProgress";
 import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
 import { HomeNextStepCard, useNextStep } from "./HomeNextStep";
+import { isWebLite } from "../../../lite/webLite";
+import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
@@ -247,6 +249,8 @@ export function HomeStart({
     return true;
   };
   const firstName = usePersonFirstName(environmentId);
+  // "A new version of Uno Work is ready · Update" (cloud computers, 0.0.113+).
+  const updateNotice = isWebLite ? null : <SelfUpdateCard environmentId={environmentId} />;
   const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const setupProgress = useSetupProgress();
@@ -536,6 +540,7 @@ export function HomeStart({
           data-first-screen=""
         >
           {notices}
+{updateNotice}
           <h1
             className="mb-2 text-center text-[28px] font-semibold tracking-tight"
             data-testid="home-greeting"
@@ -565,6 +570,7 @@ export function HomeStart({
         data-testid="home-simple"
       >
         {notices}
+{updateNotice}
         {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
         <div className="flex flex-col gap-1">
           <h1 className="text-[28px] font-semibold tracking-tight" data-testid="home-greeting">
@@ -683,6 +689,7 @@ export function HomeStart({
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pt-6 pb-16 sm:pt-12">
       {notices}
+{updateNotice}
       {setupHome.banner ? <SetupDoneBanner setup={setupHome} /> : null}
 
       {layout.editing ? (

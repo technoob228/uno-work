@@ -16,6 +16,10 @@
 #   UNO_WORK_SKIP_BROWSER=0    also install the machine's browser now (Chromium + Xvfb +
 #                              libs, ~0.7-1.1 GB). Default 1: the browser is NOT put in the
 #                              image; the machine sets it up on first use (~30-60 s).
+#   UNO_WORK_SELF_UPDATE=1     set by the machine's own updater (uno-work-update, below):
+#                              base packages are not touched when they are all there.
+#   UNO_WORK_NO_RESTART=1      install everything but leave the running daemon alone; the
+#                              caller restarts it (the updater does, then checks health).
 #
 set -euo pipefail
 
@@ -37,13 +41,26 @@ die() { printf '\033[1;31m[uno-work]\033[0m %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "Run as root (sudo)."
 command -v apt-get >/dev/null 2>&1 || die "This installer supports Debian/Ubuntu."
 
-log "Installing base packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-# build-essential нужен не «на всякий случай»: у node-pty нет prebuild под
-# linux-x64 в нашей версии, и без make/g++ установка падает на node-gyp —
-# а без node-pty нет терминала в боксе.
-apt-get install -y -qq curl ca-certificates git ripgrep python3 tar build-essential >/dev/null
+base_tools_present() {
+  local tool
+  for tool in curl git rg python3 tar make g++ node; do
+    command -v "${tool}" >/dev/null 2>&1 || return 1
+  done
+}
+# A self-update runs on a machine that already has all of this. Skipping apt
+# there keeps the update working when the person's apt is busy or one of their
+# own repositories is broken — neither is a reason to stay on an old Uno Work.
+if [ "${UNO_WORK_SELF_UPDATE:-0}" = "1" ] && base_tools_present; then
+  log "Base packages are already here"
+else
+  log "Installing base packages"
+  apt-get update -qq
+  # build-essential нужен не «на всякий случай»: у node-pty нет prebuild под
+  # linux-x64 в нашей версии, и без make/g++ установка падает на node-gyp —
+  # а без node-pty нет терминала в боксе.
+  apt-get install -y -qq curl ca-certificates git ripgrep python3 tar build-essential >/dev/null
+fi
 
 if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt "${NODE_MAJOR}" ]; then
   log "Installing Node.js ${NODE_MAJOR}"
@@ -67,14 +84,26 @@ bundle_root="${tmp}/package"
 [ -d "${bundle_root}" ] || bundle_root="${tmp}"
 [ -f "${bundle_root}/dist/bin.mjs" ] || die "Bundle has no dist/bin.mjs"
 
-rm -rf "${INSTALL_DIR}/app"
-install -d -m 0755 "${INSTALL_DIR}/app" "${INSTALL_DIR}/bin"
-cp -R "${bundle_root}/." "${INSTALL_DIR}/app/"
+# The new version is put together next to the running one and swapped in with
+# two renames: an upgrade never leaves the daemon serving a half-copied app, and
+# a failed `npm install` leaves the old version exactly as it was.
+# NEVER write into ${INSTALL_DIR}/app in place — only replace the directory.
+install -d -m 0755 "${INSTALL_DIR}/bin"
+rm -rf "${INSTALL_DIR}/app.new" "${INSTALL_DIR}/app.old"
+install -d -m 0755 "${INSTALL_DIR}/app.new"
+cp -R "${bundle_root}/." "${INSTALL_DIR}/app.new/"
 
-if [ -f "${INSTALL_DIR}/app/package.json" ]; then
+if [ -f "${INSTALL_DIR}/app.new/package.json" ]; then
   log "Installing runtime dependencies"
-  (cd "${INSTALL_DIR}/app" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
+  (cd "${INSTALL_DIR}/app.new" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null) \
+    || { rm -rf "${INSTALL_DIR}/app.new"; die "Could not install runtime dependencies; the installed version is untouched."; }
 fi
+
+if [ -d "${INSTALL_DIR}/app" ]; then
+  mv "${INSTALL_DIR}/app" "${INSTALL_DIR}/app.old"
+fi
+mv "${INSTALL_DIR}/app.new" "${INSTALL_DIR}/app"
+rm -rf "${INSTALL_DIR}/app.old"
 
 cat > "${INSTALL_DIR}/bin/uno-work" <<'LAUNCHER'
 #!/usr/bin/env bash
@@ -236,6 +265,334 @@ Documentation=https://uno4.dev/docs/work
 [Path]
 PathExists=${BROWSER_REQUEST_DIR}/request
 Unit=uno-work-browser-setup.service
+
+[Install]
+WantedBy=paths.target
+UNIT
+
+# --- Self-update by the owner's button -----------------------------------------
+# The owner presses "Update" in Uno Work. The daemon is unprivileged and cannot
+# touch ${INSTALL_DIR} (root's), so — like the browser above — it only drops an
+# EMPTY request file; uno-work-update.path sees it and starts the root oneshot
+# below. Rules the updater keeps:
+#   * It takes NO input from the request file or from the daemon: where to
+#     download from is fixed here (the console, HTTPS), which version is "latest"
+#     and its sha256 come from the console's SHA256SUMS. So anything running as
+#     ${SERVICE_USER} (an agent included) can at most start an update to the
+#     release the console already serves — never run a command or pick a file.
+#   * The bundle is installed only when its sha256 matches the console's list,
+#     and only when it is NEWER than what is installed.
+#   * The previous version is kept until the new one answers /api/health; if it
+#     does not within ${UPDATE_HEALTH_TIMEOUT:-120} s, the previous version is put back.
+#   * Chats and files (${STATE_DIR}, /home/${SERVICE_USER}) are never touched.
+# /etc/uno-work/update.conf (root-owned, optional) may point it at another
+# release directory — for our own tests and staging.
+UPDATE_REQUEST_DIR="${STATE_DIR}/update"
+UPDATE_STATUS_DIR="/var/lib/uno-work-update"
+UPDATE_BASE_URL_DEFAULT="https://console.uno.place/cli/work"
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${UPDATE_REQUEST_DIR}"
+install -d -m 0755 "${UPDATE_STATUS_DIR}"
+
+# Written to a temp file and renamed: during a self-update this very script is
+# being run by bash from the old file, which must stay intact until it exits.
+cat > "${INSTALL_DIR}/bin/.uno-work-update.new" <<'UPDATER'
+#!/usr/bin/env bash
+# Written by install.sh — updates Uno Work on this computer to the release the
+# console serves. Runs as root from uno-work-update.service. Takes no arguments
+# and reads nothing the daemon wrote.
+set -uo pipefail
+
+main() {
+  export DEBIAN_FRONTEND=noninteractive
+  export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  local INSTALL_DIR=/opt/uno-work
+  local APP_DIR="${INSTALL_DIR}/app"
+  local PREV_DIR="${INSTALL_DIR}/app.prev"
+  local ENV_FILE=/etc/uno-work/uno-work.env
+  local CONF_FILE=/etc/uno-work/update.conf
+  local STATUS_DIR=/var/lib/uno-work-update
+  local STATUS_FILE="${STATUS_DIR}/status.json"
+  local LOG_FILE="${STATUS_DIR}/update.log"
+  local WORK_DIR="${STATUS_DIR}/work"
+  local LOCK_FILE=/run/uno-work-update.lock
+  local BASE_URL="https://console.uno.place/cli/work"
+  local HEALTH_TIMEOUT=120
+  local MIN_FREE_KB=$((700 * 1024))
+  local MAX_BUNDLE_BYTES=$((300 * 1024 * 1024))
+  STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  STEP=""
+  FROM_VERSION=""
+  TO_VERSION=""
+  PHASE="check"
+
+  install -d -m 0755 "${STATUS_DIR}"
+
+  # The request lives in the daemon's directory: never follow a link it planted,
+  # never read the file.
+  local state_dir port
+  state_dir="$(sed -n 's/^UNO_WORK_STATE_DIR=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+  state_dir="${state_dir:-/var/lib/uno-work}"
+  port="$(sed -n 's/^UNO_WORK_PORT=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+  case "${port}" in ''|*[!0-9]*) port=80 ;; esac
+  local request_file="${state_dir}/update/request"
+  [ -L "${state_dir}/update" ] || rm -f -- "${request_file}" "${request_file}.tmp"
+
+  exec 9>"${LOCK_FILE}"
+  if ! flock -n 9; then
+    echo "uno-work-update: another update is running"
+    exit 0
+  fi
+
+  write_status() { # state error rolledBack finished
+    local tmp="${STATUS_FILE}.tmp.$$"
+    node -e 'const [state, step, error, from, to, rolledBack, startedAt, finished] = process.argv.slice(1);
+const now = new Date().toISOString();
+process.stdout.write(JSON.stringify({ state, step: step || null, error: error || null,
+  fromVersion: from || null, toVersion: to || null, rolledBack: rolledBack === "1",
+  startedAt: startedAt || null, updatedAt: now, finishedAt: finished === "1" ? now : null }) + "\n");' \
+      "$1" "${STEP}" "${2:-}" "${FROM_VERSION}" "${TO_VERSION}" "${3:-0}" "${STARTED_AT}" "${4:-0}" \
+      >"${tmp}" && chmod 0644 "${tmp}" && mv -f "${tmp}" "${STATUS_FILE}"
+  }
+  step() { STEP="$1"; write_status updating; echo "uno-work-update: ${STEP}"; }
+  cleanup() { rm -rf "${WORK_DIR}"; }
+
+  installed_version() {
+    node -p 'try { require(process.argv[1]).version } catch { "" }' "$1/package.json" 2>/dev/null
+  }
+  # 0 when the daemon answers /api/health three times in a row and (when it
+  # says its version) runs the version we expect.
+  wait_healthy() { # expected_version timeout_seconds
+    local deadline=$(( $(date +%s) + $2 )) ok=0 body
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+      if body="$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" 2>/dev/null)"; then
+        case "${body}" in
+          *'"version":"'*)
+            case "${body}" in *"\"version\":\"$1\""*) ok=$((ok + 1)) ;; *) ok=0 ;; esac ;;
+          *) ok=$((ok + 1)) ;;
+        esac
+      else
+        ok=0
+      fi
+      [ "${ok}" -ge 3 ] && return 0
+      sleep 2
+    done
+    return 1
+  }
+
+  # Put the previous version back: the app, the units and the helper scripts.
+  rollback() {
+    echo "uno-work-update: putting ${FROM_VERSION} back"
+    systemctl stop uno-work >>"${LOG_FILE}" 2>&1 || true
+    if [ -d "${PREV_DIR}" ] && [ -f "${PREV_DIR}/dist/bin.mjs" ]; then
+      rm -rf "${INSTALL_DIR}/app.failed" "${INSTALL_DIR}/app.new" "${INSTALL_DIR}/app.old"
+      [ -d "${APP_DIR}" ] && mv "${APP_DIR}" "${INSTALL_DIR}/app.failed"
+      mv "${PREV_DIR}" "${APP_DIR}"
+      rm -rf "${INSTALL_DIR}/app.failed"
+    fi
+    if [ -f "${WORK_DIR}/system-before.tar" ]; then
+      tar -xpf "${WORK_DIR}/system-before.tar" -C / >>"${LOG_FILE}" 2>&1 || true
+    fi
+    systemctl daemon-reload >>"${LOG_FILE}" 2>&1 || true
+    systemctl reset-failed uno-work >>"${LOG_FILE}" 2>&1 || true
+    systemctl start uno-work >>"${LOG_FILE}" 2>&1 || true
+    wait_healthy "${FROM_VERSION}" 180
+  }
+
+  fail() { # message
+    local detail="" rolled=0 message="$1"
+    if [ "${PHASE}" = "install" ] && [ "$(installed_version "${APP_DIR}")" = "${FROM_VERSION}" ] \
+      && cmp -s "${APP_DIR}/dist/bin.mjs" "${PREV_DIR}/dist/bin.mjs"; then
+      # The installer stopped before it swapped the app in: the running version
+      # is untouched, there is nothing to go back to and no reason to restart.
+      detail="$(grep -v '^\s*$' "${LOG_FILE}" 2>/dev/null | tail -n 1 | tr -cd '[:print:]' | cut -c1-200)"
+      rm -rf "${PREV_DIR}" "${INSTALL_DIR}/app.new"
+      message="${message} Nothing changed on this computer."
+    elif [ "${PHASE}" = "install" ] || [ "${PHASE}" = "restart" ]; then
+      detail="$(grep -v '^\s*$' "${LOG_FILE}" 2>/dev/null | tail -n 1 | tr -cd '[:print:]' | cut -c1-200)"
+      STEP="Going back to ${FROM_VERSION}"; write_status updating
+      if rollback; then
+        rolled=1
+        message="${message} This computer is back on Uno Work ${FROM_VERSION}. Your chats and files are untouched."
+      else
+        message="${message} Uno Work ${FROM_VERSION} did not come back by itself — write to support."
+      fi
+    fi
+    PHASE="done"
+    echo "uno-work-update: failed at '${STEP}': $1${detail:+ (${detail})}" >&2
+    write_status failed "${message}" "${rolled}" 1
+    cleanup
+    exit 1
+  }
+  trap 'fail "The update was interrupted."' TERM INT
+
+  : >"${LOG_FILE}"
+  chmod 0600 "${LOG_FILE}"
+  rm -rf "${WORK_DIR}"
+  install -d -m 0700 "${WORK_DIR}"
+
+  FROM_VERSION="$(installed_version "${APP_DIR}")"
+  [ -n "${FROM_VERSION}" ] || fail "Can't tell which Uno Work is installed on this computer."
+
+  # Root's own settings (tests, staging). Parsed, never sourced.
+  if [ -f "${CONF_FILE}" ]; then
+    if [ "$(stat -c '%u' "${CONF_FILE}")" != "0" ] || [ -n "$(find "${CONF_FILE}" -perm /022)" ]; then
+      fail "${CONF_FILE} must belong to root and not be writable by others."
+    fi
+    local conf_base conf_timeout
+    conf_base="$(sed -n 's/^UNO_WORK_UPDATE_BASE_URL=//p' "${CONF_FILE}" | tail -n 1 | sed 's:/*$::')"
+    conf_timeout="$(sed -n 's/^UNO_WORK_UPDATE_HEALTH_TIMEOUT=//p' "${CONF_FILE}" | tail -n 1)"
+    [ -n "${conf_base}" ] && BASE_URL="${conf_base}"
+    case "${conf_timeout}" in ''|*[!0-9]*) ;; *) HEALTH_TIMEOUT="${conf_timeout}" ;; esac
+  fi
+  local proto="=https"
+  case "${BASE_URL}" in
+    https://*) ;;
+    http://127.0.0.1:*|http://127.0.0.1/*|http://localhost:*|http://localhost/*) proto="=http" ;;
+    *) fail "Updates come only from the Uno console over HTTPS." ;;
+  esac
+  case "${BASE_URL}" in *[!A-Za-z0-9:/._-]*) fail "Updates come only from the Uno console over HTTPS." ;; esac
+
+  step "Checking for the new version"
+  curl -fsS --proto "${proto}" --max-redirs 0 --retry 2 --max-time 60 --max-filesize 1048576 \
+    "${BASE_URL}/SHA256SUMS" -o "${WORK_DIR}/SHA256SUMS" 2>>"${LOG_FILE}" \
+    || fail "Couldn't reach Uno to check for the new version. Try again in a few minutes."
+  # The list is append-only: the last line for "latest" is the current release,
+  # the versioned file with the same sha names its version.
+  local want_sha tarball
+  want_sha="$(awk '$2 == "uno-work-server-latest.tar.gz" || $2 == "*uno-work-server-latest.tar.gz" { sha = $1 } END { print sha }' "${WORK_DIR}/SHA256SUMS")"
+  case "${want_sha}" in
+    *[!0-9a-f]*|'') fail "Uno's release list has no current version. Try again later." ;;
+  esac
+  [ "${#want_sha}" -eq 64 ] || fail "Uno's release list has no current version. Try again later."
+  tarball="$(awk -v sha="${want_sha}" '{ name = $2; sub(/^\*/, "", name) }
+    $1 == sha && name ~ /^uno-work-server-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz$/ { found = name } END { print found }' "${WORK_DIR}/SHA256SUMS")"
+  [ -n "${tarball}" ] || fail "Uno's release list has no current version. Try again later."
+  TO_VERSION="${tarball#uno-work-server-}"
+  TO_VERSION="${TO_VERSION%.tar.gz}"
+
+  if [ "${TO_VERSION}" = "${FROM_VERSION}" ] \
+    || [ "$(printf '%s\n%s\n' "${FROM_VERSION}" "${TO_VERSION}" | sort -V | tail -n 1)" != "${TO_VERSION}" ]; then
+    echo "uno-work-update: ${FROM_VERSION} is current (latest is ${TO_VERSION})"
+    STEP=""; TO_VERSION="${FROM_VERSION}"; write_status "current" "" 0 1
+    cleanup
+    exit 0
+  fi
+  write_status updating
+
+  local free_kb app_kb need_kb
+  free_kb="$(df -Pk "${INSTALL_DIR}" | awk 'NR==2 {print $4}')"
+  app_kb="$(du -sk "${APP_DIR}" 2>/dev/null | awk '{print $1}')"
+  need_kb=$(( ${app_kb:-0} * 2 + MIN_FREE_KB ))
+  if [ -n "${free_kb}" ] && [ "${free_kb}" -lt "${need_kb}" ]; then
+    fail "Not enough disk space to update: $(awk -v k="${free_kb}" 'BEGIN {printf "%.1f", k / 1048576}') GB free, it needs $(awk -v k="${need_kb}" 'BEGIN {printf "%.1f", k / 1048576}') GB. Free up space on this computer, then try again."
+  fi
+
+  step "Downloading Uno Work ${TO_VERSION}"
+  curl -fsS --proto "${proto}" --max-redirs 0 --retry 2 --max-time 900 --max-filesize "${MAX_BUNDLE_BYTES}" \
+    "${BASE_URL}/${tarball}" -o "${WORK_DIR}/${tarball}" 2>>"${LOG_FILE}" \
+    || fail "The download didn't finish. Try again in a few minutes."
+
+  step "Checking the download"
+  local got_sha
+  got_sha="$(sha256sum "${WORK_DIR}/${tarball}" | awk '{print $1}')"
+  if [ "${got_sha}" != "${want_sha}" ]; then
+    echo "sha256 mismatch: want ${want_sha}, got ${got_sha}" >>"${LOG_FILE}"
+    fail "The download doesn't match Uno's checksum, so it was not installed. Nothing changed on this computer."
+  fi
+  install -d -m 0700 "${WORK_DIR}/unpacked"
+  tar -xzf "${WORK_DIR}/${tarball}" -C "${WORK_DIR}/unpacked" --no-same-owner 2>>"${LOG_FILE}" \
+    || fail "The download couldn't be unpacked. Nothing changed on this computer."
+  local bundle="${WORK_DIR}/unpacked/package"
+  if [ ! -f "${bundle}/dist/bin.mjs" ] || [ ! -f "${bundle}/deploy/install.sh" ] \
+    || [ "$(installed_version "${bundle}")" != "${TO_VERSION}" ]; then
+    fail "The download is not Uno Work ${TO_VERSION}. Nothing changed on this computer."
+  fi
+
+  step "Installing"
+  # Keep the running version and its units to go back to.
+  rm -rf "${PREV_DIR}"
+  cp -a "${APP_DIR}" "${PREV_DIR}" 2>>"${LOG_FILE}" \
+    || { rm -rf "${PREV_DIR}"; fail "Couldn't keep a copy of the current version. Nothing changed on this computer."; }
+  (
+    cd / && ls -d etc/systemd/system/uno-work.service etc/systemd/system/uno-work.service.d \
+      etc/systemd/system/uno-work-*.service etc/systemd/system/uno-work-*.path \
+      etc/systemd/system/uno-work-*.timer opt/uno-work/bin usr/local/sbin/uno-work-tmp-sweep 2>/dev/null \
+      | tar -cpf "${WORK_DIR}/system-before.tar" -T -
+  ) 2>>"${LOG_FILE}" || true
+  PHASE="install"
+  # The bundle's own installer does the work (same as a fresh install), from the
+  # file we just checked. It leaves the daemon running; we restart it below.
+  if ! env -i PATH="${PATH}" HOME=/root LANG=C.UTF-8 DEBIAN_FRONTEND=noninteractive \
+    UNO_WORK_TARBALL_URL="file://${WORK_DIR}/${tarball}" \
+    UNO_WORK_SELF_UPDATE=1 UNO_WORK_NO_RESTART=1 UNO_WORK_SKIP_HARNESSES=1 \
+    timeout 1200 bash "${bundle}/deploy/install.sh" >>"${LOG_FILE}" 2>&1; then
+    fail "Uno Work ${TO_VERSION} couldn't be installed."
+  fi
+  [ "$(installed_version "${APP_DIR}")" = "${TO_VERSION}" ] \
+    || fail "Uno Work ${TO_VERSION} couldn't be installed."
+
+  step "Restarting Uno Work"
+  PHASE="restart"
+  systemctl daemon-reload >>"${LOG_FILE}" 2>&1 || true
+  systemctl stop uno-work >>"${LOG_FILE}" 2>&1 || true
+  # One cold copy of the chats database, kept only if we have to go back
+  # (for support; nothing restores it by itself). Skipped when it does not fit.
+  local db="${state_dir}/userdata/state.sqlite" db_kb
+  rm -rf "${STATUS_DIR}/state-before-update"
+  if [ -f "${db}" ]; then
+    db_kb="$(du -sk "${db}" | awk '{print $1}')"
+    free_kb="$(df -Pk "${STATUS_DIR}" | awk 'NR==2 {print $4}')"
+    if [ "${db_kb:-0}" -lt 2097152 ] && [ $(( ${db_kb:-0} * 2 + 204800 )) -lt "${free_kb:-0}" ]; then
+      install -d -m 0700 "${STATUS_DIR}/state-before-update"
+      cp -a "${db}" "${db}-wal" "${db}-shm" "${STATUS_DIR}/state-before-update/" 2>/dev/null || true
+    fi
+  fi
+  systemctl reset-failed uno-work >>"${LOG_FILE}" 2>&1 || true
+  systemctl start uno-work >>"${LOG_FILE}" 2>&1 || true
+
+  step "Making sure it works"
+  if ! wait_healthy "${TO_VERSION}" "${HEALTH_TIMEOUT}"; then
+    journalctl -u uno-work -n 30 --no-pager >>"${LOG_FILE}" 2>&1 || true
+    fail "Uno Work ${TO_VERSION} didn't start within ${HEALTH_TIMEOUT} seconds."
+  fi
+
+  PHASE="done"
+  rm -rf "${PREV_DIR}" "${STATUS_DIR}/state-before-update"
+  STEP=""; write_status "done" "" 0 1
+  cleanup
+  echo "uno-work-update: Uno Work ${FROM_VERSION} -> ${TO_VERSION}"
+}
+
+main "$@"
+exit $?
+UPDATER
+chmod 0755 "${INSTALL_DIR}/bin/.uno-work-update.new"
+mv -f "${INSTALL_DIR}/bin/.uno-work-update.new" "${INSTALL_DIR}/bin/uno-work-update"
+
+cat > /etc/systemd/system/uno-work-update.service <<'UNIT'
+[Unit]
+Description=Update Uno Work on this computer (the owner pressed Update)
+Documentation=https://uno4.dev/docs/work
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/uno-work/bin/uno-work-update
+TimeoutStartSec=30min
+# Restarting uno-work must not take this unit down with it.
+KillMode=process
+SyslogIdentifier=uno-work-update
+UNIT
+
+cat > /etc/systemd/system/uno-work-update.path <<UNIT
+[Unit]
+Description=Watch for the Uno Work daemon asking to be updated
+Documentation=https://uno4.dev/docs/work
+
+[Path]
+PathExists=${UPDATE_REQUEST_DIR}/request
+Unit=uno-work-update.service
 
 [Install]
 WantedBy=paths.target
@@ -489,6 +846,22 @@ Environment=UNO_WORK_BROWSER_SETUP_REQUEST=${BROWSER_REQUEST_DIR}/request
 Environment=UNO_WORK_BROWSER_SETUP_STATUS=${BROWSER_STATUS_DIR}/status.json
 DROPIN
 
+# How the daemon asks for an update and where it reads the updater's progress
+# (see "Self-update by the owner's button" above). The base URL here is only
+# what the daemon uses to SHOW that an update is out; the updater has its own.
+update_base_url="${UPDATE_BASE_URL_DEFAULT}"
+if [ -f "${CONFIG_DIR}/update.conf" ] && [ "$(stat -c '%u' "${CONFIG_DIR}/update.conf")" = "0" ]; then
+  conf_base="$(sed -n 's/^UNO_WORK_UPDATE_BASE_URL=//p' "${CONFIG_DIR}/update.conf" | tail -n 1 | sed 's:/*$::')"
+  case "${conf_base}" in *[!A-Za-z0-9:/._-]*|'') ;; *) update_base_url="${conf_base}" ;; esac
+fi
+cat > /etc/systemd/system/uno-work.service.d/update.conf <<DROPIN
+# Written by install.sh — Uno Work updates itself when the owner presses Update.
+[Service]
+Environment=UNO_WORK_UPDATE_REQUEST=${UPDATE_REQUEST_DIR}/request
+Environment=UNO_WORK_UPDATE_STATUS=${UPDATE_STATUS_DIR}/status.json
+Environment=UNO_WORK_UPDATE_BASE_URL=${update_base_url}
+DROPIN
+
 # --- Docker without sudo ------------------------------------------------------
 # On a machine with docker (Work images, the docker template) the daemon lists,
 # starts and stops docker apps on Home with plain `docker` as ${SERVICE_USER},
@@ -514,10 +887,18 @@ if [ "${UNO_WORK_SKIP_BROWSER:-1}" = "0" ]; then
   "${INSTALL_DIR}/bin/uno-work-browser-setup" \
     || log "WARNING: browser setup failed (${BROWSER_STATUS_DIR}/setup.log); it retries on first use"
 fi
+systemctl enable --now uno-work-update.path >/dev/null 2>&1 \
+  || log "  could not enable the Update button; this computer won't update Uno Work by itself"
 systemctl start "user@${service_uid}.service" >/dev/null 2>&1 || log "  could not start the user session; user timers start after a reboot"
+systemctl enable uno-work >/dev/null
+if [ "${UNO_WORK_NO_RESTART:-0}" = "1" ]; then
+  # The machine's updater called us: it restarts the daemon itself, checks that
+  # the new version answers and goes back to the previous one if it does not.
+  log "Installed; the caller restarts the daemon"
+  exit 0
+fi
 # `enable --now` only starts a stopped unit; an upgrade leaves the old process
 # running on the old bundle. Restart unconditionally so the new code takes over.
-systemctl enable uno-work >/dev/null
 systemctl restart uno-work
 
 # 30 секунд хватало на быстрой машине, но на слабом боксе демон успевает
