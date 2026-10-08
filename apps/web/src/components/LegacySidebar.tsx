@@ -195,8 +195,10 @@ import {
   useEnvironmentSupportsThreadSnooze,
 } from "../environments/threadSnoozeSupport";
 import { useEnvironmentSupportsAgentThreads } from "../environments/agentThreadsSupport";
+import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
+import { setThreadAgentsClosed } from "../agentsAccess";
 import { useThreadTitle } from "../hooks/useThreadTitle";
-import { describeSpawnedThreadOrigin } from "../agentThreads.logic";
+import { AGENTS_ACCESS_COPY, describeSpawnedThreadOrigin } from "../agentThreads.logic";
 import {
   resolveSidebarProjectThreadList,
   type SidebarInboxListItem,
@@ -2413,10 +2415,30 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy chat ID" },
           { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
+          ...(readEnvironmentSupportsAgentsCloseChat(thread.environmentId)
+            ? [
+                {
+                  id: "agents-access",
+                  label:
+                    thread.agentsClosedAt != null
+                      ? AGENTS_ACCESS_COPY.open
+                      : AGENTS_ACCESS_COPY.close,
+                },
+              ]
+            : []),
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
       );
+
+      if (clicked === "agents-access") {
+        await setThreadAgentsClosed({
+          environmentId: thread.environmentId,
+          threadId: thread.id,
+          closed: thread.agentsClosedAt == null,
+        });
+        return;
+      }
 
       if (clicked === "done") {
         await markChatDone(thread.environmentId, thread.id).catch(() => {

@@ -255,6 +255,28 @@ describe("describeToolActivity", () => {
     expect(human?.rawResult).toMatch(/There is no site/);
   });
 
+  it("chat_message names a chat the person closed to agents", () => {
+    const closed = (error: string) =>
+      describeToolActivity({
+        summary: "uno-work_chat_message",
+        kind: "tool.completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "failed",
+          data: {
+            tool: "uno-work_chat_message",
+            state: { status: "error", input: { threadId: "t-1", text: "hi" }, error },
+          },
+        },
+      });
+    expect(
+      closed("The person closed this chat to agents. Don't write here (HTTP 409)")?.label,
+    ).toBe("Couldn't write to the other chat: the person closed it to agents");
+    expect(closed("Тред не найден среди доступных тебе. (HTTP 404)")?.label).toBe(
+      "Couldn't write to the other chat",
+    );
+  });
+
   it("site_publish names the files that stayed on the computer", () => {
     const output = JSON.stringify({
       slug: "keys-test",

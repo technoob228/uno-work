@@ -112,13 +112,50 @@ async function createSystem() {
         createdAt: new Date().toISOString(),
       }),
     );
-  return { run, handlers, projections, humanSends, humanSetsController };
+  /** The person's "Don't let agents write here" switch (null opens it). */
+  const humanSetsAgentsClosed = (threadId: ThreadId, agentsClosedAt: string | null) =>
+    run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make(`cmd-agents-${crypto.randomUUID()}`),
+        threadId,
+        agentsClosedAt,
+      }),
+    );
+  /** Stands in for a harness that finished its turn: the chat is free. */
+  const sessionIdle = (threadId: ThreadId) =>
+    run(
+      engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make(`cmd-session-${crypto.randomUUID()}`),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: new Date(Date.now() + 1_000).toISOString(),
+        },
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  return {
+    run,
+    handlers,
+    projections,
+    humanSends,
+    humanSetsController,
+    humanSetsAgentsClosed,
+    sessionIdle,
+  };
 }
 
 const body = (reply: { readonly body: unknown }) => reply.body as Record<string, any>;
 
 describe("agent threads bridge (real engine)", () => {
-  it("spawn → send → human takes over → 409 → hand back → release", async () => {
+  it("spawn → send → human writes → parent waits for a free chat → release", async () => {
     const system = await createSystem();
     const { run, handlers } = system;
 
@@ -151,11 +188,12 @@ describe("agent threads bridge (real engine)", () => {
     expect(sent.status).toBe(200);
 
     await system.humanSends(childId, "I'll take it from here");
-    const blocked = await run(
+    // The person's turn has not been answered yet: the parent waits like a peer.
+    const busy = await run(
       handlers.sendMessage(auth, { threadId: childId, body: { text: "Still me" } }),
     );
-    expect(blocked.status).toBe(409);
-    expect(body(blocked).error).toBe("human_in_control");
+    expect(busy.status).toBe(409);
+    expect(body(busy).error).toBe("target_busy");
 
     const afterHuman = await run(
       handlers.getThread(auth, { threadId: childId, limit: "10", waitMs: null }),
@@ -166,10 +204,39 @@ describe("agent threads bridge (real engine)", () => {
       (body(afterHuman).messages as Array<{ author: string }>).map((message) => message.author),
     ).toEqual(["you", "you", "human"]);
 
+    // Free again: delivered though the person wrote there (0.0.115).
+    await system.sessionIdle(childId);
+    const free = await run(
+      handlers.sendMessage(auth, { threadId: childId, body: { text: "Back to work" } }),
+    );
+    expect(free.status).toBe(200);
+
+    // "Don't let agents write here": refused even when free, until reopened.
+    await system.sessionIdle(childId);
+    await system.humanSetsAgentsClosed(childId, new Date().toISOString());
+    const closed = await run(
+      handlers.sendMessage(auth, { threadId: childId, body: { text: "Let me in" } }),
+    );
+    expect(closed.status).toBe(409);
+    expect(body(closed).error).toBe("agents_closed");
+    const closedView = await run(
+      handlers.getThread(auth, { threadId: childId, limit: null, waitMs: null }),
+    );
+    expect(body(closedView).agentsClosed).toBe(true);
+    const persisted = await run(system.projections.getThreadShellById(childId));
+    expect(Option.isSome(persisted) && persisted.value.agentsClosedAt).toEqual(expect.any(String));
+
+    await system.humanSetsAgentsClosed(childId, null);
+    const reopened = await run(
+      handlers.sendMessage(auth, { threadId: childId, body: { text: "Thanks" } }),
+    );
+    expect(reopened.status).toBe(200);
+
     // Releasing an already-human thread is a no-op success.
     const noop = await run(handlers.releaseThread(auth, { threadId: childId }));
     expect(noop).toEqual({ status: 200, body: { ok: true, controller: "human" } });
 
+    // An older client's "Hand back to agent" still works.
     await system.humanSetsController(childId, "agent");
     const again = await run(
       handlers.sendMessage(auth, { threadId: childId, body: { text: "Back to work" } }),

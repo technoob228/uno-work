@@ -276,6 +276,7 @@ export function projectEvent(
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
+            agentsClosedAt: null,
             assistantRole: payload.assistantRole ?? null,
             deletedAt: null,
             messages: [],
@@ -342,6 +343,9 @@ export function projectEvent(
             ...(payload.pinnedAt !== undefined ? { pinnedAt: payload.pinnedAt } : {}),
             ...(payload.assistantRole !== undefined
               ? { assistantRole: payload.assistantRole }
+              : {}),
+            ...(payload.agentsClosedAt !== undefined
+              ? { agentsClosedAt: payload.agentsClosedAt }
               : {}),
             updatedAt: payload.updatedAt,
           }),

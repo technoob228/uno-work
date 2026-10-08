@@ -5,12 +5,22 @@
  */
 import type { ContextMenuItem } from "@t3tools/contracts";
 
-/** The chat menu without Dev mode: four things a person does with a chat. */
-export const SIMPLE_THREAD_MENU_IDS = ["rename", "pin", "archive", "delete"] as const;
+/**
+ * The chat menu without Dev mode: four things a person does with a chat,
+ * plus the rare "Don't let agents write here" (0.0.115) — it has to be
+ * findable by the person who needs it, and it is absent on older daemons.
+ */
+export const SIMPLE_THREAD_MENU_IDS = [
+  "rename",
+  "pin",
+  "agents-access",
+  "archive",
+  "delete",
+] as const;
 
 /**
- * The right-click menu of a chat. Without Dev mode only Rename, Pin, Archive
- * and Delete; with it, everything (settle, snooze, mark unread, copy path / id,
+ * The right-click menu of a chat. Without Dev mode only Rename, Pin, "Don't
+ * let agents write here", Archive and Delete; with it, everything (settle, snooze, mark unread, copy path / id,
  * continue on another machine).
  */
 export function threadContextMenuItems<T extends ContextMenuItem<string>>(

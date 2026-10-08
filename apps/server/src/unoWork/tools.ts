@@ -1783,7 +1783,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, or with another harness. It starts at once; the person sees you created it and can take over. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, or with another harness. It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1836,7 +1836,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_message",
     group: "chats",
     description:
-      "Send a message to another chat (one you started, your parent, or a peer in this project) by its threadId. Refused when the person took over (human_in_control) or is being asked something (human_active); busy targets: pass waitMs to deliver when free. After messaging another agent, end your turn — its answer arrives as a new message.",
+      "Send a message to another chat (one you started, your parent, or a peer in this project) by its threadId — also one the person wrote in. Refused when the person closed that chat to agents (agents_closed: don't retry or work around it, tell the person here) or is being asked something there (human_active); busy targets: pass waitMs to deliver when free. After messaging another agent, end your turn — its answer arrives as a new message.",
     inputSchema: {
       type: "object",
       properties: {

@@ -4,8 +4,9 @@
  * - `POST /api/threads`                   — spawn a thread and start its first turn;
  * - `GET  /api/threads`                   — `?scope=children|project|all`, default the caller's children;
  * - `GET  /api/threads/:threadId`         — status + last messages, `?limit`, `?waitMs` long-poll;
- * - `POST /api/threads/:threadId/messages` — send a turn to a child or a peer (409 when a human
- *   took over / is asked, or the peer is busy; `waitMs` waits for it);
+ * - `POST /api/threads/:threadId/messages` — send a turn to a child or a peer (409 when the
+ *   person closed the chat to agents / is asked there, or the chat is busy; `waitMs` waits
+ *   for a busy one);
  * - `POST /api/threads/:threadId/release` — hand control to the human.
  *
  * Authenticated with the thread-scoped browser-bridge token every harness

@@ -11,15 +11,17 @@ const ALL = [
   { id: "copy-path", label: "Copy Path" },
   { id: "copy-thread-id", label: "Copy chat ID" },
   { id: "continue-on-machine", label: "Continue on another machine…" },
+  { id: "agents-access", label: "Don't let agents write here" },
   { id: "archive", label: "Archive" },
   { id: "delete", label: "Delete", destructive: true },
 ];
 
 describe("threadContextMenuItems", () => {
-  it("keeps four items without Dev mode", () => {
+  it("keeps four items and the agents switch without Dev mode", () => {
     expect(threadContextMenuItems(ALL, false).map((item) => item.id)).toEqual([
       "rename",
       "pin",
+      "agents-access",
       "archive",
       "delete",
     ]);
