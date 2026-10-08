@@ -3,9 +3,11 @@
  * reports/day_2026-10-02/sidebar/, variant D):
  * - the header: account + computer with one menu (Settings, Plan & AI,
  *   Billing, Uno console, Help, Sign out), Search ⌘K and New chat as icons;
- * - the places: Files, Apps & sites, and "Needs you" only when something
- *   waits (it replaces the bell — the same panel opens from it);
- * - the collapsed rail: the same places as icons, Uno and Chats slide the
+ * - the places: Home (the start screen — Misha 08.10: "no way back to Home
+ *   once you left it"), Files, Apps & sites, and "Needs you" only when an
+ *   approval or a question waits (it replaces the bell — the same panel
+ *   opens from it);
+ * - the collapsed rail: the same places as icons (Home first), Uno and Chats slide the
  *   chats panel out (see sidebarD.hover.ts), expand and the account at the
  *   bottom;
  * - Uno's face, used on the rail, the pinned Uno row and chats Uno started.
@@ -17,6 +19,7 @@ import {
   CircleHelpIcon,
   CreditCardIcon,
   FolderIcon,
+  HouseIcon,
   InboxIcon,
   LayoutGridIcon,
   LogInIcon,
@@ -35,7 +38,7 @@ import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
-import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
+import { useInboxNeedsYouCount } from "../../inbox/inboxStore";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -54,7 +57,7 @@ import {
   openExternal,
   useAccountWho,
 } from "./SidebarDAccountButton";
-import { accountMenuLines } from "./sidebarD.logic";
+import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
@@ -328,17 +331,16 @@ function useOpenPlace() {
   };
 }
 
-/** Whether Needs you shows, and its count (what needs the person, else unread news). */
+/** Whether Needs you shows, and its count: approvals and questions waiting, nothing else. */
 export function useNeedsYouBadge() {
-  const unread = useInboxUnreadCount();
-  const needsYou = useInboxNeedsYouCount();
-  return { unread, needsYou, shown: unread > 0 || needsYou > 0 };
+  const { shown, count } = needsYouPlace(useInboxNeedsYouCount());
+  return { needsYou: count, shown };
 }
 
 /** "Needs you" — the Inbox (approvals, questions, finished chats, app news) in place of the bell. */
 function NeedsYouPopover(props: {
   side: "right" | "bottom";
-  trigger: (badge: { unread: number; needsYou: number }) => ReactNode;
+  trigger: (badge: { needsYou: number }) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const badge = useNeedsYouBadge();
@@ -362,13 +364,25 @@ function NeedsYouPopover(props: {
   );
 }
 
-/** Files, Apps & sites, and Needs you (only when something waits). */
+/** Home, Files, Apps & sites, and Needs you (only when something waits for the person). */
 export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
+  const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
   return (
     <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
+      <PlaceRow
+        icon={<HouseIcon />}
+        label="Home"
+        active={isHomePath(pathname)}
+        onClick={() => {
+          sidebarDPanel.closeNow();
+          goHome();
+        }}
+        testId="sidebar-nav-home"
+        tour="home"
+      />
       <PlaceRow
         icon={<FolderIcon />}
         label="Files"
@@ -395,10 +409,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
             >
               <InboxIcon />
               <span className="min-w-0 flex-1 truncate">Needs you</span>
-              <InboxCountBadge
-                unread={Math.max(badge.unread, badge.needsYou)}
-                needsYou={badge.needsYou}
-              />
+              <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
             </PopoverTrigger>
           )}
         />
@@ -489,6 +500,15 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         </RailButton>
         <span aria-hidden className="my-1 h-px w-6 bg-border" />
         <RailButton
+          label="Home"
+          active={isHomePath(pathname)}
+          onClick={goHome}
+          testId="sidebar-rail-home"
+          tour="home"
+        >
+          <HouseIcon />
+        </RailButton>
+        <RailButton
           label="Files"
           active={pathname.startsWith("/files")}
           onClick={() => open("/files")}
@@ -517,7 +537,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
               >
                 <InboxIcon />
                 <InboxCountBadge
-                  unread={Math.max(badge.unread, badge.needsYou)}
+                  unread={badge.needsYou}
                   needsYou={badge.needsYou}
                   className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
                 />

@@ -9,7 +9,7 @@
  * lite/webLite.ts).
  */
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import { Outlet, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   BotIcon,
@@ -18,6 +18,7 @@ import {
   CreditCardIcon,
   DownloadIcon,
   GlobeIcon,
+  HouseIcon,
   LogOutIcon,
   PanelLeftCloseIcon,
   ServerIcon,
@@ -44,6 +45,7 @@ import {
   LITE_AI_PATH,
   LITE_HOME_PATH,
   liteLinks,
+  liteOnHome,
   liteRedirectHref,
   liteStanding,
   openCloudWork,
@@ -58,6 +60,7 @@ import { PaymentNoticeBanner } from "../components/billing/PaymentNoticeBanner";
 import { UnoAiSidebarChats } from "../unoai/UnoAiChatsList";
 import { LiveBotTile } from "../unoai/BotCard";
 import { WORK_AI_FEATURE } from "../unoai/unoAiApi";
+import { cn } from "../lib/utils";
 
 /** The root of the lite app (rendered by routes/__root.tsx in the lite build). */
 export function LiteRoot() {
@@ -220,8 +223,8 @@ export function LiteAccountMenu() {
 
 /**
  * Sidebar D as lite has it: the account button, New chat and Collapse on
- * top; the chats below. No places (Files, Apps & sites live on a computer),
- * no footer, no upsell.
+ * top; Home; the chats below. No other places (Files, Apps & sites live on a
+ * computer), no footer, no upsell.
  */
 export function LiteSidebar() {
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -230,9 +233,19 @@ export function LiteSidebar() {
   const balance = useQuery(balanceQuery());
   const workAi = (balance.data?.features ?? []).includes(WORK_AI_FEATURE);
   const onAi = pathname.startsWith(LITE_AI_PATH);
+  const search = useSearch({ strict: false }) as { chat?: string; tab?: string; section?: string };
   const newChat = () => {
     if (isMobile) setOpenMobile(false);
     void navigate({ to: LITE_AI_PATH, search: {} });
+  };
+  // Home (Misha 08.10: "no way back to Home once you left it"): where lite
+  // opens — Uno AI's start screen, or My Uno before the work_ai rollout.
+  const homePath = workAi ? LITE_AI_PATH : LITE_HOME_PATH;
+  const onHome = liteOnHome({ pathname, homePath, search });
+  const goHome = () => {
+    if (isMobile) setOpenMobile(false);
+    if (workAi) void navigate({ to: LITE_AI_PATH, search: {} });
+    else void navigate({ to: LITE_HOME_PATH, search: {} });
   };
   return (
     <>
@@ -255,6 +268,27 @@ export function LiteSidebar() {
         )}
       </SidebarHeader>
       <SidebarContent className="gap-0">
+        <nav
+          aria-label="Uno Work"
+          className="flex flex-col gap-px px-[var(--sidebar-content-inset)] pt-0.5 pb-1"
+          data-testid="lite-places"
+        >
+          <button
+            type="button"
+            onClick={goHome}
+            data-testid="sidebar-nav-home"
+            aria-current={onHome ? "page" : undefined}
+            className={cn(
+              "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
+              onHome
+                ? "bg-sidebar-row-active font-medium text-foreground"
+                : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-foreground",
+            )}
+          >
+            <HouseIcon />
+            <span className="min-w-0 flex-1 truncate">Home</span>
+          </button>
+        </nav>
         {workAi ? <LiveBotTile /> : null}
         <SidebarGroup className="px-[var(--sidebar-content-inset)] pt-1 pb-1">
           {workAi ? <UnoAiSidebarChats active={onAi} /> : null}

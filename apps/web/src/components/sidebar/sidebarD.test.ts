@@ -6,7 +6,9 @@ import {
   dRowMark,
   foldedProjectMark,
   groupChatsForSidebarD,
+  isHomePath,
   isRunningStatus,
+  needsYouPlace,
   parseFoldedProjects,
   sidebarDRailShown,
   unoRunningLabel,
@@ -170,5 +172,29 @@ describe("accountMenuLines", () => {
       signInElsewhere: false,
       desktopSignOut: false,
     });
+  });
+});
+
+describe("Home in sidebar D (Misha 08.10: no way back to Home)", () => {
+  it("lights Home on the start screen only", () => {
+    expect(isHomePath("/computer")).toBe(true);
+    expect(isHomePath("/files")).toBe(false);
+    expect(isHomePath("/env-1/thread-1")).toBe(false);
+    expect(isHomePath("/computer/x")).toBe(false);
+  });
+});
+
+describe('needsYouPlace (Misha 08.10: no "Needs you 0")', () => {
+  it("hides the row when nothing waits for the person, even with unread news", () => {
+    expect(needsYouPlace(0)).toEqual({ shown: false, count: 0 });
+  });
+
+  it("shows the row with the number of approvals and questions waiting", () => {
+    expect(needsYouPlace(3)).toEqual({ shown: true, count: 3 });
+  });
+
+  it("never shows a zero or a junk count", () => {
+    expect(needsYouPlace(-1).shown).toBe(false);
+    expect(needsYouPlace(Number.NaN).shown).toBe(false);
   });
 });

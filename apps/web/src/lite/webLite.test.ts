@@ -14,6 +14,7 @@ import {
   isWebLite,
   liteEmptyComputersCopy,
   liteLadder,
+  liteOnHome,
   liteRedirectHref,
   liteRedirectPath,
   liteLinks,
@@ -167,5 +168,23 @@ describe("checkoutHref", () => {
 
   it("points at the current console host", () => {
     expect(CONSOLE_URL).toBe("https://console.uno.place");
+  });
+});
+
+describe("liteOnHome (Misha 08.10: Home in the lite sidebar)", () => {
+  it("is Uno AI's start screen with no chat picked", () => {
+    expect(liteOnHome({ pathname: "/ai", homePath: "/ai", search: {} })).toBe(true);
+    expect(liteOnHome({ pathname: "/ai", homePath: "/ai", search: { chat: "c1" } })).toBe(false);
+    expect(liteOnHome({ pathname: "/my-uno", homePath: "/ai", search: {} })).toBe(false);
+  });
+
+  it("is My Uno's first page before the work_ai rollout", () => {
+    expect(liteOnHome({ pathname: "/my-uno", homePath: "/my-uno", search: {} })).toBe(true);
+    expect(
+      liteOnHome({ pathname: "/my-uno", homePath: "/my-uno", search: { tab: "billing" } }),
+    ).toBe(false);
+    expect(
+      liteOnHome({ pathname: "/my-uno", homePath: "/my-uno", search: { section: "sites" } }),
+    ).toBe(false);
   });
 });

@@ -136,6 +136,27 @@ export function homeLayoutReducer(
   }
 }
 
+/**
+ * "In progress" on the simple Home is the `continue` block (the same
+ * chats-in-progress list as Continue on the full one). Shown by default; the
+ * person can hide it with one click (Misha 08.10: he doesn't want it) and
+ * Customize → Add widget (or Reset) brings it back. Kept in the layout, so
+ * the choice is remembered on this device like any other widget.
+ */
+export const IN_PROGRESS_BLOCK: HomeFixedBlockId = "continue";
+
+export function inProgressShown(state: ReadonlyArray<HomeBlockId>): boolean {
+  return state.includes(IN_PROGRESS_BLOCK);
+}
+
+export function hideInProgress(): HomeLayoutAction {
+  return { type: "remove", id: IN_PROGRESS_BLOCK };
+}
+
+export function showInProgress(): HomeLayoutAction {
+  return { type: "add", id: IN_PROGRESS_BLOCK };
+}
+
 /** Blocks that can still be added: available here and not on Home yet. */
 export function addableBlocks(
   state: ReadonlyArray<HomeBlockId>,

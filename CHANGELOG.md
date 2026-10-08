@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.116 — 2026-10-08
+
+- Home is one click away again: a "Home" row on top of the sidebar (and a house on the folded rail) opens the start screen from any chat, file or app. The web version without a computer has the same "Home" row.
+- Home: "In progress" can be hidden — "Hide" next to its title (Undo in the toast). It stays hidden on this device; Customize → Add widget → "In progress" brings it back.
+- Sidebar: "Needs you" shows only when an approval or a question really waits for you, with their number — no more "Needs you" with nothing in it.
+- New computers start warm: the image keeps OpenCode's plugin files, so the first chat doesn't wait for a download.
+
 ## v0.0.115 — 2026-10-08
 
 - Agents can write into any free chat, also one you wrote in — "Hand back to agent" is gone. To keep agents out of a chat: right-click it → "Don't let agents write here" (or the strip above the input); agents then get "The person closed this chat to agents". The same button lets them back.

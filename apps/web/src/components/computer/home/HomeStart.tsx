@@ -28,6 +28,7 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { getLocalStorageItem, useLocalStorage } from "../../../hooks/useLocalStorage";
 import { accountReachable } from "../../myuno/myUnoQueries";
 import { Button } from "../../ui/button";
+import { toastManager } from "../../ui/toast";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
@@ -72,11 +73,14 @@ import {
   appWidgetBlockId,
   appWidgetSpan,
   customWidgetIdeas,
+  hideInProgress,
   homeLayoutReducer,
+  inProgressShown,
   isAppWidgetBlockId,
   isHomeFixedBlockId,
   migrateHomeLayout,
   normalizeHomeLayout,
+  showInProgress,
   type HomeBlockId,
   type HomeLayoutAction,
 } from "./homeLayout";
@@ -324,6 +328,14 @@ export function HomeStart({
   );
 
   const metaOf = (id: HomeBlockId): WidgetMeta => {
+    // The simple Home calls the continue block "In progress" (its Hide says so too).
+    if (id === "continue" && !devMode) {
+      return {
+        ...HOME_FIXED_BLOCK_META.continue,
+        title: "In progress",
+        description: "The chats Uno and your agents are working on",
+      };
+    }
     if (isHomeFixedBlockId(id)) return HOME_FIXED_BLOCK_META[id];
     if (isAppWidgetBlockId(id)) {
       const app = widgetApps.get(appIdOfBlock(id));
@@ -616,14 +628,41 @@ export function HomeStart({
             <NeedsYouWidget threads={threads} now={now} />
           </section>
         ) : null}
-        {/* No empty "In progress": the section shows only with something in it. */}
-        <section
-          className="hidden flex-col gap-2 has-[[data-testid=home-continue]]:flex"
-          data-testid="home-in-progress"
-        >
-          <HomeSectionTitle>In progress</HomeSectionTitle>
-          <ContinueCards threads={threads} now={now} withoutWaiting hideWhenEmpty />
-        </section>
+        {/* No empty "In progress": the section shows only with something in it.
+            A widget like the others (Misha 08.10): "Hide" takes it off Home,
+            Customize → Add widget brings it back; the choice is the layout's. */}
+        {inProgressShown(layout.blocks) ? (
+          <section
+            className="hidden flex-col gap-2 has-[[data-testid=home-continue]]:flex"
+            data-testid="home-in-progress"
+          >
+            <div className="flex items-center gap-2">
+              <HomeSectionTitle>In progress</HomeSectionTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  layout.dispatch(hideInProgress());
+                  toastManager.add({
+                    type: "success",
+                    title: "In progress is off Home",
+                    description: "Customize → Add widget brings it back.",
+                    actionProps: {
+                      children: "Undo",
+                      onClick: () => layout.dispatch(showInProgress()),
+                    },
+                  });
+                }}
+                aria-label="Hide In progress from Home"
+                data-testid="home-in-progress-hide"
+                className="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <XIcon className="size-3" />
+                Hide
+              </button>
+            </div>
+            <ContinueCards threads={threads} now={now} withoutWaiting hideWhenEmpty />
+          </section>
+        ) : null}
 
         {layout.editing ? (
           <div

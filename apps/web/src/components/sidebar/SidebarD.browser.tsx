@@ -78,6 +78,23 @@ describe("sidebar D places", () => {
     expect(screen.getByText("Assistants").query()).toBeNull();
   });
 
+  it("has Home on top, lit on the start screen, and it goes Home", async () => {
+    const screen = await mount(<SidebarDPlaces />);
+    await expect
+      .element(screen.getByTestId("sidebar-nav-home"))
+      .toHaveAttribute("aria-current", "page");
+    await screen.getByTestId("sidebar-nav-home").click();
+    expect(goHome).toHaveBeenCalled();
+  });
+
+  it('no Needs you for unread news alone (no "Needs you 0")', async () => {
+    unread = 3;
+    needsYou = 0;
+    const screen = await mount(<SidebarDPlaces />);
+    await expect.element(screen.getByTestId("sidebar-nav-files")).toBeVisible();
+    expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
+  });
+
   it("counts what waits on Needs you", async () => {
     unread = 2;
     needsYou = 2;
