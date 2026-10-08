@@ -36,6 +36,7 @@ import {
   FolderGit2Icon,
   ChevronRightIcon,
   FolderIcon,
+  FolderPlusIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -134,6 +135,7 @@ import {
   selectSidebarThreadsForEnvironment,
   useStore,
 } from "../store";
+import { openNewProject } from "../navigation/newProjectStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
@@ -190,7 +192,7 @@ import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
-import { SidebarEmptyProjects } from "./sidebar/SidebarEmptyProjects";
+import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { setThreadAgentsClosed } from "../agentsAccess";
@@ -1485,6 +1487,8 @@ export default function Sidebar() {
     const timer = window.setTimeout(() => setChatsLoadGraceOver(true), CHATS_LOADING_MAX_MS);
     return () => window.clearTimeout(timer);
   }, []);
+  // The setup's project being made shows in the empty list (SidebarEmptyProjects).
+  const setupPreviewName = useSetupProjectPreview((state) => state.name);
   const chatsLoading =
     activeEnvironmentId !== null && !activeBootstrapComplete && !chatsLoadGraceOver;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -3070,13 +3074,27 @@ export default function Sidebar() {
         {totalThreadCount === 0 && pinnedThreads.length === 0 ? (
           chatsLoading ? (
             <SidebarChatsLoading />
-          ) : projects.length === 0 ? (
+          ) : projectGroups.length === 0 && setupPreviewName === null ? (
+            // No folders of the person's own yet. (The assistant's project is
+            // always there, so this used to test `projects` and never showed:
+            // a fresh computer had an empty sidebar — 08.10.)
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               <span>No chats yet</span>
               <Button size="xs" variant="outline" onClick={() => handleNewThreadClick()}>
                 <PlusIcon className="-mx-0.5 size-3" />
                 New chat
               </Button>
+              {/* A fresh computer (08.10): the way to bring your own folder in. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => openNewProject()}
+                data-testid="sidebar-empty-add-folder"
+              >
+                <FolderPlusIcon className="-mx-0.5 size-3" />
+                Add a project
+              </Button>
+              <span className="text-[11px]">Your folders live in ~/projects</span>
             </div>
           ) : (
             <SidebarEmptyProjects

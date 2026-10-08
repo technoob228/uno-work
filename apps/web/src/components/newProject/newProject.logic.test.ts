@@ -4,6 +4,7 @@ import {
   NEW_PROJECT_SOURCES,
   freeProjectName,
   newProjectSources,
+  projectsFolderPath,
   uploadProjectName,
   uploadedProjectPath,
   checkNewFolderName,
@@ -104,9 +105,8 @@ it("does not offer templates until there are project templates", () => {
 });
 
 describe("upload as a new project", () => {
-  it("offers upload first, then GitHub, then empty; a folder on the computer in Dev mode", () => {
-    expect(newProjectSources(false)).toEqual(["upload", "github", "empty"]);
-    expect(newProjectSources(true)).toEqual(["upload", "github", "empty", "folder"]);
+  it("offers upload first, then GitHub, then empty, then a folder on the computer — no Dev mode", () => {
+    expect(newProjectSources()).toEqual(["upload", "github", "empty", "folder"]);
   });
 
   it("names the project after the folder or the zip", () => {
@@ -121,6 +121,7 @@ describe("upload as a new project", () => {
 
   it("lands in ~/projects and never over an existing folder", () => {
     expect(uploadedProjectPath("/home/uno/", "shop")).toBe("/home/uno/projects/shop");
+    expect(projectsFolderPath("/home/uno/")).toBe("/home/uno/projects");
     expect(freeProjectName("shop", new Set(["shop", "shop-2"]))).toBe("shop-3");
     expect(freeProjectName("shop", new Set())).toBe("shop");
   });

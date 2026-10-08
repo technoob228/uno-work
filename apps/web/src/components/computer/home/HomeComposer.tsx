@@ -8,7 +8,9 @@
  * Under the box one row of light pills (Misha 01.10, "simple hint buttons"):
  * the starters (a click fills the box and focuses it — never sends), then
  * "I have a project" (`onUploadProject`). A folder / .zip dropped anywhere on
- * the box is taken too (`onDropProject`). A newcomer's first screen
+ * the box is taken too (`onDropProject`) — or, when a task is already typed,
+ * it becomes the chip's folder (like "Upload a folder…") and the text stays.
+ * A newcomer's first screen
  * (`minimal`) is only the box and the pills: no folder chip, model or
  * permissions pickers — the defaults a new chat gets.
  */
@@ -38,7 +40,9 @@ import {
   getAppModelOptionsForInstance,
   resolveAppModelSelectionForInstance,
 } from "../../../modelSelection";
+import { openFolderForChat } from "../../../navigation/newProjectStore";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "../../../plainLanguage";
+import { readDroppedUploadFiles } from "../../../projectUploadPickers";
 import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
@@ -199,6 +203,22 @@ export function HomeComposer({
           if (!carriesFiles(event)) return;
           event.preventDefault();
           setDragging(false);
+          if (!minimal && text.trim()) {
+            // A task is typed: don't replace it — the upload becomes the
+            // folder this task works in (the chip's "Upload a folder…").
+            void readDroppedUploadFiles(event.dataTransfer).then((files) => {
+              if (files.length === 0) return;
+              openFolderForChat(
+                "upload",
+                ({ name, folder: cwd }) => {
+                  setFolder({ cwd, name });
+                  ref.current?.focus();
+                },
+                files,
+              );
+            });
+            return;
+          }
           onDropProject?.(event.dataTransfer);
         }}
         data-testid="home-composer-box"
@@ -242,6 +262,8 @@ export function HomeComposer({
                 environmentId={environmentId}
                 folder={folder}
                 onPick={(next) => {
+                  // A folder the chip just made is a project already; the
+                  // chat finds it by path when the task starts.
                   setFolder(next);
                   ref.current?.focus();
                 }}
