@@ -346,6 +346,7 @@ function UploadStep({
   const zipInput = useRef<HTMLInputElement>(null);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const finish = useFinishNewProject();
+  const wording = useNewProjectStore((state) => state.wording);
   const takeFiles = useNewProjectStore((state) => state.takeFiles);
   const takenOrNull = useProjectsEntryNames(environmentId, home);
   const taken = useMemo(() => takenOrNull ?? new Set<string>(), [takenOrNull]);
@@ -528,7 +529,7 @@ function UploadStep({
         error={error}
         busy={busy}
         disabled={picked === null || plan === null || plan.accepted.length === 0 || reading}
-        label={busy ? "Uploading…" : "Upload and open"}
+        label={busy ? "Uploading…" : wording === "folder" ? "Upload" : "Upload and open"}
         icon={<FolderUpIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
@@ -844,6 +845,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const finish = useFinishNewProject();
+  const wording = useNewProjectStore((state) => state.wording);
   const check = checkRepositoryInput(input, taken ?? new Set());
   useEffect(() => setError(null), [input]);
 
@@ -905,7 +907,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label={busy ? "Cloning…" : "Clone and open"}
+        label={busy ? "Cloning…" : wording === "folder" ? "Clone" : "Clone and open"}
         icon={<GitHubIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
