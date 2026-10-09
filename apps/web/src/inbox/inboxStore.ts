@@ -14,6 +14,7 @@ import {
 import { useMemo } from "react";
 import { create } from "zustand";
 
+import { demoHooks, useDemoVariant } from "../demo/demoFlag";
 import { readEnvironmentConnection } from "../environments/runtime";
 import { useProtoOneMachine } from "../proto/protoState";
 import { useStore } from "../store";
@@ -77,7 +78,14 @@ function useScopedInbox(): Readonly<Record<string, InboxSnapshot>> {
 
 export function useInboxEntries(): ReadonlyArray<InboxEntry> {
   const byEnvironment = useScopedInbox();
-  return useMemo(() => mergeInbox(byEnvironment), [byEnvironment]);
+  // Demo V3 (?demo=heavy): helpers' items fold into their coordinator's card.
+  const demoVariant = useDemoVariant();
+  return useMemo(() => {
+    const merged = mergeInbox(byEnvironment);
+    return demoVariant === "V3" && demoHooks.collapseInbox
+      ? demoHooks.collapseInbox(merged)
+      : merged;
+  }, [byEnvironment, demoVariant]);
 }
 
 /** Unread and not snoozed, on every connected computer. */

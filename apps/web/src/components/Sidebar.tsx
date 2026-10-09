@@ -47,7 +47,9 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -100,6 +102,7 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
 import { ProtoSidebarList } from "../proto/ProtoSidebarList";
+import { demoHooks, useDemoVariant } from "../demo/demoFlag";
 import { useJoinAccountComputers, useSyncComputerNames } from "../proto/computerNames";
 import {
   PROTO,
@@ -631,6 +634,14 @@ function SidebarDProjectRow(props: {
 }
 
 /** The one mark at the end of a D row: working, needs you, error, or Your turn. */
+// Demo mode (?demo=heavy): the heavy-usage variants, loaded only in the demo.
+const DemoSidebarTop = lazy(() =>
+  import("../demo/demoUi").then((module) => ({ default: module.DemoSidebarTop })),
+);
+const DemoSidebarList = lazy(() =>
+  import("../demo/demoUi").then((module) => ({ default: module.DemoSidebarList })),
+);
+
 function SidebarDMark(props: { mark: DRowMark }) {
   switch (props.mark) {
     case "working":
@@ -1543,6 +1554,7 @@ export default function Sidebar() {
   // Sidebar prototype (w0115): (Б) "all together" lists every computer's chats.
   const protoVariant = useProtoVariant();
   const protoAllMachines = useProtoAllMachines();
+  const demoVariant = useDemoVariant();
   // Real names of the computers in view; with (Б) the account's other cloud
   // computers that are on join this page (icp3 09.10, proto/computerNames.ts).
   useSyncComputerNames();
@@ -3040,6 +3052,11 @@ export default function Sidebar() {
             className="relative flex flex-1 flex-col gap-px"
             data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
           >
+            {demoVariant === "V1" ? (
+              <Suspense fallback={null}>
+                <DemoSidebarTop />
+              </Suspense>
+            ) : null}
             <SidebarDUnoRow
               runningCount={dGroups.unoRunning.length}
               folded={unoChildrenFolded}
@@ -3051,13 +3068,24 @@ export default function Sidebar() {
               : dGroups.unoRunning.map((thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true }),
                 )}
-            {protoVariant !== "off" && protoVariant !== "D" ? (
+            {demoVariant === "V3" ? (
+              <Suspense fallback={null}>
+                <DemoSidebarTop />
+              </Suspense>
+            ) : null}
+            {demoVariant === "V2" ? (
+              <Suspense fallback={null}>
+                <DemoSidebarList />
+              </Suspense>
+            ) : protoVariant !== "off" && protoVariant !== "D" ? (
               <ProtoSidebarList
                 threads={activeThreads.filter(
                   (thread) =>
                     !dGroups.unoRunning.some(
                       (running) => threadKeyOf(running) === threadKeyOf(thread),
-                    ),
+                    ) &&
+                    // Demo V3: coordinators and their helpers live in the tree above.
+                    !(demoVariant === "V3" && demoHooks.isTeamMember?.(thread.id)),
                 )}
                 projects={projects.filter((project) => !isAssistantProjectId(project.id))}
                 doneThreads={[...snoozedThreads, ...settledThreads]}
