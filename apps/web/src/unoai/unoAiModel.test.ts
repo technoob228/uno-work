@@ -349,3 +349,17 @@ describe("isSameSite", () => {
     expect(isSameSite(undefined, site)).toBe(false);
   });
 });
+
+describe("askQuestions", () => {
+  it("reads options sent as objects instead of strings (icp3 09.10)", () => {
+    const [q] = askQuestions({
+      question: "How do people book?",
+      options: [
+        { answer: "A booking form on the site", recommended: true },
+        { answer: "By phone" },
+      ],
+    });
+    expect(q?.options).toEqual(["A booking form on the site", "By phone"]);
+    expect(q?.recommended).toBe("A booking form on the site");
+  });
+});
