@@ -2883,6 +2883,65 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "replays the lifecycle welcome with the environment as it is now (memory-snapshot clone)",
+    () =>
+      Effect.gen(function* () {
+        // The welcome was published on the warm-up VM; the clone rotated its id since.
+        const warmUp = {
+          ...testEnvironmentDescriptor,
+          environmentId: EnvironmentId.make("environment-warm-up"),
+          label: "Uno computer",
+        };
+        const clone = {
+          ...testEnvironmentDescriptor,
+          environmentId: EnvironmentId.make("environment-clone"),
+          label: "uno-work",
+        };
+        yield* buildAppUnderTest({
+          layers: {
+            serverEnvironment: {
+              getEnvironmentId: Effect.succeed(clone.environmentId),
+              getDescriptor: Effect.succeed(clone),
+            },
+            serverLifecycleEvents: {
+              snapshot: Effect.succeed({
+                sequence: 2,
+                events: [
+                  {
+                    version: 1 as const,
+                    sequence: 1,
+                    type: "welcome" as const,
+                    payload: { environment: warmUp, cwd: "/tmp/project", projectName: "project" },
+                  },
+                  {
+                    version: 1 as const,
+                    sequence: 2,
+                    type: "ready" as const,
+                    payload: { at: new Date().toISOString(), environment: warmUp },
+                  },
+                ],
+              }),
+              stream: Stream.empty,
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeServerLifecycle]({}).pipe(Stream.take(2), Stream.runCollect),
+          ),
+        );
+
+        const [welcome, ready] = Array.from(events);
+        assert.equal(welcome?.type, "welcome");
+        assert.equal(welcome?.payload.environment.environmentId, "environment-clone");
+        assert.equal(welcome?.payload.environment.label, "uno-work");
+        assert.equal(ready?.payload.environment.environmentId, "environment-clone");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.searchEntries", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
