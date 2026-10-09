@@ -483,7 +483,11 @@ export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLik
         const response =
           action === "remove"
             ? yield* call(scope.identity, "DELETE", `${SCHEDULED_TASKS_PATH}/${scheduleId}`)
-            : yield* call(scope.identity, "PATCH", `${SCHEDULED_TASKS_PATH}/${scheduleId}/${action}`);
+            : yield* call(
+                scope.identity,
+                "PATCH",
+                `${SCHEDULED_TASKS_PATH}/${scheduleId}/${action}`,
+              );
         if (response.status === 404) return { done: false };
         if (response.status < 200 || response.status >= 300) {
           return yield* fail(scheduleConsoleProblem(response));

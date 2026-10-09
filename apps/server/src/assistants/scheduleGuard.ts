@@ -77,7 +77,7 @@ export function scheduleGuardScript(): string {
     "#!/bin/sh",
     "# Uno Work (assistants/scheduleGuard.ts): schedules go through the Uno console,",
     "# never Hermes' own cron. Hermes runs this before terminal/execute_code/cronjob calls.",
-    'payload=$(cat)',
+    "payload=$(cat)",
     "block() {",
     `  printf '%s\\n' ${shellQuote(blockJson())}`,
     "  exit 0",

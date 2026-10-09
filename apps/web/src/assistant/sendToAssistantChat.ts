@@ -18,11 +18,7 @@ import {
 import { readEnvironmentApi } from "../environmentApi";
 import { ensureAssistantChat } from "../lib/managerApi";
 import { newCommandId, newMessageId } from "../lib/utils";
-import {
-  selectEnvironmentState,
-  selectSidebarThreadsForEnvironment,
-  useStore,
-} from "../store";
+import { selectEnvironmentState, selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { ensureAssistantChatWhenReady, findAssistantChat } from "./assistantChat.logic";
 import { waitForThreadInStore } from "./useAssistantChat";
 

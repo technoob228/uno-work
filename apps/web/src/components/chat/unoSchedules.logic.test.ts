@@ -12,6 +12,7 @@ const morning = {
 
 describe("unoScheduleLine", () => {
   it("reads like a sentence in the person's own time zone", () => {
+    expect(unoScheduleLine(morning, "America/Buenos_Aires").when).toBe("Every day at 09:00");
     expect(unoScheduleLine(morning, "America/Argentina/Buenos_Aires")).toEqual({
       when: "Every day at 09:00",
       what: "Morning plan",

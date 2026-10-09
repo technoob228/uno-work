@@ -34,7 +34,10 @@ export function unoScheduleLine(
   const name = schedule.name.trim();
   const prompt = schedule.prompt.replace(/\s+/g, " ").trim();
   return {
-    when: zone === local ? when : `${when} (${cityOf(zone)} time)`,
+    // Aliases count as the same zone (Chromium says America/Buenos_Aires for
+    // America/Argentina/Buenos_Aires).
+    when:
+      zone === local || cityOf(zone) === cityOf(local) ? when : `${when} (${cityOf(zone)} time)`,
     what: name || (prompt.length > 60 ? `${prompt.slice(0, 59)}…` : prompt),
     paused: schedule.state === "paused",
   };
