@@ -29,6 +29,7 @@ import type {
   ManagerDeletedAssistant,
   ManagerProposalDecision,
   ManagerProposalId,
+  ManagerScheduleListResult,
   ManagerSlackConnectorStatus,
   ManagerTelegramConnectorStatus,
   ManagerTokenId,
@@ -156,6 +157,44 @@ export function ensureAssistantChat(
       input.projectId && input.projectId !== ASSISTANT_PROJECT_ID
         ? { projectId: input.projectId }
         : {},
+  });
+}
+
+/**
+ * What the computer's Uno (or another assistant) runs on a schedule — read by
+ * the daemon with the computer's own token, so it works in the browser too.
+ */
+export function listAssistantSchedules(
+  input: EnvironmentScoped & { readonly projectId?: ProjectId | string },
+): Promise<ManagerScheduleListResult> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/schedules",
+    ...(input.projectId && input.projectId !== ASSISTANT_PROJECT_ID
+      ? { searchParams: { projectId: input.projectId } }
+      : {}),
+  });
+}
+
+/** Pause, resume or remove one of those schedules. */
+export function actOnAssistantSchedule(
+  input: EnvironmentScoped & {
+    readonly projectId?: ProjectId | string;
+    readonly scheduleId: number;
+    readonly action: "pause" | "resume" | "remove";
+  },
+): Promise<{ readonly done: boolean }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/schedules",
+    method: "POST",
+    body: {
+      scheduleId: input.scheduleId,
+      action: input.action,
+      ...(input.projectId && input.projectId !== ASSISTANT_PROJECT_ID
+        ? { projectId: input.projectId }
+        : {}),
+    },
   });
 }
 
