@@ -33,7 +33,7 @@ import {
   MonitorIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -71,6 +71,12 @@ import { ComputerPill } from "./home/ComputerPill";
 import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
+import { useDemoVariant } from "../../demo/demoFlag";
+
+// Demo mode (?demo=heavy): V2 (the Inbox is Home) and V4 (computer lanes).
+const DemoHome = lazy(() =>
+  import("../../demo/demoUi").then((module) => ({ default: module.DemoHome })),
+);
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
 import {
@@ -95,6 +101,7 @@ export function ComputerView() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
+  const demoVariant = useDemoVariant();
   const queryClient = useQueryClient();
   const router = useRouter();
   // Back only to a screen inside Work — never to /setup, the landing or the console (WG-22).
@@ -451,6 +458,10 @@ export function ComputerView() {
                 ) : null
               }
             />
+          ) : thisMachine && (demoVariant === "V2" || demoVariant === "V4") ? (
+            <Suspense fallback={null}>
+              <DemoHome environmentId={environmentId} onStart={launchers.startTask} />
+            </Suspense>
           ) : thisMachine ? (
             <HomeStart
               environmentId={environmentId}

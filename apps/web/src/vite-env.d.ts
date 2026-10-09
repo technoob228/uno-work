@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_UNO_WORK_LITE?: string;
   /** "1" on a local stand: assistants run against an in-memory account (lib/assistantsDemo.ts). */
   readonly VITE_ASSISTANTS_DEMO?: string;
+  /** "heavy": a static demo build (icp3 09.10) — fixtures in the page, no daemon (src/demo). */
+  readonly VITE_DEMO?: string;
 }
 
 interface ImportMeta {
