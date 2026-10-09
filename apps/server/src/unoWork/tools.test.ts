@@ -99,6 +99,7 @@ function makeDeps(
   const settings = {
     uno: { apiKey: options.apiKey ?? "unollm_test", agentAccess: options.agentAccess ?? "read" },
     agentThreadsScope: "own-project",
+    agentsUseOtherComputers: true,
     providerInstances: {},
   } as unknown as ServerSettings;
   const deps: UnoWorkToolDeps = {
