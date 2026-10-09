@@ -242,7 +242,7 @@ export function MoveProjectToBoxDialog({
                   <span className="text-muted-foreground text-xs">Target computer</span>
                   {targets.length === 0 ? (
                     <p className="text-muted-foreground text-sm">
-                      No other environments yet — create a computer below.
+                      No other computers yet — create one below.
                     </p>
                   ) : (
                     <div className="flex flex-col gap-1.5">

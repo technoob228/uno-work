@@ -2,7 +2,7 @@ import type { UnoBoxCreateJobStatus } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  UNO_BOX_SIZE_PRESETS,
+  UNO_BOX_DEFAULT_SHAPE,
   describeUnoBoxCreateJobState,
   normalizeUnoBoxName,
   waitForUnoBoxCreateJob,
@@ -105,12 +105,8 @@ describe("normalizeUnoBoxName", () => {
 });
 
 describe("presets and labels", () => {
-  it("offers only sizes the Work image can boot (4 GB and up)", () => {
-    expect(Object.keys(UNO_BOX_SIZE_PRESETS)).toEqual(["medium"]);
-    expect(UNO_BOX_SIZE_PRESETS.medium).toMatchObject({ ramMb: 4096, vcpu: 2, diskGb: 20 });
-    for (const spec of Object.values(UNO_BOX_SIZE_PRESETS)) {
-      expect(spec.ramMb).toBeGreaterThanOrEqual(4096);
-    }
+  it("creates the recommended 4 GB computer when no size is picked", () => {
+    expect(UNO_BOX_DEFAULT_SHAPE).toEqual({ ramMb: 4096, vcpu: 2, diskGb: 20 });
   });
 
   it("has a label for every job state", () => {

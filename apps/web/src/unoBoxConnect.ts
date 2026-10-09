@@ -75,7 +75,7 @@ export class UnoBoxStillStartingError extends Error {
 
   constructor(boxId: number, lastError: unknown) {
     super(
-      "The computer is still starting. It is already in your machines list; we'll keep trying to connect.",
+      "The computer is still starting. It is already in your list of computers; we'll keep trying to connect.",
     );
     this.name = "UnoBoxStillStartingError";
     this.boxId = boxId;

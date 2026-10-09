@@ -21,29 +21,18 @@ import {
   type UnoBoxConnectProgress,
 } from "./unoBoxConnect";
 
-/**
- * Uno Work machines boot from the Work image, which needs 4 GB of memory
- * (`min_ram_mb` 4096). Smaller sizes are not offered: they start, then wedge.
- */
-export type UnoBoxSizePreset = "medium";
-
-export interface UnoBoxSizeSpec {
-  readonly label: string;
-  readonly description: string;
+/** Memory, cores and disk of a new computer (sizes and plan rules: `newComputerSizes.ts`). */
+export interface UnoBoxShape {
   readonly ramMb: number;
   readonly vcpu: number;
   readonly diskGb: number;
 }
 
-export const UNO_BOX_SIZE_PRESETS: Record<UnoBoxSizePreset, UnoBoxSizeSpec> = {
-  medium: {
-    label: "Medium",
-    description: "4 GB RAM · 2 vCPU · 20 GB",
-    ramMb: 4096,
-    vcpu: 2,
-    diskGb: 20,
-  },
-};
+/**
+ * Used when the caller does not pick a size: 4 GB is what we recommend for
+ * Uno Work (2 GB is the minimum it runs on — console `IMAGES.workspace`).
+ */
+export const UNO_BOX_DEFAULT_SHAPE: UnoBoxShape = { ramMb: 4096, vcpu: 2, diskGb: 20 };
 
 export const UNO_BOX_NAME_MAX_LENGTH = 40;
 
@@ -185,7 +174,8 @@ const ADDRESS_NOT_READY_CONNECT_BUDGET_MS = 30_000;
 
 export interface CreateUnoBoxInput {
   readonly name: string;
-  readonly preset: UnoBoxSizePreset;
+  /** Size of the new computer; defaults to `UNO_BOX_DEFAULT_SHAPE`. Ignored for an assistant's. */
+  readonly size?: UnoBoxShape;
   /** Assistants MVP: the computer is one assistant's home (`computer_role`). */
   readonly computerRole?: "assistant";
   readonly assistant?: { readonly name: string; readonly emoji: string; readonly template: string };
@@ -217,7 +207,7 @@ export async function createUnoBoxAndConnect(
   if (name.length === 0) {
     throw new Error("Give the computer a name (letters, digits and dashes).");
   }
-  const size = UNO_BOX_SIZE_PRESETS[input.preset];
+  const size = input.size ?? UNO_BOX_DEFAULT_SHAPE;
 
   input.onStage?.("creating");
   const { jobId } = await api.unoCloud.createBox({

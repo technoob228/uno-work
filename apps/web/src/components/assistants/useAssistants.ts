@@ -225,7 +225,6 @@ export function makeCreateAssistantDeps(
       try {
         const { status, record } = await createUnoBoxAndConnect(accountEnvironmentId, {
           name: boxName,
-          preset: "medium",
           computerRole: "assistant",
           assistant: { ...label, template: plan.template ?? "custom" },
         });

@@ -2,6 +2,10 @@
  * "Create a new box" — shared by the add-environment modal and the
  * "Move to a box…" dialog.
  *
+ * Sizes follow the plan (`newComputerSizes.ts`): 2 / 4 / 8 GB, the ones over
+ * the plan's limit or what is left of it disabled with the reason and
+ * "Change plan".
+ *
  * Creating a box is billable, so the submit path is guarded twice: the button
  * is disabled while the mutation is pending, and the mutation itself is keyed
  * per environment so two mounted copies of this component cannot both fire.
@@ -14,21 +18,31 @@
  * soon as the box appears so it shows up in My machines right away.
  */
 import type { EnvironmentId, UnoBoxCreateJobStatus } from "@t3tools/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCwIcon, ServerIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLinkIcon, RefreshCwIcon, ServerIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { consoleLinks } from "../account/accountOverview";
+import { formatRam } from "../account/billingModel";
 import { cn } from "../lib/utils";
+import { openInNewTab } from "../navigation/useOpenApp";
+import {
+  defaultSizeIndex,
+  planRoom,
+  planRoomLine,
+  sizeBlockShort,
+  sizeCostLine,
+  sizeOptions,
+} from "../newComputerSizes";
+import { subscriptionQuery } from "./myuno/myUnoQueries";
 import { unoCloudCreateBoxMutationOptions, workspaceQueryKeys } from "../lib/workspaceReactQuery";
 import { describeMachineError } from "../machineErrors";
 import {
   UNO_BOX_CREATE_STAGES,
   UNO_BOX_NAME_MAX_LENGTH,
-  UNO_BOX_SIZE_PRESETS,
   normalizeUnoBoxName,
   type CreateUnoBoxResult,
   type UnoBoxCreateStage,
-  type UnoBoxSizePreset,
 } from "../unoBoxCreation";
 import {
   connectUnoBoxById,
@@ -47,8 +61,6 @@ const STILL_STARTING_RETRY_MS = 15_000;
 const STILL_STARTING_ATTEMPT_BUDGET_MS = 45_000;
 /** Stop retrying on our own after this long; the button keeps working. */
 const STILL_STARTING_GIVE_UP_MS = 10 * 60_000;
-
-const PRESET_ORDER: ReadonlyArray<UnoBoxSizePreset> = ["medium"];
 
 interface CreateUnoBoxSectionProps {
   /** Environment holding the Uno account (normally the primary one). */
@@ -76,7 +88,18 @@ export function CreateUnoBoxSection({
 }: CreateUnoBoxSectionProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(() => normalizeUnoBoxName(defaultName ?? ""));
-  const [preset, setPreset] = useState<UnoBoxSizePreset>("medium");
+  // The plan's room for a new computer (`GET /box-subscription`); `undefined`
+  // while it loads or when this interface cannot ask the account.
+  const subscription = useQuery(subscriptionQuery());
+  const room = useMemo(
+    () => planRoom(subscription.isSuccess ? subscription.data : undefined),
+    [subscription.isSuccess, subscription.data],
+  );
+  const options = useMemo(() => sizeOptions(room), [room]);
+  const [pickedIndex, setPickedIndex] = useState<number | null>(null);
+  const sizeIndex =
+    pickedIndex !== null && !options[pickedIndex]?.block ? pickedIndex : defaultSizeIndex(options);
+  const picked = sizeIndex >= 0 ? (options[sizeIndex] ?? null) : null;
   const [stage, setStage] = useState<UnoBoxCreateStage | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [stillStarting, setStillStarting] = useState<StillStarting | null>(null);
@@ -95,6 +118,8 @@ export function CreateUnoBoxSection({
     !isPending &&
     stillStarting === null &&
     environmentId !== null &&
+    picked !== null &&
+    picked.block === null &&
     normalizedName.length > 0;
 
   const refreshBoxList = useCallback(() => {
@@ -166,7 +191,7 @@ export function CreateUnoBoxSection({
   }, [retrying, retryStillStarting, stillStarting]);
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !picked) return;
     setError(null);
     setStage("creating");
     boxListedRef.current = false;
@@ -176,7 +201,7 @@ export function CreateUnoBoxSection({
     try {
       const result = await createBox.mutateAsync({
         name: normalizedName,
-        preset,
+        size: picked.shape,
         onStatus: handleStatus,
         onStage: setStage,
         signal: controller.signal,
@@ -198,7 +223,7 @@ export function CreateUnoBoxSection({
     } finally {
       setStage(null);
     }
-  }, [canSubmit, createBox, handleStatus, normalizedName, onCreated, preset, refreshBoxList]);
+  }, [canSubmit, createBox, handleStatus, normalizedName, onCreated, picked, refreshBoxList]);
 
   const showSteps = stage !== null && (createBox.isPending || retrying);
   const stepStage = stage === "retrying" ? "connecting" : stage;
@@ -229,34 +254,58 @@ export function CreateUnoBoxSection({
 
       <div className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">Size</span>
-        {PRESET_ORDER.length === 1 ? (
-          <p className="text-sm text-foreground">{UNO_BOX_SIZE_PRESETS[preset].description}</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            {PRESET_ORDER.map((option) => {
-              const spec = UNO_BOX_SIZE_PRESETS[option];
-              const selected = preset === option;
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  disabled={disabled || isPending}
-                  aria-pressed={selected}
-                  onClick={() => setPreset(option)}
-                  className={cn(
-                    "rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-60",
-                    selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
-                  )}
-                >
-                  <span className="block text-sm font-medium text-foreground">{spec.label}</span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    {spec.description}
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Size">
+          {options.map((option, index) => {
+            const selected = index === sizeIndex;
+            const blocked = option.block !== null;
+            const note = blocked
+              ? sizeBlockShort(option.block!, room)
+              : option.recommended
+                ? "Recommended"
+                : option.minimum
+                  ? "Minimum"
+                  : null;
+            return (
+              <button
+                key={option.shape.ramMb}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={disabled || isPending || blocked}
+                onClick={() => setPickedIndex(index)}
+                data-testid={`new-computer-size-${option.shape.ramMb}`}
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed",
+                  selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
+                  blocked && "opacity-55 hover:bg-transparent",
+                )}
+              >
+                <span className="block text-sm font-medium text-foreground">
+                  {formatRam(option.shape.ramMb)}
+                </span>
+                <span className="block text-[11px] text-muted-foreground">
+                  {option.shape.vcpu} {option.shape.vcpu === 1 ? "core" : "cores"} ·{" "}
+                  {option.shape.diskGb} GB disk
+                </span>
+                {note ? (
+                  <span
+                    className={cn(
+                      "mt-0.5 block text-[10px]",
+                      option.recommended && !blocked ? "text-primary" : "text-muted-foreground",
+                    )}
+                  >
+                    {note}
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        {planRoomLine(room) ? (
+          <p className="text-[11px] text-muted-foreground" data-testid="new-computer-plan-room">
+            {planRoomLine(room)}
+          </p>
+        ) : null}
       </div>
 
       {showSteps && stepStage ? (
@@ -272,7 +321,7 @@ export function CreateUnoBoxSection({
           tone="warning"
           human={{
             title: "Still starting, we'll keep trying",
-            message: `${stillStarting.name} is created and already in your machines list. It is taking longer than usual to answer; we'll connect as soon as it does.`,
+            message: `${stillStarting.name} is created and already in your list of computers. It is taking longer than usual to answer; we'll connect as soon as it does.`,
             details:
               stillStarting.lastError != null
                 ? describeMachineError(stillStarting.lastError).details
@@ -309,8 +358,21 @@ export function CreateUnoBoxSection({
         )}
         {createBox.isPending ? "Creating…" : retrying ? "Connecting…" : submitLabel}
       </Button>
-      <p className="text-[11px] text-muted-foreground">
-        A new computer is billed to your Uno account from the moment it starts.
+      <p className="text-[11px] text-muted-foreground" data-testid="new-computer-cost">
+        {sizeCostLine(room, picked ?? options[0] ?? null)}
+        {room && (!room.hasPlan || !picked) ? (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="inline-flex items-center gap-0.5 font-medium text-primary hover:underline"
+              onClick={() => openInNewTab(consoleLinks.plans)}
+            >
+              {room.hasPlan ? "Change plan" : "Choose a plan"}
+              <ExternalLinkIcon className="size-3" />
+            </button>
+          </>
+        ) : null}
       </p>
     </div>
   );

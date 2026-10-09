@@ -503,7 +503,10 @@ export function parseAppTemplates(raw: unknown): ReadonlyArray<UnoComputerAppTem
       minRamMb: asNumber(record["min_ram_mb"]),
       minDiskGb: asNumber(record["min_disk_gb"]),
       settings,
-      notes: asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
+      notes: workAppNotes(
+        asString(record["notes_en"]) || asString(record["notes_ru"]) || null,
+        parseSsoMode(record["sso"]),
+      ),
       rank: asNumber(record["rank"]),
       featured: record["featured"] === true,
       madeByUno: record["made_by_uno"] === true || record["publisher"] === "uno",
@@ -640,6 +643,21 @@ export function parseAppCards(raw: unknown): Map<number, AppCard> {
   return out;
 }
 
+/**
+ * Uno Work shows an App Store app's own password right above the app when it
+ * is opened (AppView's password bar: Show · Copy), not on a card on Home. The
+ * catalog's notes still say "on the app card" (fishcode
+ * back/internal/apps/templates.yaml `notes_en` / `note_en`): until they are
+ * reworded there, Work says where the password really is. Apps that sign in
+ * with Uno have no bar, so their notes are left as they are.
+ */
+export function workAppNotes(notes: string | null, sso: string | null): string | null {
+  if (!notes || sso) return notes;
+  return notes
+    .replace(/\bon the app card\b/g, "above the app when you open it (Show · Copy)")
+    .replace(/\bfrom the app card\b/g, "shown above the app when you open it (Show · Copy)");
+}
+
 /** "oidc" / "edge" from the console's `sso`; anything else — the app's own sign-in only. */
 function parseSso(raw: unknown): "oidc" | "edge" | null {
   return raw === "oidc" || raw === "edge" ? raw : null;
@@ -710,7 +728,7 @@ export function parseInstalledApps(
     const card = deploymentId !== null ? cards.get(deploymentId) : undefined;
     const template = templateId !== null ? byTemplate.get(templateId) : undefined;
     return {
-      notes: card?.notes ?? template?.notes ?? null,
+      notes: workAppNotes(card?.notes ?? template?.notes ?? null, card?.sso ?? null),
       credentials: card?.credentials ?? [],
       removable:
         deploymentId !== null &&

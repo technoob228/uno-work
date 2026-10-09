@@ -8,10 +8,11 @@
  * Continue) is migrated once: greeting, composer, Continue, then those widgets
  * in the person's order.
  *
- * Since 01.10 (simplification) Home starts with no widgets: the start screen
- * is the field "What should we do?", what needs you and what's in progress.
- * A layout nobody touched (the old default with Files and Apps) moves to the
- * new default; a layout the person arranged is kept.
+ * Since 01.10 (simplification) Home starts with few widgets: the start screen
+ * is the field "What should we do?", what needs you, In progress and — since
+ * 09.10 — Apps, so an app the person installs is right there as a tile
+ * (icp3: Notetaker was installed and nowhere on Home). A layout nobody
+ * touched moves to the new default; a layout the person arranged is kept.
  */
 import {
   DEFAULT_HOME_WIDGETS,
@@ -20,7 +21,9 @@ import {
   type HomeWidgetId,
 } from "./homeModel";
 
-export const HOME_LAYOUT_KEY = "uno-work:home:layout:v3";
+export const HOME_LAYOUT_KEY = "uno-work:home:layout:v4";
+/** The 0.0.104–0.0.118 key (no widgets by default). Read once for the migration. */
+export const HOME_LAYOUT_V3_KEY = "uno-work:home:layout:v3";
 /** The 0.0.82–0.0.103 key. Read once for the migration. */
 export const HOME_LAYOUT_V2_KEY = "uno-work:home:layout:v2";
 /** The 0.0.81 key (widgets under Continue only). Read once for the migration. */
@@ -35,8 +38,8 @@ export type HomeBlockId = HomeFixedBlockId | HomeWidgetId | AppWidgetBlockId;
 
 export const COMPOSER_BLOCK: HomeFixedBlockId = "composer";
 
-/** No widgets by default (01.10); Customize → Add widget brings them. */
-export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [...HOME_FIXED_BLOCKS];
+/** In progress and Apps by default (09.10); Customize → Add widget brings the rest. */
+export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [...HOME_FIXED_BLOCKS, "apps"];
 
 /** The default until 0.0.103: the fixed blocks, then Files and Apps. */
 const UNTOUCHED_V2_LAYOUT: ReadonlyArray<HomeBlockId> = [
@@ -87,12 +90,17 @@ export function normalizeHomeLayout(raw: unknown): HomeBlockId[] {
 }
 
 /**
- * The layout to start from: the saved 0.0.82 layout when there is one, else
- * the 0.0.81 widget list behind greeting, composer and Continue, else the
- * default. A saved layout that is just the old default (nobody arranged it)
- * becomes the new default — no widgets.
+ * The layout to start from: the saved 0.0.104 layout when there is one (with
+ * Apps added when it has no widget at all — that was the default, not a
+ * choice), else the saved 0.0.82 layout, else the 0.0.81 widget list behind
+ * greeting, composer and Continue, else the default. A saved layout that is
+ * just an old default (nobody arranged it) becomes the new default.
  */
-export function migrateHomeLayout(v2: unknown, v1: unknown): HomeBlockId[] {
+export function migrateHomeLayout(v3: unknown, v2: unknown, v1: unknown): HomeBlockId[] {
+  if (Array.isArray(v3)) {
+    const layout = normalizeHomeLayout(v3);
+    return layout.some((id) => !isHomeFixedBlockId(id)) ? layout : [...layout, "apps"];
+  }
   if (Array.isArray(v2)) {
     const layout = normalizeHomeLayout(v2);
     return sameBlocks(layout, UNTOUCHED_V2_LAYOUT) ? [...DEFAULT_HOME_LAYOUT] : layout;
@@ -138,24 +146,10 @@ export function homeLayoutReducer(
 
 /**
  * "In progress" on the simple Home is the `continue` block (the same
- * chats-in-progress list as Continue on the full one). Shown by default; the
- * person can hide it with one click (Misha 08.10: he doesn't want it) and
- * Customize → Add widget (or Reset) brings it back. Kept in the layout, so
- * the choice is remembered on this device like any other widget.
+ * chats-in-progress list as Continue on the full one) — a widget like the
+ * others (Misha 09.10): × in Customize hides it, Add widget brings it back.
  */
 export const IN_PROGRESS_BLOCK: HomeFixedBlockId = "continue";
-
-export function inProgressShown(state: ReadonlyArray<HomeBlockId>): boolean {
-  return state.includes(IN_PROGRESS_BLOCK);
-}
-
-export function hideInProgress(): HomeLayoutAction {
-  return { type: "remove", id: IN_PROGRESS_BLOCK };
-}
-
-export function showInProgress(): HomeLayoutAction {
-  return { type: "add", id: IN_PROGRESS_BLOCK };
-}
 
 /** Blocks that can still be added: available here and not on Home yet. */
 export function addableBlocks(
