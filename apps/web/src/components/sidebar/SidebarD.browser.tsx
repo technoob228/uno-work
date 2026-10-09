@@ -69,11 +69,11 @@ afterEach(() => {
 });
 
 describe("sidebar D places", () => {
-  it("shows Files and Apps & sites, and no Needs you when nothing waits", async () => {
+  it("shows Files, Apps & sites and Inbox — Inbox without a number when nothing is unread", async () => {
     const screen = await mount(<SidebarDPlaces />);
     await expect.element(screen.getByTestId("sidebar-nav-files")).toHaveTextContent("Files");
     await expect.element(screen.getByTestId("sidebar-nav-apps")).toHaveTextContent("Apps & sites");
-    expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
+    await expect.element(screen.getByTestId("sidebar-inbox")).toHaveTextContent(/^Inbox$/);
     // No Assistants and no Sites row of their own any more.
     expect(screen.getByText("Assistants").query()).toBeNull();
   });
@@ -87,20 +87,20 @@ describe("sidebar D places", () => {
     expect(goHome).toHaveBeenCalled();
   });
 
-  it('no Needs you for unread news alone (no "Needs you 0")', async () => {
+  it("counts unread news on Inbox, without a \"need you\" line", async () => {
     unread = 3;
     needsYou = 0;
     const screen = await mount(<SidebarDPlaces />);
-    await expect.element(screen.getByTestId("sidebar-nav-files")).toBeVisible();
-    expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
+    await expect.element(screen.getByTestId("sidebar-inbox")).toHaveTextContent("3");
+    expect(screen.getByTestId("sidebar-inbox-needs-you").query()).toBeNull();
   });
 
-  it("counts what waits on Needs you", async () => {
+  it("says what waits for the person", async () => {
     unread = 2;
     needsYou = 2;
     const again = await mount(<SidebarDPlaces />);
-    await expect.element(again.getByTestId("sidebar-needs-you")).toHaveTextContent("Needs you");
-    await expect.element(again.getByTestId("sidebar-needs-you")).toHaveTextContent("2");
+    await expect.element(again.getByTestId("sidebar-inbox-needs-you")).toHaveTextContent("2 need you");
+    await expect.element(again.getByTestId("sidebar-inbox")).toHaveTextContent("2");
   });
 
   it("opens Files and Apps & sites as places", async () => {
