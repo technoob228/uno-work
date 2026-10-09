@@ -4,6 +4,8 @@
  * already had; the old pages are all still there and come back in the nav
  * with Dev mode (Settings → Developer).
  */
+import { type EnvironmentId, HTTP_FEATURES } from "@t3tools/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
@@ -21,11 +23,16 @@ import { accountTransport } from "../../account/unoAccount";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
 import { setDevMode, useDevMode } from "../../devMode";
 import { isElectron } from "../../env";
-import { useEnvironmentSettings } from "../../environments/settings/serverSettings";
+import { useEnvironmentSupportsHttpFeature } from "../../environments/httpFeatureSupport";
+import {
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../environments/settings/serverSettings";
 import { resolveFeatureFlag } from "../../featureFlags";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 import { useMachineRows } from "../../hooks/useMachineRows";
+import { selfUpdateQueryOptions } from "../../selfUpdate/selfUpdate";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog } from "../assistant/ConnectChannelDialog";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -397,6 +404,7 @@ export function ComputerSettings() {
             }
           />
         )}
+        <AutoUpdateRow environmentId={environmentId} />
       </SettingsSection>
 
       <MachineAccessSections />
@@ -429,6 +437,39 @@ export function ComputerSettings() {
         ) : null}
       </SettingsSection>
     </SettingsPageContainer>
+  );
+}
+
+/**
+ * "Update automatically" (server setting `autoUpdate`, on by default): the
+ * computer installs new Uno Work by itself while nothing runs on it
+ * (apps/server autoUpdate.ts). Only for a computer that can update itself and
+ * says it honours the setting (httpFeatures "auto-update").
+ */
+function AutoUpdateRow({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const honours = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.autoUpdate);
+  const routes = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.selfUpdate);
+  const status = useQuery(selfUpdateQueryOptions(environmentId, honours && routes));
+  const settings = useEnvironmentSettings(environmentId);
+  const { updateSettings, canMutate } = useUpdateEnvironmentSettings(environmentId);
+  if (!honours || !routes || status.data?.supported !== true || !settings) return null;
+  const on = settings.autoUpdate ?? true;
+  return (
+    <SettingsRow
+      title="Update automatically"
+      description="Uno Work updates itself when nothing is running on this computer."
+      control={
+        <Switch
+          checked={on}
+          disabled={!canMutate}
+          onCheckedChange={(checked) =>
+            void updateSettings({ autoUpdate: Boolean(checked) }).catch(() => undefined)
+          }
+          aria-label="Update automatically"
+          data-testid="settings-auto-update"
+        />
+      }
+    />
   );
 }
 

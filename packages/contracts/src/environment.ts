@@ -78,6 +78,12 @@ export const HTTP_FEATURES = {
   assistantWorkspace: "assistant-workspace",
   /** `/api/manager/assistants/{deleted,restore}` — Restore of a deleted assistant. */
   assistantsTrash: "assistants-trash",
+  /**
+   * Not a route: the daemon honours the `autoUpdate` server setting ("Update
+   * automatically") and updates itself while idle. Settings show the switch
+   * only for a computer that lists it.
+   */
+  autoUpdate: "auto-update",
 } as const;
 export type HttpFeature = (typeof HTTP_FEATURES)[keyof typeof HTTP_FEATURES];
 
@@ -89,6 +95,9 @@ export const HTTP_FEATURE_SINCE: Readonly<Record<HttpFeature, string>> = {
   "self-update": "0.0.113",
   "assistant-workspace": "0.0.106",
   "assistants-trash": "0.0.106",
+  // Every daemon that has it also lists httpFeatures; the version only keeps
+  // older ones (which never list anything) out.
+  "auto-update": "0.0.120",
 };
 
 /** Route prefix → feature, for the client's 404 handling and the pre-call check. */

@@ -23,8 +23,9 @@ import { compareCliVersions } from "@t3tools/contracts";
  * is used as input: no URL, no version, no command. The worst a stray request
  * can do is install the release the console already serves.
  *
- * Who may ask: only an owner session of this computer (see http.ts). There is
- * deliberately no agent tool for it.
+ * Who may ask: only an owner session of this computer (see http.ts), and the
+ * daemon itself while nobody is working on it and the owner left "Update
+ * automatically" on (autoUpdate.ts). There is deliberately no agent tool for it.
  *
  * Paths come from the drop-in `uno-work.service.d/update.conf`. Without them
  * (desktop, dev, machines installed before 0.0.113) self-update is "not
@@ -38,6 +39,12 @@ export const SELF_UPDATE_BASE_URL_ENV = "UNO_WORK_UPDATE_BASE_URL";
 /** Where releases live: the console. The root updater has its own copy of this. */
 export const SELF_UPDATE_DEFAULT_BASE_URL = "https://console.uno.place/cli/work";
 export const SELF_UPDATE_LATEST_TARBALL = "uno-work-server-latest.tar.gz";
+/**
+ * The release machines may install by themselves, while idle (autoUpdate.ts).
+ * release-work.sh moves it a day after `latest` (`release-work.sh auto <v>`).
+ * Only a line in SHA256SUMS — no file of its own. Absent: no automatic updates.
+ */
+export const SELF_UPDATE_AUTO_TARBALL = "uno-work-server-auto.tar.gz";
 
 /** How long one answer of the console about "latest" is good for. */
 const LATEST_TTL_MS = 30 * 60_000;
@@ -100,28 +107,44 @@ const VERSIONED_TARBALL = /^uno-work-server-(\d+\.\d+\.\d+)\.tar\.gz$/;
 
 /**
  * The release list is append-only (`sha256sum … >> SHA256SUMS` on every
- * release): the LAST line for `uno-work-server-latest.tar.gz` is the current
- * release, and the versioned file with the same sha names its version.
+ * release): the LAST line for a pointer (`uno-work-server-latest.tar.gz`,
+ * `uno-work-server-auto.tar.gz`) is where it points now, and the versioned
+ * file with the same sha names its version.
  */
-export function parseLatestRelease(sums: string): LatestRelease | null {
-  let latestSha: string | null = null;
+export function parseReleasePointer(sums: string, pointer: string): LatestRelease | null {
+  let pointerSha: string | null = null;
   const versioned: Array<{ sha: string; name: string; version: string }> = [];
   for (const raw of sums.split("\n")) {
     const match = SUMS_LINE.exec(raw.trim());
     if (!match) continue;
     const sha = match[1]!;
     const name = match[2]!;
-    if (name === SELF_UPDATE_LATEST_TARBALL) {
-      latestSha = sha;
+    if (name === pointer) {
+      pointerSha = sha;
       continue;
     }
     const version = VERSIONED_TARBALL.exec(name)?.[1];
     if (version) versioned.push({ sha, name, version });
   }
-  if (!latestSha) return null;
-  const same = versioned.filter((entry) => entry.sha === latestSha);
+  if (!pointerSha) return null;
+  const same = versioned.filter((entry) => entry.sha === pointerSha);
   const release = same[same.length - 1];
   return release ? { version: release.version, sha256: release.sha, tarball: release.name } : null;
+}
+
+export function parseLatestRelease(sums: string): LatestRelease | null {
+  return parseReleasePointer(sums, SELF_UPDATE_LATEST_TARBALL);
+}
+
+/** Null (no line, or no versioned twin) = this console offers no automatic updates. */
+export function parseAutoRelease(sums: string): LatestRelease | null {
+  return parseReleasePointer(sums, SELF_UPDATE_AUTO_TARBALL);
+}
+
+/** Both pointers from one read of the list. */
+export interface ReleasePointers {
+  readonly latest: LatestRelease | null;
+  readonly auto: LatestRelease | null;
 }
 
 export function isNewerVersion(candidate: string, current: string): boolean {
@@ -201,6 +224,8 @@ export interface SelfUpdateDeps {
 }
 
 export interface SelfUpdateController {
+  /** The installer set up self-update on this computer (0.0.113+). */
+  readonly supported: boolean;
   readonly status: (options: {
     readonly canUpdate: boolean;
     readonly refresh?: boolean;
@@ -209,6 +234,20 @@ export interface SelfUpdateController {
   readonly start: () => Promise<SelfUpdateStatus>;
   /** The last finished run, for the Security journal (see selfUpdateJournal.ts). */
   readonly lastRun: () => Promise<UpdaterStatus | null>;
+  /** `latest` and `auto` from the console's list (cached like `status`). */
+  readonly releases: (refresh?: boolean) => Promise<ReleasePointers>;
+  /**
+   * An update is asked for or running: the request file is there (not taken
+   * yet, or never — the .path unit is off) or the updater says "updating".
+   * Cheap: two local reads, no network.
+   */
+  readonly inProgress: () => Promise<boolean>;
+  /**
+   * The automatic update (autoUpdate.ts): the same request file the button
+   * drops, without the owner's note — so the Security line says "Uno Work on
+   * this computer was updated to X", not "You updated".
+   */
+  readonly requestAutomatic: () => Promise<void>;
 }
 
 export class SelfUpdateUnavailableError extends Error {
@@ -221,10 +260,11 @@ export class SelfUpdateUnavailableError extends Error {
 export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateController {
   const now = deps.now ?? Date.now;
   const fetchImpl = deps.fetchImpl ?? fetch;
-  let latest: { release: LatestRelease | null; at: number; ok: boolean } | null = null;
-  let checking: Promise<LatestRelease | null> | null = null;
+  let latest: { releases: ReleasePointers; at: number; ok: boolean } | null = null;
+  let checking: Promise<ReleasePointers> | null = null;
+  const NONE: ReleasePointers = { latest: null, auto: null };
 
-  const fetchLatest = async (baseUrl: string): Promise<LatestRelease | null> => {
+  const fetchReleases = async (baseUrl: string): Promise<ReleasePointers> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LATEST_FETCH_TIMEOUT_MS);
     try {
@@ -236,26 +276,26 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.text();
       if (body.length > LATEST_MAX_BYTES) throw new Error("release list is too large");
-      return parseLatestRelease(body);
+      return { latest: parseLatestRelease(body), auto: parseAutoRelease(body) };
     } finally {
       clearTimeout(timer);
     }
   };
 
-  const latestRelease = (baseUrl: string, refresh: boolean): Promise<LatestRelease | null> => {
+  const releasesFrom = (baseUrl: string, refresh: boolean): Promise<ReleasePointers> => {
     const age = latest ? now() - latest.at : Number.POSITIVE_INFINITY;
     const ttl = latest?.ok ? LATEST_TTL_MS : LATEST_RETRY_MS;
-    if (latest && !refresh && age < ttl) return Promise.resolve(latest.release);
+    if (latest && !refresh && age < ttl) return Promise.resolve(latest.releases);
     if (!checking) {
-      checking = fetchLatest(baseUrl)
-        .then((release) => {
-          latest = { release, at: now(), ok: true };
-          return release;
+      checking = fetchReleases(baseUrl)
+        .then((releases) => {
+          latest = { releases, at: now(), ok: true };
+          return releases;
         })
         .catch(() => {
           // The console is unreachable: keep what we knew, try again soon.
-          latest = { release: latest?.release ?? null, at: now(), ok: false };
-          return latest.release;
+          latest = { releases: latest?.releases ?? NONE, at: now(), ok: false };
+          return latest.releases;
         })
         .finally(() => {
           checking = null;
@@ -263,6 +303,9 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     }
     return checking;
   };
+
+  const latestRelease = (baseUrl: string, refresh: boolean): Promise<LatestRelease | null> =>
+    releasesFrom(baseUrl, refresh).then((releases) => releases.latest);
 
   const readUpdater = async (statusFile: string): Promise<UpdaterStatus | null> => {
     try {
@@ -357,6 +400,15 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     return result({ state: "idle" });
   };
 
+  /** The file carries nothing the updater reads — only its existence matters. */
+  const writeRequest = async (paths: SelfUpdatePaths) => {
+    // The directory is root's (install.sh): it is not ours to create.
+    await mkdir(dirname(paths.requestFile), { recursive: true }).catch(() => undefined);
+    const temp = `${paths.requestFile}.tmp`;
+    await writeFile(temp, `${new Date(now()).toISOString()}\n`);
+    await rename(temp, paths.requestFile);
+  };
+
   const start: SelfUpdateController["start"] = async () => {
     const paths = deps.paths;
     if (!paths) {
@@ -367,18 +419,36 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     if (!current.available) {
       throw new SelfUpdateUnavailableError("Uno Work is already up to date.");
     }
-    // The file carries nothing the updater reads — only its existence matters.
-    // The directory is root's (install.sh): it is not ours to create.
-    await mkdir(dirname(paths.requestFile), { recursive: true }).catch(() => undefined);
-    const temp = `${paths.requestFile}.tmp`;
-    await writeFile(temp, `${new Date(now()).toISOString()}\n`);
-    await rename(temp, paths.requestFile);
+    await writeRequest(paths);
     return status({ canUpdate: true });
   };
 
+  const inProgress: SelfUpdateController["inProgress"] = async () => {
+    const paths = deps.paths;
+    if (!paths) return false;
+    const [updater, requestedAt] = await Promise.all([
+      readUpdater(paths.statusFile),
+      requestTime(paths.requestFile),
+    ]);
+    if (requestedAt !== null) return true;
+    if (updater?.state !== "updating") return false;
+    const started = updater.startedAt ? Date.parse(updater.startedAt) : Number.NaN;
+    return !(Number.isFinite(started) && now() - started > STALE_UPDATE_MS);
+  };
+
   return {
+    supported: deps.paths !== null,
     status,
     start,
     lastRun: async () => (deps.paths ? readUpdater(deps.paths.statusFile) : null),
+    releases: (refresh = false) =>
+      deps.paths ? releasesFrom(deps.paths.baseUrl, refresh) : Promise.resolve(NONE),
+    inProgress,
+    requestAutomatic: async () => {
+      if (!deps.paths) {
+        throw new SelfUpdateUnavailableError("This computer can't update Uno Work by itself.");
+      }
+      await writeRequest(deps.paths);
+    },
   };
 }

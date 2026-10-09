@@ -17,6 +17,11 @@
  * An account without economy mode still gets its list across: the console
  * keeps the apps before it answers 409, so while backed off the daemon sends a
  * changed list at most once a minute.
+ *
+ * The same signals tell the automatic update (autoUpdate.ts) whether anyone
+ * is working on the computer (`activity`), and an update in progress holds the
+ * computer awake ("work:update" in keep_awake — the console says "Uno Work is
+ * busy"): the updater must not be frozen half-way by economy sleep.
  */
 import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -28,6 +33,7 @@ import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { callWorkConsole, readWorkMachineIdentity } from "../manager/workConsole.ts";
 import { RemindersRepository } from "../persistence/Services/Reminders.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { selfUpdateController } from "../selfUpdateHttp.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   ECONOMY_REPORT_INTERVAL_MS,
@@ -50,9 +56,19 @@ import {
 import { scanWorkCommands } from "./commandScan.ts";
 import { signalMachineWoke } from "./wakeSignal.ts";
 
+/** What is going on right now, plus the person's last input in a client (ms). */
+export interface EconomyActivity extends EconomyProbe {
+  readonly lastInputAt: number | null;
+}
+
+/** keep_awake while Uno Work updates itself (the console: "Uno Work is busy"). */
+export const KEEP_AWAKE_UPDATE = "work:update";
+
 export interface EconomyPresenceShape {
   /** `input: true` — the person just did something in a client. */
   readonly presence: (input: boolean) => Effect.Effect<UnoEconomyPresence>;
+  /** The economy probe on demand (autoUpdate.ts): turns, commands, reminders, input. */
+  readonly activity: Effect.Effect<EconomyActivity>;
 }
 
 export class EconomyPresence extends Context.Service<EconomyPresence, EconomyPresenceShape>()(
@@ -145,7 +161,13 @@ export const EconomyPresenceLive = Layer.effect(
           rows.map((r) => r.thread_id),
         );
       }).pipe(Effect.orElseSucceed(() => 0));
-      const keepAwake = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
+      const apps = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
+      const updating = yield* Effect.promise(() =>
+        selfUpdateController()
+          .inProgress()
+          .catch(() => false),
+      );
+      const keepAwake = updating ? [...apps, KEEP_AWAKE_UPDATE] : apps;
       const nextWakeAt = reminders
         ? yield* reminders.list({ includeInactive: false }).pipe(
             Effect.map((rows) =>
@@ -287,6 +309,12 @@ export const EconomyPresenceLive = Layer.effect(
         return state.presence;
       });
 
-    return { presence } satisfies EconomyPresenceShape;
+    const activity: EconomyPresenceShape["activity"] = probe.pipe(
+      Effect.map(
+        (current): EconomyActivity => Object.assign(current, { lastInputAt: state.lastInputAt }),
+      ),
+    );
+
+    return { presence, activity } satisfies EconomyPresenceShape;
   }),
 );

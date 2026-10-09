@@ -719,6 +719,10 @@ export const ServerSettings = Schema.Struct({
   machineOnboarded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Sidebar pins (apps, files, folders, links) — see `UnoPin`.
   pins: Schema.Array(UnoPin).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  // "Update automatically": the daemon installs the console's `auto` release
+  // by itself while nobody works on the computer (apps/server autoUpdate.ts).
+  // Kept on the machine: it is the machine that updates. On by default.
+  autoUpdate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Guided setup progress — see `UnoSetupProgress`.
   setup: UnoSetupProgress.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Remote MCP servers every agent gets — see `UnoMcpServer`.
@@ -845,6 +849,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   machineOnboarded: Schema.optionalKey(Schema.Boolean),
   pins: Schema.optionalKey(Schema.Array(UnoPin)),
+  autoUpdate: Schema.optionalKey(Schema.Boolean),
   // Both replaced whole (see applyServerSettingsPatch).
   setup: Schema.optionalKey(UnoSetupProgress),
   mcpServers: Schema.optionalKey(Schema.Array(UnoMcpServer)),
