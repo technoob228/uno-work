@@ -130,7 +130,19 @@ function normQuestion(raw: unknown): AiQuestion | null {
     .replace(STAR, "")
     .trim();
   const options = (Array.isArray(q["options"]) ? q["options"] : [])
-    .map((o) => String(o).trim())
+    .map((o) => {
+      // The model sometimes sends {answer, recommended} instead of a string:
+      // read the words, never print "[object Object]" (icp3 09.10, n2/3).
+      if (o && typeof o === "object") {
+        const option = o as Record<string, unknown>;
+        const text = String(
+          option["answer"] ?? option["label"] ?? option["text"] ?? option["value"] ?? "",
+        ).trim();
+        if (text && option["recommended"] === true && !recommended) recommended = text;
+        return text;
+      }
+      return String(o ?? "").trim();
+    })
     .filter(Boolean)
     .slice(0, 5)
     .map((o) => {
