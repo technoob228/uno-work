@@ -6,6 +6,8 @@
  */
 import { create } from "zustand";
 
+import { GROUP_LEVELS, type GroupLevel } from "./chatGrouping";
+
 /**
  * icp3 09.10: the prototype runs on real data (computerNames.ts) and is on in
  * this build — the stage of the multi-computer view. `?v=D` still shows the
@@ -22,9 +24,6 @@ export const PROTO = true;
 export type ProtoVariant = "G" | "C" | "D";
 /** one — one computer, one space (А); all — computers joined (Б). */
 export type ProtoMode = "one" | "all";
-/** How the chat list is grouped. */
-export type ProtoGroupBy = "none" | "project" | "computer" | "computer-project";
-
 export const VARIANTS: ReadonlyArray<{ id: ProtoVariant; name: string; hint: string }> = [
   {
     id: "G",
@@ -52,32 +51,18 @@ export const MODES: ReadonlyArray<{ id: ProtoMode; name: string; hint: string }>
   },
 ];
 
-export const GROUP_BY: ReadonlyArray<{
-  id: ProtoGroupBy;
-  /** In the menu. */
-  name: string;
-  /** On the button. */
-  short: string;
-  /** Needs 2+ computers. */
-  multi?: boolean;
-}> = [
-  { id: "none", name: "Nothing — newest first", short: "Newest first" },
-  { id: "project", name: "Project", short: "By project" },
-  { id: "computer", name: "Computer", short: "By computer", multi: true },
-  {
-    id: "computer-project",
-    name: "Computer, then project",
-    short: "Computer & project",
-    multi: true,
-  },
-];
-
+/**
+ * Sidebar v2 (Misha 09.10 ~22:00): how the chat list is grouped — any of
+ * status / computer / project, in the order picked — and which computers it
+ * shows. One saved view for G and C.
+ */
 export interface ProtoView {
-  readonly groupBy: ProtoGroupBy;
-  /** Logical project key (one project across computers), "none" = No project. */
+  /** Group levels in order; [] = one list, newest first. */
+  readonly levels: ReadonlyArray<GroupLevel>;
+  /** Environment ids the list shows; null = all computers. */
+  readonly computers: ReadonlyArray<string> | null;
+  /** Logical project key (one project across computers), "none" = No project (C's rows). */
   readonly project: string | null;
-  /** Environment id of the computer the list is narrowed to. */
-  readonly computer: string | null;
 }
 
 interface ProtoState extends ProtoView {
@@ -85,40 +70,49 @@ interface ProtoState extends ProtoView {
   readonly mode: ProtoMode;
   readonly setVariant: (variant: ProtoVariant) => void;
   readonly setMode: (mode: ProtoMode) => void;
-  readonly setGroupBy: (groupBy: ProtoGroupBy) => void;
+  readonly setLevels: (levels: ReadonlyArray<GroupLevel>) => void;
+  readonly setComputers: (computers: ReadonlyArray<string> | null) => void;
   readonly setProjectFilter: (project: string | null) => void;
-  readonly setComputerFilter: (computer: string | null) => void;
 }
 
-const viewKey = (variant: ProtoVariant) => `proto:view:v2:${variant}`;
-const DEFAULT_VIEW: ProtoView = { groupBy: "none", project: null, computer: null };
-/** Critics 3–4: G reads best grouped by project; C already shows projects on top. */
-const defaultViewOf = (variant: ProtoVariant): ProtoView =>
-  variant === "G" ? { ...DEFAULT_VIEW, groupBy: "project" } : DEFAULT_VIEW;
+/** v3: a new key, so a view saved by the earlier "View" button doesn't override the new default. */
+const VIEW_KEY = "proto:view:v3";
+/** Default (Misha 09.10): all computers together, grouped by project. */
+export const DEFAULT_VIEW: ProtoView = { levels: ["project"], computers: null, project: null };
 
-function readView(variant: ProtoVariant): ProtoView {
-  const fallback = defaultViewOf(variant);
-  if (typeof localStorage === "undefined") return fallback;
+export function parseView(raw: unknown): ProtoView {
+  if (!raw || typeof raw !== "object") return DEFAULT_VIEW;
+  const value = raw as Record<string, unknown>;
+  const levels = Array.isArray(value.levels)
+    ? value.levels.filter(
+        (level, index, all): level is GroupLevel =>
+          GROUP_LEVELS.some((item) => item.id === level) && all.indexOf(level) === index,
+      )
+    : DEFAULT_VIEW.levels;
+  const computers =
+    Array.isArray(value.computers) && value.computers.length > 0
+      ? value.computers.filter((id): id is string => typeof id === "string")
+      : null;
+  return {
+    levels,
+    computers,
+    project: typeof value.project === "string" ? value.project : null,
+  };
+}
+
+function readView(): ProtoView {
+  if (typeof localStorage === "undefined") return DEFAULT_VIEW;
   try {
-    const raw = JSON.parse(
-      localStorage.getItem(viewKey(variant)) ?? "null",
-    ) as Partial<ProtoView> | null;
-    if (!raw) return fallback;
-    const groupBy = GROUP_BY.find((item) => item.id === raw.groupBy)?.id ?? fallback.groupBy;
-    return {
-      groupBy,
-      project: typeof raw.project === "string" ? raw.project : null,
-      computer: typeof raw.computer === "string" ? raw.computer : null,
-    };
+    return parseView(JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null"));
   } catch {
-    return fallback;
+    return DEFAULT_VIEW;
   }
 }
 
-function writeView(variant: ProtoVariant, view: ProtoView) {
+function writeView(view: ProtoView) {
   localStorage.setItem(
-    viewKey(variant),
-    JSON.stringify({ groupBy: view.groupBy, project: view.project, computer: view.computer }),
+    VIEW_KEY,
+    JSON.stringify({ levels: view.levels, computers: view.computers, project: view.project }),
   );
 }
 
@@ -137,7 +131,8 @@ function readInitial(): Pick<ProtoState, "variant" | "mode"> {
   );
   const modeRaw = fromUrlMode === "b" ? "all" : fromUrlMode === "a" ? "one" : fromUrlMode;
   const mode = (["one", "all"] as const).find(
-    (id) => id === (modeRaw ?? localStorage.getItem("proto:mode")),
+    // v2 key: "Only this computer" saved by the earlier prototype doesn't stick (default: all).
+    (id) => id === (modeRaw ?? localStorage.getItem("proto:mode:v2")),
   );
   return { variant: variant ?? "G", mode: mode ?? "all" };
 }
@@ -145,32 +140,32 @@ function readInitial(): Pick<ProtoState, "variant" | "mode"> {
 function writeUrl(variant: ProtoVariant, mode: ProtoMode) {
   // Remembered, not put in the address: the address is the person's.
   localStorage.setItem("proto:variant", variant);
-  localStorage.setItem("proto:mode", mode);
+  localStorage.setItem("proto:mode:v2", mode);
 }
 
 export const useProtoStore = create<ProtoState>((set, get) => {
   const persist = (patch: Partial<ProtoView>) => {
     set(patch);
-    const { groupBy, project, computer, variant } = get();
-    writeView(variant, { groupBy, project, computer });
+    const { levels, computers, project } = get();
+    writeView({ levels, computers, project });
   };
   const initial = PROTO ? readInitial() : { variant: "D" as const, mode: "one" as const };
   return {
     ...initial,
-    ...(PROTO ? readView(initial.variant) : DEFAULT_VIEW),
+    ...(PROTO ? readView() : DEFAULT_VIEW),
     setVariant: (variant) => {
-      set({ variant, ...readView(variant) });
+      set({ variant });
       writeUrl(variant, get().mode);
     },
     setMode: (mode) => {
       set({ mode });
       // (А) is one computer: a computer filter means nothing there.
-      if (mode === "one") persist({ computer: null });
+      if (mode === "one") persist({ computers: null });
       writeUrl(get().variant, mode);
     },
-    setGroupBy: (groupBy) => persist({ groupBy }),
+    setLevels: (levels) => persist({ levels: [...levels] }),
+    setComputers: (computers) => persist({ computers: computers ? [...computers] : null }),
     setProjectFilter: (project) => persist({ project }),
-    setComputerFilter: (computer) => persist({ computer }),
   };
 });
 
@@ -194,14 +189,6 @@ export function useProtoOneMachine(): boolean {
 
 export function readProtoMode(): ProtoMode | "off" {
   return PROTO ? useProtoStore.getState().mode : "off";
-}
-
-/** The grouping that applies: (А) has one computer, so "by computer" falls back. */
-export function effectiveGroupBy(groupBy: ProtoGroupBy, multi: boolean): ProtoGroupBy {
-  if (multi) return groupBy;
-  if (groupBy === "computer") return "none";
-  if (groupBy === "computer-project") return "project";
-  return groupBy;
 }
 
 /**

@@ -72,6 +72,7 @@ import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
 import { useDemoVariant } from "../../demo/demoFlag";
+import { useProtoComputerInComposer } from "../../proto/computerNames";
 
 // Demo mode (?demo=heavy): V2 (the Inbox is Home) and V4 (computer lanes).
 const DemoHome = lazy(() =>
@@ -102,6 +103,7 @@ export function ComputerView() {
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const demoVariant = useDemoVariant();
+  const computerInComposer = useProtoComputerInComposer();
   const queryClient = useQueryClient();
   const router = useRouter();
   // Back only to a screen inside Work — never to /setup, the landing or the console (WG-22).
@@ -406,7 +408,10 @@ export function ComputerView() {
                     <span className="text-sm font-medium text-foreground">Home</span>
                   </>
                 ) : null}
-                <div className="ml-auto flex min-w-0 items-center gap-1.5">{pill}</div>
+                {/* Sidebar v2: with 2+ computers joined, the computer is the chip in the field below. */}
+                {computerInComposer ? null : (
+                  <div className="ml-auto flex min-w-0 items-center gap-1.5">{pill}</div>
+                )}
               </>
             ) : (
               <>

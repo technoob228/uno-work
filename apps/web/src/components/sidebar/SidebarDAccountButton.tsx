@@ -59,6 +59,8 @@ export function SidebarDAccountTrigger(props: {
   label: string;
   who: string | null;
   variant: "header" | "rail";
+  /** Sidebar v2: "Uno Work" next to five icons fits without the chevron. */
+  chevron?: boolean;
 }) {
   return props.variant === "header" ? (
     <MenuTrigger
@@ -68,7 +70,9 @@ export function SidebarDAccountTrigger(props: {
     >
       <SidebarDAvatar who={props.who} />
       <span className="min-w-0 truncate text-sm font-semibold text-foreground">{props.label}</span>
-      <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      {props.chevron === false ? null : (
+        <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
     </MenuTrigger>
   ) : (
     <MenuTrigger

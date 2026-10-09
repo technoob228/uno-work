@@ -3278,9 +3278,9 @@ export default function Sidebar() {
       <MachineIdentityProvider identities={machineIdentities}>
         <SidebarDHeader isElectron={isElectron} />
         <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
-          {/* Sidebar D (0.0.105): Files, Apps & sites, Inbox (always; a number
-              only when something is unread); the chats below with Uno pinned
-              first. Settings and the account live in the menu on top. */}
+          {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
+              waits; the chats below with Uno pinned first. Settings and the
+              account live in the menu on top. */}
           <SidebarSetupRow />
           <SidebarDPlaces />
         </SidebarGroup>

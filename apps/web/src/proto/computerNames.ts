@@ -19,6 +19,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { resolveHomeFolder } from "../hooks/useFolderChats";
 import { useMachineRows } from "../hooks/useMachineRows";
 import { connectUnoBox, isBoxRunning } from "../unoBoxConnect";
+import { useProtoAllMachines } from "./protoState";
 
 export interface ComputerName {
   readonly label: string;
@@ -89,4 +90,16 @@ export function useJoinAccountComputers(enabled: boolean): void {
       void connectUnoBox(primaryEnvironmentId, box, { budgetMs: 45_000 }).catch(() => undefined);
     }
   }, [enabled, primaryEnvironmentId, rows]);
+}
+
+/**
+ * Sidebar v2 (Misha 09.10): with computers joined and 2+ of them, the
+ * computer is the chip in the new-chat field (ProtoMachineChip) — the
+ * "which computer" pill in Home's and the chat's header steps aside, so the
+ * page doesn't say "you are inside X". One computer: the pill stays.
+ */
+export function useProtoComputerInComposer(): boolean {
+  const joined = useProtoAllMachines();
+  const count = useComputerNames((state) => state.order.length);
+  return joined && count >= 2;
 }

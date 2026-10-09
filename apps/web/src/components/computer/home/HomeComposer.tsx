@@ -250,7 +250,10 @@ export function HomeComposer({
           )}
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
-          {minimal ? null : (
+          {minimal ? (
+            // Sidebar v2: even the first screen says where the chat starts (2+ computers joined).
+            <ProtoMachineChip environmentId={environmentId} />
+          ) : (
             // The chips never push past the box: on a phone (390) they used to
             // run over its right edge and shove the send button out. They
             // shrink, the permission chip keeps only its icon, and anything

@@ -17,8 +17,7 @@ import {
   MenuPopup,
   MenuTrigger,
 } from "../components/ui/menu";
-import { useComputerNames } from "./computerNames";
-import { useProtoAllMachines } from "./protoState";
+import { useComputerNames, useProtoComputerInComposer } from "./computerNames";
 
 function MachineIcon({ kind, className }: { kind: string; className?: string }) {
   return kind === "uno_box" ? (
@@ -35,11 +34,11 @@ export function ProtoMachineChip({
   environmentId: EnvironmentId | null;
   title?: string;
 }) {
-  const joined = useProtoAllMachines();
+  const shown = useProtoComputerInComposer();
   const setActive = useStore((state) => state.setActiveEnvironmentId);
   const names = useComputerNames((state) => state.byId);
   const order = useComputerNames((state) => state.order);
-  if (!joined || environmentId === null || order.length < 2) return null;
+  if (!shown || environmentId === null) return null;
   const current = names[environmentId];
   if (!current) return null;
   return (
