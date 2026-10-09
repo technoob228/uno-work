@@ -958,7 +958,15 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label={busy ? "Cloning…" : wording === "folder" ? "Clone" : "Clone and open"}
+        label={
+          busy
+            ? "Cloning…"
+            : noAccess
+              ? "Try again"
+              : wording === "folder"
+                ? "Clone"
+                : "Clone and open"
+        }
         icon={<GitHubIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
