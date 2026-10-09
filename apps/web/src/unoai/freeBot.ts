@@ -126,3 +126,22 @@ export function liveTileLine(status: FreeBotStatus, locale?: string): string | n
 export function tokenErrorOffersPlan(code: string): boolean {
   return code === "FREE_BOT_FULL" || code === "FREE_BOT_USED" || code === "FREE_BOT_ENDED";
 }
+
+/**
+ * The free bot can't start for a reason about the account's email (no email,
+ * not confirmed, a throwaway address): say it BEFORE the @BotFather steps —
+ * it used to surface only after the token was pasted ("Add an email…"), with
+ * nowhere to add one (icp3 09.10, n1/11). Null — nothing to fix first.
+ */
+export function freeBotEmailNote(reason: string | undefined): string | null {
+  switch (reason) {
+    case "FREE_BOT_EMAIL_REQUIRED":
+      return "The free bot needs an email on your Uno account. Add it first — it takes a minute.";
+    case "FREE_BOT_EMAIL_UNVERIFIED":
+      return "Confirm your email first — the free bot starts after that.";
+    case "FREE_BOT_DISPOSABLE_EMAIL":
+      return "The free bot needs a permanent email address. Change it first.";
+    default:
+      return null;
+  }
+}
