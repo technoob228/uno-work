@@ -89,6 +89,11 @@ import { buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
+import {
+  SCHEDULE_GUARD_TIMEOUT_SEC,
+  SCHEDULE_GUARD_TOOL_MATCHER,
+  writeScheduleGuard,
+} from "../../assistants/scheduleGuard.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -587,6 +592,21 @@ export function makeHermesAdapter(
           const threadHermesHome = nodePath.join(baseHermesHome, "threads", input.threadId);
           const configuredModel =
             resolveHermesBaseModelId(hermesModelSelection?.model) ?? HERMES_DEFAULT_MODEL;
+          const inAssistantWorkspace = yield* fileSystem
+            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
+            .pipe(Effect.orElseSucceed(() => false));
+          // The Uno chat's schedules go through the console (schedule_create),
+          // never Hermes' own cron: a pre_tool_call hook refuses the rest.
+          const scheduleGuardCommand = inAssistantWorkspace
+            ? yield* Effect.tryPromise(() => writeScheduleGuard(threadHermesHome)).pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("hermes schedule guard not written").pipe(
+                    Effect.annotateLogs({ threadId: input.threadId, cause: String(cause) }),
+                    Effect.as(null),
+                  ),
+                ),
+              )
+            : null;
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
               fileSystem.writeFileString(
@@ -608,6 +628,15 @@ export function makeHermesAdapter(
                   // HERMES_TITLE_GENERATION_TIMEOUT_SECONDS). A brought key
                   // keeps the default: its provider may not serve uno/fast.
                   ...(llmProvider === "uno" ? { sideTaskModel: UNO_FAST_GATEWAY_MODEL } : {}),
+                  ...(scheduleGuardCommand
+                    ? {
+                        preToolCallHook: {
+                          command: scheduleGuardCommand,
+                          matcher: SCHEDULE_GUARD_TOOL_MATCHER,
+                          timeoutSec: SCHEDULE_GUARD_TIMEOUT_SEC,
+                        },
+                      }
+                    : {}),
                 }),
               ),
             ),
@@ -624,9 +653,6 @@ export function makeHermesAdapter(
 
           // Skills for assistants come only from the Uno catalog: close
           // Hermes' own hub (ClawHub & co.) in this HERMES_HOME.
-          const inAssistantWorkspace = yield* fileSystem
-            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
-            .pipe(Effect.orElseSucceed(() => false));
           const lockHub =
             (inAssistantWorkspace &&
               (options?.assistantsEnabled ? yield* options.assistantsEnabled : true)) ||

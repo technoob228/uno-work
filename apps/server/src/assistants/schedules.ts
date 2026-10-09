@@ -279,7 +279,22 @@ export interface AssistantSchedulesShape {
     caller: ManagerCaller,
     args: unknown,
   ) => Effect.Effect<ManagerScheduleDeleteResult, AssistantScheduleError>;
+  /**
+   * The person's side (owner session, Work's Uno chat): the schedules of one
+   * assistant of this computer — what runs when, with Pause and Remove.
+   */
+  readonly ownerList: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ManagerScheduleListResult, AssistantScheduleError>;
+  readonly ownerAct: (
+    projectId: ProjectId,
+    scheduleId: number,
+    action: AssistantScheduleOwnerAction,
+  ) => Effect.Effect<{ readonly done: boolean }, AssistantScheduleError>;
 }
+
+/** What the person can do to a schedule from Work. */
+export type AssistantScheduleOwnerAction = "pause" | "resume" | "remove";
 
 export class AssistantSchedules extends Context.Service<
   AssistantSchedules,
@@ -315,6 +330,12 @@ export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLik
             "Schedules belong to an assistant: this token is not an assistant's own token.",
           );
         }
+        return yield* resolveProjectScope(projectId);
+      });
+
+    /** The machine identity and the workspace of one assistant of this computer. */
+    const resolveProjectScope = (projectId: ProjectId) =>
+      Effect.gen(function* () {
         const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
         const identity = readWorkMachineIdentity(settings?.uno);
         if (identity === null) {
@@ -333,7 +354,7 @@ export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLik
 
     const call = (
       identity: WorkMachineIdentity,
-      method: "GET" | "POST" | "DELETE",
+      method: "GET" | "POST" | "PATCH" | "DELETE",
       path: string,
       body?: unknown,
     ) =>
@@ -446,7 +467,34 @@ export const makeAssistantSchedules = (options?: { readonly fetchImpl?: FetchLik
         return { deleted: true };
       });
 
-    return { create, list, remove } satisfies AssistantSchedulesShape;
+    const ownerList: AssistantSchedulesShape["ownerList"] = (projectId) =>
+      resolveProjectScope(projectId).pipe(
+        Effect.flatMap(listOwn),
+        Effect.map((schedules) => ({ schedules })),
+      );
+
+    const ownerAct: AssistantSchedulesShape["ownerAct"] = (projectId, scheduleId, action) =>
+      Effect.gen(function* () {
+        const scope = yield* resolveProjectScope(projectId);
+        const own = yield* listOwn(scope);
+        if (!own.some((schedule) => schedule.scheduleId === scheduleId)) {
+          return yield* fail(`Schedule ${scheduleId} is not one of this assistant's.`);
+        }
+        const response =
+          action === "remove"
+            ? yield* call(scope.identity, "DELETE", `${SCHEDULED_TASKS_PATH}/${scheduleId}`)
+            : yield* call(scope.identity, "PATCH", `${SCHEDULED_TASKS_PATH}/${scheduleId}/${action}`);
+        if (response.status === 404) return { done: false };
+        if (response.status < 200 || response.status >= 300) {
+          return yield* fail(scheduleConsoleProblem(response));
+        }
+        yield* Effect.logInfo("assistant schedule changed by the person").pipe(
+          Effect.annotateLogs({ projectId, scheduleId, action }),
+        );
+        return { done: true };
+      });
+
+    return { create, list, remove, ownerList, ownerAct } satisfies AssistantSchedulesShape;
   });
 
 export const AssistantSchedulesLive = Layer.effect(AssistantSchedules, makeAssistantSchedules());

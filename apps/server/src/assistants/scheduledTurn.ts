@@ -57,7 +57,7 @@ export function wrapScheduledPrompt(input: { readonly name?: string; readonly pr
   const title = input.name ? `"${input.name}"` : "";
   return [
     `[Scheduled task ${title}— it runs on its own: the person is not in this chat right now.`,
-    "Your final message is sent to them in Telegram/Slack, so make it short and useful.",
+    "Your final message reaches them in their Inbox (and Telegram/Slack when connected), so make it short and useful.",
     `If there is nothing worth telling them, answer exactly ${ASSISTANT_TURN_NO_REPLY}.]`,
     "",
     input.prompt,
