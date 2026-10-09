@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.119 — 2026-10-09
+
+- A new cloud computer works right away: Files, New project, new chats and Update no longer fail with "Environment API not found" until the computer restarts.
+- Telegram and Slack: every message gets its own real answer, quoted as a reply to it, however long the work takes. No more "still working, check the app". Long answers arrive in full, in parts. While Uno works you see "typing" (Slack: an hourglass reaction) and a short note at 3 and 15 minutes. If Uno Work restarts mid-task, the task runs again and the answer still comes.
+
 ## v0.0.118 — 2026-10-09
 
 - Files of any size go to the Uno cloud: Copy to Cloud, Uno Drive, project materials, Office saves and app storage no longer skip files bigger than 256 MB. Big files upload in parts; the limit is your cloud storage plan.
