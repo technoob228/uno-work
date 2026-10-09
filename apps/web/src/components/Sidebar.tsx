@@ -99,6 +99,14 @@ import {
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
+import { ProtoSidebarList } from "../proto/ProtoSidebarList";
+import { useJoinAccountComputers, useSyncComputerNames } from "../proto/computerNames";
+import {
+  PROTO,
+  useProtoAllMachines,
+  useProtoDoneInsideList,
+  useProtoVariant,
+} from "../proto/protoState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
@@ -692,6 +700,8 @@ interface SidebarThreadRowProps {
   onOpenPrLink: (event: ReactMouseEvent<HTMLElement>, url: string) => void;
   /** Without Dev mode: no snooze, and "Settle" reads "Done". */
   simple: boolean;
+  /** Sidebar prototype (w0115): "project · computer" under the title of a D row. */
+  subtitle?: ReactNode;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -1041,7 +1051,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           data-thread-mark={mark ?? undefined}
           className={cn(
             rowSurfaceClassName,
-            "flex h-8 items-center gap-2 pr-1.5",
+            "flex items-center gap-2 pr-1.5",
+            props.subtitle ? "min-h-11 py-1" : "h-8",
             props.nested ? "pl-8" : "pl-2.5",
           )}
           onClick={handleClick}
@@ -1052,6 +1063,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
           {isRenaming ? (
             title
+          ) : props.subtitle ? (
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span
+                data-testid={`thread-title-${thread.id}`}
+                className={cn(
+                  "min-w-0 truncate text-sm",
+                  props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
+                    ? "text-foreground"
+                    : shouldRecede
+                      ? "text-sidebar-foreground/70"
+                      : "text-sidebar-foreground/90",
+                  (mark === "your-turn" || mark === "input" || mark === "approval") &&
+                    "font-medium",
+                )}
+              >
+                {thread.title}
+              </span>
+              <span className="flex min-w-0" data-testid="proto-row-place">
+                {props.subtitle}
+              </span>
+            </span>
           ) : (
             <span
               data-testid={`thread-title-${thread.id}`}
@@ -1069,7 +1101,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </span>
           )}
           {pinIndicator}
-          {machineMark}
+          {PROTO ? null : machineMark}
           <span className="relative ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end">
             <span
               className={cn(
@@ -1119,7 +1151,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           tabIndex={0}
           data-testid="sidebar-row-slim"
           data-sidebar-section={section}
-          className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+          className={cn(
+            rowSurfaceClassName,
+            "flex items-center gap-2.5 px-2.5",
+            props.subtitle ? "min-h-11 py-1" : "h-9",
+          )}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           onKeyDown={handleKeyDown}
@@ -1145,10 +1181,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           </span>
           {spawnedBadge}
-          {title}
+          {props.subtitle && !isRenaming ? (
+            // Sidebar prototype (w0115): Done chats say "project · computer" too.
+            <span className="flex min-w-0 flex-1 flex-col">
+              {title}
+              <span className="flex min-w-0 opacity-80" data-testid="proto-row-place">
+                {props.subtitle}
+              </span>
+            </span>
+          ) : (
+            title
+          )}
           {pinIndicator}
           {terminalStatusIcon}
-          {machineMark}
+          {PROTO ? null : machineMark}
           <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
             <span className="inline-flex justify-end tabular-nums text-secondary-label transition-opacity group-hover/sidebar-row:opacity-0">
               {isSnoozedRow && thread.snoozedUntil != null ? (
@@ -1357,7 +1403,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             {terminalStatusIcon}
             {prBadge}
             <span className="ml-auto inline-flex shrink-0 items-center gap-1">
-              {machineMark}
+              {PROTO ? null : machineMark}
               {driverKind ? (
                 <ProviderInstanceIcon
                   driverKind={driverKind}
@@ -1494,14 +1540,33 @@ export default function Sidebar() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
   const environmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
+  // Sidebar prototype (w0115): (Б) "all together" lists every computer's chats.
+  const protoVariant = useProtoVariant();
+  const protoAllMachines = useProtoAllMachines();
+  // Real names of the computers in view; with (Б) the account's other cloud
+  // computers that are on join this page (icp3 09.10, proto/computerNames.ts).
+  useSyncComputerNames();
+  useJoinAccountComputers(protoAllMachines);
+  // Grouped or filtered: Done chats fold inside the list, not in the shelf below.
+  const protoDoneInProjects = useProtoDoneInsideList();
   const machineScope = useMemo(
     () =>
       resolveSidebarProjectScope({
-        scope: allMachinesSidebar ? environmentScopeSetting : "active",
+        scope: protoAllMachines
+          ? "all"
+          : allMachinesSidebar && !PROTO
+            ? environmentScopeSetting
+            : "active",
         activeEnvironmentId,
         primaryEnvironmentId,
       }),
-    [activeEnvironmentId, allMachinesSidebar, environmentScopeSetting, primaryEnvironmentId],
+    [
+      activeEnvironmentId,
+      allMachinesSidebar,
+      environmentScopeSetting,
+      primaryEnvironmentId,
+      protoAllMachines,
+    ],
   );
   const projects = useStore(
     useShallow((store) =>
@@ -2748,7 +2813,12 @@ export default function Sidebar() {
   const renderRow = (
     thread: SidebarThreadSummary,
     section: SidebarSection,
-    options?: { readonly d?: boolean; readonly nested?: boolean; readonly underUno?: boolean },
+    options?: {
+      readonly d?: boolean;
+      readonly nested?: boolean;
+      readonly underUno?: boolean;
+      readonly subtitle?: ReactNode;
+    },
   ) => {
     const threadKey = threadKeyOf(thread);
     // Pinned chats live in the compact Pinned group above every sidebar mode.
@@ -2791,6 +2861,7 @@ export default function Sidebar() {
         onUnpin={attemptUnpin}
         onOpenPrLink={openPrLink}
         simple={simple}
+        subtitle={options?.subtitle ?? null}
       />
     );
   };
@@ -2980,51 +3051,94 @@ export default function Sidebar() {
               : dGroups.unoRunning.map((thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true }),
                 )}
-            {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
-            {dGroups.projects.map((group) => {
-              const folded = isProjectFolded(group);
-              const project = projectByKey.get(group.key) ?? null;
-              return (
-                <li key={group.key} className="list-none">
-                  <ul role="list" className="flex flex-col gap-px">
-                    <SidebarDProjectRow
-                      name={group.name}
-                      folded={folded}
-                      mark={foldedProjectMark(
-                        group.chats.map((thread) =>
-                          dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
-                        ),
-                      )}
-                      onToggle={() => toggleProjectFolded(group.key)}
-                      onNewChat={
-                        project
-                          ? () => {
-                              if (isMobile) setOpenMobile(false);
-                              sidebarDPanel.closeNow();
-                              void newThreadContext.handleNewThread(
-                                scopeProjectRef(project.environmentId, project.id),
-                                {
-                                  envMode: resolveSidebarNewThreadEnvMode({
-                                    defaultEnvMode: defaultThreadEnvMode,
-                                  }),
-                                },
-                              );
-                            }
-                          : null
-                      }
-                    />
-                    {folded
-                      ? null
-                      : group.chats.map((thread) =>
-                          renderRow(thread, "active", { d: true, nested: true }),
-                        )}
-                  </ul>
-                </li>
-              );
-            })}
-            {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-            {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
-            {simple && snoozedThreads.length + settledThreads.length > 0 ? (
+            {protoVariant !== "off" && protoVariant !== "D" ? (
+              <ProtoSidebarList
+                threads={activeThreads.filter(
+                  (thread) =>
+                    !dGroups.unoRunning.some(
+                      (running) => threadKeyOf(running) === threadKeyOf(thread),
+                    ),
+                )}
+                projects={projects.filter((project) => !isAssistantProjectId(project.id))}
+                doneThreads={[...snoozedThreads, ...settledThreads]}
+                renderRow={(thread, rowOptions) =>
+                  rowOptions.section
+                    ? renderRow(thread, rowOptions.section, {
+                        subtitle: rowOptions.subtitle ?? null,
+                      })
+                    : renderRow(thread, "active", {
+                        d: true,
+                        nested: rowOptions.nested ?? false,
+                        subtitle: rowOptions.subtitle ?? null,
+                      })
+                }
+                markOf={(thread) =>
+                  dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now))
+                }
+                renderMark={(mark) => <SidebarDMark mark={mark} />}
+                onNewChatIn={(project) => {
+                  if (isMobile) setOpenMobile(false);
+                  sidebarDPanel.closeNow();
+                  void newThreadContext.handleNewThread(
+                    scopeProjectRef(project.environmentId, project.id),
+                    {
+                      envMode: resolveSidebarNewThreadEnvMode({
+                        defaultEnvMode: defaultThreadEnvMode,
+                      }),
+                    },
+                  );
+                }}
+              />
+            ) : null}
+            {protoVariant !== "off" && protoVariant !== "D" ? null : (
+              <>
+                {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
+                {dGroups.projects.map((group) => {
+                  const folded = isProjectFolded(group);
+                  const project = projectByKey.get(group.key) ?? null;
+                  return (
+                    <li key={group.key} className="list-none">
+                      <ul role="list" className="flex flex-col gap-px">
+                        <SidebarDProjectRow
+                          name={group.name}
+                          folded={folded}
+                          mark={foldedProjectMark(
+                            group.chats.map((thread) =>
+                              dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                            ),
+                          )}
+                          onToggle={() => toggleProjectFolded(group.key)}
+                          onNewChat={
+                            project
+                              ? () => {
+                                  if (isMobile) setOpenMobile(false);
+                                  sidebarDPanel.closeNow();
+                                  void newThreadContext.handleNewThread(
+                                    scopeProjectRef(project.environmentId, project.id),
+                                    {
+                                      envMode: resolveSidebarNewThreadEnvMode({
+                                        defaultEnvMode: defaultThreadEnvMode,
+                                      }),
+                                    },
+                                  );
+                                }
+                              : null
+                          }
+                        />
+                        {folded
+                          ? null
+                          : group.chats.map((thread) =>
+                              renderRow(thread, "active", { d: true, nested: true }),
+                            )}
+                      </ul>
+                    </li>
+                  );
+                })}
+                {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
+                {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
+              </>
+            )}
+            {simple && !protoDoneInProjects && snoozedThreads.length + settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
                 className="mt-auto pt-2"
@@ -3045,7 +3159,9 @@ export default function Sidebar() {
                 onToggle={() => setSnoozedShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+            {protoDoneInProjects
+              ? null
+              : renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
             {!simple && settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
@@ -3055,7 +3171,9 @@ export default function Sidebar() {
                 onToggle={() => setSettledShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
+            {protoDoneInProjects
+              ? null
+              : renderedSettledThreads.map((thread) => renderRow(thread, "settled"))}
             {settledShelfExpanded && hiddenSettledCount > 0 ? (
               <li className="list-none">
                 <button
@@ -3071,7 +3189,10 @@ export default function Sidebar() {
           </ul>
         </TooltipProvider>
         <SidebarUnoAiChats />
-        {totalThreadCount === 0 && pinnedThreads.length === 0 ? (
+        {/* The chat list (G/C) already lists projects without chats: no second list of them here. */}
+        {totalThreadCount === 0 &&
+        pinnedThreads.length === 0 &&
+        !(protoVariant !== "off" && protoVariant !== "D" && projectGroups.length > 0) ? (
           chatsLoading ? (
             <SidebarChatsLoading />
           ) : projectGroups.length === 0 && setupPreviewName === null ? (
