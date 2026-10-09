@@ -21,6 +21,7 @@ import { useMachineRows } from "../../hooks/useMachineRows";
 import { useReconnectEnvironment } from "../../hooks/useReconnectEnvironment";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
 import { deriveMachineKind, type MachineKind } from "../../machineKind";
+import { currentStaleBundlePage, switchReloadUrl } from "../../staleBundle";
 import { useStore } from "../../store";
 import { formatElapsedAgoLabel } from "../../timestampFormat";
 import { connectUnoBox, describeUnoBoxConnectProgress } from "../../unoBoxConnect";
@@ -216,7 +217,20 @@ export function useComputerSwitcher(onDone?: () => void) {
   };
 
   const openAccountBox = async (row: (typeof accountBoxes)[number]) => {
-    if (!primaryEnvironmentId || !row.box || connecting) return;
+    if (!row.box || connecting) return;
+    // Browser on a Work address: open the computer in its own interface —
+    // Uno wakes it and serves it here (staleBundle.ts), no pairing first.
+    const reloadUrl = switchReloadUrl(
+      currentStaleBundlePage(),
+      { isPrimary: false, unoBoxId: row.box.id, serverVersion: null },
+      "/computer",
+    );
+    if (reloadUrl) {
+      onDone?.();
+      window.location.assign(reloadUrl);
+      return;
+    }
+    if (!primaryEnvironmentId) return;
     setConnecting({ boxId: row.box.id, label: "Connecting…" });
     try {
       const record = await connectUnoBox(primaryEnvironmentId, row.box, {

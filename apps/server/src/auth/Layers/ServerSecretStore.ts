@@ -15,16 +15,25 @@ export const makeServerSecretStore = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
 
-  yield* fileSystem.makeDirectory(serverConfig.secretsDir, { recursive: true });
-  yield* fileSystem.chmod(serverConfig.secretsDir, 0o700).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SecretStoreError({
-          message: `Failed to secure secrets directory ${serverConfig.secretsDir}.`,
-          cause,
-        }),
-    ),
-  );
+  // The directory can disappear under a running daemon: on a Work machine
+  // restored from an image's memory snapshot, `uno-work-identity` deletes
+  // `secrets/` and asks the daemon to rotate its key in place
+  // (cloneIdentity.ts). Every write makes sure it is there again — otherwise
+  // the new key lives only in memory, and the next restart logs everyone out.
+  const ensureSecretsDir = fileSystem
+    .makeDirectory(serverConfig.secretsDir, { recursive: true })
+    .pipe(
+      Effect.flatMap(() => fileSystem.chmod(serverConfig.secretsDir, 0o700)),
+      Effect.mapError(
+        (cause) =>
+          new SecretStoreError({
+            message: `Failed to secure secrets directory ${serverConfig.secretsDir}.`,
+            cause,
+          }),
+      ),
+    );
+
+  yield* ensureSecretsDir;
 
   const resolveSecretPath = (name: string) => path.join(serverConfig.secretsDir, `${name}.bin`);
 
@@ -50,6 +59,7 @@ export const makeServerSecretStore = Effect.gen(function* () {
     const secretPath = resolveSecretPath(name);
     const tempPath = `${secretPath}.${Crypto.randomUUID()}.tmp`;
     return Effect.gen(function* () {
+      yield* ensureSecretsDir;
       yield* fileSystem.writeFile(tempPath, value);
       yield* fileSystem.chmod(tempPath, 0o600);
       yield* fileSystem.rename(tempPath, secretPath);
@@ -73,23 +83,27 @@ export const makeServerSecretStore = Effect.gen(function* () {
 
   const create: ServerSecretStoreShape["set"] = (name, value) => {
     const secretPath = resolveSecretPath(name);
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const file = yield* fileSystem.open(secretPath, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        yield* file.writeAll(value);
-        yield* file.sync;
-        yield* fileSystem.chmod(secretPath, 0o600);
-      }),
-    ).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SecretStoreError({
-            message: `Failed to persist secret ${name}.`,
-            cause,
+    return ensureSecretsDir.pipe(
+      Effect.flatMap(() =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const file = yield* fileSystem.open(secretPath, {
+              flag: "wx",
+              mode: 0o600,
+            });
+            yield* file.writeAll(value);
+            yield* file.sync;
+            yield* fileSystem.chmod(secretPath, 0o600);
           }),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new SecretStoreError({
+                message: `Failed to persist secret ${name}.`,
+                cause,
+              }),
+          ),
+        ),
       ),
     );
   };

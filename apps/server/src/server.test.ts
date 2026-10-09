@@ -1068,6 +1068,31 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("SPA fallback: app routes get index.html with no-cache, missing assets get 404", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-static-fallback-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "index.html"),
+        "<html>router-static-shell</html>",
+      );
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const route = yield* HttpClient.get("/computer");
+      assert.equal(route.status, 200);
+      assert.equal(route.headers["cache-control"], "no-cache");
+      assert.include(yield* route.text, "router-static-shell");
+
+      const chunk = yield* HttpClient.get("/assets/ChatView-OLDHASH1.js");
+      assert.equal(chunk.status, 404);
+      assert.notInclude(yield* chunk.text, "router-static-shell");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("redirects to dev URL when configured", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({

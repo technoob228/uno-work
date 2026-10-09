@@ -2,6 +2,7 @@ import { AuthSessionId, type AuthClientMetadata, type AuthClientSession } from "
 import { Clock, DateTime, Duration, Effect, Layer, PubSub, Ref, Schema, Stream } from "effect";
 import { Option } from "effect";
 
+import { kernelRandomBytes } from "../../cloneEntropy.ts";
 import { ServerConfig } from "../../config.ts";
 import { AuthSessionRepositoryLive } from "../../persistence/Layers/AuthSessions.ts";
 import { AuthSessionRepository } from "../../persistence/Services/AuthSessions.ts";
@@ -493,8 +494,10 @@ export const makeSessionCredentialService = Effect.gen(function* () {
   // them keeps "Authorized clients" honest.
   const rotateSigningKey: NonNullable<SessionCredentialServiceShape["rotateSigningKey"]> =
     Effect.gen(function* () {
-      yield* secretStore.remove(SIGNING_SECRET_NAME);
-      const fresh = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+      // From the kernel: in a clone of a memory snapshot the process's own
+      // generator is the snapshot's copy and would give every clone this key.
+      const fresh = kernelRandomBytes(32);
+      yield* secretStore.set(SIGNING_SECRET_NAME, fresh);
       yield* Ref.set(signingSecretRef, fresh);
       const revokedAt = yield* DateTime.now;
       const revokedSessionIds = yield* authSessions.revokeAllExcept({

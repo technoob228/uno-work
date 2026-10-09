@@ -141,6 +141,40 @@ export function reportSelfUpdate(input: {
   return inFlight;
 }
 
+/** How long a freshly started daemon waits for the updater to call the run finished. */
+const AFTER_START_WAIT_MS = 10 * 60_000;
+const AFTER_START_POLL_MS = 3_000;
+
+/**
+ * The report at daemon start. The updater that started this daemon marks the
+ * run finished only AFTER the daemon answered /api/health a few times (~6 s
+ * later, measured 08.10 on 0.0.113 → 0.0.114), so a single look at start
+ * always found an unfinished run and the owner never got the line in Security.
+ * Wait (a few seconds of polling a local file) while the updater is still
+ * working, then report once. Never rejects.
+ */
+export async function reportSelfUpdateAfterStart(
+  input: Parameters<typeof reportSelfUpdate>[0] & {
+    readonly pollMs?: number;
+    readonly maxWaitMs?: number;
+    readonly sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<void> {
+  if (!input.identity) return;
+  const now = input.now ?? Date.now;
+  const sleep =
+    input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + (input.maxWaitMs ?? AFTER_START_WAIT_MS);
+  for (;;) {
+    const run = await input.lastRun().catch(() => null);
+    if (run?.state !== "updating" || run.finishedAt) break;
+    // An updater that died mid-run: its status stays "updating" forever.
+    if (now() >= deadline) return;
+    await sleep(input.pollMs ?? AFTER_START_POLL_MS);
+  }
+  await reportSelfUpdate(input);
+}
+
 /** Tests only. */
 export function resetSelfUpdateReportState(): void {
   lastAttemptAt = 0;

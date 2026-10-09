@@ -10,8 +10,13 @@ import { isElectron } from "./env";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { handleUncaughtRenderError } from "./fatalRecovery";
+import { installPreloadErrorReload } from "./staleBundle";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
+
+// A tab still on the previous bundle asks for chunks that are gone after an
+// update: reload once into the current one instead of a broken screen.
+installPreloadErrorReload();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();

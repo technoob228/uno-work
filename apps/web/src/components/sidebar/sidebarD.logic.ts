@@ -6,8 +6,8 @@
  *
  * Layout, top to bottom: the account + computer header (menu: Settings,
  * Plan & AI, Billing, Uno console, Help, Sign out; Search ⌘K and New chat as
- * icons), the places Files and Apps & sites, "Needs you" only when something
- * waits, then the chats: Uno pinned first (the chats it started and is
+ * icons), the places Home, Files and Apps & sites, "Needs you" only when
+ * something waits for the person, then the chats: Uno pinned first (the chats it started and is
  * watching under it, "N running"), Projects as groups that fold, Recents
  * (chats in the home folder), and the Done shelf.
  */
@@ -174,4 +174,25 @@ export function accountMenuLines(
     signInElsewhere: transport === "none",
     desktopSignOut: transport === "desktop" && signedIn,
   };
+}
+
+/** Home is the computer's start screen (`/computer`): the Home row lights there. */
+export const SIDEBAR_D_HOME_PATH = "/computer";
+
+export function isHomePath(pathname: string): boolean {
+  return pathname === SIDEBAR_D_HOME_PATH;
+}
+
+/**
+ * "Needs you" in the sidebar (Misha 08.10: "Needs you 0"): the row shows only
+ * when an approval or a question really waits for the person, and counts
+ * those. Unread news alone (a finished chat, an app's note) doesn't bring it
+ * up — the chat rows already show what finished.
+ */
+export function needsYouPlace(needsYou: number): {
+  readonly shown: boolean;
+  readonly count: number;
+} {
+  const count = Number.isFinite(needsYou) && needsYou > 0 ? Math.floor(needsYou) : 0;
+  return { shown: count > 0, count };
 }

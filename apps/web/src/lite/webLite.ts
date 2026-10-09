@@ -37,6 +37,20 @@ export function liteRedirectPath(pathname: string): string | null {
 }
 
 /**
+ * Whether lite is on its Home — the screen it opens on (`homePath`): Uno AI
+ * with no chat picked, or My Uno's first page (no tab, no section).
+ */
+export function liteOnHome(input: {
+  readonly pathname: string;
+  readonly homePath: string;
+  readonly search: { readonly chat?: string; readonly tab?: string; readonly section?: string };
+}): boolean {
+  if (input.pathname !== input.homePath) return false;
+  if (input.homePath === LITE_AI_PATH) return !input.search.chat;
+  return !input.search.tab && !input.search.section;
+}
+
+/**
  * The same as an href that keeps the first message of the console's hand-off
  * (`/?q=…` → `/ai?q=…`). Other query parameters are dropped.
  */

@@ -112,7 +112,6 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   MessageSquareTextIcon,
-  TriangleAlertIcon,
   WifiOffIcon,
   XIcon,
 } from "lucide-react";
@@ -220,12 +219,6 @@ import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSend
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
-import {
-  buildVersionMismatchDismissalKey,
-  dismissVersionMismatch,
-  isVersionMismatchDismissed,
-  resolveServerConfigVersionMismatch,
-} from "../versionSkew";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
@@ -1240,42 +1233,8 @@ export default function ChatView(props: ChatViewProps) {
     threadProvider,
     providerStatuses: serverConfig?.providers,
   });
-  const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
-  const versionMismatchDismissKey =
-    versionMismatch && activeThread
-      ? buildVersionMismatchDismissalKey(activeThread.environmentId, versionMismatch)
-      : null;
-  const [dismissedVersionMismatchKey, setDismissedVersionMismatchKey] = useState<string | null>(
-    null,
-  );
-  const versionMismatchDismissed =
-    versionMismatchDismissKey === dismissedVersionMismatchKey ||
-    isVersionMismatchDismissed(versionMismatchDismissKey);
-  const showVersionMismatchBanner =
-    versionMismatch !== null && versionMismatchDismissKey !== null && !versionMismatchDismissed;
-  const hasMultipleRegisteredEnvironments = Object.keys(savedEnvironmentRegistry).length > 0;
-  const versionMismatchServerLabel = useMemo(() => {
-    if (!hasMultipleRegisteredEnvironments || !activeThread) {
-      return "server";
-    }
-
-    const isPrimary = activeThread.environmentId === primaryEnvironmentId;
-    const savedRecord = savedEnvironmentRegistry[activeThread.environmentId];
-    const runtimeState = savedEnvironmentRuntimeById[activeThread.environmentId];
-    return `${resolveEnvironmentOptionLabel({
-      isPrimary,
-      environmentId: activeThread.environmentId,
-      runtimeLabel: runtimeState?.descriptor?.label ?? serverConfig?.environment.label ?? null,
-      savedLabel: savedRecord?.label ?? null,
-    })} server`;
-  }, [
-    activeThread,
-    hasMultipleRegisteredEnvironments,
-    primaryEnvironmentId,
-    savedEnvironmentRegistry,
-    savedEnvironmentRuntimeById,
-    serverConfig?.environment.label,
-  ]);
+  // Client/server version skew is a global notice now (StaleBundleNotice):
+  // it offers the reload that actually fixes it, on every screen.
   // "A new version of Uno Work is ready · Update" for the computer this chat runs on.
   const selfUpdate = useSelfUpdate(activeThread?.environmentId ?? primaryEnvironmentId);
   const selfUpdateBanner = selfUpdateBannerItem(selfUpdate);
@@ -1335,35 +1294,12 @@ export default function ChatView(props: ChatViewProps) {
         ),
       });
     }
-    if (showVersionMismatchBanner && versionMismatch && versionMismatchDismissKey) {
-      items.push({
-        id: `version-mismatch:${versionMismatchDismissKey}`,
-        variant: "warning",
-        icon: <TriangleAlertIcon />,
-        title: "Client and server versions differ",
-        description: (
-          <>
-            Client {versionMismatch.clientVersion} is connected to {versionMismatchServerLabel}{" "}
-            {versionMismatch.serverVersion}. Sync them if RPC calls or reconnects fail.
-          </>
-        ),
-        dismissLabel: "Dismiss version mismatch warning",
-        onDismiss: () => {
-          dismissVersionMismatch(versionMismatchDismissKey);
-          setDismissedVersionMismatchKey(versionMismatchDismissKey);
-        },
-      });
-    }
     return items;
   }, [
     activeEnvironmentUnavailableState,
     handleReconnectActiveEnvironment,
     navigate,
     reconnectingEnvironmentId,
-    showVersionMismatchBanner,
-    versionMismatch,
-    versionMismatchDismissKey,
-    versionMismatchServerLabel,
   ]);
   // While Uno Work updates itself the daemon restarts: "can't reach the
   // computer" and "versions differ" would only repeat what the update notice says.

@@ -7,10 +7,13 @@ import {
   appWidgetSpan,
   appWidgetUrl,
   customWidgetIdeas,
+  hideInProgress,
   homeLayoutReducer,
+  inProgressShown,
   isAppWidgetBlockId,
   migrateHomeLayout,
   normalizeHomeLayout,
+  showInProgress,
 } from "./homeLayout";
 
 describe("migrateHomeLayout", () => {
@@ -146,5 +149,36 @@ describe("app widgets", () => {
     expect(ideas[0]).toContain("Shop");
     expect(ideas[1]).toContain("Notes");
     expect(customWidgetIdeas([])).toHaveLength(3);
+  });
+});
+
+describe("In progress on Home (Misha 08.10: a widget you can hide)", () => {
+  it("is on Home by default", () => {
+    expect(inProgressShown(DEFAULT_HOME_LAYOUT)).toBe(true);
+    expect(inProgressShown(normalizeHomeLayout(undefined))).toBe(true);
+  });
+
+  it("goes away with one Hide and the choice stays in the stored layout", () => {
+    const hidden = homeLayoutReducer(DEFAULT_HOME_LAYOUT, hideInProgress());
+    expect(inProgressShown(hidden)).toBe(false);
+    // What localStorage keeps reads back the same way (remembered on reload).
+    expect(inProgressShown(normalizeHomeLayout(JSON.parse(JSON.stringify(hidden))))).toBe(false);
+    expect(hidden).toContain("composer");
+  });
+
+  it("comes back from Add widget, Undo or Reset", () => {
+    const hidden = homeLayoutReducer(DEFAULT_HOME_LAYOUT, hideInProgress());
+    expect(addableBlocks(hidden, DEFAULT_HOME_LAYOUT)).toContain("continue");
+    expect(inProgressShown(homeLayoutReducer(hidden, showInProgress()))).toBe(true);
+    expect(inProgressShown(homeLayoutReducer(hidden, { type: "reset" }))).toBe(true);
+  });
+
+  it("keeps the person's widgets when hidden and shown again", () => {
+    const layout = homeLayoutReducer(
+      homeLayoutReducer([...DEFAULT_HOME_LAYOUT, "files"], hideInProgress()),
+      showInProgress(),
+    );
+    expect(layout).toContain("files");
+    expect(inProgressShown(layout)).toBe(true);
   });
 });

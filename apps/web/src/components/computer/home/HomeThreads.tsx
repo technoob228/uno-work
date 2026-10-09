@@ -22,7 +22,13 @@ import { useShallow } from "zustand/react/shallow";
 import { cn } from "~/lib/utils";
 import { usePendingApproval } from "../../../inbox/usePendingApproval";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
-import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
+import {
+  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsForEnvironment,
+  useStore,
+} from "../../../store";
+import { useProtoOneMachine } from "../../../proto/protoState";
+import { useProtoChatPlace } from "../../../proto/protoPlace";
 import { buildThreadRouteParams } from "../../../threadRoutes";
 import { markChatDone, markInboxItemDone } from "../../../inbox/inboxDone";
 import { useInboxEntries } from "../../../inbox/inboxStore";
@@ -45,7 +51,15 @@ import {
 
 /** Every chat summary, with when the person last opened it. */
 export function useHomeThreads(): { threads: HomeThread[]; now: number } {
-  const summaries = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  // Sidebar prototype (w0115): (А) Home is about the computer picked on top.
+  const oneMachine = useProtoOneMachine();
+  const summaries = useStore(
+    useShallow((state) =>
+      oneMachine
+        ? selectSidebarThreadsForEnvironment(state, state.activeEnvironmentId)
+        : selectSidebarThreadsAcrossEnvironments(state),
+    ),
+  );
   const visited = useUiStateStore((state) => state.threadLastVisitedAtById);
   const clock = useMinuteClock();
   const threads = useMemo(
@@ -69,6 +83,17 @@ export function useOpenThread() {
         params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
       }),
     [navigate],
+  );
+}
+
+/** Sidebar prototype (w0115): "MacBook · brand-kit" — where the chat lives. */
+function ChatPlace({ thread, className }: { thread: HomeThread; className?: string }) {
+  const place = useProtoChatPlace(thread.environmentId, thread.id);
+  if (!place) return null;
+  return (
+    <span className={cn("block truncate text-[11px] text-muted-foreground", className)}>
+      {place}
+    </span>
   );
 }
 
@@ -255,6 +280,7 @@ export function ContinueCards({
               ) : null}
             </div>
             <div className="truncate text-sm font-medium">{thread.title}</div>
+            <ChatPlace thread={thread} className="-mt-1" />
             {line ? (
               <span className="line-clamp-2 text-xs text-muted-foreground">{line}</span>
             ) : null}
@@ -356,6 +382,7 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
                 <span className="block truncate text-xs text-muted-foreground">
                   Asked you a question
                 </span>
+                <ChatPlace thread={thread} />
               </span>
               <span className="shrink-0 text-xs text-muted-foreground">Open</span>
             </button>

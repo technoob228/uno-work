@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { Duration, Effect, Layer } from "effect";
+import { join } from "node:path";
+
+import { Duration, Effect, FileSystem, Layer } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { ServerConfigShape } from "../../config.ts";
@@ -207,5 +209,42 @@ it.layer(NodeServices.layer)("SessionCredentialServiceLive clone identity", (it)
       const after = yield* sessions.issue({ subject: "clone", role: "owner" });
       expect((yield* sessions.verify(after.token)).subject).toBe("clone");
     }).pipe(Effect.provide(makeSessionCredentialLayer())),
+  );
+});
+
+it.layer(NodeServices.layer)("SessionCredentialServiceLive clone identity on disk", (it) => {
+  it.effect(
+    "keeps the rotated key after uno-work-identity removed secrets/, so a restart logs nobody out",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const keyPath = join(config.secretsDir, "server-signing-key.bin");
+        const startDaemon = Effect.service(SessionCredentialService).pipe(
+          Effect.provide(Layer.fresh(SessionCredentialServiceLive)),
+        );
+
+        // The daemon in the memory snapshot, with the snapshot's key.
+        const warm = yield* startDaemon;
+        const snapshotKey = yield* fileSystem.readFile(keyPath);
+
+        // A fresh clone: uno-work-identity deletes secrets/ and sends SIGUSR2.
+        yield* fileSystem.remove(config.secretsDir, { recursive: true });
+        yield* warm.rotateSigningKey!;
+        const cloneKey = yield* fileSystem.readFile(keyPath);
+        expect(Array.from(cloneKey)).not.toEqual(Array.from(snapshotKey));
+
+        const issued = yield* warm.issue({ subject: "clone-owner", role: "owner" });
+
+        // The next daemon start (an update, a crash) reads the clone's own key.
+        const restarted = yield* startDaemon;
+        expect((yield* restarted.verify(issued.token)).subject).toBe("clone-owner");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(SqlitePersistenceMemory, ServerSecretStoreLive).pipe(
+            Layer.provideMerge(makeServerConfigLayer()),
+          ),
+        ),
+      ),
   );
 });

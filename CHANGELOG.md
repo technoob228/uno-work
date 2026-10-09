@@ -8,6 +8,26 @@
 
 ---
 
+## v0.0.117 — 2026-10-09
+
+- Switching computers in the browser always shows the interface of the computer you switch to. If it runs another Uno Work version, the page opens it in its own version (Uno remembers your choice: app.uno4.work opens that computer next time too).
+- "A new version of Uno Work is ready · Reload" appears on every screen when the computer you use runs a newer Uno Work than the page — not only inside a chat.
+- After an update, a tab that still runs the previous version reloads by itself instead of breaking on a missing file.
+
+## v0.0.116 — 2026-10-08
+
+- Home is one click away again: a "Home" row on top of the sidebar (and a house on the folded rail) opens the start screen from any chat, file or app. The web version without a computer has the same "Home" row.
+- Home: "In progress" can be hidden — "Hide" next to its title (Undo in the toast). It stays hidden on this device; Customize → Add widget → "In progress" brings it back.
+- Sidebar: "Needs you" shows only when an approval or a question really waits for you, with their number — no more "Needs you" with nothing in it.
+- New computers start warm: the image keeps OpenCode's plugin files, so the first chat doesn't wait for a download.
+
+## v0.0.115 — 2026-10-08
+
+- Agents can write into any free chat, also one you wrote in — "Hand back to agent" is gone. To keep agents out of a chat: right-click it → "Don't let agents write here" (or the strip above the input); agents then get "The person closed this chat to agents". The same button lets them back.
+- New chat: the folder chip ("Home folder ▾") also makes folders — "New folder…", "Upload a folder…", "Clone from GitHub…". The new folder goes to ~/projects and the chat moves into it with what you typed. A folder or a .zip dropped on a new chat does the same as "Upload a folder…"; pictures and videos stay attachments. "Empty project" and "From GitHub" also put the folder in ~/projects now. A fresh computer's empty sidebar says "No chats yet" with New chat and Add a project.
+- Update: after Uno Work updates itself, Security gets the line "You updated Uno Work to … (was …)" — the computer now waits for the update to finish before telling the console.
+- Computers started from a memory snapshot (the fast start) keep their own sign-in key on disk: restarting or updating Uno Work no longer signs the person out, and every such computer has its own environment id. Saving keys on such a computer works again.
+
 ## v0.0.114 — 2026-10-08
 
 - Right panel: when a chat is marked Done or archived (or deleted), everything open in that chat's panel closes — browser tabs, site previews, files, apps. On the desktop app their pages are unloaded too. Tabs pinned to the project or "everywhere" stay. A chat brought back from Done or the archive starts with an empty panel.

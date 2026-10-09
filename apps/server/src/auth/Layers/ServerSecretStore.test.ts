@@ -220,6 +220,30 @@ it.layer(NodeServices.layer)("ServerSecretStoreLive", (it) => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("writes again after its directory was removed under it (memory-snapshot clone)", () =>
+    Effect.gen(function* () {
+      const secretStore = yield* ServerSecretStore;
+      const config = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* secretStore.getOrCreateRandom("server-signing-key", 32);
+      yield* fileSystem.remove(config.secretsDir, { recursive: true });
+
+      const fresh = yield* secretStore.getOrCreateRandom("server-signing-key", 32);
+      const onDisk = yield* secretStore.get("server-signing-key");
+      expect(Array.from(onDisk ?? new Uint8Array())).toEqual(Array.from(fresh));
+      expect((yield* fileSystem.stat(config.secretsDir)).mode & 0o777).toBe(0o700);
+
+      yield* fileSystem.remove(config.secretsDir, { recursive: true });
+      yield* secretStore.set("provider-key", Uint8Array.from([7, 8]));
+      expect(Array.from((yield* secretStore.get("provider-key")) ?? new Uint8Array())).toEqual([
+        7, 8,
+      ]);
+    }).pipe(
+      Effect.provide(ServerSecretStoreLive.pipe(Layer.provideMerge(makeServerConfigLayer()))),
+    ),
+  );
+
   it.effect("propagates read failures other than missing-file errors", () =>
     Effect.gen(function* () {
       const secretStore = yield* ServerSecretStore;

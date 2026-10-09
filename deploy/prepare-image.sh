@@ -91,6 +91,32 @@ apt-get clean >/dev/null 2>&1 || true
 # образа вырос с 8 до 11 ГБ. npm-кэш root — от `npm install` установщика.
 rm -rf /root/.npm/_cacache 2>/dev/null || true
 
+# OpenCode (Uno Code): личное — data/, state/, cache/, всё прочее в корне и
+# в config/ — в образ не везём (раньше opencode-home стирали целиком), а зависимости его плагина (config/opencode: package.json,
+# lock, .gitignore и node_modules с @opencode-ai/plugin, ~63 МБ, ничего
+# личного) ОСТАВЛЯЕМ. Без них OpenCode на старте ставит плагин с
+# registry.npmjs.org, у warm-up машины сети нет — снимок памяти замерзал
+# посреди `npm install`, и клон ждал ~133 с таймаута TCP (баг 3 0.0.113,
+# починен в поезде 0.0.115 руками, с 0.0.116 — здесь).
+OC_HOME="/home/${SERVICE_USER}/.unowork/opencode-home"
+if [ -d "${OC_HOME}" ]; then
+  log "Чищу opencode-home (оставляю только зависимости плагина в config/opencode)"
+  find "${OC_HOME}" -mindepth 1 -maxdepth 1 ! -name config -exec rm -rf {} +
+  if [ -d "${OC_HOME}/config" ]; then
+    find "${OC_HOME}/config" -mindepth 1 -maxdepth 1 ! -name opencode -exec rm -rf {} +
+  fi
+  if [ -d "${OC_HOME}/config/opencode" ]; then
+    find "${OC_HOME}/config/opencode" -mindepth 1 -maxdepth 1 \
+      ! -name node_modules ! -name package.json ! -name package-lock.json ! -name .gitignore \
+      -exec rm -rf {} +
+  fi
+  if [ -f "${OC_HOME}/config/opencode/node_modules/@opencode-ai/plugin/package.json" ]; then
+    log "  плагин OpenCode в образе: $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "${OC_HOME}/config/opencode/node_modules/@opencode-ai/plugin/package.json" | head -1)"
+  else
+    log "  ВНИМАНИЕ: нет config/opencode/node_modules/@opencode-ai/plugin — снимок будет холодным (OpenCode полезет в npm без сети)"
+  fi
+fi
+
 # 5. Вернуть host keys на первой загрузке клона.
 #
 # Раньше здесь стояло «systemd восстановит host keys сам» — это неверно.

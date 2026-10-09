@@ -23,7 +23,11 @@ import {
   SelfUpdateUnavailableError,
   type SelfUpdateController,
 } from "./selfUpdate.ts";
-import { noteSelfUpdateIntent, reportSelfUpdate } from "./selfUpdateJournal.ts";
+import {
+  noteSelfUpdateIntent,
+  reportSelfUpdate,
+  reportSelfUpdateAfterStart,
+} from "./selfUpdateJournal.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { controlPlaneBaseUrl } from "./workspaceRegistry/unoCloudParse.ts";
 
@@ -37,21 +41,30 @@ export function selfUpdateController(): SelfUpdateController {
   return controller;
 }
 
+const reportWith = (report: typeof reportSelfUpdate) =>
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    const settings = yield* ServerSettingsService;
+    const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const update = selfUpdateController();
+    yield* Effect.promise(() =>
+      report({
+        stateDir: config.stateDir,
+        lastRun: update.lastRun,
+        identity: readWorkMachineIdentity(current?.uno),
+        consoleBaseUrl: controlPlaneBaseUrl(),
+      }),
+    );
+  });
+
 /** Tell the console about a finished update (Security journal). Never fails. */
-export const reportSelfUpdateToConsole = Effect.gen(function* () {
-  const config = yield* ServerConfig;
-  const settings = yield* ServerSettingsService;
-  const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-  const update = selfUpdateController();
-  yield* Effect.promise(() =>
-    reportSelfUpdate({
-      stateDir: config.stateDir,
-      lastRun: update.lastRun,
-      identity: readWorkMachineIdentity(current?.uno),
-      consoleBaseUrl: controlPlaneBaseUrl(),
-    }),
-  );
-});
+export const reportSelfUpdateToConsole = reportWith(reportSelfUpdate);
+
+/**
+ * The same at daemon start: waits while the updater that started this daemon
+ * is still checking it (selfUpdateJournal.ts). Never fails; run it forked.
+ */
+export const reportSelfUpdateAfterStartToConsole = reportWith(reportSelfUpdateAfterStart);
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
