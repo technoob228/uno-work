@@ -50,7 +50,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
+import { UnoAiRunOutLine, UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
 import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -179,8 +179,9 @@ export function EnvironmentGeneralSettings({
             description={
               gatewayAiHours
                 ? "Uno AI time: Smart and Fast are unlimited inside it, web search too. Premium models are paid per token from premium credit, then your balance."
-                : "AI after your AI time runs out and premium past the plan's credit are paid from your Uno balance."
+                : "Uno AI without AI time and premium models past the plan's credit are paid per use from your Uno balance."
             }
+            status={<UnoAiRunOutLine apiKey={unoApiKey} />}
             control={<UnoGatewayBalance apiKey={unoApiKey} />}
           />
         ) : null}

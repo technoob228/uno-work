@@ -9,7 +9,12 @@
  * backend, or the flag is off for the account) — callers then keep the dollar
  * credits display. Pure functions, unit-tested.
  */
-import type { AccountBalance, AccountPlan, AccountSubscription } from "./accountOverview";
+import {
+  CONSOLE_URL,
+  type AccountBalance,
+  type AccountPlan,
+  type AccountSubscription,
+} from "./accountOverview";
 
 /** "AI time" — the unit of Uno AI everywhere (decision 05.10); next to every place it's shown. */
 export const AI_TIME_NOTE =
@@ -29,6 +34,17 @@ export const AI_SMART_USED_UP_LINE = "Your AI time is used up. Fast keeps going 
  * The console and the gateway's notice say the same words.
  */
 export const AI_SMART_PAUSED_LINE = "Smart is paused until you add AI time. Fast keeps working.";
+
+/**
+ * The person's own Claude / ChatGPT subscription (Settings → AI, model
+ * picker). What happens at its limit is what the chat really does
+ * (turnErrorNotice "subscription-limit"): the chat waits, nothing switches by
+ * itself, a new chat on Uno AI is one button.
+ */
+export const OWN_SUBSCRIPTION_LINE =
+  "On your Claude or ChatGPT subscription, Uno doesn't charge for AI. When the subscription's limit is reached, that chat waits until it resets — or continue in a new chat on Uno AI.";
+/** The same, short: under a subscription model in the picker. */
+export const OWN_SUBSCRIPTION_SHORT = "Your plan · Uno doesn't charge for AI";
 
 /** 5220 → "87 h", 47 → "47 min", 90 → "1 h 30 min". */
 export function formatAiMinutes(minutes: number): string {
@@ -59,6 +75,8 @@ export interface AiHoursSummary {
   readonly fastStandardSpeed?: boolean;
   /** The hours are gone and Smart is paused until AI time is added (`smart_paused`). */
   readonly smartPaused?: boolean;
+  /** At zero Smart pauses instead of being paid per use (`ai_hours.smart_stop`). */
+  readonly smartStop?: boolean;
 }
 
 /**
@@ -102,6 +120,7 @@ export function aiHoursSummary(input: {
       premiumUsd,
       power,
       ...fast(leftMinutes, hours.unlimited),
+      ...(hours.smartStop ? { smartStop: true } : {}),
     };
   }
   const fromMe = input.balance?.aiHoursMinutes ?? null;
@@ -127,6 +146,63 @@ export function aiFastLine(summary: AiHoursSummary): string | null {
   if (!summary.fastUnlimited) return null;
   if (summary.fastStandardSpeed && summary.smartPaused) return AI_SMART_PAUSED_LINE;
   return summary.fastStandardSpeed ? AI_SMART_USED_UP_LINE : AI_FAST_UNLIMITED_LINE;
+}
+
+/** The console's AI time pack checkout (plans with Uno AI). */
+export const AI_TIME_PACK_URL = `${CONSOLE_URL}/billing?ai_pack=1`;
+/** Plans and "Add Uno AI" (a plan with AI time only to try). */
+export const AI_PLANS_URL = `${CONSOLE_URL}/billing`;
+
+export interface AiRunOut {
+  /** What stops, what keeps going, whether a running task stops. */
+  readonly line: string;
+  readonly actionLabel: string;
+  readonly actionUrl: string;
+  /** Past the AI time some Uno AI is paid per use from the balance. */
+  readonly paysFromBalance: boolean;
+}
+
+/**
+ * "When your AI time runs out…" — the one true sentence, by plan (fishcode
+ * knowledge/ai-hours.md "When hours run out" + "Smart stop"):
+ *  - Uno AI plan (Fast unlimited) with smart stop — Smart pauses, its requests
+ *    and a running task go on with Fast, nothing is charged; the way on is the
+ *    AI time pack;
+ *  - Uno AI plan without smart stop — Fast goes on at standard speed, Smart
+ *    per use from the balance;
+ *  - AI time only to try / older plans — Uno AI goes on per use from the
+ *    balance; with an empty balance the gateway stops it (402
+ *    `ai_hours_empty`), the task waits for AI time or money.
+ * Null for unlimited plans (nothing runs out). `smartStop` unknown (only
+ * `/v1/ai/status` read) counts as on: AI_SMART_STOP=all in prod since 07.10.
+ */
+export function aiRunOut(
+  summary: Pick<AiHoursSummary, "unlimited" | "fastUnlimited" | "smartStop">,
+  options: { readonly smartStopKnown?: boolean } = {},
+): AiRunOut | null {
+  if (summary.unlimited) return null;
+  if (summary.fastUnlimited) {
+    const smartStop = summary.smartStop === true || options.smartStopKnown !== true;
+    return smartStop
+      ? {
+          line: "When your AI time runs out, Smart pauses and Fast keeps working — a running task carries on with Fast. Nothing is charged.",
+          actionLabel: "Add AI time",
+          actionUrl: AI_TIME_PACK_URL,
+          paysFromBalance: false,
+        }
+      : {
+          line: "When your AI time runs out, Fast keeps working at standard speed and Smart is paid per use from your balance.",
+          actionLabel: "Add AI time",
+          actionUrl: AI_TIME_PACK_URL,
+          paysFromBalance: true,
+        };
+  }
+  return {
+    line: "When your AI time runs out, Uno AI keeps working and is paid per use from your balance. With an empty balance a running task stops until you add AI time or money.",
+    actionLabel: "Add Uno AI",
+    actionUrl: AI_PLANS_URL,
+    paysFromBalance: true,
+  };
 }
 
 /** The note next to AI time. */

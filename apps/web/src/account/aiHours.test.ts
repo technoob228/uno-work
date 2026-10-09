@@ -7,6 +7,7 @@ import {
   aiHoursHeadline,
   aiHoursLine,
   aiHoursSummary,
+  aiRunOut,
   aiTimeNote,
   aiHoursTodayLine,
   formatAiMinutes,
@@ -218,5 +219,40 @@ describe("Fast unlimited, Smart in hours (plans always on)", () => {
     expect(aiFastLine(summary)).toBeNull();
     expect(aiHoursCaption(summary)).toBe("AI time · never expires");
     expect(aiHoursHeadline(summary)).toBe("87 h left");
+  });
+});
+
+describe("aiRunOut — what happens when the AI time runs out", () => {
+  it("Uno AI plan with smart stop: Smart pauses, Fast and a running task go on, nothing charged", () => {
+    const out = aiRunOut({ unlimited: false, fastUnlimited: true, smartStop: true });
+    expect(out?.line).toMatch(/Smart pauses and Fast keeps working/);
+    expect(out?.line).toMatch(/running task carries on with Fast/);
+    expect(out?.line).toMatch(/Nothing is charged/);
+    expect(out?.actionUrl).toMatch(/\/billing\?ai_pack=1$/);
+    expect(out?.paysFromBalance).toBe(false);
+  });
+
+  it("only the gateway status read: smart stop is assumed (prod AI_SMART_STOP=all)", () => {
+    expect(aiRunOut({ unlimited: false, fastUnlimited: true })?.paysFromBalance).toBe(false);
+  });
+
+  it("subscription says no smart stop: Smart per use from the balance", () => {
+    const out = aiRunOut(
+      { unlimited: false, fastUnlimited: true, smartStop: false },
+      { smartStopKnown: true },
+    );
+    expect(out?.line).toMatch(/Smart is paid per use from your balance/);
+    expect(out?.paysFromBalance).toBe(true);
+  });
+
+  it("AI time only to try: per use from the balance, stops on an empty balance", () => {
+    const out = aiRunOut({ unlimited: false });
+    expect(out?.line).toMatch(/paid per use from your balance/);
+    expect(out?.line).toMatch(/empty balance a running task stops/);
+    expect(out?.actionLabel).toBe("Add Uno AI");
+  });
+
+  it("unlimited: nothing runs out", () => {
+    expect(aiRunOut({ unlimited: true })).toBeNull();
   });
 });

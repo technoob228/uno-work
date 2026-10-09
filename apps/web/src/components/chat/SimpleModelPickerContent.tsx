@@ -164,7 +164,8 @@ export function SimpleModelPickerContent(props: {
           data-testid="simple-model-connect-subscription"
           className="mt-0.5 w-full cursor-pointer rounded-lg px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          Have Claude Pro / Max or ChatGPT Plus? Use your subscription →
+          Have Claude Pro / Max or ChatGPT Plus? Use your subscription — Uno doesn't charge for AI
+          on it →
         </button>
       ) : null}
       <p className="px-2 pt-1 pb-0.5 text-[11px] leading-snug text-muted-foreground/80">

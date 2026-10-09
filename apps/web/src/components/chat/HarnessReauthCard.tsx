@@ -234,9 +234,7 @@ export const HarnessReauthCard = memo(function HarnessReauthCard({
           driver={authDriver}
           label={loss.harnessLabel}
           job={authJob}
-          onStart={({ method, apiKey }) =>
-            void setup.startAuth({ driver: authDriver, method, ...(apiKey ? { apiKey } : {}) })
-          }
+          onStart={(input) => void setup.startAuth({ driver: authDriver, ...input })}
           onSubmitCode={(code) => void setup.submitAuthCode({ driver: authDriver, code })}
           onReset={() => setup.clearAuth(authDriver)}
         />
