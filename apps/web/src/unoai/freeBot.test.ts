@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  freeBotEmailNote,
   extractBotToken,
   formatFreeUntil,
   freeBotPollMs,
@@ -68,5 +69,15 @@ describe("free bot", () => {
     expect(tokenErrorOffersPlan("FREE_BOT_FULL")).toBe(true);
     expect(tokenErrorOffersPlan("FREE_BOT_ENDED")).toBe(true);
     expect(tokenErrorOffersPlan("FREE_BOT_BAD_TOKEN")).toBe(false);
+  });
+});
+
+describe("freeBotEmailNote (icp3 09.10)", () => {
+  it("says what to fix about the email before the @BotFather steps", () => {
+    expect(freeBotEmailNote("FREE_BOT_EMAIL_REQUIRED")).toContain("needs an email");
+    expect(freeBotEmailNote("FREE_BOT_EMAIL_UNVERIFIED")).toContain("Confirm your email");
+    expect(freeBotEmailNote("FREE_BOT_DISPOSABLE_EMAIL")).toContain("permanent email");
+    expect(freeBotEmailNote("FREE_BOT_FULL")).toBeNull();
+    expect(freeBotEmailNote(undefined)).toBeNull();
   });
 });
