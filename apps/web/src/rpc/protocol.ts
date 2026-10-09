@@ -3,6 +3,7 @@ import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
+import { makeTolerantStreamsRpcGroup } from "./tolerantRpcGroup";
 import {
   acknowledgeRpcRequest,
   clearAllTrackedRpcRequests,
@@ -67,7 +68,13 @@ export interface WsProtocolLifecycleHandlers {
   ) => void;
 }
 
-export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
+/**
+ * The client decodes streams tolerantly (tolerantRpcGroup.ts): an item of a
+ * type this bundle does not know is dropped by WsTransport instead of ending
+ * the stream. Same tags and types as WsRpcGroup.
+ */
+export const WsClientRpcGroup = makeTolerantStreamsRpcGroup(WsRpcGroup);
+export const makeWsRpcProtocolClient = RpcClient.make(WsClientRpcGroup);
 type RpcClientFactory = typeof makeWsRpcProtocolClient;
 export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;

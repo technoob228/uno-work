@@ -3,7 +3,7 @@
  * role `assistant`, joined with what this interface knows about it — is it
  * connected here, is its assistant working or waiting for the person.
  */
-import { ASSISTANT_PROJECT_ID, type EnvironmentId } from "@t3tools/contracts";
+import { ASSISTANT_PROJECT_ID, type EnvironmentId, HTTP_FEATURES } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -11,6 +11,7 @@ import { useShallow } from "zustand/react/shallow";
 import { accountTransport } from "../../account/unoAccount";
 import { ensureAssistantChatWhenReady } from "../../assistant/assistantChat.logic";
 import { isPrimaryEnvironmentId } from "../../environments/http/target";
+import { useEnvironmentSupportsHttpFeature } from "../../environments/httpFeatureSupport";
 import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
 import { updateEnvironmentSettings } from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
@@ -267,13 +268,15 @@ export function useLocalAssistants(environmentId: EnvironmentId | null) {
 
 /** Deleted assistants of this computer still kept (Restore); older daemons have none. */
 export function useDeletedLocalAssistants(environmentId: EnvironmentId | null) {
+  // A computer without the trash routes (before 0.0.106) has nothing to restore.
+  const supported = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.assistantsTrash);
   return useQuery({
     queryKey: [...LOCAL_ASSISTANTS_KEY, "deleted", environmentId],
     queryFn: () =>
       listDeletedLocalAssistants({ environmentId: environmentId! })
         .then((result) => result.deleted)
         .catch(() => []),
-    enabled: environmentId !== null,
+    enabled: environmentId !== null && supported,
     refetchInterval: 30_000,
     retry: false,
   });

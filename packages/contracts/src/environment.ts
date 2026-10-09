@@ -55,8 +55,55 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       (`/api/manager/assistant/telegram/test`). Absent: clients show the one
       pinned chat and the manual chat-id Telegram setup. */
   assistantConversations: Schema.optionalKey(Schema.Boolean),
+  /** Groups of owner HTTP routes this daemon serves, by name (see
+      {@link HTTP_FEATURES}). One flag for every route family a newer
+      interface may call, so an interface served by our address (newer than
+      the daemon) hides the button and says "Update this computer" instead of
+      getting a 404. Absent on daemons that predate the field: clients fall back to
+      {@link HTTP_FEATURE_SINCE} by `serverVersion`. Plain strings, not
+      literals: a newer daemon may list names this client does not know. */
+  httpFeatures: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
+
+/**
+ * Named families of daemon HTTP routes ({@link ExecutionEnvironmentCapabilities.httpFeatures}).
+ * Rule for a PR: a new owner HTTP route the web calls = a new name here, listed
+ * by the daemon, checked by the client before it calls.
+ */
+export const HTTP_FEATURES = {
+  /** `GET /api/self-update/status`, `POST /api/self-update/start` — the Update button. */
+  selfUpdate: "self-update",
+  /** `/api/manager/assistant/{apps,chats,draft,instructions}`. */
+  assistantWorkspace: "assistant-workspace",
+  /** `/api/manager/assistants/{deleted,restore}` — Restore of a deleted assistant. */
+  assistantsTrash: "assistants-trash",
+} as const;
+export type HttpFeature = (typeof HTTP_FEATURES)[keyof typeof HTTP_FEATURES];
+
+/**
+ * The Uno Work version that first served each feature: how a client judges a
+ * daemon that predates `httpFeatures` (it never lists anything).
+ */
+export const HTTP_FEATURE_SINCE: Readonly<Record<HttpFeature, string>> = {
+  "self-update": "0.0.113",
+  "assistant-workspace": "0.0.106",
+  "assistants-trash": "0.0.106",
+};
+
+/** Route prefix → feature, for the client's 404 handling and the pre-call check. */
+export const HTTP_FEATURE_ROUTES: ReadonlyArray<{
+  readonly prefix: string;
+  readonly feature: HttpFeature;
+}> = [
+  { prefix: "/api/self-update/", feature: "self-update" },
+  { prefix: "/api/manager/assistant/apps", feature: "assistant-workspace" },
+  { prefix: "/api/manager/assistant/chats", feature: "assistant-workspace" },
+  { prefix: "/api/manager/assistant/draft", feature: "assistant-workspace" },
+  { prefix: "/api/manager/assistant/instructions", feature: "assistant-workspace" },
+  { prefix: "/api/manager/assistants/deleted", feature: "assistants-trash" },
+  { prefix: "/api/manager/assistants/restore", feature: "assistants-trash" },
+];
 
 /**
  * What kind of machine a daemon runs on, as the daemon itself reports it.

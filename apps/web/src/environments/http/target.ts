@@ -27,6 +27,14 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import type { HttpFeature } from "@t3tools/contracts";
+
+import {
+  httpFeatureForPath,
+  knownToLackHttpFeature,
+  readEnvironmentDescriptor,
+  updateComputerToUseCopy,
+} from "../httpFeatureSupport";
 import { getPrimaryKnownEnvironment } from "../primary";
 import { resolvePrimaryEnvironmentHttpUrl } from "../primary/target";
 import { getSavedEnvironmentRecord, readSavedEnvironmentBearerToken } from "../runtime/catalog";
@@ -51,6 +59,32 @@ export class EnvironmentHttpError extends Error {
     super(message);
     this.name = "EnvironmentHttpError";
   }
+}
+
+/**
+ * The computer's Uno Work does not have this route yet (an interface newer
+ * than the daemon — "one window"). Status 404 so callers that already treat
+ * 404 as "older computer" keep working; the message says what to do.
+ */
+export class EnvironmentFeatureUnsupportedError extends EnvironmentHttpError {
+  constructor(
+    readonly feature: HttpFeature,
+    environmentId: EnvironmentId,
+  ) {
+    const descriptor = readEnvironmentDescriptor(environmentId);
+    super(
+      404,
+      updateComputerToUseCopy(descriptor?.label ?? null, descriptor?.serverVersion ?? null),
+      environmentId,
+    );
+    this.name = "EnvironmentFeatureUnsupportedError";
+  }
+}
+
+export function isEnvironmentFeatureUnsupportedError(
+  error: unknown,
+): error is EnvironmentFeatureUnsupportedError {
+  return error instanceof EnvironmentFeatureUnsupportedError;
 }
 
 /**
@@ -132,17 +166,7 @@ export interface EnvironmentRequest {
  * JSON response.
  */
 export async function environmentFetchJson<T>(request: EnvironmentRequest): Promise<T> {
-  const target = await resolveEnvironmentHttpTarget(request.environmentId);
-  const response = await sendRequest(target, request);
-
-  if (!response.ok) {
-    throw new EnvironmentHttpError(
-      response.status,
-      await readErrorMessage(response),
-      request.environmentId,
-    );
-  }
-
+  const response = await environmentFetchResponse(request);
   return (await response.json()) as T;
 }
 
@@ -151,8 +175,17 @@ export async function environmentFetchJson<T>(request: EnvironmentRequest): Prom
  * response (file bytes, streams). Non-2xx still throws.
  */
 export async function environmentFetchResponse(request: EnvironmentRequest): Promise<Response> {
+  // A route newer than the computer: don't call it when the daemon is known
+  // to lack it, and read "no such route" answers as "update this computer".
+  const feature = httpFeatureForPath(request.pathname);
+  if (feature && knownToLackHttpFeature(request.environmentId, feature)) {
+    throw new EnvironmentFeatureUnsupportedError(feature, request.environmentId);
+  }
   const target = await resolveEnvironmentHttpTarget(request.environmentId);
   const response = await sendRequest(target, request);
+  if (feature && isMissingRouteResponse(response)) {
+    throw new EnvironmentFeatureUnsupportedError(feature, request.environmentId);
+  }
   if (!response.ok) {
     throw new EnvironmentHttpError(
       response.status,
@@ -161,6 +194,20 @@ export async function environmentFetchResponse(request: EnvironmentRequest): Pro
     );
   }
   return response;
+}
+
+/**
+ * How a daemon without the route answers: 404 without our JSON error body
+ * (POST), or its own index.html for a GET under /api (the static fallback).
+ * Our routes answer JSON, so a JSON 404 ("no such assistant") stays a 404.
+ */
+export function isMissingRouteResponse(
+  response: Pick<Response, "ok" | "status" | "headers">,
+): boolean {
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  if (contentType.includes("application/json")) return false;
+  if (response.status === 404) return true;
+  return response.ok && contentType.includes("text/html");
 }
 
 async function sendRequest(

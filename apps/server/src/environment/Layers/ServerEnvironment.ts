@@ -1,4 +1,8 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ExecutionEnvironmentDescriptor,
+  HTTP_FEATURES,
+} from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Path, Random, Ref } from "effect";
 import * as OS from "node:os";
 
@@ -112,6 +116,8 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantChat: true,
       assistantLlm: true,
       assistantConversations: true,
+      // Every owner HTTP route family this daemon serves (contracts HTTP_FEATURES).
+      httpFeatures: Object.values(HTTP_FEATURES),
     },
   } satisfies Omit<
     ExecutionEnvironmentDescriptor,
