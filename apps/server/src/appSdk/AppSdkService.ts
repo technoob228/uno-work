@@ -926,7 +926,13 @@ export const makeAppSdkService = (
         const servers = new Map<string, http.Server>();
         const listen = (host: string) =>
           new Promise<boolean>((resolve) => {
-            const server = http.createServer((req, res) => void handler(req, res));
+            // No 5-minute cap on a request (Node's default): an app's upload
+            // into cloud storage (PUT /v1/storage/files/…) can take longer.
+            // The port is on loopback and the docker bridge only.
+            const server = http.createServer(
+              { requestTimeout: 0 },
+              (req, res) => void handler(req, res),
+            );
             server.once("error", () => resolve(false));
             server.listen(port, host, () => {
               servers.set(host, server);
