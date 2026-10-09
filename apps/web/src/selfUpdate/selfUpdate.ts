@@ -74,11 +74,15 @@ export const selfUpdateQueryKey = (environmentId: EnvironmentId | null) =>
 const IDLE_REFETCH_MS = 30 * 60_000;
 const UPDATING_REFETCH_MS = 2_000;
 
-export function selfUpdateQueryOptions(environmentId: EnvironmentId | null) {
+/**
+ * `supported` — the computer serves the self-update routes (httpFeatures
+ * "self-update", or 0.0.113+ by version): an older one is never asked.
+ */
+export function selfUpdateQueryOptions(environmentId: EnvironmentId | null, supported = true) {
   return queryOptions({
     queryKey: selfUpdateQueryKey(environmentId),
     queryFn: () => (environmentId ? fetchSelfUpdateStatus(environmentId) : null),
-    enabled: environmentId !== null,
+    enabled: environmentId !== null && supported,
     staleTime: 60_000,
     // While it updates the daemon restarts: requests fail for a moment and the
     // last answer ("updating") keeps the fast polling going until it is back.

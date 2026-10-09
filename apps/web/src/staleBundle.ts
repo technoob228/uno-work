@@ -20,13 +20,23 @@
  *   - a chunk of an older bundle that is gone (`vite:preloadError`) reloads
  *     the page once instead of breaking it.
  *
+ * "One window" (`<meta name="uno-ui" content="origin">`, our address serves
+ * the latest interface and computers only answer /api and /ws): switching is
+ * always in place, and a computer older than the interface gets "This
+ * computer runs Uno Work X · Update" (self-update on 0.0.113+, the console
+ * page before that) instead of its own interface.
+ *
  * Everything here is plain functions over injected inputs so the rules are
  * unit-tested without a browser.
  */
+import { CONSOLE_URL } from "./account/accountOverview";
 import { APP_VERSION } from "./branding";
 import { isWorkProxyHost } from "./hooks/useDirectMachineAddress";
 import { isElectron } from "./env";
 import { isWebLite } from "./lite/flag";
+import { compareWorkVersions, normalizeWorkVersion } from "./workVersion";
+
+export { compareWorkVersions };
 
 /** Console route on Work addresses: remember computer N and serve its interface. */
 export const WORK_OPEN_PATH = "/_work/open";
@@ -45,6 +55,26 @@ export interface StaleBundlePage {
   readonly isElectron: boolean;
   readonly isLite: boolean;
   readonly bundleVersion: string;
+  /**
+   * "One window": our address served this interface itself (the latest
+   * release), not a computer — `<meta name="uno-ui" content="origin">` in
+   * index.html, put there by the console's Work proxy. Computers then only
+   * answer /api and /ws: switching never loads another interface, and an
+   * older computer gets "Update" instead. Absent → 0.0.117 behaviour.
+   */
+  readonly uiFromOrigin: boolean;
+}
+
+export const UNO_UI_META_NAME = "uno-ui";
+export const UNO_UI_FROM_ORIGIN = "origin";
+
+export function readUiFromOrigin(doc: Pick<Document, "querySelector"> | null | undefined): boolean {
+  try {
+    const meta = doc?.querySelector(`meta[name="${UNO_UI_META_NAME}"]`);
+    return meta?.getAttribute("content")?.trim().toLowerCase() === UNO_UI_FROM_ORIGIN;
+  } catch {
+    return false;
+  }
 }
 
 export function currentStaleBundlePage(): StaleBundlePage {
@@ -54,6 +84,7 @@ export function currentStaleBundlePage(): StaleBundlePage {
     isElectron,
     isLite: isWebLite,
     bundleVersion: APP_VERSION,
+    uiFromOrigin: typeof document !== "undefined" && readUiFromOrigin(document),
   };
 }
 
@@ -64,30 +95,15 @@ export interface StaleBundleMachine {
   readonly unoBoxId: number | null;
   /** Its daemon version; null while not known (not connected yet). */
   readonly serverVersion: string | null;
+  /**
+   * It can update itself (httpFeatures "self-update", or 0.0.113+): the
+   * notice's Update calls `POST /api/self-update/start` there. Otherwise
+   * Update is the computer's page in the console.
+   */
+  readonly supportsSelfUpdate?: boolean;
 }
 
-function normalizeVersion(version: string | null | undefined): string | null {
-  const trimmed = version?.trim().replace(/^v/i, "");
-  return trimmed ? trimmed : null;
-}
-
-/** -1 / 0 / 1; unparsable parts compare as text so "different" stays different. */
-export function compareWorkVersions(a: string, b: string): number {
-  const pa = (normalizeVersion(a) ?? "").split(/[.+-]/);
-  const pb = (normalizeVersion(b) ?? "").split(/[.+-]/);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const x = pa[i] ?? "0";
-    const y = pb[i] ?? "0";
-    const nx = Number(x);
-    const ny = Number(y);
-    if (Number.isFinite(nx) && Number.isFinite(ny)) {
-      if (nx !== ny) return nx < ny ? -1 : 1;
-    } else if (x !== y) {
-      return x < y ? -1 : 1;
-    }
-  }
-  return 0;
-}
+const normalizeVersion = normalizeWorkVersion;
 
 function sameVersion(a: string | null, b: string | null): boolean {
   const na = normalizeVersion(a);
@@ -108,21 +124,38 @@ export function switchReloadUrl(
   next?: string,
 ): string | null {
   if (!page.onWorkProxyHost || page.isElectron || page.isLite) return null;
+  // Our address serves the latest interface: every computer is switched in place.
+  if (page.uiFromOrigin) return null;
   if (target.isPrimary || target.unoBoxId === null || target.unoBoxId <= 0) return null;
   if (sameVersion(target.serverVersion, page.bundleVersion)) return null;
   return workMachineOpenUrl(target.unoBoxId, next);
 }
+
+export type StaleBundleAction =
+  /** Full page load: this page's own address serves the matching interface. */
+  | { readonly kind: "reload" }
+  /** Full page load of the computer's own interface (0.0.117, no `uno-ui` meta). */
+  | { readonly kind: "open"; readonly url: string }
+  /** One window, older computer that can update itself: `POST /api/self-update/start`. */
+  | { readonly kind: "self-update" }
+  /** One window, older computer before 0.0.113: its page in the console (Update there). */
+  | { readonly kind: "console"; readonly url: string };
 
 export type StaleBundleNotice = {
   /** The computer runs a newer interface than this page, or an older one. */
   readonly kind: "newer" | "older";
   readonly clientVersion: string;
   readonly serverVersion: string;
-  /** Full page load that fixes it: a plain reload or the computer's address. */
-  readonly reload: { readonly kind: "reload" } | { readonly kind: "open"; readonly url: string };
+  /** What the notice's button does. */
+  readonly action: StaleBundleAction;
   /** Stable per (computer, page version, computer version) for "Later". */
   readonly key: string;
 };
+
+/** The computer's page in the console (its Update button works for any version). */
+export function consoleComputerUrl(boxId: number): string {
+  return `${CONSOLE_URL}/boxes/${Math.trunc(boxId)}`;
+}
 
 /**
  * The global notice for the computer in use, or null. Shown only where a
@@ -141,19 +174,33 @@ export function resolveStaleBundleNotice(
   if (!client || !server || client === "0.0.0" || compareWorkVersions(client, server) === 0) {
     return null;
   }
-  let reload: StaleBundleNotice["reload"];
-  if (active.isPrimary) {
-    reload = { kind: "reload" };
+  const kind = compareWorkVersions(server, client) > 0 ? "newer" : "older";
+  let action: StaleBundleAction;
+  if (page.uiFromOrigin) {
+    // One window: the interface is ours and the latest. A newer computer
+    // (canary) → reload picks up the newer interface once it is released;
+    // an older one → update the computer, never swap the interface.
+    if (kind === "newer") {
+      action = { kind: "reload" };
+    } else if (active.supportsSelfUpdate === true) {
+      action = { kind: "self-update" };
+    } else if (active.unoBoxId !== null && active.unoBoxId > 0) {
+      action = { kind: "console", url: consoleComputerUrl(active.unoBoxId) };
+    } else {
+      return null;
+    }
+  } else if (active.isPrimary) {
+    action = { kind: "reload" };
   } else {
     const url = switchReloadUrl(page, active);
     if (!url) return null;
-    reload = { kind: "open", url };
+    action = { kind: "open", url };
   }
   return {
-    kind: compareWorkVersions(server, client) > 0 ? "newer" : "older",
+    kind,
     clientVersion: client,
     serverVersion: server,
-    reload,
+    action,
     key: `${active.environmentId}:${client}:${server}`,
   };
 }
@@ -239,6 +286,11 @@ export const STALE_BUNDLE_COPY = {
     `Reload to use ${version}. Your chats and files stay as they are.`,
   olderTitle: (label: string, version: string) => `${label} runs Uno Work ${version}`,
   olderBody: "Reload to open it in its own version. Your chats and files stay as they are.",
+  /** One window: the computer is older than this interface. */
+  updateBody: "Update it to use everything in this version. Your chats and files stay as they are.",
+  updateConsoleBody: "Update it on its page in the console. Your chats and files stay as they are.",
+  updating: (label: string) => `Updating ${label}… It takes about a minute.`,
+  update: "Update",
   reload: "Reload",
   later: "Later",
 } as const;

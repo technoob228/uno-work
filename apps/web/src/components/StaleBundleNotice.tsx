@@ -3,15 +3,19 @@
  * a chat: the computer in use runs another Uno Work than this page
  * (staleBundle.ts decides when and what a reload does).
  */
+import { HTTP_FEATURES } from "@t3tools/contracts";
+import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
+import { descriptorSupportsHttpFeature } from "../environments/httpFeatureSupport";
 import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useServerConfig } from "../rpc/serverState";
+import { requestSelfUpdate, selfUpdateQueryKey } from "../selfUpdate/selfUpdate";
 import {
   currentStaleBundlePage,
   dismissStaleBundleNotice,
@@ -35,9 +39,12 @@ export function StaleBundleNotice() {
     environmentId ? state.byId[environmentId] : undefined,
   );
   const [laterKey, setLaterKey] = useState<string | null>(null);
+  const [updating, setUpdating] = useState<{ key: string; error: string | null } | null>(null);
+  const queryClient = useQueryClient();
 
   if (!environmentId) return null;
   const isPrimary = primary?.environmentId === environmentId;
+  const descriptor = isPrimary ? primary : (runtime?.descriptor ?? null);
   const notice = resolveStaleBundleNotice(currentStaleBundlePage(), {
     environmentId,
     isPrimary,
@@ -51,13 +58,44 @@ export function StaleBundleNotice() {
       : (runtime?.serverConfig?.environment.serverVersion ??
         runtime?.descriptor?.serverVersion ??
         null),
+    supportsSelfUpdate: descriptorSupportsHttpFeature(descriptor, HTTP_FEATURES.selfUpdate),
   });
   if (!notice || laterKey === notice.key || isStaleBundleNoticeDismissed(notice.key)) return null;
 
   const label = runtime?.descriptor?.label ?? record?.label ?? primary?.label ?? "This computer";
-  const reload = () => {
-    if (notice.reload.kind === "open") window.location.assign(notice.reload.url);
-    else window.location.reload();
+  const action = notice.action;
+  const isUpdate = action.kind === "self-update" || action.kind === "console";
+  const updatingThis = updating?.key === notice.key ? updating : null;
+  const run = () => {
+    switch (action.kind) {
+      case "open":
+        window.location.assign(action.url);
+        return;
+      case "reload":
+        window.location.reload();
+        return;
+      case "console":
+        window.open(action.url, "_blank", "noopener,noreferrer");
+        return;
+      case "self-update": {
+        const key = notice.key;
+        setUpdating({ key, error: null });
+        requestSelfUpdate(environmentId)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
+          })
+          .catch((error: unknown) => {
+            setUpdating({
+              key,
+              error:
+                error instanceof Error && error.message
+                  ? error.message
+                  : "Couldn't start the update. Try again in a minute.",
+            });
+          });
+        return;
+      }
+    }
   };
   const later = () => {
     dismissStaleBundleNotice(notice.key);
@@ -77,14 +115,27 @@ export function StaleBundleNotice() {
           {notice.kind === "newer" ? COPY.newerTitle : COPY.olderTitle(label, notice.serverVersion)}
         </AlertTitle>
         <AlertDescription>
-          {notice.kind === "newer" ? COPY.newerBody(notice.serverVersion) : COPY.olderBody}
+          {updatingThis
+            ? (updatingThis.error ?? COPY.updating(label))
+            : notice.kind === "newer"
+              ? COPY.newerBody(notice.serverVersion)
+              : action.kind === "self-update"
+                ? COPY.updateBody
+                : action.kind === "console"
+                  ? COPY.updateConsoleBody
+                  : COPY.olderBody}
         </AlertDescription>
         <AlertAction>
           <Button size="xs" variant="ghost" onClick={later}>
             {COPY.later}
           </Button>
-          <Button size="xs" onClick={reload}>
-            {COPY.reload}
+          <Button
+            size="xs"
+            onClick={run}
+            disabled={updatingThis !== null && updatingThis.error === null}
+            data-testid="stale-bundle-notice-action"
+          >
+            {isUpdate ? COPY.update : COPY.reload}
           </Button>
         </AlertAction>
       </Alert>

@@ -3,7 +3,7 @@
  * card in My Uno / on Home. One hook holds the state so every place shows the
  * same thing and the confirmation is asked once.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import { type EnvironmentId, HTTP_FEATURES } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +23,7 @@ import {
 import { Button } from "../components/ui/button";
 import { Spinner } from "../components/ui/spinner";
 import { isElectron } from "../env";
+import { useEnvironmentSupportsHttpFeature } from "../environments/httpFeatureSupport";
 import { cn } from "../lib/utils";
 import {
   PAGE_LOADED_AT,
@@ -52,7 +53,8 @@ export interface SelfUpdateController {
 
 export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateController {
   const queryClient = useQueryClient();
-  const query = useQuery(selfUpdateQueryOptions(environmentId));
+  const supported = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.selfUpdate);
+  const query = useQuery(selfUpdateQueryOptions(environmentId, supported));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
