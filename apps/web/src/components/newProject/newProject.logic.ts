@@ -202,3 +202,37 @@ export function checkRepositoryInput(raw: string, taken: ReadonlySet<string>): R
   }
   return { ok: true, remoteUrl, name };
 }
+
+/**
+ * A clone that failed because this computer can't sign in to the host: a
+ * private repository (or a typo — GitHub answers the same for both). git's
+ * own words ("could not read Username for 'https://github.com'") are not for
+ * people (icp3 09.10: Misha's private repo on a fresh cloud computer).
+ */
+export function isRepoAccessError(message: string): boolean {
+  return /could not read (Username|Password)|Authentication failed|Repository not found|terminal prompts disabled|Permission denied \(publickey\)|returned error: 40[134]|Invalid username or password/i.test(
+    message,
+  );
+}
+
+/** `owner/repo` of a GitHub remote, or null. */
+export function githubRepoSlug(remoteUrl: string): string | null {
+  const match = /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(remoteUrl.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/**
+ * The task for Uno when the repository is private: connect this computer to
+ * GitHub with an SSH key (one paste on github.com, no tokens to pick scopes
+ * for) and clone into the project folder made for it.
+ */
+export function connectGithubPrompt(remoteUrl: string): string {
+  const slug = githubRepoSlug(remoteUrl);
+  const repo = slug ?? remoteUrl;
+  const sshUrl = slug ? `git@github.com:${slug}.git` : remoteUrl;
+  return [
+    `This folder is for ${repo} — a private repository. This computer isn't signed in to GitHub yet.`,
+    "Connect it with an SSH key, no tokens: make a key if there is none (ssh-keygen -t ed25519), show me the public key and the page to add it — https://github.com/settings/ssh/new — and wait until I say it's added.",
+    `Then check with ssh -T git@github.com and clone ${sshUrl} into this folder (it is empty).`,
+  ].join("\n\n");
+}
