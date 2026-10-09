@@ -87,7 +87,7 @@ describe("sidebar D places", () => {
     expect(goHome).toHaveBeenCalled();
   });
 
-  it("counts unread news on Inbox, without a \"need you\" line", async () => {
+  it('counts unread news on Inbox, without a "need you" line', async () => {
     unread = 3;
     needsYou = 0;
     const screen = await mount(<SidebarDPlaces />);
@@ -99,7 +99,9 @@ describe("sidebar D places", () => {
     unread = 2;
     needsYou = 2;
     const again = await mount(<SidebarDPlaces />);
-    await expect.element(again.getByTestId("sidebar-inbox-needs-you")).toHaveTextContent("2 need you");
+    await expect
+      .element(again.getByTestId("sidebar-inbox-needs-you"))
+      .toHaveTextContent("2 need you");
     await expect.element(again.getByTestId("sidebar-inbox")).toHaveTextContent("2");
   });
 

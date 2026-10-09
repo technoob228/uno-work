@@ -189,11 +189,12 @@ export function isHomePath(pathname: string): boolean {
  * when something is unread (Misha 08.10: no "0"), and "N need you" only when
  * an approval or a question really waits.
  */
+const countOf = (value: number) => (Number.isFinite(value) && value > 0 ? Math.floor(value) : 0);
+
 export function inboxPlace(
   unread: number,
   needsYou: number,
 ): { readonly unread: number; readonly needsYou: number } {
-  const clean = (value: number) => (Number.isFinite(value) && value > 0 ? Math.floor(value) : 0);
-  const waiting = clean(needsYou);
-  return { unread: Math.max(clean(unread), waiting), needsYou: waiting };
+  const waiting = countOf(needsYou);
+  return { unread: Math.max(countOf(unread), waiting), needsYou: waiting };
 }
