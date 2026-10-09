@@ -13,6 +13,7 @@ import { RpcClient } from "effect/unstable/rpc";
 
 import { ClientTracingLive } from "../observability/clientTracing";
 import { clearAllTrackedRpcRequests } from "./requestLatencyState";
+import { isUnknownStreamItem, type UnknownStreamItem } from "./tolerantRpcGroup";
 import {
   createWsRpcProtocolLayer,
   makeWsRpcProtocolClient,
@@ -50,6 +51,20 @@ export interface WsTransportOptions {
    * tunnel) once WS-level reconnects are clearly not enough.
    */
   readonly onRecoveryFailed?: (consecutiveFailures: number) => void;
+}
+
+const skippedStreamItemKinds = new Set<string>();
+
+/** One warning per (stream, kind, type) per page: a busy stream must not flood the console. */
+export function noteSkippedStreamItem(tag: string | undefined, item: UnknownStreamItem): void {
+  const key = `${tag ?? "stream"}|${item.kind ?? ""}|${item.type ?? ""}`;
+  if (skippedStreamItemKinds.has(key)) return;
+  skippedStreamItemKinds.add(key);
+  console.warn("Skipped a stream item this version of Uno Work does not understand", {
+    stream: tag ?? null,
+    kind: item.kind,
+    type: item.type,
+  });
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
@@ -176,6 +191,10 @@ export class WsTransport {
       await session.runtime.runPromise(
         Stream.runForEach(connect(client), (value) =>
           Effect.sync(() => {
+            if (isUnknownStreamItem(value)) {
+              noteSkippedStreamItem(undefined, value);
+              return;
+            }
             try {
               listener(value);
             } catch {
@@ -534,6 +553,12 @@ export class WsTransport {
               }
 
               markValueReceived();
+              // An item of a type this interface does not know (a newer
+              // daemon): skip it, keep the stream (tolerantRpcGroup.ts).
+              if (isUnknownStreamItem(value)) {
+                noteSkippedStreamItem(requestStart.tag, value);
+                return;
+              }
               try {
                 listener(value);
               } catch {

@@ -35,13 +35,17 @@ import {
   WS_METHODS,
   DEFAULT_SERVER_SETTINGS,
   SkillsError,
-  WsRpcGroup,
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcServer } from "effect/unstable/rpc";
 
 import { layerJsonMobileCompat } from "./compat/rpcSerializationMobileCompat.ts";
+import {
+  isUnsupportedClientCommand,
+  ServerWsRpcGroup,
+  unsupportedCommandError,
+} from "./rpcTolerance.ts";
 import { translateAuthDescriptorForUpstream } from "./compat/mobileScopes.ts";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
@@ -235,7 +239,7 @@ const makeWsRpcLayer = (
   // в отдаваемых конфигах транслируем литералы session-методов в апстримные.
   mobileCompat = false,
 ) =>
-  WsRpcGroup.toLayer(
+  ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const linkRequests = yield* LinkRequestService;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -964,11 +968,19 @@ const makeWsRpcLayer = (
           return result;
         });
 
-      return WsRpcGroup.of({
+      return ServerWsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
+              // A command type a newer interface knows and this daemon does
+              // not: a plain "update this computer" error, not a decode defect.
+              if (isUnsupportedClientCommand(command)) {
+                yield* Effect.logWarning("dispatch: command type not supported by this version", {
+                  type: command.type,
+                });
+                return yield* unsupportedCommandError(command);
+              }
               const needsVideoMaterialization =
                 command.type === "thread.turn.start" &&
                 command.message.attachments.some(
@@ -2440,7 +2452,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           onNone: () => false,
           onSome: (url) => url.searchParams.has("wsTicket"),
         });
-        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
+        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(ServerWsRpcGroup, {
           spanPrefix: "ws.rpc",
           spanAttributes: {
             "rpc.transport": "websocket",
