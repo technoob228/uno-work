@@ -21,7 +21,9 @@ export interface AppTask {
 export const APP_TASKS: Readonly<Record<string, AppTask>> = {
   // In the catalog (fishcode back/internal/apps/templates.yaml, 25.09).
   nextcloud: { task: "Files & documents", line: "Your files on every device, like Google Drive" },
-  notetaker: { task: "Meeting notes", line: "Notes and summaries of your calls, written by AI" },
+  // Made by Uno and its name already says what it does: one name everywhere
+  // (icp3 09.10 — the store said "Notetaker", the card "Meeting notes").
+  notetaker: { task: "Notetaker", line: "Notes and summaries of your calls, written by AI" },
   vaultwarden: { task: "Passwords", line: "All your passwords in one safe place" },
   immich: { task: "Photos", line: "Phone photos backed up, like Google Photos" },
   lychee: { task: "Photo albums", line: "Simple photo albums to share with family" },

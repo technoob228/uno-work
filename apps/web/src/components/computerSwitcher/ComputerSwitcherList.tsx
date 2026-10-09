@@ -82,7 +82,7 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
                   ) : env.isPrimary ? (
                     <span
                       className="shrink-0 text-[10px] text-muted-foreground"
-                      title="The machine serving this page"
+                      title="The computer serving this page"
                     >
                       current
                     </span>
@@ -94,10 +94,10 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
                   aria-pressed={env.isDefault}
                   aria-label={
                     env.isDefault
-                      ? `Stop using ${env.name} as the default machine`
-                      : `Make ${env.name} the default machine`
+                      ? `Stop using ${env.name} as the default computer`
+                      : `Make ${env.name} the default computer`
                   }
-                  title={env.isDefault ? "Default machine" : "Make this the default machine"}
+                  title={env.isDefault ? "Default computer" : "Make this the default computer"}
                   className={cn(
                     "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
                     env.isDefault

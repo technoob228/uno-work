@@ -25,6 +25,7 @@ Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Autho
 - `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`. Projects go in `~/projects/<name>`.
 - `~/.uno/apps/<id>.json` registers an app on Home; its log is `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK (JS, Python).
 - Cloud storage keeps the person's files (photos, documents); the disk is for programs.
+- App Store apps' passwords: above the app when open (Show · Copy).
 - The right panel shows pages and files. On a cloud computer it is a browser ON the machine (the person watches, can take control): `localhost` there is the machine. To let them open an app themselves, use `app_show_on_internet`. The browser installs on first use (~30–60 s): retry if `browser_command` says so. A step only the person can do (sign-in, captcha, 2FA, payment): `browser_command` with `requestHelp`.
 
 ## Their assistant

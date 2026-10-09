@@ -10,7 +10,10 @@ describe("app task names", () => {
       line: "Your files on every device, like Google Drive",
     });
     expect(appDisplayName("vaultwarden", "Vaultwarden").title).toBe("Passwords");
-    expect(appDisplayName("notetaker", "Notetaker").title).toBe("Meeting notes");
+    expect(appDisplayName("notetaker", "Notetaker")).toMatchObject({
+      title: "Notetaker",
+      product: null,
+    });
   });
 
   it("uses a cleaner product name when the catalog's has the task in it", () => {

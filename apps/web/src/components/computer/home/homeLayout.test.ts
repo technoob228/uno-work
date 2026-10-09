@@ -7,18 +7,15 @@ import {
   appWidgetSpan,
   appWidgetUrl,
   customWidgetIdeas,
-  hideInProgress,
   homeLayoutReducer,
-  inProgressShown,
   isAppWidgetBlockId,
   migrateHomeLayout,
   normalizeHomeLayout,
-  showInProgress,
 } from "./homeLayout";
 
 describe("migrateHomeLayout", () => {
   it("puts greeting, composer and Continue before the 0.0.81 widgets, keeping their order", () => {
-    expect(migrateHomeLayout(null, ["apps", "ai-spend", "files"])).toEqual([
+    expect(migrateHomeLayout(undefined, null, ["apps", "ai-spend", "files"])).toEqual([
       "greeting",
       "composer",
       "continue",
@@ -29,29 +26,57 @@ describe("migrateHomeLayout", () => {
   });
 
   it("an empty 0.0.81 layout (all widgets removed) stays empty under the fixed blocks", () => {
-    expect(migrateHomeLayout(undefined, [])).toEqual(["greeting", "composer", "continue"]);
-  });
-
-  it("prefers a saved 0.0.82 layout", () => {
-    expect(migrateHomeLayout(["files", "composer"], ["apps"])).toEqual(["files", "composer"]);
-  });
-
-  it("gives the default with nothing saved: no widgets (01.10)", () => {
-    expect(migrateHomeLayout(undefined, undefined)).toEqual([...DEFAULT_HOME_LAYOUT]);
-    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue"]);
-  });
-
-  it("moves an untouched old default to the new one, keeps an arranged layout", () => {
-    expect(
-      migrateHomeLayout(["greeting", "composer", "continue", "files", "apps"], undefined),
-    ).toEqual(["greeting", "composer", "continue"]);
-    expect(migrateHomeLayout(undefined, ["files", "apps"])).toEqual([
+    expect(migrateHomeLayout(undefined, undefined, [])).toEqual([
       "greeting",
       "composer",
       "continue",
     ]);
+  });
+
+  it("prefers a saved 0.0.82 layout", () => {
+    expect(migrateHomeLayout(undefined, ["files", "composer"], ["apps"])).toEqual([
+      "files",
+      "composer",
+    ]);
+  });
+
+  it("gives the default with nothing saved: In progress and Apps (09.10)", () => {
+    expect(migrateHomeLayout(undefined, undefined, undefined)).toEqual([...DEFAULT_HOME_LAYOUT]);
+    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue", "apps"]);
+  });
+
+  it("adds Apps to a 0.0.104 layout without widgets, keeps one with widgets", () => {
+    expect(migrateHomeLayout(["greeting", "composer", "continue"], undefined, undefined)).toEqual([
+      ...DEFAULT_HOME_LAYOUT,
+    ]);
+    // In progress hidden stays hidden.
+    expect(migrateHomeLayout(["greeting", "composer"], undefined, undefined)).toEqual([
+      "greeting",
+      "composer",
+      "apps",
+    ]);
     expect(
-      migrateHomeLayout(["greeting", "composer", "continue", "apps", "files"], undefined),
+      migrateHomeLayout(["greeting", "composer", "continue", "files"], ["apps"], undefined),
+    ).toEqual(["greeting", "composer", "continue", "files"]);
+  });
+
+  it("moves an untouched old default to the new one, keeps an arranged layout", () => {
+    expect(
+      migrateHomeLayout(
+        undefined,
+        ["greeting", "composer", "continue", "files", "apps"],
+        undefined,
+      ),
+    ).toEqual([...DEFAULT_HOME_LAYOUT]);
+    expect(migrateHomeLayout(undefined, undefined, ["files", "apps"])).toEqual([
+      ...DEFAULT_HOME_LAYOUT,
+    ]);
+    expect(
+      migrateHomeLayout(
+        undefined,
+        ["greeting", "composer", "continue", "apps", "files"],
+        undefined,
+      ),
     ).toEqual(["greeting", "composer", "continue", "apps", "files"]);
   });
 });
@@ -152,33 +177,22 @@ describe("app widgets", () => {
   });
 });
 
-describe("In progress on Home (Misha 08.10: a widget you can hide)", () => {
+describe("In progress on Home (Misha 09.10: a widget like the others)", () => {
   it("is on Home by default", () => {
-    expect(inProgressShown(DEFAULT_HOME_LAYOUT)).toBe(true);
-    expect(inProgressShown(normalizeHomeLayout(undefined))).toBe(true);
+    expect(DEFAULT_HOME_LAYOUT).toContain("continue");
+    expect(normalizeHomeLayout(undefined)).toContain("continue");
   });
 
-  it("goes away with one Hide and the choice stays in the stored layout", () => {
-    const hidden = homeLayoutReducer(DEFAULT_HOME_LAYOUT, hideInProgress());
-    expect(inProgressShown(hidden)).toBe(false);
-    // What localStorage keeps reads back the same way (remembered on reload).
-    expect(inProgressShown(normalizeHomeLayout(JSON.parse(JSON.stringify(hidden))))).toBe(false);
-    expect(hidden).toContain("composer");
-  });
-
-  it("comes back from Add widget, Undo or Reset", () => {
-    const hidden = homeLayoutReducer(DEFAULT_HOME_LAYOUT, hideInProgress());
+  it("× takes it off, Add widget or Reset brings it back, other widgets stay", () => {
+    const hidden = homeLayoutReducer([...DEFAULT_HOME_LAYOUT, "files"], {
+      type: "remove",
+      id: "continue",
+    });
+    expect(hidden).not.toContain("continue");
+    expect(normalizeHomeLayout(JSON.parse(JSON.stringify(hidden)))).not.toContain("continue");
     expect(addableBlocks(hidden, DEFAULT_HOME_LAYOUT)).toContain("continue");
-    expect(inProgressShown(homeLayoutReducer(hidden, showInProgress()))).toBe(true);
-    expect(inProgressShown(homeLayoutReducer(hidden, { type: "reset" }))).toBe(true);
-  });
-
-  it("keeps the person's widgets when hidden and shown again", () => {
-    const layout = homeLayoutReducer(
-      homeLayoutReducer([...DEFAULT_HOME_LAYOUT, "files"], hideInProgress()),
-      showInProgress(),
-    );
-    expect(layout).toContain("files");
-    expect(inProgressShown(layout)).toBe(true);
+    const back = homeLayoutReducer(hidden, { type: "add", id: "continue" });
+    expect(back).toEqual(expect.arrayContaining(["continue", "files", "apps"]));
+    expect(homeLayoutReducer(hidden, { type: "reset" })).toContain("continue");
   });
 });
