@@ -11,6 +11,9 @@ import {
   uploadedProjectPath,
   checkNewFolderName,
   checkRepositoryInput,
+  connectGithubPrompt,
+  githubRepoSlug,
+  isRepoAccessError,
   clampToHome,
   homeCrumbs,
   isInsideHome,
@@ -183,5 +186,32 @@ describe("checkRepositoryInput without a scheme", () => {
       ok: true,
       remoteUrl: "https://github.com/owner/repo.git",
     });
+    });
+  });
+});
+
+describe("private repository on clone (icp3 09.10)", () => {
+  it("tells git's sign-in failures from other errors", () => {
+    expect(
+      isRepoAccessError(
+        "git clone -- https://github.com/a/b.git b failed: Cloning into 'b'... fatal: could not read Username for 'https://github.com': No such device or address",
+      ),
+    ).toBe(true);
+    expect(isRepoAccessError("remote: Repository not found.")).toBe(true);
+    expect(isRepoAccessError("git@github.com: Permission denied (publickey).")).toBe(true);
+    expect(isRepoAccessError("fatal: destination path 'b' already exists")).toBe(false);
+  });
+
+  it("asks Uno for an SSH key and the SSH address", () => {
+    expect(githubRepoSlug("https://github.com/technoob228/uno-workspace.git")).toBe(
+      "technoob228/uno-workspace",
+    );
+    expect(githubRepoSlug("git@github.com:technoob228/uno-workspace.git")).toBe(
+      "technoob228/uno-workspace",
+    );
+    const prompt = connectGithubPrompt("https://github.com/technoob228/uno-workspace.git");
+    expect(prompt).toContain("git@github.com:technoob228/uno-workspace.git");
+    expect(prompt).toContain("https://github.com/settings/ssh/new");
+    expect(prompt).not.toMatch(/token:/i);
   });
 });
