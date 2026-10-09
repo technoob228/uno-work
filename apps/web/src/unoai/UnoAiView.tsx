@@ -29,7 +29,7 @@ import {
   SendIcon,
   SparklesIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -56,19 +56,18 @@ import {
   type AiStop,
 } from "./unoAiApi";
 import { rememberHandoff } from "./unoAiHandoff";
+import { AnswerCards } from "./AnswerCards";
 import { BotChatItem } from "./BotCard";
+import { ContinueCards } from "./ContinueCards";
 import { looksLikeBotToken } from "./freeBot";
 import {
-  chatLanguage,
   chatTitle,
   latestBotKey,
   latestSite,
   liveActivity,
   pendingQuestion,
-  standardAnswers,
   transcriptItems,
   type AiItem,
-  type AiQuestion,
 } from "./unoAiModel";
 import { unoAiKeys, useUnoAiChat } from "./useUnoAiChat";
 
@@ -125,6 +124,7 @@ export function UnoAiView({
           if (!search.chat) void navigate({ to: "/ai", search: { chat: chatId }, replace: true });
         }}
         onNewChat={() => openChat(null)}
+        onOpenChat={(id) => openChat(id)}
         continueHere={renderContinueHere ? renderContinueHere(chatId) : null}
       />
     </SidebarInset>
@@ -136,12 +136,15 @@ function UnoAiChat({
   initialMessage,
   onFirstSend,
   onNewChat,
+  onOpenChat,
   continueHere,
 }: {
   chatId: string;
   initialMessage: string | undefined;
   onFirstSend: () => void;
   onNewChat: () => void;
+  /** Home's "Continue" opens a chat the person already started. */
+  onOpenChat: (chatId: string) => void;
   continueHere: ReactNode;
 }) {
   const { state, send, resume } = useUnoAiChat(chatId);
@@ -155,6 +158,7 @@ function UnoAiChat({
   const [previewKey, setPreviewKey] = useState(0);
   const lastSiteUrl = useRef<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const sentInitial = useRef(false);
   const wide = useWide();
 
@@ -242,7 +246,12 @@ function UnoAiChat({
               <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : empty ? (
-            <EmptyChat onPick={(q) => void submit(q)} draft={draft} setDraft={setDraft} />
+            <EmptyChat
+              onPick={(q) => void submit(q)}
+              onOpenChat={onOpenChat}
+              draft={draft}
+              setDraft={setDraft}
+            />
           ) : (
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-6 pb-8">
               {items.map((item) => (
@@ -266,7 +275,11 @@ function UnoAiChat({
               ))}
               {state.running ? <LiveLine live={state.live} /> : null}
               {question ? (
-                <QuestionAnswers question={question} onAnswer={(a) => void submit(a)} />
+                <AnswerCards
+                  question={question}
+                  onAnswer={(a) => void submit(a)}
+                  onOwnWords={() => inputRef.current?.focus()}
+                />
               ) : null}
               {!state.running && state.stop ? (
                 <StopCard stop={state.stop} onResume={() => void resume()} />
@@ -297,7 +310,8 @@ function UnoAiChat({
             setDraft={setDraft}
             busy={state.running}
             onSend={() => void submit(draft)}
-            placeholder={question ? "Or type your own answer…" : "Message Uno…"}
+            placeholder={question ? "Reply to Uno…" : "Message Uno…"}
+            inputRef={inputRef}
             manage={consoleManageLink(site, botKey !== null)}
           />
         )}
@@ -336,10 +350,12 @@ function useWide(): boolean {
 
 function EmptyChat({
   onPick,
+  onOpenChat,
   draft,
   setDraft,
 }: {
   onPick: (q: string) => void;
+  onOpenChat: (chatId: string) => void;
   draft: string;
   setDraft: (v: string) => void;
 }) {
@@ -371,6 +387,8 @@ function EmptyChat({
   }
   return (
     <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-6 px-4 py-10">
+      {/* What they already started comes first (icp3 09.10, n1/12). */}
+      <ContinueCards onOpenChat={onOpenChat} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
           What do you want to make?
@@ -414,6 +432,7 @@ function Composer({
   placeholder,
   big = false,
   manage,
+  inputRef,
 }: {
   draft: string;
   setDraft: (v: string) => void;
@@ -423,14 +442,17 @@ function Composer({
   big?: boolean;
   /** Where "Manage in console" leads from this chat (default: Uno AI). */
   manage?: ConsoleManageLink;
+  /** The message box, for "Or answer in your own words". */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef ?? ownRef;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [draft]);
+  }, [draft, ref]);
   return (
     <div className={cn(big ? "" : "border-t border-border bg-background px-3 pt-2 pb-3 sm:px-5")}>
       <div className={cn("mx-auto w-full", big ? "" : "max-w-2xl")}>
@@ -622,7 +644,7 @@ function ChatItem({
       return <Markdown text={item.text} onOpenSite={onOpenSite} />;
     case "ask":
       return (
-        <div className="text-sm font-medium" data-testid="uno-ai-question">
+        <div className="text-sm font-semibold" data-testid="uno-ai-question">
           {item.questions.map((q) => (
             <p key={q.question}>{q.question}</p>
           ))}
@@ -740,56 +762,6 @@ function LiveLine({ live }: { live: { text: string; tool: string; chars: number 
         </span>
         {activity ?? (live?.text ? "" : "Uno is thinking…")}
       </p>
-    </div>
-  );
-}
-
-function QuestionAnswers({
-  question,
-  onAnswer,
-}: {
-  question: AiQuestion;
-  onAnswer: (answer: string) => void;
-}) {
-  const std = standardAnswers(chatLanguage(question.question));
-  return (
-    <div className="flex flex-wrap gap-2" data-testid="uno-ai-answers">
-      {question.options.map((o) => (
-        <button
-          key={o}
-          type="button"
-          onClick={() => onAnswer(o)}
-          className={cn(
-            "rounded-full border px-3 py-1.5 text-sm transition-colors",
-            o === question.recommended
-              ? "border-primary/50 bg-primary/10 text-foreground hover:bg-primary/15"
-              : "border-border hover:border-foreground/30",
-          )}
-          data-testid="uno-ai-answer"
-        >
-          {o}
-          {o === question.recommended ? (
-            <span className="ml-1.5 text-[10px] font-medium tracking-wide text-primary uppercase">
-              {std.recommended}
-            </span>
-          ) : null}
-        </button>
-      ))}
-      <button
-        type="button"
-        onClick={() => onAnswer(std.youDecide)}
-        className="rounded-full border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        {std.youDecide}
-      </button>
-      <button
-        type="button"
-        onClick={() => onAnswer(std.justBuild)}
-        className="rounded-full border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
-        data-testid="uno-ai-just-build"
-      >
-        {std.justBuild}
-      </button>
     </div>
   );
 }
