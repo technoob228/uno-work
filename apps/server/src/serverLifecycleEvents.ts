@@ -1,4 +1,7 @@
-import type { ServerLifecycleStreamEvent } from "@t3tools/contracts";
+import type {
+  ExecutionEnvironmentDescriptor,
+  ServerLifecycleStreamEvent,
+} from "@t3tools/contracts";
 import { Effect, Layer, PubSub, Ref, Context, Stream } from "effect";
 
 type LifecycleEventInput =
@@ -51,3 +54,26 @@ export const ServerLifecycleEventsLive = Layer.effect(
     } satisfies ServerLifecycleEventsShape;
   }),
 );
+
+/**
+ * A remembered lifecycle event, replayed to a new subscriber with the
+ * environment as it is NOW.
+ *
+ * "welcome" and "ready" are published once at startup. On a Work machine
+ * cloned from an image's memory snapshot that startup happened on the warm-up
+ * VM: the events carry its environment id ("Uno computer", machineKind
+ * "server"), and the clone rotates the id afterwards (cloneIdentity.ts). The
+ * browser checks that every source names the same environment
+ * (environments/runtime/connection.ts), so the stale welcome made it drop the
+ * connection — "Connecting…", Files "Environment API not found", New project
+ * "Looking for your home folder…" on every fresh computer until the daemon
+ * restarted (icp3 09.10).
+ */
+export function withCurrentEnvironment(
+  event: ServerLifecycleStreamEvent,
+  environment: ExecutionEnvironmentDescriptor,
+): ServerLifecycleStreamEvent {
+  return event.type === "welcome"
+    ? { ...event, payload: { ...event.payload, environment } }
+    : { ...event, payload: { ...event.payload, environment } };
+}

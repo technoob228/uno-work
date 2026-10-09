@@ -67,7 +67,7 @@ import { makePanelThreadResolver, makePanelThreadSender } from "./plugins/panelT
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { staleProviderInstanceIds } from "./provider/staleProviders.ts";
-import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
+import { ServerLifecycleEvents, withCurrentEnvironment } from "./serverLifecycleEvents.ts";
 import { BrowserBridge } from "./browserBridge.ts";
 import { ServerBrowser } from "./serverBrowser.ts";
 import { fillCredentialInBrowser } from "./credentialsFill.ts";
@@ -2221,9 +2221,12 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeServerLifecycle,
             Effect.gen(function* () {
               const snapshot = yield* lifecycleEvents.snapshot;
-              const snapshotEvents = Array.from(snapshot.events).toSorted(
-                (left, right) => left.sequence - right.sequence,
-              );
+              // The environment as it is now, not as it was at startup: a
+              // memory-snapshot clone rotated its id since (withCurrentEnvironment).
+              const environment = yield* serverEnvironment.getDescriptor;
+              const snapshotEvents = Array.from(snapshot.events)
+                .toSorted((left, right) => left.sequence - right.sequence)
+                .map((event) => withCurrentEnvironment(event, environment));
               const liveEvents = lifecycleEvents.stream.pipe(
                 Stream.filter((event) => event.sequence > snapshot.sequence),
               );
