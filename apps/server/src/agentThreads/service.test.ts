@@ -20,7 +20,11 @@ import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import { AGENTS_CLOSED_MESSAGE, HUMAN_ACTIVE_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
-import { type AgentThreadsScope, makeAgentThreadsHandlers } from "./service.ts";
+import {
+  type AgentThreadsScope,
+  makeAgentThreadsHandlers,
+  type RemoteChatsPort,
+} from "./service.ts";
 
 const OWN_PROJECT = "project-own" as ProjectId;
 const OTHER_PROJECT = "project-other" as ProjectId;
@@ -121,6 +125,7 @@ function makeFixture(options?: {
   readonly assistantAllowlist?: "all" | ReadonlyArray<string>;
   /** Thread every project inherits its modes from (default: none). */
   readonly inheritModesFrom?: ThreadId;
+  readonly remoteChats?: RemoteChatsPort;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -188,6 +193,7 @@ function makeFixture(options?: {
       ? { getAssistantProjectAllowlist: Effect.succeed(options.assistantAllowlist) }
       : {}),
     getProviders: Effect.succeed(providers),
+    ...(options?.remoteChats ? { remoteChats: options.remoteChats } : {}),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
     sleep: (ms) =>
@@ -1088,6 +1094,103 @@ describe("agent threads bridge: computerId (assistants MVP)", () => {
       assert.strictEqual(body(other).error, "computer_not_allowed");
       assert.match(String(body(other).message), /not allowed yet/);
       assert.strictEqual(dispatched.length, 2);
+    }),
+  );
+});
+
+describe("agent threads bridge: chats on another computer (icp3)", () => {
+  const calls: Array<{ readonly kind: string; readonly input: Record<string, unknown> }> = [];
+  const remoteChats: RemoteChatsPort = {
+    start: (input) =>
+      Effect.sync(() => {
+        calls.push({ kind: "start", input: { ...input, caller: input.caller.id } });
+        return { status: 200, body: { ok: true, threadId: "box-3121:t-1" } };
+      }),
+    read: (input) =>
+      Effect.sync(() => {
+        calls.push({ kind: "read", input: { ...input, caller: input.caller.id } });
+        return { status: 200, body: { status: "idle" } };
+      }),
+    send: (input) =>
+      Effect.sync(() => {
+        calls.push({ kind: "send", input: { ...input, caller: input.caller.id } });
+        return { status: 200, body: { ok: true } };
+      }),
+  };
+
+  it.effect("another computerId goes to that computer, with the folder, not a project id", () =>
+    Effect.gen(function* () {
+      calls.length = 0;
+      const { handlers, dispatched } = makeFixture({ remoteChats });
+      const reply = yield* handlers.createThread(scoped(), {
+        text: "list ~/projects and say hi",
+        computerId: "cc-target",
+        cwd: "/home/me/projects/x",
+        projectId: "ignored-there",
+        model: "uno/smart",
+      });
+      assert.strictEqual(reply.status, 200);
+      assert.strictEqual(body(reply).threadId, "box-3121:t-1");
+      assert.strictEqual(dispatched.length, 0);
+      assert.deepStrictEqual(calls, [
+        {
+          kind: "start",
+          input: {
+            caller: CALLER,
+            computer: "cc-target",
+            text: "list ~/projects and say hi",
+            title: undefined,
+            cwd: "/home/me/projects/x",
+            model: "uno/smart",
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("box-N ids are read and written on that computer", () =>
+    Effect.gen(function* () {
+      calls.length = 0;
+      const { handlers } = makeFixture({ remoteChats });
+      const read = yield* handlers.getThread(scoped(), {
+        threadId: "box-3121%3At-1",
+        limit: "5",
+        waitMs: "1000",
+      });
+      assert.strictEqual(read.status, 200);
+      const sent = yield* handlers.sendMessage(scoped(), {
+        threadId: "box-3121:t-1",
+        body: { text: "next", waitMs: 5000 },
+      });
+      assert.strictEqual(sent.status, 200);
+      const empty = yield* handlers.sendMessage(scoped(), {
+        threadId: "box-3121:t-1",
+        body: { text: " " },
+      });
+      assert.strictEqual(empty.status, 400);
+      assert.deepStrictEqual(
+        calls.map((call) => [call.kind, call.input.boxId, call.input.threadId]),
+        [
+          ["read", 3121, "t-1"],
+          ["send", 3121, "t-1"],
+        ],
+      );
+      assert.strictEqual(calls[0]!.input.limit, 5);
+      assert.strictEqual(calls[1]!.input.waitMs, 5000);
+    }),
+  );
+
+  it.effect("without the cross-computer side: not allowed / not found, as before", () =>
+    Effect.gen(function* () {
+      const { handlers } = makeFixture();
+      const other = yield* handlers.createThread(scoped(), { text: "hi", computerId: "cc-target" });
+      assert.strictEqual(other.status, 403);
+      const read = yield* handlers.getThread(scoped(), {
+        threadId: "box-3121:t-1",
+        limit: null,
+        waitMs: null,
+      });
+      assert.strictEqual(read.status, 404);
     }),
   );
 });

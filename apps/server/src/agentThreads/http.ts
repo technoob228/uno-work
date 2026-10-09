@@ -11,9 +11,13 @@
  *
  * Authenticated with the thread-scoped browser-bridge token every harness
  * process holds (`UNO_WORK_BRIDGE_TOKEN`), like `POST /api/channels/notify`.
+ *
+ * A `computerId` of another computer of the account, and thread ids
+ * `box-N:<id>`, go to that computer (`crossComputer/agentRemoteChats.ts`).
  */
 import { ASSISTANT_PROJECT_ID, assistantTokenLabel } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
+import * as OS from "node:os";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { BrowserBridge } from "../browserBridge.ts";
@@ -24,6 +28,11 @@ import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AGENT_THREADS_PATH } from "./logic.ts";
 import { ownBoxIdFromSettings } from "../assistants/targetComputer.ts";
+import { daemonRemoteSessions, makeAgentRemoteChats } from "../crossComputer/agentRemoteChats.ts";
+import { RemoteWorkError } from "../crossComputer/remoteWork.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { fetchControlPlaneJson } from "../workspaceRegistry/unoCloudParse.ts";
+import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { type AgentThreadsReply, makeAgentThreadsHandlers } from "./service.ts";
 
 const makeRequestContext = Effect.gen(function* () {
@@ -34,6 +43,53 @@ const makeRequestContext = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
   const tokenRepository = yield* ManagerCapabilityTokenRepository;
+  const serverEnvironment = yield* ServerEnvironment;
+  const unoCloud = yield* UnoCloudService;
+  const getOwnBoxId = serverSettings.getSettings.pipe(
+    Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
+    Effect.orElseSucceed(() => null),
+  );
+  const remoteChats = makeAgentRemoteChats({
+    getPolicy: serverSettings.getSettings.pipe(
+      Effect.map((settings) => ({
+        apiKey: settings.uno.apiKey.trim(),
+        agentAccessOff: settings.uno.agentAccess === "off",
+        otherComputersAllowed: settings.agentsUseOtherComputers,
+      })),
+      // Unreadable settings: nothing leaves this computer.
+      Effect.orElseSucceed(() => ({
+        apiKey: "",
+        agentAccessOff: true,
+        otherComputersAllowed: false,
+      })),
+    ),
+    // The account's computers through the daemon's own (cached, 20 s) read;
+    // a name the agent just learned may need a fresh one.
+    listComputers: async () => {
+      const state = await Effect.runPromise(unoCloud.getState({ refresh: true }));
+      if (state.boxes.length === 0 && state.error) {
+        throw new RemoteWorkError(
+          502,
+          "computers_unavailable",
+          `Uno did not list the computers: ${state.error}`,
+        );
+      }
+      return state.boxes;
+    },
+    getOwnBoxId,
+    getOwnLabel: serverEnvironment.getDescriptor.pipe(
+      Effect.map((descriptor) => descriptor.label),
+      Effect.orElseSucceed(() => "another computer"),
+    ),
+    makeRemoteDeps: (apiKey) => ({
+      fetch: globalThis.fetch,
+      controlPlane: (path, init) => fetchControlPlaneJson(apiKey, path, init),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    }),
+    cache: daemonRemoteSessions,
+    home: OS.homedir(),
+  });
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
@@ -54,10 +110,8 @@ const makeRequestContext = Effect.gen(function* () {
         Effect.orElseSucceed((): ReadonlyArray<string> => []),
       ),
     getProviders: providerRegistry.getProviders,
-    getOwnBoxId: serverSettings.getSettings.pipe(
-      Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
-      Effect.orElseSucceed(() => null),
-    ),
+    getOwnBoxId,
+    remoteChats,
   });
   return {
     request,

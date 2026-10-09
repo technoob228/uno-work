@@ -728,6 +728,10 @@ export const ServerSettings = Schema.Struct({
   agentThreadsScope: Schema.Literals(["own-project", "any-project"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("own-project" as const)),
   ),
+  // An agent here may start and drive chats on the person's OTHER computers
+  // of the same Uno account (crossComputer/, icp3 09.10). On by default: one
+  // person's computers trust each other.
+  agentsUseOtherComputers: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
   ),
@@ -849,6 +853,7 @@ export const ServerSettingsPatch = Schema.Struct({
   setup: Schema.optionalKey(UnoSetupProgress),
   mcpServers: Schema.optionalKey(Schema.Array(UnoMcpServer)),
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
+  agentsUseOtherComputers: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
