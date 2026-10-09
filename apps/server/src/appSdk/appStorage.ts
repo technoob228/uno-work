@@ -27,15 +27,14 @@
  * @module appSdk/appStorage
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Readable } from "node:stream";
 
 import {
-  CLOUD_SINGLE_PUT_MAX_BYTES,
   type CloudDeps,
   parseBucket,
   parseCloudState,
   parseListing,
 } from "../files/cloudStorage.ts";
+import { CloudUploadError, streamUploadSource, uploadToBucket } from "../files/cloudUpload.ts";
 import {
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
@@ -225,6 +224,8 @@ const readJson = (req: IncomingMessage): Promise<unknown> =>
 export function makeAppStorage(deps: AppStorageDeps): AppStorage {
   const now = deps.now ?? Date.now;
   const fetchImpl = deps.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  /** Parts of an app's upload held in memory at once (each up to the console's part size). */
+  const UPLOAD_PARTS_IN_FLIGHT = 3;
   const usageCache = new Map<string, AppStorageUsage & { at: number; stale: boolean }>();
   let bucket: { token: string; id: number } | null = null;
 
@@ -437,41 +438,57 @@ export function makeAppStorage(deps: AppStorageDeps): AppStorage {
         "Send the file with a Content-Length header (the SDKs do this for you).",
       );
     }
-    if (size > CLOUD_SINGLE_PUT_MAX_BYTES) {
-      return err(
-        413,
-        "file_too_large",
-        `One file can be at most ${CLOUD_SINGLE_PUT_MAX_BYTES / 1024 / 1024} MB for now.`,
-      );
-    }
+    // No size cap here: the console answers big files with parts and refuses
+    // (402) what doesn't fit the account's plan. The app's own limit is ours.
     const measured = await usage(folder);
     if (measured.usedBytes + size > limitBytes) {
       return err(507, "app_storage_full", APP_STORAGE_FULL_MESSAGE);
     }
     const cd = await cloudDeps();
     const bucketId = await ensureBucket(cd);
-    const url = await presign(cd, bucketId, folder + key, "put");
     const contentType = req.headers["content-type"];
-    const headers: Record<string, string> = { "content-length": String(size) };
-    if (typeof contentType === "string" && contentType.length < 200) {
-      headers["content-type"] = contentType;
-    }
-    const upstream = await fetchImpl(url, {
-      method: "PUT",
-      headers,
-      body: size === 0 ? new Uint8Array() : (Readable.toWeb(req) as unknown as ReadableStream),
-      ...(size === 0 ? {} : { duplex: "half" }),
-    } as RequestInit).catch(() => null);
-    if (!upstream) {
-      return err(502, "storage_unreachable", "Couldn't reach cloud storage to upload the file.");
-    }
-    await upstream.body?.cancel().catch(() => undefined);
-    if (!upstream.ok) {
-      return err(
-        502,
-        "upload_failed",
-        `Cloud storage refused the file (answered ${upstream.status}).`,
-      );
+    try {
+      await uploadToBucket({
+        presign: (body) =>
+          (cd.fetchJson ?? fetchControlPlaneJson)(cd.token, `/api/v1/buckets/${bucketId}/presign`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        fetchImpl,
+        key: folder + key,
+        source: streamUploadSource(req, size),
+        contentType:
+          typeof contentType === "string" && contentType.length < 200 ? contentType : undefined,
+        concurrency: UPLOAD_PARTS_IN_FLIGHT,
+      });
+    } catch (cause) {
+      if (cause instanceof CloudUploadError) {
+        if (cause.code === "storage_unreachable") {
+          return err(
+            502,
+            "storage_unreachable",
+            "Couldn't reach cloud storage to upload the file.",
+          );
+        }
+        if (cause.code === "storage_refused") {
+          return err(
+            502,
+            "upload_failed",
+            `Cloud storage refused the file (answered ${cause.status}).`,
+          );
+        }
+        if (cause.code === "source_failed") {
+          return err(
+            400,
+            "upload_incomplete",
+            `The upload stopped before the whole file arrived: ${cause.message}.`,
+          );
+        }
+        return err(502, "storage_unreachable", "The Uno console returned no storage address.");
+      }
+      // The bucket was deleted in Files: find or create it again next time.
+      if (controlPlaneErrorStatus(cause) === 404) bucket = null;
+      return fromConsoleError(cause);
     }
     adjustUsage(folder, size, 1);
     return { status: 201, body: { key, size } };

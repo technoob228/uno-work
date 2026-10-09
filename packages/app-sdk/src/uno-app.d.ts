@@ -192,7 +192,8 @@ export type StorageData = string | Blob | ArrayBuffer | ArrayBufferView;
 
 /**
  * The app's own folder in the Uno account's cloud (manifest `"storage"`).
- * Keys are relative to that folder: "photos/2026/cat.jpg". One file ≤ 256 MB.
+ * Keys are relative to that folder: "photos/2026/cat.jpg". A file can be any size within
+ * the app's limit; use `upload(path, key)` for big files (streamed from disk).
  */
 export interface UnoStorage {
   /** Save bytes/text under a key (overwrites). Content-Type from `contentType` or the extension. */

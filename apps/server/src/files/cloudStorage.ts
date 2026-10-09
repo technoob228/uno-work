@@ -9,7 +9,7 @@
  *
  * @module files/cloudStorage
  */
-import { createReadStream, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 import { Readable } from "node:stream";
@@ -27,13 +27,17 @@ import {
   controlPlaneErrorStatus,
   fetchControlPlaneJson,
 } from "../workspaceRegistry/unoCloudParse.ts";
+import {
+  CloudUploadError,
+  type UploadSource,
+  fileUploadSource,
+  uploadToBucket,
+} from "./cloudUpload.ts";
 import { FilesPathError, uniqueDestination } from "./filesPaths.ts";
 
 /** Where Office keeps older copies of a Cloud document (see cloudOffice.ts). */
 export const CLOUD_VERSIONS_FOLDER = ".versions";
 
-/** Hostkey S3 drops single PUTs of a few hundred MB; stay under that. */
-export const CLOUD_SINGLE_PUT_MAX_BYTES = 256 * 1024 * 1024;
 const PRESIGN_TTL_SECONDS = 3600;
 const TRANSFER_MAX_FILES = 2000;
 
@@ -246,11 +250,12 @@ export async function cloudDelete(deps: CloudDeps, bucketId: number, key: string
   return num((raw as Record<string, unknown> | null)?.["deleted"]);
 }
 
+/** A presigned download link. Uploads go through `cloudUpload` (any size). */
 export async function cloudPresign(
   deps: CloudDeps,
   bucketId: number,
   key: string,
-  method: "get" | "put",
+  method: "get",
 ): Promise<string> {
   const raw = await call(deps, `/api/v1/buckets/${bucketId}/presign`, {
     method: "POST",
@@ -261,6 +266,50 @@ export async function cloudPresign(
     throw new CloudError("The console didn't return an upload address.");
   }
   return url;
+}
+
+/**
+ * Upload one object of any size: one PUT or parts, as the console says
+ * (cloudUpload.ts). Console errors read like the rest of Cloud storage;
+ * storage errors name the file, or say what `storageMessage` says.
+ */
+export async function cloudUpload(
+  deps: CloudDeps,
+  bucketId: number,
+  key: string,
+  source: UploadSource,
+  options: {
+    readonly contentType?: string | undefined;
+    readonly onProgress?: ((uploadedBytes: number, totalBytes: number) => void) | undefined;
+    readonly storageMessage?: ((error: CloudUploadError) => string) | undefined;
+  } = {},
+): Promise<void> {
+  try {
+    await uploadToBucket({
+      presign: (body) =>
+        (deps.fetchJson ?? fetchControlPlaneJson)(
+          deps.token,
+          `/api/v1/buckets/${bucketId}/presign`,
+          { method: "POST", body: JSON.stringify(body) },
+        ),
+      fetchImpl: deps.fetchImpl,
+      key,
+      source,
+      contentType: options.contentType,
+      onProgress: options.onProgress,
+    });
+  } catch (cause) {
+    if (cause instanceof CloudUploadError) {
+      if (cause.code === "bad_console_answer") {
+        throw new CloudError("The console didn't return an upload address.");
+      }
+      throw new CloudError(
+        options.storageMessage?.(cause) ??
+          `Uploading “${lastSegment(key)}” failed (${cause.message}).`,
+      );
+    }
+    throw new CloudError(describeCloudError(cause));
+  }
 }
 
 // ── Transfers ──────────────────────────────────────────────────────────────
@@ -314,30 +363,20 @@ export async function copyToCloud(
   const skipped: Array<{ name: string; reason: string }> = [];
   const files: LocalFile[] = [];
   for (const path of input.paths) await collectLocal(path, nodePath.basename(path), files, skipped);
-  const fetchImpl = deps.fetchImpl ?? fetch;
   let bytes = 0;
   const uploadedPaths: string[] = [];
   for (const file of files) {
-    if (file.size > CLOUD_SINGLE_PUT_MAX_BYTES) {
-      skipped.push({ name: file.relativeKey, reason: "bigger than 256 MB" });
-      continue;
-    }
-    const url = await cloudPresign(deps, input.bucketId, `${prefix}${file.relativeKey}`, "put");
-    const body =
-      file.size === 0
-        ? new Uint8Array()
-        : (Readable.toWeb(createReadStream(file.absolutePath)) as unknown as ReadableStream);
-    const response = await fetchImpl(url, {
-      method: "PUT",
-      body,
-      headers: { "content-length": String(file.size) },
-      ...(file.size === 0 ? {} : { duplex: "half" }),
-    } as RequestInit);
-    if (!response.ok) {
-      throw new CloudError(
-        `Uploading “${file.relativeKey}” failed (storage answered ${response.status}).`,
-      );
-    }
+    // Any size: the console answers big files with parts (cloudUpload.ts) and
+    // refuses with 402 what doesn't fit the plan.
+    await cloudUpload(
+      deps,
+      input.bucketId,
+      `${prefix}${file.relativeKey}`,
+      fileUploadSource(file.absolutePath, file.size),
+      {
+        storageMessage: (error) => `Uploading “${file.relativeKey}” failed (${error.message}).`,
+      },
+    );
     bytes += file.size;
     uploadedPaths.push(file.absolutePath);
   }

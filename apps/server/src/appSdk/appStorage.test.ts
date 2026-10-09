@@ -32,6 +32,11 @@ let s3Url = "";
 const buckets: Array<{ id: number; name: string }> = [];
 const consoleCalls: Array<{ path: string; method: string; token: string }> = [];
 let consoleQuotaFull = false;
+// Files bigger than this go in parts of PART_SIZE bytes (null: always one link, like an old console).
+let consoleMultipartOver: number | null = null;
+const PART_SIZE = 100;
+const uploads = new Map<string, { key: string; parts: number }>();
+const uploadedParts = new Map<string, Buffer>();
 
 async function fakeConsole(token: string, path: string, init?: RequestInit): Promise<unknown> {
   const method = init?.method ?? "GET";
@@ -55,9 +60,41 @@ async function fakeConsole(token: string, path: string, init?: RequestInit): Pro
     throw new ControlPlaneHttpError(404, "404");
   }
   if (match[2] === "presign") {
-    const { key, method: m } = JSON.parse(String(init?.body)) as { key: string; method: string };
+    const body = JSON.parse(String(init?.body)) as {
+      key: string;
+      method: string;
+      size?: number;
+      upload_id?: string;
+    };
+    const { key, method: m } = body;
+    if (m === "complete") {
+      const upload = uploads.get(body.upload_id ?? "")!;
+      const assembled = Array.from(
+        { length: upload.parts },
+        (_, i) => uploadedParts.get(`${body.upload_id}:${i + 1}`)!,
+      );
+      objects.set(upload.key, { body: Buffer.concat(assembled), type: "binary/octet-stream" });
+      return { method: "complete", status: "completed" };
+    }
     if (m === "put" && consoleQuotaFull) throw new ControlPlaneHttpError(402, "402");
-    return { url: `${s3Url}/${encodeURIComponent(key)}?sig=${m}` };
+    if (m === "put" && consoleMultipartOver !== null && (body.size ?? 0) > consoleMultipartOver) {
+      const id = `up-${uploads.size + 1}`;
+      const parts = Math.ceil(body.size! / PART_SIZE);
+      uploads.set(id, { key, parts });
+      return {
+        multipart: true,
+        upload_id: id,
+        size: body.size,
+        part_size: PART_SIZE,
+        parts,
+        first: 1,
+        part_urls: Array.from(
+          { length: parts },
+          (_, i) => `${s3Url}/${encodeURIComponent(key)}?sig=part&upload=${id}&n=${i + 1}`,
+        ),
+      };
+    }
+    return { url: `${s3Url}/${encodeURIComponent(key)}?sig=${m}`, max_bytes: 5_261_334_937 };
   }
   if (method === "DELETE") {
     const key = url.searchParams.get("key") ?? "";
@@ -161,6 +198,12 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
+      if (req.method === "PUT" && sig === "part") {
+        const id = `${u.searchParams.get("upload")}:${u.searchParams.get("n")}`;
+        uploadedParts.set(id, Buffer.concat(chunks));
+        res.writeHead(200).end();
+        return;
+      }
       if (req.method === "PUT" && sig === "put") {
         objects.set(key, {
           body: Buffer.concat(chunks),
@@ -207,6 +250,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   consoleQuotaFull = false;
+  consoleMultipartOver = null;
   machineToken = "uno_machine";
 });
 
@@ -315,6 +359,22 @@ describe("App API cloud storage", () => {
     });
     expect(objects.has("album/big2.bin")).toBe(false);
     await client.storage.delete("big.bin");
+  });
+
+  it("uploads a file bigger than one link takes in parts, streamed from the request", async () => {
+    consoleMultipartOver = 50;
+    const client = createClient({ url: apiUrl, token: "uno_app_other" });
+    const data = Uint8Array.from({ length: 650 }, (_, i) => (i * 13) % 256);
+    expect(await client.storage.put("video.bin", data, { contentType: "video/mp4" })).toEqual({
+      key: "video.bin",
+      size: 650,
+    });
+    const presign = consoleCalls.filter((c) => c.path.endsWith("/presign"));
+    expect(presign.length).toBeGreaterThanOrEqual(2);
+    expect([...uploadedParts.keys()].filter((id) => id.startsWith("up-1:"))).toHaveLength(7);
+    expect(uploadedParts.get("up-1:7")!.length).toBe(50);
+    expect(objects.get("other/video.bin")?.body).toEqual(Buffer.from(data));
+    expect(await client.storage.delete("video.bin")).toEqual({ deleted: 1 });
   });
 
   it("passes the account's full cloud through as cloud_full", async () => {
