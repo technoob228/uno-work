@@ -14,13 +14,17 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   ArrowUpRightIcon,
+  CheckIcon,
   CircleHelpIcon,
+  CloudIcon,
   CreditCardIcon,
   FolderIcon,
   HouseIcon,
   InboxIcon,
+  LaptopIcon,
   LayoutGridIcon,
   LogInIcon,
   LogOutIcon,
@@ -38,14 +42,17 @@ import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
-import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
+import { useInboxNeedsYouCount } from "../../inbox/inboxStore";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { isWebApp } from "../../webMode";
-import { BellPanel } from "../inbox/InboxBell";
-import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
+import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
+import { useComputerNames } from "../../proto/computerNames";
+import { PROTO } from "../../proto/protoState";
+import { BellPanel, InboxBell } from "../inbox/InboxBell";
+import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
@@ -57,7 +64,7 @@ import {
   openExternal,
   useAccountWho,
 } from "./SidebarDAccountButton";
-import { accountMenuLines, inboxPlace, isHomePath } from "./sidebarD.logic";
+import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
@@ -143,7 +150,12 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
     sidebarDPanel.closeNow();
   };
   const trigger = (
-    <SidebarDAccountTrigger label={props.computerName} who={who} variant={props.variant} />
+    <SidebarDAccountTrigger
+      label={props.computerName}
+      who={who}
+      variant={props.variant}
+      chevron={!PROTO}
+    />
   );
   return (
     <Menu>
@@ -159,6 +171,7 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           {who ? <p className="truncate text-xs text-muted-foreground">{who}</p> : null}
         </div>
         <MenuSeparator />
+        {PROTO ? <SidebarDComputersGroup close={close} /> : null}
         <MenuItem
           onClick={() => {
             close();
@@ -240,9 +253,64 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   );
 });
 
+/**
+ * Sidebar v2 (Misha 09.10): the computers live in the account menu — a click
+ * opens that computer (its Home: programs, files, apps) and new chats start
+ * there; the sidebar's top no longer says "you are inside X".
+ */
+function SidebarDComputersGroup(props: { close: () => void }) {
+  const names = useComputerNames((state) => state.byId);
+  const order = useComputerNames((state) => state.order);
+  const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const current = activeEnvironmentId ?? primaryEnvironmentId;
+  const switchEnvironment = useSwitchEnvironment();
+  const navigate = useNavigate();
+  return (
+    <>
+      <MenuGroup data-testid="sidebar-account-computers">
+        <MenuGroupLabel>Computers</MenuGroupLabel>
+        {order.map((id) => {
+          const entry = names[id]!;
+          return (
+            <MenuItem
+              key={id}
+              onClick={() => {
+                props.close();
+                if (id === current) void navigate({ to: "/computer" });
+                else switchEnvironment(id as EnvironmentId, { landing: "computer" });
+              }}
+            >
+              {entry.kind === "uno_box" ? <CloudIcon /> : <LaptopIcon />}
+              <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {entry.kind === "uno_box" ? "in the cloud" : "your computer"}
+              </span>
+              {id === current ? <CheckIcon className="text-muted-foreground" /> : null}
+            </MenuItem>
+          );
+        })}
+        <MenuItem
+          onClick={() => {
+            props.close();
+            void navigate({ to: "/my-uno" });
+          }}
+        >
+          <LayoutGridIcon />
+          All computers
+        </MenuItem>
+      </MenuGroup>
+      <MenuSeparator />
+    </>
+  );
+}
+
 /** Account and computer on top, Search ⌘K and New chat as icons. No footer. */
 export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: boolean }) {
-  const computerName = useSidebarDComputerName();
+  const machineName = useSidebarDComputerName();
+  // Sidebar v2 (Misha 09.10): the top says the app, not "you are inside X";
+  // the computer is a chip where a new chat starts, and in this menu.
+  const computerName = PROTO ? "Uno Work" : machineName;
   const goHome = useGoHome();
   const openPalette = useCommandPaletteStore((store) => store.setOpen);
   const { isMobile, setOpen } = useSidebar();
@@ -257,6 +325,13 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
       >
         <SearchIcon />
       </SidebarDHeaderIcon>
+      {PROTO ? (
+        // The whole Inbox (finished chats, app news) — the Needs you row below
+        // shows only while something waits, as in 0.0.118.
+        <span className="no-drag inline-flex">
+          <InboxBell />
+        </span>
+      ) : null}
       <SidebarDHeaderIcon label="New chat" onClick={goHome} testId="sidebar-header-new-chat">
         <SquarePenIcon />
       </SidebarDHeaderIcon>
@@ -332,17 +407,18 @@ function useOpenPlace() {
 }
 
 /** Whether Needs you shows, and its count: approvals and questions waiting, nothing else. */
-export function useInboxBadge() {
-  return inboxPlace(useInboxUnreadCount(), useInboxNeedsYouCount());
+export function useNeedsYouBadge() {
+  const { shown, count } = needsYouPlace(useInboxNeedsYouCount());
+  return { needsYou: count, shown };
 }
 
-/** "Inbox" — approvals, questions, finished chats, app news — in place of the bell. */
-function InboxPopover(props: {
+/** "Needs you" — the Inbox (approvals, questions, finished chats, app news) in place of the bell. */
+function NeedsYouPopover(props: {
   side: "right" | "bottom";
-  trigger: (badge: { unread: number; needsYou: number }) => ReactNode;
+  trigger: (badge: { needsYou: number }) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const badge = useInboxBadge();
+  const badge = useNeedsYouBadge();
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {props.trigger(badge)}
@@ -368,6 +444,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
+  const { shown } = useNeedsYouBadge();
   return (
     <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
       <PlaceRow
@@ -397,27 +474,21 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-apps"
         tour="apps"
       />
-      <InboxPopover
-        side="right"
-        trigger={(badge) => (
-          <PopoverTrigger
-            className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-sidebar-foreground/85 outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-4 [&_svg]:shrink-0"
-            data-testid="sidebar-inbox"
-          >
-            <InboxIcon />
-            <span className="min-w-0 flex-1 truncate">Inbox</span>
-            {badge.needsYou > 0 ? (
-              <span
-                className="shrink-0 text-[11px] text-warning"
-                data-testid="sidebar-inbox-needs-you"
-              >
-                {badge.needsYou} need{badge.needsYou === 1 ? "s" : ""} you
-              </span>
-            ) : null}
-            <InboxCountBadge unread={badge.unread} needsYou={badge.needsYou} />
-          </PopoverTrigger>
-        )}
-      />
+      {shown ? (
+        <NeedsYouPopover
+          side="right"
+          trigger={(badge) => (
+            <PopoverTrigger
+              className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-sidebar-foreground/85 outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-4 [&_svg]:shrink-0"
+              data-testid="sidebar-needs-you"
+            >
+              <InboxIcon />
+              <span className="min-w-0 flex-1 truncate">Needs you</span>
+              <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
+            </PopoverTrigger>
+          )}
+        />
+      ) : null}
     </nav>
   );
 });
@@ -465,16 +536,18 @@ export const SIDEBAR_D_RAIL_WIDTH = "56px";
 
 /**
  * The collapsed sidebar: a rail of icons that never hides, so the page
- * doesn't jump. Files, Apps & sites and Inbox just open (tooltip on
+ * doesn't jump. Files, Apps & sites and Needs you just open (tooltip on
  * hover); Uno and Chats slide the chats panel out over the page.
  */
 export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: boolean }) {
-  const computerName = useSidebarDComputerName();
+  const machineName = useSidebarDComputerName();
+  const computerName = PROTO ? "Uno Work" : machineName;
   const pathname = useLocation({ select: (location) => location.pathname });
   const goHome = useGoHome();
   const openPalette = useCommandPaletteStore((store) => store.setOpen);
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
+  const { shown } = useNeedsYouBadge();
   const hover = {
     onPointerEnter: () => sidebarDPanel.enterTrigger(),
     onPointerLeave: () => sidebarDPanel.leave(),
@@ -529,29 +602,25 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         >
           <LayoutGridIcon />
         </RailButton>
-        <InboxPopover
-          side="right"
-          trigger={(badge) => (
-            <PopoverTrigger
-              aria-label={
-                badge.needsYou > 0
-                  ? `Inbox: ${badge.needsYou} need you`
-                  : badge.unread > 0
-                    ? `Inbox: ${badge.unread} unread`
-                    : "Inbox"
-              }
-              data-testid="sidebar-rail-inbox"
-              className="relative grid size-9 cursor-pointer place-items-center rounded-lg text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-[18px]"
-            >
-              <InboxIcon />
-              <InboxCountBadge
-                unread={badge.unread}
-                needsYou={badge.needsYou}
-                className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
-              />
-            </PopoverTrigger>
-          )}
-        />
+        {shown ? (
+          <NeedsYouPopover
+            side="right"
+            trigger={(badge) => (
+              <PopoverTrigger
+                aria-label="Needs you"
+                data-testid="sidebar-rail-needs-you"
+                className="relative grid size-9 cursor-pointer place-items-center rounded-lg text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-[18px]"
+              >
+                <InboxIcon />
+                <InboxCountBadge
+                  unread={badge.needsYou}
+                  needsYou={badge.needsYou}
+                  className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+                />
+              </PopoverTrigger>
+            )}
+          />
+        ) : null}
         <span aria-hidden className="my-1 h-px w-6 bg-border" />
         <RailButton label="Uno and its chats" testId="sidebar-rail-uno" {...hover}>
           <UnoFace className="size-6" online />

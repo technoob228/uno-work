@@ -8,10 +8,18 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useStore } from "../../../store";
+import { useProtoComputerInComposer } from "../../../proto/computerNames";
 import { ComputerPill } from "./ComputerPill";
 import { useHomeComputer } from "./useHomeComputer";
 
 export function ComputerChip() {
+  // Sidebar v2: with 2+ computers joined, a chat doesn't say "you are on X" on top.
+  const hidden = useProtoComputerInComposer();
+  if (hidden) return null;
+  return <LiveComputerChip />;
+}
+
+function LiveComputerChip() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const navigate = useNavigate();

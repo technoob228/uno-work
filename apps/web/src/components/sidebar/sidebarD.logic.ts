@@ -184,17 +184,15 @@ export function isHomePath(pathname: string): boolean {
 }
 
 /**
- * "Inbox" in the sidebar (ICP v3, 09.10): always there — the agent says "sent
- * to your Inbox", and a finished task must be findable. The number shows only
- * when something is unread (Misha 08.10: no "0"), and "N need you" only when
- * an approval or a question really waits.
+ * "Needs you" in the sidebar (Misha 08.10: "Needs you 0"): the row shows only
+ * when an approval or a question really waits for the person, and counts
+ * those. Unread news alone (a finished chat, an app's note) doesn't bring it
+ * up — the chat rows already show what finished.
  */
-const countOf = (value: number) => (Number.isFinite(value) && value > 0 ? Math.floor(value) : 0);
-
-export function inboxPlace(
-  unread: number,
-  needsYou: number,
-): { readonly unread: number; readonly needsYou: number } {
-  const waiting = countOf(needsYou);
-  return { unread: Math.max(countOf(unread), waiting), needsYou: waiting };
+export function needsYouPlace(needsYou: number): {
+  readonly shown: boolean;
+  readonly count: number;
+} {
+  const count = Number.isFinite(needsYou) && needsYou > 0 ? Math.floor(needsYou) : 0;
+  return { shown: count > 0, count };
 }

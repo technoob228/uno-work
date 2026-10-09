@@ -1,18 +1,26 @@
 /**
- * Sidebar prototype (w0115, NOT FOR MERGE), iteration 2: the chat list of
- * variants G and C, between the Uno row and the Done shelf of the real
- * sidebar. Rows are the real sidebar rows (`renderRow`); this file decides
- * grouping, filters and the "project · computer" line under the title.
+ * The chat list of the multi-computer sidebar (variants G and C), between
+ * the Uno row and the Done shelf of the real sidebar. Rows are the real
+ * sidebar rows (`renderRow`); this file decides grouping, the computer
+ * filter and the "project · computer" line under the title.
  *
- * - A visible "Group by" button above the chats: none / project / computer /
- *   computer then project, plus a project and a computer filter. Remembered.
- * - Each chat says what the list doesn't: its project if not grouped by
- *   project, its computer if not grouped by computer (and only with 2+).
+ * Sidebar v2 (Misha 09.10 ~22:00):
+ * - all computers together by default;
+ * - group by any of status / computer / project, in the order picked
+ *   (chatGrouping.ts); none = one list, newest first;
+ * - show all computers, one, or the ones picked;
+ * - the setting is a quiet sliders icon next to "Chats", not a "View" button.
+ * - Each chat says what the groups above it don't: its project, its computer.
  * - One project on two computers (same repository / shared Uno folder) is one
  *   project: its chats from both computers sit together.
  */
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CheckIcon,
   ChevronDownIcon,
+  CircleDashedIcon,
+  CircleIcon,
   CloudIcon,
   FolderIcon,
   HomeIcon,
@@ -29,6 +37,8 @@ import { useStore } from "../store";
 import type { Project, SidebarThreadSummary } from "../types";
 import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover";
 import { Button } from "../components/ui/button";
+import { Checkbox } from "../components/ui/checkbox";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
   isHomeProject,
   logicalKeyOf,
@@ -42,12 +52,20 @@ import {
 } from "./protoPlace";
 import { useComputerNames } from "./computerNames";
 import {
-  effectiveGroupBy,
-  GROUP_BY,
-  useProtoStore,
-  type ProtoGroupBy,
-  type ProtoMode,
-} from "./protoState";
+  chatStatusOf,
+  effectiveLevels,
+  GROUP_LEVELS,
+  groupChats,
+  levelsLabel,
+  moveLevel,
+  STATUS_NAME,
+  toggleComputer,
+  toggleLevel,
+  type ChatGroupNode,
+  type ChatStatus,
+  type GroupLevel,
+} from "./chatGrouping";
+import { useProtoStore } from "./protoState";
 
 type Mark = "approval" | "input" | "your-turn" | "failed" | "working" | null;
 
@@ -61,7 +79,7 @@ export interface ProtoRowOptions {
 interface ProtoSidebarListProps {
   /** Live chats (not Done / Snoozed, not under Uno), newest activity first. */
   readonly threads: ReadonlyArray<SidebarThreadSummary>;
-  /** Projects in scope (every computer in (Б)), the assistant's left out. */
+  /** Projects in scope (every computer when joined), the assistant's left out. */
   readonly projects: ReadonlyArray<Project>;
   /** Done and Snoozed chats (one "Done" shelf without Dev mode). */
   readonly doneThreads: ReadonlyArray<SidebarThreadSummary>;
@@ -79,7 +97,7 @@ const URGENT: Record<Exclude<Mark, null>, number> = {
   working: 3,
 };
 
-/** A project row shows a dot when a chat in it waits or works — "Your turn" stays on the chats. */
+/** A folded group shows a dot when a chat in it waits or works — "Your turn" stays on the chats. */
 function mostUrgent(marks: ReadonlyArray<Mark>): Mark {
   let best: Mark = null;
   for (const mark of marks) {
@@ -103,6 +121,8 @@ interface LogicalProject {
 
 const threadKey = (thread: Pick<SidebarThreadSummary, "environmentId" | "projectId">) =>
   `${thread.environmentId}:${thread.projectId}`;
+const chatKey = (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) =>
+  `${thread.environmentId}:${thread.id}`;
 
 function useLogicalProjects(
   projects: ReadonlyArray<Project>,
@@ -232,18 +252,28 @@ function DoneFold(props: {
         </button>
       </li>
       {open
-        ? props.chats.map((thread) =>
-            props.renderRow(thread, {
-              section: thread.settledOverride === "settled" ? "settled" : "snoozed",
-              subtitle: props.subtitleOf?.(thread) ?? null,
-            }),
-          )
+        ? props.chats.map((thread) => doneRow(thread, props.renderRow, props.subtitleOf))
         : null}
     </>
   );
 }
 
-function EmptyLine(props: { text: string; onNewChat?: () => void; nested?: boolean }) {
+function doneRow(
+  thread: SidebarThreadSummary,
+  renderRow: ProtoSidebarListProps["renderRow"],
+  subtitleOf?: (thread: SidebarThreadSummary) => ReactNode,
+) {
+  return renderRow(thread, {
+    section: thread.settledOverride === "settled" ? "settled" : "snoozed",
+    subtitle: subtitleOf?.(thread) ?? null,
+  });
+}
+
+function EmptyLine(props: {
+  text: string;
+  onNewChat?: (() => void) | undefined;
+  nested?: boolean;
+}) {
   return (
     <li
       className={cn(
@@ -278,33 +308,36 @@ function GroupHeader(props: {
   onNewChat?: (() => void) | undefined;
   mark?: Mark;
   renderMark?: (mark: Mark) => ReactNode;
-  level?: 0 | 1;
+  /** 0 = top level; deeper groups step in. */
+  depth: number;
   testId?: string;
+  level: GroupLevel;
 }) {
+  const top = props.depth === 0;
   return (
     <li
-      className={cn(
-        "group/proto-group flex list-none items-center gap-0.5",
-        props.level === 1 ? "" : "mt-2",
-      )}
+      className={cn("group/proto-group flex list-none items-center gap-0.5", top ? "mt-2" : "")}
       data-testid={props.testId}
+      data-group-level={props.level}
+      data-group-depth={props.depth}
     >
       <button
         type="button"
         onClick={props.onToggle}
         aria-expanded={!props.folded}
+        style={top ? undefined : { paddingLeft: `${0.625 + props.depth * 0.5}rem` }}
         className={cn(
           "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pr-2 text-left outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
-          props.level === 1
-            ? "h-7 pl-4 text-[13px] text-sidebar-foreground/90"
-            : "min-h-8 pl-2.5 text-sm font-medium text-foreground",
+          top
+            ? "min-h-8 pl-2.5 text-sm font-medium text-foreground"
+            : "h-7 text-[13px] text-sidebar-foreground/90",
           props.quiet && "font-normal text-sidebar-foreground/70",
         )}
       >
         <span
           className={cn(
-            "inline-flex shrink-0 text-muted-foreground",
-            props.level === 1 ? "[&_svg]:size-3.5" : "[&_svg]:size-4",
+            "inline-flex shrink-0 items-center justify-center text-muted-foreground",
+            top ? "size-4 [&_svg]:size-4" : "size-3.5 [&_svg]:size-3.5",
           )}
         >
           {props.icon}
@@ -361,150 +394,208 @@ function GroupHeader(props: {
   );
 }
 
-// ── The "Group by" button ────────────────────────────────────────────────
-
-function Segmented<T extends string>(props: {
-  label: string;
-  value: T;
-  options: ReadonlyArray<{ id: T; name: string; icon?: ReactNode }>;
-  onChange: (value: T) => void;
-  testId: string;
-  wrap?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">{props.label}</span>
-      <div
-        role="radiogroup"
-        aria-label={props.label}
-        data-testid={props.testId}
-        className={cn("flex gap-1", props.wrap ? "flex-wrap" : "flex-col")}
-      >
-        {props.options.map((option) => {
-          const on = option.id === props.value;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => props.onChange(option.id)}
-              className={cn(
-                "inline-flex min-h-8 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-left text-sm transition-colors [&_svg]:size-3.5 [&_svg]:shrink-0",
-                on
-                  ? "border-foreground/80 bg-foreground/5 font-medium text-foreground"
-                  : "border-border text-sidebar-foreground/85 hover:bg-accent hover:text-foreground",
-                !props.wrap && "w-full",
-              )}
-            >
-              {option.icon}
-              <span className="min-w-0 truncate">{option.name}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
+/** The icon of a status group: the same marks the rows show. */
+function StatusIcon(props: { status: ChatStatus; renderMark: (mark: Mark) => ReactNode }) {
+  switch (props.status) {
+    case "needs-you":
+      return <>{props.renderMark("approval")}</>;
+    case "failed":
+      return <>{props.renderMark("failed")}</>;
+    case "your-turn":
+      return <span aria-hidden className="size-2 rounded-full bg-emerald-500" />;
+    case "working":
+      return <CircleDashedIcon className="text-sky-500" />;
+    case "done":
+      return <CheckIcon />;
+    default:
+      return <CircleIcon className="opacity-60" />;
+  }
 }
 
-function ViewButton(props: {
-  projects: ReadonlyArray<LogicalProject>;
+// ── The sliders icon: group levels and the computer filter ──────────────
+
+const LEVEL_ICON: Record<GroupLevel, ReactNode> = {
+  status: <CircleDashedIcon />,
+  computer: <LaptopIcon />,
+  project: <FolderIcon />,
+};
+
+function MenuLabel(props: { children: ReactNode }) {
+  return <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">{props.children}</p>;
+}
+
+function ViewMenu(props: {
+  /** Computers with chats or folders in view (2+ = the filter shows). */
   computers: ReadonlyArray<string>;
-  multi: boolean;
-  /** Computers on the account this page knows (mode choice shows with 2+). */
-  accountComputers: number;
+  /** The levels that apply now (Computer drops out with one computer in view). */
+  effective: ReadonlyArray<GroupLevel>;
+  filtered: boolean;
 }) {
-  const groupBy = useProtoStore((state) => state.groupBy);
-  const projectFilter = useProtoStore((state) => state.project);
-  const computerFilter = useProtoStore((state) => state.computer);
-  const setGroupBy = useProtoStore((state) => state.setGroupBy);
-  const setProjectFilter = useProtoStore((state) => state.setProjectFilter);
-  const setComputerFilter = useProtoStore((state) => state.setComputerFilter);
-  const mode = useProtoStore((state) => state.mode);
-  const setMode = useProtoStore((state) => state.setMode);
-  const effective = effectiveGroupBy(groupBy, props.multi);
-  const current = GROUP_BY.find((item) => item.id === effective)!;
+  const levels = useProtoStore((state) => state.levels);
+  const setLevels = useProtoStore((state) => state.setLevels);
+  const picked = useProtoStore((state) => state.computers);
+  const setComputers = useProtoStore((state) => state.setComputers);
+  const multi = props.computers.length >= 2;
+  // Ticked levels in their order, then the others.
+  const rows = [
+    ...levels,
+    ...GROUP_LEVELS.map((item) => item.id).filter((id) => !levels.includes(id)),
+  ];
+  const summary = `Grouped: ${levelsLabel(props.effective)}${props.filtered ? " · some computers" : ""}`;
   return (
     <Popover>
-      <PopoverTrigger
-        data-testid="proto-view-button"
-        className={cn(
-          "-my-1 inline-flex h-7 max-w-[calc(100%-2.5rem)] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2 text-xs font-medium text-sidebar-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover",
-        )}
-        aria-label={`Group and filter chats — now: ${current.short}`}
-      >
-        <SlidersHorizontalIcon className="size-3.5 shrink-0" />
-        <span className="truncate">View: {current.short}</span>
-        <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              data-testid="proto-view-button"
+              aria-label={`Group and filter chats — ${summary}`}
+              className="relative -my-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-foreground"
+            />
+          }
+        >
+          <SlidersHorizontalIcon className="size-3.5" />
+          {props.filtered ? (
+            <span
+              aria-hidden
+              className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+              data-testid="proto-view-filtered"
+            />
+          ) : null}
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">{summary}</TooltipPopup>
+      </Tooltip>
       <PopoverPopup
         side="bottom"
         align="end"
-        className="w-[min(18rem,calc(100vw-1.5rem))]"
+        className="w-[min(16rem,calc(100vw-1.5rem))]"
         data-testid="proto-view-popup"
       >
-        <div className="-my-1 flex max-h-[calc(var(--available-height)-2.5rem)] flex-col gap-4 overflow-y-auto py-1">
-          {props.accountComputers >= 2 ? (
-            <Segmented
-              label="Chats from"
-              value={mode}
-              options={[
-                { id: "all", name: "All my computers" },
-                { id: "one", name: "Only this computer" },
-              ]}
-              onChange={(value: ProtoMode) => setMode(value)}
-              testId="proto-mode"
-            />
-          ) : null}
-          <Segmented
-            label="Group chats by"
-            value={effective}
-            options={GROUP_BY.filter((item) => props.multi || !item.multi).map((item) => ({
-              id: item.id,
-              name: item.name,
-            }))}
-            onChange={(value: ProtoGroupBy) => setGroupBy(value)}
-            testId="proto-groupby"
-          />
-          <Segmented
-            label="Show projects"
-            value={projectFilter ?? "all"}
-            wrap
-            options={[
-              { id: "all", name: "All" },
-              ...props.projects
-                .filter((project) => !project.home)
-                .map((project) => ({
-                  id: project.key,
-                  name: project.name,
-                  icon: <FolderIcon />,
-                })),
-              { id: NO_PROJECT_KEY, name: NO_PROJECT, icon: <HomeIcon /> },
-            ]}
-            onChange={(value) => setProjectFilter(value === "all" ? null : value)}
-            testId="proto-filter-project"
-          />
-          {props.multi ? (
-            <Segmented
-              label="Show computers"
-              value={computerFilter ?? "all"}
-              wrap
-              options={[
-                { id: "all", name: "All" },
-                ...props.computers.map((id) => ({
-                  id,
-                  name: machineLabel(id),
-                  icon: <ComputerIcon environmentId={id} />,
-                })),
-              ]}
-              onChange={(value) => setComputerFilter(value === "all" ? null : value)}
-              testId="proto-filter-computer"
-            />
-          ) : null}
-          {props.multi ? (
-            <p className="text-xs leading-snug text-muted-foreground">
-              A project on several computers (a shared folder) is one project here.
+        <div className="-mx-1 -my-1 flex max-h-[calc(var(--available-height)-2.5rem)] flex-col gap-3 overflow-y-auto">
+          <div data-testid="proto-levels">
+            <MenuLabel>Group chats by</MenuLabel>
+            <ul className="flex flex-col">
+              {rows.map((id) => {
+                const on = levels.includes(id);
+                const index = levels.indexOf(id);
+                const unavailable = id === "computer" && !multi;
+                const name = GROUP_LEVELS.find((item) => item.id === id)!.name;
+                return (
+                  <li
+                    key={id}
+                    className="flex h-8 items-center gap-1 rounded-md pr-0.5 hover:bg-accent/60"
+                    data-testid={`proto-level-${id}`}
+                  >
+                    <label
+                      className={cn(
+                        "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 text-sm [&_svg]:size-3.5 [&_svg]:shrink-0",
+                        unavailable && "cursor-default opacity-60",
+                      )}
+                    >
+                      <Checkbox
+                        checked={on}
+                        disabled={unavailable}
+                        onCheckedChange={() => setLevels(toggleLevel(levels, id))}
+                        aria-label={`Group by ${name}`}
+                      />
+                      <span className="text-muted-foreground">{LEVEL_ICON[id]}</span>
+                      <span className="min-w-0 truncate">{name}</span>
+                      {on && levels.length > 1 ? (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {index + 1}
+                        </span>
+                      ) : null}
+                      {unavailable ? (
+                        <span className="truncate text-xs text-muted-foreground">
+                          with 2+ computers
+                        </span>
+                      ) : null}
+                    </label>
+                    {on && levels.length > 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => setLevels(moveLevel(levels, id, -1))}
+                          aria-label={`Move ${name} up`}
+                          className="inline-flex size-6 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <ArrowUpIcon className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === levels.length - 1}
+                          onClick={() => setLevels(moveLevel(levels, id, 1))}
+                          aria-label={`Move ${name} down`}
+                          className="inline-flex size-6 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <ArrowDownIcon className="size-3.5" />
+                        </button>
+                      </>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="px-1 pt-1 text-xs text-muted-foreground" data-testid="proto-levels-label">
+              {props.effective.length === 0
+                ? "Nothing ticked: one list, newest first."
+                : `Now: ${levelsLabel(props.effective)}`}
             </p>
+          </div>
+          {multi ? (
+            <div data-testid="proto-filter-computer" className="border-t border-border/70 pt-3">
+              <MenuLabel>Show chats from</MenuLabel>
+              <ul className="flex flex-col">
+                <li className="flex h-8 items-center rounded-md hover:bg-accent/60">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 text-sm">
+                    <Checkbox
+                      checked={picked === null}
+                      onCheckedChange={() => setComputers(null)}
+                      aria-label="All computers"
+                    />
+                    All computers
+                  </label>
+                </li>
+                {props.computers.map((id) => {
+                  const on = picked === null || picked.includes(id);
+                  const solo = picked !== null && picked.length === 1 && picked[0] === id;
+                  return (
+                    <li
+                      key={id}
+                      className="group/computer flex h-8 items-center gap-1 rounded-md pr-0.5 hover:bg-accent/60"
+                    >
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 text-sm [&_svg]:size-3.5 [&_svg]:shrink-0">
+                        <Checkbox
+                          checked={on}
+                          onCheckedChange={() =>
+                            setComputers(toggleComputer(picked, id, props.computers))
+                          }
+                          aria-label={machineLabel(id)}
+                        />
+                        <span className="text-muted-foreground">
+                          <ComputerIcon environmentId={id} />
+                        </span>
+                        <span className="min-w-0 truncate">{machineLabel(id)}</span>
+                      </label>
+                      {solo ? null : (
+                        <button
+                          type="button"
+                          onClick={() => setComputers([id])}
+                          aria-label={`Only ${machineLabel(id)}`}
+                          className="h-6 shrink-0 cursor-pointer rounded px-1.5 text-xs text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/computer:opacity-100 max-md:opacity-100"
+                        >
+                          Only
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="px-1 pt-1 text-xs leading-snug text-muted-foreground">
+                A project on several computers (same git repository) is one project.
+              </p>
+            </div>
           ) : null}
         </div>
       </PopoverPopup>
@@ -513,11 +604,13 @@ function ViewButton(props: {
 }
 
 /** What the list is narrowed to, each with ✕. */
-function FilterChips(props: { multi: boolean; projects: Map<string, LogicalProject> }) {
+function FilterChips(props: {
+  picked: ReadonlyArray<string> | null;
+  projects: Map<string, LogicalProject>;
+}) {
   const projectFilter = useProtoStore((state) => state.project);
-  const computerFilter = useProtoStore((state) => state.computer);
   const setProjectFilter = useProtoStore((state) => state.setProjectFilter);
-  const setComputerFilter = useProtoStore((state) => state.setComputerFilter);
+  const setComputers = useProtoStore((state) => state.setComputers);
   const chips: Array<{ key: string; icon: ReactNode; label: string; clear: () => void }> = [];
   if (projectFilter !== null) {
     const entry = props.projects.get(projectFilter);
@@ -528,12 +621,17 @@ function FilterChips(props: { multi: boolean; projects: Map<string, LogicalProje
       clear: () => setProjectFilter(null),
     });
   }
-  if (props.multi && computerFilter !== null) {
+  if (props.picked !== null) {
     chips.push({
       key: "c",
-      icon: <ComputerIcon environmentId={computerFilter} />,
-      label: machineLabel(computerFilter),
-      clear: () => setComputerFilter(null),
+      icon:
+        props.picked.length === 1 ? (
+          <ComputerIcon environmentId={props.picked[0]!} />
+        ) : (
+          <LaptopIcon />
+        ),
+      label: props.picked.map(machineLabel).join(", "),
+      clear: () => setComputers(null),
     });
   }
   if (chips.length === 0) return null;
@@ -561,13 +659,14 @@ function FilterChips(props: { multi: boolean; projects: Map<string, LogicalProje
 export function ProtoSidebarList(props: ProtoSidebarListProps) {
   const variant = useProtoStore((state) => state.variant);
   const mode = useProtoStore((state) => state.mode);
-  const groupBy = useProtoStore((state) => state.groupBy);
+  const levels = useProtoStore((state) => state.levels);
+  const pickedRaw = useProtoStore((state) => state.computers);
   const projectFilter = useProtoStore((state) => state.project);
-  const computerFilterRaw = useProtoStore((state) => state.computer);
   const setProjectFilter = useProtoStore((state) => state.setProjectFilter);
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  // Groups whose fold differs from their default (Done and empty groups start folded).
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   const toggle = (key: string) =>
-    setFolded((keys) => {
+    setFlipped((keys) => {
       const next = new Set(keys);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -581,9 +680,13 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
     [machineIds, props.projects],
   );
   // Computer names only with 2+ computers in view; (А) is always one.
-  const multi = mode === "all" && computers.length >= 2;
-  const computerFilter = multi ? computerFilterRaw : null;
-  const effective = effectiveGroupBy(groupBy, multi);
+  const joined = mode === "all" && computers.length >= 2;
+  // The pick, without computers that are gone; nothing left = all.
+  const pickedKnown = joined ? (pickedRaw?.filter((id) => computers.includes(id)) ?? null) : null;
+  const picked = pickedKnown && pickedKnown.length > 0 ? pickedKnown : null;
+  const inView = picked ?? computers;
+  const multi = joined && inView.length >= 2;
+  const effective = effectiveLevels(levels, multi ? inView.length : 1);
 
   // Filters only change what the list shows — they never switch the computer
   // you work on (critic 3: "Only MacBook" silently made MacBook the active one).
@@ -591,226 +694,210 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
 
   const passes = (thread: SidebarThreadSummary) =>
     (projectFilter === null || logical.logicalKeyOfThread(thread) === projectFilter) &&
-    (computerFilter === null || thread.environmentId === computerFilter);
+    (picked === null || picked.includes(thread.environmentId));
   const visible = props.threads.filter(passes);
   const visibleDone = props.doneThreads.filter(passes);
+  const doneKeys = useMemo(() => new Set(props.doneThreads.map(chatKey)), [props.doneThreads]);
+  const isDone = (thread: SidebarThreadSummary) => doneKeys.has(chatKey(thread));
 
-  /** A member folder to start a chat in: the active computer's, else the first. */
+  /** A member folder to start a chat in: on the given computer, else the active one's, else the first. */
   const memberFor = (entry: LogicalProject, environmentId?: string) =>
     entry.members.find(
       (member) => member.environmentId === (environmentId ?? activeEnvironmentId),
-    ) ?? entry.members[0]!;
+    ) ??
+    entry.members.find((member) => member.environmentId === activeEnvironmentId) ??
+    entry.members[0]!;
   const homeOf = (environmentId: string) =>
     props.projects.find(
       (project) => project.environmentId === environmentId && isHomeProject(project),
     ) ?? null;
 
   const hasProjects = logical.list.some((entry) => !entry.home);
-  const subtitleFor = (
-    thread: SidebarThreadSummary,
-    show: { project: boolean; computer: boolean },
-  ) => {
+  const subtitleFor = (thread: SidebarThreadSummary) => {
+    const entry = logical.byKey.get(logical.logicalKeyOfThread(thread));
+    const byProject = effective.includes("project");
+    // Grouped by project: the computer only where it tells chats apart (a
+    // project on 2+ computers, or No project, which is on every computer).
+    const computerTellsApart = !byProject || !entry || entry.home || entry.computers.length > 1;
     const parts = placeParts({
       environmentId: thread.environmentId,
       project: logical.projectOfThread(thread),
-      showProject: show.project && projectFilter === null,
-      showComputer: show.computer && multi && computerFilter === null,
-      // With a computer filter the project still shows, so no row is left bare (critic 4).
-      // "No project" only when there are projects to tell it from.
+      showProject: !byProject && projectFilter === null,
+      showComputer: multi && !effective.includes("computer") && computerTellsApart,
+      // "No project" only when there are projects to tell it from (critics 3–4).
       sayNoProject: hasProjects,
     });
     return parts.project || parts.computer ? <PlaceLine parts={parts} /> : null;
   };
-  const row = (
-    thread: SidebarThreadSummary,
-    show: { project: boolean; computer: boolean },
-    nested = false,
-  ) => props.renderRow(thread, { nested, subtitle: subtitleFor(thread, show) });
+  const liveRow = (thread: SidebarThreadSummary, nested: boolean) =>
+    props.renderRow(thread, { nested, subtitle: subtitleFor(thread) });
+  const anyRow = (thread: SidebarThreadSummary, nested: boolean) =>
+    isDone(thread) ? doneRow(thread, props.renderRow, subtitleFor) : liveRow(thread, nested);
 
   const projectsInView = logical.list.filter(
     (entry) =>
       (projectFilter === null || entry.key === projectFilter) &&
-      (computerFilter === null || entry.computers.includes(computerFilter)),
+      (picked === null || entry.computers.some((id) => picked.includes(id))),
   );
 
-  // ── The list body by grouping ─────────────────────────────────────────
-  let body: ReactNode;
-  if (effective === "none") {
-    body = (
-      <>
-        {visible.length === 0 ? <EmptyLine text="No chats here yet." /> : null}
-        {visible.map((thread) => row(thread, { project: true, computer: true }))}
-        <DoneFold
-          chats={visibleDone}
-          renderRow={props.renderRow}
-          subtitleOf={(thread) => subtitleFor(thread, { project: true, computer: true })}
+  const tree = groupChats<SidebarThreadSummary>({
+    chats: [...visible, ...visibleDone],
+    levels: effective,
+    keyOf: {
+      status: (thread) => chatStatusOf(props.markOf(thread), isDone(thread)),
+      computer: (thread) => thread.environmentId,
+      project: (thread) => logical.logicalKeyOfThread(thread),
+    },
+    orderOf: { computer: inView, project: logical.list.map((entry) => entry.key) },
+    seedOf: {
+      // Empty groups say where you could start (D's habit): every project in
+      // view on top; under a computer, the projects that are on it.
+      project: (trail) =>
+        projectsInView
+          .filter(
+            (entry) =>
+              !entry.home &&
+              (trail.computer === undefined || entry.computers.includes(trail.computer)),
+          )
+          .map((entry) => entry.key),
+      // Every computer in view on top; under a project, the computers it is on.
+      computer: (trail) => {
+        if (trail.project === undefined) return [...inView];
+        const entry = logical.byKey.get(trail.project);
+        return entry && !entry.home ? entry.computers.filter((id) => inView.includes(id)) : [];
+      },
+    },
+  });
+
+  const renderNode = (node: ChatGroupNode<SidebarThreadSummary>): ReactNode => {
+    const live = node.chats.filter((thread) => !isDone(thread));
+    const done = node.chats.filter(isDone);
+    const empty = node.chats.length === 0;
+    const defaultFolded = empty || (node.level === "status" && node.id === "done");
+    const isFolded = defaultFolded !== flipped.has(node.path);
+    const mark = node.level === "status" ? null : mostUrgent(live.map(props.markOf));
+    let header: ReactNode;
+    let onNewChat: (() => void) | undefined;
+    if (node.level === "project") {
+      const entry = logical.byKey.get(node.id);
+      const home = entry?.home ?? node.id === NO_PROJECT_KEY;
+      const onComputer = node.trail.computer;
+      if (entry) {
+        if (home) {
+          const homeProject = onComputer ? homeOf(onComputer) : null;
+          onNewChat = homeProject ? () => props.onNewChatIn(homeProject) : undefined;
+        } else {
+          onNewChat = () => props.onNewChatIn(memberFor(entry, onComputer));
+        }
+      }
+      const showWhere = multi && !effective.includes("computer") && !home && entry;
+      header = (
+        <GroupHeader
+          level="project"
+          depth={node.depth}
+          icon={home ? <HomeIcon /> : <FolderIcon />}
+          label={entry?.name ?? (home ? NO_PROJECT : "Project")}
+          aside={showWhere ? computersText(entry.computers) : null}
+          asideBelow={showWhere ? entry.computers.length > 1 : false}
+          count={node.chats.length}
+          quiet={empty}
+          folded={isFolded}
+          onToggle={() => toggle(node.path)}
+          onNewChat={onNewChat}
+          mark={mark}
+          renderMark={props.renderMark}
+          testId="proto-group-project"
         />
-      </>
-    );
-  } else if (effective === "project") {
-    body = projectsInView.map((entry) => {
-      const key = `p:${entry.key}`;
-      const chats = visible.filter((thread) => logical.logicalKeyOfThread(thread) === entry.key);
-      const done = visibleDone.filter((thread) => logical.logicalKeyOfThread(thread) === entry.key);
-      if (entry.home && chats.length === 0 && done.length === 0) return null;
-      const empty = chats.length === 0 && done.length === 0;
-      // An empty project shows as one quiet row; a click opens "No chats yet · New chat".
-      const isFolded = empty ? !folded.has(key) : folded.has(key);
-      // A project on 2+ computers: say so on the header, and each chat says its computer.
-      const joinedHere = entry.computers.length > 1;
-      return (
-        <li key={key} className="list-none">
-          <ul role="list" className="flex flex-col gap-px">
-            <GroupHeader
-              icon={entry.home ? <HomeIcon /> : <FolderIcon />}
-              label={entry.name}
-              aside={
-                multi && computerFilter === null && !entry.home
-                  ? computersText(entry.computers)
-                  : null
-              }
-              asideBelow={joinedHere}
-              count={chats.length + done.length}
-              quiet={empty}
-              folded={isFolded}
-              onToggle={() => toggle(key)}
-              onNewChat={entry.home ? undefined : () => props.onNewChatIn(memberFor(entry))}
-              mark={mostUrgent(chats.map(props.markOf))}
-              renderMark={props.renderMark}
-              testId="proto-group-project"
-            />
-            {isFolded ? null : (
-              <>
-                {chats.length === 0 && done.length === 0 ? (
-                  <EmptyLine
-                    nested
-                    text="No chats yet."
-                    onNewChat={() => props.onNewChatIn(memberFor(entry))}
-                  />
-                ) : null}
-                {chats.map((thread) =>
-                  row(thread, { project: false, computer: entry.home || joinedHere }, true),
-                )}
-                <DoneFold
-                  chats={done}
-                  nested
-                  renderRow={props.renderRow}
-                  subtitleOf={(thread) =>
-                    subtitleFor(thread, { project: false, computer: entry.home || joinedHere })
-                  }
-                />
-              </>
-            )}
-          </ul>
-        </li>
       );
-    });
-  } else {
-    // By computer (then, optionally, by project inside it).
-    const computersInView = computers.filter(
-      (id) =>
-        (computerFilter === null || id === computerFilter) &&
-        (projectFilter === null ||
-          (logical.byKey.get(projectFilter)?.computers.includes(id) ?? false)),
-    );
-    body = computersInView.map((environmentId) => {
-      const key = `c:${environmentId}`;
-      const chats = visible.filter((thread) => thread.environmentId === environmentId);
-      const done = visibleDone.filter((thread) => thread.environmentId === environmentId);
-      const isFolded = folded.has(key);
-      const home = homeOf(environmentId);
-      let inner: ReactNode;
-      if (effective === "computer") {
+    } else if (node.level === "computer") {
+      const projectKey = node.trail.project;
+      const entry = projectKey ? logical.byKey.get(projectKey) : undefined;
+      const target = entry && !entry.home ? memberFor(entry, node.id) : homeOf(node.id);
+      onNewChat = target ? () => props.onNewChatIn(target) : undefined;
+      header = (
+        <GroupHeader
+          level="computer"
+          depth={node.depth}
+          icon={<ComputerIcon environmentId={node.id} />}
+          label={machineLabel(node.id)}
+          count={node.chats.length}
+          quiet={empty}
+          folded={isFolded}
+          onToggle={() => toggle(node.path)}
+          onNewChat={onNewChat}
+          mark={mark}
+          renderMark={props.renderMark}
+          testId="proto-group-computer"
+        />
+      );
+    } else {
+      const status = node.id as ChatStatus;
+      header = (
+        <GroupHeader
+          level="status"
+          depth={node.depth}
+          icon={<StatusIcon status={status} renderMark={props.renderMark} />}
+          label={STATUS_NAME[status]}
+          count={node.chats.length}
+          folded={isFolded}
+          onToggle={() => toggle(node.path)}
+          testId="proto-group-status"
+        />
+      );
+    }
+    const byStatus = effective.includes("status");
+    let inner: ReactNode = null;
+    if (!isFolded) {
+      if (empty) {
+        inner = <EmptyLine nested text="No chats yet." onNewChat={onNewChat} />;
+      } else if (node.children !== null) {
+        inner = node.children.map(renderNode);
+      } else if (byStatus) {
+        // Done is a status group of its own: its chats are listed like the others.
+        inner = node.chats.map((thread) => anyRow(thread, true));
+      } else {
         inner = (
           <>
-            {chats.length === 0 ? <EmptyLine nested text="No chats here yet." /> : null}
-            {chats.map((thread) => row(thread, { project: true, computer: false }, true))}
-            <DoneFold
-              chats={done}
-              nested
-              renderRow={props.renderRow}
-              subtitleOf={(thread) => subtitleFor(thread, { project: true, computer: false })}
-            />
+            {live.map((thread) => liveRow(thread, true))}
+            <DoneFold chats={done} nested renderRow={props.renderRow} subtitleOf={subtitleFor} />
           </>
         );
-      } else {
-        inner = projectsInView
-          .filter((entry) => entry.computers.includes(environmentId))
-          .map((entry) => {
-            const subKey = `${key}:${entry.key}`;
-            const subChats = chats.filter(
-              (thread) => logical.logicalKeyOfThread(thread) === entry.key,
-            );
-            const subDone = done.filter(
-              (thread) => logical.logicalKeyOfThread(thread) === entry.key,
-            );
-            if (entry.home && subChats.length === 0 && subDone.length === 0) return null;
-            const subFolded = folded.has(subKey);
-            return (
-              <li key={subKey} className="list-none">
-                <ul role="list" className="flex flex-col gap-px">
-                  <GroupHeader
-                    level={1}
-                    icon={entry.home ? <HomeIcon /> : <FolderIcon />}
-                    label={entry.name}
-                    count={subChats.length + subDone.length}
-                    folded={subFolded}
-                    onToggle={() => toggle(subKey)}
-                    onNewChat={() => props.onNewChatIn(memberFor(entry, environmentId))}
-                    mark={mostUrgent(subChats.map(props.markOf))}
-                    renderMark={props.renderMark}
-                  />
-                  {subFolded ? null : (
-                    <>
-                      {subChats.length === 0 && subDone.length === 0 ? (
-                        <EmptyLine nested text="No chats yet." />
-                      ) : null}
-                      {subChats.map((thread) =>
-                        props.renderRow(thread, { nested: true, subtitle: null }),
-                      )}
-                      <DoneFold chats={subDone} nested renderRow={props.renderRow} />
-                    </>
-                  )}
-                </ul>
-              </li>
-            );
-          });
       }
-      return (
-        <li key={key} className="list-none">
-          <ul role="list" className="flex flex-col gap-px">
-            <GroupHeader
-              icon={<ComputerIcon environmentId={environmentId} />}
-              label={machineLabel(environmentId)}
-              count={chats.length + done.length}
-              folded={isFolded}
-              onToggle={() => toggle(key)}
-              onNewChat={home ? () => props.onNewChatIn(home) : undefined}
-              mark={mostUrgent(chats.map(props.markOf))}
-              renderMark={props.renderMark}
-              testId="proto-group-computer"
-            />
-            {isFolded ? null : inner}
-          </ul>
-        </li>
-      );
-    });
-  }
+    }
+    return (
+      <li key={node.path} className="list-none">
+        <ul role="list" className="flex flex-col gap-px">
+          {header}
+          {inner}
+        </ul>
+      </li>
+    );
+  };
+
+  const body: ReactNode =
+    tree === null ? (
+      <>
+        {visible.length === 0 ? <EmptyLine text="No chats here yet." /> : null}
+        {visible.map((thread) => liveRow(thread, false))}
+        <DoneFold chats={visibleDone} renderRow={props.renderRow} subtitleOf={subtitleFor} />
+      </>
+    ) : (
+      tree.map(renderNode)
+    );
 
   const header = (
     <>
-      <li className="flex list-none items-center gap-2 px-2.5 pt-3 pb-1.5">
+      <li className="flex list-none items-center gap-2 pt-3 pr-0 pb-1.5 pl-2.5">
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
           Chats
         </span>
-        <ViewButton
-          projects={logical.list}
-          computers={computers}
-          multi={multi}
-          accountComputers={machineIds.length}
+        <ViewMenu
+          computers={joined ? computers : []}
+          effective={effective}
+          filtered={picked !== null}
         />
       </li>
-      <FilterChips multi={multi} projects={logical.byKey} />
+      <FilterChips picked={picked} projects={logical.byKey} />
     </>
   );
 
@@ -880,12 +967,12 @@ export function ProtoSidebarList(props: ProtoSidebarListProps) {
     );
   }
 
-  // ── G: one list with the Group by button ──────────────────────────────
+  // ── G: one list with the sliders icon ─────────────────────────────────
   return (
     <>
       {header}
       {body}
-      {effective === "project" ? (
+      {effective[0] === "project" ? (
         <li className="list-none">
           <button
             type="button"
