@@ -32,7 +32,7 @@ import { Context, Data, Effect, Layer, Option } from "effect";
 
 import { currentAssistantModelSelection } from "../manager/assistantEngineSelection.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../manager/connectorBindings.ts";
-import { resolveTurnReply } from "../manager/Layers/TelegramConnector.ts";
+import { decidePendingReply, stoppedText } from "../manager/connectorReplies.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { assistantCommandOrigin } from "../orchestration/commandOrigin.ts";
@@ -153,8 +153,17 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         }
       });
 
-    const awaitReply = (threadId: ThreadId, requestedAtIso: string, deadlineMs: number) =>
+    // The answer of the turn THIS message started (see `decidePendingReply`):
+    // a Telegram message landing meanwhile has a turn — and an answer — of
+    // its own.
+    const awaitReply = (
+      threadId: ThreadId,
+      messageId: MessageId,
+      requestedAtIso: string,
+      deadlineMs: number,
+    ) =>
       Effect.gen(function* () {
+        let knownTurnId: string | null = null;
         while (Date.now() < deadlineMs) {
           yield* Effect.sleep(pollMs);
           const detail = yield* projections
@@ -164,16 +173,29 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           const turnRows = yield* turns
             .listByThreadId({ threadId })
             .pipe(Effect.orElseSucceed(() => []));
-          const reply = resolveTurnReply({
-            turns: turnRows,
+          const verdict = decidePendingReply({
+            userMessageId: messageId,
+            requestedAt: requestedAtIso,
+            knownTurnId,
+            claimedTurnIds: new Set(),
             messages: detail.value.messages,
-            sessionStatus: detail.value.session?.status ?? null,
-            sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
-            sessionActiveTurnId: detail.value.session?.activeTurnId ?? null,
-            requestedAtIso,
-            nowIso: new Date().toISOString(),
+            turns: turnRows,
+            session: detail.value.session,
+            activities: detail.value.activities,
+            nowMs: Date.now(),
           });
-          if (reply !== null) return reply;
+          knownTurnId = verdict.turnId;
+          switch (verdict.kind) {
+            case "wait":
+              continue;
+            case "answer":
+              return { text: verdict.text };
+            case "stopped":
+              return { text: verdict.partial ?? stoppedText("en") };
+            case "lost":
+            case "failed":
+              return { text: `The scheduled task could not finish: ${verdict.reason}` };
+          }
         }
         return null;
       });
@@ -192,13 +214,14 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           .getThreadShellById(threadId)
           .pipe(Effect.orElseSucceed(() => Option.none()));
         const requestedAtIso = new Date().toISOString();
+        const messageId = MessageId.make(crypto.randomUUID());
         yield* engine.dispatch(
           {
             type: "thread.turn.start",
             commandId: CommandId.make(`assistant-schedule:${crypto.randomUUID()}`),
             threadId,
             message: {
-              messageId: MessageId.make(crypto.randomUUID()),
+              messageId,
               role: "user",
               text: wrapScheduledPrompt({
                 ...(input.name ? { name: input.name } : {}),
@@ -220,7 +243,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           Effect.annotateLogs({ projectId, threadId, name: input.name ?? null }),
         );
 
-        const reply = yield* awaitReply(threadId, requestedAtIso, deadlineMs);
+        const reply = yield* awaitReply(threadId, messageId, requestedAtIso, deadlineMs);
         if (reply === null) {
           return { status: "timeout" as const, threadId, delivered: 0 };
         }

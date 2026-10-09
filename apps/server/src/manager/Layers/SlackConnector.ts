@@ -31,7 +31,6 @@ import {
   ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerSlackConnectorConfig,
-  MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
@@ -54,7 +53,10 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
-import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
+import type { ConnectorPendingReply } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
+import { makeConnectorReplies, readMeta, type SendOutcome } from "../connectorReplies.ts";
+import { detectReplyLanguage } from "../connectorReplyText.ts";
 import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "../addressing.ts";
 import type { AddressingReason } from "../addressing.ts";
 import {
@@ -77,8 +79,6 @@ import {
   type ConnectorSenderRole,
   withOwnerUserId,
 } from "../connectorSenders.ts";
-import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
-import { resolveTurnReply } from "./TelegramConnector.ts";
 import {
   parseRelayCredential,
   parseRouteCredential,
@@ -145,13 +145,7 @@ export class ManagerSlackService extends Context.Service<
 >()("t3/manager/Services/ManagerSlackService") {}
 
 const RECONCILE_INTERVAL = Duration.seconds(5);
-const REPLY_POLL_INTERVAL = Duration.seconds(2);
-const REPLY_TIMEOUT = Duration.minutes(10);
 const SLACK_MESSAGE_LIMIT = 3900;
-// Post a "working on it" ack if the reply is not ready quickly, so channel
-// users see the mention landed (thread creation + a model turn take a while).
-const ACK_DELAY = Duration.seconds(10);
-const ACK_TEXT = "⏳ On it — I'll post the result in this thread.";
 // When a session opens mid-thread, this much backlog is handed to the
 // assistant as context: the root message plus the most recent replies.
 const BACKLOG_FETCH_LIMIT = 100;
@@ -370,12 +364,21 @@ async function uploadSlackFileViaRelay(input: {
   });
 }
 
+const replyRowKey = (row: ConnectorPendingReply) => `${row.connectorProjectId}:${row.replyKey}`;
+
+/** Slack's verdict on a failed call: a refusal of the chat itself will not pass. */
+const slackSendOutcome = (cause: unknown): SendOutcome =>
+  /channel_not_found|not_in_channel|is_archived|account_inactive|invalid_auth|token_revoked|msg_too_long/.test(
+    String(cause),
+  )
+    ? "gone"
+    : "retry";
+
 const makeSlackConnector = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
   const bindingRepository = yield* ManagerConnectorBindingRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
 
@@ -415,13 +418,19 @@ const makeSlackConnector = Effect.gen(function* () {
     text: string,
     threadTs: string | undefined,
     identity: SlackIdentity | null = null,
+    /** In a thread, also show the message in the channel / DM itself. */
+    broadcast = false,
   ) =>
     Effect.tryPromise({
       try: async () => {
         const base = {
           channel,
           text: text.slice(0, SLACK_MESSAGE_LIMIT),
-          ...(threadTs !== undefined ? { thread_ts: threadTs } : {}),
+          ...(threadTs === undefined
+            ? {}
+            : broadcast
+              ? { thread_ts: threadTs, reply_broadcast: true as const }
+              : { thread_ts: threadTs }),
         };
         if (identity === null) return web.chat.postMessage(base);
         const named = identity.prefix
@@ -778,18 +787,6 @@ const makeSlackConnector = Effect.gen(function* () {
       return threadId;
     });
 
-  // Where a thread's `[[send-file: …]]` may read from: its worktree, else
-  // its project's workspace.
-  const workspaceRootsForThread = (threadId: ThreadId) =>
-    projectionSnapshotQuery.getThreadCheckpointContext(threadId).pipe(
-      Effect.map((context) =>
-        Option.isSome(context)
-          ? [context.value.worktreePath ?? context.value.workspaceRoot]
-          : ([] as Array<string>),
-      ),
-      Effect.orElseSucceed(() => [] as Array<string>),
-    );
-
   // A DM belongs to exactly one person: whoever writes in an allowlisted DM
   // is an owner, and may then drive the assistant from allowlisted channels.
   // Re-reads the stored row so a concurrent settings save is not lost.
@@ -819,88 +816,115 @@ const makeSlackConnector = Effect.gen(function* () {
       ),
     );
 
-  const watchAndReply = (input: {
-    readonly web: WebClient;
-    readonly botToken: string;
-    readonly channel: string;
-    readonly threadTs: string | undefined;
-    readonly threadId: ThreadId;
-    readonly requestedAtIso: string;
-    readonly hotKey: string;
-    readonly identity: SlackIdentity | null;
-  }) =>
-    Effect.gen(function* () {
-      const say = (text: string) =>
-        postMessage(input.web, input.channel, text, input.threadTs, input.identity);
-      const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
-      const ackAt = Date.now() + Duration.toMillis(ACK_DELAY);
-      let acked = false;
-      const maybeAck = Effect.gen(function* () {
-        if (!acked && Date.now() >= ackAt) {
-          acked = true;
-          yield* say(ACK_TEXT);
+  // Slack has no "typing…" for apps: an ⏳ reaction on the person's message
+  // says it landed and is being worked on (removed with the answer). A
+  // workspace whose app may not react hears one short line instead.
+  const reactedRef = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const WORKING_REACTION = "hourglass_flowing_sand";
+  const identityForRow = (row: ConnectorPendingReply, runtime: SlackRuntime | undefined) => {
+    const identityProjectId = readMeta(row).identityProjectId;
+    return typeof identityProjectId === "string"
+      ? identityOf(ProjectId.make(identityProjectId), runtime)
+      : Effect.succeed(null);
+  };
+
+  // Answers to chat messages: on disk, bound to each message's own turn,
+  // no deadline (see `connectorReplies.ts`).
+  const replies = yield* makeConnectorReplies({
+    kind: "slack",
+    limit: SLACK_MESSAGE_LIMIT,
+    logPrefix: "slack",
+    typing: (row) =>
+      Effect.gen(function* () {
+        const key = replyRowKey(row);
+        if ((yield* Ref.get(reactedRef)).has(key) || row.replyTo === null) return;
+        const runtime = runtimes.get(row.connectorProjectId);
+        const web = runtime?.web ?? null;
+        if (web === null) return;
+        yield* Ref.update(reactedRef, (set) => new Set(set).add(key));
+        const replyTo = row.replyTo;
+        const reacted = yield* Effect.tryPromise(() =>
+          web.reactions.add({ channel: row.chatId, timestamp: replyTo, name: WORKING_REACTION }),
+        ).pipe(
+          Effect.as(true),
+          Effect.catch((cause) => Effect.succeed(/already_reacted/.test(String(cause)))),
+        );
+        if (!reacted) {
+          const identity = yield* identityForRow(row, runtime);
+          yield* postMessage(
+            web,
+            row.chatId,
+            row.language === "ru" ? "⏳ Работаю над этим…" : "⏳ On it…",
+            row.replyThread ?? undefined,
+            identity,
+          ).pipe(Effect.ignore);
         }
-      });
-      while (Date.now() < deadline) {
-        yield* Effect.sleep(REPLY_POLL_INTERVAL);
-        const detail = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
-        if (Option.isNone(detail)) {
-          yield* maybeAck;
-          continue;
+      }),
+    sendText: (row, text, { newerInChat }) =>
+      Effect.gen(function* () {
+        const runtime = runtimes.get(row.connectorProjectId);
+        const web = runtime?.web ?? null;
+        if (web === null) return "retry";
+        const identity = yield* identityForRow(row, runtime);
+        // A flat DM where the person wrote more since: the answer goes under
+        // its own message, and still shows in the DM (reply_broadcast).
+        const underOwnMessage = row.replyThread === null && newerInChat && row.replyTo !== null;
+        return yield* postMessage(
+          web,
+          row.chatId,
+          text,
+          underOwnMessage ? (row.replyTo ?? undefined) : (row.replyThread ?? undefined),
+          identity,
+          underOwnMessage,
+        ).pipe(
+          Effect.as("ok" as const),
+          Effect.catch((error) =>
+            Effect.logWarning("slack reply post failed").pipe(
+              Effect.annotateLogs({ channel: row.chatId, cause: error.message }),
+              Effect.as(slackSendOutcome(error.message)),
+            ),
+          ),
+        );
+      }),
+    sendFile: (row, path) =>
+      Effect.gen(function* () {
+        const runtime = runtimes.get(row.connectorProjectId);
+        const web = runtime?.web ?? null;
+        if (web === null || runtime === undefined) return "retry";
+        // A failed upload is reported into the chat by sendSlackFile itself.
+        yield* sendSlackFile({
+          web,
+          botToken: runtime.botToken,
+          channel: row.chatId,
+          threadTs: row.replyThread ?? undefined,
+          filePath: path,
+          identity: yield* identityForRow(row, runtime),
+        }).pipe(Effect.ignore);
+        return "ok";
+      }),
+    onSettled: (row, delivered) =>
+      Effect.gen(function* () {
+        const hotKey = readMeta(row).hotKey;
+        if (delivered && typeof hotKey === "string") yield* markHotWindow(hotKey);
+        const key = replyRowKey(row);
+        const web = runtimes.get(row.connectorProjectId)?.web ?? null;
+        if (web !== null && row.replyTo !== null) {
+          const replyTo = row.replyTo;
+          yield* Effect.tryPromise(() =>
+            web.reactions.remove({
+              channel: row.chatId,
+              timestamp: replyTo,
+              name: WORKING_REACTION,
+            }),
+          ).pipe(Effect.ignore);
         }
-        const turns = yield* projectionTurnRepository.listByThreadId({
-          threadId: input.threadId,
+        yield* Ref.update(reactedRef, (set) => {
+          const next = new Set(set);
+          next.delete(key);
+          return next;
         });
-        const reply = resolveTurnReply({
-          turns,
-          messages: detail.value.messages,
-          sessionStatus: detail.value.session?.status ?? null,
-          sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
-          sessionActiveTurnId: detail.value.session?.activeTurnId ?? null,
-          requestedAtIso: input.requestedAtIso,
-          nowIso: new Date().toISOString(),
-        });
-        if (reply === null) {
-          yield* maybeAck;
-          continue;
-        }
-        if (reply.text.trim().length > 0) {
-          yield* say(reply.text);
-        } else if (reply.files.length === 0) {
-          yield* say("Done.");
-        }
-        const roots = yield* workspaceRootsForThread(input.threadId);
-        for (const rawPath of reply.files) {
-          const resolved = yield* Effect.promise(() =>
-            resolveConnectorOutgoingFile(rawPath, roots),
-          );
-          if (!resolved.ok) {
-            yield* Effect.logWarning("slack send-file refused").pipe(
-              Effect.annotateLogs({ channel: input.channel, filePath: rawPath }),
-            );
-            yield* say(`Could not send ${nodePath.basename(rawPath)}: ${resolved.reason}.`);
-            continue;
-          }
-          yield* sendSlackFile({
-            web: input.web,
-            botToken: input.botToken,
-            channel: input.channel,
-            threadTs: input.threadTs,
-            filePath: resolved.path,
-            identity: input.identity,
-          });
-        }
-        yield* markHotWindow(input.hotKey);
-        return;
-      }
-      yield* say("The assistant is still working on it; check the app for progress.");
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("slack reply watcher failed").pipe(
-          Effect.annotateLogs({ channel: input.channel, cause: String(cause) }),
-        ),
-      ),
-    );
+      }),
+  });
 
   // Annotated: a DM waiting for "who is this for?" replays through it.
   const handleMessage = (
@@ -1115,6 +1139,9 @@ const makeSlackConnector = Effect.gen(function* () {
         return;
       }
 
+      // A replayed event already has its reply on the way: one turn per message.
+      const replyKey = `${channel}:${ts}`;
+      if (yield* replies.isKnown(projectId, replyKey)) return;
       const title = isDM ? `Slack DM ${channel}` : `Slack: ${channel}`;
       const threadId = yield* ensureThreadForChat({
         projectId: assistantId,
@@ -1150,35 +1177,22 @@ const makeSlackConnector = Effect.gen(function* () {
         ...bodyParts,
         SLACK_SEND_FILE_HINT,
       ].join("\n\n");
-      const requestedAtIso = new Date().toISOString();
-      yield* orchestrationEngine.dispatch(
-        {
-          type: "thread.turn.start",
-          commandId: CommandId.make(`slack:${crypto.randomUUID()}`),
-          threadId,
-          message: {
-            messageId: MessageId.make(crypto.randomUUID()),
-            role: "user",
-            text: body,
-            attachments: ingested.attachments,
-          },
+      yield* replies.enqueue({
+        connectorProjectId: projectId,
+        replyKey,
+        chatId: channel,
+        replyTo: ts,
+        // DMs reply flat; channel replies land in the message's thread.
+        replyThread: isDM ? null : (threadTs ?? ts),
+        threadId,
+        language: detectReplyLanguage(cleanedText, null),
+        dispatch: {
+          text: body,
+          attachments: ingested.attachments,
           runtimeMode,
           interactionMode: "default",
-          createdAt: requestedAtIso,
         },
-        { origin: slackCommandOrigin(channel) },
-      );
-      // DMs reply flat; channel replies land in the message's thread.
-      const replyThreadTs = isDM ? undefined : (threadTs ?? ts);
-      yield* watchAndReply({
-        web,
-        botToken: config.botToken,
-        channel,
-        threadTs: replyThreadTs,
-        threadId,
-        requestedAtIso,
-        hotKey,
-        identity,
+        extraMeta: { hotKey, identityProjectId: identity === null ? null : assistantId },
       });
     }).pipe(
       Effect.catch((cause) =>
@@ -1485,5 +1499,7 @@ const makeSlackConnector = Effect.gen(function* () {
 });
 
 export const ManagerSlackServiceLive = Layer.effect(ManagerSlackService, makeSlackConnector).pipe(
-  Layer.provide(ProjectionTurnRepositoryLive),
+  Layer.provide(
+    Layer.mergeAll(ProjectionTurnRepositoryLive, ManagerConnectorPendingReplyRepositoryLive),
+  ),
 );

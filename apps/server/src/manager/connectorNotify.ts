@@ -154,10 +154,22 @@ export const SUPPRESS_OWN_ORIGIN_KINDS: ReadonlySet<ConnectorNotificationKind> =
   "turn.completed",
 ]);
 
-/** Which of the resolved chats should hear this notification. */
+/** Key of a chat in {@link selectNotificationChats}' `awaitingReply`. */
+export const notifyChatKey = (chat: { readonly kind: string; readonly chatId: string }) =>
+  `${chat.kind}:${chat.chatId}`;
+
+/**
+ * Which of the resolved chats should hear this notification. `awaitingReply`
+ * holds the chats ({@link notifyChatKey}) that wait for their own answer in
+ * this thread (`manager_connector_pending_replies`): the reply watcher tells
+ * them how the turn ended — and re-runs a turn a restart cut off, so a
+ * "Send a new message to continue" would be wrong. Unlike the in-memory
+ * origin, it survives a daemon restart.
+ */
 export const selectNotificationChats = (
   chats: ReadonlyArray<ResolvedNotifyChat>,
   notification: ConnectorNotification,
+  awaitingReply: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<ResolvedNotifyChat> =>
   chats.filter((chat) => {
     if (notification.kind === "turn.completed" && !chat.notifyOnComplete) {
@@ -165,7 +177,7 @@ export const selectNotificationChats = (
     }
     if (
       SUPPRESS_OWN_ORIGIN_KINDS.has(notification.kind) &&
-      isOwnOriginChat(notification.origin, chat)
+      (isOwnOriginChat(notification.origin, chat) || awaitingReply.has(notifyChatKey(chat)))
     ) {
       return false;
     }

@@ -18,10 +18,13 @@ import { Effect, Layer, Option, Ref, Stream } from "effect";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
+import { ManagerConnectorPendingReplyRepository } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
 import {
   admitNotification,
   formatNotificationText,
   INITIAL_NOTIFY_TRACKER_STATE,
+  notifyChatKey,
   notifyRateLimitKey,
   selectNotificationChats,
   trackDomainEvent,
@@ -33,6 +36,7 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const notifyService = yield* ConnectorNotifyService;
+  const pendingReplies = yield* ManagerConnectorPendingReplyRepository;
 
   const trackerRef = yield* Ref.make<NotifyTrackerState>(INITIAL_NOTIFY_TRACKER_STATE);
   const sentAtRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
@@ -54,7 +58,16 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
         projectId: Option.isSome(shell) ? shell.value.projectId : null,
         includeAssistantFallback: false,
       });
-      const selected = selectNotificationChats(chats, notification);
+      // Chats still owed their own answer in this thread hear it from the
+      // reply watcher, not from here (see `selectNotificationChats`).
+      const awaitingReply = new Set(
+        (yield* pendingReplies
+          .listByThread({ threadId: notification.threadId, limit: 50 })
+          .pipe(Effect.orElseSucceed(() => [])))
+          .filter((row) => row.status === "queued" || row.status === "waiting")
+          .map(notifyChatKey),
+      );
+      const selected = selectNotificationChats(chats, notification, awaitingReply);
       if (selected.length === 0) {
         return;
       }
@@ -101,4 +114,6 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
   );
 });
 
-export const ConnectorEventsForwarderLive = Layer.effectDiscard(makeConnectorEventsForwarder);
+export const ConnectorEventsForwarderLive = Layer.effectDiscard(makeConnectorEventsForwarder).pipe(
+  Layer.provide(ManagerConnectorPendingReplyRepositoryLive),
+);

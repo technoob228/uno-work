@@ -205,6 +205,21 @@ describe("selectNotificationChats", () => {
     ...overrides,
   });
 
+  it("skips a chat that still waits for its own answer in the thread, even when the origin is unknown (after a restart)", () => {
+    const chats = [chat({ chatId: "100" }), chat({ chatId: "200" })];
+    const restartError = {
+      kind: "turn.error" as const,
+      threadId,
+      origin: undefined,
+      errorClass: null,
+      errorText:
+        "Provider session did not survive a server restart. Send a new message to continue.",
+    };
+    expect(
+      selectNotificationChats(chats, restartError, new Set(["telegram:100"])).map((c) => c.chatId),
+    ).toEqual(["200"]);
+  });
+
   it("sends completions only to bindings that opted in", () => {
     const chats = [chat({ chatId: "100" }), chat({ chatId: "200", notifyOnComplete: true })];
     expect(

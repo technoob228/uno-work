@@ -35,6 +35,7 @@ interface World {
 
 function makeLayer(world: World, options: { mainChat: boolean; projectId: string }) {
   let requestedAt: string | null = null;
+  let requestedMessageId: string | null = null;
   const threads = options.mainChat
     ? [
         {
@@ -63,15 +64,19 @@ function makeLayer(world: World, options: { mainChat: boolean; projectId: string
         getThreadDetailById: () =>
           Effect.succeed(
             Option.some({
-              session: { status: "ready", activeTurnId: null, updatedAt: null },
+              session: { status: "ready", activeTurnId: null, updatedAt: requestedAt },
+              activities: [],
               messages:
                 requestedAt !== null && world.reply !== null
                   ? [
                       {
+                        id: "answer-1",
                         role: "assistant",
                         text: world.reply,
+                        turnId: "turn-1",
                         streaming: false,
                         createdAt: new Date(Date.parse(requestedAt) + 10).toISOString(),
+                        updatedAt: new Date(Date.parse(requestedAt) + 10).toISOString(),
                       },
                     ]
                   : [],
@@ -88,6 +93,7 @@ function makeLayer(world: World, options: { mainChat: boolean; projectId: string
               : ([
                   {
                     turnId: "turn-1",
+                    pendingMessageId: requestedMessageId,
                     state: "completed",
                     requestedAt,
                     completedAt: requestedAt,
@@ -103,6 +109,8 @@ function makeLayer(world: World, options: { mainChat: boolean; projectId: string
             world.dispatched.push(command as never);
             if ((command as { type: string }).type === "thread.turn.start") {
               requestedAt = (command as { createdAt: string }).createdAt;
+              requestedMessageId = (command as { message: { messageId: string } }).message
+                .messageId;
             }
             return { sequence: world.dispatched.length };
           }),
