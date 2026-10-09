@@ -5,6 +5,7 @@ import {
   describeUnoAiHandoff,
   handoffPrompt,
   HANDOFF_TTL_MS,
+  isTeammateGoal,
   isUnoAiHandoff,
   rememberHandoff,
   readHandoff,
@@ -313,6 +314,20 @@ describe("hand-off", () => {
     expect(p).toContain("https://maya-yoga.sites.uno4.dev/");
     expect(p).toContain("Why I need this computer: A real bot lives on your computer.");
     expect(p).not.toContain("THINK-SECRET"); // the model's think never leaves
+  });
+  it("tells a teammate to wait for its first task instead of building something", () => {
+    expect(isTeammateGoal("A teammate that does my tasks")).toBe(true);
+    expect(isTeammateGoal("Хочу личного ассистента")).toBe(true);
+    expect(isTeammateGoal("A booking site for my yoga studio")).toBe(false);
+    const p = handoffPrompt({
+      title: "teammate",
+      messages: [{ role: "user", content: "A teammate that does my tasks" } as AiChatMessage],
+      sites: null,
+    });
+    expect(p).toContain("You are the teammate I asked for");
+    expect(p).toContain("Don't build an app");
+    const site = handoffPrompt({ title: "yoga", messages: transcript, sites: null });
+    expect(site).not.toContain("You are the teammate");
   });
   it("reads the goal and the live sites back for the chat's card", () => {
     const p = handoffPrompt({
