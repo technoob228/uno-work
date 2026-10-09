@@ -27,6 +27,15 @@ export function isHashedStaticAsset(pathname: string): boolean {
   return /^\/assets\/[^/]+-[A-Za-z0-9_-]{6,}\.[a-z0-9]+$/.test(pathname);
 }
 
+/**
+ * Build output lives under `/assets/` only; no app route starts there. A file
+ * that is not on disk is a stale chunk of an older bundle — answer 404, never
+ * the SPA shell (HTML parsed as a module breaks the page, 0.0.117).
+ */
+export function isMissingStaticAssetPath(pathname: string): boolean {
+  return pathname.startsWith("/assets/");
+}
+
 const COMPRESSIBLE_TYPES =
   /^(text\/|application\/(javascript|json|xml|wasm|manifest\+json)|image\/svg\+xml)/;
 

@@ -4,12 +4,18 @@
  * chat; with no chat there, the index route shows that machine's own empty
  * state (`NoActiveThreadState`) instead of a project that lives elsewhere.
  * Projects are never moved between machines.
+ *
+ * In the browser on a Work address, a computer with another (or not yet
+ * known) Uno Work version is opened with a full page load of its own
+ * interface instead (staleBundle.ts) — this page's bundle may not match it.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { pickThreadForEnvironmentSwitch } from "../components/Sidebar.logic";
+import { currentStaleBundlePage, switchReloadUrl } from "../staleBundle";
+import { readStaleBundleMachine } from "../staleBundleMachine";
 import { selectSidebarThreadsForEnvironment, useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
@@ -22,6 +28,15 @@ export function useSwitchEnvironment() {
 
   return useCallback(
     (environmentId: EnvironmentId, options?: { readonly landing?: "computer" }) => {
+      const reloadUrl = switchReloadUrl(
+        currentStaleBundlePage(),
+        readStaleBundleMachine(environmentId),
+        options?.landing === "computer" ? "/computer" : undefined,
+      );
+      if (reloadUrl) {
+        window.location.assign(reloadUrl);
+        return;
+      }
       setActiveEnvironmentId(environmentId);
       // A cloud computer opens on its own home screen (programs, files, apps).
       if (options?.landing === "computer") {

@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.117 — 2026-10-09
+
+- Switching computers in the browser always shows the interface of the computer you switch to. If it runs another Uno Work version, the page opens it in its own version (Uno remembers your choice: app.uno4.work opens that computer next time too).
+- "A new version of Uno Work is ready · Reload" appears on every screen when the computer you use runs a newer Uno Work than the page — not only inside a chat.
+- After an update, a tab that still runs the previous version reloads by itself instead of breaking on a missing file.
+
 ## v0.0.116 — 2026-10-08
 
 - Home is one click away again: a "Home" row on top of the sidebar (and a house on the folded rail) opens the start screen from any chat, file or app. The web version without a computer has the same "Home" row.

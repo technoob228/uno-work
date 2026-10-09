@@ -94,6 +94,7 @@ import { getOfficeEngineStatus, startOfficeEngineInstall } from "./officeEngineI
 import {
   compressStaticBody,
   isHashedStaticAsset,
+  isMissingStaticAssetPath,
   isStaticCompressible,
   STATIC_IMMUTABLE_CACHE,
   STATIC_REVALIDATE_CACHE,
@@ -1087,6 +1088,17 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       .stat(filePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));
     if (!fileInfo || fileInfo.type !== "File") {
+      // A build asset that is not here (a tab still running the previous
+      // bundle asks for its old hashed chunk) is a plain 404. Answering it
+      // with index.html made the browser parse HTML as a module ("Failed to
+      // fetch dynamically imported module"); the client's preload-error
+      // handler reloads on a real 404 instead (staleBundle.ts).
+      if (isMissingStaticAssetPath(url.value.pathname)) {
+        return HttpServerResponse.text("Not Found", {
+          status: 404,
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
       const indexPath = path.resolve(staticRoot, "index.html");
       const indexData = yield* fileSystem
         .readFile(indexPath)
@@ -1094,9 +1106,12 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexData) {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
+      // The SPA shell names this build's chunks: never let a browser (or a
+      // proxy) keep it, or an update leaves people on the old interface.
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        headers: { "Cache-Control": STATIC_REVALIDATE_CACHE },
       });
     }
 
