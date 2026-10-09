@@ -9,6 +9,7 @@ import {
   homeThreadStatus,
   normalizeHomeWidgets,
   pickContinueItems,
+  pickDoneWhileAway,
   pickContinueThreads,
   recentHomeEntries,
   recentThreads,
@@ -308,5 +309,43 @@ describe("canMarkHomeChatDone", () => {
     expect(canMarkHomeChatDone(thread("a", { hasPendingApprovals: true }))).toBe(false);
     expect(canMarkHomeChatDone(thread("q", { hasPendingUserInput: true }))).toBe(false);
     expect(canMarkHomeChatDone(thread("r"))).toBe(true);
+  });
+});
+
+describe("pickDoneWhileAway", () => {
+  const item = (id: string, patch: Record<string, unknown> = {}) => ({
+    id,
+    kind: "agent.done",
+    source: { kind: "agent", id: "uno-chat" },
+    open: { kind: "thread", threadId: "uno-chat" },
+    updatedAt: minutesAgo(5),
+    readAt: null as string | null,
+    snoozedUntil: null as string | null,
+    ...patch,
+  });
+
+  it("shows what Uno finished in its own chat while the person was away, newest first", () => {
+    const picked = pickDoneWhileAway(
+      [
+        item("plan", { updatedAt: minutesAgo(30) }),
+        item("diff", { kind: "agent.error", updatedAt: minutesAgo(2) }),
+        item("seen", { readAt: minutesAgo(1) }),
+        item("later", { snoozedUntil: new Date(NOW + 60_000).toISOString() }),
+        item("asks", { kind: "agent.input" }),
+        item("app", { kind: "app", source: { kind: "app", id: "notes" } }),
+      ],
+      [thread("helper", { projectId: "assistant-home" as never })],
+      { now: NOW },
+    );
+    expect(picked.map((entry) => entry.id)).toEqual(["diff", "plan"]);
+  });
+
+  it("leaves out chats Home already shows as cards", () => {
+    const picked = pickDoneWhileAway(
+      [item("mine", { source: { kind: "agent", id: "a" } })],
+      [thread("a", { updatedAt: minutesAgo(10) })],
+      { now: NOW },
+    );
+    expect(picked).toEqual([]);
   });
 });

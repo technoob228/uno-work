@@ -43,6 +43,7 @@ import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
+  DoneWhileAwayCard,
   NeedsYouPill,
   NeedsYouWidget,
   RecentChatsWidget,
@@ -553,6 +554,7 @@ export function HomeStart({
         >
           {notices}
           {updateNotice}
+          <DoneWhileAwayCard threads={threads} now={now} />
           <h1
             className="mb-2 text-center text-[28px] font-semibold tracking-tight"
             data-testid="home-greeting"
@@ -595,6 +597,7 @@ export function HomeStart({
             </p>
           ) : null}
         </div>
+        {layout.editing ? null : <DoneWhileAwayCard threads={threads} now={now} />}
         {layout.editing || nextStep.step?.id === "pick_goal" ? null : (
           <HomeNextStepCard
             state={nextStep}
