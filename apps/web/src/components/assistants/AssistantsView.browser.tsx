@@ -63,7 +63,7 @@ describe("Assistants and the account's assistants flag", () => {
     await expect.element(screen.getByTestId("assistants-classic")).toBeInTheDocument();
     await expect
       .element(screen.getByTestId("assistants-empty"))
-      .toHaveTextContent("Create an assistant that answers in Telegram 24/7");
+      .toHaveTextContent("Create a teammate that does your tasks");
     await expect
       .element(screen.getByTestId("assistants-empty-create"))
       .toHaveTextContent("Create an assistant");

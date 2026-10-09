@@ -94,6 +94,11 @@ export const ProviderAuthStartInput = Schema.Struct({
   method: ProviderAuthMethod,
   /** Required when `method === "apiKey"`. Never echoed back. */
   apiKey: Schema.optional(Schema.String),
+  /**
+   * An unfinished account sign-in for the same harness is normally resumed
+   * (same link, same code box). `true` cancels it and starts a fresh one.
+   */
+  restart: Schema.optional(Schema.Boolean),
 });
 export type ProviderAuthStartInput = typeof ProviderAuthStartInput.Type;
 

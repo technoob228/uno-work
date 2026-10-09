@@ -14,6 +14,7 @@
 import type { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
 import type { ModelEsque } from "./providerIconUtils";
+import { OWN_SUBSCRIPTION_SHORT } from "../../account/aiHours";
 
 export interface SimplePickerEntry {
   readonly instanceId: ProviderInstanceId;
@@ -131,14 +132,14 @@ export function buildSimpleModelChoices<E extends SimplePickerEntry>(input: {
       driverKind: entry.driverKind,
       model,
       label,
-      description: "Your subscription",
+      description: OWN_SUBSCRIPTION_SHORT,
       models: models.map((option) => ({
         key: `${entry.instanceId}:${option.slug}`,
         instanceId: entry.instanceId,
         driverKind: entry.driverKind,
         model: option.slug,
         label: displayName(option),
-        description: "Your subscription",
+        description: OWN_SUBSCRIPTION_SHORT,
       })),
     });
   }

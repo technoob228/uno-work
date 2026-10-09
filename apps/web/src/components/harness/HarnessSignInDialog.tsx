@@ -38,6 +38,8 @@ export interface HarnessSignInPanelProps {
   readonly onStart: (input: {
     readonly method: "apiKey" | "oauth";
     readonly apiKey?: string;
+    /** Cancel the unfinished sign-in and open a fresh one. */
+    readonly restart?: boolean;
   }) => void;
   readonly onSubmitCode: (code: string) => void;
   /** Forget the finished job so the panel starts over. */
@@ -178,8 +180,21 @@ export function HarnessSignInPanel({
               <Loader2 className="size-3.5 animate-spin" />
               {job.verificationUrl
                 ? "Waiting for you to finish in the browser…"
-                : "Starting the sign-in…"}
+                : "Getting a sign-in link… (up to 20 seconds)"}
             </div>
+          ) : null}
+
+          {active && job.verificationUrl ? (
+            // A sign-in left half-way is picked back up here; this is the way
+            // out when the old link is lost or expired.
+            <button
+              type="button"
+              className="self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => onStart({ method: "oauth", restart: true })}
+              data-testid="harness-sign-in-start-over"
+            >
+              Link not working? Start over
+            </button>
           ) : null}
         </div>
       ) : active ? (

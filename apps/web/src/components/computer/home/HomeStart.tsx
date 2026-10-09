@@ -490,14 +490,28 @@ export function HomeStart({
       !layout.editing &&
       !threads.some((thread) => !isAssistantProjectId(thread.projectId));
     const ownAgentLine = (
-      <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
+      // Two doors, two things (ICP3 t1, 09.10): your Claude / ChatGPT plan running
+      // the AI here (Settings → AI sign-in) vs your agent elsewhere using this
+      // computer as a tool (the own-tools panel).
+      <p
+        className="flex flex-col items-center gap-1 px-1 text-center text-[13px] text-muted-foreground"
+        data-testid="home-own-ways"
+      >
+        <button
+          type="button"
+          onClick={() => void goTo({ to: "/settings/ai" })}
+          className="hover:text-foreground hover:underline"
+          data-testid="home-own-subscription"
+        >
+          Use my Claude or ChatGPT subscription here →
+        </button>
         <button
           type="button"
           onClick={() => setOwnTools("agent")}
           className="hover:text-foreground hover:underline"
           data-testid="home-own-agent"
         >
-          Using Claude Code or Codex? Connect it →
+          Connect Claude Code or Codex from my laptop →
         </button>
       </p>
     );

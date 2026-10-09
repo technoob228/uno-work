@@ -33,6 +33,8 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   onDismiss,
   onRetry,
   retryDisabled = false,
+  subscriptionLabel,
+  onUseUnoAi,
 }: {
   error: string | null;
   /** Changes when a new error arrives (same text twice is two errors). */
@@ -43,6 +45,10 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   /** Sends the person's last message again; absent when there is nothing to resend. */
   onRetry?: (() => void) | undefined;
   retryDisabled?: boolean;
+  /** "Claude" / "ChatGPT": whose subscription limit a "subscription-limit" error is. */
+  subscriptionLabel?: string | undefined;
+  /** Opens a new chat on Uno AI; offered when the person's own subscription is out. */
+  onUseUnoAi?: (() => void) | undefined;
 }) {
   const notice = error ? classifyTurnError(error) : null;
   const busy = notice?.kind === "busy";
@@ -131,7 +137,13 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           : COPY.busyNoRetry
       : notice.kind === "no-answer"
         ? COPY.noAnswer
-        : error;
+        : notice.kind === "subscription-limit"
+          ? COPY.subscriptionLimit(
+              subscriptionLabel ?? "AI",
+              notice.resetsAt,
+              onUseUnoAi !== undefined,
+            )
+          : error;
   const retryLabel = notice.kind === "busy" && countdown !== null ? COPY.retryNow : COPY.retry;
   const retry = () => {
     setCountdown(null);
@@ -150,6 +162,16 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           {text}
         </AlertDescription>
         <AlertAction className="items-center">
+          {notice.kind === "subscription-limit" && onUseUnoAi ? (
+            <Button
+              size="xs"
+              type="button"
+              data-testid="turn-error-use-uno-ai"
+              onClick={onUseUnoAi}
+            >
+              {COPY.newChatOnUnoAi}
+            </Button>
+          ) : null}
           {onRetry ? (
             <Button
               size="xs"

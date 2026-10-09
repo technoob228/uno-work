@@ -320,8 +320,7 @@ export function AiStep() {
                         onStart={(input) =>
                           void setup.startAuth({
                             driver: row.id as "claudeAgent" | "codex",
-                            method: input.method,
-                            ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+                            ...input,
                           })
                         }
                         onSubmitCode={(code) =>

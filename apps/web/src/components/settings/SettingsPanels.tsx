@@ -32,7 +32,7 @@ import {
   useStore,
 } from "../../store";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { formatAiMinutes } from "../../account/aiHours";
+import { aiRunOut, formatAiMinutes } from "../../account/aiHours";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -301,16 +301,43 @@ export function useGatewayAiHours(apiKey: string) {
       const body = (await response.json().catch(() => null)) as {
         readonly hours_left_minutes?: unknown;
         readonly unlimited?: unknown;
+        readonly fast_unlimited?: unknown;
       } | null;
-      if (body?.unlimited === true) return { unlimited: true, leftMinutes: null };
+      if (body?.unlimited === true) {
+        return { unlimited: true, leftMinutes: null, fastUnlimited: false };
+      }
       return typeof body?.hours_left_minutes === "number"
-        ? { unlimited: false, leftMinutes: body.hours_left_minutes }
+        ? {
+            unlimited: false,
+            leftMinutes: body.hours_left_minutes,
+            fastUnlimited: body.fast_unlimited === true,
+          }
         : null;
     },
     enabled: apiKey.length > 0,
     staleTime: 60_000,
     retry: false,
   });
+}
+
+/** "When your AI time runs out…" + "Add AI time" under the Uno AI row (aiRunOut). */
+export function UnoAiRunOutLine({ apiKey }: { readonly apiKey: string }) {
+  const hours = useGatewayAiHours(apiKey).data ?? null;
+  const runOut = hours ? aiRunOut(hours) : null;
+  if (!runOut) return null;
+  return (
+    <span data-testid="uno-ai-run-out">
+      {runOut.line}{" "}
+      <a
+        href={runOut.actionUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-foreground underline underline-offset-2"
+      >
+        {runOut.actionLabel} ↗
+      </a>
+    </span>
+  );
 }
 
 export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
