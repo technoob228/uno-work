@@ -6,9 +6,10 @@
  * app and the computer's Uno Work share one origin — the account's own
  * <label>.uno4.work, or app.uno4.work — so one localStorage);
  * the computer's Home picks it up on its first load, reads the chat from the
- * account and starts a chat with Uno there whose first message carries the
- * whole context: the goal, the answers, the plan, the live site, what the
- * person wants next. Pure parts are unit-tested.
+ * account and sends it to the Uno chat there (the pinned one; a new chat on
+ * an older daemon) as the first message with the whole context: the goal,
+ * the answers, the plan, the live site, what the person wants next. Pure
+ * parts are unit-tested.
  */
 import type { AiChatMessage, AiSite } from "./unoAiApi";
 import { transcriptItems } from "./unoAiModel";
@@ -52,24 +53,35 @@ export function peekHandoff(now = Date.now(), s: Store | null = store()): boolea
   }
 }
 
-/** The pending hand-off, removed as it is read (it runs once). */
-export function takeHandoff(now = Date.now(), s: Store | null = store()): PendingHandoff | null {
+/**
+ * The pending hand-off, left in place: it is cleared only once the message
+ * reached the computer (`clearHandoff`). A computer that couldn't take it yet
+ * (still starting, an old daemon) gets it on the next load — on 09.10 the
+ * hand-off was taken before sending and lost on the first failure.
+ */
+export function readHandoff(now = Date.now(), s: Store | null = store()): PendingHandoff | null {
   if (!s) return null;
-  let raw: string | null = null;
   try {
-    raw = s.getItem(KEY);
-    if (raw !== null) s.removeItem(KEY);
-  } catch {
-    return null;
-  }
-  if (!raw) return null;
-  try {
+    const raw = s.getItem(KEY);
+    if (!raw) return null;
     const v = JSON.parse(raw) as Partial<PendingHandoff>;
     if (typeof v.chatId !== "string" || typeof v.at !== "number") return null;
     if (now - v.at > HANDOFF_TTL_MS || v.at > now + 60_000) return null;
     return { chatId: v.chatId, at: v.at };
   } catch {
     return null;
+  }
+}
+
+/** The hand-off is done: forget it (only the same one — a newer one stays). */
+export function clearHandoff(chatId: string, s: Store | null = store()): void {
+  try {
+    const raw = s?.getItem(KEY);
+    if (!raw) return;
+    const v = JSON.parse(raw) as Partial<PendingHandoff>;
+    if (v.chatId === chatId) s?.removeItem(KEY);
+  } catch {
+    // nothing to forget
   }
 }
 
