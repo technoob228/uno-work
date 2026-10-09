@@ -637,6 +637,13 @@ export const UnoMachineApp = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   /** `http://localhost:<port>/` — only useful when the browser runs on this machine. */
   localUrl: Schema.NullOr(Schema.String),
+  /**
+   * `/_apps/<id>/<token>/` — the app through Uno Work's own address (resolve
+   * it against the daemon's http base URL), for a browser on another device.
+   * Only running registered web apps get one, and only in the signed-in UI's
+   * list; the token in it expires within ~13 h (absent = not proxied).
+   */
+  proxyPath: Schema.optional(Schema.NullOr(Schema.String)),
   publication: Schema.NullOr(UnoMachineAppPublication),
   canStart: Schema.Boolean,
   canStop: Schema.Boolean,

@@ -25,7 +25,7 @@ Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Autho
 - `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`. Projects go in `~/projects/<name>`.
 - `~/.uno/apps/<id>.json` registers an app on Home; its log is `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK (JS, Python).
 - Cloud storage keeps the person's files (photos, documents); the disk is for programs.
-- The right panel shows pages and files. On a cloud computer it is a browser ON the machine (the person watches, can take control): `localhost` there is the machine. To let them open an app themselves, use `app_show_on_internet`. The browser installs on first use (~30–60 s): retry if `browser_command` says so. A step only the person can do (sign-in, captcha, 2FA, payment): `browser_command` with `requestHelp`.
+- The right panel shows pages and files. On a cloud computer it is a browser ON the machine (the person watches, can take control): `localhost` there is the machine. They open its apps from Home on any device; `app_show_on_internet` is for a link others use. The browser installs on first use (~30–60 s): retry if `browser_command` says so. A step only the person can do (sign-in, captcha, 2FA, payment): `browser_command` with `requestHelp`.
 
 ## Their assistant
 
@@ -33,7 +33,7 @@ This computer already has one: **Uno**, the pinned chat (remembers, keeps a sche
 
 ## Making an app or a widget
 
-1. Build it in `~/projects/<id>`, listening on `0.0.0.0:<port>`. Tests never touch its real data (use a temp folder).
+1. Build it in `~/projects/<id>`, listening on `0.0.0.0:<port>`; pages use relative URLs (`api/x`, not `/api/x`). Tests never touch its real data (temp folder).
 2. `app_register` (name, emoji icon, port, command, cwd). Uno starts it within ~20 s and after every reboot; never start it yourself (no nohup, no `app_start`): a second copy.
 3. A Telegram bot (for customers) is never a plain app: no port, no panel. FIRST, before any code: `request_secret` for its token, `wait: false` (the field has Open @BotFather), then build it. Register with `type: "telegram-bot"`, `tokenEnv` (its `.env` variable) and, once known, `telegram` (its username).
 4. Sleep: check `sleep` in `computer_status`. If it sleeps when idle, its apps (bots too) stop until it wakes: never write "24/7"; say so and offer Plus (always on).

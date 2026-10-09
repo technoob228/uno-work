@@ -132,8 +132,12 @@ describe("app widgets", () => {
       "allow-same-origin",
     );
     expect(appWidgetSandbox("http://127.0.0.1:13841/app/w", "http://127.0.0.1:13841")).toBe(
-      "allow-scripts",
+      "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox",
     );
+    // An app through Uno Work's proxy is opaque even framed from another origin (desktop app).
+    expect(
+      appWidgetSandbox("https://box.uno4.work/_apps/notes/t/widget", "http://127.0.0.1:5733"),
+    ).not.toContain("allow-same-origin");
     expect(appWidgetSandbox("http://x:1/w", "http://y")).not.toContain("allow-top-navigation");
   });
 

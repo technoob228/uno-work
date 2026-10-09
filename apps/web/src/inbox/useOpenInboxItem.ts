@@ -10,6 +10,7 @@ import { useCallback } from "react";
 
 import { machineAppsQueryOptions } from "../components/computer/computerQueries";
 import { isBrowserOnMachine, machineAppOpenUrl } from "../components/computer/programModel";
+import { workBaseUrlFor } from "../components/computer/workBaseUrl";
 import { dirname, fileKindOf } from "../components/files/fileTypes";
 import { toastManager } from "../components/ui/toast";
 import { useSidebar } from "../components/ui/sidebar";
@@ -85,12 +86,16 @@ export function useOpenInboxItem() {
         .catch(() => null);
       const app = apps?.apps.find((entry) => entry.id === `manifest:${target.appId}`) ?? null;
       const base = app
-        ? machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname))
+        ? machineAppOpenUrl(
+            app,
+            isBrowserOnMachine(window.location.hostname),
+            workBaseUrlFor(item.environmentId),
+          )
         : null;
       if (!app || !base) {
         // Not there, stopped, or running but not reachable from this browser
-        // (a cloud computer's app that isn't shown on the internet): Home has
-        // the Start / "Show on the internet" buttons for it.
+        // (listens on 127.0.0.1 only, or an older Uno Work): Home has the
+        // Start button and says why.
         toastManager.add({
           type: "info",
           title:
@@ -99,7 +104,7 @@ export function useOpenInboxItem() {
               : `${item.source.name} isn't running`,
           description:
             app?.status === "running"
-              ? "Open it on Home and turn on “Show on the internet”, then open the notification again."
+              ? "Open it on Home on this computer to see why."
               : "Start it on Home, then open the notification again.",
         });
         void navigate({ to: "/computer" });

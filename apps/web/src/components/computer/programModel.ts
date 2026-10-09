@@ -6,7 +6,8 @@
  * (`uno.computer.machineApps`), apps installed from the App Store (control
  * plane), and installs still in progress — and one rule decides "Open":
  *
- *   an address the app declared → its public address (shown on the internet)
+ *   an address the app declared → (browser on another device) the app through
+ *   Uno Work's own address → its public address (shown on the internet)
  *   → `localhost:<port>` only when the browser itself runs on that machine.
  *
  * With none of those, a tile opens its details, where "Show on the internet"
@@ -197,12 +198,103 @@ export function isBrowserOnMachine(hostname: string): boolean {
   return LOOPBACK_HOSTS.has(hostname.toLowerCase());
 }
 
-export function machineAppOpenUrl(app: UnoMachineApp, browserOnMachine: boolean): string | null {
+/** Where Uno Work serves the computer's apps itself (`apps/server/src/machineApps/appProxy.ts`). */
+const APP_PROXY_PREFIX = "/_apps/";
+
+/** True for an app served through Uno Work's own address (`…/_apps/<id>/<token>/…`). */
+export function isAppProxyUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.startsWith(APP_PROXY_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The app through Uno Work's own (https) address: the daemon's `proxyPath`
+ * resolved against the daemon's http base URL, plus `path` on the app. Null
+ * when the daemon gave none (not a running registered web app, or an older
+ * Uno Work) or it doesn't look like the daemon's own proxy.
+ */
+export function appProxyUrl(
+  app: UnoMachineApp,
+  workBaseUrl: string | null | undefined,
+  path: string | null = null,
+): string | null {
+  if (!app.proxyPath || !workBaseUrl || !app.proxyPath.startsWith(APP_PROXY_PREFIX)) return null;
+  let url: URL;
+  let base: URL;
+  try {
+    base = new URL(workBaseUrl);
+    url = new URL(app.proxyPath, base);
+  } catch {
+    return null;
+  }
+  if (url.origin !== base.origin) return null;
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (path && path !== "/") {
+    if (!path.startsWith("/") || path.startsWith("//")) return null;
+    const [pathname = "", search = ""] = path.split("?", 2);
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}${pathname}`;
+    url.search = search ? `?${search}` : "";
+  }
+  return url.toString();
+}
+
+/** `http://localhost:3000/admin?x=1` → `/admin?x=1` (what "Open" opens on the app). */
+function appOpenPath(app: UnoMachineApp): string | null {
+  if (!app.localUrl) return null;
+  try {
+    const url = new URL(app.localUrl);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What "Open" opens: an address the app declared; then, from a browser on
+ * another device, the app through Uno Work's own address (no need to show it
+ * on the internet, and https like Work itself); then its public address; then
+ * `localhost` when the browser runs on that machine (Mac/PC: unchanged).
+ */
+export function machineAppOpenUrl(
+  app: UnoMachineApp,
+  browserOnMachine: boolean,
+  workBaseUrl: string | null = null,
+): string | null {
   if (app.url) return app.url;
   if (app.status !== "running") return null;
+  if (!browserOnMachine) {
+    const proxied = appProxyUrl(app, workBaseUrl, appOpenPath(app));
+    if (proxied) return proxied;
+  }
   if (app.publication?.url && app.http) return app.publication.url;
   if (browserOnMachine && app.localUrl) return app.localUrl;
   return null;
+}
+
+/** The address an app's Home widget path is added to (its root, not its "Open" path). */
+export function machineAppWidgetBase(
+  app: UnoMachineApp,
+  browserOnMachine: boolean,
+  workBaseUrl: string | null = null,
+): string | null {
+  if (!app.url && app.status === "running" && !browserOnMachine) {
+    const root = appProxyUrl(app, workBaseUrl);
+    if (root) return root;
+  }
+  return machineAppOpenUrl(app, browserOnMachine, workBaseUrl);
+}
+
+/** Why a widget shows text instead of the app (it has no address this browser can open). */
+export function appWidgetMissingText(app: UnoMachineApp): string {
+  if (app.status !== "running") return `Start ${app.name} to see its widget.`;
+  if (!app.http) return `${app.name} isn't answering yet.`;
+  if (app.loopbackOnly) {
+    return `${app.name} answers only inside the computer (127.0.0.1), so its widget can't be shown here.`;
+  }
+  return `${app.name}'s widget can't be shown here yet. Update Uno Work on this computer.`;
 }
 
 const SOURCE_WORD: Record<UnoMachineApp["source"], string> = {
@@ -230,6 +322,8 @@ export function canShowOnInternet(
     app.port !== null &&
     app.publication === null &&
     app.url === null &&
+    // Uno Work already serves it from its own address to this browser.
+    (app.proxyPath ?? null) === null &&
     !app.telegramBot
   );
 }
@@ -331,6 +425,8 @@ export function buildProgramTiles(input: {
   readonly storeApps: ReadonlyArray<UnoComputerInstalledApp>;
   readonly installs: ReadonlyArray<AppInstall>;
   readonly browserOnMachine: boolean;
+  /** The daemon's http base URL, for apps served through Uno Work's own address. */
+  readonly workBaseUrl?: string | null;
   readonly computerOn: boolean;
   /** Why "Show on the internet" can't work on this machine; null/absent = it can. */
   readonly publishBlockedReason?: string | null;
@@ -421,7 +517,9 @@ export function buildProgramTiles(input: {
       iconImage: app.iconImage,
       status: input.computerOn ? app.status : "asleep",
       caption: machineAppCaption(app),
-      openUrl: input.computerOn ? machineAppOpenUrl(app, input.browserOnMachine) : null,
+      openUrl: input.computerOn
+        ? machineAppOpenUrl(app, input.browserOnMachine, input.workBaseUrl ?? null)
+        : null,
       online: app.publication !== null || app.url !== null,
       machineApp: app,
       storeApp: null,

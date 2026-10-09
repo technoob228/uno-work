@@ -199,18 +199,19 @@ export function appWidgetUrl(base: string, path: string): string | null {
  * The widget frame's sandbox. The app keeps its own origin (its cookies, its
  * fetches to itself) only when that origin differs from Uno Work's — then the
  * browser already keeps it away from Work's cookies and DOM. An app served
- * from Work's own origin gets an opaque origin instead. Never top navigation,
- * never same-origin with Work.
+ * from Work's own origin, or through any Uno Work's app proxy (`/_apps/…`),
+ * gets an opaque origin instead (the proxy's CSP says the same). Never top
+ * navigation, never same-origin with Work.
  */
 export function appWidgetSandbox(widgetUrl: string, workOrigin: string): string {
-  let origin: string;
+  let url: URL;
   try {
-    origin = new URL(widgetUrl).origin;
+    url = new URL(widgetUrl);
   } catch {
     return "allow-scripts";
   }
-  return origin === workOrigin
-    ? "allow-scripts"
+  return url.origin === workOrigin || url.pathname.startsWith("/_apps/")
+    ? "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
     : "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
 }
 

@@ -2,8 +2,13 @@ import type { AppAiApp, UnoComputerInstalledApp, UnoMachineApp } from "@t3tools/
 import { describe, expect, it } from "vitest";
 
 import {
+  appProxyUrl,
+  appWidgetMissingText,
   buildProgramTiles,
   canHideProgram,
+  canShowOnInternet,
+  isAppProxyUrl,
+  machineAppWidgetBase,
   hiddenMachineApps,
   isBrowserOnMachine,
   machineAppCaption,
@@ -74,6 +79,60 @@ describe("opening a program", () => {
     expect(machineAppOpenUrl(app({}), true)).toBe("http://localhost:3000/");
     // From a remote browser, localhost would be the viewer's own laptop.
     expect(machineAppOpenUrl(app({}), false)).toBeNull();
+  });
+
+  it("from another device opens a registered app through Uno Work's own address", () => {
+    const work = "https://box-395.uno4.work";
+    const proxied = app({
+      id: "manifest:ai-limits",
+      source: "manifest",
+      localUrl: "http://localhost:3000/admin?tab=1",
+      proxyPath: "/_apps/ai-limits/tok/",
+    });
+    expect(machineAppOpenUrl(proxied, false, work)).toBe(
+      "https://box-395.uno4.work/_apps/ai-limits/tok/admin?tab=1",
+    );
+    // The widget's path goes on the app's root, not on its "Open" path.
+    expect(machineAppWidgetBase(proxied, false, work)).toBe(
+      "https://box-395.uno4.work/_apps/ai-limits/tok/",
+    );
+    // Before the public address too: https like Work, and only for the person.
+    const both = { ...proxied, publication: pub(43000, "http://h:43000/") };
+    expect(machineAppOpenUrl(both, false, work)).toBe(
+      "https://box-395.uno4.work/_apps/ai-limits/tok/admin?tab=1",
+    );
+    // Mac/PC (browser on the machine): unchanged, localhost.
+    expect(machineAppOpenUrl(proxied, true, "http://127.0.0.1:13773")).toBe(
+      "http://localhost:3000/admin?tab=1",
+    );
+    expect(machineAppWidgetBase(proxied, true, "http://127.0.0.1:13773")).toBe(
+      "http://localhost:3000/admin?tab=1",
+    );
+    // No daemon address known, or a stopped app: no proxy link.
+    expect(machineAppOpenUrl(proxied, false, null)).toBeNull();
+    expect(machineAppOpenUrl({ ...proxied, status: "stopped" }, false, work)).toBeNull();
+    // A tile that opens through Work needs no "Show on the internet".
+    expect(canShowOnInternet(proxied, { browserOnMachine: false })).toBe(false);
+    expect(canShowOnInternet(app({}), { browserOnMachine: false })).toBe(true);
+  });
+
+  it("uses only a proxy path of the daemon itself", () => {
+    const work = "https://box-395.uno4.work";
+    expect(appProxyUrl(app({ proxyPath: "https://evil.example/_apps/x/t/" }), work)).toBeNull();
+    expect(appProxyUrl(app({ proxyPath: "//evil.example/_apps/x/t/" }), work)).toBeNull();
+    expect(appProxyUrl(app({ proxyPath: "/files/" }), work)).toBeNull();
+    expect(appProxyUrl(app({ proxyPath: "/_apps/x/t/" }), work, "//evil.example/")).toBeNull();
+    expect(appProxyUrl(app({ proxyPath: "/_apps/x/t/" }), work, "/w?a=1")).toBe(
+      "https://box-395.uno4.work/_apps/x/t/w?a=1",
+    );
+    expect(isAppProxyUrl("https://box-395.uno4.work/_apps/x/t/w")).toBe(true);
+    expect(isAppProxyUrl("https://box-395.uno4.work/files")).toBe(false);
+  });
+
+  it("says why a widget can't be shown, without sending the app to the internet", () => {
+    expect(appWidgetMissingText(app({ status: "stopped" }))).toBe("Start Notes to see its widget.");
+    expect(appWidgetMissingText(app({ loopbackOnly: true }))).toMatch(/only inside the computer/);
+    expect(appWidgetMissingText(app({}))).not.toMatch(/internet/i);
   });
 
   it("does not open a stopped app or a non-web publication", () => {

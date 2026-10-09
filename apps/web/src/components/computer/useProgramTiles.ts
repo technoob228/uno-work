@@ -21,6 +21,7 @@ import {
   type ProgramTile,
   withAiNotes,
 } from "./programModel";
+import { workBaseUrlFor } from "./workBaseUrl";
 
 export interface ProgramTilesState {
   readonly tiles: ReadonlyArray<ProgramTile>;
@@ -51,12 +52,20 @@ export function useProgramTiles(): ProgramTilesState {
           storeApps: appsQuery.data?.installed.apps ?? [],
           installs: [],
           browserOnMachine,
+          workBaseUrl: workBaseUrlFor(environmentId),
           computerOn,
           publishBlockedReason: machineAppsQuery.data?.publishBlockedReason ?? null,
         }),
         appAiQuery.data?.apps,
       ),
-    [appAiQuery.data, appsQuery.data, browserOnMachine, computerOn, machineAppsQuery.data],
+    [
+      appAiQuery.data,
+      appsQuery.data,
+      browserOnMachine,
+      computerOn,
+      environmentId,
+      machineAppsQuery.data,
+    ],
   );
 
   return {

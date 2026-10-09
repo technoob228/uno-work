@@ -1,3 +1,5 @@
+import * as NodeCrypto from "node:crypto";
+
 import { AuthSessionId, type AuthClientMetadata, type AuthClientSession } from "@t3tools/contracts";
 import { Clock, DateTime, Duration, Effect, Layer, PubSub, Ref, Schema, Stream } from "effect";
 import { Option } from "effect";
@@ -510,6 +512,18 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       });
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to rotate the signing key.")));
 
+  const deriveSecret: NonNullable<SessionCredentialServiceShape["deriveSecret"]> = (purpose) =>
+    Ref.get(signingSecretRef).pipe(
+      Effect.map(
+        (secret) =>
+          new Uint8Array(
+            NodeCrypto.createHmac("sha256", Buffer.from(secret))
+              .update(`derive\u0000${purpose}`)
+              .digest(),
+          ),
+      ),
+    );
+
   return {
     cookieName,
     issue,
@@ -525,6 +539,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     markConnected,
     markDisconnected,
     rotateSigningKey,
+    deriveSecret,
   } satisfies SessionCredentialServiceShape;
 });
 

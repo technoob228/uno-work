@@ -28,18 +28,30 @@ export function parseAppUrl(value: unknown): string | null {
  * chrome. Matching is by origin, so an app's inner pages are fine.
  */
 export function belongsToComputer(url: string, knownUrls: ReadonlyArray<string | null>): boolean {
-  let origin: string;
+  let target: URL;
   try {
-    origin = new URL(url).origin;
+    target = new URL(url);
   } catch {
     return false;
   }
   return knownUrls.some((known) => {
     if (!known) return false;
     try {
-      return new URL(known).origin === origin;
+      const knownUrl = new URL(known);
+      if (knownUrl.origin !== target.origin) return false;
+      // An app served through Uno Work's own address shares Work's origin:
+      // there it is the app's path (`/_apps/<id>/`) that must match, so Work's
+      // own pages never count as an app.
+      const app = proxiedAppPrefix(knownUrl.pathname);
+      return app === null || target.pathname.startsWith(app);
     } catch {
       return false;
     }
   });
+}
+
+/** `/_apps/notes/<token>/x` → `/_apps/notes/`; null for any other path. */
+function proxiedAppPrefix(pathname: string): string | null {
+  const match = /^\/_apps\/([a-z0-9][a-z0-9_-]{0,63})\//.exec(pathname);
+  return match ? `/_apps/${match[1]}/` : null;
 }

@@ -32,6 +32,7 @@ import { toastManager } from "../../ui/toast";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
+import { workBaseUrlFor } from "../workBaseUrl";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import { goalState } from "../../setup/goals";
@@ -401,7 +402,10 @@ export function HomeStart({
     if (isAppWidgetBlockId(id)) {
       const app = widgetApps.get(appIdOfBlock(id));
       return app
-        ? { body: <HomeAppWidget app={app} />, action: <HomeAppWidgetOpen app={app} /> }
+        ? {
+            body: <HomeAppWidget app={app} workBaseUrl={workBaseUrlFor(environmentId)} />,
+            action: <HomeAppWidgetOpen app={app} workBaseUrl={workBaseUrlFor(environmentId)} />,
+          }
         : { body: null };
     }
     switch (id) {

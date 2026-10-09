@@ -207,6 +207,7 @@ import {
   assistantLlmStatusRouteLayer,
 } from "./manager/assistantLlmHttp.ts";
 import { pluginPanelRouteLayer } from "./plugins/http.ts";
+import { appProxyRouteLayer } from "./machineApps/appProxyHttp.ts";
 import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
 import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
@@ -651,6 +652,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   healthRouteLayer,
   otlpTracesProxyRouteLayer,
   pluginPanelRouteLayer,
+  appProxyRouteLayer,
   projectFaviconRouteLayer,
   secretsRequestRouteLayer,
   secretsResultRouteLayer,

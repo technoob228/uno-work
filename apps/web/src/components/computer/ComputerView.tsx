@@ -81,6 +81,7 @@ import {
   removalCloudFiles,
   type ProgramTile,
 } from "./programModel";
+import { workBaseUrlFor } from "./workBaseUrl";
 import { appPrimaryAction } from "./appPrimaryAction";
 import { useAppInstalls } from "./useAppInstalls";
 import { useAppPrimaryAction } from "./useAppPrimaryAction";
@@ -182,6 +183,7 @@ export function ComputerView() {
           storeApps: appsQuery.data?.installed.apps ?? [],
           installs: installs.installs,
           browserOnMachine,
+          workBaseUrl: workBaseUrlFor(environmentId),
           computerOn,
         }),
         appAiQuery.data?.apps,
@@ -191,6 +193,7 @@ export function ComputerView() {
       appsQuery.data,
       browserOnMachine,
       computerOn,
+      environmentId,
       installs.installs,
       machineAppsQuery.data,
       thisMachine,

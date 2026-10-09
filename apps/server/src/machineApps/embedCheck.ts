@@ -127,15 +127,21 @@ export function decideEmbed(
 
 const CHECK_TIMEOUT_MS = 6_000;
 
-/** Fetches the app (following redirects, e.g. to its login page) and decides. */
+/**
+ * Fetches the app (following redirects, e.g. to its login page) and decides.
+ * `fetchUrl`: where the daemon itself reaches the same page (an app served
+ * through Work's own address is read on loopback); the verdict is still about
+ * `input.url`, the address the browser frames.
+ */
 export async function checkEmbed(
   input: { readonly url: string; readonly embedderOrigin: string },
   fetchImpl: typeof fetch = fetch,
+  fetchUrl?: string,
 ): Promise<UnoEmbedCheck> {
   const app = parseOrigin(input.url);
   if (!app) return { verdict: "unknown", reason: "Not a web address" };
   try {
-    const response = await fetchImpl(app.toString(), {
+    const response = await fetchImpl(fetchUrl ?? app.toString(), {
       method: "GET",
       redirect: "follow",
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
@@ -152,7 +158,7 @@ export async function checkEmbed(
         xFrameOptions: response.headers.get("x-frame-options"),
         contentSecurityPolicies: csp,
       },
-      response.url || app.toString(),
+      fetchUrl !== undefined ? app.toString() : response.url || app.toString(),
       input.embedderOrigin,
     );
   } catch {

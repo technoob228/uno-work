@@ -98,6 +98,8 @@ import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { checkEmbed } from "./machineApps/embedCheck.ts";
+import { appProxyLoopbackUrl } from "./machineApps/appProxy.ts";
+import { makeAppProxyLinker } from "./machineApps/appProxyHttp.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
@@ -291,6 +293,8 @@ const makeWsRpcLayer = (
       const economyPresence = Option.getOrUndefined(yield* Effect.serviceOption(EconomyPresence));
       const files = yield* FilesService;
       const machineApps = yield* MachineAppsService;
+      // The signed-in UI's app list carries proxy links (appProxy.ts); agents' tools don't.
+      const linkAppProxies = makeAppProxyLinker(sessions, config.port);
       const appSdk = yield* AppSdkService;
       const inbox = yield* InboxService;
       const computerResources = yield* ComputerResourcesService;
@@ -1635,21 +1639,28 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.unoComputerMachineApps]: (_input) =>
-          observeRpcEffect(WS_METHODS.unoComputerMachineApps, machineApps.list, {
-            "rpc.aggregate": "uno-computer",
-          }),
+          observeRpcEffect(
+            WS_METHODS.unoComputerMachineApps,
+            machineApps.list.pipe(Effect.flatMap(linkAppProxies)),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.unoComputerAppAction]: (input) =>
           observeRpcEffect(
             WS_METHODS.unoComputerAppAction,
-            machineApps
-              .action(input)
-              .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
+            machineApps.action(input).pipe(
+              Effect.flatMap(linkAppProxies),
+              Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message })),
+            ),
             { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.unoComputerEmbedCheck]: (input) =>
           observeRpcEffect(
             WS_METHODS.unoComputerEmbedCheck,
-            Effect.promise(() => checkEmbed(input)),
+            // An app through Work's own address is checked on loopback: the
+            // daemon may not reach its public name from inside the machine.
+            Effect.promise(() =>
+              checkEmbed(input, fetch, appProxyLoopbackUrl(input.url, config.port)),
+            ),
             { "rpc.aggregate": "uno-computer" },
           ),
         [WS_METHODS.appAiList]: (_input) =>

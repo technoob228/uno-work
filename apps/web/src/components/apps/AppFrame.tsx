@@ -18,6 +18,7 @@ import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { isAppProxyUrl } from "../computer/programModel";
 import { originOf } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -29,6 +30,19 @@ import { Spinner } from "../ui/spinner";
  */
 const FRAME_SANDBOX =
   "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-storage-access-by-user-activation";
+
+/**
+ * An app on Uno Work's own origin — served through Work (`/_apps/…`, whose
+ * CSP already makes it opaque) — never gets Work's origin in the frame.
+ */
+const OPAQUE_FRAME_SANDBOX =
+  "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
+
+function frameSandbox(url: string, embedderOrigin: string): string {
+  return isAppProxyUrl(url) || originOf(url) === embedderOrigin
+    ? OPAQUE_FRAME_SANDBOX
+    : FRAME_SANDBOX;
+}
 
 const FRAME_ALLOW =
   "clipboard-read; clipboard-write; fullscreen; camera; microphone; display-capture; autoplay";
@@ -144,7 +158,7 @@ function BrowserAppFrame({
       src={url}
       title={name}
       allow={FRAME_ALLOW}
-      sandbox={FRAME_SANDBOX}
+      sandbox={frameSandbox(url, embedderOrigin)}
       referrerPolicy="strict-origin-when-cross-origin"
       className={cn("h-full w-full border-0 bg-background", className)}
     />

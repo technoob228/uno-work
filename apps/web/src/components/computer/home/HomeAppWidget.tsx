@@ -10,7 +10,12 @@ import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { useOpenApp } from "../../../navigation/useOpenApp";
-import { isBrowserOnMachine, machineAppOpenUrl } from "../programModel";
+import {
+  appWidgetMissingText,
+  isBrowserOnMachine,
+  machineAppOpenUrl,
+  machineAppWidgetBase,
+} from "../programModel";
 import { appWidgetSandbox, appWidgetUrl } from "./homeLayout";
 
 const HEIGHT: Record<"small" | "medium" | "wide", string> = {
@@ -35,20 +40,25 @@ function useFocusTick(): number {
   return tick;
 }
 
-export function HomeAppWidget({ app }: { app: UnoMachineApp }) {
+/**
+ * `workBaseUrl`: the daemon's http address. From a browser on another device
+ * the widget comes through it (`/_apps/<id>/<token>/…`, https like Work), so
+ * the app needn't be on the internet.
+ */
+export function HomeAppWidget({
+  app,
+  workBaseUrl,
+}: {
+  app: UnoMachineApp;
+  workBaseUrl: string | null;
+}) {
   const tick = useFocusTick();
   const widget = app.widget;
-  const base = machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname));
+  const base = machineAppWidgetBase(app, isBrowserOnMachine(window.location.hostname), workBaseUrl);
   const src = widget && base ? appWidgetUrl(base, widget.path) : null;
   if (!widget) return null;
   if (!src) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        {app.status === "running"
-          ? `${app.name} can't be shown from here yet — turn on “Show on the internet” for it.`
-          : `Start ${app.name} to see its widget.`}
-      </p>
-    );
+    return <p className="text-xs text-muted-foreground">{appWidgetMissingText(app)}</p>;
   }
   return (
     <iframe
@@ -65,9 +75,15 @@ export function HomeAppWidget({ app }: { app: UnoMachineApp }) {
 }
 
 /** "Open" next to the widget's title: the whole app inside Uno. */
-export function HomeAppWidgetOpen({ app }: { app: UnoMachineApp }) {
+export function HomeAppWidgetOpen({
+  app,
+  workBaseUrl,
+}: {
+  app: UnoMachineApp;
+  workBaseUrl: string | null;
+}) {
   const { openHere } = useOpenApp();
-  const base = machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname));
+  const base = machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname), workBaseUrl);
   if (!base) return null;
   return (
     <button

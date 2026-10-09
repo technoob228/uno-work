@@ -78,6 +78,7 @@ import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { UNTRUSTED_FILE_HEADERS } from "./untrustedFileHeaders.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { OFFICE_ENGINE_ROUTE_PREFIX, resolveOfficeEngineFilePath } from "./officeEngine.ts";
+import { isAppProxyRequestTarget } from "./machineApps/appProxy.ts";
 import {
   compressedOfficeAsset,
   isOfficeAssetCompressible,
@@ -145,6 +146,12 @@ const browserApiCorsWithPrivateNetwork = <E, R>(
 > =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    // An app served through Work (`/_apps/…`, appProxyHttp.ts) answers its
+    // page's own preflights: that page has an opaque origin ("null"), which
+    // the daemon's API CORS rightly refuses.
+    if (isAppProxyRequestTarget(request.url)) {
+      return yield* httpApp;
+    }
     const response = yield* browserApiCors(httpApp) as Effect.Effect<
       HttpServerResponse.HttpServerResponse,
       E,

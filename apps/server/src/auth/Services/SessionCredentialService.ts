@@ -83,6 +83,13 @@ export interface SessionCredentialServiceShape {
    * one revoked. Optional so test doubles need not implement it.
    */
   readonly rotateSigningKey?: Effect.Effect<void, SessionCredentialError>;
+  /**
+   * A key for another signed capability (e.g. app proxy links), derived from
+   * the current signing key: HMAC-SHA256(signing key, purpose). It changes
+   * whenever the signing key rotates, so a memory-snapshot clone never shares
+   * it. Optional so test doubles need not implement it.
+   */
+  readonly deriveSecret?: (purpose: string) => Effect.Effect<Uint8Array>;
   readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
 }
