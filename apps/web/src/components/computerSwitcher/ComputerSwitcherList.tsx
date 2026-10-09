@@ -2,7 +2,7 @@
  * The list of computers to switch between — the body of the computer menu:
  * the machines this app knows (current one checked, star = default), the
  * account's cloud computers not connected yet, "Use this computer", "All
- * computers, sites and plan" and "Add computer". Plain buttons: Tab / Enter
+ * computers, sites and plan" and "Add a computer". Plain buttons: Tab / Enter
  * work inside whatever popup holds it.
  */
 import {
@@ -194,7 +194,7 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-primary transition-colors hover:bg-primary/8"
       >
         <PlusIcon className="size-3.5" />
-        <span>Add computer</span>
+        <span>Add a computer</span>
       </button>
       {switcher.canReconnectCurrent ? (
         <button

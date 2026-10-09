@@ -360,7 +360,7 @@ export function CreateUnoBoxSection({
       </Button>
       <p className="text-[11px] text-muted-foreground" data-testid="new-computer-cost">
         {sizeCostLine(room, picked ?? options[0] ?? null)}
-        {room && (!room.hasPlan || !picked) ? (
+        {room && (!room.hasPlan || !picked || options.some((o) => o.block)) ? (
           <>
             {" "}
             <button

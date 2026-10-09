@@ -142,7 +142,7 @@ describe("ComputerPill — the one computer menu", () => {
     await expect.element(page.getByText(/Economy: on · sleeps after 10 min/)).toBeVisible();
     await expect.element(page.getByText(/\+1\.8 h earned by economy/)).toBeVisible();
     await expect.element(page.getByText("lab-box")).toBeVisible();
-    await expect.element(page.getByText("Add computer")).toBeVisible();
+    await expect.element(page.getByText("Add a computer")).toBeVisible();
     // Not "All my computers" twice: the switcher carries it.
     expect(page.getByText("All my computers").elements()).toHaveLength(0);
     if (import.meta.env.VITE_PILL_SCREENSHOT) {
@@ -165,7 +165,7 @@ describe("ComputerPill — the one computer menu", () => {
   it("still switches computers when this one can't be read", async () => {
     render(<ComputerPill loading={false} computer={null} />);
     await page.getByTestId("home-computer-pill").click();
-    await page.getByText("Add computer").click();
+    await page.getByText("Add a computer").click();
     expect(openAddComputer).toHaveBeenCalled();
   });
 
@@ -203,9 +203,9 @@ describe("ComputerPill — the one computer menu", () => {
       (trigger.element() as HTMLElement).focus();
       await userEvent.keyboard("{Enter}");
       await expect.element(page.getByText("lab-box")).toBeVisible();
-      await expect.element(page.getByText("Add computer")).toBeVisible();
+      await expect.element(page.getByText("Add a computer")).toBeVisible();
       await userEvent.keyboard("{Escape}");
-      await expect.element(page.getByText("Add computer")).not.toBeInTheDocument();
+      await expect.element(page.getByText("Add a computer")).not.toBeInTheDocument();
       await expect.element(trigger).toHaveFocus();
     });
 
