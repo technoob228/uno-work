@@ -112,7 +112,7 @@ export function buildUnoWorkGuide(
       return [
         "## Chats",
         "`chats_list` (scope children, project or all), `chat_create` (a new chat with a first message; `cwd` puts it in any folder, e.g. a project), `chat_message`, `chat_status` (with `waitMs` to wait for an answer). A chat you create starts at once; the person sees you created it and can write in it too. You may write into any free chat, even one the person wrote in — except a chat the person closed to agents (409 `agents_closed`: don't retry, tell the person).",
-        "Another of the person's computers: `chat_create` with `computerId` (its name or number, see `account_overview`) and `cwd` a folder THERE; the threadId comes back as `box-N:…` — use it with `chat_status` (waitMs) and `chat_message` as usual. The chat there is marked as started by you; it runs with at most your own rights. Refused when the person turned it off (Settings → General) — don't work around it.",
+        "Another of the person's computers: `chat_create` with `computerId` (its name or number, see `account_overview`) and `cwd` a folder THERE; the threadId comes back as `box-N:…` — use it with `chat_status` (waitMs) and `chat_message` as usual. The chat there is marked as started by you; it runs with at most your own rights. Refused when the person turned it off in this computer's settings — don't work around it.",
         HTTP_FALLBACK_NOTE,
         buildAgentThreadsInstructions(),
       ].join("\n\n");

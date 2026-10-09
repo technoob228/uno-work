@@ -6,8 +6,8 @@
  * here may start and drive chats on any other computer of the SAME Uno
  * account (the console only lists and opens the account's own computers;
  * other people's and team computers are out of reach by construction). Off
- * switches: "Agents can start chats on my other computers" (Settings →
- * General, this computer), agent access to the account turned off, and on a
+ * switches: "Agents can start chats on my other computers" (this
+ * computer's settings), agent access to the account turned off, and on a
  * cloud computer the console's "Add new computers" (it covers connecting).
  * The chat on the other computer never runs with more rights than the
  * calling chat has.
@@ -35,7 +35,7 @@ import {
 } from "./remoteWork.ts";
 
 export const OTHER_COMPUTERS_OFF_MESSAGE =
-  'The person turned off "Agents can start chats on my other computers" (Settings → General). Tell them what you wanted to hand over; don\'t try other ways.';
+  "The person turned off “Agents can start chats on my other computers” (this computer's settings, next to “Chats can create chats in other projects”). Tell them what you wanted to hand over; don't try other ways.";
 
 const NOT_LINKED_MESSAGE =
   "This computer isn't connected to an Uno account, so it can't reach the person's other computers. Tell the person to sign in to Uno in Settings.";
