@@ -776,7 +776,8 @@ export async function fetchNextStep(): Promise<unknown> {
 /**
  * What the person already started (`GET /api/v1/account/resume`, the same
  * answer the console's Home uses): the Uno AI chats to continue instead of
- * opening a new one. Only the chat ids are read here.
+ * opening a new one, and the site one of them made (Uno AI's Home shows it
+ * as "Continue").
  */
 export interface AccountResume {
   /** The chat the free bot was described in. */
@@ -785,6 +786,17 @@ export interface AccountResume {
   readonly siteChatId: string | null;
   /** The newest Uno AI chat. */
   readonly lastChatId: string | null;
+  /** The site of `siteChatId` (null without one). */
+  readonly site: ResumeSite | null;
+}
+
+export interface ResumeSite {
+  readonly chatId: string;
+  readonly slug: string;
+  readonly url: string;
+  readonly title: string | null;
+  /** When the chat last changed (ISO), null if unknown. */
+  readonly updatedAt: string | null;
 }
 
 const RESUME_CHAT_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -795,10 +807,24 @@ export function parseAccountResume(raw: unknown): AccountResume {
     const id = strOrNull(rec(r?.[key])?.["id"]);
     return id && RESUME_CHAT_ID.test(id) ? id : null;
   };
+  const siteChatId = chatId("site_chat");
+  const siteRaw = rec(r?.["site_chat"]);
+  const slug = strOrNull(siteRaw?.["slug"]);
+  const url = strOrNull(siteRaw?.["url"]);
   return {
     botChatId: chatId("bot_chat"),
-    siteChatId: chatId("site_chat"),
+    siteChatId,
     lastChatId: chatId("last_chat"),
+    site:
+      siteChatId && slug && url && /^https:\/\//i.test(url)
+        ? {
+            chatId: siteChatId,
+            slug,
+            url,
+            title: strOrNull(siteRaw?.["site_title"])?.trim() || null,
+            updatedAt: strOrNull(siteRaw?.["updated_at"]),
+          }
+        : null,
   };
 }
 
