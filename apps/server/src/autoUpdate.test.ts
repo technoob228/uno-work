@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +14,7 @@ import {
   type AutoUpdateInput,
 } from "./autoUpdate.ts";
 import {
+  autoRequestFile,
   makeSelfUpdateController,
   parseAutoRelease,
   parseLatestRelease,
@@ -29,7 +30,6 @@ function input(patch: Partial<AutoUpdateInput> = {}): AutoUpdateInput {
     enabled: true,
     supported: true,
     currentVersion: "0.0.119",
-    latestVersion: "0.0.120",
     autoVersion: "0.0.120",
     inProgress: false,
     lastRun: null,
@@ -58,7 +58,7 @@ function run(patch: Partial<UpdaterStatus>): UpdaterStatus {
 }
 
 describe("decideAutoUpdate", () => {
-  it("goes on a quiet computer when auto is newer and is the latest", () => {
+  it("goes on a quiet computer when the auto release is newer", () => {
     expect(decideAutoUpdate(input())).toEqual({ go: true, version: "0.0.120" });
   });
 
@@ -84,21 +84,11 @@ describe("decideAutoUpdate", () => {
       reason: "current",
     });
     // 0.0.99 → 0.0.100: numeric, not text order.
-    expect(
-      decideAutoUpdate(
-        input({ currentVersion: "0.0.99", autoVersion: "0.0.100", latestVersion: "0.0.100" }),
-      ),
-    ).toEqual({ go: true, version: "0.0.100" });
-    expect(decideAutoUpdate(input({ currentVersion: "garbage" })).go).toBe(false);
-  });
-
-  it("waits while latest is ahead of auto (a fresh promote, or auto rolled back)", () => {
-    // The updater installs latest — it must be the auto release.
-    expect(decideAutoUpdate(input({ latestVersion: "0.0.121" }))).toEqual({
-      go: false,
-      reason: "auto-behind-latest",
+    expect(decideAutoUpdate(input({ currentVersion: "0.0.99", autoVersion: "0.0.100" }))).toEqual({
+      go: true,
+      version: "0.0.100",
     });
-    expect(decideAutoUpdate(input({ latestVersion: null })).go).toBe(false);
+    expect(decideAutoUpdate(input({ currentVersion: "garbage" })).go).toBe(false);
   });
 
   it("does not ask again while an update is asked for or running", () => {
@@ -118,11 +108,10 @@ describe("decideAutoUpdate", () => {
       reason: "rolled-back",
     });
     // A newer auto release is a new chance.
-    expect(
-      decideAutoUpdate(
-        input({ lastRun: rolled, autoVersion: "0.0.121", latestVersion: "0.0.121" }),
-      ),
-    ).toEqual({ go: true, version: "0.0.121" });
+    expect(decideAutoUpdate(input({ lastRun: rolled, autoVersion: "0.0.121" }))).toEqual({
+      go: true,
+      version: "0.0.121",
+    });
   });
 
   it("waits a day after a failed run, then tries again", () => {
@@ -262,14 +251,21 @@ describe("auto pointer in SHA256SUMS", () => {
     const root = mkdtempSync(join(tmpdir(), "uno-auto-update-"));
     mkdirSync(join(root, "status"));
     const statusFile = join(root, "status", "status.json");
+    // Real clock: the request's age comes from the file's mtime.
     const controller = makeSelfUpdateController({
       paths: { requestFile: join(root, "ask", "request"), statusFile, baseUrl: "https://x.test" },
       currentVersion: "0.0.119",
-      now: () => NOW,
+      fetchImpl: (async () => new Response("", { status: 200 })) as unknown as typeof fetch,
     });
     expect(await controller.inProgress()).toBe(false);
     await controller.requestAutomatic();
+    // `auto`, not the button's `request`: the updater then takes the auto release.
+    expect(existsSync(join(root, "ask", "auto"))).toBe(true);
+    expect(existsSync(join(root, "ask", "request"))).toBe(false);
+    expect(autoRequestFile(join(root, "ask", "request"))).toBe(join(root, "ask", "auto"));
     expect(await controller.inProgress()).toBe(true);
+    // The app sees it like a pressed button: starting.
+    expect((await controller.status({ canUpdate: true })).state).toBe("updating");
 
     const other = makeSelfUpdateController({
       paths: { requestFile: join(root, "none", "request"), statusFile, baseUrl: "https://x.test" },

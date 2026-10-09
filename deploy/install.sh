@@ -286,6 +286,11 @@ UNIT
 #     and its sha256 come from the console's SHA256SUMS. So anything running as
 #     ${SERVICE_USER} (an agent included) can at most start an update to the
 #     release the console already serves — never run a command or pick a file.
+#   * Two request names, existence only: `request` (the owner's button) installs
+#     the console's "latest"; `auto` (the daemon by itself, while idle — see
+#     apps/server/src/autoUpdate.ts) installs the console's "auto" release, which
+#     release-work.sh moves a day after latest. Both are lines of the same
+#     SHA256SUMS; no "auto" line — nothing to do.
 #   * The bundle is installed only when its sha256 matches the console's list,
 #     and only when it is NEWER than what is installed.
 #   * The previous version is kept until the new one answers /api/health; if it
@@ -313,7 +318,8 @@ cat > "${INSTALL_DIR}/bin/.uno-work-update.new" <<'UPDATER'
 #!/usr/bin/env bash
 # Written by install.sh — updates Uno Work on this computer to the release the
 # console serves. Runs as root from uno-work-update.service. Takes no arguments
-# and reads nothing the daemon wrote.
+# and reads nothing the daemon wrote (only which request file exists: "auto"
+# alone picks the console's automatic release, anything else its latest).
 set -uo pipefail
 
 main() {
@@ -344,9 +350,16 @@ main() {
   # The request: a file the daemon's user created in root's directory. It is
   # removed first — whatever else happens, the .path unit must not see it again
   # — and never read. `rm` unlinks a planted symlink itself, not its target.
+  # Which name it has picks the pointer: only "auto" (and no owner's "request")
+  # means the automatic release; a run without any (the console's Update) is latest.
   local ASK_DIR="${STATUS_DIR}/ask"
+  CHANNEL=latest
   if [ -d "${ASK_DIR}" ] && [ ! -L "${ASK_DIR}" ]; then
-    rm -rf -- "${ASK_DIR}/request" "${ASK_DIR}/request.tmp"
+    if [ ! -e "${ASK_DIR}/request" ] && [ ! -L "${ASK_DIR}/request" ] \
+      && { [ -e "${ASK_DIR}/auto" ] || [ -L "${ASK_DIR}/auto" ]; }; then
+      CHANNEL=auto
+    fi
+    rm -rf -- "${ASK_DIR}/request" "${ASK_DIR}/request.tmp" "${ASK_DIR}/auto" "${ASK_DIR}/auto.tmp"
   fi
   local state_dir port
   state_dir="$(sed -n 's/^UNO_WORK_STATE_DIR=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
@@ -486,10 +499,17 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
   curl -fsS --proto "${proto}" --max-redirs 0 --retry 2 --max-time 60 --max-filesize 1048576 \
     "${BASE_URL}/SHA256SUMS" -o "${WORK_DIR}/SHA256SUMS" 2>>"${LOG_FILE}" \
     || fail "Couldn't reach Uno to check for the new version. Try again in a few minutes."
-  # The list is append-only: the last line for "latest" is the current release,
-  # the versioned file with the same sha names its version.
-  local want_sha tarball
-  want_sha="$(awk '$2 == "uno-work-server-latest.tar.gz" || $2 == "*uno-work-server-latest.tar.gz" { sha = $1 } END { print sha }' "${WORK_DIR}/SHA256SUMS")"
+  # The list is append-only: the last line for "latest" (or "auto") is the
+  # current release, the versioned file with the same sha names its version.
+  local want_sha tarball pointer="uno-work-server-${CHANNEL}.tar.gz"
+  want_sha="$(awk -v p="${pointer}" '$2 == p || $2 == "*" p { sha = $1 } END { print sha }' "${WORK_DIR}/SHA256SUMS")"
+  if [ "${CHANNEL}" = auto ] && [ -z "${want_sha}" ]; then
+    # Automatic updates were switched off on the console after the daemon asked.
+    echo "uno-work-update: the console offers no automatic release"
+    STEP=""; TO_VERSION="${FROM_VERSION}"; write_status "current" "" 0 1
+    cleanup
+    exit 0
+  fi
   case "${want_sha}" in
     *[!0-9a-f]*|'') fail "Uno's release list has no current version. Try again later." ;;
   esac
@@ -502,7 +522,7 @@ process.stdout.write(JSON.stringify({ state, step: step || null, error: error ||
 
   if [ "${TO_VERSION}" = "${FROM_VERSION}" ] \
     || [ "$(printf '%s\n%s\n' "${FROM_VERSION}" "${TO_VERSION}" | sort -V | tail -n 1)" != "${TO_VERSION}" ]; then
-    echo "uno-work-update: ${FROM_VERSION} is current (latest is ${TO_VERSION})"
+    echo "uno-work-update: ${FROM_VERSION} is current (${CHANNEL} is ${TO_VERSION})"
     STEP=""; TO_VERSION="${FROM_VERSION}"; write_status "current" "" 0 1
     cleanup
     exit 0
@@ -637,6 +657,7 @@ Documentation=https://uno4.dev/docs/work
 
 [Path]
 PathExists=${UPDATE_REQUEST_DIR}/request
+PathExists=${UPDATE_REQUEST_DIR}/auto
 Unit=uno-work-update.service
 
 [Install]

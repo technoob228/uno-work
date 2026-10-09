@@ -375,7 +375,7 @@ rm -f "${STATE_DIR}/browser-setup/request" /var/lib/uno-work-browser/status.json
 [ -f /etc/systemd/system/uno-work-update.path ] \
   || die "uno-work-update.path missing — rerun install.sh from 0.0.113+ (self-update)"
 systemctl enable uno-work-update.path >/dev/null 2>&1 || die "could not enable uno-work-update.path"
-rm -rf /var/lib/uno-work-update/ask/request /var/lib/uno-work-update/status.json /var/lib/uno-work-update/update.log \
+rm -rf /var/lib/uno-work-update/ask/request /var/lib/uno-work-update/ask/auto /var/lib/uno-work-update/status.json /var/lib/uno-work-update/update.log \
   /var/lib/uno-work-update/work /var/lib/uno-work-update/state-before-update /opt/uno-work/app.prev \
   "${STATE_DIR}/userdata/self-update-intent.json" "${STATE_DIR}/userdata/self-update-reported.json" \
   2>/dev/null || true

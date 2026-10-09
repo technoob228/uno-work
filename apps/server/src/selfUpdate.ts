@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { compareCliVersions } from "@t3tools/contracts";
 
@@ -67,6 +67,11 @@ export interface SelfUpdatePaths {
   readonly statusFile: string;
   /** Where the daemon looks for "latest" — display only, the updater decides itself. */
   readonly baseUrl: string;
+}
+
+/** The daemon's own request, next to the button's: `<dir>/auto` (install.sh watches both). */
+export function autoRequestFile(requestFile: string): string {
+  return join(dirname(requestFile), "auto");
 }
 
 export function selfUpdatePathsFromEnv(
@@ -237,14 +242,15 @@ export interface SelfUpdateController {
   /** `latest` and `auto` from the console's list (cached like `status`). */
   readonly releases: (refresh?: boolean) => Promise<ReleasePointers>;
   /**
-   * An update is asked for or running: the request file is there (not taken
+   * An update is asked for or running: a request file is there (not taken
    * yet, or never — the .path unit is off) or the updater says "updating".
-   * Cheap: two local reads, no network.
+   * Cheap: local reads, no network.
    */
   readonly inProgress: () => Promise<boolean>;
   /**
-   * The automatic update (autoUpdate.ts): the same request file the button
-   * drops, without the owner's note — so the Security line says "Uno Work on
+   * The automatic update (autoUpdate.ts): `auto` next to the button's
+   * `request` (the updater then installs the console's "auto" release, not
+   * "latest"), and no owner's note — so the Security line says "Uno Work on
    * this computer was updated to X", not "You updated".
    */
   readonly requestAutomatic: () => Promise<void>;
@@ -315,12 +321,19 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     }
   };
 
-  const requestTime = async (requestFile: string): Promise<number | null> => {
+  const fileTime = async (file: string): Promise<number | null> => {
     try {
-      return (await stat(requestFile)).mtimeMs;
+      return (await stat(file)).mtimeMs;
     } catch {
       return null;
     }
+  };
+  /** The newest waiting request: the owner's `request` or the daemon's `auto`. */
+  const requestTime = async (requestFile: string): Promise<number | null> => {
+    const times = (
+      await Promise.all([fileTime(requestFile), fileTime(autoRequestFile(requestFile))])
+    ).filter((at): at is number => at !== null);
+    return times.length > 0 ? Math.max(...times) : null;
   };
 
   const status: SelfUpdateController["status"] = async ({ canUpdate, refresh = false }) => {
@@ -400,13 +413,13 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     return result({ state: "idle" });
   };
 
-  /** The file carries nothing the updater reads — only its existence matters. */
-  const writeRequest = async (paths: SelfUpdatePaths) => {
+  /** The file carries nothing the updater reads — only its existence (and name) matters. */
+  const writeRequest = async (file: string) => {
     // The directory is root's (install.sh): it is not ours to create.
-    await mkdir(dirname(paths.requestFile), { recursive: true }).catch(() => undefined);
-    const temp = `${paths.requestFile}.tmp`;
+    await mkdir(dirname(file), { recursive: true }).catch(() => undefined);
+    const temp = `${file}.tmp`;
     await writeFile(temp, `${new Date(now()).toISOString()}\n`);
-    await rename(temp, paths.requestFile);
+    await rename(temp, file);
   };
 
   const start: SelfUpdateController["start"] = async () => {
@@ -419,7 +432,7 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     if (!current.available) {
       throw new SelfUpdateUnavailableError("Uno Work is already up to date.");
     }
-    await writeRequest(paths);
+    await writeRequest(paths.requestFile);
     return status({ canUpdate: true });
   };
 
@@ -448,7 +461,7 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
       if (!deps.paths) {
         throw new SelfUpdateUnavailableError("This computer can't update Uno Work by itself.");
       }
-      await writeRequest(deps.paths);
+      await writeRequest(autoRequestFile(deps.paths.requestFile));
     },
   };
 }

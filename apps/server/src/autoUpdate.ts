@@ -3,21 +3,21 @@
  * ("Update automatically", Settings → Computer; on by default).
  *
  * Once a minute the daemon asks itself: is there a newer release the console
- * offers for automatic updates, and is now a good moment? If so it drops the
- * same request file the Update button drops (selfUpdate.ts) — the root updater
- * does the rest, puts the previous version back when the new one does not
- * start, and the new daemon tells the console, which writes "Uno Work on this
- * computer was updated to X (was Y)" into Security (selfUpdateJournal.ts: no
- * owner's note, so not "You updated").
+ * offers for automatic updates, and is now a good moment? If so it drops a
+ * request file next to the Update button's (`auto` instead of `request`,
+ * selfUpdate.ts) — the root updater does the rest, puts the previous version
+ * back when the new one does not start, and the new daemon tells the console,
+ * which writes "Uno Work on this computer was updated to X (was Y)" into
+ * Security (selfUpdateJournal.ts: no owner's note, so not "You updated").
  *
  * Which release. The console's SHA256SUMS has two pointers: `latest` (the
  * Update button, every release) and `auto` (release-work.sh moves it a day
  * after latest, when the canary and the first manual updates went fine).
- * The root updater installs only `latest` and reads nothing the daemon writes,
- * so the daemon asks only while `auto` and `latest` are the same release:
- * right after a promote (latest ahead of auto) and after `release-work.sh auto
- * rollback` nothing is installed by itself. No `auto` line — no automatic
- * updates at all.
+ * The root updater reads nothing the daemon writes; the request's NAME picks
+ * the pointer (`auto` → the auto release) and the updater looks it up in the
+ * console's list itself, and installs only a newer version. No `auto` line —
+ * no automatic updates at all; `release-work.sh auto rollback` moves the
+ * pointer back, so machines not yet updated stay where they are.
  *
  * A good moment (all of them):
  *   - no agent turn, no command still running (the economy probe,
@@ -55,7 +55,6 @@ export type AutoUpdateSkip =
   | "unsupported"
   | "no-auto"
   | "current"
-  | "auto-behind-latest"
   | "in-progress"
   | "rolled-back"
   | "failed-recently"
@@ -75,7 +74,6 @@ export interface AutoUpdateInput {
   /** The installer set up self-update here (0.0.113+, a cloud computer). */
   readonly supported: boolean;
   readonly currentVersion: string;
-  readonly latestVersion: string | null;
   readonly autoVersion: string | null;
   /** A request is waiting or the updater is running (controller.inProgress). */
   readonly inProgress: boolean;
@@ -105,8 +103,6 @@ export function decideAutoUpdate(input: AutoUpdateInput): AutoUpdateDecision {
   const target = input.autoVersion;
   if (!target) return skip("no-auto");
   if (!isNewerVersion(target, input.currentVersion)) return skip("current");
-  // The updater installs `latest`: only while it is the `auto` release.
-  if (input.latestVersion !== target) return skip("auto-behind-latest");
   if (input.inProgress) return skip("in-progress");
 
   const run = input.lastRun;
@@ -185,7 +181,6 @@ export const AutoUpdateSchedulerLive = Layer.effectDiscard(
           enabled,
           supported,
           currentVersion,
-          latestVersion: releases.latest?.version ?? null,
           autoVersion: releases.auto?.version ?? null,
           inProgress,
           lastRun,
@@ -209,8 +204,8 @@ export const AutoUpdateSchedulerLive = Layer.effectDiscard(
       const activity = yield* economy.activity;
       if (activity.runningTurns > 0 || activity.runningTerminals > 0) lastBusyAt = now;
       let decision = yield* decide(activity, false, now);
-      // Before acting, read the list again: a promote since the last read
-      // moves latest past auto, and then the updater would install latest.
+      // Before acting, read the list again: `auto` may have moved back or
+      // gone (auto rollback / off) since the last read.
       if (decision.go) decision = yield* decide(activity, true, now);
       if (!decision.go) {
         if (decision.reason !== lastReason) {
