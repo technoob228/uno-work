@@ -82,7 +82,6 @@ import {
   readStartedChats,
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
-import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
 import { AssistantSchedules } from "../assistants/schedules.ts";
 import {
@@ -160,23 +159,11 @@ export const managerMcpRouteLayer = HttpRouter.add(
     }
 
     const schedules = Option.getOrUndefined(yield* Effect.serviceOption(AssistantSchedules));
-    // Schedules live in the console's assistants: offered only where the
-    // account has them (unit wiring without settings: offered).
-    const settingsService = Option.getOrUndefined(
-      yield* Effect.serviceOption(ServerSettingsService),
-    );
-    const assistantsEnabled = settingsService
-      ? yield* settingsService.getSettings.pipe(
-          Effect.flatMap((settings) => Effect.promise(() => assistantsMvpEnabled(settings))),
-          Effect.orElseSucceed(() => false),
-        )
-      : true;
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       caller,
       body,
       schedules ? { schedules } : {},
-      { assistantsEnabled },
     );
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
@@ -1049,6 +1036,75 @@ export const managerAssistantDeleteRouteLayer = HttpRouter.add(
       Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
       Effect.catch(respondAssistantError("assistants:delete")),
     );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** The assistant a schedules request is about: `projectId`, else the computer's Uno. */
+function scheduleProjectOf(raw: string | null | undefined): ProjectId {
+  const trimmed = raw?.trim();
+  return trimmed ? ProjectId.make(trimmed) : ASSISTANT_PROJECT_ID;
+}
+
+const respondScheduleProblem = (error: { readonly message: string }) =>
+  Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 }));
+
+/**
+ * `GET /api/manager/assistant/schedules[?projectId=]` — what the assistant
+ * runs on a schedule (Work's Uno chat shows "Every day at 09:00 · Morning
+ * plan" with Pause and Remove). Read with this computer's own token, so it
+ * works in the browser too. Owner session only.
+ */
+export const managerAssistantSchedulesGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/schedules",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const schedules = yield* Effect.serviceOption(AssistantSchedules);
+    if (Option.isNone(schedules)) {
+      return HttpServerResponse.jsonUnsafe({ schedules: [] }, { status: 200 });
+    }
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    const projectId = scheduleProjectOf(
+      url._tag === "Some" ? url.value.searchParams.get("projectId") : null,
+    );
+    return yield* schedules.value.ownerList(projectId).pipe(
+      Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+      Effect.catch(respondScheduleProblem),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const ScheduleActionPayload = Schema.Struct({
+  projectId: Schema.optional(Schema.String),
+  scheduleId: Schema.Number,
+  action: Schema.Literals(["pause", "resume", "remove"]),
+});
+
+/** `POST /api/manager/assistant/schedules` {scheduleId, action: pause|resume|remove, projectId?}. */
+export const managerAssistantSchedulesActRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/schedules",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const schedules = yield* Effect.serviceOption(AssistantSchedules);
+    if (Option.isNone(schedules)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Schedules are not available in this Uno Work." },
+        { status: 501 },
+      );
+    }
+    const input = yield* HttpServerRequest.schemaBodyJson(ScheduleActionPayload).pipe(
+      Effect.mapError(
+        () => new AuthError({ message: "Expected {scheduleId, action}.", status: 400 }),
+      ),
+    );
+    return yield* schedules.value
+      .ownerAct(scheduleProjectOf(input.projectId), input.scheduleId, input.action)
+      .pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch(respondScheduleProblem),
+      );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

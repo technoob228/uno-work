@@ -106,9 +106,9 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
   const assistantChatId = useAssistantChat().chat?.id ?? null;
 
   return (
-    <section aria-label="Notifications" className="-my-4 flex max-h-[min(34rem,75vh)] flex-col">
+    <section aria-label="Inbox" className="-my-4 flex max-h-[min(34rem,75vh)] flex-col">
       <header className="flex items-center gap-1 border-b border-border/60 px-3 py-2.5">
-        <span className="flex-1 text-sm font-semibold">Notifications</span>
+        <span className="flex-1 text-sm font-semibold">Inbox</span>
         <Button
           size="xs"
           variant="ghost"

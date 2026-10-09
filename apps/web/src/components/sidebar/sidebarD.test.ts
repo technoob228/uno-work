@@ -8,7 +8,7 @@ import {
   groupChatsForSidebarD,
   isHomePath,
   isRunningStatus,
-  needsYouPlace,
+  inboxPlace,
   parseFoldedProjects,
   sidebarDRailShown,
   unoRunningLabel,
@@ -184,17 +184,15 @@ describe("Home in sidebar D (Misha 08.10: no way back to Home)", () => {
   });
 });
 
-describe('needsYouPlace (Misha 08.10: no "Needs you 0")', () => {
-  it("hides the row when nothing waits for the person, even with unread news", () => {
-    expect(needsYouPlace(0)).toEqual({ shown: false, count: 0 });
+describe("inboxPlace (always there, numbers only above 0)", () => {
+  it("counts unread news and what waits for the person", () => {
+    expect(inboxPlace(0, 0)).toEqual({ unread: 0, needsYou: 0 });
+    expect(inboxPlace(3, 0)).toEqual({ unread: 3, needsYou: 0 });
+    expect(inboxPlace(3, 2)).toEqual({ unread: 3, needsYou: 2 });
   });
 
-  it("shows the row with the number of approvals and questions waiting", () => {
-    expect(needsYouPlace(3)).toEqual({ shown: true, count: 3 });
-  });
-
-  it("never shows a zero or a junk count", () => {
-    expect(needsYouPlace(-1).shown).toBe(false);
-    expect(needsYouPlace(Number.NaN).shown).toBe(false);
+  it("never shows less unread than waiting, and no junk numbers", () => {
+    expect(inboxPlace(0, 2)).toEqual({ unread: 2, needsYou: 2 });
+    expect(inboxPlace(-1, Number.NaN)).toEqual({ unread: 0, needsYou: 0 });
   });
 });

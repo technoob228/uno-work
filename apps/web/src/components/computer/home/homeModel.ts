@@ -229,6 +229,39 @@ export function pickContinueItems<I extends ContinueInboxItem>(
     .map((entry) => entry.card);
 }
 
+/** The part of an Inbox item "Done while you were away" reads. */
+export interface AwayInboxItem extends ContinueInboxItem {
+  readonly source: { readonly kind: string; readonly id: string };
+}
+
+/**
+ * "Done while you were away": what agents finished (or failed) while the
+ * person wasn't looking — unread, not snoozed Inbox items from chats Home
+ * doesn't show as cards: Uno's own chat (the teammate's work happens there),
+ * a chat that is archived or snoozed. Opening a chat reads its items, so an
+ * unread one really came while the person was away. Newest first.
+ */
+export function pickDoneWhileAway<I extends AwayInboxItem>(
+  inbox: ReadonlyArray<I>,
+  homeThreads: ReadonlyArray<HomeThread>,
+  { now, limit = 3 }: { now: number; limit?: number },
+): I[] {
+  const onHome = new Set<string>(
+    homeThreads.filter((thread) => isHomeVisibleThread(thread, now)).map((thread) => thread.id),
+  );
+  return inbox
+    .filter(
+      (item) =>
+        (item.kind === "agent.done" || item.kind === "agent.error") &&
+        item.readAt === null &&
+        !(item.snoozedUntil && Date.parse(item.snoozedUntil) > now) &&
+        item.source.kind === "agent" &&
+        !onHome.has(item.source.id),
+    )
+    .toSorted((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))
+    .slice(0, limit);
+}
+
 /** Chats waiting for the person: an approval or a question. Approvals first, newest first. */
 export function attentionThreads(threads: ReadonlyArray<HomeThread>, now: number): HomeThread[] {
   return threads

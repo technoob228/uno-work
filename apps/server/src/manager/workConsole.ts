@@ -79,7 +79,7 @@ export const callWorkConsole = (input: {
  */
 export const callMachineConsole = (input: {
   readonly identity: WorkMachineIdentity;
-  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly path: string;
   readonly body?: unknown;
   readonly fetchImpl?: FetchLike;

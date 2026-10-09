@@ -7,7 +7,8 @@ import {
   HANDOFF_TTL_MS,
   isUnoAiHandoff,
   rememberHandoff,
-  takeHandoff,
+  readHandoff,
+  clearHandoff,
 } from "./unoAiHandoff";
 import {
   askQuestions,
@@ -288,10 +289,17 @@ describe("hand-off", () => {
       removeItem: (k: string) => void mem.delete(k),
     };
     rememberHandoff("w1", 1000, s);
-    expect(takeHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
-    expect(takeHandoff(2000, s)).toBeNull();
+    // Reading leaves it in place until the message reached the computer.
+    expect(readHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
+    expect(readHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
+    // A newer hand-off is not cleared by the older one finishing.
+    rememberHandoff("w3", 1500, s);
+    clearHandoff("w1", s);
+    expect(readHandoff(2000, s)?.chatId).toBe("w3");
+    clearHandoff("w3", s);
+    expect(readHandoff(2000, s)).toBeNull();
     rememberHandoff("w2", 1000, s);
-    expect(takeHandoff(1000 + HANDOFF_TTL_MS + 1, s)).toBeNull();
+    expect(readHandoff(1000 + HANDOFF_TTL_MS + 1, s)).toBeNull();
   });
   it("gives the computer's Uno the whole context", () => {
     const p = handoffPrompt({
