@@ -35,7 +35,7 @@ afterEach(async () => {
 
 describe("openAppUpstream", () => {
   it("sends the request to 127.0.0.1:<port> with the given path, headers and body", async () => {
-    let seen: { method?: string; url?: string; host?: string; cookie?: string; body?: string } = {};
+    let seen: Record<string, string | undefined> = {};
     const port = await startApp(async (req, res) => {
       seen = {
         method: req.method,

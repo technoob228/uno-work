@@ -6,7 +6,10 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 
-import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
+import {
+  SessionCredentialService,
+  type SessionCredentialServiceShape,
+} from "../auth/Services/SessionCredentialService.ts";
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { APP_PROXY_CSP, signAppProxyToken } from "./appProxy.ts";
 import { appProxyRouteLayer } from "./appProxyHttp.ts";
@@ -108,7 +111,10 @@ const makeFixture = Effect.gen(function* () {
   ];
   const context = yield* Layer.build(
     Layer.mergeAll(
-      Layer.mock(SessionCredentialService)({ deriveSecret: () => Effect.succeed(SECRET) }),
+      // The route needs only the derived key.
+      Layer.succeed(SessionCredentialService, {
+        deriveSecret: () => Effect.succeed(SECRET),
+      } as unknown as SessionCredentialServiceShape),
       Layer.mock(MachineAppsService)({
         lastScanned: Effect.succeed(apps.map((app) => ({ ...app, hidden: false }))),
         scanned: Effect.succeed(apps),
