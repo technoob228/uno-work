@@ -121,16 +121,17 @@ export const FIRST_SCREEN_EXAMPLES = [
     prompt: "A site for my business that takes orders and sends them to me",
   },
   {
-    id: "example-bot",
-    label: "A Telegram bot",
-    prompt: "A Telegram bot that answers my customers",
+    // Misha 09.10: the own agent is a teammate that does my tasks — not a bot
+    // that answers strangers. The pill opens the same quiz ("What should it
+    // do?", AssistantQuiz); one name: teammate.
+    id: ASSISTANT_STARTER_ID,
+    label: "A teammate that does my tasks",
+    prompt: "",
   },
   {
-    // No ready-made prompt (Misha 05.10: "maybe my assistant isn't about
-    // email"): the pill opens "What should your assistant do?" (AssistantQuiz).
-    id: ASSISTANT_STARTER_ID,
-    label: "An AI assistant",
-    prompt: "",
+    id: "example-idea",
+    label: "I have an idea for an app",
+    prompt: "I have an idea for an app: ",
   },
 ] as const;
 
