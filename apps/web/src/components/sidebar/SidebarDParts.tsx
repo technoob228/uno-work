@@ -407,7 +407,10 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
             <InboxIcon />
             <span className="min-w-0 flex-1 truncate">Inbox</span>
             {badge.needsYou > 0 ? (
-              <span className="shrink-0 text-[11px] text-warning" data-testid="sidebar-inbox-needs-you">
+              <span
+                className="shrink-0 text-[11px] text-warning"
+                data-testid="sidebar-inbox-needs-you"
+              >
                 {badge.needsYou} need{badge.needsYou === 1 ? "s" : ""} you
               </span>
             ) : null}
