@@ -275,7 +275,9 @@ List the app's own tasks; stop a running one.
 ### Cloud storage — the app's own folder (`"storage"` in the manifest)
 
 Keys are relative to the app's folder: `photos/2026/cat.jpg`. Folders are
-implicit (like S3). One file is at most 256 MB for now.
+implicit (like S3). A file can be any size that fits the app's limit and the
+account's cloud: big files go to the cloud in parts, streamed — use
+`storage.upload(path)` for a file on disk rather than reading it into memory.
 
 | Call                                       | What it does                                                                                               |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |

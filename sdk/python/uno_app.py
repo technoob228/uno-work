@@ -544,7 +544,8 @@ def _file_path(key: str) -> str:
 class Storage:
     """The app's own folder in the Uno account's cloud: Cloud storage → apps/<id>/.
 
-    Keys are relative to that folder ("photos/2026/cat.jpg"); one file <= 256 MB.
+    Keys are relative to that folder ("photos/2026/cat.jpg"). A file can be any
+    size within the app's limit; use upload(path) for big files (streamed).
     Keep the person's files here (photos, documents, uploads, exports); keep
     only databases, caches and temporary files on the computer's disk.
     """

@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.118 — 2026-10-09
+
+- Files of any size go to the Uno cloud: Copy to Cloud, Uno Drive, project materials, Office saves and app storage no longer skip files bigger than 256 MB. Big files upload in parts; the limit is your cloud storage plan.
+
 ## v0.0.117 — 2026-10-09
 
 - Switching computers in the browser always shows the interface of the computer you switch to. If it runs another Uno Work version, the page opens it in its own version (Uno remembers your choice: app.uno4.work opens that computer next time too).

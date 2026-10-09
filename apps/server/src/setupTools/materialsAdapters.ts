@@ -11,18 +11,16 @@
  *
  * @module setupTools/materialsAdapters
  */
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
-
 import { UNO_FAST_GATEWAY_MODEL } from "@t3tools/contracts";
 
 import {
   cloudCreateBucket,
-  cloudPresign,
   cloudState,
+  cloudUpload,
   normalizeCloudPrefix,
   type CloudDeps,
 } from "../files/cloudStorage.ts";
+import { fileUploadSource } from "../files/cloudUpload.ts";
 import { sanitizeUntrustedField, wrapUntrustedContent } from "../untrustedContent.ts";
 import type { MaterialsCloudUpload, MaterialsModel } from "./materialsJob.ts";
 
@@ -202,23 +200,16 @@ export async function makeCloudMaterialsUpload(
     (await cloudCreateBucket(deps, "drive"));
   const folder = projectName.replace(/[/\\]/g, "-").replace(/^\.+/, "").trim() || "project";
   const prefix = normalizeCloudPrefix(`${folder}/materials/`);
-  const fetchImpl = deps.fetchImpl ?? fetch;
   return {
     displayPath: `${folder}/materials`,
     upload: async ({ absolutePath, relativeName, size }) => {
-      const url = await cloudPresign(deps, bucket.id, `${prefix}${relativeName}`, "put");
-      const body =
-        size === 0
-          ? new Uint8Array()
-          : (Readable.toWeb(createReadStream(absolutePath)) as unknown as ReadableStream);
-      const response = await fetchImpl(url, {
-        method: "PUT",
-        body,
-        headers: { "content-length": String(size) },
-        ...(size === 0 ? {} : { duplex: "half" }),
-      } as RequestInit);
-      await response.body?.cancel().catch(() => undefined);
-      if (!response.ok) throw new Error(`storage answered ${response.status}`);
+      await cloudUpload(
+        deps,
+        bucket.id,
+        `${prefix}${relativeName}`,
+        fileUploadSource(absolutePath, size),
+        { storageMessage: (error) => error.message },
+      );
     },
   };
 }
