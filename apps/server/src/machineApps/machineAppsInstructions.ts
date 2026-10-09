@@ -142,7 +142,7 @@ app.get("/photos/:id", async (req, res) => res.redirect(await uno.storage.url(ke
 
 Python: \`st = uno_app.Client(app_id="album").storage\` → \`st.upload(tmp_path, key)\`, \`st.put(key, data)\`, \`st.url(key)\`, \`st.get(key)\`, \`st.list("photos/")\`, \`st.delete(key)\`. Other languages: HTTP to \`$UNO_APP_API_URL\` with the app token — \`PUT /v1/storage/files/<key>\` (body + Content-Length), \`GET /v1/storage/files/<key>\`, \`DELETE …\`, \`GET /v1/storage/list?prefix=\`, \`POST /v1/storage/url {"key"}\`.
 
-Handle in the UI in plain words: 507 \`app_storage_full\` → "This app filled its cloud space — raise it in Uno Work → Settings → Apps"; 402 \`cloud_full\` → "Your Uno cloud storage is full"; 503 \`storage_not_connected\` → "Sign in to Uno in Uno Work". One file is at most 256 MB. When you tell the person the app is ready, say where the files live ("your photos are kept in your Uno cloud, Files → Cloud storage → apps → album").
+Handle in the UI in plain words: 507 \`app_storage_full\` → "This app filled its cloud space — raise it in Uno Work → Settings → Apps"; 402 \`cloud_full\` → "Your Uno cloud storage is full"; 503 \`storage_not_connected\` → "Sign in to Uno in Uno Work". Files of any size within the app's limit are fine; for big ones use \`upload(path)\` (streamed), not \`put\` with the bytes in memory. When you tell the person the app is ready, say where the files live ("your photos are kept in your Uno cloud, Files → Cloud storage → apps → album").
 
 ${CUSTOM_HARNESS_POINTER}`;
 }

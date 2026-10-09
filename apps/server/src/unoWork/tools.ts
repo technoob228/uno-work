@@ -1581,7 +1581,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "drive_save",
     group: "files",
     description:
-      'Copy files or folders from this computer into the person\'s Uno Drive (cloud storage), into folder (e.g. "Reports/"; default the Drive root). Files over 256 MB are skipped. The originals stay on the computer.',
+      'Copy files or folders from this computer into the person\'s Uno Drive (cloud storage), into folder (e.g. "Reports/"; default the Drive root). Files of any size; a file over the plan\'s free cloud space fails with "Cloud storage is full". The originals stay on the computer.',
     inputSchema: {
       type: "object",
       properties: {

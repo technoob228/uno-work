@@ -29,8 +29,10 @@ import {
   cloudDelete,
   cloudList,
   cloudPresign,
+  cloudUpload,
   type CloudDeps,
 } from "./cloudStorage.ts";
+import { bytesUploadSource } from "./cloudUpload.ts";
 import {
   contentVersion,
   looksLikeOfficeArchive,
@@ -102,20 +104,12 @@ async function download(
 }
 
 async function upload(deps: CloudDeps, bucketId: number, key: string, bytes: Uint8Array) {
-  const url = await cloudPresign(deps, bucketId, key, "put");
-  const response = await (deps.fetchImpl ?? fetch)(url, {
-    method: "PUT",
-    body: bytes as unknown as RequestInit["body"],
-    headers: { "content-length": String(bytes.length) },
+  await cloudUpload(deps, bucketId, key, bytesUploadSource(bytes), {
+    storageMessage: (error) =>
+      error.status === 402 || error.status === 403
+        ? "Cloud storage is full or doesn't accept this upload. Nothing was changed."
+        : `Saving to Cloud storage failed (${error.message}).`,
   });
-  if (response.status === 402 || response.status === 403) {
-    throw new CloudError(
-      "Cloud storage is full or doesn't accept this upload. Nothing was changed.",
-    );
-  }
-  if (!response.ok) {
-    throw new CloudError(`Saving to Cloud storage failed (storage answered ${response.status}).`);
-  }
 }
 
 /** Anything left in the staging folder for more than an hour (a closed tab). */
