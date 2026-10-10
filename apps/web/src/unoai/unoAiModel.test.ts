@@ -5,6 +5,7 @@ import {
   describeUnoAiHandoff,
   handoffPrompt,
   HANDOFF_TTL_MS,
+  isAssistantChat,
   isTeammateGoal,
   isUnoAiHandoff,
   rememberHandoff,
@@ -330,6 +331,29 @@ describe("hand-off", () => {
     expect(p).toContain("Don't build an app");
     const site = handoffPrompt({ title: "yoga", messages: transcript, sites: null });
     expect(site).not.toContain("You are the personal assistant");
+  });
+  it("knows an assistant chat by the person's first words or Uno's reason for the computer", () => {
+    const first = transcriptItems([
+      { role: "user", content: "Personal assistant" } as AiChatMessage,
+    ]);
+    expect(isAssistantChat(first)).toBe(true);
+    const byReason = transcriptItems([
+      { role: "user", content: "Someone to keep my schedule" } as AiChatMessage,
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          call("s9", "suggest_next", {
+            action: "computer",
+            reason: "Your assistant Uno lives on your own computer in the cloud.",
+          }),
+        ],
+      } as AiChatMessage,
+      tool("s9", { ok: true }),
+    ]);
+    expect(isAssistantChat(byReason)).toBe(true);
+    // The yoga site: a bot's reason, no assistant anywhere.
+    expect(isAssistantChat(transcriptItems(transcript))).toBe(false);
   });
   it("reads the goal and the live sites back for the chat's card", () => {
     const p = handoffPrompt({

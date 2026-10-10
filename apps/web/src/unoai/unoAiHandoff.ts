@@ -12,7 +12,7 @@
  * parts are unit-tested.
  */
 import type { AiChatMessage, AiSite } from "./unoAiApi";
-import { transcriptItems } from "./unoAiModel";
+import { type AiItem, transcriptItems } from "./unoAiModel";
 
 const KEY = "uno.ai.handoff.v1";
 /** A hand-off older than this is stale (the computer never came, or it was long ago). */
@@ -134,6 +134,23 @@ export function isTeammateGoal(text: string): boolean {
 }
 
 /**
+ * The chat is about a personal assistant: the person's first words, or Uno's
+ * reason for the computer, say so. One rule for the hand-off ("You are the
+ * personal assistant I asked for") and for the card's pay button (the
+ * checkout opens with Uno AI in the order — computerOffer.ts).
+ */
+export function isAssistantChat(items: ReadonlyArray<AiItem>): boolean {
+  const firstUser = items.find((i) => i.kind === "user");
+  const suggest = items.findLast((i) => i.kind === "suggest");
+  return isTeammateGoal(
+    [
+      firstUser && firstUser.kind === "user" ? firstUser.text : "",
+      suggest && suggest.kind === "suggest" ? (suggest.reason ?? "") : "",
+    ].join(" "),
+  );
+}
+
+/**
  * The first message for the Uno on the computer: everything it needs to go on
  * without asking again. Written to the agent (English), the conversation
  * itself stays in the person's language.
@@ -198,13 +215,9 @@ export function handoffPrompt(input: {
   // The personal assistant is the Uno on this computer itself, not something
   // to build (ICP v3 r3: the hand-off built an always-on "Dev Teammate" app
   // and asked for a GitHub token before any task).
-  const goalWords = [
-    firstUser && firstUser.kind === "user" ? firstUser.text : "",
-    suggest && suggest.kind === "suggest" ? (suggest.reason ?? "") : "",
-  ].join(" ");
   lines.push(
     "",
-    isTeammateGoal(goalWords)
+    isAssistantChat(items)
       ? "You are the personal assistant I asked for: I give you tasks here (or in my Telegram once linked), you do them on this computer while my laptop is closed and tell me in my Inbox when it's done or you need me. Don't build an app, a bot or a service for this, and don't ask for tokens or passwords until a task needs them. Now: in 1–2 sentences (in my language) say what you can do for me here as my assistant, then ask for my first task."
       : "Now: tell me in 1–2 sentences what you'll set up on this computer for this goal (in my language), then do it step by step. Ask only what you truly can't decide yourself — one question at a time.",
   );

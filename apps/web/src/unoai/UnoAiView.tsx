@@ -33,12 +33,12 @@ import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { CONSOLE_URL, checkoutHref, consoleLinks } from "../account/accountOverview";
+import { CONSOLE_URL, consoleLinks } from "../account/accountOverview";
 import { formatAiMinutes } from "../account/aiHours";
 import { isElectron } from "../env";
 import { isWebLite } from "../lite/flag";
 import { liteLinks, liteStanding } from "../lite/webLite";
-import { computerOfferCopy, workTrialOpenQuery } from "./computerOffer";
+import { computerOfferCheckoutHref, computerOfferCopy, workTrialOpenQuery } from "./computerOffer";
 import { cn } from "../lib/utils";
 import { SidebarShowButton } from "../components/sidebar/SidebarShowButton";
 import { subscriptionQuery } from "../components/myuno/myUnoQueries";
@@ -53,7 +53,7 @@ import {
   type AiMeter,
   type AiStop,
 } from "./unoAiApi";
-import { rememberHandoff } from "./unoAiHandoff";
+import { isAssistantChat, rememberHandoff } from "./unoAiHandoff";
 import { AnswerCards } from "./AnswerCards";
 import { BotChatItem } from "./BotCard";
 import { ContinueCards } from "./ContinueCards";
@@ -152,6 +152,8 @@ function UnoAiChat({
 }) {
   const { state, send, resume } = useUnoAiChat(chatId);
   const items = useMemo(() => transcriptItems(state.messages), [state.messages]);
+  // A chat about a personal assistant: its pay button opens the checkout with Uno AI in the order.
+  const assistantChat = useMemo(() => isAssistantChat(items), [items]);
   const question = state.running ? null : pendingQuestion(items);
   const site = latestSite(items, state.sites);
   const botKey = latestBotKey(items);
@@ -263,6 +265,7 @@ function UnoAiChat({
                   item={item}
                   interactiveBot={item.key === botKey}
                   chatId={chatId}
+                  assistantChat={assistantChat}
                   onView={() => {
                     setPreviewOpen(true);
                     setPreviewKey((k) => k + 1);
@@ -596,6 +599,7 @@ function ChatItem({
   item,
   interactiveBot,
   chatId,
+  assistantChat,
   onView,
   onOpenSite,
   continueHere,
@@ -603,6 +607,8 @@ function ChatItem({
   item: AiItem;
   interactiveBot: boolean;
   chatId: string;
+  /** The chat is about a personal assistant (isAssistantChat). */
+  assistantChat: boolean;
   onView: () => void;
   /** A link in the text points at this chat's site: open it on the right; false = not ours. */
   onOpenSite: (href: string) => boolean;
@@ -718,6 +724,7 @@ function ChatItem({
           action={item.action}
           reason={item.reason}
           chatId={chatId}
+          assistant={assistantChat}
           continueHere={continueHere}
         />
       );
@@ -887,11 +894,13 @@ function SuggestCard({
   action,
   reason,
   chatId,
+  assistant,
   continueHere,
 }: {
   action: "computer" | "connect_agent" | "uno_work";
   reason: string;
   chatId: string;
+  assistant: boolean;
   continueHere: ReactNode;
 }) {
   if (action === "connect_agent") {
@@ -919,7 +928,7 @@ function SuggestCard({
       </OfferFrame>
     );
   }
-  return <ComputerOffer reason={reason} chatId={chatId} />;
+  return <ComputerOffer reason={reason} chatId={chatId} assistant={assistant} />;
 }
 
 function OfferFrame({
@@ -944,7 +953,15 @@ function OfferFrame({
 }
 
 /** Lite: create the computer (plan allows), or start the free trial (no code) / pick a plan. */
-function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
+function ComputerOffer({
+  reason,
+  chatId,
+  assistant,
+}: {
+  reason: string;
+  chatId: string;
+  assistant: boolean;
+}) {
   const subscription = useQuery(subscriptionQuery());
   const standing = subscription.isPending ? null : liteStanding(subscription.data ?? null);
   // Like the console: the trial button only when there is a free place.
@@ -1019,7 +1036,13 @@ function ComputerOffer({ reason, chatId }: { reason: string; chatId: string }) {
           <Button
             size="sm"
             variant="outline"
-            render={<a href={checkoutHref("plus")} target="_blank" rel="noreferrer" />}
+            // Paying happens in the console (a new tab). "Open Uno Work" there
+            // creates the computer too, so the conversation is remembered now —
+            // the note below promises it continues on the computer.
+            onClick={() => rememberHandoff(chatId)}
+            render={
+              <a href={computerOfferCheckoutHref(assistant)} target="_blank" rel="noreferrer" />
+            }
           >
             {copy.upgradeLabel}
             <ExternalLinkIcon />
