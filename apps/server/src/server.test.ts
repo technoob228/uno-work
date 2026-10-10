@@ -173,6 +173,7 @@ import {
 import { ManagerCapabilityTokenRepository } from "./persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepository } from "./persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "./persistence/Services/ManagerConnectors.ts";
+import { ServerWsRpcGroup } from "./rpcTolerance.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -3109,6 +3110,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isAtLeast(response.sequence, 0);
       assert.equal(stat.type, "Directory");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "answers a command type from a newer interface with 'not supported', not a defect",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        // A client whose dispatch payload can carry an unknown type (as a newer
+        // interface would send): the tolerant server group encodes it as is.
+        const result = yield* Effect.scoped(
+          RpcClient.make(ServerWsRpcGroup).pipe(
+            Effect.flatMap((client) =>
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                _tag: "UnsupportedClientCommand",
+                type: "thread.teleport",
+              } as never),
+            ),
+            Effect.provide(wsRpcProtocolLayer(wsUrl)),
+            Effect.result,
+          ),
+        );
+
+        assertTrue(result._tag === "Failure");
+        assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
+        assertTrue(
+          result.failure.message.startsWith(
+            '"thread.teleport" isn\'t supported by this computer (Uno Work ',
+          ),
+        );
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc projects.writeFile errors", () =>

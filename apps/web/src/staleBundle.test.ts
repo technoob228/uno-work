@@ -4,6 +4,7 @@ import {
   compareWorkVersions,
   handlePreloadError,
   PRELOAD_RELOAD_WINDOW_MS,
+  readUiFromOrigin,
   resolveStaleBundleNotice,
   switchReloadUrl,
   workMachineOpenUrl,
@@ -15,6 +16,7 @@ const browserOnWork: StaleBundlePage = {
   isElectron: false,
   isLite: false,
   bundleVersion: "0.0.108",
+  uiFromOrigin: false,
 };
 
 describe("workMachineOpenUrl", () => {
@@ -84,7 +86,7 @@ describe("resolveStaleBundleNotice", () => {
       kind: "newer",
       clientVersion: "0.0.108",
       serverVersion: "0.0.117",
-      reload: { kind: "reload" },
+      action: { kind: "reload" },
       key: "env-395:0.0.108:0.0.117",
     });
   });
@@ -94,7 +96,7 @@ describe("resolveStaleBundleNotice", () => {
       resolveStaleBundleNotice(
         { ...browserOnWork, onWorkProxyHost: false },
         { environmentId: "e", isPrimary: true, unoBoxId: 395, serverVersion: "0.0.117" },
-      )?.reload,
+      )?.action,
     ).toEqual({ kind: "reload" });
   });
 
@@ -105,7 +107,7 @@ describe("resolveStaleBundleNotice", () => {
     );
     expect(notice).toMatchObject({
       kind: "older",
-      reload: { kind: "open", url: "/_work/open?box=2507" },
+      action: { kind: "open", url: "/_work/open?box=2507" },
     });
   });
 
@@ -130,6 +132,109 @@ describe("resolveStaleBundleNotice", () => {
     expect(
       resolveStaleBundleNotice({ ...browserOnWork, bundleVersion: "0.0.0" }, other),
     ).toBeNull();
+  });
+});
+
+describe('one window: <meta name="uno-ui" content="origin">', () => {
+  const origin: StaleBundlePage = {
+    ...browserOnWork,
+    bundleVersion: "0.0.119",
+    uiFromOrigin: true,
+  };
+
+  it("reads the meta our address puts into index.html", () => {
+    const doc = (content: string | null) => ({
+      querySelector: (selector: string) =>
+        selector === 'meta[name="uno-ui"]' && content !== null
+          ? ({ getAttribute: () => content } as unknown as Element)
+          : null,
+    });
+    expect(readUiFromOrigin(doc("origin"))).toBe(true);
+    expect(readUiFromOrigin(doc(" Origin "))).toBe(true);
+    expect(readUiFromOrigin(doc("machine"))).toBe(false);
+    expect(readUiFromOrigin(doc(null))).toBe(false);
+    expect(readUiFromOrigin(null)).toBe(false);
+  });
+
+  it("switches every computer in place — never loads a computer's own interface", () => {
+    expect(
+      switchReloadUrl(origin, { isPrimary: false, unoBoxId: 2385, serverVersion: "0.0.116" }),
+    ).toBeNull();
+    expect(
+      switchReloadUrl(
+        origin,
+        { isPrimary: false, unoBoxId: 2385, serverVersion: null },
+        "/computer",
+      ),
+    ).toBeNull();
+  });
+
+  it("an older computer that can update itself (0.0.113+) → Update calls self-update", () => {
+    const notice = resolveStaleBundleNotice(origin, {
+      environmentId: "env-2385",
+      isPrimary: false,
+      unoBoxId: 2385,
+      serverVersion: "0.0.116",
+      supportsSelfUpdate: true,
+    });
+    expect(notice).toMatchObject({
+      kind: "older",
+      serverVersion: "0.0.116",
+      action: { kind: "self-update" },
+    });
+  });
+
+  it("the same for the computer behind this address (it no longer serves the interface)", () => {
+    expect(
+      resolveStaleBundleNotice(origin, {
+        environmentId: "env-395",
+        isPrimary: true,
+        unoBoxId: 395,
+        serverVersion: "0.0.114",
+        supportsSelfUpdate: true,
+      })?.action,
+    ).toEqual({ kind: "self-update" });
+  });
+
+  it("an older computer before self-update → its page in the console", () => {
+    expect(
+      resolveStaleBundleNotice(origin, {
+        environmentId: "env-74",
+        isPrimary: false,
+        unoBoxId: 74,
+        serverVersion: "0.0.108",
+        supportsSelfUpdate: false,
+      })?.action,
+    ).toEqual({ kind: "console", url: "https://console.uno.place/boxes/74" });
+  });
+
+  it("an older machine that is not an Uno computer and can't update itself → nothing to offer", () => {
+    expect(
+      resolveStaleBundleNotice(origin, {
+        environmentId: "env-laptop",
+        isPrimary: false,
+        unoBoxId: null,
+        serverVersion: "0.0.108",
+      }),
+    ).toBeNull();
+  });
+
+  it("a newer computer (canary) → a plain Reload", () => {
+    expect(
+      resolveStaleBundleNotice(origin, {
+        environmentId: "env-2534",
+        isPrimary: false,
+        unoBoxId: 2534,
+        serverVersion: "0.0.120",
+        supportsSelfUpdate: true,
+      }),
+    ).toMatchObject({ kind: "newer", action: { kind: "reload" } });
+  });
+
+  it("same version or unknown → quiet", () => {
+    const base = { environmentId: "e", isPrimary: false, unoBoxId: 1 } as const;
+    expect(resolveStaleBundleNotice(origin, { ...base, serverVersion: "0.0.119" })).toBeNull();
+    expect(resolveStaleBundleNotice(origin, { ...base, serverVersion: null })).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@t3tools/contracts";
 import { Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1627,5 +1627,117 @@ describe("WsTransport", () => {
 
     await expect(requestPromise).resolves.toEqual(DEFAULT_SERVER_SETTINGS);
     await transport.dispose();
+  });
+});
+
+describe("WsTransport — a newer daemon's stream items (one window / desktop)", () => {
+  const projectDeleted = (sequence: number) => ({
+    sequence,
+    eventId: `event-${sequence}`,
+    aggregateKind: "project",
+    aggregateId: "project-1",
+    occurredAt: "2026-10-09T10:00:00.000Z",
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "project.deleted",
+    payload: { projectId: "project-1", deletedAt: "2026-10-09T10:00:00.000Z" },
+  });
+
+  async function openStream(
+    connect: Parameters<WsTransport["subscribe"]>[0],
+    listener: (value: unknown) => void,
+  ) {
+    const transport = createTransport("ws://localhost:3020");
+    const unsubscribe = transport.subscribe(connect, listener);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => expect(socket.sent).toHaveLength(1));
+    const request = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    const chunk = (values: unknown[]) =>
+      socket.serverMessage(JSON.stringify({ _tag: "Chunk", requestId: request.id, values }));
+    return { transport, unsubscribe, socket, chunk };
+  }
+
+  it("skips an orchestration event of an unknown type and keeps the thread stream", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const listener = vi.fn();
+    const { socket, chunk, unsubscribe } = await openStream(
+      (client) =>
+        client[ORCHESTRATION_WS_METHODS.subscribeThread]({ threadId: "thread-1" } as never),
+      listener,
+    );
+
+    chunk([
+      { kind: "event", event: { ...projectDeleted(1), type: "thread.teleported", payload: {} } },
+      { kind: "event", event: projectDeleted(2) },
+    ]);
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    expect(listener.mock.calls[0]?.[0]).toMatchObject({
+      kind: "event",
+      event: { type: "project.deleted", sequence: 2 },
+    });
+
+    // The stream is still the same one: no resubscribe, the next chunk arrives.
+    chunk([{ kind: "event", event: projectDeleted(3) }]);
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
+    // (the client acks each chunk; only one Request ever went out)
+    const requests = socket.sent.filter(
+      (raw) => (JSON.parse(raw) as { _tag?: string })._tag === "Request",
+    );
+    expect(requests).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Skipped a stream item this version of Uno Work does not understand",
+      expect.objectContaining({ kind: "event", type: "thread.teleported" }),
+    );
+    unsubscribe();
+  });
+
+  it("skips a shell item and a lifecycle event of an unknown kind", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const shell = vi.fn();
+    const first = await openStream(
+      (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),
+      shell,
+    );
+    first.chunk([
+      { kind: "machine-upserted", sequence: 4, machine: { id: "m" } },
+      { kind: "project-removed", sequence: 5, projectId: "project-1" },
+    ]);
+    await waitFor(() => expect(shell).toHaveBeenCalledTimes(1));
+    expect(shell.mock.calls[0]?.[0]).toMatchObject({ kind: "project-removed", sequence: 5 });
+    first.unsubscribe();
+    await first.transport.dispose();
+    sockets.length = 0;
+
+    const lifecycle = vi.fn();
+    const second = await openStream(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      lifecycle,
+    );
+    second.chunk([{ version: 1, sequence: 9, type: "sleeping", payload: {} }]);
+    second.chunk([
+      {
+        version: 1,
+        sequence: 10,
+        type: "welcome",
+        payload: {
+          environment: {
+            environmentId: "environment-local",
+            label: "Local environment",
+            platform: { os: "linux", arch: "x64" },
+            serverVersion: "0.0.130",
+            capabilities: { repositoryIdentity: true, httpFeatures: ["self-update", "teleport"] },
+          },
+          cwd: "/tmp/workspace",
+          projectName: "workspace",
+        },
+      },
+    ]);
+    await waitFor(() => expect(lifecycle).toHaveBeenCalledTimes(1));
+    expect(lifecycle.mock.calls[0]?.[0]).toMatchObject({ type: "welcome", sequence: 10 });
+    second.unsubscribe();
   });
 });
