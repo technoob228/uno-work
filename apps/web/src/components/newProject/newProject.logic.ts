@@ -222,6 +222,42 @@ export function githubRepoSlug(remoteUrl: string): string | null {
 }
 
 /**
+ * `https://github.com/owner/repo.git` of a GitHub remote however it was typed
+ * (`git@github.com:…` included): the account's GitHub signs git in over https.
+ * Other hosts come back unchanged.
+ */
+export function githubHttpsRemote(remoteUrl: string): string {
+  const slug = githubRepoSlug(remoteUrl);
+  return slug ? `https://github.com/${slug}.git` : remoteUrl;
+}
+
+/** What the account's GitHub looks like from this computer (`GET /api/manager/github`). */
+export interface RepoAccessGithubState {
+  readonly available: boolean;
+  readonly connected: boolean;
+  readonly accounts: ReadonlyArray<string>;
+}
+
+/**
+ * What to offer when a clone was refused:
+ * - `connect`  — GitHub isn't connected to the account yet: one button, once,
+ *   and it works on every computer;
+ * - `add-repo` — it is connected, but Uno wasn't given this repository;
+ * - `ssh-key`  — the account's GitHub can't be used here (not a cloud
+ *   computer, an older console, another host): the key Uno makes for this
+ *   computer (connectGithubPrompt).
+ */
+export type RepoAccessOffer = "connect" | "add-repo" | "ssh-key";
+
+export function repoAccessOffer(
+  remoteUrl: string,
+  github: RepoAccessGithubState | null,
+): RepoAccessOffer {
+  if (github === null || !github.available || githubRepoSlug(remoteUrl) === null) return "ssh-key";
+  return github.connected ? "add-repo" : "connect";
+}
+
+/**
  * The task for Uno when the repository is private: connect this computer to
  * GitHub with an SSH key (one paste on github.com, no tokens to pick scopes
  * for) and clone into the project folder made for it.

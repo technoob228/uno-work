@@ -6,6 +6,8 @@
  * - `GET    /api/manager/connectors`                  → {available, reason, connectors}
  * - `POST   /api/manager/connectors/:provider/start`  → {authorizeUrl}
  * - `DELETE /api/manager/connectors/:provider`        → {ok: true}
+ * - `GET    /api/manager/github`                      → {available, reason, connected, accounts, permission}
+ * - `POST   /api/manager/github/connect`              → {authorizeUrl} (the account's GitHub, for git on every computer)
  * - `POST   /api/manager/mcp/probe` {url}             → {ok, toolCount, toolNames, needsAuth, error}
  * - `POST   /api/manager/materials/read` {projectPath, links} → {jobId}
  * - `GET    /api/manager/materials/read/:jobId`       → the job
@@ -21,6 +23,7 @@ import { AuthError } from "../auth/Services/ServerAuth.ts";
 import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
 import { isConnectorProvider, type ConnectorsError } from "./connectors.ts";
 import { ConnectorsService } from "./ConnectorsService.ts";
+import { GithubAccountService } from "./GithubAccountService.ts";
 import { MaterialsService } from "./MaterialsService.ts";
 import type { MaterialsJobError } from "./materialsJob.ts";
 import { probeMcpServer } from "./mcpProbe.ts";
@@ -92,6 +95,34 @@ export const connectorsRemoveRouteLayer = HttpRouter.add(
     const connectors = yield* ConnectorsService;
     return yield* connectors.remove(provider).pipe(
       Effect.map(() => json({ ok: true })),
+      Effect.catch(respondConnectorsError),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * GitHub of the account (the Uno GitHub App): is it connected, and may this
+ * computer use it. Asking also makes sure git on this computer knows where to
+ * get its GitHub sign-in (the credential helper).
+ */
+export const githubAccountStatusRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/github",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const github = yield* GithubAccountService;
+    return json(yield* github.status);
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const githubAccountConnectRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/github/connect",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const github = yield* GithubAccountService;
+    return yield* github.connect.pipe(
+      Effect.map((result) => json({ authorizeUrl: result.authorizeUrl })),
       Effect.catch(respondConnectorsError),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -192,6 +223,8 @@ export const setupToolsRouteLayers = [
   connectorsListRouteLayer,
   connectorsStartRouteLayer,
   connectorsRemoveRouteLayer,
+  githubAccountStatusRouteLayer,
+  githubAccountConnectRouteLayer,
   mcpProbeRouteLayer,
   materialsReadRouteLayer,
   materialsReadStatusRouteLayer,

@@ -140,6 +140,7 @@ import { FilesService } from "./files/FilesService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
+import { GithubAccountService } from "./setupTools/GithubAccountService.ts";
 import { MaterialsService, type MaterialsServiceShape } from "./setupTools/MaterialsService.ts";
 import { AssistantDraftService } from "./setupTools/AssistantDraftService.ts";
 import { InboxService, type InboxServiceShape } from "./inbox/InboxService.ts";
@@ -710,6 +711,7 @@ const buildAppUnderTest = (options?: {
             tools: Effect.succeed([]),
             ...options?.layers?.connectors,
           }),
+          Layer.mock(GithubAccountService)({}),
           Layer.mock(MaterialsService)({
             get: () => Effect.succeed(null),
             ...options?.layers?.materials,

@@ -5,8 +5,10 @@
  *   built-in uno-work MCP server (`/api/manager/connectors`). "Connect" opens
  *   the provider's consent in a small window; the row turns "Connected ·
  *   <account>" when the grant lands. A provider the console has no OAuth app
- *   for yet is shown, marked Soon, not clickable. GitHub falls back to this
- *   computer's own `gh` sign-in then.
+ *   for yet is shown, marked Soon, not clickable. GitHub then is the account's
+ *   Uno GitHub App (connected once: private repositories on every computer
+ *   and site deploys — GitHubAccountRow); only where that can't be offered
+ *   (not a cloud computer) it falls back to this computer's own `gh` sign-in.
  * - Your own tool: a remote MCP server by address, checked first (it must
  *   answer and list its tools), then handed to every agent in new chats
  *   (`settings.mcpServers`, see customMcpServers.ts on the daemon).
@@ -20,7 +22,9 @@ import { type ReactNode, useEffect, useState } from "react";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
+  connectGithubAccount,
   disconnectConnector,
+  getGithubAccount,
   listConnectors,
   openAuthWindow,
   probeMcpServer,
@@ -175,6 +179,96 @@ function useConnectors(environmentId: ReturnType<typeof usePrimaryEnvironmentId>
     enabled: environmentId !== null,
     staleTime: 10_000,
   });
+}
+
+const GITHUB_ACCOUNT_KEY = ["uno-setup", "github-account"] as const;
+
+/**
+ * GitHub of the account: the Uno GitHub App, connected once. From then on
+ * private repositories clone and push on every cloud computer of the account
+ * and site deploys use the same connection. Where it can't be offered (not a
+ * cloud computer, an older console) the row is this computer's own sign-in.
+ */
+function GitHubAccountRow({
+  environmentId,
+  first,
+}: {
+  environmentId: ReturnType<typeof usePrimaryEnvironmentId>;
+  first: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [waiting, setWaiting] = useState(false);
+  const account = useQuery({
+    queryKey: [...GITHUB_ACCOUNT_KEY, environmentId],
+    queryFn: () => getGithubAccount({ environmentId: environmentId! }),
+    enabled: environmentId !== null,
+    staleTime: 10_000,
+    retry: false,
+    // While the person is on github.com, look for the connection every 3 s.
+    refetchInterval: waiting ? 3000 : false,
+  });
+  const connected = account.data?.connected === true;
+  useEffect(() => {
+    if (waiting && connected) setWaiting(false);
+  }, [waiting, connected]);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setTimeout(() => setWaiting(false), 180_000);
+    return () => window.clearTimeout(timer);
+  }, [waiting]);
+
+  if (account.isPending && environmentId !== null) {
+    return (
+      <Row
+        first={first}
+        logo={<GitHubIcon className="size-5" />}
+        name="GitHub"
+        testId="setup-connector-github"
+        description="Your private repositories on all your computers."
+        side={<Loader2Icon className="size-4 animate-spin text-muted-foreground" />}
+      />
+    );
+  }
+  if (account.data?.available !== true) return <GitHubMachineRow first={first} />;
+
+  const connect = async () => {
+    if (!environmentId) return;
+    try {
+      const { authorizeUrl } = await connectGithubAccount({ environmentId });
+      setWaiting(true);
+      await openAuthWindow(authorizeUrl, "uno-connector");
+      await queryClient.invalidateQueries({ queryKey: GITHUB_ACCOUNT_KEY });
+    } catch (cause) {
+      setWaiting(false);
+      toastManager.add({
+        type: "error",
+        title: "Couldn't open GitHub",
+        description: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  };
+  const accounts = account.data.accounts.join(", ");
+  return (
+    <Row
+      first={first}
+      done={connected}
+      logo={<GitHubIcon className="size-5" />}
+      name="GitHub"
+      testId="setup-connector-github"
+      description={
+        connected ? (
+          <ConnectedBadge>Connected{accounts ? ` · ${accounts}` : ""}</ConnectedBadge>
+        ) : (
+          "Your private repositories on all your computers, and deploys of your sites. Connect once."
+        )
+      }
+      side={
+        <Button size="sm" variant="outline" disabled={waiting} onClick={() => void connect()}>
+          {waiting ? "Waiting for GitHub…" : connected ? "Repositories" : "Connect"}
+        </Button>
+      }
+    />
+  );
 }
 
 /** This computer's own `gh` sign-in — GitHub's fallback while the connector isn't available. */
@@ -543,7 +637,11 @@ export function ConnectorsStep() {
       >
         {PROVIDERS.map((meta, index) =>
           meta.provider === "github" && githubViaMachine ? (
-            <GitHubMachineRow key={meta.provider} first={index === 0} />
+            <GitHubAccountRow
+              key={meta.provider}
+              environmentId={environmentId}
+              first={index === 0}
+            />
           ) : (
             <ProviderRow
               key={meta.provider}

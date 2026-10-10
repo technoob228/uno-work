@@ -10,7 +10,9 @@ import {
   checkNewFolderName,
   checkRepositoryInput,
   connectGithubPrompt,
+  githubHttpsRemote,
   githubRepoSlug,
+  repoAccessOffer,
   isRepoAccessError,
   clampToHome,
   homeCrumbs,
@@ -153,5 +155,38 @@ describe("private repository on clone (icp3 09.10)", () => {
     expect(prompt).toContain("git@github.com:technoob228/uno-workspace.git");
     expect(prompt).toContain("https://github.com/settings/ssh/new");
     expect(prompt).not.toMatch(/token:/i);
+  });
+});
+
+const github = (connected: boolean, available = true) => ({
+  available,
+  connected,
+  accounts: connected ? ["technoob228"] : [],
+});
+
+describe("GitHub of the account on a refused clone (icp3 10.10)", () => {
+  const repo = "https://github.com/technoob228/uno-workspace.git";
+
+  it("offers one Connect GitHub for the whole account", () => {
+    expect(repoAccessOffer(repo, github(false))).toBe("connect");
+  });
+
+  it("asks to add the repository when GitHub is connected already", () => {
+    expect(repoAccessOffer(repo, github(true))).toBe("add-repo");
+    expect(repoAccessOffer("git@github.com:technoob228/uno-workspace.git", github(true))).toBe(
+      "add-repo",
+    );
+  });
+
+  it("falls back to this computer's SSH key where the account's GitHub can't help", () => {
+    expect(repoAccessOffer(repo, null)).toBe("ssh-key");
+    expect(repoAccessOffer(repo, github(false, false))).toBe("ssh-key");
+    expect(repoAccessOffer("https://gitlab.com/a/b.git", github(true))).toBe("ssh-key");
+  });
+
+  it("clones over https once the account signs git in", () => {
+    expect(githubHttpsRemote("git@github.com:technoob228/uno-workspace.git")).toBe(repo);
+    expect(githubHttpsRemote(repo)).toBe(repo);
+    expect(githubHttpsRemote("git@gitlab.com:a/b.git")).toBe("git@gitlab.com:a/b.git");
   });
 });

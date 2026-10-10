@@ -57,6 +57,12 @@ import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { folderDisplayName, useFolderChats, useHomeFolderPath } from "../../hooks/useFolderChats";
+import {
+  connectGithubAccount,
+  getGithubAccount,
+  openAuthWindow,
+  type GithubAccountState,
+} from "../../lib/setupApi";
 import { cn } from "../../lib/utils";
 import {
   type NewProjectStep,
@@ -94,7 +100,9 @@ import {
   recentHomeFolders,
   tildePath,
   connectGithubPrompt,
+  githubHttpsRemote,
   isRepoAccessError,
+  repoAccessOffer,
 } from "./newProject.logic";
 
 const SOURCE_COPY: Record<
@@ -847,6 +855,19 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [error, setError] = useState<string | null>(null);
   // The repository is private (or mistyped) and this computer can't sign in to GitHub.
   const [noAccess, setNoAccess] = useState(false);
+  // The account's GitHub (the Uno GitHub App): connected once, used by git on
+  // every computer. Asked only after a clone was refused.
+  const [github, setGithub] = useState<GithubAccountState | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const mounted = useRef(true);
+  // Bumped to drop a wait for GitHub that is no longer wanted.
+  const watching = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const { startTask } = useHomeLaunchers(environmentId);
@@ -856,9 +877,14 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   useEffect(() => {
     setError(null);
     setNoAccess(false);
+    watching.current += 1; // a new address: stop waiting for GitHub on the old one
   }, [input]);
 
-  const submit = async () => {
+  const readGithub = () =>
+    getGithubAccount({ environmentId }).catch((): GithubAccountState | null => null);
+
+  /** `viaAccount`: GitHub is connected to the account — git signs in over https. */
+  const submit = async (options?: { readonly viaAccount?: boolean }) => {
     if (!check.ok) {
       setError(check.error);
       return;
@@ -868,7 +894,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
     try {
       const destinationPath = uploadedProjectPath(home, check.name);
       const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
-        remoteUrl: check.remoteUrl,
+        remoteUrl: options?.viaAccount ? githubHttpsRemote(check.remoteUrl) : check.remoteUrl,
         destinationPath,
       });
       const folder = result.cwd || destinationPath;
@@ -876,10 +902,50 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
       onDone();
     } catch (cause) {
       const message = errorMessage(cause, "");
-      if (isRepoAccessError(message)) setNoAccess(true);
-      else setError(message || "Couldn't clone the repository. Check the address and try again.");
+      if (isRepoAccessError(message)) {
+        // Also makes sure git on this computer asks Uno for its GitHub sign-in.
+        const state = await readGithub();
+        if (!mounted.current) return;
+        setGithub(state);
+        setNoAccess(true);
+      } else setError(message || "Couldn't clone the repository. Check the address and try again.");
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
+    }
+  };
+
+  /**
+   * "Connect GitHub": the Uno GitHub App, once per account. The person picks
+   * the repositories on github.com in a small window; after that the clone
+   * just works — here and on every other computer of the account.
+   */
+  const connectGithub = async () => {
+    if (!check.ok) return;
+    setConnecting(true);
+    setError(null);
+    const watch = (watching.current += 1);
+    try {
+      const wasConnected = github?.connected === true;
+      const { authorizeUrl } = await connectGithubAccount({ environmentId });
+      await openAuthWindow(authorizeUrl, "uno-connector");
+      let state = await readGithub();
+      if (!mounted.current) return;
+      setConnecting(false);
+      // The window can read as closed while the person is still on github.com
+      // (or it was a new tab): keep looking for a while, quietly.
+      const tries = wasConnected ? 0 : 40;
+      for (let attempt = 0; attempt < tries && !state?.connected; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        if (!mounted.current || watching.current !== watch) return;
+        state = await readGithub();
+      }
+      if (!mounted.current || watching.current !== watch) return;
+      if (state !== null) setGithub(state);
+      if (state?.connected) await submit({ viaAccount: true });
+    } catch (cause) {
+      if (mounted.current) setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
+    } finally {
+      if (mounted.current && watching.current === watch) setConnecting(false);
     }
   };
 
@@ -907,6 +973,11 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
     }
   };
 
+  const offer = repoAccessOffer(check.ok ? check.remoteUrl : "", github);
+  // After a refusal with GitHub connected to the account, "Try again" clones
+  // over https, where the account signs git in.
+  const retry = () => void submit({ viaAccount: noAccess && offer === "add-repo" });
+
   return (
     <>
       <DialogPanel className="flex flex-col gap-2">
@@ -923,7 +994,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              void submit();
+              retry();
             }
           }}
         />
@@ -933,7 +1004,57 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
             : "Clones into ~/projects/<repo>"}
         </p>
       </DialogPanel>
-      {noAccess ? (
+      {noAccess && offer === "connect" ? (
+        <div
+          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
+          data-testid="new-project-repo-private"
+        >
+          <p>
+            <b className="font-medium">This repository is private</b> (or the address has a typo).
+            GitHub isn't connected to your Uno account yet.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Connect it once and choose the repositories — it then works on all your computers and
+            for your sites. No tokens or keys.
+          </p>
+          <div>
+            <Button
+              size="sm"
+              disabled={busy || connecting}
+              onClick={() => void connectGithub()}
+              data-testid="new-project-connect-github"
+            >
+              <GitHubIcon />
+              {connecting ? "Waiting for GitHub…" : "Connect GitHub"}
+            </Button>
+          </div>
+        </div>
+      ) : noAccess && offer === "add-repo" ? (
+        <div
+          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
+          data-testid="new-project-repo-private"
+        >
+          <p>
+            <b className="font-medium">Uno isn't allowed into this repository yet</b> (or the
+            address has a typo).
+          </p>
+          <p className="text-xs text-muted-foreground">
+            GitHub is connected{github?.accounts.length ? ` (${github.accounts.join(", ")})` : ""},
+            but this repository isn't on Uno's list. Add it on GitHub, then it clones here.
+          </p>
+          <div>
+            <Button
+              size="sm"
+              disabled={busy || connecting}
+              onClick={() => void connectGithub()}
+              data-testid="new-project-connect-github"
+            >
+              <GitHubIcon />
+              {connecting ? "Waiting for GitHub…" : "Add it on GitHub"}
+            </Button>
+          </div>
+        </div>
+      ) : noAccess ? (
         <div
           className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
           data-testid="new-project-repo-private"
@@ -968,7 +1089,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
                 : "Clone and open"
         }
         icon={<GitHubIcon />}
-        onSubmit={() => void submit()}
+        onSubmit={retry}
         onCancel={onDone}
       />
     </>
