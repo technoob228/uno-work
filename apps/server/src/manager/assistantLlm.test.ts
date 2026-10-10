@@ -173,7 +173,28 @@ describe("spawnSelectionForDefaultAi", () => {
         { ...claude, auth: { status: "unauthenticated" } } as ServerProvider,
       ]),
     ).toBeNull();
-    expect(spawnSelectionForDefaultAi("codex", [claude])).toBeNull();
-    expect(spawnSelectionForDefaultAi(null, [claude])).toBeNull();
+    // The account says another AI (or nothing), and Claude here is not the
+    // person's own subscription (Claude Code on Uno AI): the project decides.
+    const claudeOnUnoAi = {
+      ...claude,
+      auth: { status: "authenticated", type: "unoAi" },
+    } as ServerProvider;
+    expect(spawnSelectionForDefaultAi("codex", [claudeOnUnoAi])).toBeNull();
+    expect(spawnSelectionForDefaultAi(null, [claudeOnUnoAi])).toBeNull();
+  });
+
+  it("the owner's signed-in subscription wins over the account's AI (10.10)", async () => {
+    const { spawnSelectionForDefaultAi } = await import("./Layers/AccountDefaultAi.ts");
+    const claude = snapshot({
+      instanceId: "claudeAgent" as never,
+      driver: "claudeAgent" as never,
+      enabled: true,
+      status: "ready",
+      auth: { status: "authenticated", type: "max" } as never,
+      models: [{ slug: "claude-sonnet-4-6", name: "Sonnet", isCustom: false }] as never,
+    });
+    const onClaude = { instanceId: "claudeAgent", model: "claude-sonnet-4-6" };
+    expect(spawnSelectionForDefaultAi("uno", [claude])).toEqual(onClaude);
+    expect(spawnSelectionForDefaultAi(null, [claude])).toEqual(onClaude);
   });
 });

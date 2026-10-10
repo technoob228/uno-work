@@ -8,7 +8,14 @@ import type {
   OrchestrationThread,
   OrchestrationThreadShell,
 } from "@t3tools/contracts";
-import { MessageId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  assistantTokenLabel,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { Effect, Layer, Option, Ref, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -21,12 +28,15 @@ import { ManagerConnectorRepositoryLive } from "../persistence/Layers/ManagerCon
 import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import { ProjectionPendingApprovalRepository } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
-import { ManagerAccountDefaultAi } from "./Layers/AccountDefaultAi.ts";
+import {
+  ManagerAccountDefaultAi,
+  type ManagerAccountDefaultAiShape,
+} from "./Layers/AccountDefaultAi.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
 import { ManagerToolServiceLive } from "./Layers/ManagerToolService.ts";
 import { sanitizeUntrustedField, wrapUntrustedContent } from "../untrustedContent.ts";
-import { handleManagerMcpMessage, MANAGER_MCP_TOOLS } from "./mcp.ts";
+import { AI_STATUS_UNKNOWN, handleManagerMcpMessage, MANAGER_MCP_TOOLS } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
 import { ManagerToolService } from "./Services/ManagerToolService.ts";
@@ -127,7 +137,12 @@ interface DispatchedCommand {
   readonly origin: OrchestrationCommandOrigin | undefined;
 }
 
-const makeTestLayer = (dispatched: Ref.Ref<ReadonlyArray<DispatchedCommand>>) => {
+const makeTestLayer = (
+  dispatched: Ref.Ref<ReadonlyArray<DispatchedCommand>>,
+  /** What the daemon picks for a chat an assistant starts (`pickSpawnSelection`). */
+  spawnModelSelection: ManagerAccountDefaultAiShape["spawnModelSelection"] = () =>
+    Effect.succeed(null),
+) => {
   const engineMock = Layer.mock(OrchestrationEngineService)({
     readEvents: () => Stream.empty,
     dispatch: (command, options) =>
@@ -193,7 +208,8 @@ const makeTestLayer = (dispatched: Ref.Ref<ReadonlyArray<DispatchedCommand>>) =>
         get: () => Effect.succeed(null),
         set: () => Effect.void,
         refreshFromAccount: () => Effect.void,
-        spawnModelSelection: () => Effect.succeed(null),
+        spawnModelSelection,
+        aiStatus: () => Effect.succeed(AI_STATUS_UNKNOWN),
       }),
     ),
     Layer.provide(ManagerBudgetServiceLive),
@@ -357,6 +373,71 @@ it.layer(NodeServices.layer)("manager tool layer", (it) => {
         );
         expect(again._tag).toBe("ManagerProposalResolutionError");
       }).pipe(Effect.provide(makeTestLayer(dispatched)));
+    }),
+  );
+
+  it.effect("a chat the assistant starts runs on what the daemon picked for it", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<DispatchedCommand>>([]);
+      const onSubscription = {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5-5",
+      };
+      const asked = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      yield* Effect.gen(function* () {
+        const tools = yield* ManagerToolService;
+        const tokenAuth = yield* ManagerTokenAuthService;
+        const issue = (label: string) =>
+          tokenAuth
+            .issueToken({
+              label,
+              scopes: ["threads:read", "threads:write", "threads:approve"],
+              projectAllowlist: "all",
+              autoApprove: true,
+            })
+            .pipe(Effect.flatMap((created) => tokenAuth.authenticate(`Bearer ${created.token}`)));
+        const createdSelections = Effect.map(Ref.get(dispatched), (entries) =>
+          entries.flatMap((entry) =>
+            entry.command.type === "thread.create" ? [entry.command.modelSelection] : [],
+          ),
+        );
+
+        // Uno (an assistant's token) names no model: the owner's subscription.
+        const uno = yield* issue(assistantTokenLabel("assistant-project"));
+        const receipt = yield* tools.createThread(uno, {
+          projectId: allowedProjectId,
+          title: "Build the importer",
+          prompt: "Build it",
+        });
+        expect(receipt.status).toBe("executed");
+        expect(yield* createdSelections).toEqual([onSubscription]);
+        expect(yield* Ref.get(asked)).toEqual([null]);
+
+        // Uno names a model: the daemon is asked about exactly that one.
+        yield* tools.createThread(uno, {
+          projectId: allowedProjectId,
+          title: "Fix the header",
+          prompt: "Fix it",
+          modelSelection,
+        });
+        expect((yield* Ref.get(asked))[1]).toEqual(modelSelection);
+
+        // Any other brain's token: its own model or the project's, as before.
+        const external = yield* issue("external-brain");
+        yield* tools.createThread(external, {
+          projectId: allowedProjectId,
+          title: "External",
+          prompt: "Do",
+        });
+        expect((yield* createdSelections)[2]).toEqual(modelSelection);
+        expect(yield* Ref.get(asked)).toHaveLength(2);
+      }).pipe(
+        Effect.provide(
+          makeTestLayer(dispatched, (requested = null) =>
+            Ref.update(asked, (entries) => [...entries, requested]).pipe(Effect.as(onSubscription)),
+          ),
+        ),
+      );
     }),
   );
 

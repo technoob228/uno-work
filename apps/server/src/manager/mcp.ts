@@ -37,11 +37,14 @@ import {
 } from "../mcp/mcpJsonRpc.ts";
 import type { AssistantScheduleError, AssistantSchedulesShape } from "../assistants/schedules.ts";
 import type { ManagerToolError } from "./Errors.ts";
+import { AI_STATUS_RULE_UNO_AI, type AiStatus } from "./ownSubscription.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
 /** Optional services some tools need; absent → the tool explains it. */
 export interface ManagerMcpExtras {
   readonly schedules?: AssistantSchedulesShape;
+  /** What this computer can run a chat on now (`ownSubscription.ts`). */
+  readonly aiStatus?: () => Effect.Effect<AiStatus>;
 }
 
 type ManagerMcpToolError = ManagerToolError | Schema.SchemaError | AssistantScheduleError;
@@ -71,6 +74,21 @@ const withSchedules = <A>(
   run: (schedules: AssistantSchedulesShape) => Effect.Effect<A, AssistantScheduleError>,
 ): Effect.Effect<A | { readonly error: string }, AssistantScheduleError> =>
   extras.schedules ? run(extras.schedules) : Effect.succeed({ error: SCHEDULES_UNAVAILABLE });
+
+/**
+ * A wiring that can't see the providers (tests, an older daemon layer): the
+ * honest answer is "no subscription known" — Uno works as before, on Uno AI.
+ */
+export const AI_STATUS_UNKNOWN: AiStatus = {
+  ownSubscriptions: [],
+  notSignedIn: [],
+  heavyWork: {
+    modelSelection: null,
+    runsOn: "Uno AI",
+    whoPays: "Uno AI: the owner's AI time and premium credit.",
+  },
+  rule: AI_STATUS_RULE_UNO_AI,
+};
 
 const decodeArgs = <S extends Schema.Top>(schema: S, args: unknown) =>
   Schema.decodeUnknownEffect(schema)(args ?? {});
@@ -191,9 +209,20 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     run: (tools, caller, _args) => tools.listPendingApprovals(caller),
   },
   {
+    name: "ai_status",
+    description:
+      "What this computer can run a chat on right now: whether the owner is signed in here to their own Claude or ChatGPT (Codex) subscription, and where heavy work should go. " +
+      "Call it before create_thread for anything heavy (coding, long multi-step builds, big refactors) — never guess whether a subscription is there. " +
+      "Returns ownSubscriptions (signed in and usable), notSignedIn (and why), heavyWork.modelSelection (pass it to create_thread; null = no subscription, follow ROUTING.md on Uno AI), heavyWork.runsOn (the words the person sees in that chat's header) and the rule to follow.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (_tools, _caller, _args, extras) =>
+      extras.aiStatus ? extras.aiStatus() : Effect.succeed(AI_STATUS_UNKNOWN),
+  },
+  {
     name: "create_thread",
     description:
-      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it. Returns proposalId + nonce.",
+      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it. Returns proposalId + nonce. " +
+      "Heavy work: call ai_status first and pass its heavyWork.modelSelection. With no modelSelection the chat runs on the owner's signed-in Claude / ChatGPT subscription when there is one, else on the project's model; a harness that isn't signed in is replaced the same way.",
     inputSchema: {
       type: "object",
       properties: {
@@ -202,7 +231,8 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         prompt: { type: "string" },
         modelSelection: {
           type: "object",
-          description: "Optional {instanceId, model}; defaults to the project's model.",
+          description:
+            "Optional {instanceId, model}. Left out: the owner's signed-in Claude / ChatGPT subscription, else the project's model.",
           properties: { instanceId: { type: "string" }, model: { type: "string" } },
           required: ["instanceId", "model"],
         },

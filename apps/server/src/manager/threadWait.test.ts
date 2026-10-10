@@ -39,7 +39,7 @@ import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
 import { ManagerToolServiceLive } from "./Layers/ManagerToolService.ts";
-import { MANAGER_MCP_TOOLS } from "./mcp.ts";
+import { AI_STATUS_UNKNOWN, MANAGER_MCP_TOOLS } from "./mcp.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
 import { ManagerToolService } from "./Services/ManagerToolService.ts";
 import {
@@ -316,6 +316,7 @@ const makeWaitLayer = (
         set: () => Effect.void,
         refreshFromAccount: () => Effect.void,
         spawnModelSelection: () => Effect.succeed(null),
+        aiStatus: () => Effect.succeed(AI_STATUS_UNKNOWN),
       }),
     ),
     Layer.provide(ManagerBudgetServiceLive),

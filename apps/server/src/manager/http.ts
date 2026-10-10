@@ -93,6 +93,7 @@ import {
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
+import { ManagerAccountDefaultAi } from "./Layers/AccountDefaultAi.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
 import { ManagerToolService } from "./Services/ManagerToolService.ts";
@@ -159,12 +160,12 @@ export const managerMcpRouteLayer = HttpRouter.add(
     }
 
     const schedules = Option.getOrUndefined(yield* Effect.serviceOption(AssistantSchedules));
-    const outcome = yield* handleManagerMcpMessage(
-      toolService,
-      caller,
-      body,
-      schedules ? { schedules } : {},
-    );
+    // `ai_status`: whether the owner is signed in to Claude / ChatGPT here.
+    const defaultAi = Option.getOrUndefined(yield* Effect.serviceOption(ManagerAccountDefaultAi));
+    const outcome = yield* handleManagerMcpMessage(toolService, caller, body, {
+      ...(schedules ? { schedules } : {}),
+      ...(defaultAi ? { aiStatus: defaultAi.aiStatus } : {}),
+    });
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }

@@ -36,6 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { chatRunsOn } from "@t3tools/shared/chatRunsOn";
 import { UnoScheduleStrip } from "./chat/UnoScheduleStrip";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1736,6 +1737,15 @@ export default function ChatView(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  // The header's "runs on" line: Uno AI, the person's own plan, or their key.
+  const activeChatRunsOn = useMemo(
+    () =>
+      chatRunsOn({
+        provider: activeProviderStatus,
+        modelSelection: activeThread?.modelSelection,
+      }),
+    [activeProviderStatus, activeThread?.modelSelection],
+  );
   // Escape hatch for the status banner: when the active harness is unusable
   // because it is not signed in (the fresh-Work-box "run codex login" dead
   // end), offer a one-click switch to the built-in Uno gateway if it is live.
@@ -3936,6 +3946,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             activeProjectName={activeProject?.name}
             activeProjectCwd={activeProject?.cwd}
+            runsOn={activeChatRunsOn}
             isGitRepo={isGitRepo}
             openInCwd={gitCwd}
             activeProjectScripts={activeProject?.scripts}
