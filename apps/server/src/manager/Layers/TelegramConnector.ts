@@ -186,6 +186,7 @@ import { callMachineConsole, readWorkMachineIdentity } from "../workConsole.ts";
 import {
   decideTelegramIngress,
   decideWebhookUpkeep,
+  FOREIGN_TELEGRAM_WEBHOOK_MESSAGE,
   isOwnTelegramWebhook,
   isTelegramWebhookSecretValid,
   isWebhookConflict,
@@ -1972,11 +1973,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         // getUpdates), said in words; the other service is left alone.
         yield* recordPollFailure(
           projectId,
-          {
-            kind: "provider",
-            message:
-              "This bot already sends its messages to another service (a webhook is set there). Remove that webhook or connect a different bot.",
-          },
+          { kind: "provider", message: FOREIGN_TELEGRAM_WEBHOOK_MESSAGE },
           "webhook",
         );
         return;
@@ -2060,9 +2057,16 @@ const makeTelegramConnector = Effect.gen(function* () {
           // or by a copy of this computer) is removed — unless the console
           // has not said yet which way this computer should listen: then it
           // stays, it delivers here anyway.
+          // A webhook of the person's other service is left alone and
+          // named as the reason the bot is silent here.
           const info = yield* callBot(projectId, config.botToken, "getWebhookInfo");
           if (info === null) return false;
-          const current = (info.result as TelegramWebhookInfo | undefined)?.url;
+          const current = ((info.result as TelegramWebhookInfo | undefined)?.url ?? "").trim();
+          if (current.length === 0) {
+            // Gone in the meantime: just poll again, from the earliest update.
+            yield* updateRuntime(projectId, { offset: 0 });
+            return false;
+          }
           if (isOwnTelegramWebhook(current, config.botToken)) {
             if (machine?.known === false) {
               yield* recordPollSuccess(projectId);
@@ -2071,6 +2075,12 @@ const makeTelegramConnector = Effect.gen(function* () {
             }
             return false;
           }
+          yield* recordPollFailure(
+            projectId,
+            { kind: "provider", message: FOREIGN_TELEGRAM_WEBHOOK_MESSAGE },
+            "webhook",
+          );
+          return false;
         }
         yield* recordGetUpdatesFailure(projectId, response);
         return false;

@@ -8,6 +8,7 @@ import {
   isTelegramWebhookSecretValid,
   isWebhookConflict,
   parseMachineIngress,
+  TELEGRAM_WEBHOOK_PATH_PREFIX,
   telegramWebhookHookId,
   telegramWebhookSecret,
   telegramWebhookUrl,
@@ -18,23 +19,83 @@ import {
 const BOT = "123456:AAExampleExampleExampleExampleExample";
 const OTHER_BOT = "654321:AAOtherOtherOtherOtherOtherOtherOth";
 const ADDRESS = "https://mybox-bcdfghjkmn.app.uno4.dev";
+const ownWebhookOn = (address: string, botToken: string) =>
+  `${address}${TELEGRAM_WEBHOOK_PATH_PREFIX}${telegramWebhookHookId(botToken)}`;
+
+describe("what counts as Uno Work's own webhook — a contract between versions", () => {
+  it("the path and the id are pinned: a version that only polls must recognise what a later one set", () => {
+    // Changing either value strands bots on computers rolled back to a
+    // version that still expects the old one. Do not change them.
+    expect(TELEGRAM_WEBHOOK_PATH_PREFIX).toBe("/api/telegram/webhook/");
+    expect(telegramWebhookHookId(BOT)).toBe("1a5776bc1aa7af8405da3a40ee486c75");
+    expect(ownWebhookOn(ADDRESS, BOT)).toBe(
+      "https://mybox-bcdfghjkmn.app.uno4.dev/api/telegram/webhook/1a5776bc1aa7af8405da3a40ee486c75",
+    );
+  });
+
+  it("the id is per bot and gives the token away nowhere", () => {
+    expect(telegramWebhookHookId(BOT)).toBe(telegramWebhookHookId(BOT));
+    expect(telegramWebhookHookId(BOT)).not.toBe(telegramWebhookHookId(OTHER_BOT));
+    expect(ownWebhookOn(ADDRESS, BOT)).not.toContain(BOT);
+    expect(ownWebhookOn(ADDRESS, BOT)).not.toContain(BOT.split(":")[1]);
+  });
+
+  it("ours on any address: this computer's, a previous one, a copy of the computer", () => {
+    expect(isOwnTelegramWebhook(ownWebhookOn(ADDRESS, BOT), BOT)).toBe(true);
+    expect(isOwnTelegramWebhook(ownWebhookOn("https://old-name-xyz.app.uno4.dev", BOT), BOT)).toBe(
+      true,
+    );
+    expect(isOwnTelegramWebhook(ownWebhookOn("https://abcdefghjk.uno4.work", BOT), BOT)).toBe(true);
+  });
+
+  it("not ours: another service, another bot's id, a look-alike path, plain http, nothing", () => {
+    expect(isOwnTelegramWebhook("https://my-own-service.example/telegram", BOT)).toBe(false);
+    expect(isOwnTelegramWebhook(ownWebhookOn(ADDRESS, OTHER_BOT), BOT)).toBe(false);
+    // A person's own app on an Uno address that happens to use the same path.
+    expect(
+      isOwnTelegramWebhook(`https://myapp-bcdfghjkmn.app.uno4.dev/api/telegram/webhook/mybot`, BOT),
+    ).toBe(false);
+    expect(isOwnTelegramWebhook(`${ADDRESS}${TELEGRAM_WEBHOOK_PATH_PREFIX}`, BOT)).toBe(false);
+    expect(isOwnTelegramWebhook(ownWebhookOn("http://mybox.app.uno4.dev", BOT), BOT)).toBe(false);
+    expect(isOwnTelegramWebhook(`${ownWebhookOn(ADDRESS, BOT)}/more`, BOT)).toBe(false);
+    expect(isOwnTelegramWebhook("", BOT)).toBe(false);
+    expect(isOwnTelegramWebhook(null, BOT)).toBe(false);
+    expect(isOwnTelegramWebhook(undefined, BOT)).toBe(false);
+  });
+});
+
+describe("getUpdates refused because of a webhook", () => {
+  it("is told apart from two pollers fighting", () => {
+    expect(
+      isWebhookConflict(
+        409,
+        "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first",
+      ),
+    ).toBe(true);
+    expect(
+      isWebhookConflict(
+        409,
+        "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running",
+      ),
+    ).toBe(false);
+    expect(isWebhookConflict(401, "Unauthorized")).toBe(false);
+    expect(isWebhookConflict(undefined, undefined)).toBe(false);
+  });
+});
 
 const economyComputer: MachineIngress = { publicUrl: ADDRESS, economy: true, wakeOnHttp: true };
 
 describe("the webhook address and secret", () => {
-  it("are derived from the bot token: stable, per bot, and give the token away nowhere", () => {
-    expect(telegramWebhookHookId(BOT)).toBe(telegramWebhookHookId(BOT));
+  it("the address is the computer's address + the pinned path + the bot's id", () => {
+    expect(telegramWebhookUrl(`${ADDRESS}/`, BOT)).toBe(ownWebhookOn(ADDRESS, BOT));
+    expect(isOwnTelegramWebhook(telegramWebhookUrl(ADDRESS, BOT), BOT)).toBe(true);
+  });
+
+  it("the secret is derived from the bot token: stable, per bot, and gives the token away nowhere", () => {
     expect(telegramWebhookSecret(BOT)).toBe(telegramWebhookSecret(BOT));
-    expect(telegramWebhookHookId(BOT)).not.toBe(telegramWebhookHookId(OTHER_BOT));
     expect(telegramWebhookSecret(BOT)).not.toBe(telegramWebhookSecret(OTHER_BOT));
     expect(telegramWebhookHookId(BOT)).not.toBe(telegramWebhookSecret(BOT).slice(0, 32));
-
-    const url = telegramWebhookUrl(`${ADDRESS}/`, BOT);
-    expect(url).toBe(`${ADDRESS}/api/telegram/webhook/${telegramWebhookHookId(BOT)}`);
-    for (const shown of [url, telegramWebhookSecret(BOT)]) {
-      expect(shown).not.toContain(BOT);
-      expect(shown).not.toContain(BOT.split(":")[1]);
-    }
+    expect(telegramWebhookSecret(BOT)).not.toContain(BOT.split(":")[1]);
     // Telegram accepts 1–256 characters of A-Z a-z 0-9 _ - as secret_token.
     expect(telegramWebhookSecret(BOT)).toMatch(/^[A-Za-z0-9_-]{1,256}$/);
   });
@@ -46,18 +107,6 @@ describe("the webhook address and secret", () => {
     expect(isTelegramWebhookSecretValid(BOT, "")).toBe(false);
     expect(isTelegramWebhookSecretValid(BOT, null)).toBe(false);
     expect(isTelegramWebhookSecretValid(BOT, undefined)).toBe(false);
-  });
-
-  it("knows its own webhook on any Uno address, and nobody else's", () => {
-    expect(isOwnTelegramWebhook(telegramWebhookUrl(ADDRESS, BOT), BOT)).toBe(true);
-    // A previous address of the computer (the label changed, a restored copy).
-    expect(isOwnTelegramWebhook(telegramWebhookUrl("https://old.app.uno4.dev", BOT), BOT)).toBe(
-      true,
-    );
-    expect(isOwnTelegramWebhook(telegramWebhookUrl(ADDRESS, OTHER_BOT), BOT)).toBe(false);
-    expect(isOwnTelegramWebhook("https://my-own-service.example/telegram", BOT)).toBe(false);
-    expect(isOwnTelegramWebhook("", BOT)).toBe(false);
-    expect(isOwnTelegramWebhook(undefined, BOT)).toBe(false);
   });
 });
 
@@ -207,24 +256,5 @@ describe("looking after the webhook", () => {
         info: { url: desiredUrl, pending_update_count: 0, last_error_date: secondsAgo(20) },
       }),
     ).toBe("ok");
-  });
-});
-
-describe("getUpdates refused because of a webhook", () => {
-  it("is told apart from two pollers fighting", () => {
-    expect(
-      isWebhookConflict(
-        409,
-        "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first",
-      ),
-    ).toBe(true);
-    expect(
-      isWebhookConflict(
-        409,
-        "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running",
-      ),
-    ).toBe(false);
-    expect(isWebhookConflict(401, "Unauthorized")).toBe(false);
-    expect(isWebhookConflict(undefined, undefined)).toBe(false);
   });
 });
