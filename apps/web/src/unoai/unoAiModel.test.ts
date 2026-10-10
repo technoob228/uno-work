@@ -5,9 +5,11 @@ import {
   describeUnoAiHandoff,
   handoffPrompt,
   HANDOFF_TTL_MS,
+  isTeammateGoal,
   isUnoAiHandoff,
   rememberHandoff,
-  takeHandoff,
+  readHandoff,
+  clearHandoff,
 } from "./unoAiHandoff";
 import {
   askQuestions,
@@ -286,10 +288,17 @@ describe("hand-off", () => {
       removeItem: (k: string) => void mem.delete(k),
     };
     rememberHandoff("w1", 1000, s);
-    expect(takeHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
-    expect(takeHandoff(2000, s)).toBeNull();
+    // Reading leaves it in place until the message reached the computer.
+    expect(readHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
+    expect(readHandoff(2000, s)).toEqual({ chatId: "w1", at: 1000 });
+    // A newer hand-off is not cleared by the older one finishing.
+    rememberHandoff("w3", 1500, s);
+    clearHandoff("w1", s);
+    expect(readHandoff(2000, s)?.chatId).toBe("w3");
+    clearHandoff("w3", s);
+    expect(readHandoff(2000, s)).toBeNull();
     rememberHandoff("w2", 1000, s);
-    expect(takeHandoff(1000 + HANDOFF_TTL_MS + 1, s)).toBeNull();
+    expect(readHandoff(1000 + HANDOFF_TTL_MS + 1, s)).toBeNull();
   });
   it("gives the computer's Uno the whole context", () => {
     const p = handoffPrompt({
@@ -303,6 +312,20 @@ describe("hand-off", () => {
     expect(p).toContain("https://maya-yoga.sites.uno4.dev/");
     expect(p).toContain("Why I need this computer: A real bot lives on your computer.");
     expect(p).not.toContain("THINK-SECRET"); // the model's think never leaves
+  });
+  it("tells a teammate to wait for its first task instead of building something", () => {
+    expect(isTeammateGoal("A teammate that does my tasks")).toBe(true);
+    expect(isTeammateGoal("Хочу личного ассистента")).toBe(true);
+    expect(isTeammateGoal("A booking site for my yoga studio")).toBe(false);
+    const p = handoffPrompt({
+      title: "teammate",
+      messages: [{ role: "user", content: "A teammate that does my tasks" } as AiChatMessage],
+      sites: null,
+    });
+    expect(p).toContain("You are the teammate I asked for");
+    expect(p).toContain("Don't build an app");
+    const site = handoffPrompt({ title: "yoga", messages: transcript, sites: null });
+    expect(site).not.toContain("You are the teammate");
   });
   it("reads the goal and the live sites back for the chat's card", () => {
     const p = handoffPrompt({

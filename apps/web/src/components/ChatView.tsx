@@ -2,6 +2,7 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
+  isAssistantProjectId,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -35,6 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { UnoScheduleStrip } from "./chat/UnoScheduleStrip";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -3916,6 +3918,13 @@ export default function ChatView(props: ChatViewProps) {
             onToggleDiff={onToggleDiff}
           />
         </header>
+      ) : null}
+      {/* Uno's own schedules: what runs when, with Pause / Remove. */}
+      {!isPreviewFocusMode && !isEmbedded && isAssistantProjectId(activeThread.projectId) ? (
+        <UnoScheduleStrip
+          environmentId={activeThread.environmentId}
+          projectId={activeThread.projectId}
+        />
       ) : null}
 
       {/* Error banner */}

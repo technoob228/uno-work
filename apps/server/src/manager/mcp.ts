@@ -381,8 +381,8 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     name: "schedule_create",
     description:
       "Schedule recurring work for yourself (the ONLY way to do things on a schedule — never cron, systemd timers or sleep loops). " +
-      "At each cron time Uno wakes this computer and gives you `prompt` as a new message; your final answer is sent to the person's Telegram/Slack (answer exactly NO_REPLY when there is nothing worth telling). " +
-      "The person sees and can stop every schedule. Write `prompt` self-contained: future-you won't see this conversation. " +
+      "At each cron time Uno wakes this computer and gives you `prompt` as a new message; your final answer lands in your Uno chat and the person's Inbox, and in their Telegram/Slack when connected (answer exactly NO_REPLY when there is nothing worth telling). " +
+      "The person sees every schedule in the Uno chat and under Schedule, and can pause or stop it. Write `prompt` self-contained: future-you won't see this conversation. " +
       `maxMinutes (default ${ASSISTANT_SCHEDULE_DEFAULT_MINUTES}, max ${ASSISTANT_SCHEDULE_MAX_MINUTES}) bounds one run.`,
     inputSchema: {
       type: "object",
@@ -467,29 +467,19 @@ const MANAGER_MCP_SERVER: McpServerDefinition<ManagerMcpContext, ManagerMcpToolE
  * Handle one decoded JSON-RPC message on behalf of an authenticated caller.
  * Returns `accepted` for notifications (HTTP 202, no body). The protocol
  * plumbing is shared with the `uno-work` server (`../mcp/mcpJsonRpc.ts`).
+ *
+ * The schedule tools are offered on every account (ICP v3, 09.10): they used
+ * to wait for the console's ASSISTANTS_MVP, and a Uno chat without them put
+ * "every morning at 9" into Hermes' own cron, which a sleeping computer never
+ * runs. Where the console still refuses, the tool says so and the model tells
+ * the person (`scheduleConsoleProblem`); Hermes' cron stays closed
+ * (assistants/scheduleGuard.ts).
  */
-/** Tools that need the console's assistants (ASSISTANTS_MVP): the schedules. */
-export const isAssistantsOnlyManagerTool = (name: string) => name.startsWith("schedule_");
-
-/** The same server where the account has no new assistants: without their tools. */
-const MANAGER_MCP_SERVER_BASIC: McpServerDefinition<ManagerMcpContext, ManagerMcpToolError> = {
-  ...MANAGER_MCP_SERVER,
-  tools: MANAGER_MCP_SERVER.tools.filter((tool) => !isAssistantsOnlyManagerTool(tool.name)),
-};
-
 export function handleManagerMcpMessage(
   tools: ManagerToolServiceShape,
   caller: ManagerCaller,
   message: unknown,
   extras: ManagerMcpExtras = {},
-  options: {
-    /** false: the account has no new assistants — schedule tools are not offered. */
-    readonly assistantsEnabled?: boolean;
-  } = {},
 ): Effect.Effect<McpHandleOutcome> {
-  return handleMcpMessage(
-    options.assistantsEnabled === false ? MANAGER_MCP_SERVER_BASIC : MANAGER_MCP_SERVER,
-    { tools, caller, extras },
-    message,
-  );
+  return handleMcpMessage(MANAGER_MCP_SERVER, { tools, caller, extras }, message);
 }
