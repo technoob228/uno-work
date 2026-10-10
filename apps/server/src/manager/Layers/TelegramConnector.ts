@@ -35,6 +35,11 @@
  * replays unhandled rows. Health (connected / reconnecting / auth_expired /
  * delivery_failed / provider_unavailable) is derived in `connectorHealth.ts`
  * and persisted alongside, so the settings UI can show it.
+ *
+ * A person's own bot on an economy computer does not long-poll: the daemon
+ * sets a Telegram webhook on the computer's own address, so a message wakes
+ * the sleeping computer the way any request to that address does (see
+ * `telegramWebhook.ts`). Updates delivered that way enter the same inbox.
  */
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import {
@@ -52,7 +57,19 @@ import {
   type ManagerConnectorHealthStatus,
   type OrchestrationThread,
 } from "@t3tools/contracts";
-import { Clock, Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
+import {
+  Clock,
+  Context,
+  Data,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  Semaphore,
+} from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
@@ -165,6 +182,20 @@ import {
   telegramFileUrl,
 } from "../channelRelay.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
+import { callMachineConsole, readWorkMachineIdentity } from "../workConsole.ts";
+import {
+  decideTelegramIngress,
+  decideWebhookUpkeep,
+  isOwnTelegramWebhook,
+  isTelegramWebhookSecretValid,
+  isWebhookConflict,
+  parseMachineIngress,
+  telegramWebhookHookId,
+  telegramWebhookSecret,
+  WEBHOOK_CHECK_INTERVAL_MS,
+  type MachineIngress,
+  type TelegramWebhookInfo,
+} from "../telegramWebhook.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -212,7 +243,32 @@ export interface ManagerTelegramServiceShape {
   }) => Effect.Effect<
     ReadonlyArray<{ readonly chatId: string; readonly ok: boolean; readonly error: string | null }>
   >;
+  /**
+   * An update Telegram delivered to this computer's address (the person's
+   * own bot on an economy computer, see `telegramWebhook.ts`). The caller is
+   * anybody on the internet until the hook id and the secret header match a
+   * connected bot, so the body (`readUpdate`) is only read after that.
+   *
+   * `accepted` — the update is on disk (the inbox) and will be handled; only
+   * then may Telegram be told 200, because an acknowledged update is gone on
+   * Telegram's side. A repeat of an update already seen is `accepted` too.
+   */
+  readonly receiveWebhookUpdate: (input: {
+    readonly hookId: string;
+    readonly secret: string | null;
+    readonly readUpdate: Effect.Effect<unknown>;
+  }) => Effect.Effect<TelegramWebhookReceipt>;
 }
+
+export type TelegramWebhookReceipt =
+  /** Stored; answer 200. */
+  | "accepted"
+  /** No connected bot has this hook id, or the secret is wrong; answer 404. */
+  | "unknown"
+  /** Not a Telegram update; answer 400. */
+  | "invalid"
+  /** Could not be stored; answer 503 so Telegram delivers it again. */
+  | "unavailable";
 
 export class ManagerTelegramService extends Context.Service<
   ManagerTelegramService,
@@ -221,6 +277,16 @@ export class ManagerTelegramService extends Context.Service<
 
 const POLL_TIMEOUT_SECONDS = 10;
 const IDLE_RECHECK = Duration.seconds(5);
+// A cycle in which no bot long-polled (webhook bots, bots backing off after a
+// failure) must not spin: wait this long before the next one.
+const QUIET_CYCLE_PAUSE = Duration.seconds(2);
+// How long the console's answer about this computer (address, economy mode)
+// is trusted; a failed read is retried sooner.
+const MACHINE_INGRESS_TTL_MS = 90_000;
+const MACHINE_INGRESS_RETRY_MS = 15_000;
+const BOT_CALL_TIMEOUT_MS = 20_000;
+// Fetching what a failed webhook left behind: batches of up to 100 updates.
+const WEBHOOK_DRAIN_MAX_ROUNDS = 20;
 // Persist `last_ok_at` on a healthy connector at most this often: the fact
 // that it is still fine does not need a write per 10-second long poll.
 const OK_PERSIST_INTERVAL = Duration.minutes(1);
@@ -272,6 +338,11 @@ interface BotRuntime {
   lastError: string | null;
   health: ConnectorHealthRuntime;
   lastOkPersistedAtMs: number;
+  /** The webhook this process set or confirmed at Telegram; null while long-polling. */
+  webhookUrl: string | null;
+  webhookCheckedAtMs: number;
+  /** When this process last fetched updates a failed webhook left behind. */
+  lastDrainAtMs: number;
 }
 
 const INITIAL_BOT_RUNTIME: BotRuntime = {
@@ -281,7 +352,14 @@ const INITIAL_BOT_RUNTIME: BotRuntime = {
   lastError: null,
   health: INITIAL_CONNECTOR_HEALTH,
   lastOkPersistedAtMs: 0,
+  webhookUrl: null,
+  webhookCheckedAtMs: 0,
+  lastDrainAtMs: 0,
 };
+
+/** The person's own bot (not Uno's shared bot through the relay, not a routed row). */
+const isOwnBotToken = (botToken: string): boolean =>
+  !isRelayCredential(botToken) && parseRouteCredential(botToken) === null;
 
 // Own bot → api.telegram.org; `unorelay:<tgr>` → the console's Bot-API
 // mirror (channelRelay.ts). Every Bot-API URL of this connector goes here.
@@ -381,6 +459,70 @@ const makeTelegramConnector = Effect.gen(function* () {
   const connectorKey = (projectId: ProjectId): ManagerConnectorKey => ({
     projectId,
     kind: "telegram",
+  });
+
+  // One update of a bot is handled at a time, whoever brought it: the poller,
+  // the webhook worker or the replay after a restart.
+  const inboxLocks = new Map<ProjectId, Semaphore.Semaphore>();
+  const withInboxLock = <A, E, R>(projectId: ProjectId, effect: Effect.Effect<A, E, R>) => {
+    let lock = inboxLocks.get(projectId);
+    if (lock === undefined) {
+      lock = Semaphore.makeUnsafe(1);
+      inboxLocks.set(projectId, lock);
+    }
+    return lock.withPermits(1)(effect);
+  };
+
+  // Bots whose webhook brought something to handle (see `receiveWebhookUpdate`).
+  const webhookArrivals = yield* Queue.unbounded<ProjectId>();
+
+  // What the console says about reaching this computer from outside (its
+  // address, economy mode). `known: false` — no answer yet: nothing may be
+  // switched on a guess.
+  let machineIngressCache: {
+    readonly readAtMs: number;
+    readonly ttlMs: number;
+    readonly known: boolean;
+    readonly value: MachineIngress | null;
+  } | null = null;
+  const readMachineIngress = Effect.gen(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const cached = machineIngressCache;
+    if (cached !== null && nowMs - cached.readAtMs < cached.ttlMs) return cached;
+    const identity = yield* serverSettingsService.getSettings.pipe(
+      Effect.map((settings) => readWorkMachineIdentity(settings.uno)),
+      Effect.orElseSucceed(() => null),
+    );
+    if (identity === null) {
+      // Not an Uno computer: there is no address that wakes it.
+      machineIngressCache = {
+        readAtMs: nowMs,
+        ttlMs: MACHINE_INGRESS_TTL_MS,
+        known: true,
+        value: null,
+      };
+      return machineIngressCache;
+    }
+    const answer = yield* callMachineConsole({
+      identity,
+      method: "GET",
+      path: `/api/v1/boxes/${identity.boxId}`,
+    }).pipe(Effect.option);
+    const parsed =
+      Option.isSome(answer) && answer.value.status >= 200 && answer.value.status < 300
+        ? parseMachineIngress(answer.value.body)
+        : null;
+    machineIngressCache =
+      parsed !== null
+        ? { readAtMs: nowMs, ttlMs: MACHINE_INGRESS_TTL_MS, known: true, value: parsed }
+        : {
+            // The console did not answer: keep what was known, ask again soon.
+            readAtMs: nowMs,
+            ttlMs: MACHINE_INGRESS_RETRY_MS,
+            known: cached?.known ?? false,
+            value: cached?.value ?? null,
+          };
+    return machineIngressCache;
   });
 
   const decodeRow = (config: unknown): ManagerTelegramConnectorConfig | null => {
@@ -1635,9 +1777,12 @@ const makeTelegramConnector = Effect.gen(function* () {
           status: sameCredential ? existing.value.status : null,
         },
       });
-      const recovered = yield* recoverPendingEvents(inboxHandler(projectId, config), {
-        decode: decodeStoredTelegramUpdate,
-      });
+      const recovered = yield* withInboxLock(
+        projectId,
+        recoverPendingEvents(inboxHandler(projectId, config), {
+          decode: decodeStoredTelegramUpdate,
+        }),
+      );
       if (recovered.handled + recovered.failed + recovered.exhausted > 0) {
         yield* Effect.logInfo("telegram inbox recovered after restart").pipe(
           Effect.annotateLogs({ projectId, ...recovered }),
@@ -1646,79 +1791,298 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
     });
 
-  const pollConnector = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
+  /**
+   * One Bot-API call of the poller. A `{ ok: false }` answer is recorded as
+   * the connector's health and reads as null; a network failure fails with
+   * `TelegramConnectorError` (the cycle records it).
+   */
+  const callBot = (
+    projectId: ProjectId,
+    botToken: string,
+    method: string,
+    body?: Record<string, unknown>,
+  ) =>
+    fetchJson(telegramApi(botToken, method), {
+      ...(body === undefined
+        ? {}
+        : {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+      signal: AbortSignal.timeout(BOT_CALL_TIMEOUT_MS),
+    }).pipe(
+      Effect.flatMap((response) =>
+        response.ok === true
+          ? Effect.succeed<TelegramApiResponse | null>(response)
+          : recordPollFailure(
+              projectId,
+              classifyTelegramApiError({
+                errorCode: response.error_code,
+                description:
+                  response.description ??
+                  (method === "getMe"
+                    ? "getMe failed — check the bot token."
+                    : `${method} failed.`),
+              }),
+              method,
+            ).pipe(Effect.as(null)),
+      ),
+    );
+
+  /** Best effort, no health bookkeeping: a bot that is no longer this connector's. */
+  const dropWebhookQuietly = (botToken: string) =>
+    fetchJson(telegramApi(botToken, "deleteWebhook"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ drop_pending_updates: false }),
+      signal: AbortSignal.timeout(BOT_CALL_TIMEOUT_MS),
+    }).pipe(Effect.ignore);
+
+  /** Bind the runtime to the row's token (first sighting, or a swapped bot). */
+  const bindRuntime = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
     Effect.gen(function* () {
-      let runtime = yield* getRuntime(projectId);
-      if (runtime.botToken !== config.botToken) {
-        yield* initializeRuntime(projectId, config);
-        runtime = yield* getRuntime(projectId);
+      const runtime = yield* getRuntime(projectId);
+      if (runtime.botToken === config.botToken) return;
+      if (runtime.botToken !== null && runtime.webhookUrl !== null) {
+        // The owner swapped bots: the old one must not keep calling here.
+        yield* dropWebhookQuietly(runtime.botToken);
       }
-      if (isBackingOff(runtime.health, Date.now())) {
-        return;
-      }
+      yield* initializeRuntime(projectId, config);
+    });
 
-      if (runtime.botUsername === null) {
-        const me = yield* fetchJson(telegramApi(config.botToken, "getMe"));
-        if (me.ok !== true) {
-          yield* recordPollFailure(
-            projectId,
-            classifyTelegramApiError({
-              errorCode: me.error_code,
-              description: me.description ?? "getMe failed — check the bot token.",
-            }),
-            "getMe",
-          );
-          return;
-        }
-        const username = (me.result as { username?: string } | undefined)?.username ?? null;
-        yield* updateRuntime(projectId, { botUsername: username });
-      }
+  /** The bot's @name (group addressing needs it); false when Telegram did not tell. */
+  const learnBotName = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      if ((yield* getRuntime(projectId)).botUsername !== null) return true;
+      const me = yield* callBot(projectId, config.botToken, "getMe");
+      if (me === null) return false;
+      const username = (me.result as { username?: string } | undefined)?.username ?? null;
+      yield* updateRuntime(projectId, { botUsername: username });
+      return true;
+    });
 
+  /**
+   * Ask Telegram for one batch from `offset` and settle it in the inbox.
+   * `timeoutSeconds: 0` returns at once (what is waiting right now).
+   */
+  const fetchUpdates = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    input: { readonly offset: number; readonly timeoutSeconds: number },
+  ) =>
+    Effect.gen(function* () {
       const response = yield* fetchJson(
         telegramApi(config.botToken, "getUpdates") +
-          `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${runtime.offset}&allowed_updates=%5B%22message%22%5D`,
+          `?timeout=${input.timeoutSeconds}&offset=${input.offset}&allowed_updates=%5B%22message%22%5D`,
         // Bounded, and dropped at once when the computer wakes from economy
         // sleep: the message that woke it is waiting in the relay queue.
-        { signal: longPollSignal((POLL_TIMEOUT_SECONDS + 15) * 1000) },
+        { signal: longPollSignal((input.timeoutSeconds + 15) * 1000) },
       );
       if (response.ok !== true) {
-        yield* recordPollFailure(
-          projectId,
-          classifyTelegramApiError({
-            errorCode: response.error_code,
-            description: response.description ?? "getUpdates failed.",
-          }),
-          "getUpdates",
-        );
-        return;
+        return { ok: false as const, response };
       }
-      yield* recordPollSuccess(projectId);
-
       const updates = (response.result ?? []) as ReadonlyArray<TelegramUpdate>;
       if (updates.length === 0) {
-        return;
+        return { ok: true as const, count: 0, nextOffset: input.offset };
       }
-      const outcomes = yield* processInboxEvents(
-        inboxHandler(projectId, config),
-        updates.map((update) => ({ providerEventId: String(update.update_id), payload: update })),
-      );
-      // Every update is terminal in the inbox now (the repository persisted
-      // the cursor per event); mirror the batch end in memory.
-      yield* updateRuntime(projectId, {
-        offset: updates.reduce(
-          (max, update) => Math.max(max, telegramOffsetAfter(update)),
-          runtime.offset,
+      const outcomes = yield* withInboxLock(
+        projectId,
+        processInboxEvents(
+          inboxHandler(projectId, config),
+          updates.map((update) => ({ providerEventId: String(update.update_id), payload: update })),
         ),
-      });
+      );
       const failed = outcomes.filter((outcome) => outcome === "failed").length;
       if (failed > 0) {
         yield* Effect.logWarning("telegram update handling failed").pipe(
           Effect.annotateLogs({ projectId, failed, total: updates.length }),
         );
       }
+      // Every update is terminal in the inbox now (the repository persisted
+      // the cursor per event); the caller mirrors the batch end in memory.
+      return {
+        ok: true as const,
+        count: updates.length,
+        nextOffset: updates.reduce(
+          (max, update) => Math.max(max, telegramOffsetAfter(update)),
+          input.offset,
+        ),
+      };
+    });
+
+  const recordGetUpdatesFailure = (projectId: ProjectId, response: TelegramApiResponse) =>
+    recordPollFailure(
+      projectId,
+      classifyTelegramApiError({
+        errorCode: response.error_code,
+        description: response.description ?? "getUpdates failed.",
+      }),
+      "getUpdates",
+    );
+
+  /**
+   * Back to long polling: remove our webhook (Telegram keeps what it has not
+   * delivered) and read from the earliest update Telegram still holds — the
+   * inbox skips whatever the webhook already brought.
+   */
+  const leaveWebhook = (projectId: ProjectId, botToken: string) =>
+    Effect.gen(function* () {
+      const removed = yield* callBot(projectId, botToken, "deleteWebhook", {
+        drop_pending_updates: false,
+      });
+      if (removed === null) return false;
+      yield* updateRuntime(projectId, { webhookUrl: null, webhookCheckedAtMs: 0, offset: 0 });
+      yield* Effect.logInfo("telegram connector back to long polling").pipe(
+        Effect.annotateLogs({ projectId }),
+      );
+      return true;
+    });
+
+  /**
+   * Economy computer, own bot: Telegram delivers to this computer's address,
+   * so a message wakes it. Sets the webhook, then looks at it once a minute
+   * (and right after a wake — the clock has jumped): if Telegram is holding
+   * updates it failed to deliver, fetch them now instead of waiting for its
+   * retry. The webhook is always set again before this returns, so the
+   * computer may fall asleep at any moment and still be woken.
+   */
+  const keepWebhook = (projectId: ProjectId, config: ManagerTelegramConnectorConfig, url: string) =>
+    Effect.gen(function* () {
+      const runtime = yield* getRuntime(projectId);
+      const nowMs = yield* Clock.currentTimeMillis;
+      if (
+        runtime.webhookUrl === url &&
+        nowMs - runtime.webhookCheckedAtMs < WEBHOOK_CHECK_INTERVAL_MS
+      ) {
+        return;
+      }
+      const token = config.botToken;
+      const answer = yield* callBot(projectId, token, "getWebhookInfo");
+      if (answer === null) return;
+      const upkeep = decideWebhookUpkeep({
+        info: (answer.result ?? {}) as TelegramWebhookInfo,
+        desiredUrl: url,
+        botToken: token,
+        nowMs,
+        lastDrainAtMs: runtime.lastDrainAtMs,
+      });
+      if (upkeep === "foreign") {
+        // Same outcome as long polling against such a bot (Telegram refuses
+        // getUpdates), said in words; the other service is left alone.
+        yield* recordPollFailure(
+          projectId,
+          {
+            kind: "provider",
+            message:
+              "This bot already sends its messages to another service (a webhook is set there). Remove that webhook or connect a different bot.",
+          },
+          "webhook",
+        );
+        return;
+      }
+      if (upkeep === "drain") {
+        const removed = yield* callBot(projectId, token, "deleteWebhook", {
+          drop_pending_updates: false,
+        });
+        if (removed === null) return;
+        yield* updateRuntime(projectId, { webhookUrl: null, lastDrainAtMs: nowMs });
+        let offset = 0;
+        let drained = 0;
+        for (let round = 0; round < WEBHOOK_DRAIN_MAX_ROUNDS; round += 1) {
+          const fetched = yield* fetchUpdates(projectId, config, { offset, timeoutSeconds: 0 });
+          if (!fetched.ok) {
+            // No webhook right now; the next cycle sets it again.
+            yield* recordGetUpdatesFailure(projectId, fetched.response);
+            return;
+          }
+          offset = fetched.nextOffset;
+          drained += fetched.count;
+          if (fetched.count === 0) break;
+        }
+        yield* Effect.logInfo("telegram webhook: fetched updates Telegram could not deliver").pipe(
+          Effect.annotateLogs({ projectId, updates: drained }),
+        );
+      }
+      if (upkeep !== "ok") {
+        const set = yield* callBot(projectId, token, "setWebhook", {
+          url,
+          secret_token: telegramWebhookSecret(token),
+          allowed_updates: ["message"],
+          drop_pending_updates: false,
+        });
+        if (set === null) return;
+        if (runtime.webhookUrl !== url) {
+          yield* Effect.logInfo(
+            "telegram connector on a webhook: a message wakes this computer",
+          ).pipe(Effect.annotateLogs({ projectId }));
+        }
+      }
+      yield* updateRuntime(projectId, { webhookUrl: url, webhookCheckedAtMs: nowMs });
+      yield* recordPollSuccess(projectId);
+      // Anything a delivery stored but did not get to handle (Telegram was
+      // unreachable for a moment) is picked up now.
+      yield* Queue.offer(webhookArrivals, projectId);
+    });
+
+  /** One cycle for one bot. True when it spent the cycle in a long poll. */
+  const pollConnector = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
+    Effect.gen(function* () {
+      yield* bindRuntime(projectId, config);
+      if (isBackingOff((yield* getRuntime(projectId)).health, Date.now())) return false;
+      if (!(yield* learnBotName(projectId, config))) return false;
+      const ownBot = isOwnBotToken(config.botToken);
+      const machine = ownBot ? yield* readMachineIngress : null;
+      const ingress = decideTelegramIngress({
+        botToken: config.botToken,
+        machine: machine?.value ?? null,
+      });
+      if (ingress.mode === "webhook") {
+        yield* keepWebhook(projectId, config, ingress.url);
+        return false;
+      }
+      let runtime = yield* getRuntime(projectId);
+      if (runtime.webhookUrl !== null && machine?.known !== false) {
+        // Economy was switched off (or the address is gone): long polling
+        // does the job again.
+        if (!(yield* leaveWebhook(projectId, config.botToken))) return false;
+        runtime = yield* getRuntime(projectId);
+      }
+
+      const fetched = yield* fetchUpdates(projectId, config, {
+        offset: runtime.offset,
+        timeoutSeconds: POLL_TIMEOUT_SECONDS,
+      });
+      if (!fetched.ok) {
+        const { response } = fetched;
+        if (ownBot && isWebhookConflict(response.error_code, response.description)) {
+          // A webhook blocks getUpdates. One of ours (set before a restart,
+          // or by a copy of this computer) is removed — unless the console
+          // has not said yet which way this computer should listen: then it
+          // stays, it delivers here anyway.
+          const info = yield* callBot(projectId, config.botToken, "getWebhookInfo");
+          if (info === null) return false;
+          const current = (info.result as TelegramWebhookInfo | undefined)?.url;
+          if (isOwnTelegramWebhook(current, config.botToken)) {
+            if (machine?.known === false) {
+              yield* recordPollSuccess(projectId);
+            } else {
+              yield* leaveWebhook(projectId, config.botToken);
+            }
+            return false;
+          }
+        }
+        yield* recordGetUpdatesFailure(projectId, response);
+        return false;
+      }
+      yield* recordPollSuccess(projectId);
+      yield* updateRuntime(projectId, { offset: fetched.nextOffset });
+      return true;
     }).pipe(
       Effect.catchTag("TelegramConnectorError", (error) =>
-        recordPollFailure(projectId, { kind: "network", message: error.message }, "poll"),
+        recordPollFailure(projectId, { kind: "network", message: error.message }, "poll").pipe(
+          Effect.as(false),
+        ),
       ),
       Effect.catch((cause) =>
         Effect.gen(function* () {
@@ -1730,6 +2094,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           yield* Effect.logWarning("telegram poll cycle failed").pipe(
             Effect.annotateLogs({ projectId, cause }),
           );
+          return false;
         }),
       ),
     );
@@ -1810,16 +2175,29 @@ const makeTelegramConnector = Effect.gen(function* () {
         ? [{ projectId: record.projectId, config: decoded.value }]
         : [];
     });
+    // A bot that was disconnected or switched off while on a webhook must
+    // not keep delivering here (and waking the computer).
+    const connected = new Set(enabled.map((entry) => entry.projectId));
+    for (const [projectId, runtime] of yield* Ref.get(runtimesRef)) {
+      if (runtime.webhookUrl !== null && runtime.botToken !== null && !connected.has(projectId)) {
+        yield* dropWebhookQuietly(runtime.botToken);
+        yield* updateRuntime(projectId, { webhookUrl: null, webhookCheckedAtMs: 0 });
+      }
+    }
     if (enabled.length === 0) {
       yield* Effect.sleep(IDLE_RECHECK);
       return;
     }
     yield* pruneInboxIfDue;
     // Poll all enabled bots concurrently; each long-polls up to 10s.
-    yield* Effect.forEach(enabled, ({ projectId, config }) => pollConnector(projectId, config), {
-      concurrency: 4,
-      discard: true,
-    });
+    const longPolled = yield* Effect.forEach(
+      enabled,
+      ({ projectId, config }) => pollConnector(projectId, config),
+      { concurrency: 4 },
+    );
+    if (!longPolled.some(Boolean)) {
+      yield* Effect.sleep(QUIET_CYCLE_PAUSE);
+    }
   });
 
   // Proactive push (reminders/notifications): resolve the bot token from the
@@ -1865,6 +2243,72 @@ const makeTelegramConnector = Effect.gen(function* () {
     });
 
   yield* Effect.forkScoped(Effect.forever(pollCycle));
+
+  // Updates a webhook brought: stored by `receiveWebhookUpdate` (so Telegram
+  // can be answered at once), handled here in arrival order — the same replay
+  // that picks up unsettled rows after a restart.
+  const handleWebhookArrivals = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const config = yield* readRow(projectId);
+      if (config === null || !config.enabled) return;
+      yield* bindRuntime(projectId, config);
+      if (!(yield* learnBotName(projectId, config))) {
+        // Telegram did not answer getMe: the rows stay in the inbox; the
+        // next arrival or the next look at the webhook handles them.
+        return;
+      }
+      yield* withInboxLock(
+        projectId,
+        recoverPendingEvents(inboxHandler(projectId, config), {
+          decode: decodeStoredTelegramUpdate,
+        }),
+      );
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("telegram webhook update handling failed").pipe(
+          Effect.annotateLogs({ projectId, cause }),
+        ),
+      ),
+    );
+  yield* Effect.forkScoped(
+    Effect.forever(Queue.take(webhookArrivals).pipe(Effect.flatMap(handleWebhookArrivals))),
+  );
+
+  const receiveWebhookUpdate: ManagerTelegramServiceShape["receiveWebhookUpdate"] = (input) =>
+    Effect.gen(function* () {
+      const row = (yield* listRows).find(
+        (candidate) =>
+          candidate.config.enabled &&
+          isOwnBotToken(candidate.config.botToken) &&
+          telegramWebhookHookId(candidate.config.botToken) === input.hookId,
+      );
+      if (row === undefined || !isTelegramWebhookSecretValid(row.config.botToken, input.secret)) {
+        return "unknown";
+      }
+      const update = decodeStoredTelegramUpdate(yield* input.readUpdate);
+      if (update === null) return "invalid";
+      // The state row must belong to this bot before anything enters its
+      // inbox (binding a new bot clears the previous bot's inbox).
+      if ((yield* getRuntime(row.projectId)).botToken !== row.config.botToken) {
+        yield* initializeRuntime(row.projectId, row.config);
+      }
+      yield* connectorRepository.insertInboxEvent({
+        ...connectorKey(row.projectId),
+        providerEventId: String(update.update_id),
+        payload: update,
+        receivedAt: new Date().toISOString(),
+      });
+      yield* Queue.offer(webhookArrivals, row.projectId);
+      return "accepted" as const;
+    }).pipe(
+      Effect.provideService(ManagerConnectorRepository, connectorRepository),
+      Effect.catch((cause) =>
+        Effect.logWarning("telegram webhook update could not be stored").pipe(
+          Effect.annotateLogs({ cause }),
+          Effect.as("unavailable" as const),
+        ),
+      ),
+    );
 
   const getRuntimeStatus: ManagerTelegramServiceShape["getRuntimeStatus"] = (requested) =>
     Effect.gen(function* () {
@@ -1956,6 +2400,7 @@ const makeTelegramConnector = Effect.gen(function* () {
     sendText,
     startPairing,
     sendTestMessage,
+    receiveWebhookUpdate,
   } satisfies ManagerTelegramServiceShape;
 });
 

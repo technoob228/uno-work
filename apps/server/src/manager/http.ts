@@ -11,6 +11,9 @@
  * - `/api/manager/assistant/telegram/shared`, `/api/manager/assistant/slack/install`
  *   — owner-session-only: Uno's shared Telegram bot / Slack app on a cloud
  *   computer (onboarding v3, `channelSetup.ts`).
+ * - `POST /api/telegram/webhook/:hook` — Telegram delivering an update for the
+ *   person's own bot on an economy computer (`telegramWebhook.ts`). No session:
+ *   the hook id and Telegram's secret header are the proof.
  * - `POST /api/channels/notify` — outbound message to the chats bound to a
  *   thread / project. Authenticated with the browser-bridge token every
  *   harness process holds (a thread-scoped token implies the thread).
@@ -59,6 +62,7 @@ import { ManagerAssistantError, ManagerAssistantService } from "./Services/Assis
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
+import { TELEGRAM_WEBHOOK_PATH_PREFIX, TELEGRAM_WEBHOOK_SECRET_HEADER } from "./telegramWebhook.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { isRelayCredential, isRouteCredential } from "./channelRelay.ts";
 import {
@@ -596,6 +600,48 @@ export const managerAssistantSlackInstallDeleteRouteLayer = HttpRouter.add(
       Effect.catch(respondServerError("assistant:slack-uninstall")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** A Telegram update is a few kilobytes; anything much bigger is not one. */
+const TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * `POST /api/telegram/webhook/:hook` — Telegram delivers an update here when
+ * the person's own bot is on a webhook (economy computer: the request to the
+ * computer's address is what wakes it).
+ *
+ * The caller is anybody on the internet, so: nothing is read or said before
+ * the hook id and the secret header match a connected bot (404 otherwise, the
+ * same for both), the body is capped, and 200 goes out only once the update
+ * is on disk — Telegram forgets an update it was told 200 for. Any other
+ * status makes Telegram deliver it again.
+ */
+export const telegramWebhookRouteLayer = HttpRouter.add(
+  "POST",
+  `${TELEGRAM_WEBHOOK_PATH_PREFIX}:hook`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const params = yield* HttpRouter.params;
+    const telegram = yield* ManagerTelegramService;
+    const declared = Number(request.headers["content-length"] ?? "0");
+    if (Number.isFinite(declared) && declared > TELEGRAM_WEBHOOK_MAX_BODY_BYTES) {
+      return HttpServerResponse.jsonUnsafe({ ok: false }, { status: 413 });
+    }
+    const receipt = yield* telegram.receiveWebhookUpdate({
+      hookId: params["hook"]?.trim() ?? "",
+      secret: request.headers[TELEGRAM_WEBHOOK_SECRET_HEADER] ?? null,
+      readUpdate: request.json.pipe(Effect.orElseSucceed((): unknown => null)),
+    });
+    const status =
+      receipt === "accepted"
+        ? 200
+        : receipt === "unknown"
+          ? 404
+          : receipt === "invalid"
+            ? 400
+            : 503;
+    return HttpServerResponse.jsonUnsafe({ ok: status === 200 }, { status });
+  }),
 );
 
 /** Text of the Settings / wizard "Send test message" button. */
