@@ -72,6 +72,19 @@ export function routeCredential(holderProjectId: string): string {
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
+/**
+ * Dev/test switch: send an OWN bot's Bot-API calls to a local stub instead of
+ * Telegram (`UNO_WORK_DEV_TELEGRAM_API_URL=http://127.0.0.1:9999`). The bot
+ * token goes to whatever this names, so it is read from the daemon's own
+ * environment only — never from settings a client can write.
+ */
+export const TELEGRAM_API_URL_OVERRIDE_ENV = "UNO_WORK_DEV_TELEGRAM_API_URL";
+
+function telegramApiBase(): string {
+  const override = process.env[TELEGRAM_API_URL_OVERRIDE_ENV]?.trim();
+  return override && override.length > 0 ? override.replace(/\/+$/, "") : TELEGRAM_API_BASE;
+}
+
 function telegramRelayBase(baseUrl: string): string {
   return `${baseUrl}/api/v1/work-relay/telegram`;
 }
@@ -84,7 +97,7 @@ export function telegramApiUrl(
 ): string {
   const relay = parseRelayCredential(botToken);
   return relay === null
-    ? `${TELEGRAM_API_BASE}/bot${botToken}/${method}`
+    ? `${telegramApiBase()}/bot${botToken}/${method}`
     : `${telegramRelayBase(baseUrl)}/bot${relay}/${method}`;
 }
 
@@ -96,7 +109,7 @@ export function telegramFileUrl(
 ): string {
   const relay = parseRelayCredential(botToken);
   return relay === null
-    ? `${TELEGRAM_API_BASE}/file/bot${botToken}/${filePath}`
+    ? `${telegramApiBase()}/file/bot${botToken}/${filePath}`
     : `${telegramRelayBase(baseUrl)}/file/bot${relay}/${filePath}`;
 }
 
