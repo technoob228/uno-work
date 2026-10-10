@@ -80,12 +80,13 @@ const STARTERS: ReadonlyArray<{ label: string; q: string }> = [
     label: "A site for my business",
     q: "I want a website for my business where customers can book or contact me",
   },
-  // The teammate (Misha 09.10): Uno on their own computer that does their
-  // tasks — not a bot that answers other people. One name, in their words:
+  // The personal assistant (Misha 09.10, named 10.10): Uno on their own
+  // computer that does their tasks — not a bot that answers other people. One
+  // name, the same as the landing and the console ("Personal assistant"):
   // the builder answers it with "your own computer" (suggest_next computer).
   {
-    label: "A teammate that does my tasks",
-    q: "I want a teammate that does my tasks on its own computer: works on my projects, keeps going while my laptop is closed, and pings me only when it needs me.",
+    label: "Personal assistant",
+    q: "I want a personal assistant that does my tasks on its own computer: works on my projects, keeps going while my laptop is closed, and pings me only when it needs me.",
   },
   { label: "I have an idea for an app", q: "I have an idea for an app" },
 ];

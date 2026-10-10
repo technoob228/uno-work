@@ -128,7 +128,7 @@ function clip(text: string, max: number): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** The person asked for a teammate / personal assistant (any language we see). */
+/** The person asked for a personal assistant (any language we see; "teammate" was its name on 09.10). */
 export function isTeammateGoal(text: string): boolean {
   return /\b(team ?mate|assistant)\b|напарник|ассистент|помощник|asistente|compañero/i.test(text);
 }
@@ -195,9 +195,9 @@ export function handoffPrompt(input: {
     );
   if (recent.length) lines.push("", "The last messages:", ...recent);
 
-  // A teammate is the Uno on this computer itself, not something to build
-  // (ICP v3 r3: the hand-off built an always-on "Dev Teammate" app and asked
-  // for a GitHub token before any task).
+  // The personal assistant is the Uno on this computer itself, not something
+  // to build (ICP v3 r3: the hand-off built an always-on "Dev Teammate" app
+  // and asked for a GitHub token before any task).
   const goalWords = [
     firstUser && firstUser.kind === "user" ? firstUser.text : "",
     suggest && suggest.kind === "suggest" ? (suggest.reason ?? "") : "",
@@ -205,7 +205,7 @@ export function handoffPrompt(input: {
   lines.push(
     "",
     isTeammateGoal(goalWords)
-      ? "You are the teammate I asked for: I give you tasks here (or in my Telegram once linked), you do them on this computer while my laptop is closed and tell me in my Inbox when it's done or you need me. Don't build an app, a bot or a service for this, and don't ask for tokens or passwords until a task needs them. Now: in 1–2 sentences (in my language) say what you can do for me here, then ask for my first task."
+      ? "You are the personal assistant I asked for: I give you tasks here (or in my Telegram once linked), you do them on this computer while my laptop is closed and tell me in my Inbox when it's done or you need me. Don't build an app, a bot or a service for this, and don't ask for tokens or passwords until a task needs them. Now: in 1–2 sentences (in my language) say what you can do for me here as my assistant, then ask for my first task."
       : "Now: tell me in 1–2 sentences what you'll set up on this computer for this goal (in my language), then do it step by step. Ask only what you truly can't decide yourself — one question at a time.",
   );
   return lines.join("\n");

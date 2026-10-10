@@ -313,19 +313,21 @@ describe("hand-off", () => {
     expect(p).toContain("Why I need this computer: A real bot lives on your computer.");
     expect(p).not.toContain("THINK-SECRET"); // the model's think never leaves
   });
-  it("tells a teammate to wait for its first task instead of building something", () => {
+  it("tells a personal assistant to wait for its first task instead of building something", () => {
+    expect(isTeammateGoal("Personal assistant")).toBe(true);
     expect(isTeammateGoal("A teammate that does my tasks")).toBe(true);
     expect(isTeammateGoal("Хочу личного ассистента")).toBe(true);
     expect(isTeammateGoal("A booking site for my yoga studio")).toBe(false);
     const p = handoffPrompt({
-      title: "teammate",
-      messages: [{ role: "user", content: "A teammate that does my tasks" } as AiChatMessage],
+      title: "assistant",
+      messages: [{ role: "user", content: "Personal assistant" } as AiChatMessage],
       sites: null,
     });
-    expect(p).toContain("You are the teammate I asked for");
+    expect(p).toContain("You are the personal assistant I asked for");
+    expect(p).not.toMatch(/teammate/i);
     expect(p).toContain("Don't build an app");
     const site = handoffPrompt({ title: "yoga", messages: transcript, sites: null });
-    expect(site).not.toContain("You are the teammate");
+    expect(site).not.toContain("You are the personal assistant");
   });
   it("reads the goal and the live sites back for the chat's card", () => {
     const p = handoffPrompt({

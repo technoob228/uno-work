@@ -122,11 +122,12 @@ export const FIRST_SCREEN_EXAMPLES = [
     prompt: "A site for my business that takes orders and sends them to me",
   },
   {
-    // Misha 09.10: the own agent is a teammate that does my tasks — not a bot
-    // that answers strangers. The pill opens the same quiz ("What should it
-    // do?", AssistantQuiz); one name: teammate.
+    // Misha 09.10: the own agent does my tasks — not a bot that answers
+    // strangers. Misha 10.10: one name everywhere, "assistant"; the pill reads
+    // like the landing's ("Personal assistant") and opens the same quiz
+    // ("What should your assistant do?", AssistantQuiz).
     id: ASSISTANT_STARTER_ID,
-    label: "A teammate that does my tasks",
+    label: "Personal assistant",
     prompt: "",
   },
   {
