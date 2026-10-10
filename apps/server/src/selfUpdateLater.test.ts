@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +16,17 @@ import {
   type SelfUpdateStatus,
   type UpdaterStatus,
 } from "./selfUpdate.ts";
+import {
+  FRESH_UPDATE_NEW_MS,
+  decideFreshUpdate,
+  freshUpdateWorthRetry,
+  isNewComputer,
+  markOpenedOnce,
+  noteFreshAttempt,
+  readFreshAttempt,
+  wasOpenedOnce,
+  type FreshUpdateInput,
+} from "./selfUpdateFresh.ts";
 import {
   UPDATE_LATER_MAX_AHEAD_MS,
   UPDATE_LATER_QUIET_MS,
@@ -386,5 +404,144 @@ describe("the daemon's own request (controller)", () => {
     expect(await none.latest()).toBeNull();
     expect(await none.inProgress()).toBe(false);
     await expect(none.request()).rejects.toThrow();
+  });
+});
+
+// ---- A new computer nobody has opened yet (selfUpdateFresh.ts) ----
+
+/** Just created, never opened, a newer release is out: "go". */
+function fresh(patch: Partial<FreshUpdateInput> = {}): FreshUpdateInput {
+  return {
+    supported: true,
+    isNew: true,
+    openedOnce: false,
+    hasChats: false,
+    currentVersion: "0.0.119",
+    latestVersion: "0.0.120",
+    inProgress: false,
+    lastRun: null,
+    attemptedVersion: null,
+    ...patch,
+  };
+}
+
+describe("decideFreshUpdate: a new computer installs the latest before its first open", () => {
+  it("goes at once on a new computer nobody has opened", () => {
+    expect(decideFreshUpdate(fresh())).toEqual({ go: true, version: "0.0.120" });
+  });
+
+  it("never once a person has connected — only their word updates it then", () => {
+    expect(decideFreshUpdate(fresh({ openedOnce: true }))).toEqual({
+      go: false,
+      reason: "opened",
+    });
+  });
+
+  it("never on a computer that is not new, even if nobody ever opened it", () => {
+    expect(decideFreshUpdate(fresh({ isNew: false }))).toEqual({ go: false, reason: "not-new" });
+  });
+
+  it("never on a computer with a person's message or an agent turn (a clone of a used one)", () => {
+    expect(decideFreshUpdate(fresh({ hasChats: true }))).toEqual({
+      go: false,
+      reason: "has-chats",
+    });
+  });
+
+  it("nothing to do on the latest version already; never down", () => {
+    expect(decideFreshUpdate(fresh({ currentVersion: "0.0.120" }))).toEqual({
+      go: false,
+      reason: "current",
+    });
+    expect(decideFreshUpdate(fresh({ currentVersion: "0.0.121" })).go).toBe(false);
+    expect(
+      decideFreshUpdate(fresh({ currentVersion: "0.0.99", latestVersion: "0.0.100" })),
+    ).toEqual({ go: true, version: "0.0.100" });
+  });
+
+  it("does not retry a version that was put back here", () => {
+    const rolled = run({ rolledBack: true });
+    expect(decideFreshUpdate(fresh({ lastRun: rolled }))).toEqual({
+      go: false,
+      reason: "rolled-back",
+    });
+    expect(decideFreshUpdate(fresh({ lastRun: rolled, latestVersion: "0.0.121" })).go).toBe(true);
+  });
+
+  it("one try per version", () => {
+    expect(decideFreshUpdate(fresh({ attemptedVersion: "0.0.120" }))).toEqual({
+      go: false,
+      reason: "attempted",
+    });
+    expect(decideFreshUpdate(fresh({ attemptedVersion: "0.0.119" })).go).toBe(true);
+  });
+
+  it("does not ask twice while an update is asked for or running", () => {
+    expect(decideFreshUpdate(fresh({ inProgress: true }))).toEqual({
+      go: false,
+      reason: "in-progress",
+    });
+  });
+
+  it("looks again shortly only when it could not know yet", () => {
+    const noRelease = decideFreshUpdate(fresh({ latestVersion: null }));
+    expect(noRelease).toEqual({ go: false, reason: "no-release" });
+    expect(freshUpdateWorthRetry(noRelease)).toBe(true);
+    const notReady = decideFreshUpdate(fresh({ hasChats: null }));
+    expect(notReady).toEqual({ go: false, reason: "not-ready" });
+    expect(freshUpdateWorthRetry(notReady)).toBe(true);
+    for (const patch of [
+      { isNew: false },
+      { openedOnce: true },
+      { hasChats: true },
+      { currentVersion: "0.0.120" },
+      { attemptedVersion: "0.0.120" },
+      { supported: false },
+    ]) {
+      expect(freshUpdateWorthRetry(decideFreshUpdate(fresh(patch)))).toBe(false);
+    }
+    expect(freshUpdateWorthRetry(decideFreshUpdate(fresh()))).toBe(false);
+  });
+
+  it("can't on a computer without self-update", () => {
+    expect(decideFreshUpdate(fresh({ supported: false }))).toEqual({
+      go: false,
+      reason: "unsupported",
+    });
+  });
+});
+
+describe("markers of a new computer", () => {
+  it("'opened once' is written once and stays", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "uno-update-fresh-"));
+    expect(await wasOpenedOnce(dir)).toBe(false);
+    await markOpenedOnce(dir, NOW);
+    expect(await wasOpenedOnce(dir)).toBe(true);
+    const first = readFileSync(join(dir, "opened-once.json"), "utf8");
+    await markOpenedOnce(dir, NOW + 86_400_000);
+    expect(readFileSync(join(dir, "opened-once.json"), "utf8")).toBe(first);
+  });
+
+  it("a computer is new for half an hour after it got its identity", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "uno-update-fresh-"));
+    const id = join(dir, "environment-id");
+    // The very first start: nothing written yet.
+    expect(await isNewComputer(id, NOW)).toBe(true);
+    writeFileSync(id, "env-1\n");
+    const at = (ms: number) => utimesSync(id, new Date(ms), new Date(ms));
+    at(NOW - 60_000);
+    expect(await isNewComputer(id, NOW)).toBe(true);
+    at(NOW - FRESH_UPDATE_NEW_MS - 1_000);
+    expect(await isNewComputer(id, NOW)).toBe(false);
+    // A clone gets a new id: new again.
+    at(NOW - 2_000);
+    expect(await isNewComputer(id, NOW)).toBe(true);
+  });
+
+  it("remembers the version it asked for", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "uno-update-fresh-"));
+    expect(await readFreshAttempt(dir)).toBeNull();
+    await noteFreshAttempt(dir, "0.0.120", NOW);
+    expect(await readFreshAttempt(dir)).toBe("0.0.120");
   });
 });

@@ -372,14 +372,17 @@ rm -f "${STATE_DIR}/browser-setup/request" /var/lib/uno-work-browser/status.json
   /var/lib/uno-work-browser/setup.log 2>/dev/null || true
 # Кнопка «Update» (install.sh 0.0.113+): юнит должен быть включён, а следы
 # обновлений эталона в клон не едут.
-# В том числе «This evening» владельца эталона (self-update-later.json).
+# В том числе «This evening» владельца эталона и отметка «этот компьютер уже
+# открывали» (opened-once.json): с ней новый компьютер не поставил бы свежую
+# версию сам при создании (selfUpdateFresh.ts).
 [ -f /etc/systemd/system/uno-work-update.path ] \
   || die "uno-work-update.path missing — rerun install.sh from 0.0.113+ (self-update)"
 systemctl enable uno-work-update.path >/dev/null 2>&1 || die "could not enable uno-work-update.path"
 rm -rf /var/lib/uno-work-update/ask/request /var/lib/uno-work-update/status.json /var/lib/uno-work-update/update.log \
   /var/lib/uno-work-update/work /var/lib/uno-work-update/state-before-update /opt/uno-work/app.prev \
   "${STATE_DIR}/userdata/self-update-intent.json" "${STATE_DIR}/userdata/self-update-reported.json" \
-  "${STATE_DIR}/userdata/self-update-later.json" \
+  "${STATE_DIR}/userdata/self-update-later.json" "${STATE_DIR}/userdata/self-update-fresh.json" \
+  "${STATE_DIR}/userdata/opened-once.json" \
   2>/dev/null || true
 # Тестовая подмена адреса релизов не должна попасть в образ.
 [ ! -e /etc/uno-work/update.conf ] \
