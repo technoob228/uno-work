@@ -28,6 +28,8 @@ export interface TelegramMessageEntity {
 }
 
 export interface TelegramIncomingMessage {
+  /** Unique within the chat; the answer replies to it. */
+  readonly message_id?: number;
   readonly chat?: {
     readonly id?: number;
     readonly title?: string;

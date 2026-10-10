@@ -6,9 +6,11 @@
  * routes messages from allowlisted chats into that assistant's chat threads.
  * Incoming media is downloaded: images enter the chat attachment pipeline
  * (vision), voice/video/documents are saved to disk and described to the
- * harness by absolute path. When the turn completes (or its harness session
- * dies mid-turn), the last assistant message goes back to the chat; files the
- * assistant marked with `[[send-file: /abs/path]]` are uploaded alongside it.
+ * harness by absolute path. Every addressed message becomes a pending reply
+ * (`connectorReplies.ts`, on disk): its turn's final answer goes back to the
+ * chat as a reply to that very message — however long the turn runs, across
+ * daemon restarts — with "typing…" meanwhile; files the assistant marked with
+ * `[[send-file: /abs/path]]` are uploaded after the text.
  *
  * Where a chat's messages go is a binding (`manager_connector_bindings`,
  * ADR 2026-09-11): the assistant that owns the bot (default), a regular
@@ -34,13 +36,11 @@
  * delivery_failed / provider_unavailable) is derived in `connectorHealth.ts`
  * and persisted alongside, so the settings UI can show it.
  */
-import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import {
   ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerTelegramConnectorConfig,
-  MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
@@ -52,7 +52,7 @@ import {
   type ManagerConnectorHealthStatus,
   type OrchestrationThread,
 } from "@t3tools/contracts";
-import { Context, Data, Duration, Effect, Layer, Option, Ref, Schema, type Scope } from "effect";
+import { Clock, Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
@@ -84,11 +84,7 @@ import {
   type ConnectorHealthRuntime,
   type HealthTransition,
 } from "../connectorHealth.ts";
-import {
-  processInboxEvents,
-  recoverPendingEvents,
-  type ConnectorInboxHandler,
-} from "../connectorInbox.ts";
+import { processInboxEvents, recoverPendingEvents } from "../connectorInbox.ts";
 import { ServerConfig } from "../../config.ts";
 import { telegramCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import {
@@ -120,16 +116,19 @@ import { executeConnectorCommand } from "../connectorCommandHandler.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { parseConnectorCommand } from "../connectorCommands.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
 import {
-  ProjectionTurnRepository,
-  type ProjectionTurn,
-} from "../../persistence/Services/ProjectionTurns.ts";
+  makeConnectorReplies,
+  readMeta,
+  TYPING_RENEW_MS,
+  type SendOutcome,
+} from "../connectorReplies.ts";
+import { detectReplyLanguage } from "../connectorReplyText.ts";
 import {
   buildMediaFailureNote,
   buildMediaNote,
   collectTelegramMedia,
   describeNonFileContent,
-  extractOutgoingFiles,
   isImageLikeMedia,
   pickTelegramUploadMethod,
   toNormalizedMessage,
@@ -156,7 +155,6 @@ import {
   type ConnectorSenderRole,
   withOwnerUserId,
 } from "../connectorSenders.ts";
-import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import {
   callTelegramBotMethod,
   isRelayCredential,
@@ -230,122 +228,20 @@ const OK_PERSIST_INTERVAL = Duration.minutes(1);
 // to outlive Telegram's own retention of unconfirmed updates (24h).
 const INBOX_RETENTION = Duration.days(7);
 const INBOX_PRUNE_INTERVAL = Duration.hours(1);
-const REPLY_POLL_INTERVAL = Duration.seconds(2);
-const REPLY_TIMEOUT = Duration.minutes(10);
-const TYPING_ACTION_INTERVAL = Duration.seconds(4);
-// Hermes (ACP) резолвит session/prompt раньше, чем достримит текст ответа:
-// turn в проекции уже терминален, а сообщение ассистента приходит секундами
-// позже. Терминальному turn'у без текста даём этот grace-период на дозапись
-// сообщения, прежде чем сдаться и отправить "Turn finished with state".
-const TERMINAL_REPLY_GRACE = Duration.seconds(45);
 const TELEGRAM_MESSAGE_LIMIT = 4000;
-// Session statuses that mean the harness runtime is gone and the turn will
-// never reach a terminal state on its own.
-const DEAD_SESSION_STATUSES: ReadonlySet<string> = new Set(["stopped", "error"]);
 
 // The handoff preamble (carrying recent history of the old thread into the
 // replacement thread) is shared with "Continue on <machine>"; see
 // `orchestration/handoff.ts`. Re-exported for the connector tests.
 export { stripHandoffPreamble };
 
-export interface TurnReplyInputs {
-  readonly turns: ReadonlyArray<
-    Pick<ProjectionTurn, "turnId" | "state" | "requestedAt" | "completedAt">
-  >;
-  readonly messages: ReadonlyArray<{
-    readonly role: string;
-    readonly text: string;
-    readonly streaming: boolean;
-    readonly createdAt: string;
-  }>;
-  readonly sessionStatus: string | null;
-  /** When `sessionStatus` was written; stale rows predate this request. */
-  readonly sessionUpdatedAtIso: string | null;
-  /**
-   * The session's active turn. ACP harnesses (hermes etc.) emit every text
-   * chunk before a tool call as a finished assistant message, and the
-   * projection marks the turn `completed` on the first one. `activeTurnId` is
-   * only cleared when the turn really ends, so it is the reliable signal.
-   */
-  readonly sessionActiveTurnId?: string | null;
-  readonly requestedAtIso: string;
-  /** Wall-clock of the current poll; keeps the grace-period logic pure. */
-  readonly nowIso: string;
-}
-
-export interface ResolvedTurnReply {
-  /** Chat text, already truncated; may be empty when the reply is file-only. */
-  readonly text: string;
-  /** Absolute paths the assistant marked with `[[send-file: …]]`. */
-  readonly files: ReadonlyArray<string>;
-}
-
-// Decides what (if anything) to send back to the chat for the turn requested
-// at `requestedAtIso`. Returns null while the turn is still in flight.
-//
-// The turn state is read from the turn rows, NOT from the thread shell's
-// `latestTurn`: that field mirrors `projection_threads.latest_turn_id`, which
-// tracks the session's active turn and is nulled the moment the session goes
-// idle again (it only survives for threads that produce checkpoint diffs), so
-// a 2s poller essentially never observes a terminal state through it.
-export const resolveTurnReply = (input: TurnReplyInputs): ResolvedTurnReply | null => {
-  const turn =
-    [...input.turns]
-      .filter(
-        (candidate) => candidate.turnId !== null && candidate.requestedAt >= input.requestedAtIso,
-      )
-      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
-      .at(0) ?? null;
-  // «stopped»/«error», записанные ДО этого запроса — протухший статус прошлого
-  // запуска приложения: dispatch как раз (пере)поднимает сессию. Смертью
-  // считаем только статус, проставленный после requestedAtIso.
-  const sessionDied =
-    input.sessionStatus !== null &&
-    DEAD_SESSION_STATUSES.has(input.sessionStatus) &&
-    (input.sessionUpdatedAtIso === null || input.sessionUpdatedAtIso >= input.requestedAtIso);
-  const stillRunning =
-    turn === null ||
-    turn.state === "pending" ||
-    turn.state === "running" ||
-    (input.sessionStatus === "running" &&
-      input.sessionActiveTurnId != null &&
-      input.sessionActiveTurnId === turn.turnId);
-  if (stillRunning && !sessionDied) {
-    return null;
-  }
-  const lastAssistantMessage = [...input.messages]
-    .reverse()
-    .find(
-      (message) =>
-        message.role === "assistant" &&
-        !message.streaming &&
-        message.createdAt >= input.requestedAtIso &&
-        message.text.trim().length > 0,
-    );
-  if (lastAssistantMessage !== undefined) {
-    // The final-answer marker some models echo never goes out to a chat.
-    const { text, files } = extractOutgoingFiles(
-      cleanUnoFinalAnswerText(lastAssistantMessage.text),
-    );
-    return { text: text.slice(0, TELEGRAM_MESSAGE_LIMIT), files };
-  }
-  // Turn терминален, а текста ещё нет: если сессия жива, подождём — харнесс
-  // может дописать сообщение после завершения turn'а (hermes так делает всегда).
-  if (!stillRunning && !sessionDied) {
-    const terminalAtIso = turn?.completedAt ?? turn?.requestedAt ?? input.requestedAtIso;
-    const graceEndsAtMs =
-      new Date(terminalAtIso).getTime() + Duration.toMillis(TERMINAL_REPLY_GRACE);
-    if (new Date(input.nowIso).getTime() < graceEndsAtMs) {
-      return null;
-    }
-  }
-  return {
-    text: stillRunning
-      ? "The harness session ended before finishing this turn; check the app for details."
-      : `Turn finished with state: ${turn.state}.`,
-    files: [],
-  };
-};
+/**
+ * What a failed send means for a pending reply: a refusal of the chat itself
+ * (bot blocked, chat gone, bad request) will not change, anything else
+ * (network, 429, 5xx, a token being swapped) may pass.
+ */
+export const telegramSendOutcome = (errorCode: number | undefined): SendOutcome =>
+  errorCode === 400 || errorCode === 403 ? "gone" : "retry";
 
 export interface TelegramUpdate {
   readonly update_id: number;
@@ -454,7 +350,6 @@ const makeTelegramConnector = Effect.gen(function* () {
   const pendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverConfig = yield* ServerConfig;
   const serverSettingsService = yield* ServerSettingsService;
 
@@ -852,51 +747,77 @@ const makeTelegramConnector = Effect.gen(function* () {
   // record the outcome as connector health: a rejection after the last
   // attempt puts the connector into `delivery_failed` until a later send
   // succeeds. Never fails — callers get `{ ok: false }` and move on.
+  // `replyTo` quotes the person's message (deleted meanwhile: sent without
+  // the quote); HTML Telegram cannot parse goes again as plain text.
   const sendTelegramText = (
     projectId: ProjectId,
     botToken: string,
     chatId: string,
     text: string,
-  ): Effect.Effect<{ readonly ok: boolean; readonly description?: string }> =>
-    attemptWithBackoff(
-      fetchJson(telegramApi(botToken, "sendMessage"), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: renderTelegramHtml(text),
-          parse_mode: "HTML",
-        }),
-      }).pipe(
-        Effect.flatMap((response) =>
-          response.ok === true
-            ? Effect.succeed(response)
-            : Effect.fail(
-                new TelegramApiRejection({
-                  errorCode: response.error_code,
-                  description: response.description ?? "unknown error",
-                }),
-              ),
+    options: { readonly replyTo?: string | null } = {},
+  ): Effect.Effect<{
+    readonly ok: boolean;
+    readonly description?: string;
+    readonly errorCode?: number | undefined;
+  }> => {
+    const replyTo = options.replyTo ?? null;
+    const attempt = (html: boolean) =>
+      attemptWithBackoff(
+        fetchJson(telegramApi(botToken, "sendMessage"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            ...(html ? { text: renderTelegramHtml(text), parse_mode: "HTML" } : { text }),
+            ...(replyTo !== null && /^\d+$/.test(replyTo)
+              ? {
+                  reply_parameters: {
+                    message_id: Number(replyTo),
+                    allow_sending_without_reply: true,
+                  },
+                }
+              : {}),
+          }),
+        }).pipe(
+          Effect.flatMap((response) =>
+            response.ok === true
+              ? Effect.succeed(response)
+              : Effect.fail(
+                  new TelegramApiRejection({
+                    errorCode: response.error_code,
+                    description: response.description ?? "unknown error",
+                  }),
+                ),
+          ),
         ),
+        {
+          retriable: (error) =>
+            error._tag === "TelegramConnectorError" || isRetriableTelegramApiError(error.errorCode),
+          delaysMs: SEND_RETRY_DELAYS_MS,
+        },
+      );
+    return attempt(true).pipe(
+      Effect.catchIf(
+        (error) =>
+          error._tag === "TelegramApiRejection" &&
+          error.errorCode === 400 &&
+          /parse entities|can't find end/i.test(error.description),
+        () => attempt(false),
       ),
-      {
-        retriable: (error) =>
-          error._tag === "TelegramConnectorError" || isRetriableTelegramApiError(error.errorCode),
-        delaysMs: SEND_RETRY_DELAYS_MS,
-      },
-    ).pipe(
       Effect.tap(() => recordDelivery(projectId, true, null)),
       Effect.map(() => ({ ok: true as const })),
       Effect.catch((error) => {
         const description =
           error._tag === "TelegramApiRejection" ? error.description : error.message;
+        const errorCode = error._tag === "TelegramApiRejection" ? error.errorCode : undefined;
         return Effect.logWarning("telegram sendMessage failed after retries").pipe(
           Effect.annotateLogs({ projectId, chatId, description }),
           Effect.andThen(recordDelivery(projectId, false, description)),
-          Effect.as({ ok: false as const, description }),
+          Effect.as({ ok: false as const, description, errorCode }),
         );
       }),
     );
+  };
 
   // «Печатает…» живёт в Telegram ~5 секунд; ошибки индикатора не должны
   // трогать ватчер ответа.
@@ -1149,93 +1070,50 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
     });
 
-  // Where a thread's `[[send-file: …]]` may read from: its worktree, else
-  // its project's workspace.
-  const workspaceRootsForThread = (threadId: ThreadId) =>
-    projectionSnapshotQuery.getThreadCheckpointContext(threadId).pipe(
-      Effect.map((context) =>
-        Option.isSome(context)
-          ? [context.value.worktreePath ?? context.value.workspaceRoot]
-          : ([] as Array<string>),
-      ),
-      Effect.orElseSucceed(() => [] as Array<string>),
-    );
+  // The bot a pending reply answers through: the connector that received
+  // the message (its own token, or Uno's relay).
+  const botTokenOf = (projectId: ProjectId) =>
+    readRow(projectId).pipe(Effect.map((config) => config?.botToken ?? null));
 
-  const sendReplyWhenTurnCompletes = (input: {
-    readonly projectId: ProjectId;
-    readonly botToken: string;
-    readonly chatId: string;
-    readonly threadId: ThreadId;
-    readonly requestedAtIso: string;
-    /** Marked with "now" once a real reply lands, opening the hot window. */
-    readonly hotKey: string;
-  }) =>
-    Effect.gen(function* () {
-      const deadline = Date.now() + Duration.toMillis(REPLY_TIMEOUT);
-      let typingSentAtMs = 0;
-      while (Date.now() < deadline) {
-        if (Date.now() - typingSentAtMs >= Duration.toMillis(TYPING_ACTION_INTERVAL)) {
-          typingSentAtMs = Date.now();
-          yield* sendTelegramTypingAction(input.botToken, input.chatId);
-        }
-        yield* Effect.sleep(REPLY_POLL_INTERVAL);
-        const detail = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
-        if (Option.isNone(detail)) continue;
-        const turns = yield* projectionTurnRepository.listByThreadId({
-          threadId: input.threadId,
+  // Answers to chat messages: on disk, bound to each message's own turn,
+  // no deadline (see `connectorReplies.ts`).
+  // One "typing…" per chat however many of its messages wait.
+  const typingAtRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  const replies = yield* makeConnectorReplies({
+    kind: "telegram",
+    limit: TELEGRAM_MESSAGE_LIMIT,
+    logPrefix: "telegram",
+    typing: (row) =>
+      Effect.gen(function* () {
+        const key = `${row.connectorProjectId}:${row.chatId}`;
+        const nowMs = yield* Clock.currentTimeMillis;
+        const last = (yield* Ref.get(typingAtRef)).get(key) ?? 0;
+        if (nowMs - last < TYPING_RENEW_MS - 500) return;
+        yield* Ref.update(typingAtRef, (map) => new Map(map).set(key, nowMs));
+        const botToken = yield* botTokenOf(row.connectorProjectId);
+        if (botToken !== null) yield* sendTelegramTypingAction(botToken, row.chatId);
+      }),
+    sendText: (row, text, { asReply }) =>
+      Effect.gen(function* () {
+        const botToken = yield* botTokenOf(row.connectorProjectId);
+        if (botToken === null) return "retry";
+        const result = yield* sendTelegramText(row.connectorProjectId, botToken, row.chatId, text, {
+          replyTo: asReply ? row.replyTo : null,
         });
-        const reply = resolveTurnReply({
-          turns,
-          messages: detail.value.messages,
-          sessionStatus: detail.value.session?.status ?? null,
-          sessionUpdatedAtIso: detail.value.session?.updatedAt ?? null,
-          sessionActiveTurnId: detail.value.session?.activeTurnId ?? null,
-          requestedAtIso: input.requestedAtIso,
-          nowIso: new Date().toISOString(),
-        });
-        if (reply === null) continue;
-        if (reply.text.trim().length > 0) {
-          yield* sendTelegramText(input.projectId, input.botToken, input.chatId, reply.text);
-        } else if (reply.files.length === 0) {
-          yield* sendTelegramText(input.projectId, input.botToken, input.chatId, "Done.");
-        }
-        const roots = yield* workspaceRootsForThread(input.threadId);
-        for (const file of reply.files) {
-          const resolved = yield* Effect.promise(() => resolveConnectorOutgoingFile(file, roots));
-          if (!resolved.ok) {
-            yield* Effect.logWarning("telegram send-file refused").pipe(
-              Effect.annotateLogs({
-                chatId: input.chatId,
-                filePath: file,
-                reason: resolved.reason,
-              }),
-            );
-            yield* sendTelegramText(
-              input.projectId,
-              input.botToken,
-              input.chatId,
-              `Could not send ${nodePath.basename(file)}: ${resolved.reason}.`,
-            );
-            continue;
-          }
-          yield* sendTelegramFile(input.projectId, input.botToken, input.chatId, resolved.path);
-        }
-        yield* markHotWindow(input.hotKey);
-        return;
-      }
-      yield* sendTelegramText(
-        input.projectId,
-        input.botToken,
-        input.chatId,
-        "The assistant is still working on it; check the app for progress.",
-      );
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("telegram reply watcher failed").pipe(
-          Effect.annotateLogs({ chatId: input.chatId, cause }),
-        ),
-      ),
-    );
+        return result.ok ? "ok" : telegramSendOutcome(result.errorCode);
+      }),
+    sendFile: (row, path) =>
+      Effect.gen(function* () {
+        const botToken = yield* botTokenOf(row.connectorProjectId);
+        if (botToken === null) return "retry";
+        yield* sendTelegramFile(row.connectorProjectId, botToken, row.chatId, path);
+        return "ok";
+      }),
+    onSettled: (row, delivered) => {
+      const hotKey = readMeta(row).hotKey;
+      return delivered && typeof hotKey === "string" ? markHotWindow(hotKey) : Effect.void;
+    },
+  });
 
   /**
    * The chat that pressed Start on the app's link: allowlist it (re-reading
@@ -1643,6 +1521,15 @@ const makeTelegramConnector = Effect.gen(function* () {
         }
         return;
       }
+      // A replayed update (crash after it was taken) already has its reply
+      // on the way: never a second turn for one message.
+      const replyKey = `${chatId}:${message.message_id ?? `u${update.update_id}`}`;
+      if (yield* replies.isKnown(projectId, replyKey)) {
+        yield* Effect.logInfo("telegram message already has a pending reply; skipped").pipe(
+          Effect.annotateLogs({ projectId, chatId, replyKey }),
+        );
+        return;
+      }
       const { threadId, handoffContext, runtimeMode, interactionMode } = yield* ensureThreadForChat(
         {
           target,
@@ -1671,36 +1558,24 @@ const makeTelegramConnector = Effect.gen(function* () {
       const body = [...bodyParts, TELEGRAM_SEND_FILE_HINT].join("\n\n");
       const messageText =
         handoffContext === null ? body : [wrapHandoffPreamble(handoffContext), "", body].join("\n");
-      const requestedAtIso = new Date().toISOString();
-      yield* orchestrationEngine.dispatch(
-        {
-          type: "thread.turn.start",
-          commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
-          threadId,
-          message: {
-            messageId: MessageId.make(crypto.randomUUID()),
-            role: "user",
-            text: messageText,
-            attachments: ingested.attachments,
-          },
-          // Inherited from the routing decision: the assistant's fixed mode,
-          // or whatever the bound project / thread runs in. Never widened here.
+      yield* replies.enqueue({
+        connectorProjectId: projectId,
+        replyKey,
+        chatId,
+        replyTo: message.message_id === undefined ? null : String(message.message_id),
+        replyThread: null,
+        threadId,
+        language: detectReplyLanguage(effectiveText, message.from?.language_code),
+        // Inherited from the routing decision: the assistant's fixed mode,
+        // or whatever the bound project / thread runs in. Never widened here.
+        dispatch: {
+          text: messageText,
+          attachments: ingested.attachments,
           runtimeMode,
           interactionMode,
-          createdAt: requestedAtIso,
         },
-        { origin: telegramCommandOrigin(chatId) },
-      );
-      yield* Effect.forkScoped(
-        sendReplyWhenTurnCompletes({
-          projectId,
-          botToken: config.botToken,
-          chatId,
-          threadId,
-          requestedAtIso,
-          hotKey,
-        }),
-      );
+        extraMeta: { hotKey },
+      });
     }).pipe(
       // A binding that cannot be served is an answer for the chat, not a
       // failed delivery: the update is handled, the user is told what to do.
@@ -2087,4 +1962,8 @@ const makeTelegramConnector = Effect.gen(function* () {
 export const ManagerTelegramServiceLive = Layer.effect(
   ManagerTelegramService,
   makeTelegramConnector,
-).pipe(Layer.provide(ProjectionTurnRepositoryLive));
+).pipe(
+  Layer.provide(
+    Layer.mergeAll(ProjectionTurnRepositoryLive, ManagerConnectorPendingReplyRepositoryLive),
+  ),
+);
