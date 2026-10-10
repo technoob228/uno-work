@@ -67,6 +67,42 @@ export function disconnectConnector(
   });
 }
 
+// ── GitHub of the account (git on every computer) ─────────────────────
+
+/**
+ * The account's GitHub — the Uno GitHub App, connected once and used by git
+ * on every cloud computer, by site deploys and by assistants the person
+ * allowed. Not the same thing as this computer's own `gh` sign-in.
+ */
+export interface GithubAccountState {
+  /** False: "Connect GitHub" can't be offered here (not a cloud computer, older console). */
+  readonly available: boolean;
+  readonly reason: string | null;
+  readonly connected: boolean;
+  /** GitHub accounts / organisations Uno is installed on. */
+  readonly accounts: ReadonlyArray<string>;
+  readonly permission: "none" | "read" | "write";
+}
+
+export function getGithubAccount(input: EnvironmentScoped): Promise<GithubAccountState> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/github",
+  });
+}
+
+/** The install page of the Uno GitHub App: open it with `openAuthWindow`. */
+export function connectGithubAccount(
+  input: EnvironmentScoped,
+): Promise<{ readonly authorizeUrl: string }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/github/connect",
+    method: "POST",
+    body: {},
+  });
+}
+
 // ── Your own MCP server ───────────────────────────────────────────────
 
 export interface McpProbeResult {

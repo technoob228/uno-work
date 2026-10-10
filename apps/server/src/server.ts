@@ -39,6 +39,7 @@ import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
+import { GithubAccountServiceLive } from "./setupTools/GithubAccountService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
 import {
   filesOfficeVersionsRouteLayer,
@@ -455,6 +456,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,
+      // GitHub of the account for git on this computer: state, "Connect
+      // GitHub", and the git credential helper on a cloud computer.
+      GithubAccountServiceLive,
       MaterialsServiceLive,
       // "New assistant": Uno AI drafts the assistant from one sentence.
       AssistantDraftServiceLive,
