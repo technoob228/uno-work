@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BotIcon, CheckIcon, ExternalLinkIcon, LoaderIcon, SendIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
-import { checkoutHref } from "../account/accountOverview";
+import { checkoutHref, CONSOLE_URL } from "../account/accountOverview";
 import { subscriptionQuery } from "../components/myuno/myUnoQueries";
 import { Button } from "../components/ui/button";
 import { liteStanding } from "../lite/webLite";
@@ -17,6 +17,7 @@ import {
   extractBotToken,
   fetchFreeBot,
   freeBotKey,
+  freeBotEmailNote,
   freeBotPollMs,
   keepOnLabel,
   liveMetaLine,
@@ -181,6 +182,8 @@ function TokenSetup({
   const [err, setErr] = useState<{ detail: string; offerPlan: boolean } | null>(null);
 
   const hasPlan = !subscription.isPending && liteStanding(subscription.data ?? null) !== "free";
+  // A plan doesn't need the free days, so their email rule doesn't apply.
+  const emailNote = hasPlan ? null : freeBotEmailNote(status?.reason);
   const days = status?.days || freeDays || 0;
   const freeLine = (status ? status.enabled : days > 0) && !hasPlan && days > 0;
 
@@ -211,6 +214,22 @@ function TokenSetup({
         <BotIcon className="size-4 text-muted-foreground" />
         Create your bot in Telegram
       </p>
+      {emailNote ? (
+        <p
+          className="mt-2 rounded-md border border-border bg-muted/40 px-2.5 py-2 text-xs"
+          data-testid="uno-ai-bot-email-first"
+        >
+          {emailNote}{" "}
+          <a
+            href={`${CONSOLE_URL}/settings`}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            Add email in Settings
+          </a>
+        </p>
+      ) : null}
       <ol className="mt-2 space-y-1 text-sm text-muted-foreground">
         <li>
           1. Open{" "}

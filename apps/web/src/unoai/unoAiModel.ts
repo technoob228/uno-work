@@ -13,6 +13,45 @@ export interface AiQuestion {
   readonly question: string;
   readonly options: ReadonlyArray<string>;
   readonly recommended: string | null;
+  /**
+   * The options as answer cards, like the uno.place chat draws them (icon,
+   * label, a line under it): same order as `options`, label === option.
+   */
+  readonly choices: ReadonlyArray<AiChoice>;
+}
+
+/** The icons an answer card may have — the uno.place chat's set (landingchat TileIcons). */
+export const AI_CHOICE_ICONS = [
+  "site",
+  "bot",
+  "agent",
+  "team",
+  "code",
+  "server",
+  "db",
+  "form",
+  "lock",
+  "telegram",
+  "mail",
+  "calendar",
+  "money",
+  "clock",
+  "chat",
+  "store",
+  "spark",
+  "folder",
+  "apps",
+  "globe",
+  "users",
+  "edit",
+] as const;
+export type AiChoiceIcon = (typeof AI_CHOICE_ICONS)[number];
+
+export interface AiChoice {
+  readonly label: string;
+  /** One short line under the label: what it means or what happens next. */
+  readonly hint: string | null;
+  readonly icon: AiChoiceIcon | null;
 }
 
 export type AiItem =
@@ -120,6 +159,39 @@ const STAR = /\s*[★⭐✱*]+\s*$/u;
 const RECOMMENDED_NOTE =
   /\s*[([](?:recommended|recommend|рекомендую|советую|recomendado|recomendada|recomiendo)[)\]]\s*$/iu;
 
+function choiceIcon(raw: unknown): AiChoiceIcon | null {
+  return typeof raw === "string" && (AI_CHOICE_ICONS as ReadonlyArray<string>).includes(raw)
+    ? (raw as AiChoiceIcon)
+    : null;
+}
+
+/**
+ * The icon for an answer the model sent as plain words (Uno AI's ask_user has
+ * strings): the uno.place chat gets icons from its model, here the words pick
+ * one. No match — no icon, the card is just the words.
+ */
+const ICON_WORDS: ReadonlyArray<readonly [RegExp, AiChoiceIcon]> = [
+  [/telegram|телеграм/iu, "telegram"],
+  [/e-?mail|inbox|почт|correo/iu, "mail"],
+  [/password|only me|парол|contraseña|senha/iu, "lock"],
+  [/\bbot\b|(?<![а-яё])бот/iu, "bot"],
+  [/pay|price|stripe|paypal|\$|оплат|цен|pago|precio|preço/iu, "money"],
+  [/book|schedule|calendar|class|appointment|slot|запис|распис|reserva|agenda/iu, "calendar"],
+  [/form|request|lead|order|заявк|заказ|formulario|pedido/iu, "form"],
+  [/edit|change|update|colou?r|text|измен|поменя|cambi|mudar/iu, "edit"],
+  [/menu|shop|store|product|магазин|меню|tienda|loja/iu, "store"],
+  [/page|site|landing|сайт|страниц|página/iu, "site"],
+  [/time|hour|время|час|hora/iu, "clock"],
+  [/chat|message|reply|answer|ответ|сообщ|mensaje/iu, "chat"],
+  [/public|everyone|anyone|всем|публичн|todos/iu, "globe"],
+  [/team|staff|group|client|customer|people|команд|групп|клиент|equipo|grupo|cliente/iu, "users"],
+];
+
+export function guessChoiceIcon(label: string): AiChoiceIcon | null {
+  for (const [re, icon] of ICON_WORDS) if (re.test(label)) return icon;
+  return null;
+}
+
 function normQuestion(raw: unknown): AiQuestion | null {
   if (!raw || typeof raw !== "object") return null;
   const q = raw as Record<string, unknown>;
@@ -129,21 +201,43 @@ function normQuestion(raw: unknown): AiQuestion | null {
     .replace(RECOMMENDED_NOTE, "")
     .replace(STAR, "")
     .trim();
-  const options = (Array.isArray(q["options"]) ? q["options"] : [])
-    .map((o) => String(o).trim())
-    .filter(Boolean)
+  const raws = (Array.isArray(q["options"]) ? q["options"] : [])
+    .map((o): { text: string; hint: string | null; icon: AiChoiceIcon | null } => {
+      // An option may come as words or as {label|answer, hint, icon, recommended}
+      // (the uno.place chat's shape): read the words, never print
+      // "[object Object]" (icp3 09.10, n2/3).
+      if (o && typeof o === "object") {
+        const option = o as Record<string, unknown>;
+        const text = String(
+          option["label"] ?? option["answer"] ?? option["text"] ?? option["value"] ?? "",
+        ).trim();
+        if (text && option["recommended"] === true && !recommended) recommended = text;
+        const hint = optString(option["hint"] ?? option["description"] ?? option["detail"]);
+        return { text, hint, icon: choiceIcon(option["icon"]) };
+      }
+      return { text: String(o ?? "").trim(), hint: null, icon: null };
+    })
+    .filter((o) => o.text)
     .slice(0, 5)
     .map((o) => {
-      const noted = RECOMMENDED_NOTE.test(o);
-      const clean = o.replace(RECOMMENDED_NOTE, "").replace(STAR, "").trim();
+      const noted = RECOMMENDED_NOTE.test(o.text);
+      const clean = o.text.replace(RECOMMENDED_NOTE, "").replace(STAR, "").trim();
       if (!recommended && noted) recommended = clean;
-      if (!recommended && clean !== o) recommended = clean;
-      return clean;
-    });
+      if (!recommended && clean !== o.text) recommended = clean;
+      o.text = clean;
+      return o;
+    })
+    .filter((o) => o.text);
+  const options = raws.map((o) => o.text);
   return {
     question,
     options,
     recommended: recommended && options.includes(recommended) ? recommended : null,
+    choices: raws.map((o) => ({
+      label: o.text,
+      hint: o.hint ? o.hint.slice(0, 80) : null,
+      icon: o.icon ?? guessChoiceIcon(o.text),
+    })),
   };
 }
 
@@ -349,6 +443,8 @@ export function standardAnswers(lang: AiChatLanguage): {
   youDecide: string;
   justBuild: string;
   recommended: string;
+  /** Under the answer cards (the uno.place chat's words). */
+  ownWords: string;
 } {
   switch (lang) {
     case "ru":
@@ -356,21 +452,29 @@ export function standardAnswers(lang: AiChatLanguage): {
         youDecide: "Решай сам",
         justBuild: "Хватит вопросов — делай",
         recommended: "Советую",
+        ownWords: "Или ответьте своими словами",
       };
     case "es":
       return {
         youDecide: "Decide tú",
         justBuild: "Basta de preguntas, hazlo",
         recommended: "Recomendado",
+        ownWords: "O responde con tus palabras",
       };
     case "pt":
       return {
         youDecide: "Decida você",
         justBuild: "Chega de perguntas, faça",
         recommended: "Recomendado",
+        ownWords: "Ou responda com suas palavras",
       };
     default:
-      return { youDecide: "You decide", justBuild: "Just build it", recommended: "Recommended" };
+      return {
+        youDecide: "You decide",
+        justBuild: "Just build it",
+        recommended: "Recommended",
+        ownWords: "Or answer in your own words",
+      };
   }
 }
 

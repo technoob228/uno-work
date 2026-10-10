@@ -138,7 +138,7 @@ describe("transcriptItems", () => {
   });
   it("offers the pending question with its default", () => {
     const q = pendingQuestion(transcriptItems(transcript.slice(0, 4)));
-    expect(q).toEqual({
+    expect(q).toMatchObject({
       question: "Group classes or private?",
       options: ["Group", "Private", "Both"],
       recommended: "Both",
@@ -234,12 +234,14 @@ describe("askQuestions", () => {
         options: ["Онлайн (рекомендую)", "Оффлайн"],
         recommended: "Онлайн (рекомендую)",
       }),
-    ).toEqual([{ question: "Как?", options: ["Онлайн", "Оффлайн"], recommended: "Онлайн" }]);
+    ).toMatchObject([{ question: "Как?", options: ["Онлайн", "Оффлайн"], recommended: "Онлайн" }]);
   });
   it("reads the old three-questions shape and stars", () => {
     expect(
       askQuestions({ questions: [{ question: "Where?", options: ["Telegram ★", "Email"] }] }),
-    ).toEqual([{ question: "Where?", options: ["Telegram", "Email"], recommended: "Telegram" }]);
+    ).toMatchObject([
+      { question: "Where?", options: ["Telegram", "Email"], recommended: "Telegram" },
+    ]);
   });
 });
 
@@ -372,5 +374,69 @@ describe("isSameSite", () => {
     expect(isSameSite("https://other.uno4.me/", site)).toBe(false);
     expect(isSameSite("https://console.uno.place/sites/sun-salute-yoga", site)).toBe(false);
     expect(isSameSite(undefined, site)).toBe(false);
+  });
+});
+
+describe("askQuestions", () => {
+  it("reads options sent as objects instead of strings (icp3 09.10)", () => {
+    const [q] = askQuestions({
+      question: "How do people book?",
+      options: [
+        { answer: "A booking form on the site", recommended: true },
+        { answer: "By phone" },
+      ],
+    });
+    expect(q?.options).toEqual(["A booking form on the site", "By phone"]);
+    expect(q?.recommended).toBe("A booking form on the site");
+  });
+  it("makes answer cards like the uno.place chat: icon, label, line under it", () => {
+    const [q] = askQuestions({
+      question: "Where should new bookings go?",
+      options: [
+        { label: "Bookings go to my Telegram", hint: "Every booking lands in your chat" },
+        { label: "Keep the schedule editable", icon: "edit" },
+        "Add a payment link too",
+        "Something unusual",
+      ],
+      recommended: "Bookings go to my Telegram",
+    });
+    expect(q?.choices).toEqual([
+      {
+        label: "Bookings go to my Telegram",
+        hint: "Every booking lands in your chat",
+        icon: "telegram",
+      },
+      { label: "Keep the schedule editable", hint: null, icon: "edit" },
+      { label: "Add a payment link too", hint: null, icon: "money" },
+      { label: "Something unusual", hint: null, icon: null },
+    ]);
+    expect(q?.options).toEqual(q?.choices.map((c) => c.label));
+    expect(q?.recommended).toBe("Bookings go to my Telegram");
+  });
+  it("picks icons by meaning, not by a lucky word", () => {
+    const [q] = askQuestions({
+      question: "How do people book?",
+      options: [
+        "Group classes on a weekly schedule",
+        "Private sessions by appointment",
+        "Both group and private",
+        "Only with a password",
+        "Open to everyone",
+      ],
+    });
+    expect(q?.choices.map((c) => c.icon)).toEqual([
+      "calendar",
+      "calendar",
+      "users",
+      "lock",
+      "globe",
+    ]);
+  });
+  it("ignores an icon outside the uno.place set and picks one from the words", () => {
+    const [q] = askQuestions({
+      question: "Как?",
+      options: [{ label: "Сайт работает сам", icon: "rocket" }, "Заявки в почту"],
+    });
+    expect(q?.choices.map((c) => c.icon)).toEqual(["site", "mail"]);
   });
 });
