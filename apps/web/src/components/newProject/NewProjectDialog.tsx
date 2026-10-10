@@ -65,6 +65,7 @@ import {
 } from "../../navigation/newProjectStore";
 import { selectProjectsForEnvironment, useStore } from "../../store";
 import { Button } from "../ui/button";
+import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import {
   Dialog,
   DialogDescription,
@@ -92,6 +93,8 @@ import {
   isPickableFolder,
   recentHomeFolders,
   tildePath,
+  connectGithubPrompt,
+  isRepoAccessError,
 } from "./newProject.logic";
 
 const SOURCE_COPY: Record<
@@ -842,12 +845,18 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The repository is private (or mistyped) and this computer can't sign in to GitHub.
+  const [noAccess, setNoAccess] = useState(false);
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
+  const { startTask } = useHomeLaunchers(environmentId);
   const finish = useFinishNewProject();
   const wording = useNewProjectStore((state) => state.wording);
   const check = checkRepositoryInput(input, taken ?? new Set());
-  useEffect(() => setError(null), [input]);
+  useEffect(() => {
+    setError(null);
+    setNoAccess(false);
+  }, [input]);
 
   const submit = async () => {
     if (!check.ok) {
@@ -866,12 +875,33 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
       await finish(await ensureFolderProject(folder, check.name), check.name, folder);
       onDone();
     } catch (cause) {
-      setError(
-        errorMessage(
-          cause,
-          "Couldn't clone the repository. For a private one, connect GitHub in Settings → Source control.",
-        ),
-      );
+      const message = errorMessage(cause, "");
+      if (isRepoAccessError(message)) setNoAccess(true);
+      else setError(message || "Couldn't clone the repository. Check the address and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * "Let Uno connect GitHub": the project folder is made now (empty), and a
+   * chat in it asks Uno to connect this computer with an SSH key — one paste
+   * on github.com, no tokens — and clone into it (connectGithubPrompt).
+   */
+  const askUno = async () => {
+    if (!check.ok) return;
+    setBusy(true);
+    try {
+      const folder = uploadedProjectPath(home, check.name);
+      await ensureFolderProject(folder, check.name, { createFolder: true });
+      await startTask(connectGithubPrompt(check.remoteUrl), {
+        folder,
+        modelSelection: null,
+        runtimeMode: "full-access",
+      });
+      onDone();
+    } catch (cause) {
+      setError(errorMessage(cause, "Couldn't start the chat. Try again."));
     } finally {
       setBusy(false);
     }
@@ -903,11 +933,40 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
             : "Clones into ~/projects/<repo>"}
         </p>
       </DialogPanel>
+      {noAccess ? (
+        <div
+          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
+          data-testid="new-project-repo-private"
+        >
+          <p>
+            <b className="font-medium">This repository is private</b> (or the address has a typo).
+            This computer isn't signed in to GitHub yet.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Uno makes a key for this computer and shows you where to add it on GitHub — one paste,
+            no tokens. Then it clones the repository here.
+          </p>
+          <div>
+            <Button size="sm" disabled={busy} onClick={() => void askUno()}>
+              <GitHubIcon />
+              Let Uno connect GitHub
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <StepFooter
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label={busy ? "Cloning…" : wording === "folder" ? "Clone" : "Clone and open"}
+        label={
+          busy
+            ? "Cloning…"
+            : noAccess
+              ? "Try again"
+              : wording === "folder"
+                ? "Clone"
+                : "Clone and open"
+        }
         icon={<GitHubIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
