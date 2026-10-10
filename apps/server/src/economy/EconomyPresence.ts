@@ -17,6 +17,13 @@
  * An account without economy mode still gets its list across: the console
  * keeps the apps before it answers 409, so while backed off the daemon sends a
  * changed list at most once a minute.
+ *
+ * "This evening" for an update (selfUpdateLater.ts) rides on the same report:
+ * its time is one more alarm in `next_wake_at` (the console wakes a sleeping
+ * computer for it, as for a reminder), and "work:update" in keep_awake holds
+ * the computer while the updater runs or the daemon waits out the last quiet
+ * minutes. The same probe tells that loop whether anyone is working here
+ * (`activity`).
  */
 import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -28,6 +35,8 @@ import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { callWorkConsole, readWorkMachineIdentity } from "../manager/workConsole.ts";
 import { RemindersRepository } from "../persistence/Services/Reminders.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { selfUpdateController } from "../selfUpdateHttp.ts";
+import { KEEP_AWAKE_UPDATE, updateLaterEconomySignals } from "../selfUpdateLater.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   ECONOMY_REPORT_INTERVAL_MS,
@@ -50,9 +59,22 @@ import {
 import { scanWorkCommands } from "./commandScan.ts";
 import { signalMachineWoke } from "./wakeSignal.ts";
 
+/** The probe plus the earliest reminder alone: `nextWakeAt` may be the update's own alarm. */
+interface ProbeWithReminder extends EconomyProbe {
+  readonly nextReminderAt: string | null;
+}
+
+/** What is going on right now, for the "This evening" update loop. */
+export interface EconomyActivity extends ProbeWithReminder {
+  /** The person's last input in a client (ms), null — none since the daemon started. */
+  readonly lastInputAt: number | null;
+}
+
 export interface EconomyPresenceShape {
   /** `input: true` — the person just did something in a client. */
   readonly presence: (input: boolean) => Effect.Effect<UnoEconomyPresence>;
+  /** The economy probe on demand (selfUpdateLaterScheduler.ts). */
+  readonly activity: Effect.Effect<EconomyActivity>;
 }
 
 export class EconomyPresence extends Context.Service<EconomyPresence, EconomyPresenceShape>()(
@@ -121,7 +143,7 @@ export const EconomyPresenceLive = Layer.effect(
       Effect.orElseSucceed(() => null),
     );
 
-    const probe: Effect.Effect<EconomyProbe> = Effect.gen(function* () {
+    const probe: Effect.Effect<ProbeWithReminder> = Effect.gen(function* () {
       const clients = yield* sessions.listActive().pipe(
         Effect.map((rows) => rows.filter((row) => row.connected).length),
         Effect.orElseSucceed(() => 0),
@@ -145,8 +167,17 @@ export const EconomyPresenceLive = Layer.effect(
           rows.map((r) => r.thread_id),
         );
       }).pipe(Effect.orElseSucceed(() => 0));
-      const keepAwake = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
-      const nextWakeAt = reminders
+      const apps = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
+      // An update is running, or its time has come and only the quiet minutes
+      // are left: economy sleep must not freeze it half-way.
+      const update = updateLaterEconomySignals();
+      const updating = yield* Effect.promise(() =>
+        selfUpdateController()
+          .inProgress()
+          .catch(() => false),
+      );
+      const keepAwake = updating || update.holdAwake ? [...apps, KEEP_AWAKE_UPDATE] : apps;
+      const nextReminderAt = reminders
         ? yield* reminders.list({ includeInactive: false }).pipe(
             Effect.map((rows) =>
               earliestFuture(
@@ -157,6 +188,11 @@ export const EconomyPresenceLive = Layer.effect(
             Effect.orElseSucceed(() => null),
           )
         : null;
+      // "This evening": the console wakes a sleeping computer for it too.
+      const nextWakeAt = earliestFuture(
+        [nextReminderAt, update.wakeAt].filter((at): at is string => at !== null),
+        Date.now(),
+      );
       // What a turn left behind or a Work terminal runs: a build, a script
       // started with nohup, a background shell of the harness (commandScan.ts).
       // Travels as running_terminals — the console holds the computer for it.
@@ -171,6 +207,7 @@ export const EconomyPresenceLive = Layer.effect(
         commands,
         keepAwake,
         nextWakeAt,
+        nextReminderAt,
       };
     });
 
@@ -287,6 +324,12 @@ export const EconomyPresenceLive = Layer.effect(
         return state.presence;
       });
 
-    return { presence } satisfies EconomyPresenceShape;
+    const activity: EconomyPresenceShape["activity"] = probe.pipe(
+      Effect.map(
+        (current): EconomyActivity => Object.assign(current, { lastInputAt: state.lastInputAt }),
+      ),
+    );
+
+    return { presence, activity } satisfies EconomyPresenceShape;
   }),
 );

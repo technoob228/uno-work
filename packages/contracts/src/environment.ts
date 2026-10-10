@@ -78,6 +78,12 @@ export const HTTP_FEATURES = {
   assistantWorkspace: "assistant-workspace",
   /** `/api/manager/assistants/{deleted,restore}` — Restore of a deleted assistant. */
   assistantsTrash: "assistants-trash",
+  /**
+   * `POST /api/self-update/later` — "This evening" next to Update: the owner
+   * agrees to the update and the computer installs it after that time, once
+   * nothing is running on it. A computer without it keeps the single Update.
+   */
+  updateLater: "update-later",
 } as const;
 export type HttpFeature = (typeof HTTP_FEATURES)[keyof typeof HTTP_FEATURES];
 
@@ -89,6 +95,9 @@ export const HTTP_FEATURE_SINCE: Readonly<Record<HttpFeature, string>> = {
   "self-update": "0.0.113",
   "assistant-workspace": "0.0.106",
   "assistants-trash": "0.0.106",
+  // Every daemon that has it also lists httpFeatures; the version only keeps
+  // older ones (which never list anything) out.
+  "update-later": "0.0.120",
 };
 
 /** Route prefix → feature, for the client's 404 handling and the pre-call check. */
@@ -96,6 +105,8 @@ export const HTTP_FEATURE_ROUTES: ReadonlyArray<{
   readonly prefix: string;
   readonly feature: HttpFeature;
 }> = [
+  // Before "/api/self-update/": the first matching prefix wins.
+  { prefix: "/api/self-update/later", feature: "update-later" },
   { prefix: "/api/self-update/", feature: "self-update" },
   { prefix: "/api/manager/assistant/apps", feature: "assistant-workspace" },
   { prefix: "/api/manager/assistant/chats", feature: "assistant-workspace" },

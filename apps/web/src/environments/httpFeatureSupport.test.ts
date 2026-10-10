@@ -51,6 +51,25 @@ describe("descriptorSupportsHttpFeature", () => {
     ).toBe(true);
   });
 
+  it("'This evening' only where the daemon lists it", () => {
+    expect(
+      descriptorSupportsHttpFeature(
+        descriptor("0.0.120", ["self-update", "update-later"]),
+        HTTP_FEATURES.updateLater,
+      ),
+    ).toBe(true);
+    expect(
+      descriptorSupportsHttpFeature(
+        descriptor("0.0.120", ["self-update"]),
+        HTTP_FEATURES.updateLater,
+      ),
+    ).toBe(false);
+    // Before the list existed there was no "This evening" either.
+    expect(descriptorSupportsHttpFeature(descriptor("0.0.119"), HTTP_FEATURES.updateLater)).toBe(
+      false,
+    );
+  });
+
   it("unknown daemon (not connected yet) → no", () => {
     expect(descriptorSupportsHttpFeature(null, HTTP_FEATURES.selfUpdate)).toBe(false);
   });
@@ -59,6 +78,9 @@ describe("descriptorSupportsHttpFeature", () => {
 describe("httpFeatureForPath", () => {
   it("maps feature routes and leaves everyday routes alone", () => {
     expect(httpFeatureForPath("/api/self-update/start")).toBe("self-update");
+    // "This evening" is its own feature: a computer may have Update without it.
+    expect(httpFeatureForPath("/api/self-update/later")).toBe("update-later");
+    expect(httpFeatureForPath("/api/self-update/status")).toBe("self-update");
     expect(httpFeatureForPath("/api/manager/assistant/draft")).toBe("assistant-workspace");
     expect(httpFeatureForPath("/api/manager/assistants/restore")).toBe("assistants-trash");
     expect(httpFeatureForPath("/api/manager/assistants")).toBeNull();

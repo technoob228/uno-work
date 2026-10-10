@@ -1,7 +1,9 @@
 /**
- * "A new version of Uno Work is ready · Update" — the cloud computer updates
- * its own Uno Work when its owner presses the button.
- * Server side: apps/server/src/selfUpdate.ts (+ the root updater in deploy/install.sh).
+ * "A new version of Uno Work is ready · This evening · Update now" — the cloud
+ * computer updates its own Uno Work when its owner says so: now, or this
+ * evening once nothing is running on it. It never updates without being asked.
+ * Server side: apps/server/src/selfUpdate.ts, selfUpdateLater.ts (+ the root
+ * updater in deploy/install.sh).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
@@ -27,6 +29,9 @@ export interface SelfUpdateStatus {
   readonly rolledBack: boolean;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
+  /** The owner said "This evening"; absent on computers before "update-later". */
+  readonly later?: { readonly version: string; readonly notBefore: string } | null;
+  readonly laterAvailable?: boolean;
 }
 
 export async function fetchSelfUpdateStatus(
@@ -68,6 +73,32 @@ export function requestSelfUpdate(environmentId: EnvironmentId): Promise<SelfUpd
   });
 }
 
+/** "This evening" starts at this hour of the owner's own clock. */
+export const THIS_EVENING_HOUR = 20;
+
+/**
+ * When "This evening" begins for the person looking at this screen: 20:00
+ * today in the browser's time zone, or right now when it is already later.
+ */
+export function thisEveningNotBefore(now: Date = new Date()): string {
+  const evening = new Date(now);
+  evening.setHours(THIS_EVENING_HOUR, 0, 0, 0);
+  return (evening.getTime() > now.getTime() ? evening : now).toISOString();
+}
+
+/** "This evening": the computer updates itself after that time, once nothing is running. */
+export function requestSelfUpdateLater(
+  environmentId: EnvironmentId,
+  notBefore: string = thisEveningNotBefore(),
+): Promise<SelfUpdateStatus> {
+  return environmentFetchJson<SelfUpdateStatus>({
+    environmentId,
+    pathname: "/api/self-update/later",
+    method: "POST",
+    body: { confirm: "later", notBefore },
+  });
+}
+
 export const selfUpdateQueryKey = (environmentId: EnvironmentId | null) =>
   ["self-update", environmentId] as const;
 
@@ -104,6 +135,17 @@ export type SelfUpdateView =
       readonly kind: "available";
       readonly version: string;
       readonly canUpdate: boolean;
+      /** "This evening" can be offered next to Update (the computer says so). */
+      readonly canLater: boolean;
+      readonly key: string;
+    }
+  | {
+      /** The owner said "This evening": a quiet line until the computer updates. */
+      readonly kind: "later";
+      readonly version: string;
+      /** The time has come: it updates as soon as nothing is running. */
+      readonly due: boolean;
+      readonly canUpdate: boolean;
       readonly key: string;
     }
   | { readonly kind: "updating"; readonly version: string | null; readonly step: string }
@@ -136,6 +178,8 @@ export function resolveSelfUpdateView(input: {
   readonly now: number;
   /** When this page was loaded: a page loaded after the update is already the new one. */
   readonly pageLoadedAt: number;
+  /** The computer lists "update-later" (httpFeatures); older ones keep the single Update. */
+  readonly supportsLater?: boolean;
 }): SelfUpdateView | null {
   const status = input.status;
   if (!status?.supported) return null;
@@ -159,10 +203,22 @@ export function resolveSelfUpdateView(input: {
     };
   }
   if (status.available && status.latestVersion) {
+    const later = input.supportsLater === true ? (status.later ?? null) : null;
+    if (later) {
+      const at = Date.parse(later.notBefore);
+      return {
+        kind: "later",
+        version: status.latestVersion,
+        due: !Number.isFinite(at) || at <= input.now,
+        canUpdate: status.canUpdate,
+        key: `later:${later.notBefore}`,
+      };
+    }
     return {
       kind: "available",
       version: status.latestVersion,
       canUpdate: status.canUpdate,
+      canLater: input.supportsLater === true && status.canUpdate && status.laterAvailable === true,
       key: `available:${status.latestVersion}`,
     };
   }
@@ -188,6 +244,11 @@ export const SELF_UPDATE_COPY = {
     `Version ${version}. Updating takes about two minutes; your chats and files stay as they are.`,
   notOwner: "The owner of this computer can update it from Uno Work.",
   update: "Update",
+  /** Next to "This evening" the button says when. */
+  updateNow: "Update now",
+  thisEvening: "This evening",
+  laterTitle: "Uno Work updates this evening, when nothing is running",
+  laterDueTitle: "Uno Work updates as soon as nothing is running",
   later: "Later",
   confirmTitle: (version: string) => `Update Uno Work to ${version}?`,
   confirmBody:

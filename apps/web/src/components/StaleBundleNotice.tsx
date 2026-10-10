@@ -4,7 +4,7 @@
  * (staleBundle.ts decides when and what a reload does).
  */
 import { HTTP_FEATURES } from "@t3tools/contracts";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -15,7 +15,13 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useServerConfig } from "../rpc/serverState";
-import { requestSelfUpdate, selfUpdateQueryKey } from "../selfUpdate/selfUpdate";
+import {
+  requestSelfUpdate,
+  requestSelfUpdateLater,
+  SELF_UPDATE_COPY,
+  selfUpdateQueryKey,
+  selfUpdateQueryOptions,
+} from "../selfUpdate/selfUpdate";
 import {
   currentStaleBundlePage,
   dismissStaleBundleNotice,
@@ -23,6 +29,7 @@ import {
   resolveStaleBundleNotice,
   STALE_BUNDLE_COPY as COPY,
 } from "../staleBundle";
+import { cn } from "../lib/utils";
 import { useStore } from "../store";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -41,11 +48,18 @@ export function StaleBundleNotice() {
   const [laterKey, setLaterKey] = useState<string | null>(null);
   const [updating, setUpdating] = useState<{ key: string; error: string | null } | null>(null);
   const queryClient = useQueryClient();
-
-  if (!environmentId) return null;
+  const page = currentStaleBundlePage();
   const isPrimary = primary?.environmentId === environmentId;
   const descriptor = isPrimary ? primary : (runtime?.descriptor ?? null);
-  const notice = resolveStaleBundleNotice(currentStaleBundlePage(), {
+  // One window: an older computer that takes "This evening" (httpFeatures
+  // "update-later") gets it here too — same answer, same query as the notice
+  // at the composer. Nowhere else is the status asked for from here.
+  const supportsLater =
+    page.uiFromOrigin && descriptorSupportsHttpFeature(descriptor, HTTP_FEATURES.updateLater);
+  const selfUpdate = useQuery(selfUpdateQueryOptions(environmentId, supportsLater)).data;
+
+  if (!environmentId) return null;
+  const notice = resolveStaleBundleNotice(page, {
     environmentId,
     isPrimary,
     unoBoxId: isPrimary
@@ -61,6 +75,10 @@ export function StaleBundleNotice() {
     supportsSelfUpdate: descriptorSupportsHttpFeature(descriptor, HTTP_FEATURES.selfUpdate),
   });
   if (!notice || laterKey === notice.key || isStaleBundleNoticeDismissed(notice.key)) return null;
+  // The owner already said "This evening" for this computer: nothing to ask.
+  if (notice.action.kind === "self-update" && supportsLater && selfUpdate?.later) return null;
+  const canLater =
+    notice.action.kind === "self-update" && supportsLater && selfUpdate?.laterAvailable === true;
 
   const label = runtime?.descriptor?.label ?? record?.label ?? primary?.label ?? "This computer";
   const action = notice.action;
@@ -101,12 +119,33 @@ export function StaleBundleNotice() {
     dismissStaleBundleNotice(notice.key);
     setLaterKey(notice.key);
   };
+  const thisEvening = () => {
+    const key = notice.key;
+    requestSelfUpdateLater(environmentId)
+      .then((status) => {
+        // The answer carries `later`: this notice goes, the quiet line shows.
+        queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
+      })
+      .catch((error: unknown) => {
+        setUpdating({
+          key,
+          error:
+            error instanceof Error && error.message
+              ? error.message
+              : "Couldn't start the update. Try again in a minute.",
+        });
+      });
+  };
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center px-3">
       <Alert
         variant="info"
-        className="pointer-events-auto w-full max-w-md bg-popover shadow-lg"
+        // Three actions need a little more room for the text beside them.
+        className={cn(
+          "pointer-events-auto w-full bg-popover shadow-lg",
+          canLater ? "max-w-xl" : "max-w-md",
+        )}
         data-testid="stale-bundle-notice"
         role="status"
       >
@@ -129,13 +168,24 @@ export function StaleBundleNotice() {
           <Button size="xs" variant="ghost" onClick={later}>
             {COPY.later}
           </Button>
+          {canLater ? (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={thisEvening}
+              disabled={updatingThis !== null && updatingThis.error === null}
+              data-testid="stale-bundle-notice-later"
+            >
+              {SELF_UPDATE_COPY.thisEvening}
+            </Button>
+          ) : null}
           <Button
             size="xs"
             onClick={run}
             disabled={updatingThis !== null && updatingThis.error === null}
             data-testid="stale-bundle-notice-action"
           >
-            {isUpdate ? COPY.update : COPY.reload}
+            {canLater ? SELF_UPDATE_COPY.updateNow : isUpdate ? COPY.update : COPY.reload}
           </Button>
         </AlertAction>
       </Alert>

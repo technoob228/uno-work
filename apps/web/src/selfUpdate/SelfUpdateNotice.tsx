@@ -5,7 +5,7 @@
  */
 import { type EnvironmentId, HTTP_FEATURES } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon } from "lucide-react";
+import { CircleCheckIcon, ClockIcon, DownloadIcon, TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "../branding";
@@ -30,6 +30,7 @@ import {
   dismissSelfUpdateNotice,
   isSelfUpdateNoticeDismissed,
   requestSelfUpdate,
+  requestSelfUpdateLater,
   resolveSelfUpdateView,
   SELF_UPDATE_COPY as COPY,
   selfUpdateQueryKey,
@@ -45,6 +46,8 @@ export interface SelfUpdateController {
   readonly starting: boolean;
   readonly startError: string | null;
   readonly askToUpdate: () => void;
+  /** "This evening": no confirmation — nothing happens right now. */
+  readonly updateLater: () => void;
   readonly dismiss: () => void;
   readonly reload: () => void;
   /** Mount once next to the notice: the confirmation dialog. */
@@ -54,6 +57,7 @@ export interface SelfUpdateController {
 export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateController {
   const queryClient = useQueryClient();
   const supported = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.selfUpdate);
+  const supportsLater = useEnvironmentSupportsHttpFeature(environmentId, HTTP_FEATURES.updateLater);
   const query = useQuery(selfUpdateQueryOptions(environmentId, supported));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
@@ -81,6 +85,25 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     },
   });
 
+  const laterMutation = useMutation({
+    mutationFn: () => {
+      if (!environmentId) throw new Error("No computer to update.");
+      return requestSelfUpdateLater(environmentId);
+    },
+    onMutate: () => setStartError(null),
+    onSuccess: (status: SelfUpdateStatus) => {
+      queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
+    },
+    onError: (error: unknown) => {
+      setStartError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Couldn't start the update. Try again in a minute.",
+      );
+      void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
+    },
+  });
+
   const view = useMemo(
     () =>
       resolveSelfUpdateView({
@@ -88,8 +111,9 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
         clientVersion: APP_VERSION,
         now: Date.now(),
         pageLoadedAt: PAGE_LOADED_AT,
+        supportsLater,
       }),
-    [query.data],
+    [query.data, supportsLater],
   );
   const key = view && "key" in view ? view.key : null;
   const dismissed =
@@ -110,7 +134,10 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     setDismissedKey(key);
   }, [environmentId, key]);
 
-  const version = view?.kind === "available" || view?.kind === "failed" ? view.version : null;
+  const version =
+    view?.kind === "available" || view?.kind === "later" || view?.kind === "failed"
+      ? view.version
+      : null;
   const dialog = (
     <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
       <AlertDialogPopup>
@@ -138,9 +165,10 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
   return {
     view,
     dismissed,
-    starting: mutation.isPending,
+    starting: mutation.isPending || laterMutation.isPending,
     startError,
     askToUpdate: () => setConfirmOpen(true),
+    updateLater: () => laterMutation.mutate(),
     dismiss,
     reload,
     dialog,
@@ -169,13 +197,46 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
         description:
           update.startError ?? (view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner),
         actions: view.canUpdate ? (
+          <>
+            {view.canLater ? (
+              <Button
+                size={size}
+                variant="outline"
+                data-testid="self-update-later-button"
+                disabled={update.starting}
+                onClick={update.updateLater}
+              >
+                {COPY.thisEvening}
+              </Button>
+            ) : null}
+            <Button
+              size={size}
+              data-testid="self-update-button"
+              disabled={update.starting}
+              onClick={update.askToUpdate}
+            >
+              {view.canLater ? COPY.updateNow : COPY.update}
+            </Button>
+          </>
+        ) : null,
+        dismissable: true,
+      };
+    case "later":
+      // The owner has answered: one quiet line, no body.
+      return {
+        variant: "info",
+        icon: <ClockIcon />,
+        title: view.due ? COPY.laterDueTitle : COPY.laterTitle,
+        description: update.startError ?? "",
+        actions: view.canUpdate ? (
           <Button
             size={size}
+            variant="outline"
             data-testid="self-update-button"
             disabled={update.starting}
             onClick={update.askToUpdate}
           >
-            {COPY.update}
+            {COPY.updateNow}
           </Button>
         ) : null,
         dismissable: true,
@@ -257,7 +318,8 @@ export function SelfUpdateCard(props: {
   const update = useSelfUpdate(props.environmentId);
   const parts = noticeParts(update, "sm");
   if (!parts) return null;
-  const keepVisible = props.persistent && update.view?.kind === "available";
+  const keepVisible =
+    props.persistent && (update.view?.kind === "available" || update.view?.kind === "later");
   if (parts.dismissable && update.dismissed && !keepVisible) return null;
   return (
     <>

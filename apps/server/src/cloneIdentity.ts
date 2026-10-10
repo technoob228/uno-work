@@ -28,6 +28,20 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
  */
 export const CLONE_IDENTITY_SIGNAL = "SIGUSR2";
 
+/**
+ * Told after a rotation: this daemon has just become a new computer (a clone
+ * of the image's snapshot). selfUpdateLaterScheduler.ts listens — a new
+ * computer nobody has opened yet installs the latest release right away.
+ */
+const cloneListeners = new Set<() => void>();
+
+export function onCloneIdentityRotated(listener: () => void): () => void {
+  cloneListeners.add(listener);
+  return () => {
+    cloneListeners.delete(listener);
+  };
+}
+
 export const rotateCloneIdentity = Effect.gen(function* () {
   const sessions = yield* SessionCredentialService;
   const environment = yield* ServerEnvironment;
@@ -43,6 +57,15 @@ export const rotateCloneIdentity = Effect.gen(function* () {
     return yield* Effect.failCause(signingKey.cause);
   }
   yield* Effect.logInfo("clone identity rotated in place (no daemon restart)");
+  yield* Effect.sync(() => {
+    for (const listener of cloneListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's trouble is not the rotation's.
+      }
+    }
+  });
 });
 
 export const CloneIdentityRotationLive = Layer.effectDiscard(

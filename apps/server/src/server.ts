@@ -27,8 +27,13 @@ import { UnoBoxIdentityLive } from "./unoBoxIdentity.ts";
 import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { EconomyPresenceLive } from "./economy/EconomyPresence.ts";
+import { UpdateLaterSchedulerLive } from "./selfUpdateLaterScheduler.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
-import { selfUpdateStartRouteLayer, selfUpdateStatusRouteLayer } from "./selfUpdateHttp.ts";
+import {
+  selfUpdateLaterRouteLayer,
+  selfUpdateStartRouteLayer,
+  selfUpdateStatusRouteLayer,
+} from "./selfUpdateHttp.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
@@ -436,8 +441,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       SelfWatchdogLive,
       // Economy mode: tells the console what is going on inside (clients,
       // agent turns, always-on apps, next reminder); needs auth sessions,
-      // providers and settings provided further down this pipe.
-      EconomyPresenceLive,
+      // providers and settings provided further down this pipe. "This evening"
+      // for an update reads the same signals ("is anything running here?").
+      UpdateLaterSchedulerLive.pipe(Layer.provideMerge(EconomyPresenceLive)),
       // Plugin runtime consumes the registry plus the orchestration engine
       // provided further down this pipe (same positioning as the manager).
       PluginRuntimeLive,
@@ -596,6 +602,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   officeEngineInstallRouteLayer,
   selfUpdateStatusRouteLayer,
   selfUpdateStartRouteLayer,
+  selfUpdateLaterRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeLoginRouteLayer,
   browserBridgeCommandResultRouteLayer,

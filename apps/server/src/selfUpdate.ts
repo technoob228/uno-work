@@ -23,8 +23,11 @@ import { compareCliVersions } from "@t3tools/contracts";
  * is used as input: no URL, no version, no command. The worst a stray request
  * can do is install the release the console already serves.
  *
- * Who may ask: only an owner session of this computer (see http.ts). There is
- * deliberately no agent tool for it.
+ * Who may ask: only an owner session of this computer (see http.ts) — now
+ * ("Update"), or for later ("This evening": the daemon then drops the same
+ * request itself once nothing is running, selfUpdateLater.ts). Without the
+ * owner's word the daemon never updates by itself. There is deliberately no
+ * agent tool for it.
  *
  * Paths come from the drop-in `uno-work.service.d/update.conf`. Without them
  * (desktop, dev, machines installed before 0.0.113) self-update is "not
@@ -191,6 +194,14 @@ export interface SelfUpdateStatus {
   readonly rolledBack: boolean;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
+  /**
+   * The owner said "This evening" (selfUpdateLater.ts): the computer updates
+   * by itself after `notBefore`, once nothing is running. Null — nobody asked.
+   * Filled in by the route (selfUpdateHttp.ts); absent on daemons before it.
+   */
+  readonly later?: { readonly version: string; readonly notBefore: string } | null;
+  /** "This evening" can be offered: the asking owner, an update that is out. */
+  readonly laterAvailable?: boolean;
 }
 
 export interface SelfUpdateDeps {
@@ -201,6 +212,8 @@ export interface SelfUpdateDeps {
 }
 
 export interface SelfUpdateController {
+  /** The installer set up self-update on this computer (0.0.113+). */
+  readonly supported: boolean;
   readonly status: (options: {
     readonly canUpdate: boolean;
     readonly refresh?: boolean;
@@ -209,6 +222,20 @@ export interface SelfUpdateController {
   readonly start: () => Promise<SelfUpdateStatus>;
   /** The last finished run, for the Security journal (see selfUpdateJournal.ts). */
   readonly lastRun: () => Promise<UpdaterStatus | null>;
+  /** The console's latest release (cached like `status`); null — not known. */
+  readonly latest: (refresh?: boolean) => Promise<LatestRelease | null>;
+  /**
+   * An update is asked for or running: the request file is there (not taken
+   * yet, or never — the .path unit is off) or the updater says "updating".
+   * Cheap: local reads, no network.
+   */
+  readonly inProgress: () => Promise<boolean>;
+  /**
+   * Drop the request file — the same one as `start` — without asking the
+   * console first: for the daemon acting on the owner's "This evening"
+   * (selfUpdateLater.ts), which has checked everything itself.
+   */
+  readonly request: () => Promise<void>;
 }
 
 export class SelfUpdateUnavailableError extends Error {
@@ -357,6 +384,15 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     return result({ state: "idle" });
   };
 
+  /** The file carries nothing the updater reads — only its existence matters. */
+  const writeRequest = async (requestFile: string) => {
+    // The directory is root's (install.sh): it is not ours to create.
+    await mkdir(dirname(requestFile), { recursive: true }).catch(() => undefined);
+    const temp = `${requestFile}.tmp`;
+    await writeFile(temp, `${new Date(now()).toISOString()}\n`);
+    await rename(temp, requestFile);
+  };
+
   const start: SelfUpdateController["start"] = async () => {
     const paths = deps.paths;
     if (!paths) {
@@ -367,18 +403,36 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     if (!current.available) {
       throw new SelfUpdateUnavailableError("Uno Work is already up to date.");
     }
-    // The file carries nothing the updater reads — only its existence matters.
-    // The directory is root's (install.sh): it is not ours to create.
-    await mkdir(dirname(paths.requestFile), { recursive: true }).catch(() => undefined);
-    const temp = `${paths.requestFile}.tmp`;
-    await writeFile(temp, `${new Date(now()).toISOString()}\n`);
-    await rename(temp, paths.requestFile);
+    await writeRequest(paths.requestFile);
     return status({ canUpdate: true });
   };
 
+  const inProgress: SelfUpdateController["inProgress"] = async () => {
+    const paths = deps.paths;
+    if (!paths) return false;
+    const [updater, requestedAt] = await Promise.all([
+      readUpdater(paths.statusFile),
+      requestTime(paths.requestFile),
+    ]);
+    if (requestedAt !== null) return true;
+    if (updater?.state !== "updating") return false;
+    const started = updater.startedAt ? Date.parse(updater.startedAt) : Number.NaN;
+    return !(Number.isFinite(started) && now() - started > STALE_UPDATE_MS);
+  };
+
   return {
+    supported: deps.paths !== null,
     status,
     start,
     lastRun: async () => (deps.paths ? readUpdater(deps.paths.statusFile) : null),
+    latest: (refresh = false) =>
+      deps.paths ? latestRelease(deps.paths.baseUrl, refresh) : Promise.resolve(null),
+    inProgress,
+    request: async () => {
+      if (!deps.paths) {
+        throw new SelfUpdateUnavailableError("This computer can't update Uno Work by itself.");
+      }
+      await writeRequest(deps.paths.requestFile);
+    },
   };
 }

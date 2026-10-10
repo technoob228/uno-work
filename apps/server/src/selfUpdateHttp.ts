@@ -3,10 +3,13 @@
  *
  *   GET  /api/self-update/status   any signed-in session — is there an update,
  *                                  how the running one is going;
- *   POST /api/self-update/start    OWNER session only, body `{"confirm":"update"}`.
+ *   POST /api/self-update/start    OWNER session only, body `{"confirm":"update"}`;
+ *   POST /api/self-update/later    OWNER session only, body
+ *                                  `{"confirm":"later","notBefore":"<ISO time>"}` —
+ *                                  "This evening" (selfUpdateLater.ts).
  *
  * There is no other way to ask for an update: no WS method, no agent tool, no
- * bridge-token route. The POST wants a JSON body, so a page on another origin
+ * bridge-token route. The POSTs want a JSON body, so a page on another origin
  * cannot send it without a CORS preflight (which only our origins pass).
  */
 import { Effect } from "effect";
@@ -28,6 +31,15 @@ import {
   reportSelfUpdate,
   reportSelfUpdateAfterStart,
 } from "./selfUpdateJournal.ts";
+import {
+  clampNotBefore,
+  clearUpdateLater,
+  economySignalsFor,
+  readUpdateLater,
+  setUpdateLaterEconomySignals,
+  statusWithLater,
+  writeUpdateLater,
+} from "./selfUpdateLater.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { controlPlaneBaseUrl } from "./workspaceRegistry/unoCloudParse.ts";
 
@@ -76,8 +88,12 @@ export const selfUpdateStatusRouteLayer = HttpRouter.add(
     const serverAuth = yield* ServerAuth;
     const session = yield* serverAuth.authenticateHttpRequest(request);
     const refresh = (request.url.split("?")[1] ?? "").split("&").includes("refresh=1");
-    const status = yield* Effect.promise(() =>
-      selfUpdateController().status({ canUpdate: session.role === "owner", refresh }),
+    const config = yield* ServerConfig;
+    const status = yield* Effect.promise(async () =>
+      statusWithLater(
+        await selfUpdateController().status({ canUpdate: session.role === "owner", refresh }),
+        await readUpdateLater(config.stateDir),
+      ),
     );
     // A finished run the console has not heard about yet: tell it in the background.
     if (status.supported && (status.state === "done" || status.state === "failed")) {
@@ -119,7 +135,11 @@ export const selfUpdateStartRouteLayer = HttpRouter.add(
       try {
         // The note first: the updater may start before `start()` returns.
         await noteSelfUpdateIntent(config.stateDir).catch(() => undefined);
-        return { ok: true as const, status: await update.start() };
+        const status = await update.start();
+        // "Now" replaces an earlier "This evening".
+        await clearUpdateLater(config.stateDir);
+        setUpdateLaterEconomySignals(economySignalsFor(null, null, Date.now()));
+        return { ok: true as const, status };
       } catch (cause) {
         const conflict = cause instanceof SelfUpdateUnavailableError;
         return {
@@ -143,5 +163,80 @@ export const selfUpdateStartRouteLayer = HttpRouter.add(
       to: started.status.latestVersion,
     });
     return HttpServerResponse.jsonUnsafe(started.status, { status: 202, headers: NO_STORE });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const selfUpdateLaterRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/self-update/later",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const session = yield* serverAuth.authenticateHttpRequest(request);
+    if (session.role !== "owner") {
+      return yield* new AuthError({
+        message: "Only the owner of this computer can update Uno Work.",
+        status: 403,
+      });
+    }
+    const contentType = request.headers["content-type"] ?? "";
+    const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+    const now = Date.now();
+    const record =
+      contentType.toLowerCase().startsWith("application/json") &&
+      typeof body === "object" &&
+      body !== null
+        ? (body as Record<string, unknown>)
+        : null;
+    const notBefore =
+      record?.["confirm"] === "later" ? clampNotBefore(record["notBefore"], now) : null;
+    if (notBefore === null) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: 'Expected the JSON body {"confirm":"later","notBefore":"<ISO time>"}.' },
+        { status: 400, headers: NO_STORE },
+      );
+    }
+    const config = yield* ServerConfig;
+    const update = selfUpdateController();
+    const current = yield* Effect.promise(async () =>
+      statusWithLater(await update.status({ canUpdate: true, refresh: true }), null),
+    );
+    if (current.state === "updating") {
+      // Already on its way: nothing to book.
+      return HttpServerResponse.jsonUnsafe(current, { status: 200, headers: NO_STORE });
+    }
+    if (!current.supported || !current.laterAvailable || !current.latestVersion) {
+      const message = !current.supported
+        ? "This computer can't update Uno Work by itself."
+        : current.available
+          ? "This version didn't start on this computer. Use Update to try it again."
+          : "Uno Work is already up to date.";
+      return HttpServerResponse.jsonUnsafe({ error: message }, { status: 409, headers: NO_STORE });
+    }
+    const later = { version: current.latestVersion, notBefore };
+    const saved = yield* Effect.promise(() =>
+      writeUpdateLater(config.stateDir, later).then(
+        () => true,
+        () => false,
+      ),
+    );
+    if (!saved) {
+      yield* Effect.logError("self-update: could not keep 'this evening'");
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Couldn't start the update. Try again in a minute." },
+        { status: 500, headers: NO_STORE },
+      );
+    }
+    // The alarm goes to the console with the next economy report (≤ 10 s).
+    setUpdateLaterEconomySignals(economySignalsFor(later, null, now));
+    yield* Effect.logInfo("self-update: the owner said 'this evening'", {
+      from: current.currentVersion,
+      to: later.version,
+      notBefore,
+    });
+    return HttpServerResponse.jsonUnsafe(statusWithLater(current, later), {
+      status: 200,
+      headers: NO_STORE,
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
