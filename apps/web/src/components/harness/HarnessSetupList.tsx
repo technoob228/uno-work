@@ -240,13 +240,7 @@ export function HarnessSetupList({
           driver={signInDriver}
           label={getDriverOption(signInDriver as ProviderDriverKind)?.label ?? signInDriver}
           job={setup.authJobs[signInDriver]}
-          onStart={({ method, apiKey }) =>
-            void setup.startAuth({
-              driver: signInDriver,
-              method,
-              ...(apiKey ? { apiKey } : {}),
-            })
-          }
+          onStart={(input) => void setup.startAuth({ driver: signInDriver, ...input })}
           onSubmitCode={(code) => void setup.submitAuthCode({ driver: signInDriver, code })}
           onReset={() => setup.clearAuth(signInDriver)}
         />

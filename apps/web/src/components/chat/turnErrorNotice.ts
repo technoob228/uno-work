@@ -11,18 +11,57 @@
  * fewer agents in parallel") and is not shown to the person.
  */
 
-export type TurnErrorKind = "busy" | "no-answer" | "other";
+export type TurnErrorKind = "busy" | "no-answer" | "subscription-limit" | "other";
 
 export interface TurnErrorNotice {
   readonly kind: TurnErrorKind;
   /** Seconds the gateway asked to wait before the retry ("busy" only). */
   readonly retryAfterSeconds: number;
+  /**
+   * "subscription-limit" only: when the person's own Claude / ChatGPT plan
+   * says it resets ("3pm", "3:42 PM", "Oct 9, 5pm"), as the provider wrote it.
+   */
+  readonly resetsAt?: string;
 }
 
 export const BUSY_DEFAULT_RETRY_SECONDS = 10;
 const BUSY_MAX_RETRY_SECONDS = 120;
 /** After an automatic retry, the next "busy" within this window is "still busy". */
 export const BUSY_AUTO_RETRY_COOLDOWN_MS = 3 * 60_000;
+
+/**
+ * The person's own Claude / ChatGPT subscription is out of its 5-hour or
+ * weekly allowance. Not "busy" (a retry in 10 s fails the same way) and not
+ * Uno's AI time: the words come from Claude Code and Codex themselves. Checked
+ * before BUSY_PATTERNS — "rate limit … reached" would match there too.
+ */
+const SUBSCRIPTION_LIMIT_PATTERNS: ReadonlyArray<RegExp> = [
+  // Claude Code: "Claude AI usage limit reached|1760032800", "Claude usage limit reached.
+  // Your limit will reset at 3pm", "5-hour limit reached ∙ resets 3pm", "Weekly limit reached".
+  /\bclaude(?: ai)? usage limit reached\b/i,
+  /\b(?:5-hour|five-hour|weekly|opus weekly|opus|session|daily) limit reached\b/i,
+  /\byour limit will reset\b/i,
+  // Both: "You've hit your limit · resets 3pm", Codex: "You've hit your usage limit. … try again at 3:42 PM."
+  /\byou(?:'|’)ve hit your (?:usage )?limit\b/i,
+  // Codex error code.
+  /\busage_limit_(?:reached|exceeded)\b/i,
+];
+
+function subscriptionResetsAt(error: string): string | undefined {
+  // Claude Code's old form ends with the reset moment in epoch seconds.
+  const epoch = /limit reached\|(\d{10})\b/i.exec(error);
+  if (epoch) {
+    const date = new Date(Number(epoch[1]) * 1000);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+  }
+  const said =
+    /\btry again at ([0-9]{1,2}(?::[0-9]{2})?\s*(?:[ap]\.?m\.?)?)/i.exec(error) ??
+    /\bresets?(?: at| on)? ([^·∙|.()\n]{2,24}?)\s*(?:\(|[.·∙|]|$)/i.exec(error);
+  const value = said?.[1]?.trim().replace(/\.$/, "");
+  return value && value.length > 0 ? value : undefined;
+}
 
 const BUSY_PATTERNS: ReadonlyArray<RegExp> = [
   /uno ai is busy for you/i,
@@ -54,6 +93,10 @@ function retryAfter(error: string): number {
 }
 
 export function classifyTurnError(error: string): TurnErrorNotice {
+  if (SUBSCRIPTION_LIMIT_PATTERNS.some((pattern) => pattern.test(error))) {
+    const resetsAt = subscriptionResetsAt(error);
+    return { kind: "subscription-limit", retryAfterSeconds: 0, ...(resetsAt ? { resetsAt } : {}) };
+  }
   if (BUSY_PATTERNS.some((pattern) => pattern.test(error))) {
     return { kind: "busy", retryAfterSeconds: retryAfter(error) };
   }
@@ -69,6 +112,10 @@ export const TURN_ERROR_COPY = {
   busyNoRetry: "Uno is busy with your other tasks. Try again in a few seconds.",
   stillBusy: "Uno is still busy. Try again in a minute.",
   noAnswer: "Uno AI didn't answer this time. Nothing is lost.",
+  /** "Your Claude subscription hit its limit — try again at 3pm, or continue on Uno AI." */
+  subscriptionLimit: (plan: string, resetsAt: string | undefined, canUseUnoAi: boolean) =>
+    `Your ${plan} subscription hit its limit — try again ${resetsAt ? `at ${resetsAt}` : "when it resets"}${canUseUnoAi ? ", or continue in a new chat on Uno AI" : ""}. Nothing is lost.`,
+  newChatOnUnoAi: "New chat on Uno AI",
   retryNow: "Try again now",
   retry: "Try again",
   retrying: "Trying again…",

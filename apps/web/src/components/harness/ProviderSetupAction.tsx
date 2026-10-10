@@ -112,9 +112,7 @@ export function ProviderSetupAction({
             driver={driver}
             label={getDriverOption(driver)?.label ?? String(driver)}
             job={setup.authJobs[driver]}
-            onStart={({ method, apiKey }) =>
-              void setup.startAuth({ driver, method, ...(apiKey ? { apiKey } : {}) })
-            }
+            onStart={(input) => void setup.startAuth({ driver, ...input })}
             onSubmitCode={(code) => void setup.submitAuthCode({ driver, code })}
             onReset={() => setup.clearAuth(driver)}
           />

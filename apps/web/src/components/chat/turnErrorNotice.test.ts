@@ -34,6 +34,38 @@ describe("classifyTurnError", () => {
     expect(classifyTurnError("502 Bad Gateway").kind).toBe("no-answer");
   });
 
+  it("tells the person's own subscription limit apart from 'busy'", () => {
+    const codex = classifyTurnError(
+      "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:42 PM.",
+    );
+    expect(codex).toEqual({
+      kind: "subscription-limit",
+      retryAfterSeconds: 0,
+      resetsAt: "3:42 PM",
+    });
+    expect(classifyTurnError("5-hour limit reached ∙ resets 3pm")).toMatchObject({
+      kind: "subscription-limit",
+      resetsAt: "3pm",
+    });
+    expect(
+      classifyTurnError(
+        "Claude usage limit reached. Your limit will reset at 3pm (America/Buenos_Aires).",
+      ),
+    ).toMatchObject({ kind: "subscription-limit", resetsAt: "3pm" });
+    expect(classifyTurnError("You've hit your limit · resets Oct 9, 5pm").resetsAt).toBe(
+      "Oct 9, 5pm",
+    );
+    const epoch = classifyTurnError("Claude AI usage limit reached|1760032800");
+    expect(epoch.kind).toBe("subscription-limit");
+    expect(epoch.resetsAt).toMatch(/\d/);
+    expect(classifyTurnError('{"type":"usage_limit_reached"}')).toEqual({
+      kind: "subscription-limit",
+      retryAfterSeconds: 0,
+    });
+    // Uno's own busy line and a plain 429 stay "busy".
+    expect(classifyTurnError("Rate limit exceeded, try again in 20 s").kind).toBe("busy");
+  });
+
   it("leaves everything else alone", () => {
     expect(classifyTurnError("Provider session did not survive a server restart.").kind).toBe(
       "other",

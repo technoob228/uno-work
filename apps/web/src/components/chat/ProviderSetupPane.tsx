@@ -225,9 +225,7 @@ function SignInPane(props: {
         key={driver}
         driver={driver}
         job={job}
-        onStart={({ method, apiKey }) =>
-          void setup.startAuth({ driver, method, ...(apiKey ? { apiKey } : {}) })
-        }
+        onStart={(input) => void setup.startAuth({ driver, ...input })}
         onSubmitCode={(code) => void setup.submitAuthCode({ driver, code })}
         onReset={() => setup.clearAuth(driver)}
       />
