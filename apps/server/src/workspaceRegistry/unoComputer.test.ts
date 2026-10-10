@@ -23,6 +23,7 @@ import {
   openComputerApp,
   computerAppAccess,
   REMOVE_NEEDS_CONSOLE_UPDATE,
+  workAppNotes,
   type KnownInstall,
 } from "./unoComputer.ts";
 
@@ -440,6 +441,29 @@ describe("installComputerApp", () => {
   });
 });
 
+describe("where an app's password is (icp3 09.10)", () => {
+  it("says above the app, not on the app card", () => {
+    expect(
+      workAppNotes(
+        "The password is on the app card. Meetings are saved in Files → Meetings.",
+        null,
+      ),
+    ).toBe(
+      "The password is above the app when you open it (Show · Copy). Meetings are saved in Files → Meetings.",
+    );
+    expect(workAppNotes("Sign in with the login and password from the app card.", null)).toBe(
+      "Sign in with the login and password shown above the app when you open it (Show · Copy).",
+    );
+  });
+
+  it("leaves apps that sign in with Uno as they are (no password bar there)", () => {
+    expect(workAppNotes("Or the login and password on the app card.", "oidc")).toBe(
+      "Or the login and password on the app card.",
+    );
+    expect(workAppNotes(null, null)).toBeNull();
+  });
+});
+
 describe("App Store 0.0.71", () => {
   it("reads choices, show_if and required from the catalog", () => {
     const [t] = parseAppTemplates({
@@ -464,7 +488,8 @@ describe("App Store 0.0.71", () => {
         },
       ],
     });
-    expect(t?.notes).toBe("Your login is on the app card.");
+    // Work shows an app's password above the app, not on a card (icp3 09.10).
+    expect(t?.notes).toBe("Your login is above the app when you open it (Show · Copy).");
     expect(t?.settings[0]?.options).toEqual([
       { value: "disk", label: "On this computer's disk" },
       { value: "s3", label: "In S3" },

@@ -149,6 +149,23 @@ function DoneButton({ onDone, label }: { onDone: () => Promise<void>; label: str
 const CARD_CLASS =
   "group/continue flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-2xl border border-border/70 bg-card/40 p-3.5 text-left transition-colors hover:bg-accent/40";
 
+/** The chats (and notifications) the simple Home's "In progress" widget would show. */
+function continueThreads(threads: HomeThread[], withoutWaiting: boolean): HomeThread[] {
+  return withoutWaiting
+    ? threads.filter((thread) => !thread.hasPendingApprovals && !thread.hasPendingUserInput)
+    : threads;
+}
+
+/** Whether "In progress" has anything in it (no empty widget on the simple Home). */
+export function useHasContinueItems(
+  threads: HomeThread[],
+  now: number,
+  withoutWaiting = false,
+): boolean {
+  const inbox = useInboxEntries();
+  return pickContinueItems(continueThreads(threads, withoutWaiting), inbox, { now }).length > 0;
+}
+
 /**
  * What needs the person or is worth picking up: chats and unread app
  * notifications (the same items as the Inbox), most urgent first. Done
@@ -217,13 +234,7 @@ export function ContinueCards({
   const open = useOpenThread();
   const openItem = useOpenInboxItem();
   const inbox = useInboxEntries();
-  const cards = pickContinueItems(
-    withoutWaiting
-      ? threads.filter((thread) => !thread.hasPendingApprovals && !thread.hasPendingUserInput)
-      : threads,
-    inbox,
-    { now },
-  );
+  const cards = pickContinueItems(continueThreads(threads, withoutWaiting), inbox, { now });
   if (cards.length === 0) {
     if (hideWhenEmpty) return null;
     return (

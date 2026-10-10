@@ -145,13 +145,13 @@ export function SidebarWorkspaceSwitcher({
     void navigate({ to: "/" });
   };
 
-  const triggerTitle = currentWorkspace?.name ?? (isLoading ? "Loading machines…" : "Machines");
+  const triggerTitle = currentWorkspace?.name ?? (isLoading ? "Loading computers…" : "Computers");
   const machineCount = currentWorkspace?.machines.length ?? 0;
   const triggerSubtitle = currentMachine
     ? `${currentMachine.machine.label} · 1 of ${machineCount}`
     : currentWorkspace
-      ? `all machines · ${machineCount} ${machineCount === 1 ? "machine" : "machines"}`
-      : "No machines yet";
+      ? `all computers · ${machineCount} ${machineCount === 1 ? "computer" : "computers"}`
+      : "No computers yet";
 
   return (
     <>
@@ -167,7 +167,7 @@ export function SidebarWorkspaceSwitcher({
                     ? "h-8 px-2 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                     : "border border-border bg-background px-2 py-1.5 hover:bg-accent",
                 )}
-                aria-label="Switch machine"
+                aria-label="Switch computer"
                 title={variant === "compact" ? `${triggerTitle} · ${triggerSubtitle}` : undefined}
               >
                 <LayersIcon className="size-3.5 shrink-0 text-primary" />
@@ -191,7 +191,7 @@ export function SidebarWorkspaceSwitcher({
           />
           <MenuPopup align="start" side="top" sideOffset={6} className="min-w-[17rem] p-1">
             <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              My machines
+              My computers
             </div>
             {workspaces.map((workspace) => {
               const isCurrent = workspace.workspaceId === currentWorkspace?.workspaceId;
@@ -210,7 +210,7 @@ export function SidebarWorkspaceSwitcher({
                     <div className="truncate font-medium">{workspace.name}</div>
                     <div className="truncate text-[10px] text-muted-foreground">
                       {workspace.machines.length}{" "}
-                      {workspace.machines.length === 1 ? "machine" : "machines"}
+                      {workspace.machines.length === 1 ? "computer" : "computers"}
                       {workspace.unreachableCount > 0
                         ? ` · ${workspace.unreachableCount} not connected`
                         : ""}
@@ -224,7 +224,7 @@ export function SidebarWorkspaceSwitcher({
             })}
             {workspaces.length === 0 ? (
               <div className="px-2 py-2 text-xs text-muted-foreground">
-                {isLoading ? "Looking for machines…" : "No machines found yet."}
+                {isLoading ? "Looking for computers…" : "No computers found yet."}
               </div>
             ) : null}
 
@@ -232,7 +232,7 @@ export function SidebarWorkspaceSwitcher({
               <>
                 <div className="my-1 h-px bg-border" />
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Machines
+                  Computers
                 </div>
                 {currentWorkspace.machines.map((entry) => {
                   const kind =
@@ -308,7 +308,7 @@ export function SidebarWorkspaceSwitcher({
                               ? `Stop using ${entry.machine.label} as the default machine`
                               : `Make ${entry.machine.label} the default machine`
                           }
-                          title={isDefault ? "Default machine" : "Make this the default machine"}
+                          title={isDefault ? "Default computer" : "Make this the default computer"}
                           className={cn(
                             "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
                             isDefault
@@ -335,7 +335,7 @@ export function SidebarWorkspaceSwitcher({
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
             >
               <SettingsIcon className="size-3.5" />
-              <span>Manage my machines…</span>
+              <span>Manage my computers…</span>
             </button>
             <button
               type="button"
@@ -343,7 +343,7 @@ export function SidebarWorkspaceSwitcher({
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-primary transition-colors hover:bg-primary/8"
             >
               <PlusIcon className="size-3.5" />
-              <span>Add a machine</span>
+              <span>Add a computer</span>
             </button>
           </MenuPopup>
         </Menu>
@@ -357,8 +357,8 @@ export function SidebarWorkspaceSwitcher({
                 : "size-9 border border-border bg-background hover:bg-accent",
             )}
             disabled={isReconnectingCurrent}
-            title="Reconnect machine"
-            aria-label="Reconnect machine"
+            title="Reconnect computer"
+            aria-label="Reconnect computer"
             onClick={() => {
               if (currentEnvironmentId) void reconnect(currentEnvironmentId);
             }}

@@ -14,6 +14,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
   HouseIcon,
+  KeyRoundIcon,
   Maximize2Icon,
   Minimize2Icon,
   PanelRightIcon,
@@ -30,6 +31,8 @@ import { useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { useProgramTiles } from "../computer/useProgramTiles";
+import { CopyButton } from "../computer/computerUi";
+import type { ProgramTile } from "../computer/programModel";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
@@ -189,6 +192,7 @@ export function AppView() {
             </div>
           ) : null}
         </header>
+        {known ? <AppPasswordBar tile={tile} /> : null}
         <div className="relative min-h-0 flex-1">{frame}</div>
       </div>
     </SidebarInset>
@@ -264,6 +268,45 @@ function Notice({ title, children }: { title: string; children: ReactNode }) {
         <h2 className="text-base font-semibold text-foreground">{title}</h2>
         <div className="mt-2 text-sm leading-relaxed text-muted-foreground">{children}</div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The password Uno made for an App Store app with its own sign-in, right above
+ * the app — where it asks for it. It used to be only on the app's card behind
+ * a hover-only "ⓘ" on Home; the app said "Enter the password from the app card
+ * in Uno Work" and nothing on the way showed it (icp3 09.10, Notetaker). Apps
+ * that sign in with Uno have no bar: Open signs you in.
+ */
+function AppPasswordBar({ tile }: { tile: ProgramTile | null }) {
+  const [shown, setShown] = useState(false);
+  const store = tile?.storeApp ?? null;
+  const password = store?.sso ? null : (store?.credentials ?? []).find((c) => c.secret && !c.link);
+  if (!password) return null;
+  const login = (store?.credentials ?? []).find((c) => !c.secret && !c.link) ?? null;
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-muted/40 px-3 py-1.5 text-xs"
+      data-testid="app-password-bar"
+    >
+      <KeyRoundIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="text-muted-foreground">
+        Sign in with the password Uno made for this app
+        {login ? (
+          <>
+            {" "}
+            · {login.label} <span className="font-mono text-foreground">{login.value}</span>
+          </>
+        ) : null}
+      </span>
+      <span className="font-mono text-foreground">{shown ? password.value : "•".repeat(12)}</span>
+      <span className="flex items-center gap-0.5">
+        <Button size="xs" variant="ghost" onClick={() => setShown((value) => !value)}>
+          {shown ? "Hide" : "Show"}
+        </Button>
+        <CopyButton value={password.value} label={password.label.toLowerCase()} />
+      </span>
     </div>
   );
 }

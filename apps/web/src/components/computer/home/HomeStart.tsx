@@ -16,6 +16,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
   ChevronDownIcon,
+  ListChecksIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -28,7 +29,6 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { getLocalStorageItem, useLocalStorage } from "../../../hooks/useLocalStorage";
 import { accountReachable } from "../../myuno/myUnoQueries";
 import { Button } from "../../ui/button";
-import { toastManager } from "../../ui/toast";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
@@ -47,6 +47,7 @@ import {
   NeedsYouPill,
   NeedsYouWidget,
   RecentChatsWidget,
+  useHasContinueItems,
   useHomeThreads,
 } from "./HomeThreads";
 import {
@@ -69,19 +70,18 @@ import {
   HOME_FIXED_BLOCKS,
   HOME_LAYOUT_KEY,
   HOME_LAYOUT_V2_KEY,
+  HOME_LAYOUT_V3_KEY,
+  IN_PROGRESS_BLOCK,
   HOME_WIDGETS_V1_KEY,
   appIdOfBlock,
   appWidgetBlockId,
   appWidgetSpan,
   customWidgetIdeas,
-  hideInProgress,
   homeLayoutReducer,
-  inProgressShown,
   isAppWidgetBlockId,
   isHomeFixedBlockId,
   migrateHomeLayout,
   normalizeHomeLayout,
-  showInProgress,
   type HomeBlockId,
   type HomeLayoutAction,
 } from "./homeLayout";
@@ -146,10 +146,11 @@ export const HOME_PLACE_LINE =
 
 /** The layout (per device) and the Customize mode. */
 export function useHomeLayout() {
-  // Migration from the 0.0.82 layout (or the 0.0.81 widget list) happens once,
-  // when there's no v3 layout yet.
+  // Migration from the 0.0.104 / 0.0.82 layout (or the 0.0.81 widget list)
+  // happens once, when there's no v4 layout yet.
   const [initial] = useState(() =>
     migrateHomeLayout(
+      readStored(HOME_LAYOUT_V3_KEY) ?? undefined,
       readStored(HOME_LAYOUT_V2_KEY) ?? undefined,
       readStored(HOME_WIDGETS_V1_KEY) ?? undefined,
     ),
@@ -224,6 +225,7 @@ export function HomeStart({
   onAskUno: (prompt: string) => Promise<void>;
 }) {
   const { threads, now } = useHomeThreads();
+  const hasInProgress = useHasContinueItems(threads, now, true);
   const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
   // 01.10: the simple start screen unless Dev mode is on.
   const devMode = useDevMode();
@@ -331,12 +333,14 @@ export function HomeStart({
   );
 
   const metaOf = (id: HomeBlockId): WidgetMeta => {
-    // The simple Home calls the continue block "In progress" (its Hide says so too).
-    if (id === "continue" && !devMode) {
+    // The simple Home's "In progress": a widget card like the others (Misha
+    // 09.10) — × in Customize hides it, Add widget brings it back.
+    if (id === IN_PROGRESS_BLOCK && !devMode) {
       return {
-        ...HOME_FIXED_BLOCK_META.continue,
         title: "In progress",
         description: "The chats Uno and your agents are working on",
+        icon: <ListChecksIcon />,
+        span: 4,
       };
     }
     if (isHomeFixedBlockId(id)) return HOME_FIXED_BLOCK_META[id];
@@ -462,6 +466,18 @@ export function HomeStart({
           ),
         };
       case "continue":
+        if (!devMode) {
+          return {
+            body: (
+              <ContinueCards
+                threads={threads}
+                now={now}
+                withoutWaiting
+                hideWhenEmpty={!layout.editing}
+              />
+            ),
+          };
+        }
         return {
           body: (
             <div className="flex flex-col gap-4">
@@ -483,7 +499,10 @@ export function HomeStart({
     ).filter((starter) => starter.source !== "generic");
     const simpleStarters =
       personalStarters.length > 0 ? personalStarters.slice(0, 3) : FIRST_SCREEN_EXAMPLES;
-    const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
+    // In progress sits with the widgets; empty, it shows only in Customize.
+    const widgetBlocks = shown.filter((id) =>
+      id === IN_PROGRESS_BLOCK ? layout.editing || hasInProgress : !isHomeFixedBlockId(id),
+    );
     const waiting = attentionThreads(threads, now);
     // A newcomer (no chats yet) gets one box, the pills and one quiet line, nothing else:
     // no greeting, next step, empty sections, widgets or Customize.
@@ -647,42 +666,6 @@ export function HomeStart({
             <NeedsYouWidget threads={threads} now={now} />
           </section>
         ) : null}
-        {/* No empty "In progress": the section shows only with something in it.
-            A widget like the others (Misha 08.10): "Hide" takes it off Home,
-            Customize → Add widget brings it back; the choice is the layout's. */}
-        {inProgressShown(layout.blocks) ? (
-          <section
-            className="hidden flex-col gap-2 has-[[data-testid=home-continue]]:flex"
-            data-testid="home-in-progress"
-          >
-            <div className="flex items-center gap-2">
-              <HomeSectionTitle>In progress</HomeSectionTitle>
-              <button
-                type="button"
-                onClick={() => {
-                  layout.dispatch(hideInProgress());
-                  toastManager.add({
-                    type: "success",
-                    title: "In progress is off Home",
-                    description: "Customize → Add widget brings it back.",
-                    actionProps: {
-                      children: "Undo",
-                      onClick: () => layout.dispatch(showInProgress()),
-                    },
-                  });
-                }}
-                aria-label="Hide In progress from Home"
-                data-testid="home-in-progress-hide"
-                className="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <XIcon className="size-3" />
-                Hide
-              </button>
-            </div>
-            <ContinueCards threads={threads} now={now} withoutWaiting hideWhenEmpty />
-          </section>
-        ) : null}
-
         {layout.editing ? (
           <div
             className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/50 px-3 py-2"
