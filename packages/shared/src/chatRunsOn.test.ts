@@ -39,10 +39,12 @@ describe("what a chat runs on", () => {
     expect(
       chatRunsOn({ provider: provider("claudeAgent", { status: "authenticated", type: "max" }) }),
     ).toBe("claude-plan");
-    // Signed in, the probe found no plan name: still their own account.
-    expect(chatRunsOn({ provider: provider("claudeAgent", { status: "authenticated" }) })).toBe(
-      "claude-plan",
-    );
+    // "authenticated" with no account behind it (a computer without an Uno
+    // key reports it for a Claude nobody signed in to): not a subscription.
+    expect(
+      chatRunsOn({ provider: provider("claudeAgent", { status: "authenticated" }) }),
+    ).toBeNull();
+    expect(chatRunsOn({ provider: provider("codex", { status: "authenticated" }) })).toBeNull();
     // Claude Code on Uno AI (paid plans, no sign-in): Uno's money, not "your plan".
     expect(
       chatRunsOn({ provider: provider("claudeAgent", { status: "authenticated", type: "unoAi" }) }),

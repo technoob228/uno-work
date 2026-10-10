@@ -30,7 +30,11 @@ import {
   type ChatRunsOn,
 } from "@t3tools/shared/chatRunsOn";
 
-import { isUsableForDefault, resolveModel } from "../provider/autoBootstrapModelSelection.ts";
+import {
+  isUsableForDefault,
+  resolveModel,
+  selectAutoBootstrapModelSelection,
+} from "../provider/autoBootstrapModelSelection.ts";
 
 /** Subscriptions Uno may put heavy work on, in the order they are tried. */
 const SUBSCRIPTION_DRIVERS: ReadonlyArray<{
@@ -91,10 +95,12 @@ export function ownSubscriptions(
 }
 
 /**
- * True when the daemon KNOWS a chat on this selection can't run now: its
- * harness is off, not installed, or not signed in. An instance the registry
- * doesn't list, or one whose sign-in couldn't be verified, is left alone —
- * no signal, no interference.
+ * True when the daemon KNOWS a Claude Code / Codex chat on this selection
+ * can't run now: the harness is off, not installed, or not signed in. Only
+ * these two — the harnesses a person signs in to — are judged: an instance
+ * the registry doesn't list, one whose sign-in couldn't be verified, and
+ * every other harness (Hermes runs the assistant even when it is hidden
+ * from the pickers) are left alone — no signal, no interference.
  */
 export function isKnownUnrunnable(
   selection: Pick<ModelSelection, "instanceId">,
@@ -102,6 +108,7 @@ export function isKnownUnrunnable(
 ): boolean {
   const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
   if (provider === undefined) return false;
+  if (!SUBSCRIPTION_DRIVERS.some((entry) => entry.driver === provider.driver)) return false;
   return (
     !isProviderAvailable(provider) ||
     !provider.enabled ||
@@ -115,10 +122,13 @@ export function isKnownUnrunnable(
  * What a chat the Uno assistant starts runs on.
  *
  *  - Uno named a selection this computer can run → that one.
- *  - Uno named none, or one the daemon knows can't run (Claude without a
- *    sign-in): the owner's signed-in subscription (the account's default AI
+ *  - Uno named none, or Claude Code / Codex that the daemon knows can't run
+ *    (not signed in): the owner's signed-in subscription (the account's default AI
  *    first, then Claude, then ChatGPT); with no subscription, the account's
  *    default AI when it is usable here (as before 10.10).
+ *  - Uno named a harness that can't run and none of the above is there:
+ *    whatever this computer can run (Uno AI first — the same pick as a new
+ *    project's default).
  *  - Nothing of that → null: the caller keeps what Uno named, else the
  *    project's default.
  */
@@ -133,11 +143,17 @@ export function pickSpawnSelection(input: {
   const defaultHarness = harnessForAccountDefaultAi(input.defaultAi);
   const subscription = ownSubscriptions(providers, defaultHarness)[0];
   if (subscription !== undefined) return subscription.modelSelection;
-  if (defaultHarness === null) return null;
-  const provider = providers.find((entry) => entry.instanceId === defaultHarness);
-  if (provider === undefined || !isUsableForDefault(provider)) return null;
-  const model = resolveModel(provider);
-  return model === null ? null : { instanceId: provider.instanceId, model };
+  const provider =
+    defaultHarness === null
+      ? undefined
+      : providers.find((entry) => entry.instanceId === defaultHarness);
+  if (provider !== undefined && isUsableForDefault(provider)) {
+    const model = resolveModel(provider);
+    if (model !== null) return { instanceId: provider.instanceId, model };
+  }
+  // Uno named a harness that can't run and the account says nothing usable:
+  // what this computer can run (Uno AI first) beats a chat that only errors.
+  return requested === null ? null : selectAutoBootstrapModelSelection(providers);
 }
 
 /** A subscription harness the owner could sign in to, and isn't. */

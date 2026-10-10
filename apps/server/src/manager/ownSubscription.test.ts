@@ -85,6 +85,11 @@ describe("the owner's subscription, from what the daemon's probes found", () => 
   it("Claude Code on Uno AI, an API key, a signed-out or switched-off harness are not it", () => {
     expect(ownSubscriptions([claudeOnUnoAi])).toEqual([]);
     expect(ownSubscriptions([claudeApiKey])).toEqual([]);
+    // Found on the stand: a Claude nobody signed in to reports a bare
+    // "authenticated" (no plan, no email) where there is no Uno key.
+    expect(ownSubscriptions([provider({ auth: { status: "authenticated" } as never })])).toEqual(
+      [],
+    );
     expect(ownSubscriptions([claudeSignedOut, codexSignedOut])).toEqual([]);
     expect(ownSubscriptions([provider({ enabled: false })])).toEqual([]);
     expect(ownSubscriptions([provider({ installed: false })])).toEqual([]);
@@ -167,7 +172,12 @@ describe("what a chat Uno starts runs on", () => {
         providers: [uno, claudeSignedOut],
       }),
     ).toEqual({ instanceId: "uno", model: "uno/uno/smart" });
-    // Nothing known to fall to → null: the caller keeps what was named.
+    // The account names no AI: what this computer can run (Uno AI) still
+    // beats a chat that would only say "not signed in".
+    expect(
+      pickSpawnSelection({ requested: named, defaultAi: null, providers: [uno, claudeSignedOut] }),
+    ).toEqual({ instanceId: "uno", model: "uno/uno/smart" });
+    // Nothing on this computer runs → null: the caller keeps what was named.
     expect(
       pickSpawnSelection({ requested: named, defaultAi: null, providers: [claudeSignedOut] }),
     ).toBeNull();
@@ -180,6 +190,24 @@ describe("what a chat Uno starts runs on", () => {
     expect(isKnownUnrunnable(named, [provider({ enabled: false })])).toBe(true);
     expect(isKnownUnrunnable(named, [claudeSignedIn])).toBe(false);
     expect(isKnownUnrunnable(named, [claudeOnUnoAi])).toBe(false);
+    // Only Claude Code and Codex are judged: Hermes runs the assistant even
+    // when it is hidden from the pickers (enabled: false), Uno AI is Uno's.
+    const hermesHidden = provider({
+      instanceId: "hermes" as never,
+      driver: "hermes" as never,
+      enabled: false,
+      status: "disabled",
+      auth: { status: "unauthenticated" } as never,
+    });
+    expect(isKnownUnrunnable(selection("hermes", "uno/smart"), [hermesHidden])).toBe(false);
+    const onHermes = selection("hermes", "uno/smart");
+    expect(
+      pickSpawnSelection({
+        requested: onHermes,
+        defaultAi: "claude",
+        providers: [hermesHidden, claudeSignedIn],
+      }),
+    ).toBe(onHermes);
     // Probes not in yet / sign-in not verified: not a "no".
     expect(isKnownUnrunnable(named, [])).toBe(false);
     expect(isKnownUnrunnable(named, [provider({ auth: { status: "unknown" } as never })])).toBe(

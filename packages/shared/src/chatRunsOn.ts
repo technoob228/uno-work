@@ -11,8 +11,9 @@
  * It follows what the daemon KNOWS about the harness — its driver and the
  * account its probe found (`ServerProvider.auth`) — never the harness's name
  * alone: Claude Code without a sign-in of its own runs on Uno AI
- * (`auth.type` "unoAi"), and a Claude or Codex signed in with an API key is a
- * key, not a subscription.
+ * (`auth.type` "unoAi"), a Claude or Codex signed in with an API key is a
+ * key, not a subscription, and a bare "authenticated" with no account behind
+ * it is nothing at all.
  *
  * Pure: no I/O.
  */
@@ -37,6 +38,8 @@ export type RunsOnProvider = Pick<ServerProvider, "driver" | "auth">;
 
 const AUTH_TYPE_UNO_AI = "unoAi";
 const AUTH_TYPE_API_KEY = "apiKey";
+/** Codex signed in with a ChatGPT account (`account.type` of its app-server). */
+const AUTH_TYPE_CHATGPT = "chatgpt";
 
 /**
  * What a chat on this harness runs on; null when the daemon can't tell (not
@@ -60,9 +63,14 @@ export function chatRunsOn(input: {
   switch (driver) {
     case "claudeAgent":
       if (auth.type === AUTH_TYPE_UNO_AI) return "uno-ai";
-      return auth.type === AUTH_TYPE_API_KEY ? "own-key" : "claude-plan";
+      if (auth.type === AUTH_TYPE_API_KEY) return "own-key";
+      // "authenticated" alone is not a sign-in: on a computer without an Uno
+      // key the Claude probe reports it as soon as the CLI starts, account or
+      // not (ClaudeProvider). The plan the account carries is the evidence.
+      return auth.type === undefined ? null : "claude-plan";
     case "codex":
-      return auth.type === AUTH_TYPE_API_KEY ? "own-key" : "chatgpt-plan";
+      if (auth.type === AUTH_TYPE_API_KEY) return "own-key";
+      return auth.type === AUTH_TYPE_CHATGPT ? "chatgpt-plan" : null;
     case "cursor":
       return "cursor-plan";
     default:
