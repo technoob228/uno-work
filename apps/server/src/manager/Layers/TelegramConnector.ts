@@ -165,6 +165,12 @@ import {
   telegramFileUrl,
 } from "../channelRelay.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
+import {
+  FOREIGN_TELEGRAM_WEBHOOK_MESSAGE,
+  isOwnTelegramWebhook,
+  isWebhookConflict,
+  type TelegramWebhookInfo,
+} from "../telegramWebhook.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -282,6 +288,12 @@ const INITIAL_BOT_RUNTIME: BotRuntime = {
   health: INITIAL_CONNECTOR_HEALTH,
   lastOkPersistedAtMs: 0,
 };
+
+/** The person's own bot (not Uno's shared bot through the relay, not a routed row). */
+const isOwnBotToken = (botToken: string): boolean =>
+  !isRelayCredential(botToken) && parseRouteCredential(botToken) === null;
+
+const BOT_CALL_TIMEOUT_MS = 20_000;
 
 // Own bot → api.telegram.org; `unorelay:<tgr>` → the console's Bot-API
 // mirror (channelRelay.ts). Every Bot-API URL of this connector goes here.
@@ -1646,6 +1658,50 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
     });
 
+  /**
+   * Telegram refuses `getUpdates` while the bot has a webhook (409). A webhook
+   * Uno Work itself set (a later version delivers messages to the computer's
+   * address; this computer was rolled back, or restored from a copy) is
+   * removed, keeping what Telegram has not delivered, and polling goes on.
+   * A webhook pointing at the person's other service is left alone and named
+   * as the reason the bot is silent here. See `telegramWebhook.ts`.
+   *
+   * `healed` — poll again; `foreign` — the error is recorded; `unknown` —
+   * Telegram did not say, the caller records the 409 as before.
+   */
+  const healWebhookConflict = (projectId: ProjectId, botToken: string) =>
+    Effect.gen(function* () {
+      const info = yield* fetchJson(telegramApi(botToken, "getWebhookInfo"), {
+        signal: AbortSignal.timeout(BOT_CALL_TIMEOUT_MS),
+      });
+      if (info.ok !== true) return "unknown" as const;
+      const url = ((info.result as TelegramWebhookInfo | undefined)?.url ?? "").trim();
+      if (url.length > 0 && !isOwnTelegramWebhook(url, botToken)) {
+        yield* recordPollFailure(
+          projectId,
+          { kind: "provider", message: FOREIGN_TELEGRAM_WEBHOOK_MESSAGE },
+          "webhook",
+        );
+        return "foreign" as const;
+      }
+      if (url.length > 0) {
+        const removed = yield* fetchJson(telegramApi(botToken, "deleteWebhook"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ drop_pending_updates: false }),
+          signal: AbortSignal.timeout(BOT_CALL_TIMEOUT_MS),
+        });
+        if (removed.ok !== true) return "unknown" as const;
+        yield* Effect.logInfo(
+          "telegram connector: removed Uno Work's own webhook, back to long polling",
+        ).pipe(Effect.annotateLogs({ projectId }));
+      }
+      // Read from the earliest update Telegram still holds: the inbox skips
+      // whatever the webhook already brought, and nothing in between is lost.
+      yield* updateRuntime(projectId, { offset: 0 });
+      return "healed" as const;
+    });
+
   const pollConnector = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
     Effect.gen(function* () {
       let runtime = yield* getRuntime(projectId);
@@ -1682,6 +1738,13 @@ const makeTelegramConnector = Effect.gen(function* () {
         { signal: longPollSignal((POLL_TIMEOUT_SECONDS + 15) * 1000) },
       );
       if (response.ok !== true) {
+        if (
+          isOwnBotToken(config.botToken) &&
+          isWebhookConflict(response.error_code, response.description) &&
+          (yield* healWebhookConflict(projectId, config.botToken)) !== "unknown"
+        ) {
+          return;
+        }
         yield* recordPollFailure(
           projectId,
           classifyTelegramApiError({
