@@ -380,6 +380,41 @@ export function EnvironmentGeneralSettings({
           />
         ) : null}
 
+        {supportsAgentThreads ? (
+          <SettingsRow
+            title="Agents can start chats on my other computers"
+            description="An agent in a chat here can start a chat in Uno Work on another computer of your Uno account and talk to it. The chat there says which computer started it. Never other people's computers."
+            resetAction={
+              settings.agentsUseOtherComputers !==
+              DEFAULT_UNIFIED_SETTINGS.agentsUseOtherComputers ? (
+                <SettingResetButton
+                  label="chats on other computers"
+                  onClick={() =>
+                    save(
+                      {
+                        agentsUseOtherComputers: DEFAULT_UNIFIED_SETTINGS.agentsUseOtherComputers,
+                      },
+                      "Could not save chats on other computers",
+                    )
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.agentsUseOtherComputers}
+                onCheckedChange={(checked) =>
+                  save(
+                    { agentsUseOtherComputers: checked },
+                    "Could not save chats on other computers",
+                  )
+                }
+                aria-label="Let agents start chats on my other computers"
+              />
+            }
+          />
+        ) : null}
+
         <SettingsRow
           title="Add project starts in"
           description='A path on this environment. Leave empty to use "~/" when the Add Project browser opens.'

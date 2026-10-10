@@ -1783,7 +1783,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, or with another harness. It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another of the person's computers (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1804,7 +1804,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         computerId: {
           type: "string",
           description:
-            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+            'Another computer of the person\'s Uno account to run the chat on: its name as in the console (e.g. "uno-product") or its number. Leave it out for this computer. There cwd is a folder on that computer (default: the project used last there) and the threadId comes back as "box-N:…" for chat_status / chat_message.',
         },
       },
       required: ["text"],
@@ -2998,6 +2998,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             agentAccessToAccount: access.level,
             chatsMayStartChatsIn:
               settings.agentThreadsScope === "any-project" ? "any project" : "own project only",
+            chatsOnOtherComputers: settings.agentsUseOtherComputers && access.level !== "off",
             harnesses: Object.entries(settings.providerInstances)
               .filter(([, instance]) => instance.enabled !== false)
               .map(([id, instance]) => ({ id, driver: instance.driver })),

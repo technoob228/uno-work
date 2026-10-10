@@ -37,7 +37,12 @@ import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
-import { checkTargetComputer } from "../assistants/targetComputer.ts";
+import {
+  classifyTargetComputer,
+  TARGET_COMPUTER_NOT_ALLOWED,
+  TARGET_COMPUTER_NOT_ALLOWED_MESSAGE,
+} from "../assistants/targetComputer.ts";
+import { parseRemoteThreadId } from "../crossComputer/remoteWork.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import {
@@ -106,10 +111,41 @@ export interface AgentThreadsDeps {
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
    */
   readonly getOwnBoxId?: Effect.Effect<number | null>;
+  /**
+   * Chats on the person's OTHER computers (`crossComputer/agentRemoteChats.ts`).
+   * Absent: another `computerId` is "not allowed" and `box-N:` ids are 404.
+   */
+  readonly remoteChats?: RemoteChatsPort;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
   readonly nowMs?: () => number;
+}
+
+/** What the bridge needs from the cross-computer side; every call renders its own reply. */
+export interface RemoteChatsPort {
+  readonly start: (input: {
+    readonly caller: OrchestrationThreadShell;
+    readonly computer: string | number;
+    readonly text: string;
+    readonly title: string | undefined;
+    readonly cwd: string | undefined;
+    readonly model: string | undefined;
+  }) => Effect.Effect<AgentThreadsReply>;
+  readonly read: (input: {
+    readonly caller: OrchestrationThreadShell;
+    readonly boxId: number;
+    readonly threadId: string;
+    readonly limit: number;
+    readonly waitMs: number;
+  }) => Effect.Effect<AgentThreadsReply>;
+  readonly send: (input: {
+    readonly caller: OrchestrationThreadShell;
+    readonly boxId: number;
+    readonly threadId: string;
+    readonly text: string;
+    readonly waitMs: number;
+  }) => Effect.Effect<AgentThreadsReply>;
 }
 
 /** Short-circuit reply: raised inside a handler, rendered as-is. */
@@ -385,11 +421,13 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         }
         const text = checkMessageText(body.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
-        const target = checkTargetComputer(
+        const target = classifyTargetComputer(
           body.computerId,
           deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
         );
-        if (!target.ok) return yield* fail(403, target.code, target.message);
+        if (target.kind !== "this" && (target.kind === "invalid" || !deps.remoteChats)) {
+          return yield* fail(403, TARGET_COMPUTER_NOT_ALLOWED, TARGET_COMPUTER_NOT_ALLOWED_MESSAGE);
+        }
         const title = optionalString(body, "title", AGENT_THREAD_MAX_TITLE_CHARS);
         const provider = optionalString(body, "provider", 200);
         const model = optionalString(body, "model", 500);
@@ -401,6 +439,18 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             "invalid_payload",
             `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd" — строки.`,
           );
+        }
+
+        if (target.kind === "other" && deps.remoteChats) {
+          // A project id means nothing on another computer; the folder does.
+          return yield* deps.remoteChats.start({
+            caller,
+            computer: target.ref,
+            text: text.value,
+            title: title.value,
+            cwd: cwd.value,
+            model: model.value,
+          });
         }
 
         const project = yield* resolveTargetProject(caller, {
@@ -562,7 +612,6 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("get", authorization, (caller) =>
       Effect.gen(function* () {
-        let shell = yield* loadReachable(caller, input.threadId);
         const limit = clampInteger(input.limit, {
           fallback: AGENT_THREAD_DEFAULT_MESSAGE_LIMIT,
           min: 1,
@@ -573,6 +622,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           min: 0,
           max: AGENT_THREAD_MAX_WAIT_MS,
         });
+        const remote = parseRemoteThreadId(input.threadId);
+        if (remote !== null) {
+          if (!deps.remoteChats) return { status: 404, body: THREAD_NOT_FOUND_BODY };
+          return yield* deps.remoteChats.read({ caller, ...remote, limit, waitMs });
+        }
+        let shell = yield* loadReachable(caller, input.threadId);
         const deadline = nowMs() + waitMs;
         while (deriveAgentThreadStatus(shell) === "running" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
@@ -621,6 +676,19 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("send", authorization, (caller) =>
       Effect.gen(function* () {
+        const remote = parseRemoteThreadId(input.threadId);
+        if (remote !== null) {
+          if (!deps.remoteChats) return { status: 404, body: THREAD_NOT_FOUND_BODY };
+          const remoteBody = asBody(input.body);
+          const remoteText = checkMessageText(remoteBody?.text);
+          if (!remoteText.ok) return yield* fail(400, "invalid_payload", remoteText.message);
+          return yield* deps.remoteChats.send({
+            caller,
+            ...remote,
+            text: remoteText.value,
+            waitMs: bodyWaitMs(remoteBody?.waitMs),
+          });
+        }
         let target = yield* loadReachable(caller, input.threadId);
         if (target.id === caller.id) {
           return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");

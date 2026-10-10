@@ -47,6 +47,7 @@ import {
   runAssistantTurnCli,
 } from "./assistants/assistantTurnCli.ts";
 import { readBootstrapEnvelope } from "./bootstrap.ts";
+import { nodeChatCliDeps, runChatCli, type ChatCliInput } from "./crossComputer/chatCli.ts";
 import { renderTerminalQrCode } from "./startupAccess.ts";
 import { expandHomePath, resolveBaseDir } from "./os-jank.ts";
 import { runServer } from "./server.ts";
@@ -1221,6 +1222,108 @@ const assistantTurnCommand = Command.make("assistant-turn", {
   ),
 );
 
+// ── chat: Uno Work chats on the account's computers, from anywhere ─────────
+
+const chatWaitFlag = Flag.integer("wait").pipe(
+  Flag.withDescription("Seconds to wait for the chat's answer (max 600)."),
+  Flag.optional,
+);
+const chatFromFlag = Flag.string("from").pipe(
+  Flag.withDescription('Who it is from, shown in the chat (default "an agent on <this host>").'),
+  Flag.optional,
+);
+const chatThreadIdArgument = Argument.string("thread-id").pipe(
+  Argument.withDescription('The "box-<id>:<chat id>" that "chat start" printed.'),
+);
+const chatMessageArgument = Argument.string("message").pipe(
+  Argument.withDescription("The message, self-contained."),
+);
+
+const runChatCommand = (input: ChatCliInput) =>
+  Effect.gen(function* () {
+    const outcome = yield* Effect.promise(() => runChatCli(input, nodeChatCliDeps()));
+    const text = JSON.stringify(outcome.output, null, 2);
+    if (outcome.exitCode === 0) yield* Console.log(text);
+    else yield* Console.error(text);
+    process.exitCode = outcome.exitCode;
+  });
+
+const chatStartCommand = Command.make("start", {
+  computer: Flag.string("computer").pipe(
+    Flag.withDescription("The computer's name as in the Uno console, or its number."),
+  ),
+  folder: Flag.string("folder").pipe(
+    Flag.withDescription("Folder on that computer, e.g. ~/projects/site (created if missing)."),
+    Flag.optional,
+  ),
+  title: Flag.string("title").pipe(Flag.optional),
+  model: Flag.string("model").pipe(
+    Flag.withDescription("Model of that computer's default AI (default: its own)."),
+    Flag.optional,
+  ),
+  from: chatFromFlag,
+  wait: chatWaitFlag,
+  message: chatMessageArgument,
+}).pipe(
+  Command.withDescription(
+    "Start a chat in Uno Work on a computer of your Uno account (UNO_API_KEY) and send it a first message.",
+  ),
+  Command.withHandler((flags) =>
+    runChatCommand({
+      action: "start",
+      computer: flags.computer,
+      text: flags.message,
+      folder: Option.getOrUndefined(flags.folder),
+      title: Option.getOrUndefined(flags.title),
+      model: Option.getOrUndefined(flags.model),
+      from: Option.getOrUndefined(flags.from),
+      waitSec: Option.getOrUndefined(flags.wait),
+    }),
+  ),
+);
+
+const chatSendCommand = Command.make("send", {
+  from: chatFromFlag,
+  wait: chatWaitFlag,
+  threadId: chatThreadIdArgument,
+  message: chatMessageArgument,
+}).pipe(
+  Command.withDescription('Send the next message to a chat started with "chat start".'),
+  Command.withHandler((flags) =>
+    runChatCommand({
+      action: "send",
+      threadId: flags.threadId,
+      text: flags.message,
+      from: Option.getOrUndefined(flags.from),
+      waitSec: Option.getOrUndefined(flags.wait),
+    }),
+  ),
+);
+
+const chatStatusCommand = Command.make("status", {
+  wait: chatWaitFlag,
+  limit: Flag.integer("limit").pipe(
+    Flag.withDescription("Last N messages (default 20)."),
+    Flag.optional,
+  ),
+  threadId: chatThreadIdArgument,
+}).pipe(
+  Command.withDescription("Status and last messages of that chat; --wait holds while it runs."),
+  Command.withHandler((flags) =>
+    runChatCommand({
+      action: "status",
+      threadId: flags.threadId,
+      limit: Option.getOrUndefined(flags.limit),
+      waitSec: Option.getOrUndefined(flags.wait),
+    }),
+  ),
+);
+
+const chatCommand = Command.make("chat").pipe(
+  Command.withDescription("Chats in Uno Work on the computers of your Uno account."),
+  Command.withSubcommands([chatStartCommand, chatSendCommand, chatStatusCommand]),
+);
+
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
@@ -1230,5 +1333,6 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
     authCommand,
     projectCommand,
     assistantTurnCommand,
+    chatCommand,
   ]),
 );
