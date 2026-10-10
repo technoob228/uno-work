@@ -1,0 +1,84 @@
+name: Compatibility matrix
+
+# "One window": the account address serves the newest Uno Work interface and
+# computers only answer the API, so the interface of a release must keep
+# working with the daemons already out there. `scripts/compat-matrix/run.ts`
+# builds the web of this commit once and drives it, through a stand-in for the
+# console's proxy, against each daemon: this commit's own, the two newest
+# public releases and the oldest supported one (0.0.113).
+#
+# Not on every PR (it downloads releases and holds a browser for a few
+# minutes per daemon): only by hand and on pushes to a release branch.
+# Public repository: GitHub-hosted runners cost nothing. No secrets are used.
+
+on:
+  workflow_dispatch:
+    inputs:
+      daemons:
+        description: 'Daemons, e.g. "current,0.0.119,0.0.118,0.0.113". Empty: current, the two newest releases, the floor.'
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - "release/**"
+
+concurrency:
+  group: compat-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The server build does not fit Node's default heap (see ci.yml).
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  compat_matrix:
+    name: Fresh web against older daemons
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - name: Cache Bun
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - run: bun install --frozen-lockfile
+      - name: Install browser test runtime
+        run: cd apps/web && bunx playwright install --with-deps chromium
+      - name: Fresh web against each daemon
+        env:
+          COMPAT_DAEMONS: ${{ inputs.daemons }}
+          COMPAT_OUT: ${{ runner.temp }}/compat-matrix
+          COMPAT_CACHE_DIR: ${{ runner.temp }}/compat-matrix-cache
+        run: bun run compat:matrix
+      - name: Matrix in the run summary
+        if: ${{ always() }}
+        run: |
+          if [ -f "$RUNNER_TEMP/compat-matrix/matrix.md" ]; then
+            cat "$RUNNER_TEMP/compat-matrix/matrix.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The matrix did not get as far as a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: compat-matrix
+          path: ${{ runner.temp }}/compat-matrix
+          retention-days: 14
+          if-no-files-found: ignore
