@@ -128,6 +128,10 @@
       "types": "./src/assistantLlm.ts",
       "import": "./src/assistantLlm.ts"
     },
+    "./chatRunsOn": {
+      "types": "./src/chatRunsOn.ts",
+      "import": "./src/chatRunsOn.ts"
+    },
     "./assistantMemory": {
       "types": "./src/assistantMemory.ts",
       "import": "./src/assistantMemory.ts"

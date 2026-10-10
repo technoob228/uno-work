@@ -41,6 +41,8 @@ import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
+import { ChatRunsOnChip } from "./ChatRunsOnChip";
+import type { ChatRunsOn } from "@t3tools/shared/chatRunsOn";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import {
   ASSISTANT_CHAT_NAME,
@@ -61,6 +63,11 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   /** The project's folder; a new chat shows it as the folder chip. */
   activeProjectCwd?: string | undefined;
+  /**
+   * What the chat runs on — Uno AI, the person's Claude / ChatGPT plan, their
+   * key (`chatRunsOn`); null: unknown, nothing is shown.
+   */
+  runsOn?: ChatRunsOn | null | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -93,6 +100,19 @@ export function shouldShowOpenInPicker(input: {
   );
 }
 
+/**
+ * The "runs on" line is for a chat that already runs: a draft's model is
+ * still being picked in the composer, and a phone's header keeps its room for
+ * the title.
+ */
+export function shouldShowRunsOn(input: {
+  readonly runsOn: ChatRunsOn | null | undefined;
+  readonly isDraft: boolean;
+  readonly isMobile: boolean;
+}): boolean {
+  return input.runsOn != null && !input.isDraft && !input.isMobile;
+}
+
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
@@ -100,6 +120,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeProjectName,
   activeProjectCwd,
+  runsOn,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -255,6 +276,11 @@ export const ChatHeader = memo(function ChatHeader({
             <UnoFace className="size-4" />
             Started by Uno
           </button>
+        ) : null}
+        {/* What this chat runs on, and so who pays for its AI (10.10). A new
+            chat has its model picker right below; a phone has no room. */}
+        {shouldShowRunsOn({ runsOn, isDraft: Boolean(draftId), isMobile }) ? (
+          <ChatRunsOnChip runsOn={runsOn ?? null} />
         ) : null}
         {isMobile ? null : (
           <TooltipProvider delay={0} closeDelay={0}>

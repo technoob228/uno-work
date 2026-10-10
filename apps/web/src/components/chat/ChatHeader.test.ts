@@ -1,7 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import { shouldShowOpenInPicker, shouldShowRunsOn } from "./ChatHeader";
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -44,5 +44,22 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowRunsOn", () => {
+  it("shows what a running chat runs on", () => {
+    expect(shouldShowRunsOn({ runsOn: "claude-plan", isDraft: false, isMobile: false })).toBe(true);
+    expect(shouldShowRunsOn({ runsOn: "uno-ai", isDraft: false, isMobile: false })).toBe(true);
+  });
+
+  it("says nothing when the daemon can't tell", () => {
+    expect(shouldShowRunsOn({ runsOn: null, isDraft: false, isMobile: false })).toBe(false);
+    expect(shouldShowRunsOn({ runsOn: undefined, isDraft: false, isMobile: false })).toBe(false);
+  });
+
+  it("stays out of a new chat (its picker is below) and of a phone's header", () => {
+    expect(shouldShowRunsOn({ runsOn: "uno-ai", isDraft: true, isMobile: false })).toBe(false);
+    expect(shouldShowRunsOn({ runsOn: "uno-ai", isDraft: false, isMobile: true })).toBe(false);
   });
 });

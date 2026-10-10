@@ -735,6 +735,12 @@ export const ManagerThreadSummary = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
+  /**
+   * What the chat runs on: harness instance id ("claudeAgent", "codex",
+   * "hermes", "uno") and model. Optional: older daemons don't send it.
+   */
+  harness: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
 });
 export type ManagerThreadSummary = typeof ManagerThreadSummary.Type;
 

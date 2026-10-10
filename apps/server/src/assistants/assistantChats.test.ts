@@ -6,6 +6,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  billingForChat,
   buildAssistantChats,
   chatEffort,
   chatStatus,
@@ -106,6 +107,25 @@ describe("cost per chat", () => {
     expect(u1?.projectTitle).toBe("fishcode");
     expect(u2).toMatchObject({ billing: "uno-ai", costUsd: 0, aiHoursRequests: 0, tokens: null });
     expect(c1).toMatchObject({ billing: "plan", costUsd: null, tokens: 1200, harness: "Claude" });
+  });
+
+  it("a subscription harness that isn't on the person's plan is not billed as their plan", () => {
+    const claude = (auth: unknown) =>
+      ({ driver: "claudeAgent", auth }) as unknown as ServerProvider;
+    expect(billingForChat(claude({ status: "authenticated", type: "max" }), "claudeAgent")).toBe(
+      "plan",
+    );
+    // Claude Code on Uno AI: premium credit, in the computer's total.
+    expect(billingForChat(claude({ status: "authenticated", type: "unoAi" }), "claudeAgent")).toBe(
+      "uno-ai-unlabelled",
+    );
+    expect(billingForChat(claude({ status: "authenticated", type: "apiKey" }), "claudeAgent")).toBe(
+      "other",
+    );
+    // Sign-in not known now (signed out since): as before, by the harness.
+    expect(billingForChat(claude({ status: "unauthenticated" }), "claudeAgent")).toBe("plan");
+    expect(billingForChat(null, "codex")).toBe("plan");
+    expect(billingForChat(null, "uno")).toBe("uno-ai");
   });
 
   it("without metering nothing is priced", () => {

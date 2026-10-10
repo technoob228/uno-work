@@ -76,15 +76,17 @@ const makeManagerApprovalService = Effect.gen(function* () {
           }
           const startedBy = yield* assistantOfToken(proposal.tokenId);
           const fromAssistant = startedBy !== null;
-          // A chat the Uno assistant starts without naming a model runs on the
-          // person's own AI (account default_ai, when usable here), else on
-          // the project's default. The assistant itself runs on Hermes.
-          const personalDefault =
-            action.modelSelection === null && fromAssistant
-              ? yield* accountDefaultAi.spawnModelSelection()
-              : null;
+          // A chat the Uno assistant starts runs on what it named when this
+          // computer can run that. Named nothing, or a harness that isn't
+          // signed in: the owner's own Claude / ChatGPT subscription when
+          // they are signed in here (decision 10.10), else the account's
+          // default AI, else the project's default. The assistant itself
+          // runs on Hermes.
+          const spawnPick = fromAssistant
+            ? yield* accountDefaultAi.spawnModelSelection(action.modelSelection)
+            : null;
           const modelSelection: ModelSelection | null =
-            action.modelSelection ?? personalDefault ?? projectShell.value.defaultModelSelection;
+            spawnPick ?? action.modelSelection ?? projectShell.value.defaultModelSelection;
           if (modelSelection === null) {
             return yield* new ManagerExecutionError({
               proposalId: proposal.proposalId,

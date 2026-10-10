@@ -5,6 +5,10 @@
  * target project's default when that AI isn't usable here (not installed,
  * not signed in).
  *
+ * 10.10: a Claude / ChatGPT subscription the owner is signed in to on this
+ * computer comes first — Uno coordinates on Uno AI, the work it starts runs
+ * on the owner's subscription (`../ownSubscription.ts`).
+ *
  * The value comes from the account: the daemon reads `/auth/me` itself when
  * it holds an account key (a laptop), and clients push what they read with
  * their own account token (a Work box's daemon only has a gateway key).
@@ -12,17 +16,15 @@
  *
  * @module manager/Layers/AccountDefaultAi
  */
-import type { ModelSelection } from "@t3tools/contracts";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { harnessForAccountDefaultAi } from "@t3tools/shared/assistantLlm";
+import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
 import { Context, Effect, FileSystem, Layer, Path, Ref } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { isUsableForDefault, resolveModel } from "../../provider/autoBootstrapModelSelection.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { fetchControlPlaneJson } from "../../unoBoxIdentity.ts";
 import { isGatewayScopedKey } from "../../unoGatewayKey.ts";
+import { aiStatus, pickSpawnSelection, type AiStatus } from "../ownSubscription.ts";
 
 export interface ManagerAccountDefaultAiShape {
   readonly get: () => Effect.Effect<string | null>;
@@ -30,8 +32,16 @@ export interface ManagerAccountDefaultAiShape {
   readonly set: (value: string | null) => Effect.Effect<void>;
   /** Read `/auth/me` with the machine's account key, when it has one. */
   readonly refreshFromAccount: () => Effect.Effect<void>;
-  /** What a chat the assistant starts runs on; null = use the project's default. */
-  readonly spawnModelSelection: () => Effect.Effect<ModelSelection | null>;
+  /**
+   * What a chat the assistant starts runs on, given the selection the
+   * assistant named (none: null). Null = keep what it named, else the
+   * project's default. See `pickSpawnSelection`.
+   */
+  readonly spawnModelSelection: (
+    requested?: ModelSelection | null,
+  ) => Effect.Effect<ModelSelection | null>;
+  /** What this computer can run a chat on now — `ai_status` of uno-manager. */
+  readonly aiStatus: () => Effect.Effect<AiStatus>;
 }
 
 export class ManagerAccountDefaultAi extends Context.Service<
@@ -41,17 +51,16 @@ export class ManagerAccountDefaultAi extends Context.Service<
 
 const FILE_NAME = "account-default-ai.json";
 
-/** The account value → a selection this machine can run, or null. */
+/**
+ * The account value → a selection this machine can run, or null. The owner's
+ * signed-in Claude / ChatGPT subscription wins over the account value.
+ */
 export function spawnSelectionForDefaultAi(
   value: string | null,
-  providers: Parameters<typeof isUsableForDefault>[0][],
+  providers: ReadonlyArray<ServerProvider>,
+  requested: ModelSelection | null = null,
 ): ModelSelection | null {
-  const instance = harnessForAccountDefaultAi(value);
-  if (instance === null) return null;
-  const provider = providers.find((entry) => entry.instanceId === instance);
-  if (provider === undefined || !isUsableForDefault(provider)) return null;
-  const model = resolveModel(provider);
-  return model === null ? null : { instanceId: ProviderInstanceId.make(instance), model };
+  return pickSpawnSelection({ requested, defaultAi: value, providers });
 }
 
 export const ManagerAccountDefaultAiLive = Layer.effect(
@@ -106,10 +115,18 @@ export const ManagerAccountDefaultAiLive = Layer.effect(
         if (typeof value === "string" && value.length > 0) yield* set(value);
       });
 
-    const spawnModelSelection: ManagerAccountDefaultAiShape["spawnModelSelection"] = () =>
+    const spawnModelSelection: ManagerAccountDefaultAiShape["spawnModelSelection"] = (
+      requested = null,
+    ) =>
       Effect.gen(function* () {
         const providers = yield* providerRegistry.getProviders;
-        return spawnSelectionForDefaultAi(yield* Ref.get(current), [...providers]);
+        return spawnSelectionForDefaultAi(yield* Ref.get(current), [...providers], requested);
+      });
+
+    const readAiStatus: ManagerAccountDefaultAiShape["aiStatus"] = () =>
+      Effect.gen(function* () {
+        const providers = yield* providerRegistry.getProviders;
+        return aiStatus({ providers: [...providers], defaultAi: yield* Ref.get(current) });
       });
 
     return {
@@ -117,6 +134,7 @@ export const ManagerAccountDefaultAiLive = Layer.effect(
       set,
       refreshFromAccount,
       spawnModelSelection,
+      aiStatus: readAiStatus,
     } satisfies ManagerAccountDefaultAiShape;
   }),
 );

@@ -27,6 +27,7 @@ import {
   type OrchestrationThreadShell,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { chatRunsOn } from "@t3tools/shared/chatRunsOn";
 
 /** Newest chats first, at most this many (the page shows a week or so). */
 export const ASSISTANT_CHATS_LIMIT = 30;
@@ -88,6 +89,24 @@ export function billingForDriver(driver: string | null): AssistantChatBilling {
     default:
       return "other";
   }
+}
+
+/**
+ * Who pays for a chat, from the harness AND the account its probe found: a
+ * "subscription" harness isn't always the person's plan — Claude Code
+ * without a sign-in runs on Uno AI (premium credit; its calls aren't
+ * labelled per chat, so the cost is in the computer's total), and one signed
+ * in with an API key is a key. As the header says (`chatRunsOn`).
+ */
+export function billingForChat(
+  provider: Pick<ServerProvider, "driver" | "auth"> | null,
+  instanceId: string,
+): AssistantChatBilling {
+  const byDriver = billingForDriver(provider?.driver ?? instanceId);
+  if (byDriver !== "plan" || provider === null) return byDriver;
+  const runsOn = chatRunsOn({ provider });
+  if (runsOn === "uno-ai") return "uno-ai-unlabelled";
+  return runsOn === "own-key" ? "other" : "plan";
 }
 
 /**
@@ -223,7 +242,7 @@ export function buildAssistantChats(input: {
       : new Map<string, GatewayThreadUsage>();
   const chats: AssistantChatSummary[] = input.threads.map((thread) => {
     const provider = providerOf.get(thread.modelSelection.instanceId) ?? null;
-    const billing = billingForDriver(provider?.driver ?? thread.modelSelection.instanceId);
+    const billing = billingForChat(provider, thread.modelSelection.instanceId);
     const priced = billing === "uno-ai" && input.gateway.status === "metered";
     const row = usage.get(thread.id) ?? null;
     const local = input.localTokens.get(thread.id) ?? null;

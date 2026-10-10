@@ -102,6 +102,8 @@ function toThreadSummary(shell: OrchestrationThreadShell): ManagerThreadSummary 
     archivedAt: shell.archivedAt,
     hasPendingApprovals: shell.hasPendingApprovals,
     hasPendingUserInput: shell.hasPendingUserInput,
+    harness: shell.modelSelection.instanceId,
+    model: shell.modelSelection.model,
   };
 }
 
