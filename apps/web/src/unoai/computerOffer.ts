@@ -7,7 +7,7 @@
  * only "See plans" to someone who had just paid for Small (live walkthrough
  * 05.10.2026, WG-02) — now it says so plainly and offers both real ways on.
  */
-import { CONSOLE_URL } from "../account/accountOverview";
+import { CONSOLE_URL, checkoutHref } from "../account/accountOverview";
 import type { LiteStanding } from "../lite/webLite";
 
 export interface ComputerOfferCopy {
@@ -62,6 +62,19 @@ export function computerOfferCopy(
     ownAgent: false,
     trial: trialOpen && standing !== "cloud",
   };
+}
+
+/**
+ * Where the card's pay button goes: the console's Confirm and pay for Plus —
+ * one screen, no plan chooser in front of it. In a chat about a personal
+ * assistant it opens with Uno AI already in the order (`ai=1`), removable there
+ * in one click: the same screen the console's "Set it up" opens (Misha 10.10,
+ * "Ассистенту Uno AI в комплекте?" → A). An older console ignores `ai=1` and
+ * opens the same checkout without Uno AI; an account that already pays for a
+ * plan gets the console's plan change screen either way.
+ */
+export function computerOfferCheckoutHref(assistant: boolean): string {
+  return assistant ? `${checkoutHref("plus")}&ai=1` : checkoutHref("plus");
 }
 
 /** Public, no sign-in, CORS `*`: does the console hand out the free trial now? */

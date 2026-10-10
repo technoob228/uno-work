@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { computerOfferCopy, fetchWorkTrialOpen, WORK_TRIAL_PUBLIC_URL } from "./computerOffer";
+import {
+  computerOfferCheckoutHref,
+  computerOfferCopy,
+  fetchWorkTrialOpen,
+  WORK_TRIAL_PUBLIC_URL,
+} from "./computerOffer";
 
 describe("computerOfferCopy", () => {
   it("Small: says Uno builds on Plus, offers the person's own agent", () => {
@@ -38,6 +43,18 @@ describe("computerOfferCopy", () => {
     expect(computerOfferCopy("other", false).upgradeLabel).toBe("Upgrade to Plus");
     expect(computerOfferCopy("cloud", true).trial).toBe(false);
     expect(computerOfferCopy("small", true).trial).toBe(false);
+  });
+});
+
+describe("computerOfferCheckoutHref", () => {
+  it("an assistant chat: the one checkout, Plus with Uno AI in the order", () => {
+    const href = computerOfferCheckoutHref(true);
+    expect(href).toMatch(/\/billing\?tab=plan&plan=plus&checkout=1&ai=1$/);
+  });
+
+  it("any other chat: the same checkout, Uno AI not preselected", () => {
+    const href = computerOfferCheckoutHref(false);
+    expect(href).toMatch(/\/billing\?tab=plan&plan=plus&checkout=1$/);
   });
 });
 
