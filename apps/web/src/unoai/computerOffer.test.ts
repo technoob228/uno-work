@@ -49,7 +49,7 @@ describe("computerOfferCopy", () => {
 describe("computerOfferCheckoutHref", () => {
   it("an assistant chat: the one checkout, Plus with Uno AI in the order", () => {
     const href = computerOfferCheckoutHref(true);
-    expect(href).toMatch(/\/billing\?tab=plan&plan=plus&checkout=1&ai=1$/);
+    expect(href).toMatch(/\/billing\?tab=plan&plan=plus&checkout=1&ai=1&for=assistant$/);
   });
 
   it("any other chat: the same checkout, Uno AI not preselected", () => {
