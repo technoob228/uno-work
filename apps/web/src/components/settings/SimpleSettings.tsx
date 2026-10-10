@@ -311,7 +311,7 @@ export function AssistantsPhoneSettings() {
         <LinkRow
           icon={<BotIcon />}
           title="Assistants"
-          description="Teammates that do your tasks: only you give them work, in chat, Telegram or Slack. Create, pause or delete them."
+          description="Assistants that do your tasks: only you give them work, in chat, Telegram or Slack. Create, pause or delete them."
           onClick={() => void navigate({ to: "/assistants" })}
         />
       </SettingsSection>

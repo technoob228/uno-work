@@ -268,7 +268,7 @@ function ClassicEmptyAssistants({
       </span>
       <div className="flex max-w-md flex-col gap-1.5">
         <h1 className="text-xl font-semibold tracking-tight">
-          Create a teammate that does your tasks
+          Create an assistant that does your tasks
         </h1>
         <p className="text-sm text-muted-foreground">
           Only you can give it work — in chat or your Telegram. It does your tasks on {machineLabel}
