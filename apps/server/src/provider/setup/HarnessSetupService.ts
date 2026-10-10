@@ -422,10 +422,27 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     await runCliLogin(job, { args: ["auth", "login"], parsePrompt: true });
   };
 
+  const cancelAuthJob = (jobId: string) => {
+    auths.updateExtra(jobId, { needsCodeInput: false });
+    auths.finish(jobId, { state: "failed", error: "Replaced by a new sign-in." });
+    handles.get(jobId)?.kill();
+    handles.delete(jobId);
+  };
+
   const authStart = (input: ProviderAuthStartInput): ProviderAuthStartResult => {
     const apiKey = input.method === "apiKey" ? input.apiKey?.trim() : undefined;
     if (input.method === "apiKey" && !apiKey) {
       throw fail("invalid", "Paste an API key first.");
+    }
+    const unfinished = auths.findActive("auth", input.driver);
+    if (unfinished) {
+      // A sign-in left half-way (dialog closed, page reloaded) must not lock
+      // the person out: an account sign-in picks the same flow back up (same
+      // link, same code box); anything else, or "Start over", cancels it.
+      if (input.method === "oauth" && unfinished.extra.method === "oauth" && !input.restart) {
+        return { jobId: unfinished.jobId };
+      }
+      cancelAuthJob(unfinished.jobId);
     }
     const started = auths.start({
       kind: "auth",
@@ -434,7 +451,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       ...(apiKey ? { secret: apiKey } : {}),
     });
     if (!started.ok) {
-      throw fail("conflict", `A sign-in for ${input.driver} is already in progress.`);
+      throw fail("conflict", `A ${authDriverLabel(input.driver)} sign-in is already in progress.`);
     }
     track(
       runAuth(started.job, apiKey).catch((error: unknown) => {
@@ -512,7 +529,10 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     const driver = input.driver;
     const running = auths.findActive("auth", driver);
     if (running) {
-      throw fail("conflict", `A sign-in for ${driver} is in progress. Cancel it first.`);
+      throw fail(
+        "conflict",
+        `A ${authDriverLabel(driver)} sign-in is in progress. Finish it or start over first.`,
+      );
     }
     const cli = await deps.resolveCliEnvironment(driver);
     const args = driver === "codex" ? ["logout"] : ["auth", "logout"];
@@ -554,6 +574,11 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
 }
 
 const isProviderSetupRpcError = Schema.is(ProviderSetupRpcError);
+
+/** Name a person reads: never the internal driver id ("claudeAgent"). */
+function authDriverLabel(driver: ProviderAuthDriver): string {
+  return driver === "claudeAgent" ? "Claude" : "ChatGPT (Codex)";
+}
 
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;

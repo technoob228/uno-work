@@ -44,6 +44,8 @@ export interface HarnessSetupApi {
     readonly driver: ProviderAuthDriver;
     readonly method: ProviderAuthMethod;
     readonly apiKey?: string;
+    /** Cancel an unfinished sign-in instead of picking it back up. */
+    readonly restart?: boolean;
   }) => Promise<void>;
   readonly submitAuthCode: (input: {
     readonly driver: ProviderAuthDriver;
@@ -142,7 +144,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
   );
 
   const startAuth = useCallback<HarnessSetupApi["startAuth"]>(
-    async ({ driver, method, apiKey }) => {
+    async ({ driver, method, apiKey, restart }) => {
       setAuthJobs((current) => ({
         ...current,
         [driver]: {
@@ -160,6 +162,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
           driver,
           method,
           ...(apiKey ? { apiKey } : {}),
+          ...(restart ? { restart } : {}),
         });
         authIds.current.set(driver, jobId);
       } catch (error) {

@@ -2,6 +2,7 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
+  isAssistantProjectId,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -35,6 +36,7 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { UnoScheduleStrip } from "./chat/UnoScheduleStrip";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -96,6 +98,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useWindowInFront } from "../hooks/useWindowInFront";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
@@ -1752,6 +1755,45 @@ export default function ChatView(props: ChatViewProps) {
       model: getDefaultServerModel(providerStatuses, uno.driver),
     };
   }, [activeProviderStatus, providerStatuses]);
+  // The person's own Claude / ChatGPT subscription hit its limit: the turn
+  // error offers a new chat on Uno AI (this chat stays on its harness).
+  const { handleNewThread } = useNewThreadHandler();
+  const subscriptionLabel =
+    activeProviderStatus?.driver === "claudeAgent"
+      ? "Claude"
+      : activeProviderStatus?.driver === "codex"
+        ? "ChatGPT"
+        : undefined;
+  const unoAiTarget = useMemo(() => {
+    if (!subscriptionLabel) return null;
+    const uno = providerStatuses.find(
+      (candidate) => candidate.driver === "uno" && isUsableDefaultProvider(candidate),
+    );
+    return uno
+      ? { instanceId: uno.instanceId, model: getDefaultServerModel(providerStatuses, uno.driver) }
+      : null;
+  }, [providerStatuses, subscriptionLabel]);
+  const onNewChatOnUnoAi = useMemo(() => {
+    if (!unoAiTarget || !activeProjectRef) return undefined;
+    return () => {
+      const resolvedModel = resolveAppModelSelectionForInstance(
+        unoAiTarget.instanceId,
+        settings,
+        providerStatuses,
+        unoAiTarget.model,
+      );
+      if (!resolvedModel) return;
+      setStickyComposerModelSelection({ instanceId: unoAiTarget.instanceId, model: resolvedModel });
+      void handleNewThread(activeProjectRef);
+    };
+  }, [
+    activeProjectRef,
+    handleNewThread,
+    providerStatuses,
+    setStickyComposerModelSelection,
+    settings,
+    unoAiTarget,
+  ]);
   // A harness that lost its sign-in gets the in-chat "You were signed out"
   // card instead of the red banners. Assistant chats are always Hermes.
   const harnessAuth = useMemo(
@@ -3917,6 +3959,13 @@ export default function ChatView(props: ChatViewProps) {
           />
         </header>
       ) : null}
+      {/* Uno's own schedules: what runs when, with Pause / Remove. */}
+      {!isPreviewFocusMode && !isEmbedded && isAssistantProjectId(activeThread.projectId) ? (
+        <UnoScheduleStrip
+          environmentId={activeThread.environmentId}
+          projectId={activeThread.projectId}
+        />
+      ) : null}
 
       {/* Error banner */}
       {!isPreviewFocusMode ? (
@@ -3966,6 +4015,8 @@ export default function ChatView(props: ChatViewProps) {
               isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined
             }
             retryDisabled={isSendBusy || isConnecting}
+            subscriptionLabel={subscriptionLabel}
+            onUseUnoAi={onNewChatOnUnoAi}
           />
         </>
       ) : null}

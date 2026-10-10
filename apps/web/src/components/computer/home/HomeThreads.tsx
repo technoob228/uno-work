@@ -37,6 +37,7 @@ import {
   canMarkHomeChatDone,
   homeThreadStatus,
   pickContinueItems,
+  pickDoneWhileAway,
   recentThreads,
   shortAgo,
   threadActivityAt,
@@ -154,6 +155,52 @@ const CARD_CLASS =
  * settles a chat (not while it works or waits for an answer) or dismisses a
  * notification — so Continue, the sidebar and the Inbox stay in agreement.
  */
+/**
+ * "Done while you were away" (ICP v3, 09.10): a teammate's result is never
+ * only in a chat the person has to find — what Uno finished while they were
+ * away is the first thing Home shows. Open goes where the item points, Done
+ * clears it (the same Done as the Inbox).
+ */
+export function DoneWhileAwayCard({ threads, now }: { threads: HomeThread[]; now: number }) {
+  const openItem = useOpenInboxItem();
+  const items = pickDoneWhileAway(useInboxEntries(), threads, { now });
+  if (items.length === 0) return null;
+  return (
+    <section
+      className="flex flex-col gap-1 rounded-2xl border border-border bg-card px-4 py-3"
+      data-testid="home-done-away"
+    >
+      <h2 className="text-sm font-semibold">Done while you were away</h2>
+      <ul className="flex flex-col">
+        {items.map((item) => (
+          <li key={item.id} className="flex items-start gap-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => void openItem(item)}
+              className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-md text-left hover:text-foreground"
+              data-testid="home-done-away-item"
+            >
+              <span className="mt-0.5 [&>span]:size-5 [&>span]:rounded-md [&>span]:text-[12px] [&_svg]:size-3">
+                <ItemIcon item={item} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{item.title}</span>
+                {item.body ? (
+                  <span className="line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
+                ) : null}
+              </span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {shortAgo(Date.parse(item.updatedAt), now)}
+              </span>
+            </button>
+            <DoneButton label="Done" onDone={() => markInboxItemDone(item)} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function ContinueCards({
   threads,
   now,

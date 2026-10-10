@@ -268,11 +268,11 @@ function ClassicEmptyAssistants({
       </span>
       <div className="flex max-w-md flex-col gap-1.5">
         <h1 className="text-xl font-semibold tracking-tight">
-          Create an assistant that answers in Telegram 24/7
+          Create an assistant that does your tasks
         </h1>
         <p className="text-sm text-muted-foreground">
-          Write to it like to a colleague: it answers questions, does tasks on {machineLabel} and
-          remembers what you told it.
+          Only you can give it work — in chat or your Telegram. It does your tasks on {machineLabel}
+          , even when your laptop is closed, and remembers what you told it.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">

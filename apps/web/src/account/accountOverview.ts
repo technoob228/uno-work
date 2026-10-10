@@ -642,6 +642,11 @@ export interface SubscriptionAiHours {
   readonly expiresAt: string | null;
   /** Max+AI: no hours limit (full speed for the month's hours, then standard). */
   readonly unlimited: boolean;
+  /**
+   * When the hours run out Smart pauses and Fast keeps working, nothing per
+   * use from the balance (fishcode `ai_hours.smart_stop`, AI_SMART_STOP).
+   */
+  readonly smartStop: boolean;
 }
 
 export function parseSubscriptionAiHours(raw: unknown): SubscriptionAiHours | null {
@@ -658,6 +663,7 @@ export function parseSubscriptionAiHours(raw: unknown): SubscriptionAiHours | nu
     neverExpire: r["never_expire"] !== false,
     expiresAt: strOrNull(r["expires_at"]),
     unlimited,
+    smartStop: r["smart_stop"] === true,
   };
 }
 

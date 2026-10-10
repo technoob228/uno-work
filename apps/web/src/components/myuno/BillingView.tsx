@@ -43,6 +43,7 @@ import {
   aiFastLine,
   aiHoursHeadline,
   aiHoursSummary,
+  aiRunOut,
   aiHoursTodayLine,
   aiTimeNote,
   planAiHoursLine,
@@ -334,6 +335,7 @@ function MoneyCard({
   const ai = subscription?.aiCredits;
   const hours = aiHoursSummary({ subscription, balance, usedTodayMinutes });
   const today = hours ? aiHoursTodayLine(hours) : null;
+  const runOut = hours ? aiRunOut(hours, { smartStopKnown: true }) : null;
   return (
     <SectionCard title="Balance and Uno AI" icon={<WalletIcon />}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -343,8 +345,8 @@ function MoneyCard({
             {balance ? formatUsd(balance.balanceUsd) : "…"}
           </span>
           <span className="text-[11px] text-muted-foreground">
-            {balance?.oneWallet
-              ? "Pays for the plan each month, and for AI after your AI time runs out."
+            {balance?.oneWallet && (runOut?.paysFromBalance ?? !hours)
+              ? "Pays for the plan each month, and for Uno AI past your AI time."
               : "Pays for the plan each month."}
           </span>
           <div className="mt-1">
@@ -388,6 +390,18 @@ function MoneyCard({
                 .join(" · ")}
             </span>
             <span className="text-[11px] text-muted-foreground">{aiTimeNote(hours)}</span>
+            {runOut ? (
+              <span className="text-[11px] text-muted-foreground" data-testid="my-uno-ai-run-out">
+                {runOut.line}{" "}
+                <button
+                  type="button"
+                  className="font-medium text-foreground underline underline-offset-2"
+                  onClick={() => openInNewTab(runOut.actionUrl)}
+                >
+                  {runOut.actionLabel}
+                </button>
+              </span>
+            ) : null}
             <span className="text-[11px] text-muted-foreground">
               Premium models (Grok, GLM-5.3, Kimi K3):{" "}
               <span className="font-medium text-foreground tabular-nums">

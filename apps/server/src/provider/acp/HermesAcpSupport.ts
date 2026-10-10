@@ -306,6 +306,15 @@ export function buildHermesConfigYaml(input: {
    * uno-work calls that wait for a person (approvals, request_secret).
    */
   readonly mcpToolTimeoutSec?: Readonly<Record<string, number>>;
+  /**
+   * A `pre_tool_call` shell hook (command line + tool matcher + timeout),
+   * auto-accepted: the Uno chat's schedule guard (assistants/scheduleGuard.ts).
+   */
+  readonly preToolCallHook?: {
+    readonly command: string;
+    readonly matcher: string;
+    readonly timeoutSec: number;
+  };
 }): string {
   const quote = JSON.stringify;
   const lines: Array<string> = [
@@ -338,6 +347,18 @@ export function buildHermesConfigYaml(input: {
       "  title_generation:",
       `    model: ${quote(input.sideTaskModel.trim())}`,
       `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+    );
+  }
+  if (input.preToolCallHook) {
+    // No TTY to approve a new hook under `hermes acp`: the daemon wrote it,
+    // so it is accepted up front.
+    lines.push(
+      "hooks_auto_accept: true",
+      "hooks:",
+      "  pre_tool_call:",
+      `    - matcher: ${quote(input.preToolCallHook.matcher)}`,
+      `      command: ${quote(input.preToolCallHook.command)}`,
+      `      timeout: ${Math.max(1, Math.round(input.preToolCallHook.timeoutSec))}`,
     );
   }
   if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {

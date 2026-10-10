@@ -17,6 +17,7 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import { CONSOLE_URL } from "../../account/accountOverview";
+import { OWN_SUBSCRIPTION_LINE } from "../../account/aiHours";
 import { accountTransport } from "../../account/unoAccount";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
 import { setDevMode, useDevMode } from "../../devMode";
@@ -42,7 +43,7 @@ import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
 import { Switch } from "../ui/switch";
 import { MachineAccessSections } from "./MachineAccessSettings";
-import { GeneralSettingsPanel, UnoGatewayBalance } from "./SettingsPanels";
+import { GeneralSettingsPanel, UnoAiRunOutLine, UnoGatewayBalance } from "./SettingsPanels";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { buildSettingsNavGroups } from "./settingsNavGroups";
 
@@ -103,6 +104,7 @@ export function AccountPlanSettings() {
             <SettingsRow
               title="AI time and balance"
               description="Smart and Fast come from your AI time; Premium models from premium credit, then your balance."
+              status={<UnoAiRunOutLine apiKey={apiKey} />}
               control={<UnoGatewayBalance apiKey={apiKey} />}
             />
           ) : null}
@@ -189,6 +191,7 @@ export function AiSettings() {
           <SettingsRow
             title="Uno AI"
             description="AI time this month, premium credit and your balance."
+            status={<UnoAiRunOutLine apiKey={apiKey} />}
             control={<UnoGatewayBalance apiKey={apiKey} />}
           />
         ) : null}
@@ -282,6 +285,12 @@ export function AiSettings() {
             </SettingsRow>
           );
         })}
+        <p
+          className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5"
+          data-testid="own-subscription-money"
+        >
+          {OWN_SUBSCRIPTION_LINE}
+        </p>
       </SettingsSection>
     </SettingsPageContainer>
   );
@@ -302,7 +311,7 @@ export function AssistantsPhoneSettings() {
         <LinkRow
           icon={<BotIcon />}
           title="Assistants"
-          description="Bots that answer in Telegram or Slack 24/7. Create, pause or delete them."
+          description="Assistants that do your tasks: only you give them work, in chat, Telegram or Slack. Create, pause or delete them."
           onClick={() => void navigate({ to: "/assistants" })}
         />
       </SettingsSection>
@@ -317,8 +326,8 @@ export function AssistantsPhoneSettings() {
           }
           description={
             channels.telegram === "on"
-              ? `Your assistant answers you in Telegram${channels.telegramBot ? ` as @${channels.telegramBot}` : ""}.`
-              : "Scan a QR code with your phone and write to your assistant from anywhere."
+              ? `Uno answers you in Telegram${channels.telegramBot ? ` as @${channels.telegramBot}` : ""}. Only you can talk to it.`
+              : "Only you can talk to it — Uno answers your messages and does your tasks, even when your laptop is closed. You make its bot in @BotFather (about a minute), then link your Telegram."
           }
           control={
             channels.telegram === "on" ? (

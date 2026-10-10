@@ -43,6 +43,7 @@ import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
+  DoneWhileAwayCard,
   NeedsYouPill,
   NeedsYouWidget,
   RecentChatsWidget,
@@ -121,16 +122,18 @@ export const FIRST_SCREEN_EXAMPLES = [
     prompt: "A site for my business that takes orders and sends them to me",
   },
   {
-    id: "example-bot",
-    label: "A Telegram bot",
-    prompt: "A Telegram bot that answers my customers",
+    // Misha 09.10: the own agent does my tasks — not a bot that answers
+    // strangers. Misha 10.10: one name everywhere, "assistant"; the pill reads
+    // like the landing's ("Personal assistant") and opens the same quiz
+    // ("What should your assistant do?", AssistantQuiz).
+    id: ASSISTANT_STARTER_ID,
+    label: "Personal assistant",
+    prompt: "",
   },
   {
-    // No ready-made prompt (Misha 05.10: "maybe my assistant isn't about
-    // email"): the pill opens "What should your assistant do?" (AssistantQuiz).
-    id: ASSISTANT_STARTER_ID,
-    label: "An AI assistant",
-    prompt: "",
+    id: "example-idea",
+    label: "I have an idea for an app",
+    prompt: "I have an idea for an app: ",
   },
 ] as const;
 
@@ -490,14 +493,28 @@ export function HomeStart({
       !layout.editing &&
       !threads.some((thread) => !isAssistantProjectId(thread.projectId));
     const ownAgentLine = (
-      <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
+      // Two doors, two things (ICP3 t1, 09.10): your Claude / ChatGPT plan running
+      // the AI here (Settings → AI sign-in) vs your agent elsewhere using this
+      // computer as a tool (the own-tools panel).
+      <p
+        className="flex flex-col items-center gap-1 px-1 text-center text-[13px] text-muted-foreground"
+        data-testid="home-own-ways"
+      >
+        <button
+          type="button"
+          onClick={() => void goTo({ to: "/settings/ai" })}
+          className="hover:text-foreground hover:underline"
+          data-testid="home-own-subscription"
+        >
+          Use my Claude or ChatGPT subscription here →
+        </button>
         <button
           type="button"
           onClick={() => setOwnTools("agent")}
           className="hover:text-foreground hover:underline"
           data-testid="home-own-agent"
         >
-          Using Claude Code or Codex? Connect it →
+          Connect Claude Code or Codex from my laptop →
         </button>
       </p>
     );
@@ -553,6 +570,7 @@ export function HomeStart({
         >
           {notices}
           {updateNotice}
+          <DoneWhileAwayCard threads={threads} now={now} />
           <h1
             className="mb-2 text-center text-[28px] font-semibold tracking-tight"
             data-testid="home-greeting"
@@ -595,6 +613,7 @@ export function HomeStart({
             </p>
           ) : null}
         </div>
+        {layout.editing ? null : <DoneWhileAwayCard threads={threads} now={now} />}
         {layout.editing || nextStep.step?.id === "pick_goal" ? null : (
           <HomeNextStepCard
             state={nextStep}

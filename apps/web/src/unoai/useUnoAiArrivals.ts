@@ -4,19 +4,24 @@
  * - `?q=` — the console's first message (…/enter?q=, work_ai): a new chat
  *   with Uno that sends it right away;
  * - a pending hand-off from a Uno AI chat without a computer (the person
- *   pressed "Create my computer"): a new chat with the whole context.
+ *   pressed "Create my computer"): the whole context goes to the Uno chat
+ *   (pinned) and it opens; it is forgotten only once it was sent.
  *
  * `q` is read once when this module loads — before the router may drop it on
  * a redirect (/ → /computer) — and removed from the address bar.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import type { HomeStartOptions } from "../components/computer/home/HomeComposer";
+import { sendToAssistantChat } from "../assistant/sendToAssistantChat";
+import { useEnvironmentSupportsAssistantChat } from "../environments/assistantChatSupport";
 import { useUpdateSettings } from "../hooks/useSettings";
 import { isWebLite } from "../lite/flag";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { aiChatLive } from "./unoAiApi";
-import { handoffPrompt, peekHandoff, takeHandoff } from "./unoAiHandoff";
+import { clearHandoff, handoffPrompt, peekHandoff, readHandoff } from "./unoAiHandoff";
 import { useUnoDefaultSelection } from "./useUnoDefaultSelection";
 
 let arrivedQ: string | null = null;
@@ -51,6 +56,8 @@ export function useUnoAiArrivals(
 ): void {
   const { updateSettings } = useUpdateSettings();
   const uno = useUnoDefaultSelection();
+  const daemonMarksChat = useEnvironmentSupportsAssistantChat(environmentId);
+  const navigate = useNavigate();
   useEffect(() => {
     if (handled || environmentId === null || !uno.ready) return;
     if (arrivedQ === null && !peekHandoff()) return;
@@ -64,18 +71,40 @@ export function useUnoAiArrivals(
       void send(q);
       return;
     }
-    const pending = takeHandoff();
+    const pending = readHandoff();
     if (!pending) return;
     void (async () => {
       try {
         const chat = await aiChatLive(pending.chatId, 0);
-        if (!chat || chat.messages.length === 0) return;
-        await send(
-          handoffPrompt({ title: chat.title ?? "", messages: chat.messages, sites: chat.sites }),
-        );
+        if (!chat || chat.messages.length === 0) {
+          clearHandoff(pending.chatId);
+          return;
+        }
+        const prompt = handoffPrompt({
+          title: chat.title ?? "",
+          messages: chat.messages,
+          sites: chat.sites,
+        });
+        // The teammate on this computer continues it in its own (pinned) chat;
+        // an older daemon without one gets a new chat with Uno, as before.
+        const threadId = await sendToAssistantChat({
+          environmentId,
+          text: prompt,
+          daemonMarksChat,
+        });
+        if (threadId !== null) {
+          void navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams({ environmentId, threadId }),
+          });
+        } else {
+          await send(prompt);
+        }
+        clearHandoff(pending.chatId);
       } catch {
-        // the chat is still in Uno AI; "Continue on this computer" there
+        // Not sent: it stays remembered and goes on the next load (the chat
+        // is still in Uno AI too, with "Continue on this computer").
       }
     })();
-  }, [environmentId, startTask, updateSettings, uno]);
+  }, [daemonMarksChat, environmentId, navigate, startTask, updateSettings, uno]);
 }

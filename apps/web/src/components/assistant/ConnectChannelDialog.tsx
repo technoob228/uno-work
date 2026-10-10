@@ -69,13 +69,17 @@ export function ConnectChannelDialog(props: {
       >
         <DialogHeader>
           <DialogTitle>
-            {props.channel === "slack" ? "Answer in Slack" : "Answer in Telegram"}
+            {props.channel === "slack"
+              ? "Answer in Slack"
+              : props.projectId === undefined
+                ? "Talk to Uno from your Telegram"
+                : "Talk to it from your Telegram"}
           </DialogTitle>
           <DialogDescription>
             {props.channel === "slack"
               ? "Mention the assistant in a channel or write to it directly. Each Slack channel gets its own conversation; all of them share its memory."
               : ownBot
-                ? "It gets a Telegram bot of its own: its own name and chat. You make the bot in @BotFather, then press Start."
+                ? "Only you can talk to it: it answers just the Telegram account you link in step 2. You make its bot in @BotFather (about a minute), then press Start."
                 : "Scan the code with your phone and press Start. Write to it like to a colleague — it answers there, in the same conversation you see in Uno Work."}
           </DialogDescription>
         </DialogHeader>

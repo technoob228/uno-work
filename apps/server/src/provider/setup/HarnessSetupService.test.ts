@@ -297,16 +297,53 @@ describe("auth jobs", () => {
     );
   });
 
-  it("rejects a concurrent sign-in for the same driver", async () => {
+  it("resumes an unfinished account sign-in instead of locking the person out", async () => {
     const harness = makeHarness();
-    harness.runner.authStart({ driver: "codex", method: "oauth" });
+    const first = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
     await tick();
-    expect(() => harness.runner.authStart({ driver: "codex", method: "oauth" })).toThrow(
-      /already in progress/,
+    harness.latest().input.onOutput("Visit: https://claude.ai/oauth/authorize?code=true\n");
+    // Dialog closed, page reloaded — the person presses "Sign in with account" again.
+    const again = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    expect(again.jobId).toBe(first.jobId);
+    expect(harness.processes).toHaveLength(1);
+    expect(harness.runner.authStatus({ jobId: again.jobId }).verificationUrl).toContain(
+      "claude.ai/oauth",
     );
-    expect(() =>
-      harness.runner.authStart({ driver: "claudeAgent", method: "oauth" }),
-    ).not.toThrow();
+    expect(() => harness.runner.authStart({ driver: "codex", method: "oauth" })).not.toThrow();
+  });
+
+  it("start over cancels the unfinished sign-in and runs a fresh one", async () => {
+    const harness = makeHarness();
+    const first = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick();
+    const oldProcess = harness.latest();
+    const fresh = harness.runner.authStart({
+      driver: "claudeAgent",
+      method: "oauth",
+      restart: true,
+    });
+    await tick();
+    expect(fresh.jobId).not.toBe(first.jobId);
+    expect(oldProcess.killed).toBe(true);
+    expect(harness.processes).toHaveLength(2);
+    const old = harness.runner.authStatus({ jobId: first.jobId });
+    expect(old.state).toBe("failed");
+    expect(old.error).toMatch(/Replaced/);
+    expect(harness.runner.authStatus({ jobId: fresh.jobId }).state).toBe("running");
+  });
+
+  it("an API key replaces an unfinished account sign-in", async () => {
+    const harness = makeHarness();
+    const first = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick();
+    const { jobId: keyJob } = harness.runner.authStart({
+      driver: "claudeAgent",
+      method: "apiKey",
+      apiKey: "sk-test",
+    });
+    await harness.runner.drain();
+    expect(harness.runner.authStatus({ jobId: first.jobId }).state).toBe("failed");
+    expect(harness.runner.authStatus({ jobId: keyJob }).state).toBe("succeeded");
   });
 
   it("kills a stalled oauth login after the timeout", async () => {

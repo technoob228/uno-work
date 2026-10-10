@@ -284,6 +284,47 @@ describe("AssistantSchedules service (console mocked)", () => {
     expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: "/api/v1/scheduled-tasks/12" });
   });
 
+  it("lets the person list, pause, resume and remove the assistant's schedules", async () => {
+    const own = buildAssistantTurnCommand({
+      workspaceRoot: WORKSPACE,
+      name: "Morning plan",
+      prompt: "Send me a short plan for today.",
+      timeoutSec: 600,
+    });
+    const { calls, run } = setup((method) =>
+      method === "GET"
+        ? json(200, {
+            tasks: [
+              { id: 15, box_id: 7, command: own, cron_expr: "0 9 * * *", name: "Morning plan" },
+              { id: 16, box_id: 7, command: "pg_dump x", cron_expr: "0 3 * * *" },
+            ],
+          })
+        : json(200, { id: 15, state: "paused" }),
+    );
+    const home = ProjectId.make("assistant-home");
+    const listed = await run(withService((schedules) => schedules.ownerList(home)));
+    expect(listed).toMatchObject({
+      _tag: "Success",
+      success: { schedules: [{ scheduleId: 15, name: "Morning plan", cron: "0 9 * * *" }] },
+    });
+    for (const action of ["pause", "resume"] as const) {
+      const done = await run(withService((schedules) => schedules.ownerAct(home, 15, action)));
+      expect(done).toMatchObject({ _tag: "Success", success: { done: true } });
+      expect(calls.at(-1)).toMatchObject({
+        method: "PATCH",
+        path: `/api/v1/scheduled-tasks/15/${action}`,
+        auth: "Bearer uno_agt_machine",
+      });
+    }
+    await run(withService((schedules) => schedules.ownerAct(home, 15, "remove")));
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: "/api/v1/scheduled-tasks/15" });
+    // Not the assistant's (a plain console job): refused before any change.
+    const before = calls.length;
+    const refused = await run(withService((schedules) => schedules.ownerAct(home, 16, "remove")));
+    expect(refused._tag).toBe("Failure");
+    expect(calls.slice(before).map((call) => call.method)).toEqual(["GET"]);
+  });
+
   it("turns a console without the feature into a readable tool error", async () => {
     const { run } = setup(() => json(403, { error: "WORK_MACHINE_ROUTE_RESTRICTED" }));
     const result = await run(
@@ -346,6 +387,8 @@ describe("uno-manager MCP schedule tools", () => {
           schedules: {
             create: () => Effect.die("unused"),
             remove: () => Effect.die("unused"),
+            ownerList: () => Effect.die("unused"),
+            ownerAct: () => Effect.die("unused"),
             list: (who) =>
               Effect.sync(() => {
                 seen.push(who);
