@@ -17,7 +17,7 @@ import {
   resetWsConnectionStateForTests,
 } from "../rpc/wsConnectionState";
 import { TRANSPORT_CONNECTION_LOST_MESSAGE } from "./transportError";
-import { getSubscriptionRetryDelayMs, WsTransport } from "./wsTransport";
+import { getSubscriptionRetryDelayMs, unknownRpcMethodOf, WsTransport } from "./wsTransport";
 
 type WsEventType = "open" | "message" | "close" | "error";
 type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
@@ -1739,5 +1739,102 @@ describe("WsTransport — a newer daemon's stream items (one window / desktop)",
     await waitFor(() => expect(lifecycle).toHaveBeenCalledTimes(1));
     expect(lifecycle.mock.calls[0]?.[0]).toMatchObject({ type: "welcome", sequence: 10 });
     second.unsubscribe();
+  });
+});
+
+const unknownMethod = (method: string) =>
+  JSON.stringify({ _tag: "Defect", defect: `Unknown request tag: ${method}` });
+const requestsSent = (socket: MockWebSocket) =>
+  socket.sent
+    .map((frame) => JSON.parse(frame) as { _tag?: string; id?: string; tag?: string })
+    .filter((frame) => frame._tag === "Request");
+
+describe("WsTransport — a method the computer's daemon does not have", () => {
+  const welcome = {
+    version: 1,
+    sequence: 1,
+    type: "welcome",
+    payload: {
+      environment: {
+        environmentId: "environment-local",
+        label: "Local environment",
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.101",
+        capabilities: { repositoryIdentity: true },
+      },
+      cwd: "/tmp/workspace",
+      projectName: "workspace",
+    },
+  };
+
+  it("reads the method out of the daemon's answer", () => {
+    expect(unknownRpcMethodOf("Unknown request tag: uno.sites.list")).toBe("uno.sites.list");
+    expect(unknownRpcMethodOf("Git command failed in GitCore.statusDetails")).toBeNull();
+  });
+
+  it("starts a stream again when another request's unknown method ended it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transport = createTransport("ws://localhost:3020");
+    const lifecycle = vi.fn();
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      lifecycle,
+      { tag: WS_METHODS.subscribeServerLifecycle, retryDelay: 10 },
+    );
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => expect(requestsSent(socket)).toHaveLength(1));
+
+    // Some other screen asked for a method this daemon has never heard of:
+    // the daemon answers for the whole connection, every stream ends.
+    socket.serverMessage(unknownMethod("uno.future.method"));
+
+    await waitFor(() => expect(requestsSent(socket)).toHaveLength(2));
+    const again = requestsSent(socket)[1];
+    expect(again?.tag).toBe(WS_METHODS.subscribeServerLifecycle);
+    socket.serverMessage(
+      JSON.stringify({ _tag: "Chunk", requestId: again?.id, values: [welcome] }),
+    );
+    await waitFor(() => expect(lifecycle).toHaveBeenCalledTimes(1));
+    expect(warn).toHaveBeenCalledWith(
+      "This computer's Uno Work does not have a method the interface asked for",
+      { method: "uno.future.method" },
+    );
+    expect(warn).not.toHaveBeenCalledWith("WebSocket RPC subscription failed", expect.anything());
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("stops a stream whose own method is unknown and never asks for it again", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transport = createTransport("ws://localhost:3020");
+    const subscribeLifecycle = () =>
+      transport.subscribe((client) => client[WS_METHODS.subscribeServerLifecycle]({}), vi.fn(), {
+        tag: WS_METHODS.subscribeServerLifecycle,
+        retryDelay: 10,
+      });
+    const unsubscribe = subscribeLifecycle();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => expect(requestsSent(socket)).toHaveLength(1));
+
+    socket.serverMessage(unknownMethod(WS_METHODS.subscribeServerLifecycle));
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
+        error: `Unknown request tag: ${WS_METHODS.subscribeServerLifecycle}`,
+      }),
+    );
+
+    // A second screen subscribing to the same thing must not end the others again.
+    const unsubscribeSecond = subscribeLifecycle();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(requestsSent(socket)).toHaveLength(1);
+
+    unsubscribe();
+    unsubscribeSecond();
+    await transport.dispose();
   });
 });

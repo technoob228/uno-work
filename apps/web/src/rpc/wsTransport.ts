@@ -67,6 +67,24 @@ export function noteSkippedStreamItem(tag: string | undefined, item: UnknownStre
   });
 }
 
+/**
+ * What a daemon's RPC server answers to a method it has never heard of — the
+ * interface is newer than the computer ("one window", a desktop app ahead of
+ * a cloud machine). The answer is not an error of that one request: it is a
+ * connection-level defect, and effect's client ends EVERY request and stream
+ * on the socket with it. The socket itself stays open, so nothing reconnects.
+ */
+export function unknownRpcMethodOf(message: string): string | null {
+  return /Unknown request tag: (\S+)/.exec(message)?.[1] ?? null;
+}
+
+/**
+ * How many times in a row (with no value in between) a stream is started
+ * again after another request's unknown method ended it. A stream that keeps
+ * dying without ever delivering anything is given up like before.
+ */
+const MAX_UNKNOWN_METHOD_RESTARTS = 20;
+
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
 const AUTO_RECOVERY_DEBOUNCE_MS = 1_000;
 const DEFAULT_CONNECTION_RETRY_LIMIT = 3;
@@ -127,6 +145,8 @@ export class WsTransport {
   private session: TransportSession;
   private lastHeartbeatPongAt = 0;
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
+  /** Methods this computer's daemon said it does not have (see unknownRpcMethodOf). */
+  private readonly unsupportedMethods = new Set<string>();
 
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
@@ -220,6 +240,7 @@ export class WsTransport {
     let active = true;
     let hasReceivedValue = false;
     let transportFailureStreak = 0;
+    let unknownMethodRestarts = 0;
     const retryDelayMs = Duration.toMillis(
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
@@ -228,6 +249,10 @@ export class WsTransport {
     void (async () => {
       for (;;) {
         if (!active || this.disposed) {
+          return;
+        }
+        // Asking again would end every other stream on the connection again.
+        if (options?.tag !== undefined && this.unsupportedMethods.has(options.tag)) {
           return;
         }
 
@@ -256,6 +281,7 @@ export class WsTransport {
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
               transportFailureStreak = 0;
+              unknownMethodRestarts = 0;
             },
           );
           cancelCurrentStream = runningStream.cancel;
@@ -274,6 +300,22 @@ export class WsTransport {
 
           const formattedError = formatErrorMessage(error);
           if (!isTransportConnectionErrorMessage(formattedError)) {
+            // Another request asked the daemon for a method it does not have:
+            // this stream was ended along with everything else on the socket
+            // and is fine — start it again. The stream whose own method is
+            // unknown stops for good.
+            const unknownMethod = unknownRpcMethodOf(formattedError);
+            if (unknownMethod !== null) {
+              this.noteUnsupportedMethod(unknownMethod);
+              if (
+                unknownMethod !== options?.tag &&
+                unknownMethodRestarts < MAX_UNKNOWN_METHOD_RESTARTS
+              ) {
+                unknownMethodRestarts += 1;
+                await sleep(retryDelayMs);
+                continue;
+              }
+            }
             console.warn("WebSocket RPC subscription failed", {
               error: formattedError,
             });
@@ -379,6 +421,15 @@ export class WsTransport {
     });
     this.autoRecovery = recovery;
     return recovery;
+  }
+
+  /** One warning per method per connection owner: the computer needs an update for it. */
+  private noteUnsupportedMethod(method: string): void {
+    if (this.unsupportedMethods.has(method)) return;
+    this.unsupportedMethods.add(method);
+    console.warn("This computer's Uno Work does not have a method the interface asked for", {
+      method,
+    });
   }
 
   /**
