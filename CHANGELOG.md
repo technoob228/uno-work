@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.126 — 2026-10-11
+
+- Chats: "Read". A chat that finished and waits for you can be marked as read — the Read button next to Done in the chat's header, or "Mark as read" in the chat's menu. It stops asking for "Your turn" and stays in its place in the list; the next finished answer asks again, and "Mark unread" brings it back. The mark is kept in this browser.
+- Home: the quiet line under the box now reads "Give this computer to your local agent".
+
 ## v0.0.125 — 2026-10-11
 
 - Uno Work in the browser: "Continue on another machine" is gone from the chat header and the chat's menu. It stays in the desktop app, where you have several computers at hand.

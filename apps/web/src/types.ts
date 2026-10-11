@@ -202,6 +202,8 @@ export interface SidebarThreadSummary {
   /** Manual settle override ("settled" parked, "active" pulled back out); absent on pre-settle servers. */
   settledOverride?: "settled" | "active" | null | undefined;
   settledAt?: string | null | undefined;
+  /** When the person pressed Read in this browser (see threadReadMarks); it holds until a later turn finishes. */
+  readAt?: string | null | undefined;
   /** Model the chat runs on; drives the provider icon on chat-list cards. */
   modelSelection?: { readonly instanceId: string; readonly model: string } | undefined;
   /** Thread whose agent created this one; absent/null for human-created threads. */

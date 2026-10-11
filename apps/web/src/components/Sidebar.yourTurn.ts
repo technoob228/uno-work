@@ -1,11 +1,13 @@
 // "Your turn": a chat finished its work and now waits for the person — to
 // reply, or to say it's done. Looking at the chat does not clear it (that was
 // the old "unread" green dot, gone after one accidental click); only a new
-// message (the chat works again) or Done (the server-backed settle) does, so
-// it reads the same on the desktop app and in the browser.
+// message (the chat works again), Done (the server-backed settle, so it reads
+// the same on the desktop app and in the browser) or Read (this browser's
+// mark: seen, nothing to add, the chat stays in its place) does.
 import { isAssistantProjectId } from "@t3tools/contracts";
 
 import { isLatestTurnSettled } from "../session-logic";
+import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
 import { isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
 
@@ -29,6 +31,7 @@ export type YourTurnInput = Pick<
       | "snoozedAt"
       | "settledOverride"
       | "settledAt"
+      | "readAt"
       | "projectId"
       | "spawnedByThreadId"
     >
@@ -62,6 +65,8 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
     const settledAtMs = Date.parse(thread.settledAt ?? "");
     if (Number.isNaN(settledAtMs) || settledAtMs >= completedAtMs) return false;
   }
+  // Read: seen, and no turn finished since.
+  if (isTurnRead(thread.readAt, thread.latestTurn?.completedAt)) return false;
   return !isThreadSnoozed(thread, now);
 }
 

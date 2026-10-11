@@ -1342,6 +1342,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
+  const setThreadReadAt = useStore((state) => state.setThreadReadAt);
   const toggleProject = useUiStateStore((state) => state.toggleProject);
   const toggleThreadSelection = useThreadSelectionStore((state) => state.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((state) => state.rangeSelectTo);
@@ -1967,17 +1968,35 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (threadKeys.length === 0) return;
       const count = threadKeys.length;
 
+      const nowIso = new Date().toISOString();
+      const yourTurnThreads = threadKeys.flatMap((threadKey) => {
+        const thread = sidebarThreadByKeyRef.current.get(threadKey);
+        return thread && isYourTurn(thread, nowIso) ? [thread] : [];
+      });
+
       const clicked = await api.contextMenu.show(
         [
+          ...(yourTurnThreads.length > 0
+            ? [{ id: "mark-read", label: `Mark as read (${count})` }]
+            : []),
           { id: "mark-unread", label: `Mark unread (${count})` },
           { id: "delete", label: `Delete (${count})`, destructive: true },
         ],
         position,
       );
 
+      if (clicked === "mark-read") {
+        for (const thread of yourTurnThreads) {
+          setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), nowIso);
+        }
+        clearSelection();
+        return;
+      }
+
       if (clicked === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = sidebarThreadByKeyRef.current.get(threadKey);
+          if (thread) setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), null);
           markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
         }
         clearSelection();
@@ -2011,6 +2030,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       clearSelection,
       deleteThread,
       markThreadUnread,
+      setThreadReadAt,
       removeFromSelection,
     ],
   );
@@ -2411,6 +2431,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "rename", label: "Rename chat" },
           { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
           ...snoozeMenuItems,
+          ...(isYourTurn(thread, nowIso) ? [{ id: "mark-read", label: "Mark as read" }] : []),
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy chat ID" },
@@ -2480,7 +2501,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
+      if (clicked === "mark-read") {
+        setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), nowIso);
+        return;
+      }
+
       if (clicked === "mark-unread") {
+        setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), null);
         markThreadUnread(threadKey, thread.latestTurn?.completedAt);
         return;
       }
@@ -2527,6 +2554,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       deleteThread,
       inboxSections,
       markThreadUnread,
+      setThreadReadAt,
       memberProjectByScopedKey,
       openSnoozePicker,
       project.cwd,

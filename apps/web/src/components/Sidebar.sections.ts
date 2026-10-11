@@ -45,6 +45,7 @@ export type SidebarSectionThread = Pick<
   | "snoozedAt"
   | "settledOverride"
   | "settledAt"
+  | "readAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "latestUserMessageAt"

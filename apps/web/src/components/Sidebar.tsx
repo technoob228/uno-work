@@ -1732,6 +1732,7 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
+  const setThreadReadAt = useStore((s) => s.setThreadReadAt);
   // Scope flips drop the selection: bulk actions must never touch hidden rows.
   useEffect(() => {
     clearSelection();
@@ -2349,6 +2350,9 @@ export default function Sidebar() {
                 },
               ]
             : []),
+          ...(selectedThreads.some((thread) => isYourTurn(thread, nowIso))
+            ? [{ id: "mark-read", label: `Mark as read (${count})` }]
+            : []),
           { id: "mark-unread", label: `Mark unread (${count})` },
           { id: "delete", label: `Delete (${count})`, destructive: true },
         ],
@@ -2377,8 +2381,17 @@ export default function Sidebar() {
         }
         return;
       }
+      if (clicked === "mark-read") {
+        for (const thread of selectedThreads) {
+          if (!isYourTurn(thread, nowIso)) continue;
+          setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), nowIso);
+        }
+        clearSelection();
+        return;
+      }
       if (clicked === "mark-unread") {
         for (const thread of selectedThreads) {
+          setThreadReadAt(scopeThreadRef(thread.environmentId, thread.id), null);
           markThreadUnread(threadKeyOf(thread), thread.latestTurn?.completedAt);
         }
         clearSelection();
@@ -2407,6 +2420,7 @@ export default function Sidebar() {
       confirmThreadDelete,
       deleteThread,
       markThreadUnread,
+      setThreadReadAt,
       removeFromSelection,
     ],
   );
@@ -2475,6 +2489,10 @@ export default function Sidebar() {
               { id: "rename", label: "Rename chat" },
               { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
               ...lifecycleItems,
+              // Read: seen, nothing to add — the chat stops asking for "Your turn".
+              ...(isYourTurn(thread, nowDate.toISOString())
+                ? [{ id: "mark-read", label: "Mark as read" }]
+                : []),
               { id: "mark-unread", label: "Mark unread" },
               { id: "copy-path", label: "Copy Path" },
               { id: "copy-thread-id", label: "Copy chat ID" },
@@ -2522,7 +2540,11 @@ export default function Sidebar() {
           case "unsnooze":
             attemptUnsnooze(threadRef);
             return;
+          case "mark-read":
+            setThreadReadAt(threadRef, new Date().toISOString());
+            return;
           case "mark-unread":
+            setThreadReadAt(threadRef, null);
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
             return;
           case "copy-path":
@@ -2596,6 +2618,7 @@ export default function Sidebar() {
       devMode,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      setThreadReadAt,
       openSnoozePicker,
       projectByKey,
       setThreadPinned,

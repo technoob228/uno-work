@@ -81,6 +81,13 @@ describe("isYourTurn", () => {
     expect(isYourTurn(makeThread({ latestUserMessageAt: ago(MINUTE_MS) }), NOW)).toBe(false);
   });
 
+  it("ends with Read, and comes back when a later turn finishes", () => {
+    expect(isYourTurn(makeThread({ readAt: ago(MINUTE_MS) }), NOW)).toBe(false);
+    // The mark is older than the turn that finished last: it asks again.
+    expect(isYourTurn(makeThread({ readAt: ago(9 * DAY_MS) }), NOW)).toBe(true);
+    expect(isYourTurn(makeThread({ readAt: null }), NOW)).toBe(true);
+  });
+
   it("ends with Done, and comes back when a later turn finishes", () => {
     const done = makeThread({ settledOverride: "settled", settledAt: ago(30 * MINUTE_MS) });
     expect(isYourTurn(done, NOW)).toBe(false);

@@ -497,7 +497,7 @@ export function HomeStart({
           className="hover:text-foreground hover:underline"
           data-testid="home-own-agent"
         >
-          Using Claude Code or Codex? Connect it →
+          Give this computer to your local agent →
         </button>
       </p>
     );

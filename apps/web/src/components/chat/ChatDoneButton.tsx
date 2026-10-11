@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, EyeIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useEnvironmentSupportsThreadSettlement } from "../../environments/threadSettlementSupport";
@@ -12,8 +12,10 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
- * "Done" in the chat's header while the chat waits on the person: reading the
- * answer doesn't end "Your turn" — replying or this button does.
+ * "Read" and "Done" in the chat's header while the chat waits on the person:
+ * looking at the answer doesn't end "Your turn" — replying or one of these
+ * does. Read keeps the chat in its place in the list; Done parks it on the
+ * Done shelf.
  */
 export function ChatDoneButton(props: {
   readonly environmentId: EnvironmentId;
@@ -27,8 +29,9 @@ export function ChatDoneButton(props: {
   );
   const thread = useStore((state) => selectSidebarThreadSummaryByRef(state, ref));
   const supported = useEnvironmentSupportsThreadSettlement(props.environmentId);
+  const setThreadReadAt = useStore((state) => state.setThreadReadAt);
   const [pending, setPending] = useState(false);
-  if (!supported || !thread || !isYourTurn(thread, new Date().toISOString())) return null;
+  if (!thread || !isYourTurn(thread, new Date().toISOString())) return null;
 
   const onClick = () => {
     setPending(true);
@@ -43,28 +46,56 @@ export function ChatDoneButton(props: {
       .finally(() => setPending(false));
   };
 
-  return (
+  const read = (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
             size="xs"
             variant="outline"
-            className="shrink-0 border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
-            disabled={pending}
-            onClick={onClick}
-            data-testid="chat-done-button"
-            aria-label="Done"
+            className="shrink-0"
+            onClick={() => setThreadReadAt(ref, new Date().toISOString())}
+            data-testid="chat-read-button"
+            aria-label="Mark as read"
           />
         }
       >
-        <CheckIcon className="size-3" />
-        {props.compact ? null : "Done"}
+        <EyeIcon className="size-3" />
+        {props.compact ? null : "Read"}
       </TooltipTrigger>
       <TooltipPopup side="bottom" className="max-w-64">
-        This chat finished and waits for you. Reply to keep going, or press Done when there's
-        nothing more to do.
+        You've seen the answer and have nothing to add for now. The chat stays in the list and stops
+        asking for your turn until it finishes something new.
       </TooltipPopup>
     </Tooltip>
+  );
+  if (!supported) return read;
+
+  return (
+    <>
+      {read}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="xs"
+              variant="outline"
+              className="shrink-0 border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+              disabled={pending}
+              onClick={onClick}
+              data-testid="chat-done-button"
+              aria-label="Done"
+            />
+          }
+        >
+          <CheckIcon className="size-3" />
+          {props.compact ? null : "Done"}
+        </TooltipTrigger>
+        <TooltipPopup side="bottom" className="max-w-64">
+          This chat finished and waits for you. Reply to keep going, or press Done when there's
+          nothing more to do.
+        </TooltipPopup>
+      </Tooltip>
+    </>
   );
 }

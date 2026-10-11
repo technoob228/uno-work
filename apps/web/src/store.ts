@@ -37,6 +37,7 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { readThreadReadAt, writeThreadReadAt } from "./threadReadMarks";
 
 export interface EnvironmentState {
   projectIds: ProjectId[];
@@ -339,6 +340,7 @@ function mapThreadShell(
     snoozedAt: thread.snoozedAt ?? null,
     settledOverride: thread.settledOverride ?? null,
     settledAt: thread.settledAt ?? null,
+    readAt: readThreadReadAt(environmentId, thread.id),
     modelSelection: {
       instanceId: shell.modelSelection.instanceId,
       model: shell.modelSelection.model,
@@ -461,6 +463,7 @@ function sidebarThreadSummariesEqual(
     (left.snoozedAt ?? null) === (right.snoozedAt ?? null) &&
     (left.settledOverride ?? null) === (right.settledOverride ?? null) &&
     (left.settledAt ?? null) === (right.settledAt ?? null) &&
+    (left.readAt ?? null) === (right.readAt ?? null) &&
     left.modelSelection?.instanceId === right.modelSelection?.instanceId &&
     left.modelSelection?.model === right.modelSelection?.model &&
     (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
@@ -2095,6 +2098,27 @@ export function setThreadArchivedAt(
   return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
 }
 
+/**
+ * Read / Mark unread on a chat: a mark of this browser (threadReadMarks), put
+ * on the chat's sidebar summary so "Your turn" follows it everywhere at once.
+ */
+export function setThreadReadAt(
+  state: AppState,
+  threadRef: ScopedThreadRef,
+  readAt: string | null,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, threadRef.environmentId);
+  const summary = environmentState.sidebarThreadSummaryById[threadRef.threadId];
+  if (!summary || (summary.readAt ?? null) === readAt) return state;
+  return commitEnvironmentState(state, threadRef.environmentId, {
+    ...environmentState,
+    sidebarThreadSummaryById: {
+      ...environmentState.sidebarThreadSummaryById,
+      [threadRef.threadId]: { ...summary, readAt },
+    },
+  });
+}
+
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
@@ -2116,6 +2140,7 @@ interface AppStore extends AppState {
     worktreePath: string | null,
   ) => void;
   setThreadArchivedAt: (threadRef: ScopedThreadRef, archivedAt: string | null) => void;
+  setThreadReadAt: (threadRef: ScopedThreadRef, readAt: string | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -2139,4 +2164,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
   setThreadArchivedAt: (threadRef, archivedAt) =>
     set((state) => setThreadArchivedAt(state, threadRef, archivedAt)),
+  setThreadReadAt: (threadRef, readAt) => {
+    writeThreadReadAt(threadRef.environmentId, threadRef.threadId, readAt);
+    set((state) => setThreadReadAt(state, threadRef, readAt));
+  },
 }));
