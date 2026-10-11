@@ -34,7 +34,7 @@ import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
-import { CloudBrowser, CloudUsageBar, formatQuota } from "../files/CloudBrowser";
+import { CloudBrowser, CloudUsageBar, formatBackupsNote, formatQuota } from "../files/CloudBrowser";
 import { filesApi } from "../files/filesApi";
 import { UploadPanel, useFilesUploads } from "../files/FilesUploads";
 import {
@@ -153,6 +153,11 @@ export function DriveView() {
               ? `${formatQuota(state.data.usedBytes, state.data.quotaBytes)} · your Cloud storage, on every computer and in Telegram`
               : "Your Cloud storage"}
           </p>
+          {state.data?.available && formatBackupsNote(state.data.backupsBytes) ? (
+            <p className="truncate text-xs text-muted-foreground" data-testid="drive-backups-note">
+              {formatBackupsNote(state.data.backupsBytes)} — kept by Uno, not shown as files here.
+            </p>
+          ) : null}
         </div>
         <div className="ml-auto flex w-full max-w-xs items-center gap-1.5">
           <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />

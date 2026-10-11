@@ -113,6 +113,7 @@ export function parseCloudState(raw: unknown): FilesCloudState {
     available: true,
     message: null,
     usedBytes,
+    backupsBytes: num(storage["backups_bytes"]),
     quotaBytes: num(storage["quota_bytes"]),
     overQuota: storage["over_quota"] === true,
     buckets: buckets.toSorted((left, right) => left.name.localeCompare(right.name)),

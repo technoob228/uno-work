@@ -255,7 +255,7 @@ export function HomeStart({
   const firstName = usePersonFirstName(environmentId);
   // "A new version of Uno Work is ready · Update" (cloud computers, 0.0.113+).
   const updateNotice = isWebLite ? null : <SelfUpdateCard environmentId={environmentId} />;
-  const homeStarters = useHomeStarters({ environmentId, threads, now, tiles });
+  const homeStarters = useHomeStarters({ environmentId, threads, now });
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const setupProgress = useSetupProgress();
   const setupHome = useSetupHome({
@@ -474,7 +474,8 @@ export function HomeStart({
 
   if (!devMode) {
     // The same row of pills as the first screen: their own hints (from their
-    // chats, apps, files, sites) when there are some, else the three examples.
+    // chats, files, sites — or, with few projects, how to get on board) when
+    // there are some, else the three examples.
     const personalStarters = (
       setupHome.starters.length > 0 ? setupHome.starters : homeStarters
     ).filter((starter) => starter.source !== "generic");
@@ -690,6 +691,18 @@ export function HomeStart({
             </Button>
           </div>
         ) : null}
+        {/* Above the widgets it changes (Misha 11.10), not under them. */}
+        {layout.editing ? null : (
+          <button
+            type="button"
+            onClick={() => layout.setEditing(true)}
+            data-testid="home-customize"
+            className="flex items-center gap-1 self-end rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PencilIcon className="size-3" />
+            Customize widgets
+          </button>
+        )}
         {widgetBlocks.length > 0 ? (
           <HomeWidgetGrid
             blocks={widgetBlocks}
@@ -699,17 +712,6 @@ export function HomeStart({
             render={render}
           />
         ) : null}
-        {layout.editing ? null : (
-          <button
-            type="button"
-            onClick={() => layout.setEditing(true)}
-            data-testid="home-customize"
-            className="flex items-center gap-1 self-end rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <PencilIcon className="size-3" />
-            Customize
-          </button>
-        )}
         <AddWidgetDialog
           open={layout.adding}
           onOpenChange={layout.setAdding}
@@ -788,16 +790,6 @@ export function HomeStart({
         />
       ) : null}
 
-      {secondaryBlocks.length > 0 ? (
-        <HomeWidgetGrid
-          blocks={secondaryBlocks}
-          editing={false}
-          dispatch={layout.dispatch}
-          metaOf={metaOf}
-          render={render}
-        />
-      ) : null}
-
       {!showAll || layout.editing ? null : (
         <div className="flex items-center gap-2">
           <button
@@ -815,10 +807,20 @@ export function HomeStart({
             className="ml-auto flex items-center gap-1.5 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <PencilIcon className="size-3.5" />
-            Customize
+            Customize widgets
           </button>
         </div>
       )}
+
+      {secondaryBlocks.length > 0 ? (
+        <HomeWidgetGrid
+          blocks={secondaryBlocks}
+          editing={false}
+          dispatch={layout.dispatch}
+          metaOf={metaOf}
+          render={render}
+        />
+      ) : null}
 
       <AddWidgetDialog
         open={layout.adding}

@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, CloudIcon } from "lucide-react";
 
-import { CloudUsageBar, formatQuota } from "../files/CloudBrowser";
+import { CloudUsageBar, formatBackupsNote, formatQuota } from "../files/CloudBrowser";
 import { cloudStateQueryOptions } from "../files/filesApi";
 
 export function ComputerCloudStorageRow({
@@ -32,6 +32,9 @@ export function ComputerCloudStorageRow({
           <span className="font-medium">Cloud storage</span>
           <span className="text-xs tabular-nums text-muted-foreground">
             {formatQuota(state.usedBytes, state.quotaBytes)}
+            {formatBackupsNote(state.backupsBytes)
+              ? ` · ${formatBackupsNote(state.backupsBytes)}`
+              : ""}
           </span>
         </span>
         <span className="mt-0.5 block text-xs text-muted-foreground">

@@ -78,6 +78,16 @@ export function formatQuota(used: number, quota: number): string {
   return quota > 0 ? `${gb(used)} of ${gb(quota)} GB used` : `${formatFileSize(used)} used`;
 }
 
+/**
+ * "3.6 GB of it is backups of your computers": they count toward the plan
+ * but aren't files, so an empty list next to "3.6 GB used" needs the word
+ * (Misha 11.10: "a backup or a bug? what isn't visible has to be shown").
+ */
+export function formatBackupsNote(backupsBytes: number | undefined): string | null {
+  if (!backupsBytes || backupsBytes <= 0) return null;
+  return `${formatFileSize(backupsBytes)} of it is backups of your computers`;
+}
+
 export function CloudUsageBar({ used, quota }: { used: number; quota: number }) {
   if (quota <= 0) return null;
   const percent = Math.min(100, Math.round((used / quota) * 100));
@@ -331,6 +341,11 @@ export function CloudBrowser({
                 {formatQuota(state.data.usedBytes, state.data.quotaBytes)} · part of your Uno plan,
                 reachable from every computer on your account
               </div>
+              {formatBackupsNote(state.data.backupsBytes) ? (
+                <div className="text-xs text-muted-foreground" data-testid="cloud-backups-note">
+                  {formatBackupsNote(state.data.backupsBytes)} — kept by Uno, not shown as files.
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="mt-3">

@@ -242,6 +242,12 @@ export const FilesCloudState = Schema.Struct({
   /** Why it's unavailable, in words for a person. */
   message: Schema.NullOr(Schema.String),
   usedBytes: NonNegativeInt,
+  /**
+   * The part of `usedBytes` taken by backups of the account's computers: they
+   * count toward the plan but aren't files, so no list shows them. Absent on
+   * older servers.
+   */
+  backupsBytes: Schema.optional(NonNegativeInt),
   /** 0 when the console didn't report a quota. */
   quotaBytes: NonNegativeInt,
   overQuota: Schema.Boolean,
@@ -416,6 +422,8 @@ export const FilesDriveState = Schema.Struct({
   message: Schema.NullOr(Schema.String),
   bucketId: Schema.NullOr(Schema.Number),
   usedBytes: NonNegativeInt,
+  /** See FilesCloudState.backupsBytes. */
+  backupsBytes: Schema.optional(NonNegativeInt),
   quotaBytes: NonNegativeInt,
   telegram: Schema.Struct({
     sharedBot: Schema.String,

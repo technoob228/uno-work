@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.128 — 2026-10-11
+
+- Home: the hints under the box come from your own work — the chats you had, app notifications, documents and sites — and no longer guess from what merely sits on the computer ("Add a login page to…", "Tidy up…" are gone). With fewer than two projects the row starts with what helps to get on board: "Learn Uno Work" and "Uno cloud services".
+- Home: "Customize" is now "Customize widgets" and sits above the widgets it changes.
+- Cloud storage and Uno Drive say what the used space is when it isn't files: "3.6 GB of it is backups of your computers". Backups count toward the plan but were invisible next to an empty file list.
+
 ## v0.0.127 — 2026-10-11
 
 - Files: a markdown file now edits as the document it reads as — click into the text and type, no markup in sight. "Code" in the editor's toolbar switches to the source with its live preview, "Document" switches back; the editor opens the way you used it last.

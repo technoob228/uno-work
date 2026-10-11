@@ -1,10 +1,10 @@
 /**
  * Feeds `homeStarters` from what Home already fetches: recent chats (with
- * their folders), this computer's apps, files changed lately in the home
- * folder, and the account's sites. No extra requests: the files and sites
+ * their folders), how many projects the person added, files changed lately
+ * in the home folder, and the account's sites. No extra requests: the files and sites
  * queries share their cache with the Files / Sites widgets.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import { type EnvironmentId, isAssistantProjectId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -12,7 +12,6 @@ import { useShallow } from "zustand/react/shallow";
 import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { filesListQueryOptions } from "../../files/filesApi";
 import { accountReachable, sitesQuery } from "../../myuno/myUnoQueries";
-import { programRemoval, type ProgramTile } from "../programModel";
 import { useInboxEntries } from "../../../inbox/inboxStore";
 import {
   inboxSnoozedThreadIds,
@@ -22,7 +21,7 @@ import {
   threadActivityAt,
   type HomeThread,
 } from "./homeModel";
-import { homeStarters, type HomeStarter, type StarterApp, type StarterChat } from "./homeStarters";
+import { homeStarters, type HomeStarter, type StarterChat } from "./homeStarters";
 
 const MAX_CHATS = 8;
 
@@ -30,11 +29,12 @@ export function useHomeStarters(input: {
   environmentId: EnvironmentId | null;
   threads: ReadonlyArray<HomeThread>;
   now: number;
-  tiles: ReadonlyArray<ProgramTile>;
 }): HomeStarter[] {
-  const { environmentId, threads, now, tiles } = input;
+  const { environmentId, threads, now } = input;
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const files = useQuery(filesListQueryOptions(environmentId, null, false)).data?.entries;
+  const homeListing = useQuery(filesListQueryOptions(environmentId, null, false)).data;
+  const files = homeListing?.entries;
+  const homePath = homeListing?.rootPath ?? null;
   const inbox = useInboxEntries();
   const sites = useQuery({ ...sitesQuery(), enabled: accountReachable() }).data?.sites;
 
@@ -60,11 +60,14 @@ export function useHomeStarters(input: {
       })
       .toSorted((a, b) => b.activityAt - a.activityAt)
       .slice(0, MAX_CHATS);
-    const apps: StarterApp[] = [];
-    for (const tile of tiles) {
-      const removal = programRemoval(tile);
-      if (removal) apps.push({ name: tile.name, kind: removal.kind });
-    }
+    // The projects the person added: not the home folder, not an assistant's own folder.
+    const home = homePath?.replace(/\/+$/, "") ?? null;
+    const projectCount = projects.filter(
+      (project) =>
+        project.environmentId === environmentId &&
+        !isAssistantProjectId(project.id) &&
+        project.cwd.replace(/\/+$/, "") !== home,
+    ).length;
     // Exactly the cards Continue shows (same input, same pick), so a starter
     // never repeats a card right below the composer.
     const continueCards = pickContinueItems(threads, inbox, { now });
@@ -92,7 +95,7 @@ export function useHomeStarters(input: {
       continueTitles,
       notifications,
       chats,
-      apps,
+      projectCount,
       files: recentHomeEntries(files ?? [], 6).map((entry) => ({
         name: entry.name,
         isDirectory: entry.kind === "directory",
@@ -100,5 +103,5 @@ export function useHomeStarters(input: {
       })),
       sites: (sites ?? []).map((site) => ({ name: site.customDomain ?? site.slug })),
     });
-  }, [environmentId, files, inbox, now, projects, sites, threads, tiles]);
+  }, [environmentId, files, homePath, inbox, now, projects, sites, threads]);
 }

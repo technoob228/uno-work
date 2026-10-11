@@ -1,9 +1,14 @@
 /**
- * Starter suggestions under Home's composer, made from what this person
- * already has — not a fixed list. Deterministic and instant: rules over the
- * data Home fetches anyway (recent chats, their apps, files changed lately in
- * the home folder, their sites). Only with none of that do the generic
- * starters show.
+ * Starter suggestions under Home's composer, made from the work this person
+ * already did here — not a fixed list. Deterministic and instant: rules over
+ * the data Home fetches anyway (recent chats, app notifications, documents
+ * changed lately in the home folder, their sites).
+ *
+ * Misha 11.10: "the hints are dumb — make them from the work in chats, and
+ * with few projects give what helps to get on board: learn Uno Work, Uno
+ * cloud services". So nothing is guessed from what merely sits on the
+ * computer (an app → "add a login page", a folder → "tidy up" are gone), and
+ * a person with fewer than two projects gets the onboarding starters first.
  *
  * A click pre-fills the composer (never sends); a starter that belongs to a
  * folder (a chat's project) also switches the composer's folder chip there.
@@ -15,16 +20,6 @@ export interface StarterChat {
   readonly activityAt: number;
   /** The chat's folder; null = unknown / the home folder. */
   readonly folder: { readonly cwd: string; readonly name: string } | null;
-}
-
-export interface StarterApp {
-  readonly name: string;
-  /**
-   * `registered` = built on this computer (by the AI or the person),
-   * `store` = from the App Store, `container` = a docker container the person
-   * started. The computer's own programs never get here.
-   */
-  readonly kind: "registered" | "store" | "container";
 }
 
 export interface StarterFile {
@@ -49,7 +44,11 @@ export interface StarterNotification {
 
 export interface StarterContext {
   readonly chats: ReadonlyArray<StarterChat>;
-  readonly apps: ReadonlyArray<StarterApp>;
+  /**
+   * Projects the person added (the home folder and assistants' folders don't
+   * count). Fewer than `ONBOARDING_BELOW_PROJECTS` = still getting on board.
+   */
+  readonly projectCount: number;
   readonly files: ReadonlyArray<StarterFile>;
   readonly sites: ReadonlyArray<StarterSite>;
   readonly notifications?: ReadonlyArray<StarterNotification>;
@@ -60,7 +59,7 @@ export interface StarterContext {
   readonly continueTitles?: ReadonlyArray<string>;
 }
 
-export type StarterSource = "chat" | "notification" | "app" | "file" | "site" | "generic";
+export type StarterSource = "chat" | "notification" | "file" | "site" | "onboarding" | "generic";
 
 export interface HomeStarter {
   readonly id: string;
@@ -75,6 +74,28 @@ export interface HomeStarter {
 
 export const MAX_HOME_STARTERS = 4;
 
+/** With fewer projects than this, the person is still finding their way around. */
+export const ONBOARDING_BELOW_PROJECTS = 2;
+
+/** What helps to get on board: what this place is, and what comes with it. */
+export const ONBOARDING_STARTERS: ReadonlyArray<HomeStarter> = [
+  {
+    id: "onboarding:learn",
+    label: "Learn Uno Work",
+    prompt:
+      "Show me around Uno Work: what I can do here and how, in a few short steps. Then suggest one thing to try first on this computer.",
+    source: "onboarding",
+  },
+  {
+    id: "onboarding:cloud",
+    label: "Uno cloud services",
+    prompt:
+      "What comes with my Uno account besides this computer — sites, Cloud storage, databases, apps on the internet, AI? Explain each in a line and show me how to use one from here.",
+    source: "onboarding",
+  },
+];
+
+/** Things to start from scratch; they fill the row while there is little work to go on. */
 export const GENERIC_STARTERS: ReadonlyArray<HomeStarter> = [
   {
     id: "generic:app",
@@ -86,19 +107,6 @@ export const GENERIC_STARTERS: ReadonlyArray<HomeStarter> = [
     id: "generic:site",
     label: "Publish a site from a folder",
     prompt: "Publish a site from a folder on this computer. Ask me which folder first.",
-    source: "generic",
-  },
-  {
-    id: "generic:downloads",
-    label: "Clean up my Downloads folder",
-    prompt:
-      "Clean up my Downloads folder: sort the files into subfolders by type and tell me what you moved.",
-    source: "generic",
-  },
-  {
-    id: "generic:explain",
-    label: "Explain what's running on this computer",
-    prompt: "Explain what's running on this computer, in plain words.",
     source: "generic",
   },
 ];
@@ -176,83 +184,33 @@ function notificationStarters(items: ReadonlyArray<StarterNotification>): HomeSt
     });
 }
 
-function appStarters(apps: ReadonlyArray<StarterApp>): HomeStarter[] {
-  const seen = new Set<string>();
-  const out: HomeStarter[] = [];
-  // Apps built here first: those are the ones the person can change.
-  const order = { registered: 0, store: 1, container: 2 } as const;
-  for (const app of apps.toSorted((a, b) => order[a.kind] - order[b.kind])) {
-    const name = app.name.trim();
-    if (!name || seen.has(name.toLowerCase())) continue;
-    seen.add(name.toLowerCase());
-    const short = shortName(name, 24);
-    switch (app.kind) {
-      case "registered":
-        out.push({
-          id: `app:${name}`,
-          label: `Add a login page to ${short}`,
-          prompt: `Add a login page to my app ${name}, so only people I allow can open it.`,
-          source: "app",
-        });
-        break;
-      case "store":
-        out.push({
-          id: `app:${name}`,
-          label: `Set up a backup for ${short}`,
-          prompt: `Set up a daily backup of ${name}'s data on this computer, and tell me how to restore it.`,
-          source: "app",
-        });
-        break;
-      case "container":
-        out.push({
-          id: `app:${name}`,
-          label: `Explain what ${short} does`,
-          prompt: `Explain what ${name} on this computer does, whether it is healthy, and what I could use it for.`,
-          source: "app",
-        });
-        break;
-    }
-  }
-  return out;
-}
-
-/** Files first (they make concrete tasks), then at most one folder to tidy. */
+/** Documents and sheets changed lately: the only files with an obvious one-click task. */
 function fileStarters(files: ReadonlyArray<StarterFile>): HomeStarter[] {
-  const fileTasks: HomeStarter[] = [];
-  let folderTask: HomeStarter | null = null;
+  const out: HomeStarter[] = [];
   const recent = files
-    .filter((file) => !file.name.startsWith("."))
+    .filter((file) => !file.isDirectory && !file.name.startsWith("."))
     .toSorted((a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0));
   for (const file of recent) {
     const short = shortName(file.name, 28);
-    if (file.isDirectory) {
-      folderTask ??= {
-        id: `file:${file.name}`,
-        label: `Tidy up ${short}`,
-        prompt: `Tidy up the folder ${file.name} in my home folder: sort what's inside and tell me what you changed.`,
-        source: "file",
-      };
-      continue;
-    }
     const ext = extensionOf(file.name);
     if (SHEET_EXT.has(ext)) {
-      fileTasks.push({
+      out.push({
         id: `file:${file.name}`,
         label: `Make a chart from ${short}`,
         prompt: `Make a chart from ${file.name} in my home folder and tell me what stands out.`,
         source: "file",
       });
     } else if (DOC_EXT.has(ext) || DECK_EXT.has(ext)) {
-      fileTasks.push({
+      out.push({
         id: `file:${file.name}`,
         label: `Summarize ${short}`,
         prompt: `Summarize ${file.name} from my home folder in a few bullet points.`,
         source: "file",
       });
     }
-    // Other files (images, archives, code) make no obvious one-click task.
+    // Other files (images, archives, code) and folders make no obvious task.
   }
-  return folderTask ? [...fileTasks, folderTask] : fileTasks;
+  return out;
 }
 
 function siteStarters(sites: ReadonlyArray<StarterSite>): HomeStarter[] {
@@ -266,19 +224,11 @@ function siteStarters(sites: ReadonlyArray<StarterSite>): HomeStarter[] {
     }));
 }
 
-/**
- * Up to `max` starters: one from each kind of context in turn (a chat, an
- * app, a file, a site), then the next of each, so no single source fills the
- * row. Generic starters only when there is no context at all.
- */
-export function homeStarters(
-  context: StarterContext,
-  max: number = MAX_HOME_STARTERS,
-): HomeStarter[] {
+/** One from each kind of work in turn (a chat, a notification, a file, a site), then the next of each. */
+function workStarters(context: StarterContext, max: number): HomeStarter[] {
   const pools = [
     chatStarters(context.chats, context.continueTitles ?? []),
     notificationStarters(context.notifications ?? []),
-    appStarters(context.apps),
     fileStarters(context.files),
     siteStarters(context.sites),
   ];
@@ -294,5 +244,26 @@ export function homeStarters(
     }
     if (!added) break;
   }
-  return out.length > 0 ? out : GENERIC_STARTERS.slice(0, max);
+  return out;
+}
+
+/**
+ * Up to `max` starters.
+ *
+ * - Still getting on board (fewer than two projects): the onboarding starters
+ *   first, then what the person's own work suggests, then things to start
+ *   from scratch.
+ * - Otherwise: what their work suggests, no single source filling the row;
+ *   the onboarding starters only when the work suggests nothing.
+ */
+export function homeStarters(
+  context: StarterContext,
+  max: number = MAX_HOME_STARTERS,
+): HomeStarter[] {
+  if (context.projectCount < ONBOARDING_BELOW_PROJECTS) {
+    const work = workStarters(context, max - ONBOARDING_STARTERS.length);
+    return [...ONBOARDING_STARTERS, ...work, ...GENERIC_STARTERS].slice(0, max);
+  }
+  const work = workStarters(context, max);
+  return work.length > 0 ? work : [...ONBOARDING_STARTERS, ...GENERIC_STARTERS].slice(0, max);
 }

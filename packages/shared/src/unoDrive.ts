@@ -71,6 +71,7 @@ export function parseDriveState(raw: unknown): FilesDriveState {
     message: null,
     bucketId: typeof bucketId === "number" ? bucketId : null,
     usedBytes: num(record["used_bytes"]),
+    backupsBytes: num(record["backups_bytes"]),
     quotaBytes: num(record["quota_bytes"]),
     telegram: {
       sharedBot: str(telegram["shared_bot"]) || "get_uno_bot",
