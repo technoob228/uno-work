@@ -2478,7 +2478,10 @@ export default function Sidebar() {
               { id: "mark-unread", label: "Mark unread" },
               { id: "copy-path", label: "Copy Path" },
               { id: "copy-thread-id", label: "Copy chat ID" },
-              { id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action },
+              // Desktop app only, like the chat header's button.
+              ...(isElectron
+                ? [{ id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action }]
+                : []),
               ...(supportsAgentsAccess
                 ? [
                     {

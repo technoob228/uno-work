@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.125 — 2026-10-11
+
+- Uno Work in the browser: "Continue on another machine" is gone from the chat header and the chat's menu. It stays in the desktop app, where you have several computers at hand.
+
 ## v0.0.124 — 2026-10-11
 
 - The sidebar has two modes. Classic, the default: every project you added is always in the sidebar with its chats, then Recents. Inbox: chats grouped by status — Needs you, Your turn, Failed, Working, Idle, Snoozed.

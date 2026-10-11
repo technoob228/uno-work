@@ -35,6 +35,7 @@ import { useChatBrowser } from "../preview/useChatBrowser";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
+import { isElectron } from "../../env";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
@@ -175,7 +176,9 @@ export const ChatHeader = memo(function ChatHeader({
       : activeThreadTitle;
   const [continueDialogOpen, setContinueDialogOpen] = useState(false);
   // A draft has nothing to carry yet: no files were touched, no history exists.
-  const canContinueOnMachine = Boolean(activeProjectName) && !draftId;
+  // Desktop app only (Misha 11.10): Uno Work in the browser is one cloud
+  // computer's window — "continue on another machine" doesn't belong there.
+  const canContinueOnMachine = isElectron && Boolean(activeProjectName) && !draftId;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
