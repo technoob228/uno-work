@@ -7,6 +7,8 @@
  *   unpacked in the browser), with progress; then a chat opens in it. From
  *   the start screen the dropped files come in already and Uno gets a first
  *   task instead of an empty chat (store `files` / `afterCreate`).
+ * - From Cloud storage (11.10): a folder of the account's cloud is copied to
+ *   `~/projects/<name>`; the cloud copy stays where it is.
  * - From GitHub: clone a repository into `~/projects/<repo>`.
  * - Empty project: a new folder `~/projects/<name>`.
  * - A folder on this computer: click through the home folder (recent folders
@@ -29,6 +31,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  CloudDownloadIcon,
+  CloudIcon,
   CodeIcon,
   FileArchiveIcon,
   FolderIcon,
@@ -52,6 +56,7 @@ import {
   type ProjectUploadFile,
 } from "../../projectUpload";
 import { pickFolderForProjectUpload, readDroppedUploadFiles } from "../../projectUploadPickers";
+import { cloudListQueryOptions, cloudStateQueryOptions, filesApi } from "../files/filesApi";
 import { stripSharedTopFolder } from "../setup/goals";
 import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
@@ -79,7 +84,10 @@ import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import {
   type NewProjectSource,
+  CLOUD_COPY_MAX_ITEMS,
   checkNewFolderName,
+  cloudCrumbs,
+  cloudProjectName,
   freeProjectName,
   newProjectSources,
   projectsFolderPath,
@@ -108,6 +116,11 @@ const SOURCE_COPY: Record<
     body: "Something you already have in your home folder",
     Icon: FolderOpenIcon,
   },
+  cloud: {
+    title: "From Cloud storage",
+    body: "A folder you keep in your Uno cloud",
+    Icon: CloudIcon,
+  },
   empty: {
     title: "Empty project",
     body: "A new folder in ~/projects, named by you",
@@ -115,7 +128,7 @@ const SOURCE_COPY: Record<
   },
   github: {
     title: "From GitHub",
-    body: "Clone one of your repositories",
+    body: "Paste a repository link, or pick one of yours",
     Icon: GitHubIcon,
   },
 };
@@ -189,6 +202,14 @@ export function NewProjectDialog() {
           <FolderStep
             environmentId={environmentId}
             home={home}
+            onBack={() => setStep("choose")}
+            onDone={close}
+          />
+        ) : step === "cloud" ? (
+          <CloudStep
+            environmentId={environmentId}
+            home={home}
+            machineLabel={machineLabel}
             onBack={() => setStep("choose")}
             onDone={close}
           />
@@ -729,6 +750,194 @@ function FolderStep({ environmentId, home, onBack, onDone }: StepProps) {
         label={atHome ? "Open a folder first" : `Make “${folderDisplayName(current)}” a project`}
         icon={<FolderIcon />}
         hint={tildePath(current, home)}
+        onSubmit={() => void submit()}
+        onCancel={onDone}
+      />
+    </>
+  );
+}
+
+// ── From Cloud storage ───────────────────────────────────────────────
+
+/**
+ * Pick a folder in the account's Cloud storage; its contents are copied to
+ * `~/projects/<name>` and that folder becomes the project. The cloud copy is
+ * left as it is.
+ */
+function CloudStep({
+  environmentId,
+  home,
+  machineLabel,
+  onBack,
+  onDone,
+}: StepProps & { readonly machineLabel: string }) {
+  const [place, setPlace] = useState<{ bucketId: number; prefix: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const finish = useFinishNewProject();
+  const takenNames = useProjectsEntryNames(environmentId, home);
+  const state = useQuery(cloudStateQueryOptions(environmentId));
+  const buckets = state.data?.buckets ?? [];
+  const onlyBucketId = state.data?.available && buckets.length === 1 ? buckets[0]!.id : null;
+  // One bucket (the usual case): start inside it.
+  useEffect(() => {
+    if (onlyBucketId !== null) {
+      setPlace((current) => current ?? { bucketId: onlyBucketId, prefix: "" });
+    }
+  }, [onlyBucketId]);
+  const listing = useQuery({
+    ...cloudListQueryOptions(environmentId, place?.bucketId ?? 0, place?.prefix ?? ""),
+    enabled: place !== null,
+  });
+  const bucket = place ? (buckets.find((entry) => entry.id === place.bucketId) ?? null) : null;
+  const folders = listing.data?.folders ?? [];
+  const objects = listing.data?.objects ?? [];
+  const itemCount = folders.length + objects.length;
+  const tooMany = listing.data ? listing.data.truncated || itemCount > CLOUD_COPY_MAX_ITEMS : false;
+  const name =
+    place && bucket && takenNames
+      ? freeProjectName(cloudProjectName(bucket.name, place.prefix), takenNames)
+      : "";
+  const target = name ? uploadedProjectPath(home, name) : null;
+
+  const submit = async () => {
+    if (!place || !target || !listing.data || itemCount === 0 || tooMany) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const projectRef = await ensureFolderProject(target, name, { createFolder: true });
+      await filesApi(environmentId).cloudCopyToComputer({
+        bucketId: place.bucketId,
+        keys: [...folders.map((folder) => folder.prefix), ...objects.map((object) => object.key)],
+        destinationPath: target,
+      });
+      await finish(projectRef, name, target);
+      onDone();
+    } catch (cause) {
+      setError(errorMessage(cause, "Copying from Cloud storage stopped. Try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <DialogPanel className="flex flex-col gap-2">
+        <BackToOptions onBack={onBack} />
+        <nav
+          aria-label="Cloud folder"
+          className="flex min-w-0 flex-wrap items-center gap-0.5 text-xs"
+        >
+          <button
+            type="button"
+            onClick={() => setPlace(null)}
+            disabled={place === null || onlyBucketId !== null || busy}
+            className={cn(
+              "inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent",
+              place === null ? "font-semibold" : "text-muted-foreground",
+            )}
+          >
+            <CloudIcon className="size-3" />
+            Cloud storage
+          </button>
+          {place && bucket
+            ? cloudCrumbs(bucket.name, place.prefix).map((crumb, index, all) => (
+                <span key={crumb.prefix} className="flex items-center gap-0.5">
+                  <ChevronRightIcon className="size-3 text-muted-foreground/60" />
+                  <button
+                    type="button"
+                    onClick={() => setPlace({ bucketId: place.bucketId, prefix: crumb.prefix })}
+                    disabled={index === all.length - 1 || busy}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent",
+                      index === all.length - 1 ? "font-semibold" : "text-muted-foreground",
+                    )}
+                  >
+                    {crumb.label}
+                  </button>
+                </span>
+              ))
+            : null}
+        </nav>
+        <div
+          className="h-64 overflow-y-auto rounded-xl border border-border/60 bg-background/60 p-1"
+          data-testid="new-project-cloud-list"
+        >
+          {state.isPending || (place !== null && listing.isPending) ? (
+            <div className="flex flex-col gap-1.5 p-2">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-7 w-full rounded-lg" />
+              ))}
+            </div>
+          ) : state.isError || state.data?.available === false ? (
+            <p className="p-3 text-xs text-muted-foreground">
+              {state.data?.message ?? "Cloud storage isn't available on this computer right now."}
+            </p>
+          ) : place === null ? (
+            buckets.length === 0 ? (
+              <p className="p-3 text-xs text-muted-foreground">
+                Nothing in your Cloud storage yet. Files you copy there from Files show up here.
+              </p>
+            ) : (
+              <ul className="flex flex-col">
+                {buckets.map((entry) => (
+                  <FolderRow
+                    key={entry.id}
+                    name={entry.name}
+                    isProject={false}
+                    onClick={() => setPlace({ bucketId: entry.id, prefix: "" })}
+                  />
+                ))}
+              </ul>
+            )
+          ) : listing.isError ? (
+            <p className="p-3 text-xs text-destructive">
+              {errorMessage(listing.error, "Can't open this folder.")}
+            </p>
+          ) : itemCount === 0 ? (
+            <p className="p-3 text-xs text-muted-foreground">This folder is empty.</p>
+          ) : (
+            <>
+              <ul className="flex flex-col">
+                {folders.map((folder) => (
+                  <FolderRow
+                    key={folder.prefix}
+                    name={folder.name}
+                    isProject={false}
+                    onClick={() => setPlace({ bucketId: place.bucketId, prefix: folder.prefix })}
+                  />
+                ))}
+              </ul>
+              {objects.length > 0 ? (
+                <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                  {folders.length > 0 ? "and " : ""}
+                  {objects.length} {objects.length === 1 ? "file" : "files"} here
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground" data-testid="new-project-destination">
+          {tooMany ? (
+            "This folder has too many items to copy in one go. Open a folder inside it."
+          ) : (
+            <>
+              A copy goes to{" "}
+              <span className="font-mono text-foreground">
+                {target ? tildePath(target, home) : "~/projects/<name>"}
+              </span>{" "}
+              on computer {machineLabel}. The cloud copy stays.
+            </>
+          )}
+        </p>
+      </DialogPanel>
+      <StepFooter
+        error={error}
+        busy={busy}
+        disabled={place === null || !target || itemCount === 0 || tooMany || listing.isPending}
+        label={place === null || !name ? "Open a folder first" : `Copy “${name}” and open`}
+        icon={<CloudDownloadIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
       />

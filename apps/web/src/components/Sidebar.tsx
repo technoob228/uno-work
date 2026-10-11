@@ -37,7 +37,6 @@ import {
   ChevronRightIcon,
   FolderIcon,
   FolderPlusIcon,
-  FolderUpIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -529,14 +528,14 @@ function SidebarDSectionLabel(props: { label: string }) {
 const SidebarDGroupBySchema = Schema.Literals(SIDEBAR_D_GROUP_BY);
 
 /**
- * Sidebar D: the line over the chats (Misha 11.10) — how they are grouped
- * (by project or by status) and the short way to bring a folder from the
- * person's own computer in as a project.
+ * Sidebar D: the line over the chats (Misha 11.10) — "Add a project" (the
+ * dialog then asks where it comes from: the laptop, this computer, Cloud
+ * storage, GitHub) and how the chats are grouped (by project or by status).
  */
 function SidebarDChatsBar(props: {
   groupBy: SidebarDGroupBy;
   onGroupByChange: (groupBy: SidebarDGroupBy) => void;
-  onUploadFolder: () => void;
+  onAddProject: () => void;
 }) {
   return (
     <li
@@ -551,16 +550,16 @@ function SidebarDChatsBar(props: {
           render={
             <button
               type="button"
-              aria-label="Upload a folder as a project"
-              data-testid="sidebar-d-upload-folder"
-              onClick={props.onUploadFolder}
+              aria-label="Add a project"
+              data-testid="sidebar-d-add-project"
+              onClick={props.onAddProject}
               className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
-          <FolderUpIcon className="size-3.5" />
+          <FolderPlusIcon className="size-3.5" />
         </TooltipTrigger>
-        <TooltipPopup side="top">Upload a folder as a project</TooltipPopup>
+        <TooltipPopup side="top">Add a project</TooltipPopup>
       </Tooltip>
       <Menu>
         <MenuTrigger
@@ -595,23 +594,6 @@ function SidebarDChatsBar(props: {
           </MenuGroup>
         </MenuPopup>
       </Menu>
-    </li>
-  );
-}
-
-/** Sidebar D: no projects in the list yet — one row that brings the first in. */
-function SidebarDUploadFolderRow(props: { onUploadFolder: () => void }) {
-  return (
-    <li className="list-none">
-      <button
-        type="button"
-        onClick={props.onUploadFolder}
-        data-testid="sidebar-d-upload-folder-row"
-        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-sidebar-muted-foreground/80 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <FolderUpIcon aria-hidden className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">Upload a folder as a project</span>
-      </button>
     </li>
   );
 }
@@ -3083,19 +3065,14 @@ export default function Sidebar() {
   );
 
   // ── Sidebar D (the standard layout) ──────────────────────────────────
-  const handleUploadFolderAsProject = () => {
+  const handleAddProject = () => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
-    openNewProject("upload");
+    openNewProject();
   };
   const dProjectList = (
     <>
-      {dGroups.projects.length > 0 ? (
-        <SidebarDSectionLabel label="Projects" />
-      ) : totalThreadCount > 0 ? (
-        // Chats but no project among them: the short way to bring one in.
-        <SidebarDUploadFolderRow onUploadFolder={handleUploadFolderAsProject} />
-      ) : null}
+      {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
       {dGroups.projects.map((group) => {
         const folded = isProjectFolded(group);
         const project = projectByKey.get(group.key) ?? null;
@@ -3172,7 +3149,7 @@ export default function Sidebar() {
             <SidebarDChatsBar
               groupBy={dGroupBy}
               onGroupByChange={setDGroupBy}
-              onUploadFolder={handleUploadFolderAsProject}
+              onAddProject={handleAddProject}
             />
             {dGroupBy === "status" ? dStatusList : dProjectList}
             {simple && snoozedThreads.length + settledThreads.length > 0 ? (

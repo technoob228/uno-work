@@ -9,20 +9,22 @@ import {
   normalizeProjectName,
 } from "../../firstProject";
 
-export type NewProjectSource = "upload" | "folder" | "empty" | "github" | "template";
+export type NewProjectSource = "upload" | "folder" | "cloud" | "empty" | "github" | "template";
 
 /**
- * Sources the dialog offers, in order (01.10): your own files first, then
- * GitHub, then an empty folder, then "A folder on this computer" (one already
- * on the computer — for everyone since 08.10: on a fresh machine it was the
- * missing way to open a folder). "From a template" stays out until the
- * product has project templates (today there is only the onboarding tutorial).
+ * Sources the dialog offers, in order (Misha 11.10: "add a project — from a
+ * folder on the computer, from the cloud, from a GitHub link, or upload"):
+ * what the person already has comes first — on their laptop, on this
+ * computer, in Cloud storage, on GitHub — and an empty folder last. "From a
+ * template" stays out until the product has project templates (today there is
+ * only the onboarding tutorial).
  */
 export const NEW_PROJECT_SOURCES: ReadonlyArray<NewProjectSource> = [
   "upload",
+  "folder",
+  "cloud",
   "github",
   "empty",
-  "folder",
 ];
 
 export function newProjectSources(): ReadonlyArray<NewProjectSource> {
@@ -69,6 +71,32 @@ export function freeProjectName(name: string, taken: ReadonlySet<string>): strin
   }
   return `${name}-${Date.now()}`;
 }
+
+/**
+ * A project copied from Cloud storage is named after the folder picked there,
+ * or after the bucket when the whole bucket is taken.
+ */
+export function cloudProjectName(bucketName: string, prefix: string): string {
+  const segments = prefix.split("/").filter(Boolean);
+  return normalizeProjectName(segments.at(-1) ?? bucketName) || "my-project";
+}
+
+/** Where the person is in Cloud storage: the bucket, then each folder down to `prefix`. */
+export function cloudCrumbs(
+  bucketName: string,
+  prefix: string,
+): ReadonlyArray<{ readonly label: string; readonly prefix: string }> {
+  const crumbs = [{ label: bucketName, prefix: "" }];
+  let walked = "";
+  for (const segment of prefix.split("/").filter(Boolean)) {
+    walked += `${segment}/`;
+    crumbs.push({ label: segment, prefix: walked });
+  }
+  return crumbs;
+}
+
+/** The daemon copies at most this many picked items in one go. */
+export const CLOUD_COPY_MAX_ITEMS = 1000;
 
 function trimSlashes(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;

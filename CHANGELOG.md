@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.122 — 2026-10-11
+
+- Sidebar: the folder icon on the "Chats" line is now "Add a project". It asks where the project comes from: your laptop, a folder on this computer, Cloud storage, GitHub, or an empty folder.
+- New: a project from Cloud storage. Pick a folder in your Uno cloud; a copy goes to ~/projects and opens as a project. The cloud copy stays.
+- From GitHub: the card now says you can paste a repository link.
+
 ## v0.0.121 — 2026-10-11
 
 - Home: the "Uno Work is updated" notice can be closed. It used to stay on Home for a day with no way to hide it.

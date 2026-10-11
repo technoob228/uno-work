@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   NEW_PROJECT_SOURCES,
+  cloudCrumbs,
+  cloudProjectName,
   freeProjectName,
   newProjectSources,
   projectsFolderPath,
@@ -105,8 +107,8 @@ it("does not offer templates until there are project templates", () => {
 });
 
 describe("upload as a new project", () => {
-  it("offers upload first, then GitHub, then empty, then a folder on the computer — no Dev mode", () => {
-    expect(newProjectSources()).toEqual(["upload", "github", "empty", "folder"]);
+  it("offers what the person already has first — laptop, this computer, cloud, GitHub — then empty", () => {
+    expect(newProjectSources()).toEqual(["upload", "folder", "cloud", "github", "empty"]);
   });
 
   it("names the project after the folder or the zip", () => {
@@ -124,5 +126,22 @@ describe("upload as a new project", () => {
     expect(projectsFolderPath("/home/uno/")).toBe("/home/uno/projects");
     expect(freeProjectName("shop", new Set(["shop", "shop-2"]))).toBe("shop-3");
     expect(freeProjectName("shop", new Set())).toBe("shop");
+  });
+});
+
+describe("a project from Cloud storage", () => {
+  it("is named after the picked folder, or the bucket at its root", () => {
+    expect(cloudProjectName("my-files", "sites/landing page/")).toBe("landing-page");
+    expect(cloudProjectName("my-files", "")).toBe("my-files");
+    expect(cloudProjectName("", "")).toBe("my-project");
+  });
+
+  it("walks from the bucket down to the folder", () => {
+    expect(cloudCrumbs("my-files", "")).toEqual([{ label: "my-files", prefix: "" }]);
+    expect(cloudCrumbs("my-files", "sites/landing/")).toEqual([
+      { label: "my-files", prefix: "" },
+      { label: "sites", prefix: "sites/" },
+      { label: "landing", prefix: "sites/landing/" },
+    ]);
   });
 });
