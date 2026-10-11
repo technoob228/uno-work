@@ -42,7 +42,6 @@ import {
   PinIcon,
   PlusIcon,
   ShieldQuestionIcon,
-  SlidersHorizontalIcon,
   TerminalIcon,
   Undo2Icon,
 } from "lucide-react";
@@ -234,13 +233,8 @@ import {
   groupChatsByStatusForSidebarD,
   groupChatsForSidebarD,
   isRunningStatus,
-  isSidebarDGroupBy,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
-  SIDEBAR_D_GROUP_BY,
-  SIDEBAR_D_GROUP_BY_KEY,
-  SIDEBAR_D_GROUP_BY_LABELS,
   SIDEBAR_D_UNO_FOLDED_KEY,
-  type SidebarDGroupBy,
   unoRunningLabel,
 } from "./sidebar/sidebarD.logic";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
@@ -275,17 +269,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
-import {
-  Menu,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuTrigger,
-} from "./ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -525,18 +509,13 @@ function SidebarDSectionLabel(props: { label: string }) {
   );
 }
 
-const SidebarDGroupBySchema = Schema.Literals(SIDEBAR_D_GROUP_BY);
-
 /**
- * Sidebar D: the line over the chats (Misha 11.10) — "Add a project" (the
- * dialog then asks where it comes from: the laptop, this computer, Cloud
- * storage, GitHub) and how the chats are grouped (by project or by status).
+ * Sidebar D: the line over the chats — "Add a project" (the dialog then asks
+ * where it comes from: the laptop, this computer, Cloud storage, GitHub).
+ * How the chats are laid out — classic or inbox — is a setting (Settings →
+ * General → "Inbox sidebar"), not a control here (Misha 11.10).
  */
-function SidebarDChatsBar(props: {
-  groupBy: SidebarDGroupBy;
-  onGroupByChange: (groupBy: SidebarDGroupBy) => void;
-  onAddProject: () => void;
-}) {
+function SidebarDChatsBar(props: { onAddProject: () => void }) {
   return (
     <li
       className="mt-2 flex h-7 list-none items-center gap-0.5 pr-1 pl-2.5"
@@ -561,39 +540,6 @@ function SidebarDChatsBar(props: {
         </TooltipTrigger>
         <TooltipPopup side="top">Add a project</TooltipPopup>
       </Tooltip>
-      <Menu>
-        <MenuTrigger
-          aria-label="Group chats"
-          title="Group chats"
-          data-testid="sidebar-d-group-by"
-          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-foreground"
-        >
-          <SlidersHorizontalIcon className="size-3.5" />
-        </MenuTrigger>
-        <MenuPopup align="end" side="bottom" className="min-w-40">
-          <MenuGroup>
-            <MenuGroupLabel>Group chats by</MenuGroupLabel>
-            <MenuRadioGroup
-              value={props.groupBy}
-              onValueChange={(value) => {
-                if (isSidebarDGroupBy(value)) props.onGroupByChange(value);
-              }}
-            >
-              {SIDEBAR_D_GROUP_BY.map((value) => (
-                <MenuRadioItem
-                  key={value}
-                  value={value}
-                  data-testid={`sidebar-d-group-by-${value}`}
-                  closeOnClick
-                  className="min-h-7 py-1 sm:text-xs"
-                >
-                  {SIDEBAR_D_GROUP_BY_LABELS[value]}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuGroup>
-        </MenuPopup>
-      </Menu>
     </li>
   );
 }
@@ -1871,10 +1817,17 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
   const renderedSnoozedThreads = useMemo(() => {
-    if (simple ? settledShelfExpanded : snoozedShelfExpanded) return snoozedThreads;
+    if (simple && railLayout ? settledShelfExpanded : snoozedShelfExpanded) return snoozedThreads;
     const routeThread = snoozedThreads.find((thread) => threadKeyOf(thread) === routeThreadKey);
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, simple, snoozedShelfExpanded, snoozedThreads]);
+  }, [
+    railLayout,
+    routeThreadKey,
+    settledShelfExpanded,
+    simple,
+    snoozedShelfExpanded,
+    snoozedThreads,
+  ]);
 
   // ── Sidebar D: Uno's running chats, Projects, Recents ───────────────
   const sidebarD = !railLayout;
@@ -1888,11 +1841,8 @@ export default function Sidebar() {
     false,
     Schema.Boolean,
   );
-  const [dGroupBy, setDGroupBy] = useLocalStorage<SidebarDGroupBy, SidebarDGroupBy>(
-    SIDEBAR_D_GROUP_BY_KEY,
-    "project",
-    SidebarDGroupBySchema,
-  );
+  // Classic (projects always in the sidebar) or inbox (chats by status).
+  const dInboxMode = useSettings((settings) => settings.sidebarInboxMode);
   const dGroups = useMemo(() => {
     const home = dHomeFolderPath?.replace(/\/+$/, "") ?? null;
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
@@ -1920,6 +1870,17 @@ export default function Sidebar() {
       },
       activityMs: (thread) =>
         resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined) ?? 0,
+      // Every project the person added keeps its row, live chats or not.
+      allProjects: projects
+        .filter(
+          (project) =>
+            !isAssistantProjectId(project.id) &&
+            !(home !== null && project.cwd.replace(/\/+$/, "") === home),
+        )
+        .map((project) => {
+          const key = `${project.environmentId}:${project.id}`;
+          return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
+        }),
     });
   }, [
     activeThreads,
@@ -1928,18 +1889,19 @@ export default function Sidebar() {
     pinnedThreads,
     projectByKey,
     projectDisplayNameByKey,
+    projects,
     threads,
   ]);
   // Grouped by status: the same live chats (Uno's running ones stay under
   // Uno), whatever folder they live in.
   const dStatusSections = useMemo(() => {
-    if (dGroupBy !== "status") return [];
+    if (!dInboxMode) return [];
     const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
     return groupChatsByStatusForSidebarD({
       chats: activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread))),
       markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
     });
-  }, [activeThreads, dGroupBy, dGroups.unoRunning, now]);
+  }, [activeThreads, dInboxMode, dGroups.unoRunning, now]);
   const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
   // A folded project with the open chat in it stays open, so the chat is seen.
   const isProjectFolded = useCallback(
@@ -3118,14 +3080,27 @@ export default function Sidebar() {
       {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
     </>
   );
-  const dStatusList = dStatusSections.map((section) => (
-    <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
-      <ul role="list" className="flex flex-col gap-px">
-        <SidebarDSectionLabel label={section.label} />
-        {section.chats.map((thread) => renderRow(thread, "active", { d: true }))}
-      </ul>
-    </li>
-  ));
+  const dStatusList = (
+    <>
+      {dStatusSections.map((section) => (
+        <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
+          <ul role="list" className="flex flex-col gap-px">
+            <SidebarDSectionLabel label={section.label} />
+            {section.chats.map((thread) => renderRow(thread, "active", { d: true }))}
+          </ul>
+        </li>
+      ))}
+      {snoozedThreads.length > 0 ? (
+        // Snoozed is a status too: in the inbox it sits in the list, not on a shelf.
+        <li className="list-none" data-testid="sidebar-d-status-snoozed">
+          <ul role="list" className="flex flex-col gap-px">
+            <SidebarDSectionLabel label="Snoozed" />
+            {snoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+          </ul>
+        </li>
+      ) : null}
+    </>
+  );
   const dChatList = (inPanel: boolean) => (
     <SidebarContent className="min-h-full gap-0">
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
@@ -3146,25 +3121,9 @@ export default function Sidebar() {
               : dGroups.unoRunning.map((thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true }),
                 )}
-            <SidebarDChatsBar
-              groupBy={dGroupBy}
-              onGroupByChange={setDGroupBy}
-              onAddProject={handleAddProject}
-            />
-            {dGroupBy === "status" ? dStatusList : dProjectList}
-            {simple && snoozedThreads.length + settledThreads.length > 0 ? (
-              <SidebarSectionHeader
-                kind="settled"
-                className="mt-auto pt-2"
-                label={doneShelfLabel(
-                  snoozedThreads.length + settledThreads.length,
-                  settledShelfExpanded,
-                )}
-                expanded={settledShelfExpanded}
-                onToggle={() => setSettledShelfExpanded((value) => !value)}
-              />
-            ) : null}
-            {!simple && snoozedThreads.length > 0 ? (
+            <SidebarDChatsBar onAddProject={handleAddProject} />
+            {dInboxMode ? dStatusList : dProjectList}
+            {!dInboxMode && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="snoozed"
                 className="mt-auto pt-2"
@@ -3173,11 +3132,13 @@ export default function Sidebar() {
                 onToggle={() => setSnoozedShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
-            {!simple && settledThreads.length > 0 ? (
+            {dInboxMode
+              ? null
+              : renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+            {settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
-                className={cn(snoozedThreads.length === 0 && "mt-auto pt-2")}
+                className={cn((dInboxMode || snoozedThreads.length === 0) && "mt-auto pt-2")}
                 label={doneShelfLabel(settledThreads.length, settledShelfExpanded)}
                 expanded={settledShelfExpanded}
                 onToggle={() => setSettledShelfExpanded((value) => !value)}
@@ -3224,7 +3185,7 @@ export default function Sidebar() {
               </Button>
               <span className="text-[11px]">Your folders live in ~/projects</span>
             </div>
-          ) : (
+          ) : !dInboxMode ? null : (
             <SidebarEmptyProjects
               projects={projectGroups.map((group) => ({
                 key: group.projectKey,

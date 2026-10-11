@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.124 — 2026-10-11
+
+- The sidebar has two modes. Classic, the default: every project you added is always in the sidebar with its chats, then Recents. Inbox: chats grouped by status — Needs you, Your turn, Failed, Working, Idle, Snoozed.
+- Switch in Settings → General → "Inbox sidebar". The grouping menu on the "Chats" line is gone; "Add a project" stays there.
+- Snoozed chats have their own place again: a "Snoozed" shelf above Done in classic, a "Snoozed" section in the inbox.
+
 ## v0.0.123 — 2026-10-11
 
 - Apps that open in their own tab: the page that says so now tells you what the app is, in the app's own words.

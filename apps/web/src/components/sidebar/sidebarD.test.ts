@@ -10,7 +10,6 @@ import {
   groupChatsForSidebarD,
   isHomePath,
   isRunningStatus,
-  isSidebarDGroupBy,
   needsYouPlace,
   parseFoldedProjects,
   sidebarDRailShown,
@@ -246,11 +245,30 @@ describe("sidebar D grouped by status", () => {
     expect(statusSectionOf("working")).toBe("working");
     expect(statusSectionOf(null)).toBe("idle");
   });
+});
 
-  it("reads only the two known ways to group", () => {
-    expect(isSidebarDGroupBy("project")).toBe(true);
-    expect(isSidebarDGroupBy("status")).toBe(true);
-    expect(isSidebarDGroupBy("computer")).toBe(false);
-    expect(isSidebarDGroupBy(null)).toBe(false);
+describe("sidebar D, classic: every project stays in the sidebar", () => {
+  it("lists projects without a live chat after the ones worked in", () => {
+    const result = groupChatsForSidebarD({
+      chats: [
+        { id: "a", project: "site", at: 5 },
+        { id: "b", at: 9 },
+      ] as Chat[],
+      isFromUno: () => false,
+      isRunning: () => false,
+      projectOf: (chat) => (chat.project ? { key: chat.project, name: chat.project } : null),
+      activityMs: (chat) => chat.at,
+      allProjects: [
+        { key: "bot", name: "bot" },
+        { key: "site", name: "site" },
+        { key: "docs", name: "docs" },
+      ],
+    });
+    expect(result.projects.map((project) => [project.key, project.chats.length])).toEqual([
+      ["site", 1],
+      ["bot", 0],
+      ["docs", 0],
+    ]);
+    expect(result.recents.map((chat) => chat.id)).toEqual(["b"]);
   });
 });

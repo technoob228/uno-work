@@ -65,6 +65,7 @@ const clientSettings: ClientSettings = {
   providerModelPreferences: {},
   sidebarEnvironmentScope: "all",
   sidebarGroupBy: "project_machine",
+  sidebarInboxMode: false,
   sidebarMachineSortOrder: "name",
   sidebarMachineIdentity: {
     "environment-1": { monogram: "R1", colorSlot: 2 },

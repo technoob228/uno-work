@@ -203,6 +203,10 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarEnvironmentScope: SidebarEnvironmentScope.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE)),
   ),
+  // The sidebar's two modes (Misha 11.10). Off — classic: the projects are
+  // always in the sidebar with their chats, then Recents. On — inbox: the
+  // chats by status (Needs you, Your turn, Failed, Working, Idle, Snoozed).
+  sidebarInboxMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarGroupBy: SidebarGroupBy.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_GROUP_BY)),
   ),

@@ -631,6 +631,29 @@ export function GeneralSettingsPanel({
         />
 
         <SettingsRow
+          title="Inbox sidebar"
+          description="On: chats in the sidebar are grouped by status — Needs you, Your turn, Working, Snoozed. Off (classic): your projects are always in the sidebar, with their chats."
+          resetAction={
+            settings.sidebarInboxMode !== DEFAULT_UNIFIED_SETTINGS.sidebarInboxMode ? (
+              <SettingResetButton
+                label="sidebar mode"
+                onClick={() =>
+                  updateSettings({ sidebarInboxMode: DEFAULT_UNIFIED_SETTINGS.sidebarInboxMode })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarInboxMode}
+              onCheckedChange={(checked) => updateSettings({ sidebarInboxMode: Boolean(checked) })}
+              aria-label="Inbox sidebar"
+              data-testid="settings-sidebar-inbox"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Time format"
           description="System default follows your browser or OS clock preference."
           resetAction={

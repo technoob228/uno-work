@@ -19,8 +19,6 @@ export const SIDEBAR_D_COLLAPSED_KEY = "uno-work:sidebar:collapsed";
 export const SIDEBAR_D_FOLDED_PROJECTS_KEY = "uno-work:sidebar:folded-projects";
 /** Uno's running chats folded away under its row. */
 export const SIDEBAR_D_UNO_FOLDED_KEY = "uno-work:sidebar:uno-folded";
-/** How the chats are grouped: a choice of this device. */
-export const SIDEBAR_D_GROUP_BY_KEY = "uno-work:sidebar:group-by";
 /** Narrower than this, Work shows the rail without changing the person's choice. */
 export const SIDEBAR_D_NARROW_PX = 1000;
 /** Pointing at Uno or Chats on the rail opens the chats panel after this long. */
@@ -84,7 +82,8 @@ export interface DChatGroups<T> {
 /**
  * Fold the live chats (pinned and Done stay where they are) into Uno /
  * Projects / Recents. Chats keep their incoming order inside a group; a
- * project's place is its newest chat.
+ * project's place is its newest chat, and projects without a live chat
+ * (`allProjects`) come after those.
  */
 export function groupChatsForSidebarD<T>(input: {
   readonly chats: ReadonlyArray<T>;
@@ -94,6 +93,11 @@ export function groupChatsForSidebarD<T>(input: {
   /** The chat's project, or null for the home folder / no project. */
   readonly projectOf: (chat: T) => { readonly key: string; readonly name: string } | null;
   readonly activityMs: (chat: T) => number;
+  /**
+   * Every project the person added (classic mode): the ones without a live
+   * chat still get their row, after the ones worked in, in this order.
+   */
+  readonly allProjects?: ReadonlyArray<{ readonly key: string; readonly name: string }>;
 }): DChatGroups<T> {
   const unoRunning: T[] = [];
   const recents: T[] = [];
@@ -117,30 +121,24 @@ export function groupChatsForSidebarD<T>(input: {
       byProject.set(project.key, { name: project.name, chats: [chat], latestMs: activity });
     }
   }
-  const projects = [...byProject.entries()]
+  const projects: DProjectGroup<T>[] = [...byProject.entries()]
     .toSorted(([, a], [, b]) => b.latestMs - a.latestMs)
     .map(([key, group]) => ({ key, name: group.name, chats: group.chats }));
+  for (const project of input.allProjects ?? []) {
+    if (!byProject.has(project.key)) {
+      byProject.set(project.key, { name: project.name, chats: [], latestMs: 0 });
+      projects.push({ key: project.key, name: project.name, chats: [] });
+    }
+  }
   return { unoRunning, projects, recents };
 }
 
 /**
- * How the chats under Uno are grouped (Misha 11.10): by project — the folders
- * that fold, then Recents — or by status, so what waits for the person is on
- * top whatever folder it lives in. By computer is not offered here: this list
- * shows one computer.
+ * The sidebar has two modes (Misha 11.10, Settings → General → "Inbox
+ * sidebar"): classic — every project the person added is always there with
+ * its chats, then Recents; inbox — the chats by status, whatever folder they
+ * live in, so what waits for the person is on top.
  */
-export const SIDEBAR_D_GROUP_BY = ["project", "status"] as const;
-export type SidebarDGroupBy = (typeof SIDEBAR_D_GROUP_BY)[number];
-
-export const SIDEBAR_D_GROUP_BY_LABELS: Readonly<Record<SidebarDGroupBy, string>> = {
-  project: "Project",
-  status: "Status",
-};
-
-export function isSidebarDGroupBy(value: unknown): value is SidebarDGroupBy {
-  return value === "project" || value === "status";
-}
-
 export type DStatusSectionId = "needs-you" | "your-turn" | "failed" | "working" | "idle";
 
 export interface DStatusSection<T> {
