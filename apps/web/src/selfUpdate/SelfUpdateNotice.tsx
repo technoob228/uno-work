@@ -5,7 +5,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon } from "lucide-react";
+import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "../branding";
@@ -257,13 +257,32 @@ export function SelfUpdateCard(props: {
   if (!parts) return null;
   const keepVisible = props.persistent && update.view?.kind === "available";
   if (parts.dismissable && update.dismissed && !keepVisible) return null;
+  // "Updated" and "didn't finish" can be closed here too (11.10: the card on
+  // Home had no way to go, it stayed for a day). "An update is ready" keeps its
+  // place: Later lives on the banner, My Uno is where the person comes back.
+  const canDismiss = parts.dismissable && update.view?.kind !== "available";
   return (
     <>
       <Alert variant={parts.variant} className={cn(props.className)} data-testid="self-update-card">
         {parts.icon}
         <AlertTitle>{parts.title}</AlertTitle>
         {parts.description ? <AlertDescription>{parts.description}</AlertDescription> : null}
-        {parts.actions ? <AlertAction>{parts.actions}</AlertAction> : null}
+        {parts.actions || canDismiss ? (
+          <AlertAction>
+            {parts.actions}
+            {canDismiss ? (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Hide the update notice"
+                data-testid="self-update-card-dismiss"
+                onClick={update.dismiss}
+              >
+                <XIcon />
+              </Button>
+            ) : null}
+          </AlertAction>
+        ) : null}
       </Alert>
       {update.dialog}
     </>

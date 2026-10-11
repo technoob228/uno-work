@@ -585,6 +585,7 @@ function SidebarDChatsBar(props: {
                   key={value}
                   value={value}
                   data-testid={`sidebar-d-group-by-${value}`}
+                  closeOnClick
                   className="min-h-7 py-1 sm:text-xs"
                 >
                   {SIDEBAR_D_GROUP_BY_LABELS[value]}

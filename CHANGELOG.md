@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.121 — 2026-10-11
+
+- Home: the "Uno Work is updated" notice can be closed. It used to stay on Home for a day with no way to hide it.
+- Sidebar: the "Group chats by" menu closes once you pick.
+
 ## v0.0.120 — 2026-10-11
 
 - Sidebar: group your chats by project or by status. The new control sits on the "Chats" line. By status, what waits for you comes first: Needs you, Your turn, Failed, Working, Idle.
