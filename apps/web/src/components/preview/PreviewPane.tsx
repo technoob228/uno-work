@@ -26,21 +26,11 @@ import {
   XIcon,
   AppWindowIcon,
 } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import TurndownService from "turndown";
 import * as XLSX from "xlsx";
 
 import { sanitizeDocumentHtml } from "../../lib/safeHtml";
@@ -54,6 +44,10 @@ import { getPrimaryEnvironmentConnection } from "../../environments/runtime";
 import { subscribeShellEvents } from "../../environments/runtime/shellEventBus";
 import { readLocalApi } from "../../localApi";
 import { useStore } from "../../store";
+import {
+  MarkdownDocumentEditor,
+  type MarkdownDocumentEditorHandle,
+} from "../files/openers/MarkdownDocumentEditor";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -984,19 +978,8 @@ function LoadedBody({ file, sourceView }: { file: PreviewFile; sourceView: boole
   return renderLoadedBody(file, { ...data, ...(blobUrl ? { blobUrl } : {}) }, sourceView);
 }
 
-const FROZEN_MARKDOWN_COMPONENTS: Components = {
-  a({ href, children }) {
-    return <UntrustedExternalLink href={href}>{children}</UntrustedExternalLink>;
-  },
-};
-
-const FrozenMarkdownPreview = memo(function FrozenMarkdownPreview({ source }: { source: string }) {
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={FROZEN_MARKDOWN_COMPONENTS}>
-      {source}
-    </ReactMarkdown>
-  );
-});
+/** The panel's editor has no "unsaved" mark: Save writes what the document reads now. */
+const noop = () => {};
 
 function canEditFile(file: PreviewFile, fallbackEnvId: EnvironmentId | null): boolean {
   if (!KIND_EDITABLE.has(file.kind)) return false;
@@ -1015,7 +998,7 @@ function EditableBody({
 }) {
   const { applyEditedContent, cancelEditing } = usePreviewPane();
   const queryClient = useQueryClient();
-  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<MarkdownDocumentEditorHandle | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1055,13 +1038,8 @@ function EditableBody({
     if (!path || !target) return;
     let newContent = "";
     if (file.kind === "md" && editorRef.current) {
-      const html = editorRef.current.innerHTML;
-      const td = new TurndownService({
-        headingStyle: "atx",
-        codeBlockStyle: "fenced",
-        bulletListMarker: "-",
-      });
-      newContent = td.turndown(html);
+      // Block by block: what the person didn't touch is saved as it was written.
+      newContent = editorRef.current.read();
     } else if (file.kind === "html") {
       const doc = iframeRef.current?.contentDocument;
       if (!doc) {
@@ -1162,15 +1140,13 @@ function EditableBody({
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {file.kind === "md" ? (
-          <div
+          <MarkdownDocumentEditor
             ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck={false}
-            className="preview-markdown min-h-full px-5 py-4 outline-none focus:outline-none focus:ring-1 focus:ring-primary/40"
-          >
-            <FrozenMarkdownPreview source={initialContent} />
-          </div>
+            markdown={initialContent}
+            onInput={noop}
+            label={`Contents of ${file.name}`}
+            className="px-5 py-4 focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
         ) : null}
         {file.kind === "html" ? (
           <iframe

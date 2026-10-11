@@ -1,9 +1,10 @@
 /**
  * Text-like files: markdown reads as a document, text and code with syntax
- * colours; all of them (plus web pages) edit in the browser with ⌘S / Ctrl+S,
- * markdown and HTML with a live preview next to the source.
+ * colours; all of them (plus web pages) edit in the browser with ⌘S / Ctrl+S.
+ * Markdown edits as the document it reads as, or — the person's switch — as
+ * code with a live preview next to it; HTML as source with a live preview.
  */
-import { ColumnsIcon, Loader2Icon } from "lucide-react";
+import { CodeIcon, ColumnsIcon, FileTextIcon, Loader2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -15,6 +16,15 @@ import { toastManager } from "../../ui/toast";
 import type { FileEditorProps, FileOpener, FileViewProps } from "../fileOpeners";
 import { useFileText } from "../fileSource";
 import { Paper, ViewerLoading, ViewerMessage, viewerErrorText } from "./common";
+import {
+  MarkdownDocumentEditor,
+  type MarkdownDocumentEditorHandle,
+} from "./MarkdownDocumentEditor";
+import {
+  MARKDOWN_EDIT_MODE_KEY,
+  type MarkdownEditMode,
+  parseMarkdownEditMode,
+} from "./markdownDocumentEdit";
 
 const TEXT_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -90,6 +100,14 @@ function TextView({ source }: FileViewProps) {
   );
 }
 
+function readMarkdownEditMode(): MarkdownEditMode {
+  try {
+    return parseMarkdownEditMode(window.localStorage.getItem(MARKDOWN_EDIT_MODE_KEY));
+  } catch {
+    return "document";
+  }
+}
+
 function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
   const { data, error, isPending } = useFileText(source);
   const [draft, setDraft] = useState<string | null>(null);
@@ -97,6 +115,15 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
   const withPreview = source.kind === "markdown" || source.kind === "html";
   const [showPreview, setShowPreview] = useState(withPreview);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Markdown: the document itself by default, its code when the person switched to it.
+  const isMarkdown = source.kind === "markdown";
+  const [markdownMode, setMarkdownMode] = useState<MarkdownEditMode>(readMarkdownEditMode);
+  const asDocument = isMarkdown && markdownMode === "document";
+  // What the document view is rendered from: the file, or the code as it stood at the switch.
+  const [documentBase, setDocumentBase] = useState<{ markdown: string; version: number } | null>(
+    null,
+  );
+  const documentRef = useRef<MarkdownDocumentEditorHandle | null>(null);
 
   const value = draft ?? data ?? "";
   const dirty = draft !== null && draft !== data;
@@ -138,6 +165,20 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
   useEffect(() => {
     if (!isPending) textareaRef.current?.focus();
   }, [isPending]);
+
+  const switchMarkdownMode = (mode: MarkdownEditMode) => {
+    if (mode === markdownMode) return;
+    // The draft is always the markdown as it stands; the document re-renders from it.
+    if (mode === "document") {
+      setDocumentBase((current) => ({ markdown: value, version: (current?.version ?? 0) + 1 }));
+    }
+    setMarkdownMode(mode);
+    try {
+      window.localStorage.setItem(MARKDOWN_EDIT_MODE_KEY, mode);
+    } catch {
+      // Storage is off: the choice holds for this editor only.
+    }
+  };
 
   const preview = useMemo(() => {
     if (!showPreview) return null;
@@ -181,7 +222,31 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
           <span className="hidden sm:inline">· ⌘S to save</span>
         </span>
         <span className="flex-1" />
-        {withPreview ? (
+        {isMarkdown ? (
+          <span className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+            <Button
+              size="xs"
+              variant={asDocument ? "secondary" : "ghost"}
+              aria-pressed={asDocument}
+              onClick={() => switchMarkdownMode("document")}
+              data-testid="markdown-edit-mode-document"
+            >
+              <FileTextIcon />
+              Document
+            </Button>
+            <Button
+              size="xs"
+              variant={asDocument ? "ghost" : "secondary"}
+              aria-pressed={!asDocument}
+              onClick={() => switchMarkdownMode("code")}
+              data-testid="markdown-edit-mode-code"
+            >
+              <CodeIcon />
+              Code
+            </Button>
+          </span>
+        ) : null}
+        {withPreview && !asDocument ? (
           <Button
             size="sm"
             variant={showPreview ? "secondary" : "ghost"}
@@ -199,25 +264,40 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
           Save
         </Button>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => setDraft(event.target.value)}
-          spellCheck={source.kind === "markdown" || source.kind === "text"}
-          aria-label={`Contents of ${source.name}`}
-          className={cn(
-            "h-full min-w-0 flex-1 resize-none border-0 bg-background p-4 text-[13px] leading-relaxed text-foreground outline-none",
-            source.kind === "text" || source.kind === "markdown"
-              ? "font-sans text-[15px]"
-              : "font-mono",
-            showPreview && preview ? "border-r border-border" : "",
-          )}
-        />
-        {showPreview && preview ? (
-          <div className="hidden min-w-0 flex-1 md:block">{preview}</div>
-        ) : null}
-      </div>
+      {asDocument ? (
+        <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30">
+          <Paper>
+            <MarkdownDocumentEditor
+              key={documentBase?.version ?? 0}
+              ref={documentRef}
+              markdown={documentBase?.markdown ?? data ?? ""}
+              onInput={() => setDraft(documentRef.current?.read() ?? value)}
+              label={`Contents of ${source.name}`}
+              autoFocus
+            />
+          </Paper>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(event) => setDraft(event.target.value)}
+            spellCheck={source.kind === "markdown" || source.kind === "text"}
+            aria-label={`Contents of ${source.name}`}
+            className={cn(
+              "h-full min-w-0 flex-1 resize-none border-0 bg-background p-4 text-[13px] leading-relaxed text-foreground outline-none",
+              source.kind === "text" || source.kind === "markdown"
+                ? "font-sans text-[15px]"
+                : "font-mono",
+              showPreview && preview ? "border-r border-border" : "",
+            )}
+          />
+          {showPreview && preview ? (
+            <div className="hidden min-w-0 flex-1 md:block">{preview}</div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
