@@ -12,7 +12,9 @@ import { useMatch, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { pickThreadForEnvironmentSwitch } from "../components/Sidebar.logic";
+import { opensInOwnTab } from "../components/apps/ownTabApps";
 import { makeAppFile, usePreviewPane } from "../components/preview/PreviewPaneContext";
+import { isElectron } from "../env";
 import { useActiveMachine } from "../hooks/useActiveMachine";
 import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
@@ -61,6 +63,12 @@ function useOpenAppInApp() {
 
   const openHere = useCallback(
     (app: AppTarget) => {
+      // An app this browser already saw refusing to be shown inside Uno Work:
+      // straight to its tab (the click is the gesture a new tab needs).
+      if (!isElectron && opensInOwnTab(app.url)) {
+        openInNewTab(app.url);
+        return;
+      }
       setAppFullscreen(false);
       void navigate({
         to: "/app",

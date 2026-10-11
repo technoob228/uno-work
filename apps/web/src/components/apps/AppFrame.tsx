@@ -7,10 +7,13 @@
  * the app's X-Frame-Options / CSP `frame-ancestors` (`uno.computer.embedCheck`)
  * — the browser can't see why a frame stays blank, the daemon can. An app that
  * refuses to be framed gets an honest card with "Open in a new tab" instead of
- * the browser's grey "refused to connect".
+ * the browser's grey "refused to connect". The card says what the app is (its
+ * own description), and the browser remembers the refusal, so the next click
+ * on the app opens the tab right away (`ownTabApps.ts`).
  */
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { isElectron } from "../../env";
 import { ensureEnvironmentApi } from "../../environmentApi";
@@ -18,9 +21,11 @@ import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { machineAppsQueryOptions } from "../computer/computerQueries";
 import { originOf } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
+import { rememberOwnTabVerdict } from "./ownTabApps";
 
 /**
  * The app runs as itself (scripts, its own cookies, forms, downloads, popups
@@ -99,6 +104,24 @@ function BrowserAppFrame({
     staleTime: 60_000,
     retry: false,
   });
+  const verdict = check.data?.verdict ?? null;
+  // Next time the click on this app opens its tab right away — or shows it
+  // here again, once it can be shown.
+  useEffect(() => {
+    if (verdict === "blocked") rememberOwnTabVerdict(url, true);
+    else if (verdict === "ok") rememberOwnTabVerdict(url, false);
+  }, [url, verdict]);
+  // What the app is, in its own words (the manifest's description).
+  const machineApps = useQuery(machineAppsQueryOptions(environmentId, verdict === "blocked"));
+  const appOrigin = originOf(url);
+  const description =
+    machineApps.data?.apps
+      .find(
+        (app) =>
+          appOrigin !== null &&
+          (originOf(app.url) === appOrigin || originOf(app.publication?.url) === appOrigin),
+      )
+      ?.description?.trim() || null;
 
   if (check.isPending && environmentId !== null) {
     return (
@@ -124,9 +147,17 @@ function BrowserAppFrame({
         />
         <div className="max-w-md">
           <h2 className="text-base font-semibold text-foreground">{name} opens in its own tab</h2>
+          {description ? (
+            <p
+              className="mt-2 text-sm leading-relaxed text-foreground/90"
+              data-testid="app-own-tab-description"
+            >
+              {description}
+            </p>
+          ) : null}
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            {name} protects itself from being shown inside other pages, so Uno Work can't show it
-            here. It opens in a new browser tab, and Uno Work stays open in this one.
+            {name} can't be shown inside other pages, so it opens in a new browser tab. Uno Work
+            stays open in this one. Next time a click on {name} opens the tab right away.
           </p>
         </div>
         <Button onClick={() => openInNewTab(url)}>

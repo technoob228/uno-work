@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.123 — 2026-10-11
+
+- Apps that open in their own tab: the page that says so now tells you what the app is, in the app's own words.
+- After the first time, a click on such an app opens its tab right away.
+
 ## v0.0.122 — 2026-10-11
 
 - Sidebar: the folder icon on the "Chats" line is now "Add a project". It asks where the project comes from: your laptop, a folder on this computer, Cloud storage, GitHub, or an empty folder.
