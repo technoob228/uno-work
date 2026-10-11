@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.120 — 2026-10-11
+
+- Sidebar: group your chats by project or by status. The new control sits on the "Chats" line. By status, what waits for you comes first: Needs you, Your turn, Failed, Working, Idle.
+- Sidebar: "Upload a folder as a project" — one click on the "Chats" line brings a folder or a .zip from your laptop to this computer as a project. While you have no projects yet, the same button is a row in the list.
+
 ## v0.0.119 — 2026-10-09
 
 - A new cloud computer works right away: Files, New project, new chats and Update no longer fail with "Environment API not found" until the computer restarts.

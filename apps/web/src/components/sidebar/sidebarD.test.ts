@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HoverPanelController } from "./sidebarD.hover";
 import {
   accountMenuLines,
+  type DRowMark,
   dRowMark,
   foldedProjectMark,
+  groupChatsByStatusForSidebarD,
   groupChatsForSidebarD,
   isHomePath,
   isRunningStatus,
+  isSidebarDGroupBy,
   needsYouPlace,
   parseFoldedProjects,
   sidebarDRailShown,
+  statusSectionOf,
   unoRunningLabel,
 } from "./sidebarD.logic";
 
@@ -196,5 +200,57 @@ describe('needsYouPlace (Misha 08.10: no "Needs you 0")', () => {
   it("never shows a zero or a junk count", () => {
     expect(needsYouPlace(-1).shown).toBe(false);
     expect(needsYouPlace(Number.NaN).shown).toBe(false);
+  });
+});
+
+describe("sidebar D grouped by status", () => {
+  const byStatus = (chats: ReadonlyArray<{ id: string; mark: DRowMark }>) =>
+    groupChatsByStatusForSidebarD({ chats, markOf: (chat) => chat.mark }).map((section) => ({
+      id: section.id,
+      label: section.label,
+      chats: section.chats.map((chat) => chat.id),
+    }));
+
+  it("puts what waits for the person first, then failed, working and the rest", () => {
+    expect(
+      byStatus([
+        { id: "idle-1", mark: null },
+        { id: "working-1", mark: "working" },
+        { id: "question", mark: "input" },
+        { id: "failed-1", mark: "failed" },
+        { id: "turn", mark: "your-turn" },
+        { id: "approval", mark: "approval" },
+        { id: "idle-2", mark: null },
+      ]),
+    ).toEqual([
+      { id: "needs-you", label: "Needs you", chats: ["question", "approval"] },
+      { id: "your-turn", label: "Your turn", chats: ["turn"] },
+      { id: "failed", label: "Failed", chats: ["failed-1"] },
+      { id: "working", label: "Working", chats: ["working-1"] },
+      { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },
+    ]);
+  });
+
+  it("leaves empty sections out", () => {
+    expect(byStatus([{ id: "a", mark: "working" }])).toEqual([
+      { id: "working", label: "Working", chats: ["a"] },
+    ]);
+    expect(byStatus([])).toEqual([]);
+  });
+
+  it("maps every mark to a section", () => {
+    expect(statusSectionOf("approval")).toBe("needs-you");
+    expect(statusSectionOf("input")).toBe("needs-you");
+    expect(statusSectionOf("your-turn")).toBe("your-turn");
+    expect(statusSectionOf("failed")).toBe("failed");
+    expect(statusSectionOf("working")).toBe("working");
+    expect(statusSectionOf(null)).toBe("idle");
+  });
+
+  it("reads only the two known ways to group", () => {
+    expect(isSidebarDGroupBy("project")).toBe(true);
+    expect(isSidebarDGroupBy("status")).toBe(true);
+    expect(isSidebarDGroupBy("computer")).toBe(false);
+    expect(isSidebarDGroupBy(null)).toBe(false);
   });
 });

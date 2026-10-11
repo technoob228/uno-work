@@ -19,6 +19,8 @@ export const SIDEBAR_D_COLLAPSED_KEY = "uno-work:sidebar:collapsed";
 export const SIDEBAR_D_FOLDED_PROJECTS_KEY = "uno-work:sidebar:folded-projects";
 /** Uno's running chats folded away under its row. */
 export const SIDEBAR_D_UNO_FOLDED_KEY = "uno-work:sidebar:uno-folded";
+/** How the chats are grouped: a choice of this device. */
+export const SIDEBAR_D_GROUP_BY_KEY = "uno-work:sidebar:group-by";
 /** Narrower than this, Work shows the rail without changing the person's choice. */
 export const SIDEBAR_D_NARROW_PX = 1000;
 /** Pointing at Uno or Chats on the rail opens the chats panel after this long. */
@@ -119,6 +121,76 @@ export function groupChatsForSidebarD<T>(input: {
     .toSorted(([, a], [, b]) => b.latestMs - a.latestMs)
     .map(([key, group]) => ({ key, name: group.name, chats: group.chats }));
   return { unoRunning, projects, recents };
+}
+
+/**
+ * How the chats under Uno are grouped (Misha 11.10): by project — the folders
+ * that fold, then Recents — or by status, so what waits for the person is on
+ * top whatever folder it lives in. By computer is not offered here: this list
+ * shows one computer.
+ */
+export const SIDEBAR_D_GROUP_BY = ["project", "status"] as const;
+export type SidebarDGroupBy = (typeof SIDEBAR_D_GROUP_BY)[number];
+
+export const SIDEBAR_D_GROUP_BY_LABELS: Readonly<Record<SidebarDGroupBy, string>> = {
+  project: "Project",
+  status: "Status",
+};
+
+export function isSidebarDGroupBy(value: unknown): value is SidebarDGroupBy {
+  return value === "project" || value === "status";
+}
+
+export type DStatusSectionId = "needs-you" | "your-turn" | "failed" | "working" | "idle";
+
+export interface DStatusSection<T> {
+  readonly id: DStatusSectionId;
+  readonly label: string;
+  readonly chats: ReadonlyArray<T>;
+}
+
+/** Top to bottom: what waits for the person, what broke, what runs, the rest. */
+const STATUS_SECTIONS: ReadonlyArray<{ readonly id: DStatusSectionId; readonly label: string }> = [
+  { id: "needs-you", label: "Needs you" },
+  { id: "your-turn", label: "Your turn" },
+  { id: "failed", label: "Failed" },
+  { id: "working", label: "Working" },
+  { id: "idle", label: "Idle" },
+];
+
+export function statusSectionOf(mark: DRowMark): DStatusSectionId {
+  switch (mark) {
+    case "approval":
+    case "input":
+      return "needs-you";
+    case "your-turn":
+    case "failed":
+    case "working":
+      return mark;
+    case null:
+      return "idle";
+  }
+}
+
+/**
+ * The live chats by status, in the fixed order above; empty sections are left
+ * out and chats keep their incoming order inside one.
+ */
+export function groupChatsByStatusForSidebarD<T>(input: {
+  readonly chats: ReadonlyArray<T>;
+  readonly markOf: (chat: T) => DRowMark;
+}): ReadonlyArray<DStatusSection<T>> {
+  const bySection = new Map<DStatusSectionId, T[]>();
+  for (const chat of input.chats) {
+    const id = statusSectionOf(input.markOf(chat));
+    const chats = bySection.get(id);
+    if (chats) chats.push(chat);
+    else bySection.set(id, [chat]);
+  }
+  return STATUS_SECTIONS.flatMap((section) => {
+    const chats = bySection.get(section.id);
+    return chats ? [{ id: section.id, label: section.label, chats }] : [];
+  });
 }
 
 /** "3 running", or nothing. */

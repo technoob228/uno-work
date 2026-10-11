@@ -37,11 +37,13 @@ import {
   ChevronRightIcon,
   FolderIcon,
   FolderPlusIcon,
+  FolderUpIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PlusIcon,
   ShieldQuestionIcon,
+  SlidersHorizontalIcon,
   TerminalIcon,
   Undo2Icon,
 } from "lucide-react";
@@ -230,10 +232,16 @@ import {
   type DRowMark,
   dRowMark,
   foldedProjectMark,
+  groupChatsByStatusForSidebarD,
   groupChatsForSidebarD,
   isRunningStatus,
+  isSidebarDGroupBy,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
+  SIDEBAR_D_GROUP_BY,
+  SIDEBAR_D_GROUP_BY_KEY,
+  SIDEBAR_D_GROUP_BY_LABELS,
   SIDEBAR_D_UNO_FOLDED_KEY,
+  type SidebarDGroupBy,
   unoRunningLabel,
 } from "./sidebar/sidebarD.logic";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
@@ -268,7 +276,17 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -504,6 +522,95 @@ function SidebarDSectionLabel(props: { label: string }) {
       className="list-none px-2.5 pt-3 pb-1 text-xs font-medium text-sidebar-muted-foreground/70"
     >
       {props.label}
+    </li>
+  );
+}
+
+const SidebarDGroupBySchema = Schema.Literals(SIDEBAR_D_GROUP_BY);
+
+/**
+ * Sidebar D: the line over the chats (Misha 11.10) — how they are grouped
+ * (by project or by status) and the short way to bring a folder from the
+ * person's own computer in as a project.
+ */
+function SidebarDChatsBar(props: {
+  groupBy: SidebarDGroupBy;
+  onGroupByChange: (groupBy: SidebarDGroupBy) => void;
+  onUploadFolder: () => void;
+}) {
+  return (
+    <li
+      className="mt-2 flex h-7 list-none items-center gap-0.5 pr-1 pl-2.5"
+      data-testid="sidebar-d-chats-bar"
+    >
+      <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
+        Chats
+      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Upload a folder as a project"
+              data-testid="sidebar-d-upload-folder"
+              onClick={props.onUploadFolder}
+              className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <FolderUpIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Upload a folder as a project</TooltipPopup>
+      </Tooltip>
+      <Menu>
+        <MenuTrigger
+          aria-label="Group chats"
+          title="Group chats"
+          data-testid="sidebar-d-group-by"
+          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-foreground"
+        >
+          <SlidersHorizontalIcon className="size-3.5" />
+        </MenuTrigger>
+        <MenuPopup align="end" side="bottom" className="min-w-40">
+          <MenuGroup>
+            <MenuGroupLabel>Group chats by</MenuGroupLabel>
+            <MenuRadioGroup
+              value={props.groupBy}
+              onValueChange={(value) => {
+                if (isSidebarDGroupBy(value)) props.onGroupByChange(value);
+              }}
+            >
+              {SIDEBAR_D_GROUP_BY.map((value) => (
+                <MenuRadioItem
+                  key={value}
+                  value={value}
+                  data-testid={`sidebar-d-group-by-${value}`}
+                  className="min-h-7 py-1 sm:text-xs"
+                >
+                  {SIDEBAR_D_GROUP_BY_LABELS[value]}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuGroup>
+        </MenuPopup>
+      </Menu>
+    </li>
+  );
+}
+
+/** Sidebar D: no projects in the list yet — one row that brings the first in. */
+function SidebarDUploadFolderRow(props: { onUploadFolder: () => void }) {
+  return (
+    <li className="list-none">
+      <button
+        type="button"
+        onClick={props.onUploadFolder}
+        data-testid="sidebar-d-upload-folder-row"
+        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-sidebar-muted-foreground/80 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <FolderUpIcon aria-hidden className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">Upload a folder as a project</span>
+      </button>
     </li>
   );
 }
@@ -1798,6 +1905,11 @@ export default function Sidebar() {
     false,
     Schema.Boolean,
   );
+  const [dGroupBy, setDGroupBy] = useLocalStorage<SidebarDGroupBy, SidebarDGroupBy>(
+    SIDEBAR_D_GROUP_BY_KEY,
+    "project",
+    SidebarDGroupBySchema,
+  );
   const dGroups = useMemo(() => {
     const home = dHomeFolderPath?.replace(/\/+$/, "") ?? null;
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
@@ -1835,6 +1947,16 @@ export default function Sidebar() {
     projectDisplayNameByKey,
     threads,
   ]);
+  // Grouped by status: the same live chats (Uno's running ones stay under
+  // Uno), whatever folder they live in.
+  const dStatusSections = useMemo(() => {
+    if (dGroupBy !== "status") return [];
+    const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
+    return groupChatsByStatusForSidebarD({
+      chats: activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread))),
+      markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+    });
+  }, [activeThreads, dGroupBy, dGroups.unoRunning, now]);
   const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
   // A folded project with the open chat in it stays open, so the chat is seen.
   const isProjectFolded = useCallback(
@@ -2960,6 +3082,72 @@ export default function Sidebar() {
   );
 
   // ── Sidebar D (the standard layout) ──────────────────────────────────
+  const handleUploadFolderAsProject = () => {
+    if (isMobile) setOpenMobile(false);
+    sidebarDPanel.closeNow();
+    openNewProject("upload");
+  };
+  const dProjectList = (
+    <>
+      {dGroups.projects.length > 0 ? (
+        <SidebarDSectionLabel label="Projects" />
+      ) : totalThreadCount > 0 ? (
+        // Chats but no project among them: the short way to bring one in.
+        <SidebarDUploadFolderRow onUploadFolder={handleUploadFolderAsProject} />
+      ) : null}
+      {dGroups.projects.map((group) => {
+        const folded = isProjectFolded(group);
+        const project = projectByKey.get(group.key) ?? null;
+        return (
+          <li key={group.key} className="list-none">
+            <ul role="list" className="flex flex-col gap-px">
+              <SidebarDProjectRow
+                name={group.name}
+                folded={folded}
+                mark={foldedProjectMark(
+                  group.chats.map((thread) =>
+                    dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                  ),
+                )}
+                onToggle={() => toggleProjectFolded(group.key)}
+                onNewChat={
+                  project
+                    ? () => {
+                        if (isMobile) setOpenMobile(false);
+                        sidebarDPanel.closeNow();
+                        void newThreadContext.handleNewThread(
+                          scopeProjectRef(project.environmentId, project.id),
+                          {
+                            envMode: resolveSidebarNewThreadEnvMode({
+                              defaultEnvMode: defaultThreadEnvMode,
+                            }),
+                          },
+                        );
+                      }
+                    : null
+                }
+              />
+              {folded
+                ? null
+                : group.chats.map((thread) =>
+                    renderRow(thread, "active", { d: true, nested: true }),
+                  )}
+            </ul>
+          </li>
+        );
+      })}
+      {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
+      {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
+    </>
+  );
+  const dStatusList = dStatusSections.map((section) => (
+    <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
+      <ul role="list" className="flex flex-col gap-px">
+        <SidebarDSectionLabel label={section.label} />
+        {section.chats.map((thread) => renderRow(thread, "active", { d: true }))}
+      </ul>
+    </li>
+  ));
   const dChatList = (inPanel: boolean) => (
     <SidebarContent className="min-h-full gap-0">
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
@@ -2980,50 +3168,12 @@ export default function Sidebar() {
               : dGroups.unoRunning.map((thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true }),
                 )}
-            {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
-            {dGroups.projects.map((group) => {
-              const folded = isProjectFolded(group);
-              const project = projectByKey.get(group.key) ?? null;
-              return (
-                <li key={group.key} className="list-none">
-                  <ul role="list" className="flex flex-col gap-px">
-                    <SidebarDProjectRow
-                      name={group.name}
-                      folded={folded}
-                      mark={foldedProjectMark(
-                        group.chats.map((thread) =>
-                          dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
-                        ),
-                      )}
-                      onToggle={() => toggleProjectFolded(group.key)}
-                      onNewChat={
-                        project
-                          ? () => {
-                              if (isMobile) setOpenMobile(false);
-                              sidebarDPanel.closeNow();
-                              void newThreadContext.handleNewThread(
-                                scopeProjectRef(project.environmentId, project.id),
-                                {
-                                  envMode: resolveSidebarNewThreadEnvMode({
-                                    defaultEnvMode: defaultThreadEnvMode,
-                                  }),
-                                },
-                              );
-                            }
-                          : null
-                      }
-                    />
-                    {folded
-                      ? null
-                      : group.chats.map((thread) =>
-                          renderRow(thread, "active", { d: true, nested: true }),
-                        )}
-                  </ul>
-                </li>
-              );
-            })}
-            {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-            {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
+            <SidebarDChatsBar
+              groupBy={dGroupBy}
+              onGroupByChange={setDGroupBy}
+              onUploadFolder={handleUploadFolderAsProject}
+            />
+            {dGroupBy === "status" ? dStatusList : dProjectList}
             {simple && snoozedThreads.length + settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
