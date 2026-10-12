@@ -171,3 +171,17 @@ describe("describedProjectPrompt", () => {
     expect(cloned).toContain("Look at what's inside");
   });
 });
+
+describe("checkRepositoryInput without a scheme", () => {
+  it("github.com/owner/repo is the repository it names", () => {
+    expect(checkRepositoryInput("github.com/owner/repo", new Set())).toEqual({
+      ok: true,
+      remoteUrl: "https://github.com/owner/repo.git",
+      name: "repo",
+    });
+    expect(checkRepositoryInput("www.github.com/owner/repo/tree/main", new Set())).toMatchObject({
+      ok: true,
+      remoteUrl: "https://github.com/owner/repo.git",
+    });
+  });
+});

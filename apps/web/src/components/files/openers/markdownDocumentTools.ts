@@ -111,9 +111,11 @@ export function readDocumentToolState(root: HTMLElement): DocumentToolState | nu
   if (!selection) return null;
   const node = selection.anchorNode;
   const code = closestIn(root, node, "code");
+  const block = blockKindAt(root, node);
   return {
-    block: blockKindAt(root, node),
-    bold: document.queryCommandState("bold"),
+    block,
+    // A heading is bold by its look, not by the person's choice: the B stays off there.
+    bold: document.queryCommandState("bold") && block !== "h1" && block !== "h2" && block !== "h3",
     italic: document.queryCommandState("italic"),
     strike: document.queryCommandState("strikeThrough"),
     code: code !== null && code.closest("pre") === null,

@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.130 — 2026-10-12
+
+- "I have a project": a GitHub link pasted without `https://` (`github.com/owner/repo`) is taken as it is.
+- Markdown editor: the Bold tool no longer lights up just because the caret stands in a heading.
+
 ## v0.0.129 — 2026-10-12
 
 - Markdown editor: formatting tools above the document — Text and Heading 1–3, bold, italic, strikethrough, code, link, bulleted, numbered and to-do lists, quote. A press never drops your selection, and the tools light up for what the caret stands in.

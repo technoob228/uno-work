@@ -211,7 +211,11 @@ export type RepoCheck =
 export function checkRepositoryInput(raw: string, taken: ReadonlySet<string>): RepoCheck {
   const value = raw.trim();
   if (value.length === 0) return { ok: false, error: "Paste the repository address." };
-  let remoteUrl = expandGitRemoteUrl(value);
+  // Copied without its scheme ("github.com/owner/repo"): still the same address.
+  const typed = /^(www\.)?(github\.com|gitlab\.com|bitbucket\.org)\//i.test(value)
+    ? `https://${value.replace(/^www\./i, "")}`
+    : value;
+  let remoteUrl = expandGitRemoteUrl(typed);
   const web = /^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/([\w.-]+)\/([\w.-]+)/i.exec(
     remoteUrl,
   );
