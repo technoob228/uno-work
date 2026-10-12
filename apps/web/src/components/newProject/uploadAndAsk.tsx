@@ -12,6 +12,7 @@ import type { ProjectUploadFile } from "../../projectUpload";
 import { takeWorkIntent, uploadedProjectPrompt } from "../../unoai/workIntent";
 import type { HomeStartOptions } from "../computer/home/HomeComposer";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
+import { describedProjectPrompt } from "./newProject.logic";
 
 type StartTask = (prompt: string, options: HomeStartOptions) => Promise<void>;
 
@@ -21,12 +22,16 @@ export function openUploadAndAsk(
 ): void {
   openNewProject("upload", {
     ...(files ? { files } : {}),
-    afterCreate: ({ name, folder }) =>
-      startTask(uploadedProjectPrompt(name, folder), {
-        folder,
-        modelSelection: null,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
-      }),
+    afterCreate: ({ name, folder, about, contents }) =>
+      startTask(
+        // Nothing to look at or publish yet: start from what they said.
+        about && contents === "none"
+          ? describedProjectPrompt({ name, folder, about, contents })
+          : about
+            ? `${uploadedProjectPrompt(name, folder)}\n\nAbout it, in my words: ${about}`
+            : uploadedProjectPrompt(name, folder),
+        { folder, modelSelection: null, runtimeMode: DEFAULT_RUNTIME_MODE },
+      ),
   });
 }
 

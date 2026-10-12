@@ -27,7 +27,7 @@ export interface MarkdownSourceBlock {
   /** Where the block's source starts and ends (offsets in the source). */
   readonly start: number;
   readonly end: number;
-  /** Its HTML at the start; while it reads the same, the block is untouched. */
+  /** How it read at the start (its tag and inner HTML); while it reads the same, the block is untouched. */
   readonly html: string;
 }
 
@@ -35,6 +35,7 @@ export interface MarkdownSourceBlock {
 export interface MarkdownEditedBlock {
   /** The source block it was rendered from; null for one the person added. */
   readonly index: number | null;
+  /** How it reads now, the same way `MarkdownSourceBlock.html` was taken. */
   readonly innerHtml: string;
   readonly outerHtml: string;
 }
@@ -99,7 +100,8 @@ function turndownService(): TurndownService {
   // The GitHub flavour the document view renders (remark-gfm): strikethrough,
   // task lists and tables.
   service.addRule("strikethrough", {
-    filter: ["del", "s"],
+    // `<strike>` is what the browser's own strikethrough command writes.
+    filter: ["del", "s", "strike" as keyof HTMLElementTagNameMap],
     replacement: (content) => `~~${content}~~`,
   });
   service.addRule("taskListCheckbox", {
@@ -112,6 +114,11 @@ function turndownService(): TurndownService {
       const spaced = /^\s/.test(box.nextSibling?.nodeValue ?? "");
       return `${box.getAttribute?.("checked") != null ? "[x]" : "[ ]"}${spaced ? "" : " "}`;
     },
+  });
+  // The break the browser keeps at the end of a line being typed is not a line break of the text.
+  service.addRule("trailingBreak", {
+    filter: (node) => node.nodeName === "BR" && node.nextSibling === null,
+    replacement: () => "",
   });
   // A footnote's mark in the text; its definition is a line of the source.
   service.addRule("footnoteReference", {

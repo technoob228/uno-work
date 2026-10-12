@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.129 — 2026-10-12
+
+- Markdown editor: formatting tools above the document — Text and Heading 1–3, bold, italic, strikethrough, code, link, bulleted, numbered and to-do lists, quote. A press never drops your selection, and the tools light up for what the caret stands in.
+- Markdown editor: type markdown and it becomes the block — `# `, `## `, `### `, `- `, `1. `, `> `, `[] ` at the start of a line. Shortcuts: ⌘B, ⌘I, ⌘⇧X, ⌘E, ⌘K, ⌘⌥1–3 and ⌘⌥0, ⌘⇧7/8/9; Tab and Shift+Tab move a list item a level in and out. To-do boxes can be ticked right in the document.
+- "I have a project" takes a project any way it comes: a folder, a .zip, a few separate files, a GitHub link — or only a few words about it, with no folder at all. What you write under "Tell Uno about it" becomes the first message of the project's chat.
+
 ## v0.0.128 — 2026-10-11
 
 - Home: the hints under the box come from your own work — the chats you had, app notifications, documents and sites — and no longer guess from what merely sits on the computer ("Add a login page to…", "Tidy up…" are gone). With fewer than two projects the row starts with what helps to get on board: "Learn Uno Work" and "Uno cloud services".

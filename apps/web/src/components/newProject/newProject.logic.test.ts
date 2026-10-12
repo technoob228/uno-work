@@ -17,6 +17,7 @@ import {
   isPickableFolder,
   recentHomeFolders,
   tildePath,
+  describedProjectPrompt,
 } from "./newProject.logic";
 
 const HOME = "/home/uno";
@@ -143,5 +144,30 @@ describe("a project from Cloud storage", () => {
       { label: "sites", prefix: "sites/" },
       { label: "landing", prefix: "sites/landing/" },
     ]);
+  });
+});
+
+describe("describedProjectPrompt", () => {
+  const base = {
+    name: "shop",
+    folder: "/home/unowork/projects/shop",
+    about: "  An online shop.  ",
+  };
+
+  it("no folder: starts from the person's words and asks before doing", () => {
+    const prompt = describedProjectPrompt({ ...base, contents: "none" });
+    expect(prompt).toContain("the folder is empty for now");
+    expect(prompt).toContain("What I have in mind: An online shop.");
+    expect(prompt).toContain("Ask me what you need to know");
+  });
+
+  it("files or a repository: their words, then look inside", () => {
+    expect(describedProjectPrompt({ ...base, contents: "files" })).toContain(
+      `I've added my project "shop" to /home/unowork/projects/shop.`,
+    );
+    const cloned = describedProjectPrompt({ ...base, contents: "repository" });
+    expect(cloned).toContain(`I've cloned my project "shop"`);
+    expect(cloned).toContain("About it, in my words: An online shop.");
+    expect(cloned).toContain("Look at what's inside");
   });
 });

@@ -10,7 +10,10 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { create } from "zustand";
 
-import type { NewProjectSource } from "../components/newProject/newProject.logic";
+import type {
+  NewProjectContents,
+  NewProjectSource,
+} from "../components/newProject/newProject.logic";
 import type { ProjectUploadFile } from "../projectUpload";
 
 export type NewProjectStep = "choose" | Exclude<NewProjectSource, "template">;
@@ -22,6 +25,10 @@ export interface CreatedProject {
   readonly folder: string;
   /** Its project — already created, may not be in the store yet. */
   readonly projectRef: ScopedProjectRef;
+  /** What the person wrote under "Tell Uno about it"; empty when nothing. */
+  readonly about?: string;
+  /** What the folder starts with: uploaded files, a cloned repository, or nothing yet. */
+  readonly contents?: NewProjectContents;
 }
 
 /**

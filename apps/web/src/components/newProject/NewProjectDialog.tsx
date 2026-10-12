@@ -23,6 +23,7 @@
  * template" is not offered: there are no project templates yet.)
  */
 import {
+  DEFAULT_RUNTIME_MODE,
   isAssistantProjectId,
   type FilesystemBrowseEntry,
   type ScopedProjectRef,
@@ -35,6 +36,7 @@ import {
   CloudIcon,
   CodeIcon,
   FileArchiveIcon,
+  FilesIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderUpIcon,
@@ -49,13 +51,18 @@ import { useShallow } from "zustand/react/shallow";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import {
   formatUploadBytes,
   planProjectUpload,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
 } from "../../projectUpload";
-import { pickFolderForProjectUpload, readDroppedUploadFiles } from "../../projectUploadPickers";
+import {
+  pickFilesForProjectUpload,
+  pickFolderForProjectUpload,
+  readDroppedUploadFiles,
+} from "../../projectUploadPickers";
 import { cloudListQueryOptions, cloudStateQueryOptions, filesApi } from "../files/filesApi";
 import { stripSharedTopFolder } from "../setup/goals";
 import { expandZips } from "../setup/siteUpload";
@@ -80,12 +87,15 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import {
   type NewProjectSource,
   CLOUD_COPY_MAX_ITEMS,
   checkNewFolderName,
+  describedProjectPrompt,
+  type NewProjectContents,
   cloudCrumbs,
   cloudProjectName,
   freeProjectName,
@@ -108,7 +118,7 @@ const SOURCE_COPY: Record<
 > = {
   upload: {
     title: "Upload from my computer",
-    body: "A folder or a .zip from your laptop",
+    body: "A folder, a .zip or a few files — or just tell Uno about it",
     Icon: FolderUpIcon,
   },
   folder: {
@@ -261,21 +271,45 @@ function dialogCopy(
  * first task, a chat's folder chip) — or, without one or when it fails, a new
  * chat in the folder.
  */
+/** What the person told Uno about the project, and what its folder starts with. */
+interface ProjectStory {
+  readonly about: string;
+  readonly contents: NewProjectContents;
+}
+
 function useFinishNewProject() {
   const afterCreate = useNewProjectStore((state) => state.afterCreate);
   const { handleNewThread } = useNewThreadHandler();
+  const { startTask } = useHomeLaunchers(useActiveMachine().environmentId);
   return useCallback(
-    async (projectRef: ScopedProjectRef, name: string, folder: string): Promise<void> => {
+    async (
+      projectRef: ScopedProjectRef,
+      name: string,
+      folder: string,
+      story?: ProjectStory,
+    ): Promise<void> => {
       if (afterCreate) {
-        const done = await afterCreate({ name, folder, projectRef }).then(
+        const done = await afterCreate({ name, folder, projectRef, ...story }).then(
           () => true,
           () => false,
         );
         if (done) return;
       }
+      // They told Uno about it: the project opens with their words as its first message.
+      if (story && story.about.length > 0) {
+        const sent = await startTask(describedProjectPrompt({ name, folder, ...story }), {
+          folder,
+          modelSelection: null,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+        }).then(
+          () => true,
+          () => false,
+        );
+        if (sent) return;
+      }
       await handleNewThread(projectRef, { envMode: "local" });
     },
-    [afterCreate, handleNewThread],
+    [afterCreate, handleNewThread, startTask],
   );
 }
 
@@ -339,15 +373,18 @@ interface PickedUpload {
   readonly files: ReadonlyArray<ProjectUploadFile>;
   readonly name: string;
   readonly fromZip: boolean;
+  /** A folder or a zip names the project; loose files leave the name to the person. */
+  readonly named: boolean;
 }
 
 /** Zips unpacked, a shared top folder (the picked folder itself) taken off. */
 async function preparePicked(raw: ReadonlyArray<ProjectUploadFile>): Promise<PickedUpload> {
   const fromZip = raw.some((file) => /\.zip$/i.test(file.relativePath));
   const name = uploadProjectName(raw);
+  const named = (raw[0]?.relativePath.includes("/") ?? false) || (raw.length === 1 && fromZip);
   const expanded = await expandZips(raw);
   const files = stripSharedTopFolder(expanded, (file, relativePath) => ({ ...file, relativePath }));
-  return { files, name, fromZip };
+  return { files, name, fromZip, named };
 }
 
 function UploadStep({
@@ -371,13 +408,37 @@ function UploadStep({
   const takeFiles = useNewProjectStore((state) => state.takeFiles);
   const takenOrNull = useProjectsEntryNames(environmentId, home);
   const taken = useMemo(() => takenOrNull ?? new Set<string>(), [takenOrNull]);
-  const name = picked ? freeProjectName(picked.name, taken) : null;
+  // "I have a project" takes it any way it comes (Misha 11.10): a folder, a
+  // zip, a few files, a GitHub link — or only a word about it, no folder at
+  // all. The folder chip of a chat ("folder" wording) keeps the plain upload.
+  const rich = wording === "project";
+  const [repo, setRepo] = useState("");
+  const [about, setAbout] = useState("");
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [working, setWorking] = useState<string | null>(null);
+  const aboutText = rich ? about.trim() : "";
+  const fromRepo = rich && picked === null && repo.trim().length > 0;
+  const aboutOnly = rich && picked === null && !fromRepo && aboutText.length > 0;
+  const repoCheck = checkRepositoryInput(repo, taken);
+  // Nothing names the project (loose files, or only a description): the person does.
+  const needsName = (picked !== null && !picked.named) || aboutOnly;
+  const suggestedName = freeProjectName(picked?.name ?? "my-project", taken);
+  const nameCheck = checkNewFolderName(nameDraft ?? suggestedName, taken);
+  const name = needsName
+    ? nameCheck.ok
+      ? nameCheck.name
+      : null
+    : picked
+      ? freeProjectName(picked.name, taken)
+      : fromRepo && repoCheck.ok
+        ? repoCheck.name
+        : null;
   const target = name ? uploadedProjectPath(home, name) : null;
   const plan = useMemo(
     () => (picked ? planProjectUpload(picked.files, { filterIgnored: true }) : null),
     [picked],
   );
-  const busy = progress !== null;
+  const busy = progress !== null || working !== null;
 
   const accept = (raw: ReadonlyArray<ProjectUploadFile>) => {
     if (raw.length === 0) return;
@@ -404,8 +465,46 @@ function UploadStep({
     if (files) accept(files);
   }, [takeFiles]);
 
+  const submitWithoutUpload = async () => {
+    if (!name || !target) return;
+    setError(null);
+    setWorking(fromRepo ? "Cloning…" : "Creating…");
+    try {
+      if (fromRepo && repoCheck.ok) {
+        const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
+          remoteUrl: repoCheck.remoteUrl,
+          destinationPath: target,
+        });
+        const folder = result.cwd || target;
+        await finish(await ensureFolderProject(folder, name), name, folder, {
+          about: aboutText,
+          contents: "repository",
+        });
+      } else {
+        const projectRef = await ensureFolderProject(target, name, { createFolder: true });
+        await finish(projectRef, name, target, { about: aboutText, contents: "none" });
+      }
+      onDone();
+    } catch (cause) {
+      setError(
+        errorMessage(
+          cause,
+          fromRepo
+            ? "Couldn't clone the repository. For a private one, connect GitHub in Settings → Source control."
+            : "Couldn't create the project.",
+        ),
+      );
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const submit = async () => {
-    if (!picked || !name || !target || !plan) return;
+    if (!picked) {
+      await submitWithoutUpload();
+      return;
+    }
+    if (!name || !target || !plan) return;
     setError(null);
     setProgress({ done: 0, total: plan.accepted.length, bytes: "" });
     try {
@@ -425,7 +524,7 @@ function UploadStep({
             }),
         },
       );
-      await finish(projectRef, name, target);
+      await finish(projectRef, name, target, { about: aboutText, contents: "files" });
       onDone();
     } catch (cause) {
       setError(errorMessage(cause, "The upload stopped. Try again."));
@@ -458,7 +557,11 @@ function UploadStep({
           >
             <FolderUpIcon className="size-7 text-muted-foreground" />
             <p className="text-sm">
-              {reading ? "Reading the files…" : "Drop a folder or a .zip here"}
+              {reading
+                ? "Reading the files…"
+                : rich
+                  ? "Drop a folder, a .zip or files here"
+                  : "Drop a folder or a .zip here"}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               <Button
@@ -479,6 +582,18 @@ function UploadStep({
                 <FileArchiveIcon className="size-4" />
                 Choose a .zip…
               </Button>
+              {rich ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={reading}
+                  onClick={() => pickFilesForProjectUpload(accept)}
+                  data-testid="new-project-upload-files"
+                >
+                  <FilesIcon className="size-4" />
+                  Choose files…
+                </Button>
+              ) : null}
               <input
                 ref={zipInput}
                 type="file"
@@ -506,7 +621,9 @@ function UploadStep({
                 )}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{name}</span>
+                <span className="block truncate text-sm font-semibold">
+                  {picked.named ? name : `${picked.files.length === 1 ? "1 file" : "Files"}`}
+                </span>
                 <span className="block text-xs text-muted-foreground">
                   {plan
                     ? `${plan.accepted.length} files · ${formatUploadBytes(plan.totalBytes)}`
@@ -515,7 +632,14 @@ function UploadStep({
                 </span>
               </span>
               {busy ? null : (
-                <Button size="xs" variant="ghost" onClick={() => setPicked(null)}>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    setPicked(null);
+                    setNameDraft(null);
+                  }}
+                >
                   Change
                 </Button>
               )}
@@ -538,6 +662,56 @@ function UploadStep({
             ) : null}
           </div>
         )}
+        {rich && picked === null && !busy ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium" htmlFor="new-project-upload-repo">
+              Or a GitHub link
+            </label>
+            <Input
+              id="new-project-upload-repo"
+              placeholder="https://github.com/owner/repo or owner/repo"
+              value={repo}
+              onChange={(event) => {
+                setRepo(event.currentTarget.value);
+                setError(null);
+              }}
+              data-testid="new-project-upload-repo"
+            />
+          </div>
+        ) : null}
+        {rich && !busy ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium" htmlFor="new-project-upload-about">
+              Tell Uno about it{" "}
+              <span className="font-normal text-muted-foreground">
+                {picked === null && !fromRepo
+                  ? "— enough on its own, no folder needed"
+                  : "— optional"}
+              </span>
+            </label>
+            <Textarea
+              id="new-project-upload-about"
+              rows={3}
+              placeholder="What it is and what you want done. Uno reads this first."
+              value={about}
+              onChange={(event) => setAbout(event.currentTarget.value)}
+              data-testid="new-project-upload-about"
+            />
+          </div>
+        ) : null}
+        {needsName && !busy ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium" htmlFor="new-project-upload-name">
+              Name
+            </label>
+            <Input
+              id="new-project-upload-name"
+              value={nameDraft ?? suggestedName}
+              onChange={(event) => setNameDraft(event.currentTarget.value)}
+              data-testid="new-project-upload-name"
+            />
+          </div>
+        ) : null}
         <p className="text-xs text-muted-foreground" data-testid="new-project-destination">
           Goes to{" "}
           <span className="font-mono text-foreground">
@@ -547,11 +721,34 @@ function UploadStep({
         </p>
       </DialogPanel>
       <StepFooter
-        error={error}
+        error={
+          error ??
+          (fromRepo && !repoCheck.ok
+            ? repoCheck.error
+            : needsName && !nameCheck.ok
+              ? nameCheck.error
+              : null)
+        }
         busy={busy}
-        disabled={picked === null || plan === null || plan.accepted.length === 0 || reading}
-        label={busy ? "Uploading…" : wording === "folder" ? "Upload" : "Upload and open"}
-        icon={<FolderUpIcon />}
+        disabled={
+          reading ||
+          name === null ||
+          takenOrNull === null ||
+          (picked !== null && (plan === null || plan.accepted.length === 0))
+        }
+        label={
+          working ??
+          (progress !== null
+            ? "Uploading…"
+            : fromRepo
+              ? "Clone and open"
+              : aboutOnly
+                ? "Create and open"
+                : wording === "folder"
+                  ? "Upload"
+                  : "Upload and open")
+        }
+        icon={fromRepo ? <GitHubIcon /> : aboutOnly ? <PlusIcon /> : <FolderUpIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
       />

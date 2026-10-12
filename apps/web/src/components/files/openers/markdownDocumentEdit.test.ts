@@ -124,6 +124,12 @@ describe("htmlBlockToMarkdown", () => {
     expect(htmlBlockToMarkdown("<p>End.&nbsp;More</p>")).toBe("End. More");
   });
 
+  it("the break the browser leaves at a line's end is dropped, one inside the text stays", () => {
+    expect(htmlBlockToMarkdown("<ul><li>task<br></li><li>next</li></ul>")).toBe("- task\n- next");
+    expect(htmlBlockToMarkdown("<p>one<br>two</p>")).toBe("one  \ntwo");
+    expect(htmlBlockToMarkdown("<p><strike>old</strike></p>")).toBe("~~old~~");
+  });
+
   it("strikethrough and task lists", () => {
     expect(htmlBlockToMarkdown("<p><del>old</del> new</p>")).toBe("~~old~~ new");
     expect(

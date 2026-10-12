@@ -230,3 +230,34 @@ export function checkRepositoryInput(raw: string, taken: ReadonlySet<string>): R
   }
   return { ok: true, remoteUrl, name };
 }
+
+/** What a new project's folder starts with. */
+export type NewProjectContents = "files" | "repository" | "none";
+
+/**
+ * The first message of a project the person told Uno about (Misha 11.10:
+ * "just tell about it and add files — not only a folder; describe the context
+ * yourself when there is no folder"). Their words go first, as they wrote them.
+ */
+export function describedProjectPrompt(input: {
+  readonly name: string;
+  readonly folder: string;
+  readonly about: string;
+  readonly contents: NewProjectContents;
+}): string {
+  const about = input.about.trim();
+  if (input.contents === "none") {
+    return [
+      `I'm starting a new project "${input.name}" in ${input.folder}; the folder is empty for now.`,
+      `What I have in mind: ${about}`,
+      "Ask me what you need to know, one question at a time, then suggest where to start.",
+    ].join("\n\n");
+  }
+  return [
+    input.contents === "repository"
+      ? `I've cloned my project "${input.name}" into ${input.folder}.`
+      : `I've added my project "${input.name}" to ${input.folder}.`,
+    `About it, in my words: ${about}`,
+    "Look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step.",
+  ].join("\n\n");
+}
