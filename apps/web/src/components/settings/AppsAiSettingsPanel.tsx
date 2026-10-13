@@ -632,13 +632,117 @@ function AppRow({
   );
 }
 
-export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId: EnvironmentId }) {
+/**
+ * The two defaults every app starts from: the model for answers and the agent
+ * for jobs. Shown here and in Settings → AI ("Default AI"), written to the
+ * same machine settings.
+ */
+export function AppsAiDefaultRows({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const queryClient = useQueryClient();
   const serverSettings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentProviders(environmentId);
   const clientSettings = useSettings();
-  const { updateSettings, mutationBlockedReason } = useUpdateEnvironmentSettings(environmentId);
+  const { updateSettings } = useUpdateEnvironmentSettings(environmentId);
   const settings = serverSettings ?? DEFAULT_UNIFIED_SETTINGS;
+  const overview = useQuery(appAiQueryOptions(environmentId));
+  const save = useCallback(
+    (patch: Parameters<typeof updateSettings>[0], title: string) => {
+      void updateSettings(patch)
+        .then(() => queryClient.invalidateQueries({ queryKey: appAiQueryKey(environmentId) }))
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title,
+            description: error instanceof Error ? error.message : String(error),
+          });
+        });
+    },
+    [environmentId, queryClient, updateSettings],
+  );
+  const merged = useMemo(() => ({ ...clientSettings, ...settings }), [clientSettings, settings]);
+  const instanceEntries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
+  const chosen = settings.appsAi?.taskModelSelection ?? null;
+  // What jobs run on now: the person's choice, else the machine's default.
+  const effective = chosen ?? overview.data?.taskModelDefault ?? null;
+  const taskInstanceId = effective?.instanceId ?? instanceEntries[0]?.instanceId ?? null;
+  const taskModel = effective?.model ?? instanceEntries[0]?.models[0]?.slug ?? "";
+  const modelOptionsByInstance = getCustomModelOptionsByInstance(
+    merged,
+    providers,
+    taskInstanceId,
+    taskModel,
+  );
+  const data = overview.data;
+  const chatModel = settings.appsAi?.chatModel ?? "";
+  return (
+    <>
+      <SettingsRow
+        title="Model for answers"
+        description="What apps on Uno AI get when they don't pick a model themselves. Any model of the Uno AI gateway."
+        resetAction={
+          chatModel.length > 0 ? (
+            <SettingResetButton
+              label="model for answers"
+              onClick={() => save({ appsAi: { chatModel: "" } }, "Could not save the model")}
+            />
+          ) : null
+        }
+        control={
+          <DraftInput
+            className="w-full sm:w-72"
+            value={chatModel}
+            placeholder={APP_SDK_DEFAULT_CHAT_MODEL}
+            spellCheck={false}
+            aria-label="Model for app answers"
+            onCommit={(next) =>
+              save({ appsAi: { chatModel: next.trim() } }, "Could not save the model")
+            }
+          />
+        }
+      />
+      <SettingsRow
+        title="Agent for jobs"
+        description="Which agent does the jobs apps hand over. Each job appears as a chat named after the app, where you can watch it and approve its steps."
+        status={data ? taskSpendNote(data) : null}
+        resetAction={
+          chosen ? (
+            <SettingResetButton
+              label="agent for jobs"
+              onClick={() =>
+                save({ appsAi: { taskModelSelection: null } }, "Could not save the agent")
+              }
+            />
+          ) : null
+        }
+        control={
+          taskInstanceId !== null ? (
+            <ProviderModelPicker
+              activeInstanceId={taskInstanceId}
+              model={taskModel}
+              lockedProvider={null}
+              instanceEntries={instanceEntries}
+              modelOptionsByInstance={modelOptionsByInstance}
+              triggerVariant="outline"
+              triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+              onInstanceModelChange={(instanceId, model) =>
+                save(
+                  { appsAi: { taskModelSelection: createModelSelection(instanceId, model) } },
+                  "Could not save the agent",
+                )
+              }
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">No agent installed</span>
+          )
+        }
+      />
+    </>
+  );
+}
+
+export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const queryClient = useQueryClient();
+  const { mutationBlockedReason } = useUpdateEnvironmentSettings(environmentId);
 
   const overview = useQuery(appAiQueryOptions(environmentId));
   // Uno AI hours: included models don't spend an app's $ limit.
@@ -663,37 +767,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
       }),
   });
 
-  const save = useCallback(
-    (patch: Parameters<typeof updateSettings>[0], title: string) => {
-      void updateSettings(patch)
-        .then(() => queryClient.invalidateQueries({ queryKey: appAiQueryKey(environmentId) }))
-        .catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title,
-            description: error instanceof Error ? error.message : String(error),
-          });
-        });
-    },
-    [environmentId, queryClient, updateSettings],
-  );
-
-  const merged = useMemo(() => ({ ...clientSettings, ...settings }), [clientSettings, settings]);
-  const instanceEntries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
-  const chosen = settings.appsAi?.taskModelSelection ?? null;
-  // What jobs run on now: the person's choice, else the machine's default.
-  const effective = chosen ?? overview.data?.taskModelDefault ?? null;
-  const taskInstanceId = effective?.instanceId ?? instanceEntries[0]?.instanceId ?? null;
-  const taskModel = effective?.model ?? instanceEntries[0]?.models[0]?.slug ?? "";
-  const modelOptionsByInstance = getCustomModelOptionsByInstance(
-    merged,
-    providers,
-    taskInstanceId,
-    taskModel,
-  );
-
   const data = overview.data;
-  const chatModel = settings.appsAi?.chatModel ?? "";
 
   return (
     <SettingsPageContainer>
@@ -718,66 +792,7 @@ export function AppsAiSettingsPanel({ environmentId }: { readonly environmentId:
           }
           control={<AddAiToAppButton environmentId={environmentId} />}
         />
-        <SettingsRow
-          title="Model for answers"
-          description="What apps on Uno AI get when they don't pick a model themselves. Any model of the Uno AI gateway."
-          resetAction={
-            chatModel.length > 0 ? (
-              <SettingResetButton
-                label="model for answers"
-                onClick={() => save({ appsAi: { chatModel: "" } }, "Could not save the model")}
-              />
-            ) : null
-          }
-          control={
-            <DraftInput
-              className="w-full sm:w-72"
-              value={chatModel}
-              placeholder={APP_SDK_DEFAULT_CHAT_MODEL}
-              spellCheck={false}
-              aria-label="Model for app answers"
-              onCommit={(next) =>
-                save({ appsAi: { chatModel: next.trim() } }, "Could not save the model")
-              }
-            />
-          }
-        />
-        <SettingsRow
-          title="Agent for jobs"
-          description="Which agent does the jobs apps hand over. Each job appears as a chat named after the app, where you can watch it and approve its steps."
-          status={data ? taskSpendNote(data) : null}
-          resetAction={
-            chosen ? (
-              <SettingResetButton
-                label="agent for jobs"
-                onClick={() =>
-                  save({ appsAi: { taskModelSelection: null } }, "Could not save the agent")
-                }
-              />
-            ) : null
-          }
-          control={
-            taskInstanceId !== null ? (
-              <ProviderModelPicker
-                activeInstanceId={taskInstanceId}
-                model={taskModel}
-                lockedProvider={null}
-                instanceEntries={instanceEntries}
-                modelOptionsByInstance={modelOptionsByInstance}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onInstanceModelChange={(instanceId, model) =>
-                  save(
-                    { appsAi: { taskModelSelection: createModelSelection(instanceId, model) } },
-                    "Could not save the agent",
-                  )
-                }
-              />
-            ) : (
-              <span className="text-xs text-muted-foreground">No agent installed</span>
-            )
-          }
-        />
+        <AppsAiDefaultRows environmentId={environmentId} />
       </SettingsSection>
 
       <SettingsSection title="Apps using AI or cloud storage">

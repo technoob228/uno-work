@@ -44,7 +44,11 @@ export interface HarnessSetupApi {
     readonly driver: ProviderAuthDriver;
     readonly method: ProviderAuthMethod;
     readonly apiKey?: string;
+    /** Drop a browser sign-in that is still waiting and start a new one. */
+    readonly restart?: boolean;
   }) => Promise<void>;
+  /** Stop a sign-in that waits for its browser half, and forget it here. */
+  readonly cancelAuth: (driver: ProviderAuthDriver) => Promise<void>;
   readonly submitAuthCode: (input: {
     readonly driver: ProviderAuthDriver;
     readonly code: string;
@@ -142,7 +146,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
   );
 
   const startAuth = useCallback<HarnessSetupApi["startAuth"]>(
-    async ({ driver, method, apiKey }) => {
+    async ({ driver, method, apiKey, restart }) => {
       setAuthJobs((current) => ({
         ...current,
         [driver]: {
@@ -156,10 +160,14 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
       }));
       try {
         const client = resolveClient(environmentId);
+        // A browser sign-in that was already waiting on the machine (this page
+        // was closed or reloaded meanwhile) comes back as the same job: the
+        // poller shows its link and code again.
         const { jobId } = await client.providerSetup.authStart({
           driver,
           method,
           ...(apiKey ? { apiKey } : {}),
+          ...(restart ? { restart: true } : {}),
         });
         authIds.current.set(driver, jobId);
       } catch (error) {
@@ -176,6 +184,19 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
             error: errorMessage(error),
           },
         }));
+      }
+    },
+    [environmentId],
+  );
+
+  const cancelAuth = useCallback<HarnessSetupApi["cancelAuth"]>(
+    async (driver) => {
+      authIds.current.delete(driver);
+      setAuthJobs((current) => ({ ...current, [driver]: undefined }));
+      try {
+        await resolveClient(environmentId).providerSetup.authCancel({ driver });
+      } catch {
+        // An older daemon has no cancel: its sign-in times out by itself.
       }
     },
     [environmentId],
@@ -294,6 +315,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
       authJobs,
       startInstall,
       startAuth,
+      cancelAuth,
       submitAuthCode,
       signOut,
       clearAuth,
@@ -304,6 +326,7 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
       authJobs,
       startInstall,
       startAuth,
+      cancelAuth,
       submitAuthCode,
       signOut,
       clearAuth,

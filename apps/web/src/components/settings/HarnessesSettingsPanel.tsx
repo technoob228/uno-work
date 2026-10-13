@@ -28,7 +28,7 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   refreshEnvironmentProviders,
@@ -304,9 +304,13 @@ function HarnessRow({
 
 export function HarnessesSettingsPanel({
   environmentId,
+  embedded = false,
 }: {
   readonly environmentId: EnvironmentId;
+  /** Inside another settings page (Settings → AI): the sections alone, no page around them. */
+  readonly embedded?: boolean;
 }) {
+  const Page = embedded ? Fragment : SettingsPageContainer;
   const settings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentProviders(environmentId);
   const { updateSettings, canMutate, mutationBlockedReason } =
@@ -384,7 +388,7 @@ export function HarnessesSettingsPanel({
   const harnesses = list?.harnesses ?? [];
 
   return (
-    <SettingsPageContainer>
+    <Page>
       {mutationBlockedReason ? (
         <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400">
           {mutationBlockedReason}
@@ -509,6 +513,6 @@ export function HarnessesSettingsPanel({
         onOpenChange={setGuideOpen}
         guidePath={list?.guidePath ?? null}
       />
-    </SettingsPageContainer>
+    </Page>
   );
 }

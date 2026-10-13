@@ -16,6 +16,13 @@
  *                           instance's environment (secret store backed).
  *   auth claudeAgent oauth  `claude auth login`; URL parsed from stdout, the
  *                           user pastes the code back via `submitCode`.
+ *   resume / restart        a second `authStart` while a browser sign-in waits
+ *                           hands the same job back (the page was closed or
+ *                           reloaded: the link and code are still good);
+ *                           `restart` or `authCancel` stops it.
+ *   signed in elsewhere     while a browser sign-in waits, the daemon re-probes
+ *                           the harness: a login done in a terminal ends the job
+ *                           as succeeded instead of blocking the row for 10 min.
  *   sign out codex          `codex logout`.
  *   sign out claudeAgent    `claude auth logout` + drop the stored
  *                           ANTHROPIC_API_KEY; on a Uno box Claude Code then
@@ -33,6 +40,8 @@ import {
   ClaudeSettings,
   CodexSettings,
   defaultInstanceIdForDriver,
+  type ProviderAuthCancelInput,
+  type ProviderAuthCancelResult,
   type ProviderAuthDriver,
   type ProviderAuthJobStatus,
   type ProviderAuthMethod,
@@ -70,6 +79,8 @@ import {
 import { lastNonEmptyLine, parseOAuthPrompt } from "./harnessSetupParsers.ts";
 
 export const AUTH_JOB_TIMEOUT_MS = 10 * 60_000;
+/** How often a waiting browser sign-in checks whether the harness got signed in another way. */
+export const AUTH_WATCH_INTERVAL_MS = 7_000;
 export const SIGN_OUT_TIMEOUT_MS = 30_000;
 export const INSTALL_JOB_TIMEOUT_MS = 15 * 60_000;
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
@@ -93,6 +104,9 @@ export interface HarnessSetupShape {
   readonly authSignOut: (
     input: ProviderAuthSignOutInput,
   ) => Effect.Effect<ProviderAuthSignOutResult, ProviderSetupRpcError>;
+  readonly authCancel: (
+    input: ProviderAuthCancelInput,
+  ) => Effect.Effect<ProviderAuthCancelResult, ProviderSetupRpcError>;
 }
 
 export class HarnessSetup extends Context.Service<HarnessSetup, HarnessSetupShape>()(
@@ -108,6 +122,13 @@ export interface CliEnvironment {
   readonly env: NodeJS.ProcessEnv;
 }
 
+/** Who the harness is signed in as, as far as the daemon's probe can tell. */
+export interface HarnessAuthProbe {
+  readonly authenticated: boolean;
+  /** Changes when the account or the kind of sign-in changes. */
+  readonly signature: string;
+}
+
 export interface HarnessSetupRunnerDeps {
   readonly spawn: HarnessProcessSpawner;
   readonly platform: NodeJS.Platform;
@@ -121,6 +142,15 @@ export interface HarnessSetupRunnerDeps {
   /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
   readonly removeClaudeApiKey: () => Promise<boolean>;
   readonly refreshProvider: (driver: ProviderDriverKind) => Promise<void>;
+  /**
+   * The harness's sign-in as the daemon sees it; `refresh` re-probes the CLI
+   * first. Absent: a waiting sign-in is not watched for a login done elsewhere.
+   */
+  readonly probeAuth?: (
+    driver: ProviderAuthDriver,
+    options: { readonly refresh: boolean },
+  ) => Promise<HarnessAuthProbe>;
+  readonly authWatchIntervalMs?: number;
   readonly authTimeoutMs?: number;
   readonly signOutTimeoutMs?: number;
   readonly installTimeoutMs?: number;
@@ -150,6 +180,7 @@ export interface HarnessSetupRunner {
   readonly authStatus: (input: ProviderAuthStatusInput) => ProviderAuthJobStatus;
   readonly authSubmitCode: (input: ProviderAuthSubmitCodeInput) => ProviderAuthJobStatus;
   readonly authSignOut: (input: ProviderAuthSignOutInput) => Promise<ProviderAuthSignOutResult>;
+  readonly authCancel: (input: ProviderAuthCancelInput) => ProviderAuthCancelResult;
   /** Kill every running child. Used on daemon shutdown. */
   readonly shutdown: () => void;
   /** Resolves once every job started so far has settled. Test helper. */
@@ -333,6 +364,60 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     ...(job.error ? { error: job.error } : {}),
   });
 
+  /** Settle a waiting sign-in from outside its CLI process, and stop that process. */
+  const settleFromOutside = (
+    jobId: string,
+    outcome: { readonly state: "succeeded" } | { readonly state: "failed"; readonly error: string },
+    note: string,
+  ): boolean => {
+    const current = auths.get(jobId);
+    if (!current || (current.state !== "queued" && current.state !== "running")) return false;
+    auths.appendLog(jobId, `${note}\n`);
+    auths.updateExtra(jobId, { needsCodeInput: false });
+    auths.finish(jobId, outcome);
+    handles.get(jobId)?.kill();
+    return true;
+  };
+
+  /**
+   * While a browser sign-in waits, the person may sign the same CLI in from a
+   * terminal (12.10: the page lost the job, "Try again" answered "already in
+   * progress" for ten minutes, and the terminal login showed up only on the
+   * next scheduled probe). Re-probe the harness every few seconds; a sign-in
+   * that was not there when the job started ends it as succeeded.
+   */
+  const watchForSignInElsewhere = async (job: SetupJobRecord<AuthExtra>): Promise<() => void> => {
+    const probeAuth = deps.probeAuth;
+    if (!probeAuth) return () => {};
+    const driver = job.driver as ProviderAuthDriver;
+    const baseline = await probeAuth(driver, { refresh: false }).catch(() => null);
+    let probing = false;
+    const timer = setInterval(() => {
+      if (probing) return;
+      probing = true;
+      void probeAuth(driver, { refresh: true })
+        .then((now) => {
+          const signedInElsewhere =
+            now.authenticated && (!baseline?.authenticated || now.signature !== baseline.signature);
+          if (!signedInElsewhere) return;
+          clearInterval(timer);
+          settleFromOutside(
+            job.jobId,
+            { state: "succeeded" },
+            "[signed in outside this window — nothing more to do here]",
+          );
+        })
+        .catch((error: unknown) => {
+          log("sign-in watch probe failed", { driver, error: String(error) });
+        })
+        .finally(() => {
+          probing = false;
+        });
+    }, deps.authWatchIntervalMs ?? AUTH_WATCH_INTERVAL_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  };
+
   const runCliLogin = async (
     job: SetupJobRecord<AuthExtra>,
     input: {
@@ -345,6 +430,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     const cli = await deps.resolveCliEnvironment(driver);
     auths.markRunning(job.jobId);
     auths.appendLog(job.jobId, `$ ${cli.binaryPath} ${input.args.join(" ")}\n`);
+    const stopWatching = input.parsePrompt ? await watchForSignInElsewhere(job) : () => {};
     const result = await runProcess({
       store: auths,
       jobId: job.jobId,
@@ -377,6 +463,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
         : {}),
     });
 
+    stopWatching();
     if (result.code === 0) {
       auths.updateExtra(job.jobId, { needsCodeInput: false });
       auths.finish(job.jobId, { state: "succeeded" });
@@ -427,6 +514,19 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     if (input.method === "apiKey" && !apiKey) {
       throw fail("invalid", "Paste an API key first.");
     }
+    const waiting = auths.findActive("auth", input.driver);
+    if (waiting) {
+      // The same browser sign-in asked for again (the page was closed or
+      // reloaded): its link and code are still good — hand it back.
+      const sameFlow =
+        waiting.extra.method === "oauth" && input.method === "oauth" && input.restart !== true;
+      if (sameFlow) return { jobId: waiting.jobId, resumed: true };
+      settleFromOutside(
+        waiting.jobId,
+        { state: "failed", error: "Replaced by a new sign-in." },
+        "[replaced by a new sign-in]",
+      );
+    }
     const started = auths.start({
       kind: "auth",
       driver: input.driver,
@@ -464,6 +564,18 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     handle.write(`${code}\n`);
     auths.appendLog(job.jobId, "[code submitted]\n");
     return toAuthStatus(auths.updateExtra(job.jobId, { needsCodeInput: false }) ?? job);
+  };
+
+  const authCancel = (input: ProviderAuthCancelInput): ProviderAuthCancelResult => {
+    const waiting = auths.findActive("auth", input.driver);
+    const cancelled = waiting
+      ? settleFromOutside(
+          waiting.jobId,
+          { state: "failed", error: "Sign-in cancelled." },
+          "[cancelled]",
+        )
+      : false;
+    return { driver: input.driver, cancelled };
   };
 
   /* ---------------------------- sign out --------------------------- */
@@ -510,10 +622,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     input: ProviderAuthSignOutInput,
   ): Promise<ProviderAuthSignOutResult> => {
     const driver = input.driver;
-    const running = auths.findActive("auth", driver);
-    if (running) {
-      throw fail("conflict", `A sign-in for ${driver} is in progress. Cancel it first.`);
-    }
+    // Signing out while a sign-in still waits for its browser half: that
+    // sign-in is moot — stop it rather than ask the person to hunt for it.
+    authCancel({ driver });
     const cli = await deps.resolveCliEnvironment(driver);
     const args = driver === "codex" ? ["logout"] : ["auth", "logout"];
     const result = await runQuick(
@@ -542,6 +653,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     authStatus,
     authSubmitCode,
     authSignOut,
+    authCancel,
     shutdown: () => {
       for (const handle of handles.values()) handle.kill();
     },
@@ -550,6 +662,28 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
         await Promise.all(Array.from(pending));
       }
     },
+  };
+}
+
+/** A provider snapshot's sign-in, reduced to "signed in?" and "as whom / how". */
+export function describeHarnessAuth(
+  provider:
+    | {
+        readonly auth: {
+          readonly status: string;
+          readonly type?: string | undefined;
+          readonly label?: string | undefined;
+          readonly email?: string | undefined;
+        };
+      }
+    | undefined,
+): HarnessAuthProbe {
+  const auth = provider?.auth;
+  return {
+    authenticated: auth?.status === "authenticated",
+    signature: [auth?.status ?? "", auth?.type ?? "", auth?.label ?? "", auth?.email ?? ""].join(
+      "|",
+    ),
   };
 }
 
@@ -593,6 +727,7 @@ export function makeHarnessSetupShape(runner: HarnessSetupRunner): HarnessSetupS
     authStart: liftSync(runner.authStart),
     authStatus: liftSync(runner.authStatus),
     authSubmitCode: liftSync(runner.authSubmitCode),
+    authCancel: liftSync(runner.authCancel),
     authSignOut: (input) =>
       Effect.tryPromise({
         try: () => runner.authSignOut(input),
@@ -748,6 +883,20 @@ export const HarnessSetupLive = Layer.effect(
       removeClaudeApiKey: () => runPromise(removeClaudeApiKey),
       refreshProvider: (driver) =>
         runPromise(providerRegistry.refresh(driver)).then(() => undefined),
+      probeAuth: (driver, options) => {
+        const kind = ProviderDriverKind.make(driver);
+        return runPromise(
+          options.refresh ? providerRegistry.refresh(kind) : providerRegistry.getProviders,
+        ).then((providers) =>
+          describeHarnessAuth(
+            providers.find(
+              (provider) =>
+                provider.driver === kind &&
+                provider.instanceId === defaultInstanceIdForDriver(kind),
+            ) ?? providers.find((provider) => provider.driver === kind),
+          ),
+        );
+      },
       log: (message, meta) => {
         runFork(Effect.logWarning(message, meta));
       },

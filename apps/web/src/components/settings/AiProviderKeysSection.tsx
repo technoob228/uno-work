@@ -295,8 +295,8 @@ export function AiProviderKeysSection({
     <SettingsSection title="AI provider keys">
       <div className="px-4 pt-4 text-xs leading-relaxed text-muted-foreground sm:px-5">
         Uno runs on the Uno gateway by default. Add your own key to run it on your xAI, OpenRouter,
-        OpenAI or any OpenAI-compatible account instead — pick it in the Uno chat. Keys stay on this
-        computer. Requests on your key are billed by that provider;{" "}
+        OpenAI or any OpenAI-compatible gateway instead — pick it above, under “Default AI”. Keys
+        stay on this computer. Requests on your key are billed by that provider;{" "}
         <span className="font-medium text-foreground">
           Uno's AI limits and credits don't apply to them.
         </span>

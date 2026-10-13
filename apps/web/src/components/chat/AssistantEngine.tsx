@@ -68,6 +68,11 @@ export function AssistantModelPicker(props: {
   readonly environmentId: EnvironmentId;
   readonly compact?: boolean;
   readonly testId?: string;
+  /**
+   * In the chat (Misha 13.10): the chip only says what Uno runs on; the choice
+   * itself lives in Settings → AI, with the rest of the default AI.
+   */
+  readonly settingsLink?: boolean;
 }) {
   const { environmentId } = props;
   const navigate = useNavigate();
@@ -101,10 +106,7 @@ export function AssistantModelPicker(props: {
 
   const openKeys = () => {
     setOpen(false);
-    void navigate({
-      to: "/settings/environment/$environmentId/providers",
-      params: { environmentId },
-    });
+    void navigate({ to: "/settings/ai" });
   };
 
   const apply = async (nextProvider: AssistantLlmProvider, model: string) => {
@@ -132,6 +134,24 @@ export function AssistantModelPicker(props: {
     provider === "uno"
       ? "Counts against this computer's AI limit and your Uno balance."
       : `Billed by ${AI_PROVIDER_LABELS[provider]} on your key — Uno spend limits don't apply.`;
+
+  if (props.settingsLink) {
+    return (
+      <button
+        type="button"
+        data-testid={props.testId ?? "uno-engine"}
+        onClick={() => void navigate({ to: "/settings/ai" })}
+        className="inline-flex h-7 min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium text-foreground shadow-xs/5 hover:bg-accent sm:h-6"
+        title={`Uno runs on ${modelLabel} · ${providerLabel}. Change it in Settings → AI.`}
+      >
+        <BrainCircuitIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate">{modelLabel}</span>
+        {props.compact ? null : (
+          <span className="hidden truncate text-muted-foreground sm:inline">· {providerLabel}</span>
+        )}
+      </button>
+    );
+  }
 
   return (
     <Popover

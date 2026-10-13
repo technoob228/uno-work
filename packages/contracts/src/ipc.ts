@@ -41,6 +41,8 @@ import type {
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ProviderAuthJobStatus,
+  ProviderAuthCancelInput,
+  ProviderAuthCancelResult,
   ProviderAuthSignOutInput,
   ProviderAuthSignOutResult,
   ProviderAuthStartInput,
@@ -972,6 +974,7 @@ export interface EnvironmentApi {
     authStatus: (input: ProviderAuthStatusInput) => Promise<ProviderAuthJobStatus>;
     authSubmitCode: (input: ProviderAuthSubmitCodeInput) => Promise<ProviderAuthJobStatus>;
     authSignOut: (input: ProviderAuthSignOutInput) => Promise<ProviderAuthSignOutResult>;
+    authCancel: (input: ProviderAuthCancelInput) => Promise<ProviderAuthCancelResult>;
   };
   /** Custom (ACP) harnesses on this environment's machine. */
   customHarness: {

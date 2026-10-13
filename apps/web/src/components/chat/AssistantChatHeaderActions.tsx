@@ -189,7 +189,12 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
       {devMode ? null : (
         <>
           <AssistantMemoryChip environmentId={environmentId} onOpenSettings={openSettings} />
-          <AssistantModelPicker environmentId={environmentId} compact testId="uno-header-engine" />
+          <AssistantModelPicker
+            environmentId={environmentId}
+            compact
+            settingsLink
+            testId="uno-header-engine"
+          />
           {conversations.supported ? (
             <Tooltip>
               <TooltipTrigger

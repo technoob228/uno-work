@@ -13,13 +13,14 @@
  * @module provider/Drivers/OpenCodeDriver
  */
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
-import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Duration, Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
+import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { writeUnoWorkBriefFile } from "../../agentContext/unoWorkBrief.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
@@ -43,6 +44,12 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { currentHarnessBudget } from "../harnessBudget.ts";
+import {
+  fetchUnoModelsCatalogWithRetry,
+  UNO_GATEWAY_OPENCODE_PROVIDER_ID,
+  unoGatewayProviderForOpenCode,
+  withOpenCodeProvider,
+} from "./UnoDriver.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
 /**
@@ -110,6 +117,30 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           $schema: "https://opencode.ai/config.json",
           instructions: [instructionsFilePath],
         });
+      }
+      // Uno AI out of the box: on a computer with a Uno gateway key, OpenCode
+      // gets the gateway as one more provider, so it works right after it is
+      // installed. Its own providers (a key, `opencode auth login`) stay as
+      // they are. `UNO_WORK_OPENCODE_UNO_AI=0` in the instance's environment
+      // turns it off. One quick look at the gateway's list: a slow gateway
+      // must not hold OpenCode back, it just comes up without Uno AI.
+      const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
+      const unoApiKey = Option.isSome(gatewayKey) ? yield* gatewayKey.value.harnessKey() : "";
+      if (unoApiKey.length > 0 && processEnv.UNO_WORK_OPENCODE_UNO_AI !== "0") {
+        const catalog = yield* Effect.promise(() =>
+          fetchUnoModelsCatalogWithRetry(unoApiKey, { delaysMs: [0] }).catch(() => ({})),
+        );
+        const unoProvider = unoGatewayProviderForOpenCode(catalog);
+        if (unoProvider !== null) {
+          processEnv.OPENCODE_CONFIG_CONTENT = withOpenCodeProvider(
+            processEnv.OPENCODE_CONFIG_CONTENT,
+            UNO_GATEWAY_OPENCODE_PROVIDER_ID,
+            unoProvider,
+          );
+          processEnv.UNO_API_KEY = unoApiKey;
+        } else {
+          yield* Effect.logWarning("opencode.unoGateway.unavailable", { instanceId });
+        }
       }
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,

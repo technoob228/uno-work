@@ -38,7 +38,11 @@ export interface HarnessSignInPanelProps {
   readonly onStart: (input: {
     readonly method: "apiKey" | "oauth";
     readonly apiKey?: string;
+    /** Drop the sign-in that is waiting and start a new one. */
+    readonly restart?: boolean;
   }) => void;
+  /** Stop the sign-in that waits for the browser. Absent: no Cancel button. */
+  readonly onCancel?: () => void;
   readonly onSubmitCode: (code: string) => void;
   /** Forget the finished job so the panel starts over. */
   readonly onReset: () => void;
@@ -72,6 +76,7 @@ export function HarnessSignInPanel({
   onStart,
   onSubmitCode,
   onReset,
+  onCancel,
   className,
 }: Omit<HarnessSignInPanelProps, "label"> & { readonly className?: string }) {
   const [apiKey, setApiKey] = useState("");
@@ -181,6 +186,31 @@ export function HarnessSignInPanel({
                 : "Starting the sign-in…"}
             </div>
           ) : null}
+          {active ? (
+            // Closing this page does not lose the sign-in: it is still here
+            // when you come back. These two are the ways out of it.
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {onCancel ? (
+                <button
+                  type="button"
+                  className="cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
+                  onClick={onCancel}
+                  data-testid="harness-sign-in-cancel"
+                >
+                  Cancel
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="cursor-pointer underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => onStart({ method: "oauth", restart: true })}
+                data-testid="harness-sign-in-restart"
+              >
+                Get a new link
+              </button>
+              <span>Signed in from a terminal instead? This page notices in a few seconds.</span>
+            </div>
+          ) : null}
         </div>
       ) : active ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -258,6 +288,7 @@ export function HarnessSignInDialog({
   onStart,
   onSubmitCode,
   onReset,
+  onCancel,
 }: HarnessSignInDialogProps) {
   // Remount the panel when the dialog closes so its inputs start empty next time.
   const [panelKey, setPanelKey] = useState(0);
@@ -283,6 +314,7 @@ export function HarnessSignInDialog({
           onStart={onStart}
           onSubmitCode={onSubmitCode}
           onReset={onReset}
+          {...(onCancel ? { onCancel } : {})}
           className="px-4 pb-2 sm:px-6"
         />
 

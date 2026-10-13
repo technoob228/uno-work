@@ -625,6 +625,64 @@ export const UNO_GATEWAY_STREAM_TIMEOUTS = {
   chunkTimeout: 120_000,
 } as const;
 
+/**
+ * The Uno AI gateway as a provider of plain OpenCode (Misha 13.10: OpenCode
+ * works on Uno AI as soon as it is installed, no key of its own). The same
+ * provider id and key variable as Uno Code's, so a chat's calls are labelled
+ * and billed the same way; the person's own providers stay next to it.
+ * Null when the gateway listed no models: an empty provider only confuses.
+ */
+export function unoGatewayProviderForOpenCode(catalog: UnoCatalog): Record<string, unknown> | null {
+  const models: Record<string, UnoOpenCodeModelConfig> = {};
+  for (const model of Object.values(catalog)) {
+    if (model.route === "russia") continue;
+    models[model.modelId] = withLimit(model.name, gatewayModelLimit(model.contextLength));
+  }
+  if (Object.keys(models).length === 0) return null;
+  return {
+    npm: "@ai-sdk/openai-compatible",
+    name: "Uno AI",
+    options: {
+      baseURL: UNO_GATEWAY_BASE_URL,
+      apiKey: "{env:UNO_API_KEY}",
+      ...UNO_GATEWAY_STREAM_TIMEOUTS,
+    },
+    models,
+  };
+}
+
+/**
+ * Add a provider to an `OPENCODE_CONFIG_CONTENT` value. A provider of that id
+ * already in the content (the person's own instance environment) wins.
+ */
+export function withOpenCodeProvider(
+  configContent: string | undefined,
+  providerId: string,
+  provider: Record<string, unknown>,
+): string {
+  let config: Record<string, unknown> = { $schema: "https://opencode.ai/config.json" };
+  if (configContent !== undefined && configContent.trim().length > 0) {
+    try {
+      const parsed: unknown = JSON.parse(configContent);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Not JSON we can extend: leave the person's content alone.
+      return configContent;
+    }
+  }
+  const existing =
+    config.provider !== null && typeof config.provider === "object"
+      ? (config.provider as Record<string, unknown>)
+      : {};
+  if (providerId in existing) return configContent ?? JSON.stringify(config);
+  return JSON.stringify({ ...config, provider: { ...existing, [providerId]: provider } });
+}
+
+/** The Uno gateway's provider id inside an OpenCode config. */
+export const UNO_GATEWAY_OPENCODE_PROVIDER_ID = UNO_PROVIDER_ID;
+
 function buildUnoConfigContent(
   unoApiKey: string,
   models: UnoCatalog,

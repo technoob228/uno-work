@@ -2314,6 +2314,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.providerAuthSignOut, harnessSetup.authSignOut(input), {
             "rpc.aggregate": "provider-setup",
           }),
+        [WS_METHODS.providerAuthCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.providerAuthCancel, harnessSetup.authCancel(input), {
+            "rpc.aggregate": "provider-setup",
+          }),
         [WS_METHODS.customHarnessList]: (_input) =>
           observeRpcEffect(WS_METHODS.customHarnessList, customHarness.list, {
             "rpc.aggregate": "custom-harness",

@@ -297,16 +297,94 @@ describe("auth jobs", () => {
     );
   });
 
-  it("rejects a concurrent sign-in for the same driver", async () => {
+  it("hands the waiting browser sign-in back instead of refusing a second one", async () => {
     const harness = makeHarness();
-    harness.runner.authStart({ driver: "codex", method: "oauth" });
+    const first = harness.runner.authStart({ driver: "codex", method: "oauth" });
     await tick();
-    expect(() => harness.runner.authStart({ driver: "codex", method: "oauth" })).toThrow(
-      /already in progress/,
-    );
+    // The page was closed and opened again: same job, same link and code.
+    const again = harness.runner.authStart({ driver: "codex", method: "oauth" });
+    expect(again).toEqual({ jobId: first.jobId, resumed: true });
+    expect(harness.processes).toHaveLength(1);
     expect(() =>
       harness.runner.authStart({ driver: "claudeAgent", method: "oauth" }),
     ).not.toThrow();
+  });
+
+  it("starts over when asked to, stopping the sign-in that was waiting", async () => {
+    const harness = makeHarness();
+    const first = harness.runner.authStart({ driver: "codex", method: "oauth" });
+    await tick();
+    const fresh = harness.runner.authStart({ driver: "codex", method: "oauth", restart: true });
+    await tick();
+    expect(fresh.jobId).not.toBe(first.jobId);
+    expect(fresh.resumed).toBeUndefined();
+    expect(harness.processes[0]?.killed).toBe(true);
+    expect(harness.runner.authStatus({ jobId: first.jobId }).state).toBe("failed");
+    expect(harness.runner.authStatus({ jobId: fresh.jobId }).state).toBe("running");
+  });
+
+  it("an API key replaces a waiting browser sign-in", async () => {
+    const harness = makeHarness();
+    const first = harness.runner.authStart({ driver: "codex", method: "oauth" });
+    await tick();
+    const keyed = harness.runner.authStart({ driver: "codex", method: "apiKey", apiKey: "sk-1" });
+    await tick();
+    expect(keyed.jobId).not.toBe(first.jobId);
+    expect(harness.processes[0]?.killed).toBe(true);
+  });
+
+  it("cancels a waiting sign-in", async () => {
+    const harness = makeHarness();
+    const { jobId: id } = harness.runner.authStart({ driver: "codex", method: "oauth" });
+    await tick();
+    expect(harness.runner.authCancel({ driver: "codex" })).toEqual({
+      driver: "codex",
+      cancelled: true,
+    });
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("failed");
+    expect(status.error).toBe("Sign-in cancelled.");
+    expect(harness.latest().killed).toBe(true);
+    // Nothing waits any more: a new sign-in is a new job.
+    expect(harness.runner.authCancel({ driver: "codex" }).cancelled).toBe(false);
+    expect(harness.runner.authStart({ driver: "codex", method: "oauth" }).jobId).not.toBe(id);
+  });
+
+  it("a login done in a terminal ends the waiting sign-in as succeeded", async () => {
+    let signedIn = false;
+    const harness = makeHarness({
+      authWatchIntervalMs: 2,
+      probeAuth: async () => ({
+        authenticated: signedIn,
+        signature: signedIn ? "authenticated|chatgpt|Plus|me@example.com" : "unauthenticated|||",
+      }),
+    });
+    const { jobId: id } = harness.runner.authStart({ driver: "codex", method: "oauth" });
+    await tick(8);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("running");
+    signedIn = true;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("signed in outside this window");
+    expect(harness.latest().killed).toBe(true);
+  });
+
+  it("does not take a sign-in that was already there for a new one", async () => {
+    // Claude Code on Uno AI reads as signed in before the person's own login.
+    const harness = makeHarness({
+      authWatchIntervalMs: 2,
+      probeAuth: async () => ({ authenticated: true, signature: "authenticated|unoAi||" }),
+    });
+    const { jobId: id } = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick(8);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("running");
+    harness.runner.shutdown();
+    await harness.runner.drain();
   });
 
   it("kills a stalled oauth login after the timeout", async () => {
@@ -381,12 +459,17 @@ describe("sign out", () => {
     expect(result.error).toContain("read-only");
   });
 
-  it("is refused while a sign-in is running", async () => {
+  it("stops a sign-in that was still waiting, then signs out", async () => {
     const harness = makeHarness();
-    harness.runner.authStart({ driver: "codex", method: "oauth" });
+    const { jobId: id } = harness.runner.authStart({ driver: "codex", method: "oauth" });
     await tick();
-    await expect(harness.runner.authSignOut({ driver: "codex" })).rejects.toThrow(/in progress/);
-    harness.runner.shutdown();
+    const done = harness.runner.authSignOut({ driver: "codex" });
+    await tick(8);
+    expect(harness.processes[0]?.killed).toBe(true);
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("failed");
+    expect(harness.latest().input.args).toEqual(["logout"]);
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await expect(done).resolves.toEqual({ driver: "codex", signedOut: true });
     await harness.runner.drain();
   });
 });

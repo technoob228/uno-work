@@ -2737,6 +2737,7 @@ export const ChatComposer = memo(
                 <AssistantModelPicker
                   environmentId={environmentId}
                   compact
+                  settingsLink
                   testId="uno-engine-composer"
                 />
               ) : (
@@ -3396,6 +3397,7 @@ export const ChatComposer = memo(
                     <AssistantModelPicker
                       environmentId={environmentId}
                       compact={isComposerFooterCompact}
+                      settingsLink
                       testId="uno-engine-composer"
                     />
                   ) : (

@@ -94,11 +94,19 @@ export const ProviderAuthStartInput = Schema.Struct({
   method: ProviderAuthMethod,
   /** Required when `method === "apiKey"`. Never echoed back. */
   apiKey: Schema.optional(Schema.String),
+  /**
+   * A browser sign-in for this harness is already waiting: by default the
+   * daemon hands that one back (the page was closed or reloaded, the link and
+   * code are still good). True drops it and starts from scratch.
+   */
+  restart: Schema.optional(Schema.Boolean),
 });
 export type ProviderAuthStartInput = typeof ProviderAuthStartInput.Type;
 
 export const ProviderAuthStartResult = Schema.Struct({
   jobId: ProviderSetupJobId,
+  /** True when `jobId` is a sign-in that was already waiting, not a new one. */
+  resumed: Schema.optional(Schema.Boolean),
 });
 export type ProviderAuthStartResult = typeof ProviderAuthStartResult.Type;
 
@@ -132,6 +140,19 @@ export const ProviderAuthSubmitCodeInput = Schema.Struct({
   code: Schema.String,
 });
 export type ProviderAuthSubmitCodeInput = typeof ProviderAuthSubmitCodeInput.Type;
+
+/** Stop a sign-in that is waiting for its browser half. */
+export const ProviderAuthCancelInput = Schema.Struct({
+  driver: ProviderAuthDriver,
+});
+export type ProviderAuthCancelInput = typeof ProviderAuthCancelInput.Type;
+
+export const ProviderAuthCancelResult = Schema.Struct({
+  driver: ProviderAuthDriver,
+  /** False when nothing was waiting. */
+  cancelled: Schema.Boolean,
+});
+export type ProviderAuthCancelResult = typeof ProviderAuthCancelResult.Type;
 
 /* ------------------------------------------------------------------ *
  * Sign out

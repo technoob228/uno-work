@@ -5,6 +5,8 @@ import {
   fetchUnoModelsCatalogWithRetry,
   retainDroppedUnoModels,
   unoCatalogSignature,
+  unoGatewayProviderForOpenCode,
+  withOpenCodeProvider,
 } from "./UnoDriver.ts";
 
 afterEach(() => {
@@ -572,5 +574,56 @@ describe("UnoDriver with AI hours (curated catalog)", () => {
     expect(withMeta.models[0]).toMatchObject({ name: "Smart" });
     expect(withMeta.models[0]!.subProvider).toBeUndefined();
     expect(withMeta.models[1]!.capabilities?.metadata?.unoGroup).toBe("custom");
+  });
+});
+
+describe("Uno AI as a provider of plain OpenCode", () => {
+  const smart = __unoDriverTest.normalizeUnoCatalogEntry("default", {
+    id: "uno/smart",
+    display_name: "Smart",
+    context_length: 200_000,
+  });
+  const russia = __unoDriverTest.normalizeUnoCatalogEntry("russia", {
+    id: "yandex/alice",
+    display_name: "Alice",
+  });
+
+  it("lists the gateway's models under the gateway address and the key variable", () => {
+    if (!smart || !russia) throw new Error("catalog entries did not normalize");
+    const provider = unoGatewayProviderForOpenCode({
+      "uno/uno/smart": smart,
+      "uno-russia/yandex/alice": russia,
+    });
+    expect(provider).not.toBeNull();
+    const options = provider?.options as { baseURL: string; apiKey: string };
+    expect(options.apiKey).toBe("{env:UNO_API_KEY}");
+    expect(options.baseURL).toMatch(/^https:\/\//);
+    // The Russia route is Uno Code's own second provider; plain OpenCode gets the main one.
+    expect(Object.keys(provider?.models as object)).toEqual(["uno/smart"]);
+  });
+
+  it("is nothing when the gateway listed no models", () => {
+    expect(unoGatewayProviderForOpenCode({})).toBeNull();
+  });
+
+  it("joins the instructions already in the config and keeps a provider the person set", () => {
+    const added = JSON.parse(
+      withOpenCodeProvider(JSON.stringify({ instructions: ["/brief.md"] }), "uno", {
+        name: "Uno AI",
+      }),
+    ) as { instructions: string[]; provider: Record<string, { name: string }> };
+    expect(added.instructions).toEqual(["/brief.md"]);
+    expect(added.provider.uno?.name).toBe("Uno AI");
+
+    const own = JSON.stringify({ provider: { uno: { name: "Mine" } } });
+    expect(withOpenCodeProvider(own, "uno", { name: "Uno AI" })).toBe(own);
+    expect(withOpenCodeProvider("not json", "uno", { name: "Uno AI" })).toBe("not json");
+    expect(
+      (
+        JSON.parse(withOpenCodeProvider(undefined, "uno", { name: "Uno AI" })) as {
+          provider: Record<string, unknown>;
+        }
+      ).provider.uno,
+    ).toEqual({ name: "Uno AI" });
   });
 });
