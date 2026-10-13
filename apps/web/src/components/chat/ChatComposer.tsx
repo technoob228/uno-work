@@ -173,9 +173,15 @@ function inferVideoMimeType(file: File): VideoMimeType | null {
 
 type ImageAttachmentSupport = "supported" | "unsupported" | "unknown";
 
+// Claude and Codex always take images; their model lists simply carry no
+// vision metadata, so "unknown" would nag on every screenshot.
+const PROVIDERS_WITH_IMAGE_INPUT: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
+
 function deriveImageAttachmentSupport(
   capabilities: ModelCapabilities | null | undefined,
+  provider?: string | null,
 ): ImageAttachmentSupport {
+  if (provider && PROVIDERS_WITH_IMAGE_INPUT.has(provider)) return "supported";
   const metadata = capabilities?.metadata;
   if (!metadata) return "unknown";
   const supports = metadata.supports;
@@ -938,8 +944,8 @@ export const ChatComposer = memo(
       setPersonalAiQueued(false);
     }, [personalAiId]);
     const imageAttachmentSupport = useMemo(
-      () => deriveImageAttachmentSupport(selectedModelCapabilities),
-      [selectedModelCapabilities],
+      () => deriveImageAttachmentSupport(selectedModelCapabilities, selectedProvider),
+      [selectedModelCapabilities, selectedProvider],
     );
     const hasKnownUnsupportedImageAttachments =
       imageAttachmentSupport === "unsupported" && composerImages.length > 0;

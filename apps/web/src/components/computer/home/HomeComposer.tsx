@@ -10,6 +10,8 @@
  * "I have a project" (`onUploadProject`). A folder / .zip dropped anywhere on
  * the box is taken too (`onDropProject`) — or, when a task is already typed,
  * it becomes the chip's folder (like "Upload a folder…") and the text stays.
+ * Pictures are not a project: a screenshot pasted, dropped or picked with the
+ * paperclip is attached to the first message, as in the chat itself.
  * A newcomer's first screen
  * (`minimal`) is only the box and the pills: no folder chip, model or
  * permissions pickers — the defaults a new chat gets.
@@ -19,6 +21,7 @@ import {
   type EnvironmentId,
   type ModelSelection,
   type ProviderInstanceId,
+  type ProviderOptionSelection,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import {
@@ -27,13 +30,15 @@ import {
   FolderUpIcon,
   LockIcon,
   LockOpenIcon,
+  PaperclipIcon,
   PenLineIcon,
+  XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { useComposerDraftStore } from "../../../composerDraftStore";
+import { type ComposerImageAttachment, useComposerDraftStore } from "../../../composerDraftStore";
 import { useEnvironmentProviders } from "../../../environments/settings/serverSettings";
 import { useSettings } from "../../../hooks/useSettings";
 import {
@@ -42,19 +47,23 @@ import {
 } from "../../../modelSelection";
 import { openFolderForChat } from "../../../navigation/newProjectStore";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "../../../plainLanguage";
-import { readDroppedUploadFiles } from "../../../projectUploadPickers";
+import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../../projectUploadPickers";
 import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../../providerInstances";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
+import { TraitsPicker } from "../../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
+import { homeImagesFromFiles } from "./homeAttachments";
 import { homeStartModelSelection } from "./homeStartModel";
 import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
+
+const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
 
 const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
   "approval-required": LockIcon,
@@ -68,6 +77,8 @@ export interface HomeStartOptions {
   /** Null = nothing usable to pick; the chat falls back to its own default. */
   readonly modelSelection: ModelSelection | null;
   readonly runtimeMode: RuntimeMode;
+  /** Pictures attached on Home; they go into the new chat's first message. */
+  readonly images?: ReadonlyArray<ComposerImageAttachment>;
 }
 
 /**
@@ -109,7 +120,16 @@ export function useHomeModelPicker(environmentId: EnvironmentId | null) {
     // What the chat composer does on a pick: it becomes the next chat's default.
     setStickyModelSelection({ instanceId, model: resolved });
   };
-  return { selection, instanceEntries, modelOptionsByInstance, pick };
+  /** Effort and the other traits: kept on the sticky pick, as the chat composer does. */
+  const setOptions = (options: ReadonlyArray<ProviderOptionSelection> | undefined) => {
+    if (!selection) return;
+    setStickyModelSelection({
+      instanceId: selection.instanceId,
+      model: selection.model,
+      ...(options && options.length > 0 ? { options } : {}),
+    });
+  };
+  return { selection, instanceEntries, modelOptionsByInstance, pick, setOptions };
 }
 
 export function HomeComposer({
@@ -152,8 +172,33 @@ export function HomeComposer({
   const picker = useHomeModelPicker(environmentId);
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
-  const carriesFiles = (event: DragEvent) =>
-    onDropProject !== undefined && Array.from(event.dataTransfer.types).includes("Files");
+  const [images, setImages] = useState<ComposerImageAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedEntry = picker.selection
+    ? picker.instanceEntries.find((entry) => entry.instanceId === picker.selection?.instanceId)
+    : undefined;
+
+  const attachFiles = (files: ReadonlyArray<File>) => {
+    if (files.length === 0) return;
+    const result = homeImagesFromFiles(files, images.length);
+    if (result.images.length > 0) setImages((current) => [...current, ...result.images]);
+    if (result.error) {
+      toastManager.add({ type: "error", title: "Couldn't attach", description: result.error });
+    }
+    ref.current?.focus();
+  };
+  const removeImage = (id: string) =>
+    setImages((current) => {
+      const gone = current.find((image) => image.id === id);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return current.filter((image) => image.id !== id);
+    });
+  const onPaste = (event: ClipboardEvent) => {
+    const files = Array.from(event.clipboardData.files);
+    if (files.length === 0) return;
+    event.preventDefault();
+    attachFiles(files);
+  };
 
   useEffect(() => {
     ref.current?.focus();
@@ -161,7 +206,7 @@ export function HomeComposer({
 
   const submit = async () => {
     const prompt = text.trim();
-    if (!prompt || starting) {
+    if ((!prompt && images.length === 0) || starting) {
       ref.current?.focus();
       return;
     }
@@ -171,7 +216,10 @@ export function HomeComposer({
         folder: folder?.cwd ?? null,
         modelSelection: picker.selection,
         runtimeMode,
+        images,
       });
+      // The new chat's draft owns the previews now (no revoke).
+      setImages([]);
       setText("");
     } catch (error) {
       toastManager.add({
@@ -203,6 +251,11 @@ export function HomeComposer({
           if (!carriesFiles(event)) return;
           event.preventDefault();
           setDragging(false);
+          if (!dataTransferHasFolderOrZip(event.dataTransfer)) {
+            // Not a project: pictures are attached to the first message.
+            attachFiles(Array.from(event.dataTransfer.files));
+            return;
+          }
           if (!minimal && text.trim()) {
             // A task is typed: don't replace it — the upload becomes the
             // folder this task works in (the chip's "Upload a folder…").
@@ -226,13 +279,34 @@ export function HomeComposer({
         {dragging ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[20px] bg-card/90 text-sm font-medium text-primary">
             <FolderUpIcon className="size-4" />
-            Drop your project folder or .zip
+            Drop pictures to attach, or a project folder / .zip
+          </div>
+        ) : null}
+        {images.length > 0 ? (
+          <div className="flex flex-wrap gap-2 px-3 pt-3" data-testid="home-attachments">
+            {images.map((image) => (
+              <div
+                key={image.id}
+                className="relative size-14 overflow-hidden rounded-lg border bg-muted"
+              >
+                <img src={image.previewUrl} alt={image.name} className="size-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => removeImage(image.id)}
+                  aria-label={`Remove ${image.name}`}
+                  className="absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full bg-background/85 text-foreground hover:bg-background"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            ))}
           </div>
         ) : null}
         <textarea
           ref={ref}
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onPaste={onPaste}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
@@ -288,6 +362,19 @@ export function HomeComposer({
                   triggerClassName="text-muted-foreground"
                 />
               ) : null}
+              {picker.selection && selectedEntry ? (
+                <TraitsPicker
+                  provider={selectedEntry.driverKind}
+                  models={selectedEntry.models}
+                  model={picker.selection.model}
+                  modelOptions={picker.selection.options}
+                  prompt={text}
+                  onPromptChange={setText}
+                  onModelOptionsChange={picker.setOptions}
+                  triggerVariant="ghost"
+                  triggerClassName="h-7 rounded-full text-xs"
+                />
+              ) : null}
               <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
                 <SelectTrigger
                   variant="ghost"
@@ -326,14 +413,40 @@ export function HomeComposer({
               </Select>
             </div>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            data-testid="home-attach-input"
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              event.currentTarget.value = "";
+              attachFiles(files);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach pictures"
+            title="Attach pictures — or paste a screenshot"
+            data-testid="home-attach"
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              minimal && "ml-auto",
+            )}
+          >
+            <PaperclipIcon className="size-4" />
+          </button>
           <button
             type="button"
             onClick={() => void submit()}
             aria-label="Start"
             disabled={starting}
             className={cn(
-              "ml-auto flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              text.trim()
+              "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+              text.trim() || images.length > 0
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground",
             )}

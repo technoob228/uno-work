@@ -32,6 +32,7 @@ import {
   LayoutGridIcon,
   MonitorIcon,
   RefreshCwIcon,
+  TerminalIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -399,7 +400,20 @@ export function ComputerView() {
                     <span className="text-sm font-medium text-foreground">Home</span>
                   </>
                 ) : null}
-                <div className="ml-auto flex min-w-0 items-center gap-1.5">{pill}</div>
+                <div className="ml-auto flex min-w-0 items-center gap-1.5">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => void launchers.openTerminal()}
+                    aria-label="Terminal"
+                    title="Open a terminal on this computer"
+                    data-testid="home-terminal"
+                  >
+                    <TerminalIcon className="size-3.5" />
+                    <span className="hidden sm:inline">Terminal</span>
+                  </Button>
+                  {pill}
+                </div>
               </>
             ) : (
               <>

@@ -143,6 +143,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       const store = useComposerDraftStore.getState();
       // Set on the draft itself: a reused draft doesn't pick up the sticky model.
       if (options.modelSelection) store.setModelSelection(draftId, options.modelSelection);
+      if (options.images?.length) store.addImages(draftId, [...options.images]);
       store.setRuntimeMode(draftId, options.runtimeMode);
       store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
       usePendingSendStore.getState().request(draftId, prompt);
