@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.131 — 2026-10-13
+
+- Home: pictures can be attached to the first message — paste a screenshot, drop it on the box or use the paperclip. Effort (and the other traits) can be picked next to the model.
+- Home: a dropped file is no longer taken for a project; only a folder or a `.zip` is. Pictures are attached.
+- Home: a Terminal button next to the computer.
+- No more "Image support is unknown" for Claude and Codex.
+
 ## v0.0.130 — 2026-10-12
 
 - "I have a project": a GitHub link pasted without `https://` (`github.com/owner/repo`) is taken as it is.
