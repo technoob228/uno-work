@@ -686,7 +686,7 @@ function SidebarDMark(props: { mark: DRowMark }) {
           data-testid="sidebar-row-your-turn"
           className="text-[11px] font-medium whitespace-nowrap text-emerald-700 dark:text-emerald-300"
         >
-          Your turn
+          Ready
         </span>
       );
     default:
@@ -845,7 +845,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               }
             : yourTurn
               ? {
-                  label: "Your turn",
+                  label: "Ready",
                   icon: "your-turn" as const,
                   className: "text-emerald-700 dark:text-emerald-300",
                 }
@@ -2489,7 +2489,7 @@ export default function Sidebar() {
               { id: "rename", label: "Rename chat" },
               { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
               ...lifecycleItems,
-              // Read: seen, nothing to add — the chat stops asking for "Your turn".
+              // Read: seen, nothing to add — the chat stops asking for "Ready".
               ...(isYourTurn(thread, nowDate.toISOString())
                 ? [{ id: "mark-read", label: "Mark as read" }]
                 : []),

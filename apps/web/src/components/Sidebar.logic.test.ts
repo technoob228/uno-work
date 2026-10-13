@@ -570,7 +570,7 @@ describe("resolveThreadStatusPill", () => {
         },
         now: "2026-10-01T11:00:00.000Z",
       }),
-    ).toMatchObject({ label: "Your turn", pulse: false });
+    ).toMatchObject({ label: "Ready", pulse: false });
   });
 
   it("shows your turn for a finished chat even after it was looked at", () => {
@@ -592,7 +592,7 @@ describe("resolveThreadStatusPill", () => {
         },
         now: "2026-10-01T11:00:00.000Z",
       }),
-    ).toMatchObject({ label: "Your turn", pulse: false });
+    ).toMatchObject({ label: "Ready", pulse: false });
   });
 });
 
@@ -629,7 +629,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Your turn",
+          label: "Ready",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
@@ -654,7 +654,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Your turn",
+          label: "Ready",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,

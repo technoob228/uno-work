@@ -14,6 +14,7 @@ import { CONSOLE_URL } from "../../../account/accountOverview";
 import { useAssistantChat } from "../../../assistant/useAssistantChat";
 import { trackFunnel } from "../../../lib/funnel";
 import { useDevMode } from "../../../devMode";
+import { useServerConfigReady } from "../../../rpc/serverState";
 import { isWebLite } from "../../../lite/webLite";
 import { accountResumeQuery, nextStepQuery } from "../../myuno/myUnoQueries";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
@@ -46,10 +47,14 @@ export function useNextStep(): HomeNextStepState {
   const backend = useQuery(nextStepQuery());
   const plan = useMemo(() => parseNextStepPlan(backend.data), [backend.data]);
   const devMode = useDevMode();
+  // The "Not now" answers live in this machine's settings, which arrive after
+  // the account's plan: until they do, a step the person already put off would
+  // flash on Home and then vanish.
+  const settingsReady = useServerConfigReady();
   const answers = progress.answers ?? {};
   const { step, developerStep } = withoutSshFirst(
     plan,
-    visibleNextStep(plan, answers),
+    settingsReady ? visibleNextStep(plan, answers) : null,
     answers,
     devMode,
   );

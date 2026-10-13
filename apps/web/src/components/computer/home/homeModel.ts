@@ -92,7 +92,7 @@ export function homeThreadStatus(thread: HomeThread): HomeThreadStatus | null {
       return isYourTurn(thread, new Date().toISOString())
         ? {
             kind: "done",
-            label: "Your turn",
+            label: "Ready",
             colorClass: "text-emerald-600 dark:text-emerald-300/90",
             dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
             pulse: false,

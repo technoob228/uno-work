@@ -223,7 +223,7 @@ describe("sidebar D grouped by status", () => {
       ]),
     ).toEqual([
       { id: "needs-you", label: "Needs you", chats: ["question", "approval"] },
-      { id: "your-turn", label: "Your turn", chats: ["turn"] },
+      { id: "your-turn", label: "Ready", chats: ["turn"] },
       { id: "failed", label: "Failed", chats: ["failed-1"] },
       { id: "working", label: "Working", chats: ["working-1"] },
       { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },

@@ -632,7 +632,7 @@ export function GeneralSettingsPanel({
 
         <SettingsRow
           title="Inbox sidebar"
-          description="On: chats in the sidebar are grouped by status — Needs you, Your turn, Working, Snoozed. Off (classic): your projects are always in the sidebar, with their chats."
+          description="On: chats in the sidebar are grouped by status — Needs you, Ready, Working, Snoozed. Off (classic): your projects are always in the sidebar, with their chats."
           resetAction={
             settings.sidebarInboxMode !== DEFAULT_UNIFIED_SETTINGS.sidebarInboxMode ? (
               <SettingResetButton

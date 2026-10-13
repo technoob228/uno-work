@@ -218,9 +218,9 @@ describe("words", () => {
     expect(label({ hasPendingUserInput: true })).toBe("Asks you");
     expect(label({ session: running })).toBe("Working");
     expect(label({ session: { status: "error" } as HomeThread["session"] })).toBe("Failed");
-    expect(label({ latestTurn: doneTurn(5) })).toBe("Your turn");
+    expect(label({ latestTurn: doneTurn(5) })).toBe("Ready");
     // Looking at it doesn't end it: a reply or Done does.
-    expect(label({ latestTurn: doneTurn(5), lastVisitedAt: minutesAgo(1) })).toBe("Your turn");
+    expect(label({ latestTurn: doneTurn(5), lastVisitedAt: minutesAgo(1) })).toBe("Ready");
     expect(
       label({ latestTurn: doneTurn(5), settledOverride: "settled", settledAt: minutesAgo(1) }),
     ).toBeUndefined();

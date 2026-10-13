@@ -32,13 +32,7 @@ type SidebarProject = {
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
-  label:
-    | "Working"
-    | "Connecting"
-    | "Your turn"
-    | "Pending Approval"
-    | "Awaiting Input"
-    | "Plan Ready";
+  label: "Working" | "Connecting" | "Ready" | "Pending Approval" | "Awaiting Input" | "Plan Ready";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -50,7 +44,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
-  "Your turn": 1,
+  Ready: 1,
 };
 
 type ThreadStatusInput = Pick<
@@ -493,7 +487,7 @@ export function resolveThreadStatusPill(input: {
 
   if (isYourTurn(thread, input.now ?? new Date().toISOString())) {
     return {
-      label: "Your turn",
+      label: "Ready",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,
