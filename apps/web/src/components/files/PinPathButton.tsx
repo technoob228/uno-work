@@ -18,7 +18,7 @@ export function PinPathButton({ kind, path }: { kind: "file" | "folder"; path: s
       onClick={() => toggle({ kind, title: pathTitle(path), target: path })}
     >
       {pinned ? <PinOffIcon /> : <PinIcon />}
-      <span className="hidden lg:inline">{pinned ? "Unpin" : "Pin"}</span>
+      <span className="hidden 2xl:inline">{pinned ? "Unpin" : "Pin"}</span>
     </Button>
   );
 }

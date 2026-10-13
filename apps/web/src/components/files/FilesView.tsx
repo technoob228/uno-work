@@ -685,7 +685,7 @@ function FolderBrowser({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search in this folder"
               aria-label="Search files"
-              className="h-8 w-56 rounded-lg border border-input bg-background pr-7 pl-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              className="h-8 w-36 rounded-lg border border-input bg-background pr-7 pl-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 2xl:w-56"
             />
             {query ? (
               <button
@@ -707,12 +707,12 @@ function FolderBrowser({
               data-testid="files-start-chat-here"
             >
               <MessageSquarePlusIcon />
-              <span className="hidden md:inline">Start chat here</span>
+              <span className="hidden 2xl:inline">Start chat here</span>
             </Button>
           ) : null}
           <Button size="sm" variant="ghost" onClick={() => onDialog({ type: "links" })}>
             <LinkIcon />
-            <span className="hidden lg:inline">Shared links</span>
+            <span className="hidden 2xl:inline">Shared links</span>
           </Button>
           <Menu>
             <MenuTrigger render={<Button size="sm" variant="outline" disabled={!currentPath} />}>
