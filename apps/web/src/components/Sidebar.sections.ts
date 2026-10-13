@@ -20,6 +20,7 @@ import { sortThreadsPinnedFirst, sortThreads, toSortableTimestamp } from "../lib
 import { isLatestTurnSettled } from "../session-logic";
 import type { SidebarThreadSummary } from "../types";
 import { hasQueuedTurnStart, isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
+import { isTurnRead } from "../threadReadMarks";
 import { isYourTurn } from "./Sidebar.yourTurn";
 
 export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
@@ -118,7 +119,14 @@ export function isThreadSettled(thread: SidebarSectionThread, now: string): bool
   }
   if (!isLatestTurnSettled(thread.latestTurn, thread.session)) return false;
   if (hasQueuedTurnStart(thread, now)) return false;
-  const activityMs = resolveThreadActivityMs(thread);
+  let activityMs = resolveThreadActivityMs(thread);
+  // Read ends the wait but not the chat's place: a chat that waited for days
+  // would otherwise fall straight into Done the moment it is marked read, so
+  // the idle clock starts from the Read.
+  if (isTurnRead(thread.readAt, thread.latestTurn?.completedAt)) {
+    const readMs = Date.parse(thread.readAt ?? "");
+    if (!Number.isNaN(readMs) && (activityMs === null || readMs > activityMs)) activityMs = readMs;
+  }
   const nowMs = Date.parse(now);
   if (activityMs === null || Number.isNaN(nowMs)) return false;
   return nowMs - activityMs > SIDEBAR_SETTLE_AFTER_IDLE_MS;

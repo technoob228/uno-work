@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
   BracesIcon,
   CheckIcon,
@@ -15,6 +16,7 @@ import {
   ImageIcon,
   MonitorIcon,
   Loader2Icon,
+  ExpandIcon,
   Maximize2Icon,
   Minimize2Icon,
   PanelLeftOpenIcon,
@@ -34,6 +36,7 @@ import remarkGfm from "remark-gfm";
 import * as XLSX from "xlsx";
 
 import { sanitizeDocumentHtml } from "../../lib/safeHtml";
+import { useOpenApp } from "../../navigation/useOpenApp";
 import { cn } from "../../lib/utils";
 import { openUntrustedLinkExternally, toExternalHttpUrl } from "../../lib/externalLinks";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
@@ -1812,6 +1815,31 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
 
   const active = files.find((f) => f.id === activeFileId) ?? files[0];
 
+  // "Open full screen": the app or document in the panel moves to the main
+  // area (the app screen / Files), where it has the whole window.
+  const navigate = useNavigate();
+  const { openHere } = useOpenApp();
+  const fullScreenTarget =
+    active && isAppTab(active) && active.url
+      ? ({ type: "app", url: active.url } as const)
+      : active &&
+          active.path?.startsWith("/") &&
+          !isBrowserTab(active) &&
+          !isPluginPanelTab(active) &&
+          !isLiveBrowserTab(active)
+        ? ({ type: "file", path: active.path } as const)
+        : null;
+  const openFullScreen = () => {
+    if (!active || !fullScreenTarget) return;
+    closeFile(active.id);
+    if (fullScreenTarget.type === "app") {
+      openHere({ url: fullScreenTarget.url, name: active.name, icon: active.content || null });
+      return;
+    }
+    const folder = fullScreenTarget.path.replace(/\/[^/]*$/, "") || "/";
+    void navigate({ to: "/files", search: { path: folder, file: fullScreenTarget.path } });
+  };
+
   const handleOpenAt = (path: string | null) => {
     if (!active) return;
     const fallback = active.path ? active.path.replace(/[\\/][^\\/]*$/, "") : null;
@@ -2003,6 +2031,19 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             <PlusIcon className="relative size-3.5" />
           </button>
         </div>
+        {fullScreenTarget ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={openFullScreen}
+            aria-label="Open full screen"
+            title="Open full screen — leave the chat and give this the whole window"
+            data-testid="preview-open-full-screen"
+            className="relative shrink-0"
+          >
+            <ExpandIcon />
+          </Button>
+        ) : null}
         <Button
           size="icon-xs"
           variant="ghost"

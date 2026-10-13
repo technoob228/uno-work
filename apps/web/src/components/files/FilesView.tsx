@@ -40,6 +40,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import {
   pickFilesForProjectUpload,
@@ -50,6 +51,15 @@ import { useShallow } from "zustand/react/shallow";
 
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { machineAppsQueryOptions } from "../computer/computerQueries";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -58,6 +68,8 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { DeleteDialog, MoveDialog, NameDialog } from "./FilesDialogs";
 import { FileViewer } from "./FileViewer";
+import { FilesNavButtons, useFilesHistory, type FilesHistory } from "./filesHistory";
+import { FilesTree, FilesViewSwitch, useFilesViewMode, type FilesViewMode } from "./FilesTree";
 import { UploadPanel, useFilesUploads } from "./FilesUploads";
 import {
   breadcrumbs,
@@ -185,6 +197,17 @@ export function FilesView() {
   const uploads = useFilesUploads(environmentId);
   const [dialog, setDialog] = useState<DialogState>({ type: "none" });
   const closeDialog = useCallback(() => setDialog({ type: "none" }), []);
+  // List (the folder as a table) or Tree (folders on the left, the file on the
+  // right). A phone has no room for two columns, so it always gets the list.
+  const [storedViewMode, setViewMode] = useFilesViewMode();
+  const isMobile = useIsMobile();
+  const viewMode: FilesViewMode = isMobile ? "list" : storedViewMode;
+  const history = useFilesHistory(
+    search,
+    useCallback((next) => void navigate({ search: next }), [navigate]),
+  );
+  const [viewerUnsaved, setViewerUnsaved] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState<null | (() => void)>(null);
 
   // Documents are opened from here: get the office engine into the browser's
   // cache in the background so the first one opens fast (officePrewarm.ts).
@@ -204,6 +227,23 @@ export function FilesView() {
     (entry: Pick<FilesEntry, "path">) =>
       void navigate({ search: { path: dirname(entry.path), file: entry.path } }),
     [navigate],
+  );
+
+  // Another file from the tree while this one has unsaved edits: ask first.
+  const openFileGuarded = useCallback(
+    (entry: Pick<FilesEntry, "path">) => {
+      if (viewerUnsaved && entry.path !== search.file) {
+        setPendingOpen(() => () => openFile(entry));
+        return;
+      }
+      openFile(entry);
+    },
+    [openFile, search.file, viewerUnsaved],
+  );
+  const selectFolder = useCallback(
+    (path: string) =>
+      void navigate({ search: search.file ? { path, file: search.file } : { path } }),
+    [navigate, search.file],
   );
 
   const refreshAll = useCallback(
@@ -252,6 +292,29 @@ export function FilesView() {
   const listing = useQuery(filesListQueryOptions(environmentId, search.path ?? null, false));
   const rootPath = listing.data?.rootPath ?? null;
   const currentPath = listing.data?.path ?? search.path ?? null;
+  useEffect(() => setViewerUnsaved(false), [search.file]);
+
+  const fileViewer =
+    search.file && environmentId ? (
+      <FileViewer
+        key={search.file}
+        environmentId={environmentId}
+        path={search.file}
+        uploads={uploads}
+        embedded={viewMode === "tree"}
+        onUnsavedChange={setViewerUnsaved}
+        viewSwitch={
+          viewMode === "list" && !isMobile ? (
+            <FilesViewSwitch mode={viewMode} onChange={setViewMode} />
+          ) : undefined
+        }
+        onBack={() => openFolder(search.path ?? dirname(search.file!))}
+        onShare={(entry) => setDialog({ type: "share", entry })}
+        onRename={(entry) => setDialog({ type: "rename", entry })}
+        onMove={(entry) => setDialog({ type: "move", entries: [entry] })}
+        onDelete={(entry) => setDialog({ type: "delete", entries: [entry] })}
+      />
+    ) : null;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -273,22 +336,42 @@ export function FilesView() {
               })
             }
           />
-        ) : search.file && environmentId ? (
-          <FileViewer
-            key={search.file}
-            environmentId={environmentId}
-            path={search.file}
-            uploads={uploads}
-            onBack={() => openFolder(search.path ?? dirname(search.file!))}
-            onShare={(entry) => setDialog({ type: "share", entry })}
-            onRename={(entry) => setDialog({ type: "rename", entry })}
-            onMove={(entry) => setDialog({ type: "move", entries: [entry] })}
-            onDelete={(entry) => setDialog({ type: "delete", entries: [entry] })}
-          />
+        ) : viewMode === "tree" ? (
+          <div className="flex min-h-0 flex-1" data-testid="files-tree-layout">
+            <div className="w-72 shrink-0 border-r border-border lg:w-80">
+              <FilesTree
+                environmentId={environmentId}
+                selectedFile={search.file}
+                currentFolder={search.path}
+                onOpenFile={openFileGuarded}
+                onSelectFolder={selectFolder}
+                history={history}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                onOpenHome={() => openFolder(undefined)}
+                onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
+                onCreate={(kind) =>
+                  setDialog(kind === "folder" ? { type: "newFolder" } : { type: "newFile", kind })
+                }
+                onUpload={(files) => {
+                  if (currentPath) void uploads.start({ targetDir: currentPath, files });
+                }}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              {fileViewer ?? <TreeEmptyState folder={currentPath} />}
+            </div>
+          </div>
+        ) : fileViewer ? (
+          fileViewer
         ) : (
           <FolderBrowser
             environmentId={environmentId}
             listing={listing}
+            history={history}
+            viewSwitch={
+              isMobile ? undefined : <FilesViewSwitch mode={viewMode} onChange={setViewMode} />
+            }
             onOpenFolder={openFolder}
             onOpenFile={openFile}
             uploads={uploads}
@@ -308,6 +391,31 @@ export function FilesView() {
       </div>
 
       <UploadPanel batches={uploads.batches} onDismiss={uploads.dismiss} />
+
+      <AlertDialog
+        open={pendingOpen !== null}
+        onOpenChange={(open) => !open && setPendingOpen(null)}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>Your changes to this file will be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Keep editing</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const action = pendingOpen;
+                setPendingOpen(null);
+                action?.();
+              }}
+            >
+              Discard changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
 
       <NameDialog
         open={dialog.type === "newFolder"}
@@ -401,6 +509,8 @@ export function FilesView() {
 function FolderBrowser({
   environmentId,
   listing,
+  history,
+  viewSwitch,
   onOpenFolder,
   onOpenFile,
   uploads,
@@ -410,6 +520,8 @@ function FolderBrowser({
 }: {
   environmentId: EnvironmentId | null;
   listing: UseQueryResult<FilesListResult>;
+  history: FilesHistory;
+  viewSwitch?: React.ReactNode;
   onOpenFolder: (path: string | undefined) => void;
   onOpenFile: (entry: FilesEntry) => void;
   uploads: ReturnType<typeof useFilesUploads>;
@@ -436,6 +548,16 @@ function FolderBrowser({
   const data = showHidden ? (hidden.data ?? listing.data) : listing.data;
   const currentPath = data?.path ?? null;
   const rootPath = data?.rootPath ?? null;
+  const parentFolder =
+    rootPath && currentPath && currentPath !== rootPath ? dirname(currentPath) : null;
+  const onUp = parentFolder
+    ? () =>
+        onOpenFolder(
+          parentFolder === rootPath || !parentFolder.startsWith(rootPath ?? "")
+            ? undefined
+            : parentFolder,
+        )
+    : null;
   const trimmedQuery = query.trim();
   const searchResults = useQuery(filesSearchQueryOptions(environmentId, currentPath, trimmedQuery));
   const shares = useQuery(filesSharesQueryOptions(environmentId, null));
@@ -548,48 +670,14 @@ function FolderBrowser({
       <header className="shrink-0 border-b border-border px-3 py-2 sm:px-5 sm:py-3">
         <div className="flex items-center gap-2">
           <SidebarShowButton />
+          <FilesNavButtons history={history} onUp={onUp} />
           <FilesLocationSwitch
             location="computer"
             onComputer={() => onOpenFolder(undefined)}
             onCloud={() => onOpenCloud()}
           />
-          <nav
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-sm"
-            aria-label="Folder"
-          >
-            {rootPath && currentPath ? (
-              breadcrumbs(rootPath, currentPath).map((crumb, index, all) => (
-                <span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => onOpenFolder(index === 0 ? undefined : crumb.path)}
-                    onDragOver={(event) => {
-                      if (event.dataTransfer.types.includes(INTERNAL_DRAG_TYPE)) {
-                        event.preventDefault();
-                        setDropTarget(crumb.path);
-                      }
-                    }}
-                    onDragLeave={() => setDropTarget(null)}
-                    onDrop={(event) => onDropInto(event, crumb.path)}
-                    className={cn(
-                      "truncate rounded-md px-1.5 py-0.5 hover:bg-accent",
-                      index === all.length - 1
-                        ? "font-medium text-foreground"
-                        : "text-muted-foreground",
-                      dropTarget === crumb.path ? "bg-primary/15 ring-1 ring-primary" : "",
-                    )}
-                  >
-                    {index === 0 ? "Files" : crumb.label}
-                  </button>
-                  {index < all.length - 1 ? (
-                    <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-                  ) : null}
-                </span>
-              ))
-            ) : (
-              <span className="font-medium">Files</span>
-            )}
-          </nav>
+          {viewSwitch}
+          <span className="flex-1" />
           <div className="relative hidden sm:block">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -694,6 +782,45 @@ function FolderBrowser({
               </MenuItem>
             </MenuPopup>
           </Menu>
+        </div>
+        <div className="mt-1.5 flex items-center">
+          <nav
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]"
+            aria-label="Folder"
+          >
+            {rootPath && currentPath ? (
+              breadcrumbs(rootPath, currentPath).map((crumb, index, all) => (
+                <span key={crumb.path} className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onOpenFolder(index === 0 ? undefined : crumb.path)}
+                    onDragOver={(event) => {
+                      if (event.dataTransfer.types.includes(INTERNAL_DRAG_TYPE)) {
+                        event.preventDefault();
+                        setDropTarget(crumb.path);
+                      }
+                    }}
+                    onDragLeave={() => setDropTarget(null)}
+                    onDrop={(event) => onDropInto(event, crumb.path)}
+                    className={cn(
+                      "whitespace-nowrap rounded-md px-1.5 py-0.5 hover:bg-accent",
+                      index === all.length - 1
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground",
+                      dropTarget === crumb.path ? "bg-primary/15 ring-1 ring-primary" : "",
+                    )}
+                  >
+                    {index === 0 ? "Files" : crumb.label}
+                  </button>
+                  {index < all.length - 1 ? (
+                    <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+                  ) : null}
+                </span>
+              ))
+            ) : (
+              <span className="font-medium">Files</span>
+            )}
+          </nav>
         </div>
         <div className="relative mt-2 sm:hidden">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -903,6 +1030,20 @@ function FolderBrowser({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** The right side of the Tree view while no file is picked. */
+function TreeEmptyState({ folder }: { folder: string | null }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+      <FileTextIcon className="mb-1 size-8 text-muted-foreground/40" />
+      <p className="text-sm font-medium">Pick a file to see it here</p>
+      <p className="max-w-xs text-xs text-muted-foreground">
+        Open folders on the left. A file opens on this side, and you can edit it right here.
+        {folder ? ` New files and uploads go to “${folder.split("/").pop() || folder}”.` : ""}
+      </p>
     </div>
   );
 }

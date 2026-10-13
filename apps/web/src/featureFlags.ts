@@ -101,6 +101,19 @@ const FLAG_DEFAULTS: Readonly<Record<FeatureFlagKey, boolean>> = Object.fromEntr
 ) as Record<FeatureFlagKey, boolean>;
 
 /**
+ * Unfinished sidebar experiments, switched off for everyone (Misha 13.10):
+ * the old project-grouped sidebar and the all-machines "workspaces" one. A
+ * device that still has them on in storage would never see the inbox sidebar
+ * setting take effect, so they read as off whatever is stored, and Labs no
+ * longer lists them.
+ */
+export const RETIRED_FEATURE_FLAGS: ReadonlySet<FeatureFlagKey> = new Set([
+  "allMachinesSidebar",
+  "legacySidebar",
+  "inboxSections",
+]);
+
+/**
  * Keys a flag was stored under before a rename. The persisted map is an open
  * record in localStorage, so a rename cannot rewrite old devices up front:
  * reads fall back to the legacy key and the next write moves the value.

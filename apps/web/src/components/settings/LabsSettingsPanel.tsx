@@ -1,5 +1,6 @@
 import {
   FEATURE_FLAGS,
+  RETIRED_FEATURE_FLAGS,
   readStoredFeatureFlag,
   resolveFeatureFlag,
   type FeatureFlagKey,
@@ -26,7 +27,7 @@ export function LabsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="Feature flags">
-        {FEATURE_FLAGS.map((flag) => {
+        {FEATURE_FLAGS.filter((flag) => !RETIRED_FEATURE_FLAGS.has(flag.key)).map((flag) => {
           const key = flag.key as FeatureFlagKey;
           const value = resolveFeatureFlag(overrides, key);
           const stored = readStoredFeatureFlag(overrides, key);

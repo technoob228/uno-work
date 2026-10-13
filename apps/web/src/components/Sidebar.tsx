@@ -33,6 +33,7 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   CloudOffIcon,
+  EyeIcon,
   FolderGit2Icon,
   ChevronRightIcon,
   FolderIcon,
@@ -766,6 +767,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const settlementSupported = useEnvironmentSupportsThreadSettlement(thread.environmentId);
   const snoozeSupported = useEnvironmentSupportsThreadSnooze(thread.environmentId);
+  const setThreadReadAt = useStore((state) => state.setThreadReadAt);
 
   // Machine awareness: a chat on another machine carries that machine's chip,
   // and a warning when the machine is unreachable.
@@ -855,7 +857,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
   // Snooze is offered only where it can succeed: capability-gated and never
   // on blocked-on-you work or queued turns (the server rejects both).
-  const showSnoozeButton = !props.simple && snoozeSupported && canSnoozeThread(thread, props.now);
+  // Sidebar D rows always offer it (Misha 13.10): Read / Snooze are the main hover actions there.
+  const showSnoozeButton =
+    (variant === "d" || !props.simple) && snoozeSupported && canSnoozeThread(thread, props.now);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
   useEffect(() => {
     if (!showSnoozeButton) setSnoozeMenuOpen(false);
@@ -1066,7 +1070,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   if (variant === "d") {
     const mark = dRowMark(status, yourTurn);
-    const showDone = canSettle && section !== "settled" && section !== "snoozed";
+    const parked = section === "settled" || section === "snoozed";
+    // Read and Snooze come first: the chat stays or comes back. Done is the
+    // quiet one, an icon that just takes the chat out of the list.
+    const showRead = yourTurn && !parked;
+    const showDSnooze = showSnoozeButton && !parked;
+    const showDone = canSettle && !parked;
+    const hasActions = showRead || showDSnooze || showDone;
+    const dActionClassName =
+      "inline-flex h-6 cursor-pointer items-center rounded-md px-1 text-xs text-muted-foreground transition-colors hover:text-foreground";
     return (
       <li data-thread-item className="list-none">
         <div
@@ -1110,32 +1122,65 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <span
               className={cn(
                 "inline-flex items-center transition-opacity",
-                showDone &&
-                  "group-hover/sidebar-row:opacity-0 group-focus-within/sidebar-row:opacity-0",
+                hasActions &&
+                  "group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0 group-focus-within/sidebar-row:absolute group-focus-within/sidebar-row:right-0 group-focus-within/sidebar-row:opacity-0",
+                snoozeMenuOpen && "absolute right-0 opacity-0",
               )}
             >
               <SidebarDMark mark={mark} />
             </span>
-            {showDone ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Mark chat done"
-                      data-testid="sidebar-row-done"
-                      onClick={stopAnd(onSettle)}
-                      className="pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
-                    />
-                  }
-                >
-                  <CheckIcon className="size-3.5" />
-                  Done
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  Done: nothing more to answer — move it to Done
-                </TooltipPopup>
-              </Tooltip>
+            {hasActions ? (
+              <span
+                className={cn(
+                  "pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:static group-focus-within/sidebar-row:opacity-100",
+                  snoozeMenuOpen && "pointer-events-auto static opacity-100",
+                )}
+              >
+                {showRead ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Mark chat as read"
+                          data-testid="sidebar-row-read"
+                          onClick={stopAnd((ref) => setThreadReadAt(ref, new Date().toISOString()))}
+                          className={dActionClassName}
+                        />
+                      }
+                    >
+                      <EyeIcon className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Mark as read — it stays in the list</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+                {showDSnooze ? (
+                  <SnoozeMenuButton
+                    open={snoozeMenuOpen}
+                    onOpenChange={setSnoozeMenuOpen}
+                    onSnooze={(snoozedUntil) => onSnooze(threadRef, snoozedUntil)}
+                    onPickTime={() => onPickSnoozeTime(threadRef)}
+                  />
+                ) : null}
+                {showDone ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Mark chat done"
+                          data-testid="sidebar-row-done"
+                          onClick={stopAnd(onSettle)}
+                          className={dActionClassName}
+                        />
+                      }
+                    >
+                      <CheckIcon className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Done — take it out of the list</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+              </span>
             ) : null}
           </span>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
@@ -2454,10 +2499,10 @@ export default function Sidebar() {
         if (supportsSettlement) {
           lifecycleItems.push(
             section === "settled"
-              ? { id: "unsettle", label: "Un-settle chat" }
+              ? { id: "unsettle", label: devMode ? "Un-settle chat" : "Move back from Done" }
               : {
                   id: "settle",
-                  label: "Settle chat",
+                  label: devMode ? "Settle chat" : "Done",
                   disabled: status === "working" || status === "approval",
                 },
           );

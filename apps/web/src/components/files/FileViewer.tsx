@@ -16,7 +16,14 @@ import {
   UploadIcon,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import { isElectron } from "../../env";
 import { isOfficeFile } from "../office/officeFormats";
@@ -60,6 +67,9 @@ export function FileViewer({
   onRename,
   onMove,
   onDelete,
+  embedded = false,
+  viewSwitch,
+  onUnsavedChange,
 }: {
   environmentId: EnvironmentId;
   path: string;
@@ -69,6 +79,12 @@ export function FileViewer({
   onRename: (entry: FilesEntry) => void;
   onMove: (entry: FilesEntry) => void;
   onDelete: (entry: FilesEntry) => void;
+  /** Shown beside a tree (Files → Tree): no way back, the tree is the way. */
+  embedded?: boolean;
+  /** The List | Tree switch, when the header should carry it. */
+  viewSwitch?: ReactNode;
+  /** True while the editor holds changes that are not saved yet. */
+  onUnsavedChange?: (unsaved: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const stat = useQuery(filesStatQueryOptions(environmentId, path));
@@ -85,6 +101,9 @@ export function FileViewer({
     [environmentId, entry?.path, entry?.modifiedAt, entry?.size, queryClient],
   );
   const opener = source ? resolveFileOpener(source) : null;
+  useEffect(() => {
+    onUnsavedChange?.(editing && dirty);
+  }, [dirty, editing, onUnsavedChange]);
 
   const guard = useCallback(
     (action: () => void) => {
@@ -164,14 +183,16 @@ export function FileViewer({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-4">
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Back to folder"
-          onClick={() => guard(onBack)}
-        >
-          <ArrowLeftIcon />
-        </Button>
+        {embedded ? null : (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Back to folder"
+            onClick={() => guard(onBack)}
+          >
+            <ArrowLeftIcon />
+          </Button>
+        )}
         <Icon className={cn("size-5 shrink-0", FILE_KIND_TINT[kind])} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{entry?.name ?? path.split("/").pop()}</div>
@@ -182,6 +203,7 @@ export function FileViewer({
             </div>
           ) : null}
         </div>
+        {viewSwitch}
         {entry && !editing ? (
           <div className="flex shrink-0 items-center gap-1.5">
             {inOffice ? (

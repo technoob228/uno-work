@@ -9,6 +9,7 @@ import { useCallback } from "react";
 
 import {
   type FeatureFlagKey,
+  RETIRED_FEATURE_FLAGS,
   migrateFeatureFlagOverrides,
   resolveFeatureFlag,
 } from "../featureFlags";
@@ -16,7 +17,9 @@ import { useSettings, useUpdateSettings } from "./useSettings";
 
 /** Read a single flag's effective value (stored override, else default). */
 export function useFeatureFlag(key: FeatureFlagKey): boolean {
-  return useSettings((settings) => resolveFeatureFlag(settings.featureFlags, key));
+  return useSettings(
+    (settings) => !RETIRED_FEATURE_FLAGS.has(key) && resolveFeatureFlag(settings.featureFlags, key),
+  );
 }
 
 /** The whole sparse override map, for panels that render every flag. */

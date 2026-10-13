@@ -5,7 +5,7 @@
  * belongs: an app inside Uno, a file in Files, a link in a new tab.
  */
 import type { UnoPin } from "@t3tools/contracts";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useMatch, useNavigate } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
   FileIcon,
@@ -17,12 +17,16 @@ import {
 } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 
+import { isElectron } from "../../env";
+import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { linkTitle, normalizeLinkInput } from "../../navigation/pins";
 import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
+import { opensInOwnTab } from "../apps/ownTabApps";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
 import { dirname } from "../files/fileTypes";
 import { Button } from "../ui/button";
 import {
@@ -137,23 +141,50 @@ export function usePinActive(item: UnoPin): boolean {
         : false;
 }
 
-/** A click on a pin: an app inside Uno, a folder or file in Files, a link in a new tab. */
+/**
+ * A click on a pin: an app inside Uno, a folder or file in Files, a link in a
+ * new tab. Inside a chat, an app or a file a panel can show opens in the
+ * right panel, so the chat you work in stays put (Misha 13.10); from Home or
+ * any other screen it opens in the main area as before. The panel's "Open full
+ * screen" button moves it to the main area.
+ */
 export function useOpenPin() {
   const navigate = useNavigate();
-  const { openHere } = useOpenApp();
+  const { openHere, openBeside } = useOpenApp();
+  const preview = usePreviewPane();
+  const machine = useActiveMachine();
+  const inChat = useMatch({ from: "/_chat/$environmentId/$threadId", shouldThrow: false });
   const { isMobile, setOpenMobile } = useSidebar();
   return (item: UnoPin) => {
     if (isMobile) setOpenMobile(false);
     switch (item.kind) {
-      case "app":
-        openHere({ url: item.target, name: item.title, icon: item.icon ?? null });
+      case "app": {
+        const app = { url: item.target, name: item.title, icon: item.icon ?? null };
+        // An app that refuses to be framed goes to its own tab either way.
+        if (inChat && (isElectron || !opensInOwnTab(item.target))) openBeside(app);
+        else openHere(app);
         return;
+      }
       case "folder":
         void navigate({ to: "/files", search: { path: item.target } });
         return;
-      case "file":
+      case "file": {
+        const name = item.target.split("/").pop() ?? item.target;
+        const kind = detectFileKind(name);
+        if (inChat && kind !== "unknown" && machine.environmentId) {
+          preview.openFile({
+            id: item.target,
+            name,
+            kind,
+            content: "",
+            path: item.target,
+            environmentId: machine.environmentId,
+          });
+          return;
+        }
         void navigate({ to: "/files", search: { path: dirname(item.target), file: item.target } });
         return;
+      }
       case "link":
         openInNewTab(item.target);
     }

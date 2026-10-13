@@ -100,6 +100,23 @@ describe("resolveSidebarThreadSection", () => {
     expect(resolveSidebarThreadSection(makeThread("young", idle(2)), NOW)).toBe("active");
   });
 
+  it("keeps a chat that waited for days in Active when it is marked read", () => {
+    // After "Your turn" shipped: a chat finished 5 days ago and has been waiting since.
+    const now = "2026-10-13T12:00:00.000Z";
+    const at = (ms: number) => new Date(Date.parse(now) - ms).toISOString();
+    const waiting = {
+      latestTurn: completedTurn(at(5 * DAY_MS)),
+      latestUserMessageAt: at(5 * DAY_MS),
+    };
+    expect(resolveSidebarThreadSection(makeThread("waiting", waiting), now)).toBe("active");
+    // Read yesterday-ish: the chat stays put instead of dropping onto the Done shelf.
+    const read = makeThread("read", { ...waiting, readAt: at(HOUR_MS) });
+    expect(resolveSidebarThreadSection(read, now)).toBe("active");
+    // Three idle days after the Read, it settles like any quiet chat.
+    const readLongAgo = makeThread("read-old", { ...waiting, readAt: at(4 * DAY_MS) });
+    expect(resolveSidebarThreadSection(readLongAgo, now)).toBe("settled");
+  });
+
   it("never settles a pinned thread", () => {
     const thread = makeThread("pinned-old", { ...idle(30), pinnedAt: ago(40 * DAY_MS) });
     expect(resolveSidebarThreadSection(thread, NOW)).toBe("pinned");

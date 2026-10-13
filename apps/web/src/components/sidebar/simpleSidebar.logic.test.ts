@@ -5,8 +5,9 @@ import { doneShelfLabel, threadContextMenuItems } from "./simpleSidebar.logic";
 const ALL = [
   { id: "rename", label: "Rename chat" },
   { id: "pin", label: "Pin chat" },
-  { id: "settle", label: "Settle chat" },
+  { id: "settle", label: "Done" },
   { id: "snooze", label: "Snooze" },
+  { id: "mark-read", label: "Mark as read" },
   { id: "mark-unread", label: "Mark unread" },
   { id: "copy-path", label: "Copy Path" },
   { id: "copy-thread-id", label: "Copy chat ID" },
@@ -17,10 +18,13 @@ const ALL = [
 ];
 
 describe("threadContextMenuItems", () => {
-  it("keeps four items and the agents switch without Dev mode", () => {
+  it("keeps the everyday items and the agents switch without Dev mode", () => {
     expect(threadContextMenuItems(ALL, false).map((item) => item.id)).toEqual([
       "rename",
       "pin",
+      "settle",
+      "snooze",
+      "mark-read",
       "agents-access",
       "archive",
       "delete",
