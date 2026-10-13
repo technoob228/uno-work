@@ -4,6 +4,11 @@
  * the data Home fetches anyway (recent chats, app notifications, documents
  * changed lately in the home folder, their sites).
  *
+ * Misha 13.10: "Next step for «title»" is dumb. Hints from chats are now made
+ * by a small model that read the end of those chats (server:
+ * homeSuggestions.ts) and come in as `chatHints`; nothing is guessed from a
+ * chat's title any more.
+ *
  * Misha 11.10: "the hints are dumb — make them from the work in chats, and
  * with few projects give what helps to get on board: learn Uno Work, Uno
  * cloud services". So nothing is guessed from what merely sits on the
@@ -14,10 +19,11 @@
  * folder (a chat's project) also switches the composer's folder chip there.
  */
 
-export interface StarterChat {
-  readonly title: string;
-  /** Epoch ms of the chat's last activity. */
-  readonly activityAt: number;
+/** A concrete follow-up the model made from a recent chat. */
+export interface StarterChatHint {
+  readonly id: string;
+  readonly label: string;
+  readonly prompt: string;
   /** The chat's folder; null = unknown / the home folder. */
   readonly folder: { readonly cwd: string; readonly name: string } | null;
 }
@@ -43,7 +49,8 @@ export interface StarterNotification {
 }
 
 export interface StarterContext {
-  readonly chats: ReadonlyArray<StarterChat>;
+  /** Model-made follow-ups from recent chats (empty without Uno AI or while loading). */
+  readonly chatHints: ReadonlyArray<StarterChatHint>;
   /**
    * Projects the person added (the home folder and assistants' folders don't
    * count). Fewer than `ONBOARDING_BELOW_PROJECTS` = still getting on board.
@@ -52,11 +59,6 @@ export interface StarterContext {
   readonly files: ReadonlyArray<StarterFile>;
   readonly sites: ReadonlyArray<StarterSite>;
   readonly notifications?: ReadonlyArray<StarterNotification>;
-  /**
-   * Titles of the chats Home already shows under "Continue": a starter for
-   * them would repeat the card right below, so they are skipped.
-   */
-  readonly continueTitles?: ReadonlyArray<string>;
 }
 
 export type StarterSource = "chat" | "notification" | "file" | "site" | "onboarding" | "generic";
@@ -122,13 +124,6 @@ export function shortName(value: string, max = MAX_NAME): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
-const PLACEHOLDER_TITLE = /^(new (thread|chat)|untitled)$/i;
-
-function isMeaningfulTitle(title: string): boolean {
-  const clean = title.trim();
-  return clean.length >= 3 && !PLACEHOLDER_TITLE.test(clean);
-}
-
 const DOC_EXT = new Set(["pdf", "doc", "docx", "md", "txt", "rtf", "odt", "pages"]);
 const SHEET_EXT = new Set(["csv", "xls", "xlsx", "ods", "numbers", "tsv"]);
 const DECK_EXT = new Set(["ppt", "pptx", "odp", "key"]);
@@ -138,26 +133,14 @@ function extensionOf(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function chatStarters(
-  chats: ReadonlyArray<StarterChat>,
-  continueTitles: ReadonlyArray<string>,
-): HomeStarter[] {
-  const seen = new Set<string>(continueTitles.map((title) => title.trim().toLowerCase()));
-  const out: HomeStarter[] = [];
-  for (const chat of chats.toSorted((a, b) => b.activityAt - a.activityAt)) {
-    const title = chat.title.trim();
-    const key = title.toLowerCase();
-    if (!isMeaningfulTitle(title) || seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      id: `chat:${key}`,
-      label: `Next step for “${shortName(title)}”`,
-      prompt: `Last time we worked on “${title}”. Look at where it stands in this folder and suggest the next step.`,
-      source: "chat",
-      ...(chat.folder ? { folder: chat.folder } : {}),
-    });
-  }
-  return out;
+function chatStarters(hints: ReadonlyArray<StarterChatHint>): HomeStarter[] {
+  return hints.map((hint) => ({
+    id: `chat:${hint.id}`,
+    label: hint.label,
+    prompt: hint.prompt,
+    source: "chat" as const,
+    ...(hint.folder ? { folder: hint.folder } : {}),
+  }));
 }
 
 const REPLY_WORDS = /\b(comment(ed)?|replied|reply|message|asked|mentioned|question)\b/i;
@@ -227,7 +210,7 @@ function siteStarters(sites: ReadonlyArray<StarterSite>): HomeStarter[] {
 /** One from each kind of work in turn (a chat, a notification, a file, a site), then the next of each. */
 function workStarters(context: StarterContext, max: number): HomeStarter[] {
   const pools = [
-    chatStarters(context.chats, context.continueTitles ?? []),
+    chatStarters(context.chatHints),
     notificationStarters(context.notifications ?? []),
     fileStarters(context.files),
     siteStarters(context.sites),

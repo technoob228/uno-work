@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.132 — 2026-10-13
+
+- Home hints: instead of "Next step for «title»", a small model reads the end of your last chats and suggests concrete follow-ups (an open item, a failing check, a promised step) in the language of the chat. Needs Uno AI; without it, no hints from chats. Cached for a few hours.
+- The chat status "Your turn" is now called "Ready".
+- Home no longer flashes the blue next-step card (for example "Connect Telegram") for a step you already put off with "Not now".
+
 ## v0.0.131 — 2026-10-13
 
 - Home: pictures can be attached to the first message — paste a screenshot, drop it on the box or use the paperclip. Effort (and the other traits) can be picked next to the model.

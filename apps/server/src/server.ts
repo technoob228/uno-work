@@ -28,6 +28,7 @@ import { HealthCheck } from "./health.ts";
 import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { EconomyPresenceLive } from "./economy/EconomyPresence.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
+import { homeSuggestionsRouteLayer } from "./homeSuggestionsHttp.ts";
 import { selfUpdateStartRouteLayer, selfUpdateStatusRouteLayer } from "./selfUpdateHttp.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -594,6 +595,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   officeEngineInstallRouteLayer,
   selfUpdateStatusRouteLayer,
   selfUpdateStartRouteLayer,
+  homeSuggestionsRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeLoginRouteLayer,
   browserBridgeCommandResultRouteLayer,

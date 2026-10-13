@@ -1,8 +1,9 @@
 /**
- * Feeds `homeStarters` from what Home already fetches: recent chats (with
- * their folders), how many projects the person added, files changed lately
- * in the home folder, and the account's sites. No extra requests: the files and sites
- * queries share their cache with the Files / Sites widgets.
+ * Feeds `homeStarters` from what Home already fetches: how many projects the
+ * person added, files changed lately in the home folder, the account's sites
+ * (their queries share the cache with the Files / Sites widgets) — plus the
+ * one extra request: concrete hints a model made from the end of the three most
+ * recent chats (server-cached; see homeSuggestionsApi.ts).
  */
 import { type EnvironmentId, isAssistantProjectId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -21,9 +22,11 @@ import {
   threadActivityAt,
   type HomeThread,
 } from "./homeModel";
-import { homeStarters, type HomeStarter, type StarterChat } from "./homeStarters";
+import { homeSuggestionsQueryOptions, type HomeSuggestionChat } from "./homeSuggestionsApi";
+import { homeStarters, type HomeStarter, type StarterChatHint } from "./homeStarters";
 
-const MAX_CHATS = 8;
+/** How many recent chats the model reads (the server takes at most three). */
+const HINT_CHATS = 3;
 
 export function useHomeStarters(input: {
   environmentId: EnvironmentId | null;
@@ -38,28 +41,43 @@ export function useHomeStarters(input: {
   const inbox = useInboxEntries();
   const sites = useQuery({ ...sitesQuery(), enabled: accountReachable() }).data?.sites;
 
-  return useMemo(() => {
+  // The chats the model reads: the latest ones that were really talked in, by
+  // the same bar as Continue (never settled or snoozed ones).
+  const hintChats = useMemo(() => {
     const snoozedInInbox = inboxSnoozedThreadIds(inbox, now);
-    const chats: StarterChat[] = threads
-      // Same bar as Continue: settled or Inbox-snoozed chats are never suggested.
+    return threads
       .filter(
         (thread) =>
           thread.environmentId === environmentId &&
+          thread.latestUserMessageAt !== null &&
           isContinueCandidate(thread, now, snoozedInInbox),
       )
-      .map((thread) => {
-        const project = projects.find(
-          (candidate) =>
-            candidate.id === thread.projectId && candidate.environmentId === thread.environmentId,
-        );
-        return {
-          title: thread.title,
-          activityAt: threadActivityAt(thread),
+      .toSorted((a, b) => threadActivityAt(b) - threadActivityAt(a))
+      .slice(0, HINT_CHATS);
+  }, [environmentId, inbox, now, threads]);
+  const suggestionChats = useMemo<HomeSuggestionChat[]>(
+    () => hintChats.map((thread) => ({ id: thread.id, version: threadActivityAt(thread) })),
+    [hintChats],
+  );
+  const suggestions = useQuery(homeSuggestionsQueryOptions(environmentId, suggestionChats)).data;
+
+  return useMemo(() => {
+    const chatHints: StarterChatHint[] = (suggestions?.suggestions ?? []).flatMap((suggestion) => {
+      const thread = hintChats.find((candidate) => candidate.id === suggestion.threadId);
+      if (!thread) return [];
+      const project = projects.find(
+        (candidate) =>
+          candidate.id === thread.projectId && candidate.environmentId === thread.environmentId,
+      );
+      return [
+        {
+          id: `${suggestion.threadId}:${suggestion.label}`.toLowerCase(),
+          label: suggestion.label,
+          prompt: suggestion.prompt,
           folder: project ? { cwd: project.cwd, name: project.name } : null,
-        };
-      })
-      .toSorted((a, b) => b.activityAt - a.activityAt)
-      .slice(0, MAX_CHATS);
+        },
+      ];
+    });
     // The projects the person added: not the home folder, not an assistant's own folder.
     const home = homePath?.replace(/\/+$/, "") ?? null;
     const projectCount = projects.filter(
@@ -68,12 +86,6 @@ export function useHomeStarters(input: {
         !isAssistantProjectId(project.id) &&
         project.cwd.replace(/\/+$/, "") !== home,
     ).length;
-    // Exactly the cards Continue shows (same input, same pick), so a starter
-    // never repeats a card right below the composer.
-    const continueCards = pickContinueItems(threads, inbox, { now });
-    const continueTitles = continueCards.flatMap((card) =>
-      card.kind === "chat" ? [card.thread.title] : [],
-    );
     // Notifications already on a Continue card are suggested too: the card
     // opens the app, the chip asks Uno to deal with it.
     const notifications = inbox
@@ -92,9 +104,8 @@ export function useHomeStarters(input: {
         body: item.body,
       }));
     return homeStarters({
-      continueTitles,
       notifications,
-      chats,
+      chatHints,
       projectCount,
       files: recentHomeEntries(files ?? [], 6).map((entry) => ({
         name: entry.name,
@@ -103,5 +114,5 @@ export function useHomeStarters(input: {
       })),
       sites: (sites ?? []).map((site) => ({ name: site.customDomain ?? site.slug })),
     });
-  }, [environmentId, files, homePath, inbox, now, projects, sites, threads]);
+  }, [environmentId, files, hintChats, homePath, inbox, now, projects, sites, suggestions]);
 }

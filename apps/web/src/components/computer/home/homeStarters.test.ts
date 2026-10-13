@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { ONBOARDING_STARTERS, homeStarters, shortName, type StarterContext } from "./homeStarters";
 
 /** Someone with projects: the row comes from their work. */
-const EMPTY: StarterContext = { chats: [], projectCount: 3, files: [], sites: [] };
+const EMPTY: StarterContext = { chatHints: [], projectCount: 3, files: [], sites: [] };
+
+const hint = (id: string, label: string, folder: { cwd: string; name: string } | null = null) => ({
+  id,
+  label,
+  prompt: `Do: ${label}`,
+  folder,
+});
 /** Someone still getting on board. */
 const NEWCOMER: StarterContext = { ...EMPTY, projectCount: 0 };
 
@@ -22,17 +29,17 @@ describe("homeStarters", () => {
     const starters = homeStarters({
       ...NEWCOMER,
       projectCount: 1,
-      chats: [
-        { title: "Sales report", activityAt: 2, folder: null },
-        { title: "Invoice bot", activityAt: 1, folder: null },
-        { title: "Landing", activityAt: 0, folder: null },
+      chatHints: [
+        hint("a", "Fix the Safari test"),
+        hint("b", "Send the invoice"),
+        hint("c", "Add tests"),
       ],
     });
     expect(starters.map((s) => s.label)).toEqual([
       "Learn Uno Work",
       "Uno cloud services",
-      "Next step for “Sales report”",
-      "Next step for “Invoice bot”",
+      "Fix the Safari test",
+      "Send the invoice",
     ]);
   });
 
@@ -53,81 +60,33 @@ describe("homeStarters", () => {
   it("takes one from each source in turn, max four", () => {
     const starters = homeStarters({
       ...EMPTY,
-      chats: [
-        { title: "Sales report", activityAt: 3, folder: null },
-        { title: "Invoice bot", activityAt: 2, folder: null },
-        { title: "Old landing", activityAt: 1, folder: null },
-      ],
+      chatHints: [hint("a", "Fix the Safari test"), hint("b", "Send the invoice")],
       files: [{ name: "budget.xlsx", isDirectory: false, modifiedAt: "2026-09-20T00:00:00Z" }],
       sites: [{ name: "blog" }],
     });
     expect(starters.map((s) => s.source)).toEqual(["chat", "file", "site", "chat"]);
     expect(starters.map((s) => s.label)).toEqual([
-      "Next step for “Sales report”",
+      "Fix the Safari test",
       "Make a chart from budget.xlsx",
       "Publish an update to blog",
-      "Next step for “Invoice bot”",
+      "Send the invoice",
     ]);
   });
 
-  it("fills the row from a single rich source", () => {
-    const starters = homeStarters({
-      ...EMPTY,
-      chats: ["a report", "b report", "c report", "d report", "e report"].map((title, i) => ({
-        title,
-        activityAt: i,
-        folder: null,
-      })),
-    });
-    expect(starters).toHaveLength(4);
-    expect(starters[0]!.label).toContain("e report");
-  });
-
-  it("skips placeholder chat titles and duplicates", () => {
-    const starters = homeStarters({
-      ...EMPTY,
-      chats: [
-        { title: "New thread", activityAt: 3, folder: null },
-        { title: "Landing page", activityAt: 2, folder: null },
-        { title: "landing page", activityAt: 1, folder: null },
-      ],
-    });
-    expect(starters.map((s) => s.label)).toEqual(["Next step for “Landing page”"]);
-  });
-
-  it("skips chats already shown under Continue, then uses other sources", () => {
-    const starters = homeStarters({
-      ...EMPTY,
-      chats: [
-        { title: "Sales report", activityAt: 3, folder: null },
-        { title: "Invoice bot", activityAt: 2, folder: null },
-      ],
-      sites: [{ name: "blog" }],
-      continueTitles: ["Sales report", "invoice bot "],
-    });
-    expect(starters.map((s) => s.label)).toEqual(["Publish an update to blog"]);
-  });
-
-  it("keeps older chats that are not under Continue", () => {
-    const starters = homeStarters({
-      ...EMPTY,
-      chats: [
-        { title: "Sales report", activityAt: 3, folder: null },
-        { title: "Old landing", activityAt: 1, folder: null },
-      ],
-      continueTitles: ["Sales report"],
-    });
-    expect(starters.map((s) => s.label)).toEqual(["Next step for “Old landing”"]);
+  it("nothing is made from a chat's title: no hints, no chat chips", () => {
+    expect(homeStarters({ ...EMPTY, sites: [{ name: "blog" }] }).map((s) => s.source)).toEqual([
+      "site",
+    ]);
   });
 
   it("carries the chat's folder so the composer switches there", () => {
     const folder = { cwd: "/home/uno/shop", name: "shop" };
     const [starter] = homeStarters({
       ...EMPTY,
-      chats: [{ title: "Shop checkout", activityAt: 1, folder }],
+      chatHints: [hint("a", "Fix the checkout total", folder)],
     });
     expect(starter!.folder).toEqual(folder);
-    expect(starter!.prompt).toContain("Shop checkout");
+    expect(starter!.prompt).toContain("checkout total");
   });
 
   it("only suggests files with an obvious task, newest first — never a folder to tidy", () => {
@@ -157,14 +116,14 @@ describe("notification starters", () => {
   it("offers a reply for comments and a look for other alerts, after a chat", () => {
     const starters = homeStarters({
       ...EMPTY,
-      chats: [{ title: "Old landing", activityAt: 1, folder: null }],
+      chatHints: [hint("a", "Fix the hero image")],
       notifications: [
         { id: "n1", source: "Office", title: "Boris commented on report.docx", body: null },
         { id: "n2", source: "Shop", title: "Payment failed for order 42", body: "Card declined." },
       ],
     });
     expect(starters.map((s) => s.label)).toEqual([
-      "Next step for “Old landing”",
+      "Fix the hero image",
       "Reply to “Boris commented on…”",
       "Look at Shop alert",
     ]);
