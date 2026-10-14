@@ -124,6 +124,15 @@ export const FILE_KIND_LABEL: Record<FileKind, string> = {
   other: "File",
 };
 
+/**
+ * Kinds that open straight in their editor beside the Files tree: text you
+ * type into. Tables, web pages and documents open as they look, with an Edit
+ * button (a grid / the page source / Office is a different thing to read).
+ */
+export function editsInline(kind: FileKind): boolean {
+  return kind === "markdown" || kind === "text" || kind === "code";
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];

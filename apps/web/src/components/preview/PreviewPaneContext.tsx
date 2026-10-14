@@ -10,6 +10,7 @@ import {
 import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
+import { recordFileOpened } from "../files/filesApi";
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
@@ -146,6 +147,17 @@ export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
 }
 
 /** A web app of the computer (Nextcloud, Vaultwarden…) shown in a frame. */
+/** A tab showing a file of the computer (not a browser, app or plugin panel). */
+export function isRecordableFileTab(file: Pick<PreviewFile, "kind" | "path">): boolean {
+  return (
+    !!file.path?.startsWith("/") &&
+    file.kind !== "browser" &&
+    file.kind !== "live-browser" &&
+    file.kind !== "plugin-panel" &&
+    file.kind !== "app"
+  );
+}
+
 export function isAppTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "app";
 }
@@ -496,6 +508,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const openFile = useCallback(
     (file: PreviewFile) => {
       openFileForTarget(currentTarget, personScope, file);
+      // Файл с компьютера, открытый человеком, попадает в Files → Recent.
+      if (file.path && isRecordableFileTab(file)) recordFileOpened(file.environmentId, file.path);
     },
     [currentTarget, openFileForTarget, personScope],
   );
