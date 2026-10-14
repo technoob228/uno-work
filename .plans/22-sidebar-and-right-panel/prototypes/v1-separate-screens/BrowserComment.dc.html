@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser with comment mode</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;family=Fraunces:opsz,wght@9..144,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.ib{all:unset;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:#525252;cursor:pointer;flex-shrink:0}
+.ib:hover{background:rgba(0,0,0,.05)}
+.ib.on{background:#5046e5;color:#fff}
+.ib:focus-visible,.pick:focus-visible,.btn:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+.btn{all:unset;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:500;cursor:pointer}
+.pick{all:unset;display:block;box-sizing:border-box;position:relative;cursor:default;border-radius:6px}
+.cm .pick{cursor:crosshair}
+.cm .pick:hover{outline:2px solid #5046e5;outline-offset:2px;background:rgba(80,70,229,.04)}
+.pin{position:absolute;top:-10px;right:-10px;width:20px;height:20px;border-radius:50%;background:#5046e5;color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+</helmet>
+<div style="width:1280px;height:800px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden">
+  <section aria-label="Chat" style="width:440px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="height:52px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid rgba(0,0,0,.07)"><span class="t" style="font-size:14px;font-weight:500">Fix checkout button on mobile</span></div>
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:14px;overflow:auto">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">The checkout button is cut off on iPhone. Fix it and show me.</div>
+      <div style="font-size:13px;line-height:1.55;color:#333">Fixed. Opened localhost:5173/checkout at iPhone size in the panel.</div>
+      <sc-if value="{{sent}}" hint-placeholder-val="{{false}}">
+        <div style="align-self:flex-end;max-width:86%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:11.5px;color:#666">From the browser · localhost:5173/checkout · iPhone 15</span>
+          <sc-for list="{{comments}}" as="c" hint-placeholder-count="2">
+            <span style="display:flex;gap:8px;align-items:flex-start"><span style="width:18px;height:18px;border-radius:50%;background:#5046e5;color:#fff;font-size:10.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">{{c.n}}</span><span><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#5046e5">{{c.el}}</span><br>{{c.text}}</span></span>
+          </sc-for>
+          <span style="display:flex;gap:6px"><span style="width:64px;height:40px;border-radius:6px;background:#e5e5e5"></span><span style="width:64px;height:40px;border-radius:6px;background:#e5e5e5"></span></span>
+        </div>
+        <div style="font-size:13px;line-height:1.55;color:#333">On it — making the total bold and the button full width.</div>
+      </sc-if>
+    </div>
+    <div style="margin:0 20px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something…</div>
+  </section>
+  <aside aria-label="Browser" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8">
+    <div style="height:52px;display:flex;align-items:center;gap:4px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <button class="ib" aria-label="Back"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+      <button class="ib" aria-label="Reload"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+      <div style="flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;padding:0 10px;font-size:12.5px">
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;background:#e0e7ff;color:#3730a3;border-radius:5px;padding:1px 7px;flex-shrink:0">This computer ▾</span>
+        <span class="t">localhost:5173/checkout</span>
+      </div>
+      <button class="ib" aria-label="Phone size" style="background:rgba(0,0,0,.06)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"></rect></svg></button>
+      <button class="{{cmBtnCls}}" onClick="{{toggleCm}}" aria-pressed="{{cm}}" aria-label="Comment mode (C)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"></path><path d="M12 8v4M10 10h4"></path></svg></button>
+    </div>
+    <sc-if value="{{cm}}" hint-placeholder-val="{{true}}">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#eef0ff;border-bottom:1px solid rgba(80,70,229,.15);font-size:12.5px;color:#3730a3">
+        <span style="flex:1">Comment mode: click anything on the page to leave a note for Uno. Esc to stop.</span>
+        <span>{{countLabel}}</span>
+        <button class="btn" style="background:#5046e5;color:#fff" onClick="{{send}}">Send to chat</button>
+      </div>
+    </sc-if>
+    <div style="flex:1;display:flex;justify-content:center;align-items:flex-start;padding:22px;overflow:auto;position:relative">
+      <div class="{{pageCls}}" style="width:360px;height:640px;background:#fbf7f1;border-radius:28px;box-shadow:0 0 0 8px #1f1f1f,0 18px 40px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column;font-family:'DM Sans',sans-serif;position:relative">
+        <button class="pick" onClick="{{pickHeader}}" style="padding:18px 20px 12px;display:flex;align-items:center;gap:10px">
+          <span style="font-family:Fraunces,Georgia,serif;font-size:22px;color:#3b2a1a">Bean &amp; Co.</span>
+          <span style="margin-left:auto;font-size:12px;color:#7a6a58">Cart (3)</span>
+          <sc-if value="{{pinHeader}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinHeaderN}}</span></sc-if>
+        </button>
+        <div style="padding:0 20px;display:flex;flex-direction:column;gap:12px;flex:1">
+          <div style="font-size:18px;font-weight:600;color:#3b2a1a">Checkout</div>
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#4a3a2a"><span>Flat white ×2</span><span>$9.00</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#4a3a2a"><span>Almond croissant</span><span>$4.50</span></div>
+          <div style="height:1px;background:#e8dfd3"></div>
+          <button class="pick" onClick="{{pickTotal}}" style="display:flex;justify-content:space-between;font-size:14px;color:#3b2a1a;padding:4px 0">
+            <span>Total</span><span>$13.50</span>
+            <sc-if value="{{pinTotal}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinTotalN}}</span></sc-if>
+          </button>
+        </div>
+        <div style="padding:14px 20px 26px;background:#fff;border-top:1px solid #efe7dc">
+          <button class="pick" onClick="{{pickButton}}" style="width:100%;background:#3b2a1a;color:#fff;text-align:center;border-radius:12px;padding:14px;font-size:15px;font-weight:600">
+            Pay $13.50
+            <sc-if value="{{pinButton}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinButtonN}}</span></sc-if>
+          </button>
+        </div>
+      </div>
+      <sc-if value="{{editing}}" hint-placeholder-val="{{false}}">
+        <div style="position:absolute;top:{{boxTop}}px;left:calc(50% + 196px);width:230px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);border:1px solid rgba(0,0,0,.08);padding:12px;display:flex;flex-direction:column;gap:8px">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#5046e5">{{editEl}}</span>
+          <label style="font-size:11.5px;color:#666" for="cmt">Note for Uno</label>
+          <input id="cmt" value="{{editText}}" style="font:inherit;font-size:13px;border:1px solid rgba(0,0,0,.15);border-radius:8px;padding:7px 9px">
+          <span style="display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn" style="color:#525252" onClick="{{cancelEdit}}">Cancel</button>
+            <button class="btn" style="background:#5046e5;color:#fff" onClick="{{saveEdit}}">Add</button>
+          </span>
+        </div>
+      </sc-if>
+      <sc-if value="{{sent}}" hint-placeholder-val="{{false}}">
+        <div style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#262626;color:#fff;font-size:12.5px;border-radius:999px;padding:8px 16px">Sent to chat with screenshots</div>
+      </sc-if>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { cm: true, list: [], editing: null, sent: false }; }
+  renderVals() {
+    var self = this, s = this.state;
+    var defs = {
+      header: { el: 'header.site-header', text: 'Logo is too small on phones', top: 70 },
+      total: { el: 'div.total-row', text: 'Make the total bold and bigger', top: 230 },
+      button: { el: 'button.checkout-button', text: 'Button should be full width and sticky', top: 560 }
+    };
+    var start = function (k) { return function () { if (!self.state.cm || self.state.sent) return; self.setState({ editing: k }); }; };
+    var nOf = function (k) { var i = s.list.indexOf(k); return i < 0 ? '' : String(i + 1); };
+    var e = s.editing ? defs[s.editing] : null;
+    return {
+      cm: s.cm, sent: s.sent, pageCls: s.cm && !s.sent ? 'cm' : '',
+      cmBtnCls: 'ib' + (s.cm ? ' on' : ''),
+      toggleCm: function () { self.setState({ cm: !s.cm, editing: null }); },
+      countLabel: s.list.length === 1 ? '1 note' : s.list.length + ' notes',
+      pickHeader: start('header'), pickTotal: start('total'), pickButton: start('button'),
+      pinHeader: !!nOf('header'), pinHeaderN: nOf('header'),
+      pinTotal: !!nOf('total'), pinTotalN: nOf('total'),
+      pinButton: !!nOf('button'), pinButtonN: nOf('button'),
+      editing: !!e, editEl: e ? e.el : '', editText: e ? e.text : '', boxTop: e ? e.top : 0,
+      cancelEdit: function () { self.setState({ editing: null }); },
+      saveEdit: function () { var l = s.list.indexOf(s.editing) >= 0 ? s.list : s.list.concat([s.editing]); self.setState({ list: l, editing: null }); },
+      send: function () { if (s.list.length) self.setState({ sent: true, editing: null }); },
+      comments: s.list.map(function (k, i) { return { n: i + 1, el: defs[k].el, text: defs[k].text }; })
+    };
+  }
+}
+</script>
+</body>
+</html>

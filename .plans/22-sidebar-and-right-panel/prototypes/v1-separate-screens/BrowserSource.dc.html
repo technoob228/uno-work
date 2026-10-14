@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Choose where the browser runs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.ib{all:unset;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;color:#525252;cursor:pointer}
+.ib.on{background:rgba(80,70,229,.1);color:#5046e5}
+.card{box-sizing:border-box;display:flex;gap:16px;align-items:flex-start;padding:20px;border:1px solid rgba(0,0,0,.09);border-radius:14px;background:#fff;text-decoration:none;color:#262626}
+.card:hover{border-color:rgba(80,70,229,.45);box-shadow:0 2px 10px rgba(80,70,229,.08);color:#262626}
+.card:focus-visible,.seg:focus-visible{outline:2px solid #5046e5;outline-offset:2px}
+.ci{display:inline-flex;width:44px;height:44px;border-radius:12px;align-items:center;justify-content:center;flex-shrink:0}
+.cn{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cd{font-size:13px;color:#555;line-height:1.45;margin-top:4px}
+.pts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.pt{font-size:11.5px;background:#f1f1f3;color:#404040;border-radius:999px;padding:2px 9px}
+.badge{font-size:10.5px;font-weight:600;padding:1px 8px;border-radius:999px}
+.seg{all:unset;font-size:12px;padding:5px 12px;border-radius:7px;cursor:pointer;color:#525252}
+.seg.on{background:#fff;color:#262626;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+</helmet>
+<div style="width:1280px;height:800px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden">
+  <section aria-label="Chat" style="width:500px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="height:52px;display:flex;align-items:center;gap:6px;padding:0 12px 0 20px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <span class="t" style="font-size:14px;font-weight:500">Fix checkout button on mobile</span>
+      <span class="ib on" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path></svg></span>
+    </div>
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">The checkout button is cut off on iPhone. Fix it and show me.</div>
+      <div style="font-size:13px;line-height:1.55;color:#333">Fixed. The dev server is running on localhost:5173.</div>
+    </div>
+    <div style="margin:0 20px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something…</div>
+  </section>
+  <aside aria-label="Right panel" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8">
+    <div style="height:52px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <a href="PanelLauncher.dc.html" style="font-size:12.5px;color:#525252;text-decoration:none">← All</a>
+      <span style="font-size:13px;font-weight:600">Browser</span>
+      <span style="flex:1"></span>
+      <div role="group" aria-label="App version (prototype)" style="display:flex;background:#ececef;border-radius:9px;padding:2px">
+        <button class="{{segDesk}}" onClick="{{setDesk}}">Desktop app</button>
+        <button class="{{segWeb}}" onClick="{{setWeb}}">Web</button>
+      </div>
+    </div>
+    <div style="flex:1;padding:36px 48px;display:flex;flex-direction:column;gap:14px;overflow:auto">
+      <div>
+        <div style="font-size:20px;font-weight:600;letter-spacing:-.01em">Where should the browser run?</div>
+        <div style="font-size:13px;color:#666;margin-top:4px">Uno remembers your choice for this project. You can switch from the browser’s toolbar.</div>
+      </div>
+
+      <a class="card" href="{{localHref}}">
+        <span class="ci" style="background:#e0e7ff;color:#4338ca"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg></span>
+        <span style="flex:1;min-width:0">
+          <span class="cn">On my computer <span class="badge" style="background:#e0e7ff;color:#3730a3">Best for design checks</span></span>
+          <span class="cd" style="display:block">{{localDesc}}</span>
+          <span class="pts"><span class="pt">Comment on any element</span><span class="pt">Your logins</span><span class="pt">Phone sizes</span><span class="pt">localhost works</span></span>
+        </span>
+      </a>
+
+      <a class="card" href="BrowserCloud.dc.html">
+        <span class="ci" style="background:#ccfbf1;color:#0f766e"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 8Z"></path></svg></span>
+        <span style="flex:1;min-width:0">
+          <span class="cn">On the agent’s cloud computer</span>
+          <span class="cd" style="display:block">The agent browses on its own computer, even when your laptop is closed. You watch live, leave hints, or take control when it gets stuck.</span>
+          <span class="pts"><span class="pt">Works 24/7</span><span class="pt">Watch live</span><span class="pt">Take control</span><span class="pt">Comment too</span></span>
+        </span>
+      </a>
+
+      <a class="card" href="ConnectChrome.dc.html">
+        <span class="ci" style="background:#fef3c7;color:#b45309"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"></path></svg></span>
+        <span style="flex:1;min-width:0">
+          <span class="cn">Connect the agent to my Chrome <span class="badge" style="background:#f1f1f3;color:#525252">Extension</span></span>
+          <span class="cd" style="display:block">The agent works in tabs of the Chrome you already use — with your accounts and cookies. Only the tabs you share.</span>
+          <span class="pts"><span class="pt">{{chromeStatus}}</span></span>
+        </span>
+      </a>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { web: false }; }
+  renderVals() {
+    var self = this, web = this.state.web;
+    return {
+      segDesk: 'seg' + (web ? '' : ' on'), segWeb: 'seg' + (web ? ' on' : ''),
+      setDesk: function () { self.setState({ web: false }); }, setWeb: function () { self.setState({ web: true }); },
+      localHref: web ? 'ConnectChrome.dc.html' : 'BrowserComment.dc.html',
+      localDesc: web
+        ? 'In the web version Uno opens the page in a new tab of your Chrome and keeps it linked to this chat. Needs the Uno extension (1 minute to install).'
+        : 'A real browser right here in the panel, on this computer. Good for checking a design: open localhost, switch to a phone size, point at what to fix.',
+      chromeStatus: web ? 'Not installed yet' : 'Not connected'
+    };
+  }
+}
+</script>
+</body>
+</html>

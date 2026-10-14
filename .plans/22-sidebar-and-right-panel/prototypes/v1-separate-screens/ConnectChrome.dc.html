@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connect the agent to Chrome</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.btn{all:unset;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
+.btn:focus-visible,.tg:focus-visible{outline:2px solid #5046e5;outline-offset:2px}
+.step{display:flex;gap:14px;padding:16px 18px;border-radius:12px;background:#fff;border:1px solid rgba(0,0,0,.08)}
+.num{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:600;flex-shrink:0}
+.sn{font-size:14px;font-weight:600}
+.sd{font-size:12.5px;color:#555;line-height:1.45;margin-top:3px}
+.tg{all:unset;width:34px;height:20px;border-radius:10px;position:relative;cursor:pointer;flex-shrink:0}
+.knob{position:absolute;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+</helmet>
+<div style="width:1280px;height:800px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden">
+  <section aria-label="Chat" style="width:440px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="height:52px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid rgba(0,0,0,.07)"><span class="t" style="font-size:14px;font-weight:500">Post the new menu to our Instagram</span></div>
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">Post the new menu to our Instagram. I’m logged in already.</div>
+      <div style="font-size:13px;line-height:1.55;color:#333">I can do it in your own Chrome, where you’re logged in. Connect it in the panel — I’ll only see the tab you share.</div>
+      <sc-if value="{{done}}" hint-placeholder-val="{{false}}">
+        <div style="font-size:13px;line-height:1.55;color:#333">Connected. I see 1 shared tab: instagram.com. Starting the post.</div>
+      </sc-if>
+    </div>
+    <div style="margin:0 20px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something…</div>
+  </section>
+  <aside aria-label="Connect Chrome" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8">
+    <div style="height:52px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <a href="BrowserSource.dc.html" style="font-size:12.5px;color:#525252;text-decoration:none">← Browser</a>
+      <span style="font-size:13px;font-weight:600">Your Chrome</span>
+      <span style="flex:1"></span>
+      <span style="{{statusStyle}}">{{statusLabel}}</span>
+    </div>
+    <div style="flex:1;padding:28px 44px;display:flex;flex-direction:column;gap:12px;overflow:auto">
+      <div>
+        <div style="font-size:20px;font-weight:600;letter-spacing:-.01em">Let Uno work in your Chrome</div>
+        <div style="font-size:13px;color:#666;margin-top:4px">Three steps, about a minute. You can disconnect any time from the extension or here.</div>
+      </div>
+
+      <div class="step">
+        <span class="num" style="{{n1}}">1</span>
+        <div style="flex:1">
+          <div class="sn">Install the Uno extension</div>
+          <div class="sd">Free, from the Chrome Web Store. Works in Chrome, Edge, Arc and Brave.</div>
+        </div>
+        <sc-if value="{{s1}}" hint-placeholder-val="{{true}}"><button class="btn" style="background:#5046e5;color:#fff" onClick="{{install}}">Add to Chrome</button></sc-if>
+        <sc-if value="{{d1}}" hint-placeholder-val="{{false}}"><span style="font-size:12.5px;color:#15803d;font-weight:600">Installed</span></sc-if>
+      </div>
+
+      <div class="step">
+        <span class="num" style="{{n2}}">2</span>
+        <div style="flex:1">
+          <div class="sn">Connect it to your Uno account</div>
+          <div class="sd">Click the Uno icon in Chrome’s toolbar and check the code matches.</div>
+          <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+            <div style="margin-top:10px;display:flex;align-items:center;gap:12px">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:20px;font-weight:600;letter-spacing:.12em;background:#f1f1f3;border-radius:8px;padding:6px 12px">UNO-4821</span>
+              <span style="font-size:12px;color:#666">Waiting for the extension…</span>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{s2}}" hint-placeholder-val="{{false}}"><button class="btn" style="background:#5046e5;color:#fff" onClick="{{pair}}">Codes match</button></sc-if>
+        <sc-if value="{{d2}}" hint-placeholder-val="{{false}}"><span style="font-size:12.5px;color:#15803d;font-weight:600">Connected</span></sc-if>
+      </div>
+
+      <div class="step" style="flex-direction:column;gap:12px">
+        <div style="display:flex;gap:14px">
+          <span class="num" style="{{n3}}">3</span>
+          <div style="flex:1">
+            <div class="sn">Choose what Uno can see</div>
+            <div class="sd">Uno sees only the tabs you share and the tabs it opens itself. Never your passwords or other tabs.</div>
+          </div>
+        </div>
+        <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
+          <div style="display:flex;flex-direction:column;gap:2px;padding-left:40px">
+            <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+                <span style="width:16px;height:16px;border-radius:4px;{{tb.fav}}"></span>
+                <span class="t">{{tb.title}}</span>
+                <span style="font-size:11.5px;color:#8a8a8a">{{tb.host}}</span>
+                <button class="tg" style="{{tb.trackStyle}}" onClick="{{tb.toggle}}" role="switch" aria-checked="{{tb.on}}" aria-label="Share {{tb.title}}"><span class="knob" style="{{tb.knobStyle}}"></span></button>
+              </div>
+            </sc-for>
+            <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" style="background:#262626;color:#fff" onClick="{{finish}}">Share {{sharedCount}} with Uno</button></div>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="display:flex;gap:18px;font-size:12px;color:#666;padding:4px 2px">
+        <span><b style="color:#262626">Uno can:</b> open tabs, click, type, scroll, take screenshots</span>
+        <span><b style="color:#262626">Uno can’t:</b> see other tabs, read saved passwords, run scripts</span>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { step: 1, shared: { ig: true } }; }
+  renderVals() {
+    var self = this, s = this.state, st = s.step;
+    var active = 'background:#5046e5;color:#fff', done = 'background:#dcfce7;color:#15803d', idle = 'background:#f1f1f3;color:#8a8a8a';
+    var list = [
+      { id: 'ig', title: 'Instagram', host: 'instagram.com', fav: 'background:#e1306c' },
+      { id: 'gm', title: 'Inbox (12)', host: 'mail.google.com', fav: 'background:#ea4335' },
+      { id: 'dr', title: 'Menu autumn.pdf', host: 'drive.google.com', fav: 'background:#1a73e8' },
+      { id: 'yt', title: 'Lo-fi beats', host: 'youtube.com', fav: 'background:#ff0000' }
+    ];
+    var count = list.filter(function (t) { return s.shared[t.id]; }).length;
+    return {
+      s1: st === 1, d1: st > 1, s2: st === 2, d2: st > 2, s3: st === 3, done: st === 4,
+      n1: st === 1 ? active : done, n2: st === 2 ? active : (st > 2 ? done : idle), n3: st === 3 ? active : (st > 3 ? done : idle),
+      install: function () { self.setState({ step: 2 }); },
+      pair: function () { self.setState({ step: 3 }); },
+      finish: function () { self.setState({ step: 4 }); },
+      sharedCount: count === 1 ? '1 tab' : count + ' tabs',
+      statusLabel: st === 4 ? 'Connected · 1 tab shared' : (st > 2 ? 'Connected' : 'Not connected'),
+      statusStyle: 'font-size:11.5px;font-weight:600;border-radius:999px;padding:3px 10px;' + (st > 2 ? 'background:#dcfce7;color:#15803d' : 'background:#f1f1f3;color:#525252'),
+      tabs: list.map(function (t) {
+        var on = !!s.shared[t.id];
+        return { title: t.title, host: t.host, fav: t.fav, on: on,
+          trackStyle: on ? 'background:#5046e5' : 'background:#d4d4d4',
+          knobStyle: on ? 'left:16px' : 'left:2px',
+          toggle: function () { var n = Object.assign({}, s.shared); n[t.id] = !on; self.setState({ shared: n }); } };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

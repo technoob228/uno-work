@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Right panel launcher</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.ib{all:unset;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;color:#525252;cursor:pointer}
+.ib:hover{background:rgba(0,0,0,.05)}
+.ib.on{background:rgba(80,70,229,.1);color:#5046e5}
+.ib:focus-visible,.tile:focus-visible,.tab:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+.tile{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:18px;border:1px solid rgba(0,0,0,.09);border-radius:14px;background:#fff;cursor:pointer;min-height:132px;text-decoration:none;color:#262626}
+.tile:hover{border-color:rgba(80,70,229,.45);box-shadow:0 2px 10px rgba(80,70,229,.08)}
+.ti{display:inline-flex;width:38px;height:38px;border-radius:10px;align-items:center;justify-content:center}
+.tn{font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.td{font-size:12.5px;color:#666;line-height:1.4}
+.kbd{margin-left:auto;font-size:10.5px;font-weight:500;color:#737373;border:1px solid rgba(0,0,0,.12);border-radius:4px;padding:0 5px}
+.tab{all:unset;display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:7px;font-size:12.5px;color:#525252;cursor:pointer}
+.tab.on{background:#fff;color:#262626;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+</style>
+</helmet>
+<div style="width:1280px;height:800px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden">
+  <section aria-label="Chat" style="width:500px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="height:52px;display:flex;align-items:center;gap:6px;padding:0 12px 0 20px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <span class="t" style="font-size:14px;font-weight:500">Fix checkout button on mobile</span>
+      <button class="ib" aria-label="Terminal"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m5 8 4 4-4 4M12 16h7"></path></svg></button>
+      <button class="{{panelBtnCls}}" onClick="{{togglePanel}}" aria-label="Toggle right panel (⌘J)" aria-pressed="{{panelOpen}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path></svg></button>
+    </div>
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">The checkout button is cut off on iPhone. Fix it and show me.</div>
+      <div style="font-size:13px;line-height:1.55;color:#333">Found it: the sticky footer overlaps the button below 400px. I changed the padding in <span class="mono" style="font-size:12px;background:#f1f1f3;padding:1px 5px;border-radius:4px">checkout.css</span> and started the dev server.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;border:1px solid rgba(0,0,0,.1);border-radius:8px;padding:5px 10px">checkout.css +4 −2</span>
+        <span style="font-size:12px;border:1px solid rgba(0,0,0,.1);border-radius:8px;padding:5px 10px">localhost:5173</span>
+      </div>
+    </div>
+    <div style="margin:0 20px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something…</div>
+  </section>
+  <sc-if value="{{panelOpen}}" hint-placeholder-val="{{true}}">
+  <aside aria-label="Right panel" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8">
+    <div style="height:52px;display:flex;align-items:center;gap:4px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="1">
+        <button class="{{tb.cls}}" onClick="{{tb.pick}}">{{tb.label}}</button>
+      </sc-for>
+      <button class="ib" onClick="{{showLauncher}}" aria-label="Open something in the panel"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+    </div>
+    <sc-if value="{{isLauncher}}" hint-placeholder-val="{{true}}">
+      <div style="flex:1;padding:40px 48px;display:flex;flex-direction:column;gap:22px;overflow:auto">
+        <div>
+          <div style="font-size:20px;font-weight:600;letter-spacing:-.01em">Open in this panel</div>
+          <div style="font-size:13px;color:#666;margin-top:4px">Everything stays next to the chat. Press a letter to open.</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:14px">
+          <a class="tile" href="BrowserSource.dc.html">
+            <span class="ti" style="background:#e0e7ff;color:#4338ca"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span>
+            <span class="tn">Browser<span class="kbd">B</span></span>
+            <span class="td">Your computer, the agent’s cloud computer, or your own Chrome</span>
+          </a>
+          <button class="tile" onClick="{{openFiles}}">
+            <span class="ti" style="background:#fef3c7;color:#b45309"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span>
+            <span class="tn">Files<span class="kbd">F</span></span>
+            <span class="td">Browse, preview and edit the project’s files</span>
+          </button>
+          <button class="tile" onClick="{{openTerminal}}">
+            <span class="ti" style="background:#262626;color:#fff"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m5 8 4 4-4 4M12 16h7"></path></svg></span>
+            <span class="tn">Terminal<span class="kbd">T</span></span>
+            <span class="td">A shell on the computer this chat runs on</span>
+          </button>
+          <button class="tile" onClick="{{openChanges}}">
+            <span class="ti" style="background:#dcfce7;color:#15803d"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>
+            <span class="tn">Changes<span class="kbd">D</span></span>
+            <span class="td">What the agent changed in this chat</span>
+          </button>
+          <button class="tile" onClick="{{openApps}}">
+            <span class="ti" style="background:#fce7f3;color:#be185d"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg></span>
+            <span class="tn">Apps<span class="kbd">A</span></span>
+            <span class="td">Apps installed on your Uno computer</span>
+          </button>
+          <button class="tile" onClick="{{openSites}}">
+            <span class="ti" style="background:#ccfbf1;color:#0f766e"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M7 6.5h.01M10 6.5h.01"></path></svg></span>
+            <span class="tn">Sites<span class="kbd">S</span></span>
+            <span class="td">Your sites on uno4.me, with the live preview</span>
+          </button>
+        </div>
+        <div style="font-size:12px;color:#737373">Recent: <a href="BrowserComment.dc.html">localhost:5173</a> · checkout.css · coffee-site.uno4.me</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{isFiles}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="width:220px;border-right:1px solid rgba(0,0,0,.07);padding:12px 8px;font-size:12.5px;display:flex;flex-direction:column;gap:2px">
+          <div style="padding:4px 8px;color:#737373">coffee-site</div>
+          <div style="padding:4px 8px 4px 18px">src/</div>
+          <div style="padding:4px 8px 4px 30px;background:rgba(0,0,0,.07);border-radius:6px">checkout.css</div>
+          <div style="padding:4px 8px 4px 30px">checkout.ts</div>
+          <div style="padding:4px 8px 4px 30px">menu.html</div>
+          <div style="padding:4px 8px 4px 18px">package.json</div>
+        </div>
+        <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#fff;color:#333">.checkout-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 400px) {
+  .checkout-button { width: 100%; }
+}</pre>
+      </div>
+    </sc-if>
+    <sc-if value="{{isTerminal}}" hint-placeholder-val="{{false}}">
+      <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#171717;color:#e5e5e5">~/coffee-site $ npm run dev
+
+  VITE v7.1.2  ready in 412 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://10.0.0.12:5173/
+~/coffee-site $ █</pre>
+    </sc-if>
+    <sc-if value="{{isChanges}}" hint-placeholder-val="{{false}}">
+      <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#fff;color:#333">checkout.css
+<span style="background:#fee2e2;display:block">-  padding: 12px 16px;</span><span style="background:#dcfce7;display:block">+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));</span>
+<span style="background:#dcfce7;display:block">+@media (max-width: 400px) {</span><span style="background:#dcfce7;display:block">+  .checkout-button { width: 100%; }</span><span style="background:#dcfce7;display:block">+}</span></pre>
+    </sc-if>
+    <sc-if value="{{isApps}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;padding:24px;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:12px;align-content:start">
+        <sc-for list="{{apps}}" as="ap" hint-placeholder-count="3">
+          <div style="background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center">
+            <span style="width:36px;height:36px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;font-weight:600;{{ap.style}}">{{ap.mono}}</span>
+            <span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:600">{{ap.name}}</span><span style="display:block;font-size:12px;color:#666">{{ap.desc}}</span></span>
+            <span style="font-size:12px;color:#5046e5;font-weight:500">Open</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{isSites}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:10px">
+        <sc-for list="{{sites}}" as="st" hint-placeholder-count="2">
+          <div style="background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:14px 16px;display:flex;gap:12px;align-items:center">
+            <span style="width:9px;height:9px;border-radius:50%;{{st.dot}}"></span>
+            <span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:600">{{st.host}}</span><span style="display:block;font-size:12px;color:#666">{{st.meta}}</span></span>
+            <span style="font-size:12px;color:#5046e5;font-weight:500">Preview</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </aside>
+  </sc-if>
+  <sc-if value="{{panelClosed}}" hint-placeholder-val="{{false}}">
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#8a8a8a;font-size:13px">Panel closed — press the panel button or ⌘J</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { open: true, tabs: [], active: 'launcher' }; }
+  renderVals() {
+    var self = this, s = this.state;
+    var names = { files: 'checkout.css', terminal: 'Terminal', changes: 'Changes', apps: 'Apps', sites: 'Sites' };
+    var openKind = function (k) { return function () { var t = s.tabs.indexOf(k) >= 0 ? s.tabs : s.tabs.concat([k]); self.setState({ tabs: t, active: k }); }; };
+    var tabs = s.tabs.map(function (k) { return { label: names[k], cls: 'tab' + (s.active === k ? ' on' : ''), pick: function () { self.setState({ active: k }); } }; });
+    if (s.active === 'launcher' || tabs.length === 0) tabs = tabs.concat([{ label: 'New tab', cls: 'tab on', pick: function () {} }]);
+    return {
+      panelOpen: s.open, panelClosed: !s.open,
+      panelBtnCls: 'ib' + (s.open ? ' on' : ''),
+      togglePanel: function () { self.setState({ open: !s.open }); },
+      tabs: tabs,
+      showLauncher: function () { self.setState({ active: 'launcher' }); },
+      isLauncher: s.active === 'launcher', isFiles: s.active === 'files', isTerminal: s.active === 'terminal',
+      isChanges: s.active === 'changes', isApps: s.active === 'apps', isSites: s.active === 'sites',
+      openFiles: openKind('files'), openTerminal: openKind('terminal'), openChanges: openKind('changes'), openApps: openKind('apps'), openSites: openKind('sites'),
+      apps: [
+        { name: 'Notetaker', desc: 'Meeting notes and tasks', mono: 'N', style: 'background:#fef3c7;color:#b45309' },
+        { name: 'Uno Tasks', desc: 'Tasks for you and the agent', mono: 'T', style: 'background:#e0e7ff;color:#4338ca' },
+        { name: 'n8n', desc: 'Automations', mono: 'n', style: 'background:#fce7f3;color:#be185d' }
+      ],
+      sites: [
+        { host: 'coffee-site.uno4.me', meta: 'Published 2h ago · from coffee-site', dot: 'background:#10b981' },
+        { host: 'sales.uno4.me', meta: 'Password protected · from sales-report', dot: 'background:#10b981' },
+        { host: 'draft-landing.uno4.me', meta: 'Not published yet', dot: 'background:#d4d4d4' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

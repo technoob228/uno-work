@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Classic sidebar, today</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.row{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;width:100%;min-height:28px;padding:4px 8px 4px 24px;border-radius:6px;font-size:12px;color:#262626;cursor:pointer}
+.row:hover{background:rgba(0,0,0,.04)}
+.row.sel{background:rgba(0,0,0,.07);font-weight:500}
+.row:focus-visible,.proj:focus-visible,.icon-btn:focus-visible,.foot-btn:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+.proj{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;width:100%;min-height:28px;padding:4px 8px;border-radius:6px;font-size:12px;font-weight:500;color:#262626;cursor:pointer}
+.proj:hover{background:rgba(0,0,0,.04)}
+.icon-btn{all:unset;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;color:#737373;cursor:pointer}
+.icon-btn:hover{background:rgba(0,0,0,.05)}
+.foot-btn{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;min-height:28px;padding:4px 8px;border-radius:6px;font-size:12px;color:#404040;cursor:pointer}
+.foot-btn:hover{background:rgba(0,0,0,.05)}
+.sec{display:flex;align-items:center;gap:4px;padding:4px 6px 4px 8px;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8a8a8a}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{font-size:10.5px;color:#8a8a8a;flex-shrink:0}
+.chip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:4px;font-size:9.5px;font-weight:600;flex-shrink:0}
+.stack{display:inline-flex}
+.stack .chip{margin-left:-4px;box-shadow:0 0 0 1.5px #f7f7f8}
+.pill{font-size:10px;padding:1px 6px;border-radius:999px;flex-shrink:0}
+</style>
+</helmet>
+<div style="width:760px;height:720px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#ffffff;overflow:hidden">
+  <nav aria-label="Sidebar" style="width:272px;flex-shrink:0;display:flex;flex-direction:column;background:#f7f7f8;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="display:flex;align-items:center;gap:6px;padding:14px 10px 6px 14px">
+      <span style="font-weight:600;font-size:14px;flex:1">Uno Work</span>
+      <button class="icon-btn" aria-label="Hide sidebar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg></button>
+    </div>
+    <div style="padding:2px 8px">
+      <button class="foot-btn" style="width:100%;color:#8a8a8a"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span class="t">Search</span><span style="font-size:10px;border:1px solid rgba(0,0,0,.12);border-radius:4px;padding:0 4px">⌘K</span></button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:4px 8px 8px;display:flex;flex-direction:column;gap:1px">
+      <div class="sec"><span class="t">Assistant</span><button class="icon-btn" aria-label="New assistant thread"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>
+      <sc-for list="{{assistant}}" as="t" hint-placeholder-count="2">
+        <button class="{{t.cls}}" style="padding-left:8px" onClick="{{t.pick}}">
+          <span class="t">{{t.title}}</span>
+          <span class="time">{{t.ago}}</span>
+        </button>
+      </sc-for>
+      <div class="sec" style="margin-top:10px">
+        <span class="t">Projects</span>
+        <button class="icon-btn" aria-label="Group by machine"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg></button>
+        <button class="icon-btn" aria-label="Sort projects"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M6 12h12M10 18h4"></path></svg></button>
+        <button class="icon-btn" aria-label="Add project"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+      </div>
+      <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+        <button class="proj" onClick="{{p.toggle}}" aria-expanded="{{p.open}}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8a8a8a" stroke-width="2.4" stroke-linecap="round" style="{{p.chevStyle}}" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8a8a8a" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg>
+          <span class="t">{{p.name}}</span>
+          <span class="stack" style="padding-left:4px">
+            <sc-for list="{{p.stack}}" as="c" hint-placeholder-count="2"><span class="chip" style="{{c.style}}" role="img" aria-label="{{c.name}}">{{c.mono}}</span></sc-for>
+          </span>
+        </button>
+        <sc-if value="{{p.open}}" hint-placeholder-val="{{true}}">
+          <sc-for list="{{p.threads}}" as="t" hint-placeholder-count="3">
+            <button class="{{t.cls}}" onClick="{{t.pick}}">
+              <span class="chip" style="{{t.chipStyle}}" role="img" aria-label="{{t.machine}}">{{t.mono}}</span>
+              <span class="t">{{t.title}}</span>
+              <sc-if value="{{t.hasPill}}" hint-placeholder-val="{{false}}"><span class="pill" style="{{t.pillStyle}}">{{t.pill}}</span></sc-if>
+              <span class="time">{{t.ago}}</span>
+            </button>
+          </sc-for>
+          <sc-if value="{{p.more}}" hint-placeholder-val="{{false}}">
+            <button class="row" style="color:#8a8a8a;font-size:11px;min-height:24px">Show more</button>
+          </sc-if>
+        </sc-if>
+      </sc-for>
+    </div>
+    <div style="border-top:1px solid rgba(0,0,0,.07);padding:8px;display:flex;flex-direction:column;gap:2px">
+      <div style="display:flex;align-items:center;gap:4px">
+        <button class="foot-btn" style="flex:1"><span class="chip" style="background:#dbeafe;color:#1d4ed8" aria-hidden="true">M</span><span class="t">MacBook</span><span style="font-size:10px;color:#8a8a8a">+2</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"></path></svg></button>
+        <button class="icon-btn" aria-label="Add machine"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+      </div>
+      <button class="foot-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="9"></circle></svg><span>Settings</span></button>
+    </div>
+  </nav>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="height:48px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid rgba(0,0,0,.07);font-size:13.5px;font-weight:500"><span class="t">{{selTitle}}</span></div>
+    <div style="flex:1;padding:28px 32px;display:flex;flex-direction:column;gap:14px">
+      <div style="align-self:flex-end;max-width:70%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">{{selTitle}}</div>
+      <div style="height:10px;width:82%;background:#efeff1;border-radius:5px"></div>
+      <div style="height:10px;width:64%;background:#efeff1;border-radius:5px"></div>
+    </div>
+    <div style="margin:0 24px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something…</div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":720}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { sel: 't1', closed: {} }; }
+  renderVals() {
+    var self = this;
+    var M = { mac: { n: 'MacBook', m: 'M', bg: '#dbeafe', fg: '#1d4ed8' }, box: { n: 'Cloud computer', m: 'C', bg: '#ccfbf1', fg: '#0f766e' }, pc: { n: 'Office PC', m: 'O', bg: '#ffedd5', fg: '#c2410c' } };
+    var cs = function (k) { return 'background:' + M[k].bg + ';color:' + M[k].fg; };
+    var selTitle = '';
+    var mk = function (t, extraPad) {
+      if (self.state.sel === t.id) selTitle = t.title;
+      var pills = { working: ['Working', 'background:#dbeafe;color:#1d4ed8'], unread: ['Completed', 'background:#dcfce7;color:#15803d'], needs: ['Pending approval', 'background:#fef3c7;color:#b45309'] };
+      var p = pills[t.s];
+      return {
+        title: t.title, ago: t.ago, machine: t.m ? M[t.m].n : '', mono: t.m ? M[t.m].m : '',
+        chipStyle: t.m ? cs(t.m) : '', hasPill: !!p, pill: p ? p[0] : '', pillStyle: p ? p[1] : '',
+        cls: 'row' + (self.state.sel === t.id ? ' sel' : ''),
+        pick: function () { self.setState({ sel: t.id }); }
+      };
+    };
+    var data = [
+      { id: 'coffee', name: 'coffee-site', stack: ['box', 'mac'], threads: [
+        { id: 't1', title: 'Fix checkout button on mobile', m: 'box', s: 'working', ago: '1m' },
+        { id: 't4', title: 'Add menu page with prices', m: 'box', s: 'read', ago: '1h' },
+        { id: 't7', title: 'Hero image ideas', m: 'mac', s: 'read', ago: '2d' } ], more: true },
+      { id: 'sales', name: 'sales-report', stack: ['box', 'pc'], threads: [
+        { id: 't2', title: 'Weekly sales summary for Sept', m: 'box', s: 'unread', ago: '4m' },
+        { id: 't5', title: 'Clean up CSV duplicates', m: 'pc', s: 'read', ago: '3h' } ], more: false },
+      { id: 'bot', name: 'telegram-bot', stack: ['mac'], threads: [
+        { id: 't3', title: 'Run npm install?', m: 'mac', s: 'needs', ago: '12m' },
+        { id: 't6', title: 'Reminder every day at 9am', m: 'mac', s: 'read', ago: 'Tue' } ], more: true }
+    ];
+    var assistant = [ { id: 'a1', title: 'Morning brief', ago: '8h' }, { id: 'a2', title: 'Plan my week', ago: 'Mon' } ].map(function (t) { return mk(t); });
+    var projects = data.map(function (p) {
+        var open = !self.state.closed[p.id];
+        return {
+          name: p.name, open: open, more: p.more,
+          chevStyle: open ? 'transform:rotate(90deg);flex-shrink:0' : 'flex-shrink:0',
+          stack: p.stack.map(function (k) { return { name: M[k].n, mono: M[k].m, style: cs(k) }; }),
+          toggle: function () { var c = Object.assign({}, self.state.closed); c[p.id] = open; self.setState({ closed: c }); },
+          threads: p.threads.map(function (t) { return mk(t); })
+        };
+      });
+    return { selTitle: selTitle || 'Fix checkout button on mobile', assistant: assistant, projects: projects };
+  }
+}
+</script>
+</body>
+</html>

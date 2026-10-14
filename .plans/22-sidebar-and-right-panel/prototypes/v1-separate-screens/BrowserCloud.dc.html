@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent cloud browser live view</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.ib{all:unset;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:#525252;cursor:pointer;flex-shrink:0}
+.ib:hover{background:rgba(0,0,0,.05)}
+.btn{all:unset;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0}
+.btn:focus-visible,.ib:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.live{width:7px;height:7px;border-radius:50%;background:#ef4444;animation:pulse 1.4s ease-in-out infinite}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step{display:flex;gap:8px;font-size:12px;color:#525252;align-items:center}
+</style>
+</helmet>
+<div style="width:1280px;height:800px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden">
+  <section aria-label="Chat" style="width:440px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="height:52px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid rgba(0,0,0,.07)"><span class="t" style="font-size:14px;font-weight:500">Order 20 kg of beans from the supplier</span></div>
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:14px;overflow:auto">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">Order 20 kg of Ethiopia Yirgacheffe from greenbeans.example, same as last month.</div>
+      <div style="font-size:13px;line-height:1.55;color:#333">Opening the supplier’s site on my cloud computer. You can watch in the panel.</div>
+      <sc-if value="{{needsHelp}}" hint-placeholder-val="{{true}}">
+        <div style="border:1px solid #fcd34d;background:#fffbeb;border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:8px">
+          <span style="font-weight:600;color:#92400e">Uno needs your help</span>
+          <span style="color:#78350f">The site asks for a code from your phone. Take control, enter it, then hand back.</span>
+          <button class="btn" style="background:#262626;color:#fff;align-self:flex-start" onClick="{{take}}">Take control</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{handed}}" hint-placeholder-val="{{false}}">
+        <div style="font-size:13px;line-height:1.55;color:#333">Thanks — I’m back in. Adding 20 kg to the cart.</div>
+      </sc-if>
+    </div>
+    <div style="margin:0 20px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Tell Uno something while it works…</div>
+  </section>
+  <aside aria-label="Cloud browser" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8">
+    <div style="height:52px;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <div style="flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;padding:0 10px;font-size:12.5px">
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;background:#ccfbf1;color:#115e59;border-radius:5px;padding:1px 7px;flex-shrink:0">Agent’s cloud computer ▾</span>
+        <span class="t">greenbeans.example/login</span>
+      </div>
+      <button class="ib" aria-label="Comment mode"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"></path></svg></button>
+    </div>
+    <div style="{{barStyle}}">
+      <sc-if value="{{watching}}" hint-placeholder-val="{{true}}">
+        <span class="live" aria-hidden="true"></span>
+        <span style="flex:1"><b>Live</b> · Uno is browsing. You’re watching — your clicks won’t reach the page.</span>
+        <button class="btn" style="background:#262626;color:#fff" onClick="{{take}}">Take control</button>
+      </sc-if>
+      <sc-if value="{{control}}" hint-placeholder-val="{{false}}">
+        <span style="flex:1"><b>You’re in control.</b> Uno is paused and waiting.</span>
+        <button class="btn" style="background:#0f766e;color:#fff" onClick="{{handBack}}">Hand back to Uno</button>
+      </sc-if>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;padding:18px;gap:12px;min-height:0">
+      <div style="{{viewportStyle}}">
+        <div style="height:46px;display:flex;align-items:center;padding:0 22px;border-bottom:1px solid #eee;font-weight:600;color:#14532d">greenbeans<span style="color:#65a30d">.</span></div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:center">
+          <div style="width:320px;display:flex;flex-direction:column;gap:12px;position:relative">
+            <div style="font-size:18px;font-weight:600">Confirm it’s you</div>
+            <div style="font-size:13px;color:#555">We sent a 6-digit code to •••• 4417.</div>
+            <div style="display:flex;gap:8px">
+              <sc-for list="{{digits}}" as="d" hint-placeholder-count="6"><span style="width:40px;height:46px;border:1px solid #d4d4d4;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;background:#fff">{{d.v}}</span></sc-for>
+            </div>
+            <span style="background:#14532d;color:#fff;border-radius:8px;padding:11px;text-align:center;font-size:14px;font-weight:600">Verify</span>
+            <sc-if value="{{watching}}" hint-placeholder-val="{{true}}">
+              <span style="position:absolute;left:150px;top:96px;display:flex;align-items:flex-start;gap:4px" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="#0f766e" stroke="#fff" stroke-width="1.5"><path d="M4 3l7 18 2.5-7.5L21 11Z"></path></svg>
+                <span style="background:#0f766e;color:#fff;font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 6px;margin-top:12px">Uno</span>
+              </span>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#8a8a8a">What Uno did</div>
+        <div class="step"><span style="color:#10b981">✓</span><span class="t">Opened greenbeans.example</span><span>14:02</span></div>
+        <div class="step"><span style="color:#10b981">✓</span><span class="t">Signed in with saved login</span><span>14:02</span></div>
+        <div class="step"><span style="color:#d97706">●</span><span class="t">{{lastStep}}</span><span>14:03</span></div>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { mode: 'watch', handed: false }; }
+  renderVals() {
+    var self = this, s = this.state, ctrl = s.mode === 'control';
+    var base = 'display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12.5px;border-bottom:1px solid ';
+    return {
+      watching: !ctrl, control: ctrl, handed: s.handed, needsHelp: !ctrl && !s.handed,
+      barStyle: base + (ctrl ? 'rgba(15,118,110,.2);background:#f0fdfa;color:#115e59' : 'rgba(0,0,0,.07);background:#fff;color:#404040'),
+      viewportStyle: 'flex:1;min-height:0;background:#fff;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;' + (ctrl ? 'box-shadow:0 0 0 3px #14b8a6' : 'box-shadow:0 0 0 1px rgba(0,0,0,.08)'),
+      digits: (ctrl ? ['4', '8', '1', '', '', ''] : ['', '', '', '', '', '']).map(function (v) { return { v: v }; }),
+      lastStep: ctrl ? 'Paused — you have control' : (s.handed ? 'Adding 20 kg to cart' : 'Waiting for a phone code — asked you for help'),
+      take: function () { self.setState({ mode: 'control' }); },
+      handBack: function () { self.setState({ mode: 'watch', handed: true }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

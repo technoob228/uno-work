@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox sidebar, flat list</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+.row{all:unset;box-sizing:border-box;display:flex;align-items:flex-start;gap:9px;width:100%;padding:7px 9px;border-radius:8px;color:#262626;cursor:pointer}
+.row:hover{background:rgba(0,0,0,.04)}
+.row.sel{background:rgba(0,0,0,.07)}
+.row:focus-visible,.icon-btn:focus-visible,.foot-btn:focus-visible,.opt:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+.icon-btn{all:unset;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:#525252;cursor:pointer}
+.icon-btn:hover{background:rgba(0,0,0,.05)}
+.foot-btn{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;min-height:32px;padding:6px 8px;border-radius:7px;font-size:12.5px;color:#404040;cursor:pointer}
+.foot-btn:hover{background:rgba(0,0,0,.05)}
+.opt{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.opt:hover{background:rgba(0,0,0,.05)}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title{font-size:13px;line-height:18px}
+.unreadT{font-weight:600}
+.meta{display:flex;align-items:center;gap:5px;font-size:11.5px;color:#737373;margin-top:1px}
+.time{font-size:11.5px;color:#737373;flex-shrink:0;line-height:18px}
+.chip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:4px;font-size:9.5px;font-weight:600;flex-shrink:0}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:6px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.working{background:#3b82f6;animation:pulse 1.4s ease-in-out infinite}
+.unread{background:#5046e5}
+.needs{background:#d97706}
+.none{background:transparent}
+.tag{font-size:10.5px;font-weight:500;padding:0 6px;border-radius:999px;line-height:16px}
+</style>
+</helmet>
+<div style="width:760px;height:720px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#ffffff;overflow:hidden">
+  <nav aria-label="Sidebar" style="width:280px;flex-shrink:0;display:flex;flex-direction:column;background:#f7f7f8;border-right:1px solid rgba(0,0,0,.08);position:relative">
+    <div style="display:flex;align-items:center;gap:6px;padding:14px 10px 8px 14px">
+      <span style="font-weight:600;font-size:15px;letter-spacing:-.01em;flex:1">Uno Work</span>
+      <button class="icon-btn" aria-label="Search (⌘K)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+      <button class="icon-btn" aria-label="New thread (⌘N)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></button>
+    </div>
+    <div style="padding:0 8px 6px">
+      <button class="{{assistantCls}}" style="align-items:center" onClick="{{pickAssistant}}">
+        <span style="display:inline-flex;width:18px;height:18px;border-radius:5px;background:#5046e5;color:#fff;align-items:center;justify-content:center;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"></path></svg></span>
+        <span class="t title">Assistant</span>
+        <span class="time">8h</span>
+      </button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;padding:4px 10px 6px 12px">
+      <button class="foot-btn" style="padding:4px 8px;font-weight:500" onClick="{{toggleFilter}}" aria-expanded="{{filterOpen}}" aria-haspopup="listbox">
+        <span>{{filterLabel}}</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+      </button>
+      <span style="flex:1"></span>
+      <span style="font-size:11.5px;color:#737373">{{countLabel}}</span>
+    </div>
+    <sc-if value="{{filterOpen}}" hint-placeholder-val="{{false}}">
+      <div role="listbox" aria-label="Filter by project" style="position:absolute;top:128px;left:14px;width:220px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px;z-index:5">
+        <sc-for list="{{filterOpts}}" as="o" hint-placeholder-count="4">
+          <button class="opt" role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}"><span class="t">{{o.label}}</span><span style="font-size:11px;color:#737373">{{o.count}}</span></button>
+        </sc-for>
+      </div>
+    </sc-if>
+    <div style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:1px">
+      <sc-for list="{{threads}}" as="t" hint-placeholder-count="7">
+        <button class="{{t.cls}}" onClick="{{t.pick}}">
+          <span class="{{t.dotCls}}" aria-label="{{t.statusLabel}}"></span>
+          <span style="flex:1;min-width:0">
+            <span style="display:flex;gap:8px"><span class="{{t.titleCls}}">{{t.title}}</span><span class="time">{{t.ago}}</span></span>
+            <span class="meta">
+              <sc-if value="{{t.hasTag}}" hint-placeholder-val="{{false}}"><span class="tag" style="{{t.tagStyle}}">{{t.tag}}</span></sc-if>
+              <span class="t">{{t.project}}</span>
+              <sc-if value="{{showChips}}" hint-placeholder-val="{{false}}"><span class="chip" style="{{t.chipStyle}}" role="img" aria-label="{{t.machine}}">{{t.mono}}</span></sc-if>
+            </span>
+          </span>
+        </button>
+      </sc-for>
+      <button class="row" style="justify-content:center;font-size:12px;color:#737373;padding:8px">Show older</button>
+    </div>
+    <div style="border-top:1px solid rgba(0,0,0,.07);padding:8px;display:flex;align-items:center;gap:4px">
+      <button class="foot-btn" style="flex:1" aria-label="Machine: {{machineLabel}}">
+        <span class="chip" style="{{footChip}}" aria-hidden="true">{{footMono}}</span>
+        <span class="t">{{machineLabel}}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"></path></svg>
+      </button>
+      <button class="icon-btn" aria-label="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="9"></circle></svg></button>
+    </div>
+  </nav>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="height:48px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid rgba(0,0,0,.07);font-size:13.5px;font-weight:500;gap:8px">
+      <span class="t">{{selTitle}}</span>
+      <span style="font-size:12px;color:#737373">{{selProject}}</span>
+    </div>
+    <div style="flex:1;padding:28px 32px;display:flex;flex-direction:column;gap:14px">
+      <div style="align-self:flex-end;max-width:70%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">{{selTitle}}</div>
+      <div style="height:10px;width:82%;background:#efeff1;border-radius:5px"></div>
+      <div style="height:10px;width:64%;background:#efeff1;border-radius:5px"></div>
+      <div style="height:10px;width:74%;background:#efeff1;border-radius:5px"></div>
+    </div>
+    <div style="margin:0 24px 20px;border:1px solid rgba(0,0,0,.1);border-radius:14px;padding:14px 16px;font-size:13px;color:#8a8a8a">Ask Uno to do something in {{composerProject}}…</div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"machines":{"editor":"enum","options":["1 машина","3 машины"],"default":"3 машины"},"$preview":{"width":760,"height":720}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { sel: 't1', filter: 'all', filterOpen: false, seen: {} }; }
+  renderVals() {
+    var self = this;
+    var multi = (this.props.machines ?? '3 машины') !== '1 машина';
+    var M = { mac: { n: 'MacBook', m: 'M', bg: '#dbeafe', fg: '#1d4ed8' }, box: { n: 'Cloud computer', m: 'C', bg: '#ccfbf1', fg: '#0f766e' }, pc: { n: 'Office PC', m: 'O', bg: '#ffedd5', fg: '#c2410c' } };
+    var all = [
+      { id: 't1', title: 'Fix checkout button on mobile', p: 'coffee-site', m: 'box', s: 'working', ago: '1m' },
+      { id: 't2', title: 'Weekly sales summary for Sept', p: 'sales-report', m: 'box', s: 'unread', ago: '4m' },
+      { id: 't3', title: 'Run npm install?', p: 'telegram-bot', m: 'mac', s: 'needs', ago: '12m' },
+      { id: 't4', title: 'Add menu page with prices', p: 'coffee-site', m: 'box', s: 'read', ago: '1h' },
+      { id: 't5', title: 'Clean up CSV duplicates', p: 'sales-report', m: 'pc', s: 'read', ago: '3h' },
+      { id: 't6', title: 'Reminder every day at 9am', p: 'telegram-bot', m: 'mac', s: 'read', ago: 'Tue' },
+      { id: 't7', title: 'Hero image ideas', p: 'coffee-site', m: 'mac', s: 'read', ago: '2d' },
+      { id: 't8', title: 'Q3 chart for investors', p: 'sales-report', m: 'box', s: 'read', ago: '5d' }
+    ];
+    var labels = { working: 'Working', unread: 'New reply', needs: 'Needs your approval', read: 'Read' };
+    var tags = { working: ['Working', 'background:#dbeafe;color:#1d4ed8'], needs: ['Needs you', 'background:#fef3c7;color:#92400e'] };
+    var f = this.state.filter;
+    var shown = all.filter(function (t) { return f === 'all' || t.p === f; });
+    var selTitle = 'Assistant', selProject = '';
+    var threads = shown.map(function (t) {
+      var s = (t.s === 'unread' && self.state.seen[t.id]) ? 'read' : t.s;
+      var mm = multi ? M[t.m] : M.box;
+      var on = self.state.sel === t.id;
+      if (on) { selTitle = t.title; selProject = t.p + (multi ? ' · ' + mm.n : ''); }
+      var tg = tags[s];
+      return {
+        title: t.title, project: t.p, ago: t.ago, machine: mm.n, mono: mm.m,
+        chipStyle: 'background:' + mm.bg + ';color:' + mm.fg,
+        cls: 'row' + (on ? ' sel' : ''), dotCls: 'dot ' + (s === 'read' ? 'none' : s),
+        titleCls: 't title' + (s === 'unread' ? ' unreadT' : ''), statusLabel: labels[s],
+        hasTag: !!tg, tag: tg ? tg[0] : '', tagStyle: tg ? tg[1] : '',
+        pick: function () { var seen = Object.assign({}, self.state.seen); seen[t.id] = true; self.setState({ sel: t.id, seen: seen }); }
+      };
+    });
+    var projects = ['all', 'coffee-site', 'sales-report', 'telegram-bot'];
+    return {
+      threads: threads, showChips: multi, selTitle: selTitle, selProject: selProject,
+      composerProject: f === 'all' ? (selProject ? selProject.split(' · ')[0] : 'a project') : f,
+      filterOpen: this.state.filterOpen,
+      filterLabel: f === 'all' ? 'All projects' : f,
+      countLabel: shown.length + ' threads',
+      toggleFilter: function () { self.setState({ filterOpen: !self.state.filterOpen }); },
+      filterOpts: projects.map(function (p) {
+        return { label: p === 'all' ? 'All projects' : p, on: p === f, count: p === 'all' ? all.length : all.filter(function (t) { return t.p === p; }).length,
+          pick: function () { self.setState({ filter: p, filterOpen: false }); } };
+      }),
+      assistantCls: 'row' + (this.state.sel === 'assistant' ? ' sel' : ''),
+      pickAssistant: function () { self.setState({ sel: 'assistant' }); },
+      machineLabel: multi ? 'All machines (3)' : 'Cloud computer',
+      footMono: multi ? '3' : 'C',
+      footChip: multi ? 'background:#e5e5e5;color:#404040' : 'background:#ccfbf1;color:#0f766e'
+    };
+  }
+}
+</script>
+</body>
+</html>

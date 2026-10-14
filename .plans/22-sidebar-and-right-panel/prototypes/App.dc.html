@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Uno Work — new right panel</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;family=Fraunces:opsz,wght@9..144,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5046e5}a:hover{color:#3b32c4}
+button{font-family:inherit}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* sidebar */
+.row{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-height:30px;padding:5px 8px 5px 26px;border-radius:7px;font-size:13px;color:#262626;cursor:pointer}
+.row:hover{background:rgba(0,0,0,.04)}
+.row.sel{background:rgba(0,0,0,.07);font-weight:500}
+.row2{all:unset;box-sizing:border-box;display:flex;align-items:flex-start;gap:9px;width:100%;padding:7px 9px;border-radius:8px;color:#262626;cursor:pointer}
+.row2:hover{background:rgba(0,0,0,.04)}
+.row2.sel{background:rgba(0,0,0,.07)}
+.proj{display:flex;align-items:center;gap:6px;min-height:30px;padding:5px 8px;border-radius:7px;font-size:13px;font-weight:600}
+.time{font-size:11.5px;color:#737373;flex-shrink:0}
+.chip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;font-size:10px;font-weight:600;flex-shrink:0}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.working{background:#3b82f6;animation:pulse 1.4s ease-in-out infinite}
+.unread{background:#5046e5}
+.needs{background:#d97706}
+.none{background:transparent}
+/* buttons */
+.ib{all:unset;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:#525252;cursor:pointer;flex-shrink:0;position:relative}
+.ib:hover{background:rgba(0,0,0,.05);color:#262626}
+.ib.on{background:rgba(80,70,229,.12);color:#5046e5}
+.ib.solid{background:#5046e5;color:#fff}
+.hb{all:unset;display:inline-flex;align-items:center;justify-content:center;height:24px;min-width:24px;border-radius:6px;border:1px solid rgba(0,0,0,.12);color:#6b6b6b;cursor:pointer;flex-shrink:0;box-sizing:border-box;padding:0 4px;gap:5px;font-size:11.5px}
+.hb:hover{background:rgba(0,0,0,.04);color:#262626}
+.hb.on{border-color:rgba(80,70,229,.4);background:rgba(80,70,229,.12);color:#5046e5}
+.btn{all:unset;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0}
+.ib:focus-visible,.hb:focus-visible,.btn:focus-visible,.row:focus-visible,.row2:focus-visible,.tab:focus-visible,.tile:focus-visible,.opt:focus-visible,.pick:focus-visible,.src:focus-visible{outline:2px solid #5046e5;outline-offset:1px}
+/* panel */
+.tab{all:unset;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 9px;border-radius:7px;font-size:12px;color:#6b6b6b;cursor:pointer;flex-shrink:0}
+.tab:hover{background:rgba(0,0,0,.04)}
+.tab.on{background:#fff;color:#262626;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.x{display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center;border-radius:4px;opacity:.55}
+.tile{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid rgba(0,0,0,.09);border-radius:12px;background:#fff;cursor:pointer;min-height:118px;color:#262626}
+.tile:hover{border-color:rgba(80,70,229,.45);box-shadow:0 2px 10px rgba(80,70,229,.08)}
+.ti{display:inline-flex;width:34px;height:34px;border-radius:9px;align-items:center;justify-content:center}
+.tn{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.td{font-size:12px;color:#666;line-height:1.4}
+.kbd{margin-left:auto;font-size:10.5px;font-weight:500;color:#737373;border:1px solid rgba(0,0,0,.12);border-radius:4px;padding:0 5px}
+/* browser */
+.src{all:unset;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;flex-shrink:0}
+.opt{all:unset;box-sizing:border-box;display:flex;align-items:flex-start;gap:10px;width:100%;padding:8px 10px;border-radius:8px;cursor:pointer}
+.opt:hover{background:rgba(0,0,0,.04)}
+.oi{display:inline-flex;width:26px;height:26px;border-radius:7px;align-items:center;justify-content:center;flex-shrink:0}
+.pick{all:unset;display:block;box-sizing:border-box;position:relative;cursor:default;border-radius:6px}
+.cm .pick{cursor:crosshair}
+.cm .pick:hover{outline:2px solid #5046e5;outline-offset:2px;background:rgba(80,70,229,.04)}
+.pin{position:absolute;top:-10px;right:-10px;width:20px;height:20px;border-radius:50%;background:#5046e5;color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff}
+.live{width:7px;height:7px;border-radius:50%;background:#ef4444;animation:pulse 1.4s ease-in-out infinite;flex-shrink:0}
+.num{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;flex-shrink:0}
+.tg{all:unset;width:30px;height:18px;border-radius:9px;position:relative;cursor:pointer;flex-shrink:0}
+.knob{position:absolute;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;display:flex;font-family:'DM Sans',-apple-system,'Segoe UI',system-ui,sans-serif;color:#262626;background:#fff;overflow:hidden;position:relative">
+
+  <!-- ============ SIDEBAR ============ -->
+  <nav aria-label="Sidebar" style="width:264px;flex-shrink:0;display:flex;flex-direction:column;background:#f7f7f8;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="display:flex;align-items:center;gap:4px;padding:14px 10px 8px 14px">
+      <span style="font-weight:600;font-size:15px;letter-spacing:-.01em;flex:1">Uno Work</span>
+      <button class="ib" aria-label="Search (⌘K)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+      <button class="ib" aria-label="New thread (⌘N)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></button>
+    </div>
+    <div style="padding:2px 8px 6px">
+      <button class="row" style="padding-left:8px">
+        <span style="display:inline-flex;width:18px;height:18px;border-radius:5px;background:#5046e5;color:#fff;align-items:center;justify-content:center;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"></path></svg></span>
+        <span class="t">Assistant</span>
+        <span class="dot unread" aria-label="New reply"></span>
+      </button>
+    </div>
+    <sc-if value="{{sbClassic}}" hint-placeholder-val="{{true}}">
+      <div style="padding:6px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#737373">Projects</div>
+      <div style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:1px">
+        <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+          <div class="proj"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#737373" stroke-width="2.4" stroke-linecap="round" style="transform:rotate(90deg)" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg><span class="t">{{p.name}}</span></div>
+          <sc-for list="{{p.threads}}" as="t" hint-placeholder-count="2">
+            <button class="{{t.cls}}" onClick="{{t.pick}}">
+              <span class="{{t.dotCls}}" aria-label="{{t.statusLabel}}"></span>
+              <span class="t">{{t.title}}</span>
+              <span class="chip" style="{{t.chipStyle}}" role="img" aria-label="{{t.machine}}">{{t.mono}}</span>
+              <span class="time">{{t.ago}}</span>
+            </button>
+          </sc-for>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{sbInbox}}" hint-placeholder-val="{{false}}">
+      <div style="display:flex;align-items:center;padding:4px 12px 6px 14px;font-size:12.5px;font-weight:500;gap:6px"><span>All projects</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg><span style="flex:1"></span><span style="font-size:11.5px;color:#737373">7 threads</span></div>
+      <div style="flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:1px">
+        <sc-for list="{{flat}}" as="t" hint-placeholder-count="7">
+          <button class="{{t.cls2}}" onClick="{{t.pick}}">
+            <span class="{{t.dotCls}}" style="margin-top:6px" aria-label="{{t.statusLabel}}"></span>
+            <span style="flex:1;min-width:0">
+              <span style="display:flex;gap:8px"><span class="t" style="font-size:13px;line-height:18px">{{t.title}}</span><span class="time" style="line-height:18px">{{t.ago}}</span></span>
+              <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#737373;margin-top:1px"><span class="t">{{t.project}}</span><span class="chip" style="{{t.chipStyle}}" role="img" aria-label="{{t.machine}}">{{t.mono}}</span></span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+    <div style="border-top:1px solid rgba(0,0,0,.07);padding:8px;display:flex;align-items:center;gap:4px">
+      <button class="row" style="padding-left:8px;flex:1;width:auto"><span class="chip" style="background:#e5e5e5;color:#404040" aria-hidden="true">3</span><span class="t" style="font-size:12.5px">All machines</span></button>
+      <button class="ib" aria-label="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="9"></circle></svg></button>
+    </div>
+  </nav>
+
+  <!-- ============ CHAT ============ -->
+  <section aria-label="Chat" style="{{chatStyle}}">
+    <div style="height:48px;display:flex;align-items:center;gap:8px;padding:0 12px 0 18px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <h2 style="margin:0;font-size:14px;font-weight:500;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{selTitle}}</h2>
+      <span style="font-size:11.5px;border:1px solid rgba(0,0,0,.12);border-radius:6px;padding:1px 7px;color:#525252;flex-shrink:0">{{selProject}}</span>
+      <button class="hb" aria-label="Toggle dev mode"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m8 16-4-4 4-4M16 8l4 4-4 4"></path></svg></button>
+      <span style="flex:1"></span>
+      <sc-if value="{{isNow}}" hint-placeholder-val="{{false}}">
+        <button class="hb" aria-label="Browse files" onClick="{{nowFiles}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></button>
+        <button class="hb" aria-label="Открыть браузер" onClick="{{nowBrowser}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></button>
+        <button class="{{panelHbCls}}" aria-label="Toggle preview pane" onClick="{{togglePanel}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path></svg></button>
+      </sc-if>
+      <sc-if value="{{isNew}}" hint-placeholder-val="{{true}}">
+        <button class="{{panelHbCls}}" onClick="{{togglePanel}}" aria-pressed="{{panelOpen}}" aria-label="Panel (⌘J)" style="padding:0 7px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path></svg><span>Panel</span><span style="opacity:.6">⌘J</span></button>
+      </sc-if>
+    </div>
+    <div style="flex:1;padding:22px 26px;display:flex;flex-direction:column;gap:14px;overflow:auto;min-height:0">
+      <div style="align-self:flex-end;max-width:80%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45">The checkout button is cut off on iPhone. Fix it and show me.</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:12px;color:#737373;display:flex;gap:6px;align-items:center"><span style="color:#10b981">✓</span> Edited <span class="mono" style="font-size:11.5px">checkout.css</span> <span style="color:#15803d">+4</span> <span style="color:#b91c1c">−2</span></div>
+        <div style="font-size:12px;color:#737373;display:flex;gap:6px;align-items:center"><span style="color:#10b981">✓</span> Ran <span class="mono" style="font-size:11.5px">npm run dev</span></div>
+        <div style="font-size:12px;color:#737373;display:flex;gap:6px;align-items:center"><span style="color:#10b981">✓</span> Opened <span class="mono" style="font-size:11.5px">localhost:5173/checkout</span> in the browser</div>
+      </div>
+      <div style="font-size:13px;line-height:1.55;color:#333">Fixed: the sticky footer was covering the button below 400px. It’s open in the panel at iPhone size — point at anything that still looks off.</div>
+      <sc-if value="{{sent}}" hint-placeholder-val="{{false}}">
+        <div style="align-self:flex-end;max-width:88%;background:#f1f1f3;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:11.5px;color:#666">From the browser · localhost:5173/checkout · iPhone 15</span>
+          <sc-for list="{{comments}}" as="c" hint-placeholder-count="2">
+            <span style="display:flex;gap:8px;align-items:flex-start"><span class="num" style="width:18px;height:18px;font-size:10.5px;background:#5046e5;color:#fff">{{c.n}}</span><span><span class="mono" style="font-size:11px;color:#5046e5">{{c.el}}</span><br>{{c.text}}</span></span>
+          </sc-for>
+        </div>
+        <div style="font-size:13px;line-height:1.55;color:#333">On it — making the total bold and the button sticky.</div>
+      </sc-if>
+    </div>
+    <div style="margin:0 18px 16px;border:1px solid rgba(0,0,0,.12);border-radius:16px;padding:12px 14px 10px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 2px rgba(0,0,0,.04)">
+      <span style="font-size:13px;color:#8a8a8a">Ask anything, attach files, @tag files/folders, or use /</span>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#525252">
+        <span>Claude ▾</span>
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="chip" style="background:#ccfbf1;color:#0f766e;width:14px;height:14px;font-size:9px">C</span>Cloud computer</span>
+        <span style="flex:1"></span>
+        <span style="width:28px;height:28px;border-radius:50%;background:#262626;color:#fff;display:inline-flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT PANEL ============ -->
+  <sc-if value="{{panelOpen}}" hint-placeholder-val="{{true}}">
+  <aside aria-label="Panel" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f7f8;position:relative">
+    <div style="height:48px;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid rgba(0,0,0,.07)">
+      <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="2">
+        <button class="{{tb.cls}}" onClick="{{tb.pick}}"><span style="display:inline-flex">{{tb.icon}}</span><span style="max-width:9rem" class="t">{{tb.label}}</span><span class="x" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></span></button>
+      </sc-for>
+      <button class="ib" onClick="{{openLauncher}}" aria-label="Open in panel" style="width:26px;height:26px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+      <span style="flex:1"></span>
+      <button class="ib" aria-label="Focus panel" style="width:26px;height:26px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+      <button class="ib" aria-label="Close panel" onClick="{{togglePanel}}" style="width:26px;height:26px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+    </div>
+
+    <!-- launcher -->
+    <sc-if value="{{showLauncher}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;padding:32px 36px;display:flex;flex-direction:column;gap:18px;overflow:auto">
+        <div><div style="font-size:18px;font-weight:600">Open in the panel</div><div style="font-size:12.5px;color:#666;margin-top:3px">Press a letter to open.</div></div>
+        <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px">
+          <button class="tile" onClick="{{addBrowser}}"><span class="ti" style="background:#e0e7ff;color:#4338ca"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span><span class="tn">Browser<span class="kbd">B</span></span><span class="td">Opens {{defaultName}} · change in the address bar</span></button>
+          <button class="tile" onClick="{{addFiles}}"><span class="ti" style="background:#fef3c7;color:#b45309"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span><span class="tn">Files<span class="kbd">F</span></span><span class="td">Browse and edit the project</span></button>
+          <button class="tile" onClick="{{addTerminal}}"><span class="ti" style="background:#262626;color:#fff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m5 8 4 4-4 4M12 16h7"></path></svg></span><span class="tn">Terminal<span class="kbd">T</span></span><span class="td">Shell on Cloud computer</span></button>
+          <button class="tile" onClick="{{addChanges}}"><span class="ti" style="background:#dcfce7;color:#15803d"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span><span class="tn">Changes<span class="kbd">D</span></span><span class="td">What Uno changed here</span></button>
+          <button class="tile" onClick="{{addApps}}"><span class="ti" style="background:#fce7f3;color:#be185d"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg></span><span class="tn">Apps<span class="kbd">A</span></span><span class="td">Apps on your Uno computer</span></button>
+          <button class="tile" onClick="{{addSites}}"><span class="ti" style="background:#ccfbf1;color:#0f766e"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18"></path></svg></span><span class="tn">Sites<span class="kbd">S</span></span><span class="td">Your sites on uno4.me</span></button>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- browser -->
+    <sc-if value="{{showBrowser}}" hint-placeholder-val="{{true}}">
+      <div style="height:44px;display:flex;align-items:center;gap:2px;padding:0 8px;border-bottom:1px solid rgba(0,0,0,.07);background:#fff">
+        <button class="ib" aria-label="Назад"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg></button>
+        <button class="ib" aria-label="Вперёд"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></button>
+        <button class="ib" aria-label="Обновить"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+        <div style="flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:6px;background:#f4f4f5;border-radius:8px;padding:0 4px 0 4px;font-size:12.5px;margin:0 4px">
+          <sc-if value="{{isNew}}" hint-placeholder-val="{{true}}">
+            <button class="src" style="{{srcStyle}}" onClick="{{toggleSrcMenu}}" aria-haspopup="menu" aria-expanded="{{srcMenu}}">{{srcLabel}}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+          </sc-if>
+          <span class="t" style="padding-left:4px">localhost:5173/checkout</span>
+        </div>
+        <button class="ib on" aria-label="Device toolbar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"></rect></svg></button>
+        <sc-if value="{{canComment}}" hint-placeholder-val="{{true}}">
+          <button class="{{cmBtnCls}}" onClick="{{toggleCm}}" aria-pressed="{{cm}}" aria-label="Comment mode (C)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"></path><path d="M12 8v4M10 10h4"></path></svg></button>
+        </sc-if>
+        <button class="ib" aria-label="Дополнительные действия"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle></svg></button>
+      </div>
+
+      <!-- source menu -->
+      <sc-if value="{{srcMenu}}" hint-placeholder-val="{{false}}">
+        <div role="menu" aria-label="Где открыть" style="position:absolute;top:96px;left:108px;width:330px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.16);padding:6px;z-index:20">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8a8a8a;padding:6px 10px 4px">Где открыть</div>
+          <sc-for list="{{srcOpts}}" as="o" hint-placeholder-count="3">
+            <button class="opt" role="menuitemradio" aria-checked="{{o.on}}" onClick="{{o.pick}}">
+              <span class="oi" style="{{o.iconStyle}}">{{o.mono}}</span>
+              <span style="flex:1;min-width:0"><span style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:500">{{o.name}}<sc-if value="{{o.isDefault}}" hint-placeholder-val="{{false}}"><span style="font-size:10px;font-weight:600;background:#f1f1f3;color:#525252;border-radius:999px;padding:0 6px">по умолчанию</span></sc-if></span><span style="display:block;font-size:11.5px;color:#737373;margin-top:1px">{{o.sub}}</span></span>
+              <sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5046e5" stroke-width="2.6" stroke-linecap="round" style="margin-top:6px" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg></sc-if>
+            </button>
+          </sc-for>
+          <div style="height:1px;background:rgba(0,0,0,.07);margin:4px 6px"></div>
+          <button class="opt" onClick="{{makeDefault}}" style="align-items:center;font-size:12.5px;color:#404040"><span class="t">{{makeDefaultLabel}}</span></button>
+        </div>
+      </sc-if>
+
+      <!-- mode bars -->
+      <sc-if value="{{cmBar}}" hint-placeholder-val="{{false}}">
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:#eef0ff;border-bottom:1px solid rgba(80,70,229,.15);font-size:12px;color:#3730a3">
+          <span style="flex:1">Кликни на элемент — оставь заметку для Uno. Esc — выйти.</span>
+          <span>{{countLabel}}</span>
+          <button class="btn" style="background:#5046e5;color:#fff;height:26px" onClick="{{send}}">Send to chat</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{cloudWatch}}" hint-placeholder-val="{{false}}">
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#fff;border-bottom:1px solid rgba(0,0,0,.07);font-size:12px;color:#404040">
+          <span class="live" aria-hidden="true"></span>
+          <span style="flex:1"><b>Live</b> · Uno работает в браузере облачного компьютера. Ты смотришь.</span>
+          <button class="btn" style="background:#262626;color:#fff;height:26px" onClick="{{take}}">Take control</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{cloudControl}}" hint-placeholder-val="{{false}}">
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:#f0fdfa;border-bottom:1px solid rgba(15,118,110,.2);font-size:12px;color:#115e59">
+          <span style="flex:1"><b>Управляешь ты.</b> Uno на паузе и ждёт.</span>
+          <button class="btn" style="background:#0f766e;color:#fff;height:26px" onClick="{{handBack}}">Hand back to Uno</button>
+        </div>
+      </sc-if>
+
+      <!-- page -->
+      <sc-if value="{{showPage}}" hint-placeholder-val="{{true}}">
+      <div style="flex:1;display:flex;justify-content:center;align-items:flex-start;padding:20px;overflow:auto;position:relative;min-height:0">
+        <div class="{{pageCls}}" style="{{phoneStyle}}">
+          <button class="pick" onClick="{{pickHeader}}" style="padding:18px 20px 12px;display:flex;align-items:center;gap:10px">
+            <span style="font-family:Fraunces,Georgia,serif;font-size:22px;color:#3b2a1a">Bean &amp; Co.</span>
+            <span style="margin-left:auto;font-size:12px;color:#7a6a58">Cart (3)</span>
+            <sc-if value="{{pinHeader}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinHeaderN}}</span></sc-if>
+          </button>
+          <div style="padding:0 20px;display:flex;flex-direction:column;gap:12px;flex:1">
+            <div style="font-size:18px;font-weight:600;color:#3b2a1a">Checkout</div>
+            <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#4a3a2a"><span>Flat white ×2</span><span>$9.00</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#4a3a2a"><span>Almond croissant</span><span>$4.50</span></div>
+            <div style="height:1px;background:#e8dfd3"></div>
+            <button class="pick" onClick="{{pickTotal}}" style="display:flex;justify-content:space-between;font-size:14px;color:#3b2a1a;padding:4px 0">
+              <span>Total</span><span>$13.50</span>
+              <sc-if value="{{pinTotal}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinTotalN}}</span></sc-if>
+            </button>
+          </div>
+          <div style="padding:14px 20px 26px;background:#fff;border-top:1px solid #efe7dc;position:relative">
+            <button class="pick" onClick="{{pickButton}}" style="width:100%;background:#3b2a1a;color:#fff;text-align:center;border-radius:12px;padding:14px;font-size:15px;font-weight:600">
+              Pay $13.50
+              <sc-if value="{{pinButton}}" hint-placeholder-val="{{false}}"><span class="pin">{{pinButtonN}}</span></sc-if>
+            </button>
+            <sc-if value="{{cloudWatch}}" hint-placeholder-val="{{false}}">
+              <span style="position:absolute;left:190px;top:30px;display:flex;align-items:flex-start;gap:4px" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="#0f766e" stroke="#fff" stroke-width="1.5"><path d="M4 3l7 18 2.5-7.5L21 11Z"></path></svg>
+                <span style="background:#0f766e;color:#fff;font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 6px;margin-top:12px">Uno</span>
+              </span>
+            </sc-if>
+          </div>
+        </div>
+        <sc-if value="{{editing}}" hint-placeholder-val="{{false}}">
+          <div style="position:absolute;top:{{boxTop}}px;right:16px;width:210px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);border:1px solid rgba(0,0,0,.08);padding:12px;display:flex;flex-direction:column;gap:8px;z-index:5">
+            <span class="mono" style="font-size:11px;color:#5046e5">{{editEl}}</span>
+            <label style="font-size:11.5px;color:#666" for="cmt">Заметка для Uno</label>
+            <input id="cmt" value="{{editText}}" style="font:inherit;font-size:12.5px;border:1px solid rgba(0,0,0,.15);border-radius:8px;padding:7px 9px">
+            <span style="display:flex;gap:6px;justify-content:flex-end">
+              <button class="btn" style="color:#525252;height:26px" onClick="{{cancelEdit}}">Cancel</button>
+              <button class="btn" style="background:#5046e5;color:#fff;height:26px" onClick="{{saveEdit}}">Add</button>
+            </span>
+          </div>
+        </sc-if>
+        <sc-if value="{{chromeLinked}}" hint-placeholder-val="{{false}}">
+          <div style="position:absolute;left:20px;right:20px;bottom:16px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.06)">
+            <span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0"></span>
+            <span style="flex:1">Это вкладка в твоём Chrome — здесь её копия. Uno видит только её.</span>
+            <button class="btn" style="background:#f1f1f3;color:#262626;height:26px">Перейти во вкладку</button>
+          </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- connect chrome (compact, inside panel) -->
+      <sc-if value="{{showConnect}}" hint-placeholder-val="{{false}}">
+        <div style="flex:1;padding:28px 32px;display:flex;flex-direction:column;gap:10px;overflow:auto">
+          <div style="font-size:16px;font-weight:600">Подключи свой Chrome</div>
+          <div style="font-size:12.5px;color:#666;line-height:1.45">Uno будет работать во вкладках твоего Chrome — с твоими аккаунтами. Видит только вкладки, которыми поделишься.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">
+            <div style="display:flex;gap:10px;align-items:center;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:10px 12px">
+              <span class="num" style="{{n1}}">1</span><span class="t" style="font-size:13px">Поставь расширение Uno</span>
+              <sc-if value="{{c1}}" hint-placeholder-val="{{true}}"><button class="btn" style="background:#5046e5;color:#fff;height:26px" onClick="{{cInstall}}">Add to Chrome</button></sc-if>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:10px 12px">
+              <span class="num" style="{{n2}}">2</span><span class="t" style="font-size:13px">Сверь код в расширении: <b class="mono">UNO-4821</b></span>
+              <sc-if value="{{c2}}" hint-placeholder-val="{{false}}"><button class="btn" style="background:#5046e5;color:#fff;height:26px" onClick="{{cPair}}">Коды совпадают</button></sc-if>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:10px 12px">
+              <span style="display:flex;gap:10px;align-items:center"><span class="num" style="{{n3}}">3</span><span class="t" style="font-size:13px">Выбери вкладки для Uno</span></span>
+              <sc-if value="{{c3}}" hint-placeholder-val="{{false}}">
+                <sc-for list="{{chromeTabs}}" as="tb" hint-placeholder-count="3">
+                  <span style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 32px;font-size:12.5px"><span style="width:14px;height:14px;border-radius:4px;{{tb.fav}}"></span><span class="t">{{tb.title}}</span><button class="tg" style="{{tb.track}}" onClick="{{tb.toggle}}" role="switch" aria-checked="{{tb.on}}" aria-label="Share {{tb.title}}"><span class="knob" style="{{tb.knob}}"></span></button></span>
+                </sc-for>
+                <span style="display:flex;justify-content:flex-end"><button class="btn" style="background:#262626;color:#fff;height:26px" onClick="{{cFinish}}">Подключить</button></span>
+              </sc-if>
+            </div>
+          </div>
+          <div style="font-size:11.5px;color:#737373;margin-top:4px">Может: открывать вкладки, кликать, печатать, делать скриншоты. Не может: видеть другие вкладки, читать сохранённые пароли.</div>
+        </div>
+      </sc-if>
+
+      <!-- web fallback (now) -->
+      <sc-if value="{{showFallback}}" hint-placeholder-val="{{false}}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#737373;font-size:13px;text-align:center;padding:30px">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="opacity:.4" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg>
+          <span>Встроенный браузер доступен только в десктопном приложении.</span>
+          <button class="btn" style="background:#f1f1f3;color:#262626">Открыть в системном браузере</button>
+        </div>
+      </sc-if>
+    </sc-if>
+
+    <!-- other tabs -->
+    <sc-if value="{{showFiles}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="width:190px;border-right:1px solid rgba(0,0,0,.07);padding:12px 8px;font-size:12.5px;display:flex;flex-direction:column;gap:2px">
+          <div style="padding:4px 8px;color:#737373">coffee-site</div>
+          <div style="padding:4px 8px 4px 18px">src/</div>
+          <div style="padding:4px 8px 4px 30px;background:rgba(0,0,0,.07);border-radius:6px">checkout.css</div>
+          <div style="padding:4px 8px 4px 30px">checkout.ts</div>
+          <div style="padding:4px 8px 4px 18px">package.json</div>
+        </div>
+        <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#fff;color:#333">.checkout-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}</pre>
+      </div>
+    </sc-if>
+    <sc-if value="{{showTerminal}}" hint-placeholder-val="{{false}}">
+      <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#171717;color:#e5e5e5">~/coffee-site $ npm run dev
+
+  VITE v7.1.2  ready in 412 ms
+  ➜  Local:   http://localhost:5173/
+~/coffee-site $ █</pre>
+    </sc-if>
+    <sc-if value="{{showChanges}}" hint-placeholder-val="{{false}}">
+      <pre class="mono" style="margin:0;flex:1;padding:16px 20px;font-size:12px;line-height:1.7;background:#fff;color:#333">checkout.css
+<span style="background:#fee2e2;display:block">-  padding: 12px 16px;</span><span style="background:#dcfce7;display:block">+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));</span></pre>
+    </sc-if>
+    <sc-if value="{{showApps}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;padding:22px;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:10px;align-content:start">
+        <sc-for list="{{apps}}" as="ap" hint-placeholder-count="3">
+          <div style="background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:12px;display:flex;gap:10px;align-items:center">
+            <span style="width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:600;{{ap.style}}">{{ap.mono}}</span>
+            <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{ap.name}}</span><span style="display:block;font-size:11.5px;color:#666">{{ap.desc}}</span></span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{showSites}}" hint-placeholder-val="{{false}}">
+      <div style="flex:1;padding:22px;display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{sites}}" as="st" hint-placeholder-count="2">
+          <div style="background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center">
+            <span style="width:9px;height:9px;border-radius:50%;{{st.dot}}"></span>
+            <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{st.host}}</span><span style="display:block;font-size:11.5px;color:#666">{{st.meta}}</span></span>
+            <span style="font-size:12px;color:#5046e5;font-weight:500">Preview</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </aside>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"variant":{"editor":"enum","options":["Новое","Сейчас"],"default":"Новое"},"platform":{"editor":"enum","options":["Desktop","Web"],"default":"Desktop"},"sidebar":{"editor":"enum","options":["Classic","Inbox"],"default":"Classic"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 't1', panel: true, tabs: ['browser', 'files'], active: 'browser', launcher: false,
+      src: null, def: 'local', srcMenu: false, cm: false, notes: [], editing: null, sent: false,
+      cloud: 'watch', chrome: 0, shared: { lh: true } };
+  }
+  renderVals() {
+    var self = this, s = this.state;
+    var isNow = (this.props.variant ?? 'Новое') === 'Сейчас';
+    var web = (this.props.platform ?? 'Desktop') === 'Web';
+    var inbox = (this.props.sidebar ?? 'Classic') === 'Inbox';
+    var M = { mac: { n: 'MacBook', m: 'M', bg: '#dbeafe', fg: '#1d4ed8' }, box: { n: 'Cloud computer', m: 'C', bg: '#ccfbf1', fg: '#0f766e' }, pc: { n: 'Office PC', m: 'O', bg: '#ffedd5', fg: '#c2410c' } };
+    var all = [
+      { id: 't1', title: 'Fix checkout button on mobile', p: 'coffee-site', m: 'box', s: 'working', ago: '1m' },
+      { id: 't2', title: 'Weekly sales summary for Sept', p: 'sales-report', m: 'box', s: 'unread', ago: '4m' },
+      { id: 't3', title: 'Run npm install?', p: 'telegram-bot', m: 'mac', s: 'needs', ago: '12m' },
+      { id: 't4', title: 'Add menu page with prices', p: 'coffee-site', m: 'box', s: 'read', ago: '1h' },
+      { id: 't5', title: 'Clean up CSV duplicates', p: 'sales-report', m: 'pc', s: 'read', ago: '3h' },
+      { id: 't6', title: 'Reminder every day at 9am', p: 'telegram-bot', m: 'mac', s: 'read', ago: 'Tue' },
+      { id: 't7', title: 'Hero image ideas', p: 'coffee-site', m: 'mac', s: 'read', ago: '2d' }
+    ];
+    var labels = { working: 'Working', unread: 'New reply', needs: 'Needs your approval', read: 'Read' };
+    var selT = all[0];
+    var mapT = function (t) {
+      var mm = M[t.m], on = s.sel === t.id;
+      if (on) selT = t;
+      return { title: t.title, project: t.p, ago: t.ago, machine: mm.n, mono: mm.m,
+        chipStyle: 'background:' + mm.bg + ';color:' + mm.fg,
+        cls: 'row' + (on ? ' sel' : ''), cls2: 'row2' + (on ? ' sel' : ''),
+        dotCls: 'dot ' + (t.s === 'read' ? 'none' : t.s), statusLabel: labels[t.s],
+        pick: function () { self.setState({ sel: t.id }); } };
+    };
+    var flat = all.map(mapT);
+    var projects = ['coffee-site', 'sales-report', 'telegram-bot'].map(function (p) {
+      return { name: p, threads: all.filter(function (t) { return t.p === p; }).slice(0, 3).map(mapT) };
+    });
+
+    // panel tabs
+    var src = isNow ? 'local' : (s.src || s.def);
+    var srcNames = { local: 'Локально', cloud: 'Облако агента', chrome: 'Мой Chrome' };
+    var icons = { browser: '◍', files: '▤', terminal: '›_', changes: '±', apps: '▦', sites: '▭' };
+    var names = { browser: 'localhost:5173', files: 'checkout.css', terminal: 'Terminal', changes: 'Changes', apps: 'Apps', sites: 'Sites' };
+    var showLauncher = !isNow && (s.launcher || s.tabs.length === 0);
+    var active = showLauncher ? null : s.active;
+    var tabs = s.tabs.map(function (k) {
+      return { label: names[k], icon: icons[k], cls: 'tab' + (active === k ? ' on' : ''),
+        pick: function () { self.setState({ active: k, launcher: false, srcMenu: false }); },
+        close: function (e) { if (e && e.stopPropagation) e.stopPropagation(); var n = s.tabs.filter(function (x) { return x !== k; }); self.setState({ tabs: n, active: n[0] || null }); } };
+    });
+    if (showLauncher) tabs = tabs.concat([{ label: 'New tab', icon: '+', cls: 'tab on', pick: function () {}, close: function () { self.setState({ launcher: false }); } }]);
+    var add = function (k) { return function () { var n = s.tabs.indexOf(k) >= 0 ? s.tabs : s.tabs.concat([k]); self.setState({ tabs: n, active: k, launcher: false }); }; };
+
+    // browser state
+    var browserOn = active === 'browser';
+    var localWeb = web && src === 'local' && !isNow;
+    var chromeNeeded = (src === 'chrome' || localWeb) && s.chrome < 4;
+    var showFallback = browserOn && isNow && web;
+    var showConnect = browserOn && !isNow && chromeNeeded;
+    var showPage = browserOn && !showFallback && !showConnect;
+    var cloudOn = showPage && src === 'cloud';
+    var canComment = !isNow && showPage && (src !== 'cloud' || s.cloud === 'watch') && src !== 'chrome' && !localWeb;
+    var cmOn = s.cm && canComment;
+    var defs = {
+      header: { el: 'header.site-header', text: 'Logo is too small on phones', top: 110 },
+      total: { el: 'div.total-row', text: 'Make the total bold and bigger', top: 270 },
+      button: { el: 'button.checkout-button', text: 'Button should stay visible while scrolling', top: 560 }
+    };
+    var start = function (k) { return function () { if (!cmOn || s.sent) return; self.setState({ editing: k }); }; };
+    var nOf = function (k) { var i = s.notes.indexOf(k); return i < 0 ? '' : String(i + 1); };
+    var e = cmOn && s.editing ? defs[s.editing] : null;
+    var srcColors = { local: 'background:#e0e7ff;color:#3730a3', cloud: 'background:#ccfbf1;color:#115e59', chrome: 'background:#fef3c7;color:#92400e' };
+    var srcSubs = {
+      local: web ? 'Во вкладке твоего Chrome · нужно расширение' : 'Браузер прямо в панели, на этом компьютере',
+      cloud: 'Uno работает сам, ты смотришь и можешь перехватить',
+      chrome: s.chrome >= 4 ? 'Подключён · 1 вкладка' : 'Через расширение · не подключён'
+    };
+    var monos = { local: 'L', cloud: 'C', chrome: 'G' };
+    var active3 = 'background:#5046e5;color:#fff', done3 = 'background:#dcfce7;color:#15803d', idle3 = 'background:#f1f1f3;color:#8a8a8a';
+    var ct = [
+      { id: 'lh', title: 'localhost:5173/checkout', fav: 'background:#3b2a1a' },
+      { id: 'ig', title: 'Instagram', fav: 'background:#e1306c' },
+      { id: 'gm', title: 'Inbox (12) — Gmail', fav: 'background:#ea4335' }
+    ];
+    return {
+      isNow: isNow, isNew: !isNow,
+      sbClassic: !inbox, sbInbox: inbox, projects: projects, flat: flat,
+      selTitle: selT.title, selProject: selT.p,
+      panelOpen: s.panel,
+      chatStyle: 'display:flex;flex-direction:column;min-width:0;border-right:1px solid rgba(0,0,0,.08);' + (s.panel ? 'width:500px;flex-shrink:0' : 'flex:1'),
+      panelHbCls: 'hb' + (s.panel ? ' on' : ''),
+      togglePanel: function () { self.setState({ panel: !s.panel }); },
+      nowFiles: add('files'), nowBrowser: add('browser'),
+      tabs: tabs,
+      openLauncher: function () { if (!isNow) self.setState({ launcher: true, srcMenu: false }); },
+      showLauncher: showLauncher, defaultName: srcNames[s.def].toLowerCase(),
+      addBrowser: add('browser'), addFiles: add('files'), addTerminal: add('terminal'), addChanges: add('changes'), addApps: add('apps'), addSites: add('sites'),
+      showBrowser: browserOn, showFiles: active === 'files', showTerminal: active === 'terminal', showChanges: active === 'changes', showApps: active === 'apps', showSites: active === 'sites',
+      srcLabel: srcNames[src], srcStyle: srcColors[src], srcMenu: s.srcMenu && !isNow,
+      toggleSrcMenu: function () { self.setState({ srcMenu: !s.srcMenu }); },
+      srcOpts: ['local', 'cloud', 'chrome'].map(function (k) {
+        return { name: srcNames[k], sub: srcSubs[k], mono: monos[k], iconStyle: srcColors[k] + ';font-size:11px;font-weight:700',
+          on: src === k, isDefault: s.def === k,
+          pick: function () { self.setState({ src: k, srcMenu: false, cm: false, editing: null }); } };
+      }),
+      makeDefaultLabel: s.def === src ? '✓ «' + srcNames[src] + '» открывается по умолчанию' : 'Открывать «' + srcNames[src] + '» по умолчанию',
+      makeDefault: function () { self.setState({ def: src, srcMenu: false }); },
+      canComment: canComment, cm: cmOn,
+      cmBtnCls: 'ib' + (cmOn ? ' solid' : ''),
+      toggleCm: function () { self.setState({ cm: !s.cm, editing: null, srcMenu: false }); },
+      cmBar: cmOn, countLabel: s.notes.length === 1 ? '1 заметка' : s.notes.length + ' заметки',
+      cloudWatch: cloudOn && s.cloud === 'watch', cloudControl: cloudOn && s.cloud === 'control',
+      take: function () { self.setState({ cloud: 'control', cm: false }); },
+      handBack: function () { self.setState({ cloud: 'watch' }); },
+      showPage: showPage, showConnect: showConnect, showFallback: showFallback,
+      chromeLinked: showPage && (src === 'chrome' || localWeb),
+      pageCls: cmOn && !s.sent ? 'cm' : '',
+      phoneStyle: 'width:350px;height:620px;background:#fbf7f1;border-radius:28px;overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 0 0 8px #1f1f1f,0 18px 40px rgba(0,0,0,.18)' + (cloudOn && s.cloud === 'control' ? ',0 0 0 12px #14b8a6' : '') + ((src === 'chrome' || localWeb) ? ';opacity:.92' : ''),
+      pickHeader: start('header'), pickTotal: start('total'), pickButton: start('button'),
+      pinHeader: !!nOf('header'), pinHeaderN: nOf('header'),
+      pinTotal: !!nOf('total'), pinTotalN: nOf('total'),
+      pinButton: !!nOf('button'), pinButtonN: nOf('button'),
+      editing: !!e, editEl: e ? e.el : '', editText: e ? e.text : '', boxTop: e ? e.top : 0,
+      cancelEdit: function () { self.setState({ editing: null }); },
+      saveEdit: function () { var l = s.notes.indexOf(s.editing) >= 0 ? s.notes : s.notes.concat([s.editing]); self.setState({ notes: l, editing: null }); },
+      send: function () { if (s.notes.length) self.setState({ sent: true, cm: false, editing: null }); },
+      sent: s.sent,
+      comments: s.notes.map(function (k, i) { return { n: i + 1, el: defs[k].el, text: defs[k].text }; }),
+      c1: s.chrome <= 1, c2: s.chrome === 2, c3: s.chrome === 3,
+      n1: s.chrome <= 1 ? active3 : done3, n2: s.chrome === 2 ? active3 : (s.chrome > 2 ? done3 : idle3), n3: s.chrome === 3 ? active3 : (s.chrome > 3 ? done3 : idle3),
+      cInstall: function () { self.setState({ chrome: 2 }); }, cPair: function () { self.setState({ chrome: 3 }); }, cFinish: function () { self.setState({ chrome: 4 }); },
+      chromeTabs: ct.map(function (t) { var on = !!s.shared[t.id]; return { title: t.title, fav: t.fav, on: on,
+        track: on ? 'background:#5046e5' : 'background:#d4d4d4', knob: on ? 'left:14px' : 'left:2px',
+        toggle: function () { var n = Object.assign({}, s.shared); n[t.id] = !on; self.setState({ shared: n }); } }; }),
+      apps: [
+        { name: 'Notetaker', desc: 'Meeting notes and tasks', mono: 'N', style: 'background:#fef3c7;color:#b45309' },
+        { name: 'Uno Tasks', desc: 'Tasks for you and Uno', mono: 'T', style: 'background:#e0e7ff;color:#4338ca' },
+        { name: 'n8n', desc: 'Automations', mono: 'n', style: 'background:#fce7f3;color:#be185d' }
+      ],
+      sites: [
+        { host: 'coffee-site.uno4.me', meta: 'Published 2h ago', dot: 'background:#10b981' },
+        { host: 'sales.uno4.me', meta: 'Password protected', dot: 'background:#10b981' },
+        { host: 'draft-landing.uno4.me', meta: 'Not published yet', dot: 'background:#d4d4d4' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
