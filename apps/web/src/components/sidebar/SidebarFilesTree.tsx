@@ -1,8 +1,9 @@
 /**
  * Files mode of the sidebar: the computer's home folder as a tree, like the
  * sidebar of Finder. Folders unfold in place (each level is listed on
- * demand); a click on a name opens it in Files — a folder to browse, a file in
- * its viewer. Every row can be pinned.
+ * demand); a click on a folder opens it in Files; a file opens in the right
+ * panel when you are in a chat, otherwise in Files (useOpenComputerFile).
+ * Every row can be pinned.
  */
 import type { FilesEntry } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -24,9 +25,9 @@ import { memo, useState } from "react";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { pathTitle } from "../../navigation/pins";
+import { useOpenComputerFile } from "../../navigation/useOpenComputerFile";
 import { usePins } from "../../navigation/usePins";
 import { filesListQueryOptions } from "../files/filesApi";
-import { dirname } from "../files/fileTypes";
 import { useSidebar } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 
@@ -54,6 +55,7 @@ export const SidebarFilesTree = memo(function SidebarFilesTree() {
   const { isMobile, setOpenMobile } = useSidebar();
   const root = useQuery(filesListQueryOptions(environmentId, null, false));
   const onFilesPage = useLocation({ select: (location) => location.pathname === "/files" });
+  const openComputerFile = useOpenComputerFile();
 
   if (root.isPending) {
     return (
@@ -90,12 +92,22 @@ export const SidebarFilesTree = memo(function SidebarFilesTree() {
         <HouseIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">Home folder</span>
       </button>
-      <TreeLevel entries={root.data.entries} depth={0} />
+      <TreeLevel entries={root.data.entries} depth={0} onOpenFile={openComputerFile} />
     </div>
   );
 });
 
-function TreeLevel({ entries, depth }: { entries: ReadonlyArray<FilesEntry>; depth: number }) {
+interface TreeProps {
+  readonly depth: number;
+  /** Stable (useOpenComputerFile), so the rows stay put while the panel changes. */
+  readonly onOpenFile: (path: string) => void;
+}
+
+const TreeLevel = memo(function TreeLevel({
+  entries,
+  depth,
+  onOpenFile,
+}: TreeProps & { entries: ReadonlyArray<FilesEntry> }) {
   const sorted = sortEntries(entries.filter((entry) => !entry.hidden));
   if (sorted.length === 0) {
     return (
@@ -110,7 +122,7 @@ function TreeLevel({ entries, depth }: { entries: ReadonlyArray<FilesEntry>; dep
   return (
     <ul className="flex flex-col gap-px">
       {sorted.slice(0, MAX_ENTRIES_PER_FOLDER).map((entry) => (
-        <TreeRow key={entry.path} entry={entry} depth={depth} />
+        <TreeRow key={entry.path} entry={entry} depth={depth} onOpenFile={onOpenFile} />
       ))}
       {sorted.length > MAX_ENTRIES_PER_FOLDER ? (
         <li
@@ -122,9 +134,9 @@ function TreeLevel({ entries, depth }: { entries: ReadonlyArray<FilesEntry>; dep
       ) : null}
     </ul>
   );
-}
+});
 
-function TreeRow({ entry, depth }: { entry: FilesEntry; depth: number }) {
+function TreeRow({ entry, depth, onOpenFile }: TreeProps & { entry: FilesEntry }) {
   const isFolder = entry.kind === "directory";
   const [expanded, setExpanded] = useState(false);
   const { environmentId } = useActiveMachine();
@@ -148,7 +160,7 @@ function TreeRow({ entry, depth }: { entry: FilesEntry; depth: number }) {
       setExpanded(true);
       void navigate({ to: "/files", search: { path: entry.path } });
     } else {
-      void navigate({ to: "/files", search: { path: dirname(entry.path), file: entry.path } });
+      onOpenFile(entry.path);
     }
   };
 
@@ -217,7 +229,7 @@ function TreeRow({ entry, depth }: { entry: FilesEntry; depth: number }) {
             <Skeleton className="h-4 w-24 rounded" />
           </div>
         ) : children.data ? (
-          <TreeLevel entries={children.data.entries} depth={depth + 1} />
+          <TreeLevel entries={children.data.entries} depth={depth + 1} onOpenFile={onOpenFile} />
         ) : null
       ) : null}
     </li>

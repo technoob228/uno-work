@@ -18,16 +18,14 @@ import {
 import { memo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
-import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { linkTitle, normalizeLinkInput } from "../../navigation/pins";
+import { useOpenComputerFile } from "../../navigation/useOpenComputerFile";
 import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
 import { opensInOwnTab } from "../apps/ownTabApps";
 import { ProgramIcon } from "../computer/ComputerPrograms";
-import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
-import { dirname } from "../files/fileTypes";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -151,8 +149,7 @@ export function usePinActive(item: UnoPin): boolean {
 export function useOpenPin() {
   const navigate = useNavigate();
   const { openHere, openBeside } = useOpenApp();
-  const preview = usePreviewPane();
-  const machine = useActiveMachine();
+  const openComputerFile = useOpenComputerFile();
   const inChat = useMatch({ from: "/_chat/$environmentId/$threadId", shouldThrow: false });
   const { isMobile, setOpenMobile } = useSidebar();
   return (item: UnoPin) => {
@@ -168,23 +165,9 @@ export function useOpenPin() {
       case "folder":
         void navigate({ to: "/files", search: { path: item.target } });
         return;
-      case "file": {
-        const name = item.target.split("/").pop() ?? item.target;
-        const kind = detectFileKind(name);
-        if (inChat && kind !== "unknown" && machine.environmentId) {
-          preview.openFile({
-            id: item.target,
-            name,
-            kind,
-            content: "",
-            path: item.target,
-            environmentId: machine.environmentId,
-          });
-          return;
-        }
-        void navigate({ to: "/files", search: { path: dirname(item.target), file: item.target } });
+      case "file":
+        openComputerFile(item.target);
         return;
-      }
       case "link":
         openInNewTab(item.target);
     }

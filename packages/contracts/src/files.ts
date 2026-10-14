@@ -129,6 +129,45 @@ export const FilesSearchResult = Schema.Struct({
 });
 export type FilesSearchResult = typeof FilesSearchResult.Type;
 
+/**
+ * Recent files of this computer (Files → Recent): what the person opened in
+ * Uno Work, and what agents changed in chats. Kept by the daemon (the opened
+ * list in its state dir, the changes from the chats' turn summaries), so the
+ * same list shows on every device. Only files that still exist are returned.
+ */
+export const FilesRecentSource = Schema.Literals(["opened", "agent"]);
+export type FilesRecentSource = typeof FilesRecentSource.Type;
+
+export const FilesRecentItem = Schema.Struct({
+  entry: FilesEntry,
+  source: FilesRecentSource,
+  /** ISO time it was opened, or the time the agent's turn finished. */
+  at: Schema.String,
+  /** The chat whose agent changed it (`source: "agent"`). */
+  threadId: Schema.NullOr(Schema.String),
+  threadTitle: Schema.NullOr(Schema.String),
+});
+export type FilesRecentItem = typeof FilesRecentItem.Type;
+
+export const FilesRecentListInput = Schema.Struct({
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(200))),
+});
+export type FilesRecentListInput = typeof FilesRecentListInput.Type;
+
+export const FilesRecentListResult = Schema.Struct({
+  items: Schema.Array(FilesRecentItem),
+});
+export type FilesRecentListResult = typeof FilesRecentListResult.Type;
+
+export const FilesRecentRecordInput = Schema.Struct({ path: FilesPath });
+export type FilesRecentRecordInput = typeof FilesRecentRecordInput.Type;
+
+export const FilesRecentRecordResult = Schema.Struct({
+  /** False when the path is not a file inside the files root (nothing kept). */
+  recorded: Schema.Boolean,
+});
+export type FilesRecentRecordResult = typeof FilesRecentRecordResult.Type;
+
 export const FilesShareKind = Schema.Literals(["file", "folder"]);
 export type FilesShareKind = typeof FilesShareKind.Type;
 

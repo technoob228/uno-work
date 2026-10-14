@@ -3,7 +3,7 @@
  * get at a file's bytes, text or a loadable URL.
  */
 import { FILES_RAW_ROUTE_PATH, type EnvironmentId, type FilesEntry } from "@t3tools/contracts";
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { isPrimaryEnvironmentId } from "../../environments/http/target";
@@ -71,13 +71,19 @@ export function useFileBytes(source: FileSource) {
   });
 }
 
-export function useFileText(source: FileSource) {
+/**
+ * `keepPrevious`: while a newer version of the same file loads (after a save
+ * the modification time changes), keep showing the text loaded before
+ * instead of a spinner — an editor that stays open after a save needs it.
+ */
+export function useFileText(source: FileSource, options: { keepPrevious?: boolean } = {}) {
   return useQuery({
     queryKey: ["files", "view-text", ...sourceKey(source)],
     queryFn: () => source.readText(),
     staleTime: Infinity,
     gcTime: 60_000,
     retry: 1,
+    ...(options.keepPrevious ? { placeholderData: keepPreviousData } : {}),
   });
 }
 

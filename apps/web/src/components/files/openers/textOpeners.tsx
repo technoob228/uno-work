@@ -109,8 +109,18 @@ function readMarkdownEditMode(): MarkdownEditMode {
 }
 
 function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
-  const { data, error, isPending } = useFileText(source);
+  // The shell may keep this editor open after a save (Files → Tree edits in
+  // place): the text loaded before stays on screen while the saved version loads.
+  const { data, error, isPending } = useFileText(source, { keepPrevious: true });
   const [draft, setDraft] = useState<string | null>(null);
+  // What was just saved, until the file is read back: the draft is clean against it.
+  const [savedText, setSavedText] = useState<string | null>(null);
+  useEffect(() => setSavedText(null), [data]);
+  // The document view is typed into directly: it is rendered once from the
+  // text first loaded and must not be re-rendered under the person's caret
+  // when the file is read back after a save.
+  const [loadedText, setLoadedText] = useState<string | null>(null);
+  if (loadedText === null && data !== undefined) setLoadedText(data);
   const [saving, setSaving] = useState(false);
   const withPreview = source.kind === "markdown" || source.kind === "html";
   const [showPreview, setShowPreview] = useState(withPreview);
@@ -126,17 +136,16 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
   const documentRef = useRef<MarkdownDocumentEditorHandle | null>(null);
 
   const value = draft ?? data ?? "";
-  const dirty = draft !== null && draft !== data;
+  const dirty = draft !== null && draft !== (savedText ?? data);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   const save = useCallback(async () => {
-    if (!dirty || saving) {
-      if (!dirty) onClose(false);
-      return;
-    }
+    // ⌘S with nothing to save does nothing (it used to close the editor).
+    if (!dirty || saving) return;
     setSaving(true);
     try {
       await source.save(value);
+      setSavedText(value);
       toastManager.add({ type: "success", title: "Saved", description: source.name });
       onDirtyChange(false);
       onClose(true);
@@ -270,7 +279,7 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
             <MarkdownDocumentEditor
               key={documentBase?.version ?? 0}
               ref={documentRef}
-              markdown={documentBase?.markdown ?? data ?? ""}
+              markdown={documentBase?.markdown ?? loadedText ?? data ?? ""}
               onInput={() => setDraft(documentRef.current?.read() ?? value)}
               label={`Contents of ${source.name}`}
               autoFocus

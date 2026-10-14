@@ -222,6 +222,10 @@ import type {
   FilesMoveResult,
   FilesPublishSiteInput,
   FilesPublishSiteResult,
+  FilesRecentListInput,
+  FilesRecentListResult,
+  FilesRecentRecordInput,
+  FilesRecentRecordResult,
   FilesRenameInput,
   FilesSearchInput,
   FilesSearchResult,
@@ -939,6 +943,8 @@ export interface EnvironmentApi {
     move: (input: FilesMoveInput) => Promise<FilesMoveResult>;
     delete: (input: FilesDeleteInput) => Promise<FilesDeleteResult>;
     search: (input: FilesSearchInput) => Promise<FilesSearchResult>;
+    recentList: (input: FilesRecentListInput) => Promise<FilesRecentListResult>;
+    recentRecord: (input: FilesRecentRecordInput) => Promise<FilesRecentRecordResult>;
     createShare: (input: FilesShareCreateInput) => Promise<FilesShare>;
     listShares: (input: FilesShareListInput) => Promise<FilesShareListResult>;
     revokeShare: (input: FilesShareRevokeInput) => Promise<FilesShare>;

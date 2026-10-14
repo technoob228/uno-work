@@ -2,14 +2,17 @@
  * Files, the "Tree" view (Misha 13.10): the home folder as a tree on the left,
  * the way a code editor shows a project. Folders unfold in place and stay
  * open as you go deeper; a click on a file opens it on the right, in the same
- * window, where it can be read and edited. The "List" view is the old one.
+ * window, where it can be read and edited. The "List" view is the old one;
+ * "Recent" puts the recent files (RecentFilesList) where the tree is.
  *
- * The choice is remembered on this device (`uno-work:files:view`).
+ * The choice is remembered on this device (`uno-work:files:view`); Tree is
+ * the default.
  */
 import type { EnvironmentId, FilesEntry } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRightIcon,
+  ClockIcon,
   EyeIcon,
   EyeOffIcon,
   FileSpreadsheetIcon,
@@ -38,6 +41,7 @@ import { FILE_KIND_ICON, FILE_KIND_TINT, dirname, fileKindOf, joinPath } from ".
 import { filesListQueryOptions, filesQueryKeys } from "./filesApi";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
 import { FilesNavButtons, type FilesHistory } from "./filesHistory";
+import { RecentFilesList } from "./RecentFilesList";
 import type { useFilesUploads } from "./FilesUploads";
 
 type UploadFiles = Parameters<ReturnType<typeof useFilesUploads>["start"]>[0]["files"];
@@ -45,7 +49,12 @@ type UploadFiles = Parameters<ReturnType<typeof useFilesUploads>["start"]>[0]["f
 export const FILES_VIEW_KEY = "uno-work:files:view";
 const FILES_TREE_OPEN_KEY = "uno-work:files:tree-open";
 
-export type FilesViewMode = "list" | "tree";
+/**
+ * Tree is the default (Misha 14.10: Files works like a code editor — the tree
+ * on the left, the file on the right, editable right there). Recent shares
+ * its layout: the recent files on the left instead of the tree.
+ */
+export type FilesViewMode = "list" | "tree" | "recent";
 export type FilesCreateKind =
   | "folder"
   | "word"
@@ -57,19 +66,31 @@ export type FilesCreateKind =
 export function useFilesViewMode(): [FilesViewMode, (mode: FilesViewMode) => void] {
   const [mode, setMode] = useLocalStorage<FilesViewMode, FilesViewMode>(
     FILES_VIEW_KEY,
-    "list",
-    Schema.Literals(["list", "tree"]),
+    "tree",
+    Schema.Literals(["list", "tree", "recent"]),
   );
   return [mode, setMode];
 }
 
-/** List | Tree, in the header of both views. */
+/**
+ * The view actually shown: a phone has no room for two columns, so Tree
+ * becomes the list there; Recent stays (one column, the file opens over it).
+ */
+export function effectiveFilesViewMode(stored: FilesViewMode, isMobile: boolean): FilesViewMode {
+  if (!isMobile) return stored;
+  return stored === "recent" ? "recent" : "list";
+}
+
+/** List | Tree | Recent, in the header of every view. */
 export function FilesViewSwitch({
   mode,
   onChange,
+  compact = false,
 }: {
   mode: FilesViewMode;
   onChange: (mode: FilesViewMode) => void;
+  /** A phone: no Tree (two columns don't fit), just List | Recent. */
+  compact?: boolean | undefined;
 }) {
   const item = (active: boolean) =>
     cn(
@@ -95,15 +116,28 @@ export function FilesViewSwitch({
         <ListIcon className="size-3.5" />
         <span className="hidden md:inline">List</span>
       </button>
+      {compact ? null : (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "tree"}
+          className={item(mode === "tree")}
+          onClick={() => onChange("tree")}
+        >
+          <FolderTreeIcon className="size-3.5" />
+          <span className="hidden md:inline">Tree</span>
+        </button>
+      )}
       <button
         type="button"
         role="tab"
-        aria-selected={mode === "tree"}
-        className={item(mode === "tree")}
-        onClick={() => onChange("tree")}
+        aria-selected={mode === "recent"}
+        className={item(mode === "recent")}
+        onClick={() => onChange("recent")}
+        data-testid="files-view-recent"
       >
-        <FolderTreeIcon className="size-3.5" />
-        <span className="hidden md:inline">Tree</span>
+        <ClockIcon className="size-3.5" />
+        <span className="hidden md:inline">Recent</span>
       </button>
     </div>
   );
@@ -151,6 +185,8 @@ export const FilesTree = memo(function FilesTree(props: {
   history: FilesHistory;
   viewMode: FilesViewMode;
   onViewModeChange: (mode: FilesViewMode) => void;
+  /** A phone: the switch offers List | Recent only. */
+  compactSwitch?: boolean | undefined;
   onOpenCloud: () => void;
   onOpenHome: () => void;
   onCreate: (kind: FilesCreateKind) => void;
@@ -158,6 +194,7 @@ export const FilesTree = memo(function FilesTree(props: {
   children?: ReactNode;
 }) {
   const { environmentId, selectedFile, currentFolder } = props;
+  const recentMode = props.viewMode === "recent";
   const queryClient = useQueryClient();
   const [showHidden, setShowHidden] = useLocalStorage<boolean, boolean>(
     "uno-work:files:tree-hidden",
@@ -213,7 +250,11 @@ export const FilesTree = memo(function FilesTree(props: {
         </div>
         <div className="flex items-center gap-1.5">
           <FilesNavButtons history={props.history} />
-          <FilesViewSwitch mode={props.viewMode} onChange={props.onViewModeChange} />
+          <FilesViewSwitch
+            mode={props.viewMode}
+            onChange={props.onViewModeChange}
+            compact={props.compactSwitch}
+          />
           <span className="flex-1" />
           <Menu>
             <MenuTrigger
@@ -267,15 +308,17 @@ export const FilesTree = memo(function FilesTree(props: {
               </MenuItem>
             </MenuPopup>
           </Menu>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={showHidden ? "Hide hidden files" : "Show hidden files"}
-            title={showHidden ? "Hide hidden files" : "Show hidden files"}
-            onClick={() => setShowHidden((value) => !value)}
-          >
-            {showHidden ? <EyeOffIcon /> : <EyeIcon />}
-          </Button>
+          {recentMode ? null : (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={showHidden ? "Hide hidden files" : "Show hidden files"}
+              title={showHidden ? "Hide hidden files" : "Show hidden files"}
+              onClick={() => setShowHidden((value) => !value)}
+            >
+              {showHidden ? <EyeOffIcon /> : <EyeIcon />}
+            </Button>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -287,21 +330,34 @@ export const FilesTree = memo(function FilesTree(props: {
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5" role="tree" aria-label="Files">
-        {root.isPending ? (
-          <div className="flex flex-col gap-1.5 px-1 pt-1">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <Skeleton key={i} className="h-5 w-full rounded-md" />
-            ))}
-          </div>
-        ) : root.isError || !root.data ? (
-          <p className="px-2 py-6 text-center text-xs text-muted-foreground/70">
-            This computer's files can't be read right now.
-          </p>
-        ) : (
-          <TreeLevel entries={root.data.entries} depth={0} context={context} />
-        )}
-      </div>
+      {recentMode ? (
+        <RecentFilesList
+          environmentId={environmentId}
+          rootPath={rootPath}
+          selectedFile={selectedFile}
+          onOpenFile={props.onOpenFile}
+        />
+      ) : (
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5"
+          role="tree"
+          aria-label="Files"
+        >
+          {root.isPending ? (
+            <div className="flex flex-col gap-1.5 px-1 pt-1">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-5 w-full rounded-md" />
+              ))}
+            </div>
+          ) : root.isError || !root.data ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground/70">
+              This computer's files can't be read right now.
+            </p>
+          ) : (
+            <TreeLevel entries={root.data.entries} depth={0} context={context} />
+          )}
+        </div>
+      )}
       {props.children}
     </div>
   );
