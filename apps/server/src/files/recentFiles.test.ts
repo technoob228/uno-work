@@ -59,7 +59,6 @@ const row = (overrides: Partial<RecentTurnRow>): RecentTurnRow => ({
 });
 
 describe("agentChangesFromTurns", () => {
-
   it("resolves paths against the worktree, else the project", () => {
     const changes = agentChangesFromTurns([
       row({ filesJson: JSON.stringify([{ path: "docs/a.md", kind: "modified" }]) }),
