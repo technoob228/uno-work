@@ -252,6 +252,13 @@ it.layer(NodeServices.layer)("manager tool layer", (it) => {
         const listed = yield* tools.listThreads(caller, {});
         expect(listed.projects.map((project) => project.projectId)).toEqual([allowedProjectId]);
         expect(listed.threads.map((thread) => thread.threadId)).toEqual([allowedThreadId]);
+        // One call says what each chat is doing: its project, folder, who
+        // started it and the start of its last answer (wrapped, untrusted).
+        const summary = listed.threads[0]!;
+        expect(summary.projectTitle).toBeTruthy();
+        expect(summary.spawnedByThreadId ?? null).toBeNull();
+        expect(summary.lastAssistantText?.startsWith("<untrusted_thread_output>")).toBe(true);
+        expect(summary.lastAssistantText?.endsWith("</untrusted_thread_output>")).toBe(true);
 
         const denied = yield* Effect.flip(
           tools.getThreadStatus(caller, { threadId: otherThreadId }),

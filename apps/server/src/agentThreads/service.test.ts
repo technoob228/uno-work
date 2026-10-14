@@ -761,6 +761,55 @@ describe("agent threads bridge: peers (plan 22)", () => {
     }),
   );
 
+  it.effect("every chat sees the person's assistant chat and may write to it, not read it", () =>
+    Effect.gen(function* () {
+      const UNO = "thread-uno" as ThreadId;
+      const { handlers, dispatched } = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(UNO, { projectId: OTHER_PROJECT, assistantRole: "chat" }),
+        ],
+        messages: [
+          {
+            id: "m1",
+            role: "assistant",
+            text: "private plans",
+            turnId: null,
+            streaming: false,
+            createdAt: T0,
+            updatedAt: T0,
+          } as unknown as OrchestrationMessage,
+        ],
+      });
+      for (const scope of ["children", "project"]) {
+        const list = yield* handlers.listThreads(scoped(), { scope });
+        const rows = body(list).threads as Array<Record<string, unknown>>;
+        const uno = rows.find((row) => row.id === UNO);
+        assert.strictEqual(uno?.relation, "assistant", scope);
+        // Its transcript stays private to the chats that may read its project.
+        assert.strictEqual(uno?.lastAssistantText, null, scope);
+        assert.strictEqual(rows[0]?.id, UNO, scope);
+      }
+
+      const sent = yield* handlers.sendMessage(scoped(), {
+        threadId: UNO,
+        body: { text: "the report is ready in ~/Uploads" },
+      });
+      assert.deepStrictEqual(sent, {
+        status: 200,
+        body: { ok: true, threadId: UNO, relation: "assistant" },
+      });
+      assert.strictEqual((dispatched[0]!.command as any).threadId, UNO);
+
+      const read = yield* handlers.getThread(scoped(), {
+        threadId: UNO,
+        limit: null,
+        waitMs: null,
+      });
+      assert.strictEqual(read.status, 404);
+    }),
+  );
+
   it.effect("refuses threads that wait for the human or that the person closed", () =>
     Effect.gen(function* () {
       const { handlers, dispatched } = makeFixture({

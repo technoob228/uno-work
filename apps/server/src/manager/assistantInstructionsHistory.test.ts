@@ -18,6 +18,27 @@ describe("AGENTS.md of assistants made by older versions", () => {
     expect(SHIPPED_ASSISTANT_INSTRUCTIONS).not.toContain(ASSISTANT_INSTRUCTIONS_TEMPLATE);
   });
 
+  it("the shipped template says where the person's files are", () => {
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toMatch(/## Files/);
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("~/Uploads/YYYY-MM/");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("`drive_get`");
+  });
+
+  it("an assistant left on the previous template (its base) gets this one silently", () => {
+    const previous = ASSISTANT_INSTRUCTIONS_TEMPLATE.replace(
+      /<!-- uno-instructions: [^>]+ -->/,
+      "<!-- uno-instructions: 2026-10-02.2 -->",
+    ).replace(/## Files\n[\s\S]*?\n## Where chats run/, "## Where chats run");
+    const plan = planInstructions({
+      current: previous,
+      base: previous,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Files");
+  });
+
   it("an untouched 0.0.104 file (writeFileIfMissing, no base) gets the new version", () => {
     for (const old of SHIPPED_ASSISTANT_INSTRUCTIONS) {
       const plan = planInstructions({

@@ -1641,7 +1641,6 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         keys: {
           type: "array",
           items: { type: "string", minLength: 1, maxLength: 1024 },
-          minItems: 1,
           maxItems: 50,
         },
         folder: { type: "string", minLength: 1, maxLength: 1024 },
@@ -1662,6 +1661,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (!state.available || state.bucketId === null) {
           return yield* toolError(state.message ?? "Uno Drive isn't available.");
         }
+        const keys = args["keys"] as string[];
+        if (keys.length === 0) return yield* toolError("Name at least one Uno Drive file.");
         const requested = str(args, "folder");
         const destination = requested
           ? resolveUserPath(requested, deps)
@@ -1676,7 +1677,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const result = yield* asToolError(
           drive.cloudCopyToComputer({
             bucketId: state.bucketId,
-            keys: args["keys"] as string[],
+            keys,
             destinationPath: destination,
           }),
         );
@@ -1829,7 +1830,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chats_list",
     group: "chats",
     description:
-      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer.',
+      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer. The person’s assistant chat (Uno) is always listed, relation "assistant": chat_message it to report something it should know.',
     inputSchema: {
       type: "object",
       properties: {
