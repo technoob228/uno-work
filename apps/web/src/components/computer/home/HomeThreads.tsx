@@ -3,8 +3,9 @@
  * the chat widgets (Needs you, Recent chats). All read the same thread
  * summaries the sidebar shows, with the sidebar's status colors.
  *
- * Approvals get Allow / Don't right in the Needs-you widget (the row subscribes
- * to the chat's details to learn the request); questions open the chat.
+ * Approvals get Allow / Decline / View right in the Needs-you widget (the row
+ * subscribes to the chat's details to learn the request); questions get Open
+ * chat / Skip for now — the same actions as the Inbox (`inboxActions.logic.ts`).
  */
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import { useNavigate } from "@tanstack/react-router";
@@ -24,10 +25,18 @@ import { usePendingApproval } from "../../../inbox/usePendingApproval";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
+import {
+  INBOX_BUTTON_LABEL,
+  questionItemIdsToSkip,
+  resolveInboxItemActions,
+  skippedQuestionThreadKeys,
+} from "../../../inbox/inboxActions.logic";
 import { markChatDone, markInboxItemDone } from "../../../inbox/inboxDone";
-import { useInboxEntries } from "../../../inbox/inboxStore";
+import { updateInbox, useInboxEntries } from "../../../inbox/inboxStore";
+import { chatOpenRequests } from "../../../inbox/openRequests.logic";
 import { useOpenInboxItem } from "../../../inbox/useOpenInboxItem";
 import { useUiStateStore } from "../../../uiStateStore";
+import { SkipForNowMenu } from "../../inbox/InboxItemActions";
 import { ItemIcon } from "../../inbox/InboxPanel";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
@@ -89,7 +98,7 @@ function StatusLabel({ thread }: { thread: HomeThread }) {
 /** "3 things need you ›" — opens the first chat that waits. Nothing when nothing waits. */
 export function NeedsYouPill({ threads, now }: { threads: HomeThread[]; now: number }) {
   const open = useOpenThread();
-  const waiting = attentionThreads(threads, now);
+  const waiting = useAttentionThreads(threads, now);
   const first = waiting[0];
   if (!first) return null;
   return (
@@ -265,14 +274,36 @@ export function ContinueCards({
   );
 }
 
+/** Chats whose question was skipped for now (their Inbox item is snoozed). */
+export function useSkippedQuestionThreads(now: number): ReadonlySet<string> {
+  const inbox = useInboxEntries();
+  return useMemo(() => skippedQuestionThreadKeys(inbox, now), [inbox, now]);
+}
+
+/** Needs you on Home: waiting chats, without questions skipped for now. */
+function useAttentionThreads(threads: HomeThread[], now: number): HomeThread[] {
+  const skipped = useSkippedQuestionThreads(now);
+  return useMemo(() => attentionThreads(threads, now, skipped), [threads, now, skipped]);
+}
+
 /**
  * An approval, answerable right here: the row keeps the chat's details
  * subscribed (only the chat's own events name the request) and sends the same
- * `thread.approval.respond` the chat's Approve / Decline buttons send. Until
- * the request is known — or when it's gone — the row just opens the chat.
+ * `thread.approval.respond` the chat's Allow / Decline buttons send. Until
+ * the request is known — or when it's gone — the row offers View only.
  */
 function ApprovalRow({ thread, onOpen }: { thread: HomeThread; onOpen: () => void }) {
-  const { approval, responding, respond } = usePendingApproval(thread.environmentId, thread.id);
+  const { approval, phase, responding, respond } = usePendingApproval(
+    thread.environmentId,
+    thread.id,
+  );
+  const actions = resolveInboxItemActions({
+    kind: "agent.approval",
+    hasThread: true,
+    unread: true,
+    open: chatOpenRequests(thread),
+    approvalPhase: phase,
+  });
   const question = approval ? approvalQuestion(approval) : null;
   return (
     <div
@@ -303,31 +334,105 @@ function ApprovalRow({ thread, onOpen }: { thread: HomeThread; onOpen: () => voi
           {question ? thread.title : "Wants your OK to go on"}
         </span>
       </button>
-      {approval ? (
-        <span className="flex shrink-0 items-center gap-1.5">
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={responding}
-            onClick={() => void respond("decline")}
-          >
-            Don't
-          </Button>
-          <Button size="xs" disabled={responding} onClick={() => void respond("accept")}>
-            Allow
-          </Button>
-        </span>
-      ) : (
-        <span className="shrink-0 text-xs text-muted-foreground">Open</span>
-      )}
+      <span className="flex shrink-0 items-center gap-1.5">
+        {actions.buttons.map((id) =>
+          id === "allow" ? (
+            <Button
+              key={id}
+              size="xs"
+              disabled={responding || !approval}
+              onClick={() => void respond("accept")}
+              data-testid="home-approval-allow"
+            >
+              {INBOX_BUTTON_LABEL.allow}
+            </Button>
+          ) : id === "decline" ? (
+            <Button
+              key={id}
+              size="xs"
+              variant="outline"
+              disabled={responding || !approval}
+              onClick={() => void respond("decline")}
+              data-testid="home-approval-decline"
+            >
+              {INBOX_BUTTON_LABEL.decline}
+            </Button>
+          ) : (
+            <Button key={id} size="xs" variant="ghost" onClick={onOpen}>
+              {INBOX_BUTTON_LABEL[id]}
+            </Button>
+          ),
+        )}
+      </span>
     </div>
   );
 }
 
-/** Widget: the chats waiting for the person — approvals answered in place, questions open the chat. */
+/**
+ * A question: Open chat, or Skip for now — the chat's question item in the
+ * Inbox is snoozed, so the row (and the Inbox's Needs you) stay quiet until
+ * it wakes. No Inbox item for it (dismissed long ago) → nothing to skip with.
+ */
+function QuestionRow({
+  thread,
+  now,
+  onOpen,
+}: {
+  thread: HomeThread;
+  now: number;
+  onOpen: () => void;
+}) {
+  const inbox = useInboxEntries();
+  const skipIds = useMemo(
+    () => questionItemIdsToSkip(inbox, thread.environmentId, thread.id, now),
+    [inbox, thread.environmentId, thread.id, now],
+  );
+  const actions = resolveInboxItemActions({
+    kind: "agent.input",
+    hasThread: true,
+    unread: true,
+    open: chatOpenRequests(thread),
+  });
+  return (
+    <div
+      className="flex w-full items-center gap-3 rounded-lg px-2 py-2"
+      data-testid="home-question"
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 [&_svg]:size-4">
+          <MessageCircleQuestionIcon />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{thread.title}</span>
+          <span className="block truncate text-xs text-muted-foreground">Asked you a question</span>
+        </span>
+      </button>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {actions.buttons.map((id) => (
+          <Button key={id} size="xs" variant="outline" onClick={onOpen}>
+            {INBOX_BUTTON_LABEL[id]}
+          </Button>
+        ))}
+        {actions.skip && skipIds.length > 0 ? (
+          <SkipForNowMenu
+            onSkip={(until) =>
+              updateInbox(thread.environmentId, { action: "snooze", ids: skipIds, until })
+            }
+          />
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/** Widget: the chats waiting for the person — approvals answered in place, questions open or wait. */
 export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: number }) {
   const open = useOpenThread();
-  const waiting = attentionThreads(threads, now).slice(0, 4);
+  const waiting = useAttentionThreads(threads, now).slice(0, 4);
   if (waiting.length === 0) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -343,22 +448,7 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
           {thread.hasPendingApprovals ? (
             <ApprovalRow thread={thread} onOpen={() => open(thread)} />
           ) : (
-            <button
-              type="button"
-              onClick={() => open(thread)}
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/50"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 [&_svg]:size-4">
-                <MessageCircleQuestionIcon />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{thread.title}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  Asked you a question
-                </span>
-              </span>
-              <span className="shrink-0 text-xs text-muted-foreground">Open</span>
-            </button>
+            <QuestionRow thread={thread} now={now} onOpen={() => open(thread)} />
           )}
         </li>
       ))}

@@ -1,9 +1,11 @@
 /**
  * The Inbox list — in the standard sidebar (the "Inbox" row under Home) and
  * as the Inbox panel of the rail. Newest first, "Needs you" on top of the
- * filter, each item opens where it belongs; hover (always on touch) offers
- * Mark read, Snooze and Dismiss. The bell turns system notifications on for
- * this device.
+ * filter, each item opens where it belongs. An approval or a question that
+ * still waits answers in the row (Allow / Decline / View, Open chat / Skip
+ * for now — `InboxItemActions.tsx`) and is never marked read or dismissed
+ * from here; the rest offer Mark read, Snooze and Dismiss on hover (always on
+ * touch). The bell turns system notifications on for this device.
  */
 import type { InboxItemKind } from "@t3tools/contracts";
 import {
@@ -40,11 +42,14 @@ import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
-import { canDismissInboxItem } from "../../inbox/openRequests.logic";
-import { useChatOpenRequests } from "../../inbox/usePendingApproval";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  InboxActionButtons,
+  type ResolvedInboxActions,
+  WithInboxItemActions,
+} from "./InboxItemActions";
 
 type Filter = "all" | "needs-you" | "chats" | "apps" | "snoozed";
 
@@ -300,26 +305,40 @@ export function ItemIcon({ item }: { item: InboxEntry }) {
 }
 
 const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
+  return (
+    <WithInboxItemActions item={item}>
+      {(resolved) => <InboxRowView item={item} resolved={resolved} />}
+    </WithInboxItemActions>
+  );
+});
+
+function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: ResolvedInboxActions }) {
   const openItem = useOpenInboxItem();
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const unread = item.readAt === null;
   const snoozed = isSnoozed(item);
   const time = formatRelativeTime(item.updatedAt).value;
   const presets = useMemo(() => (snoozeOpen ? resolveSnoozePresets(new Date()) : []), [snoozeOpen]);
-  // An Allow or a question the chat still waits on is answered there, not dismissed here.
-  const openRequests = useChatOpenRequests(
-    item.environmentId,
-    item.open?.kind === "thread" ? item.open.threadId : null,
-  );
-  const canDismiss = canDismissInboxItem(item.kind, openRequests);
+  const { actions } = resolved;
+  // An Allow or a question the chat still waits on is answered (or skipped) with
+  // the row's own buttons — never marked read or dismissed: the agent would keep
+  // waiting with nothing in the Inbox.
+  const answerInRow = actions.reason !== "other" && !actions.done;
+  const canDismiss = actions.done;
+  const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
 
   return (
-    <li className="group/inbox relative list-none" data-testid="inbox-item">
+    <li
+      className="group/inbox relative list-none rounded-lg transition-colors hover:bg-sidebar-row-hover"
+      data-testid="inbox-item"
+      data-inbox-reason={actions.reason}
+    >
       <button
         type="button"
         onClick={() => void openItem(item)}
         className={cn(
-          "flex w-full cursor-pointer items-start gap-2.5 rounded-lg py-2 pr-2 pl-3 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 group-hover/inbox:pr-[5.5rem] max-md:pr-[5.5rem]",
+          "flex w-full cursor-pointer items-start gap-2.5 rounded-lg py-2 pr-2 pl-3 text-left outline-hidden ring-ring focus-visible:ring-2",
+          hoverActions && "group-hover/inbox:pr-[5.5rem] max-md:pr-[5.5rem]",
           !unread && "opacity-70",
         )}
       >
@@ -340,7 +359,12 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
             >
               {item.title}
             </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums group-hover/inbox:invisible max-md:invisible">
+            <span
+              className={cn(
+                "shrink-0 text-[11px] text-muted-foreground tabular-nums",
+                hoverActions && "group-hover/inbox:invisible max-md:invisible",
+              )}
+            >
               {snoozed ? snoozeWakeDescription(item.snoozedUntil!, new Date()) : time}
             </span>
           </span>
@@ -355,76 +379,85 @@ const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
           </span>
         </span>
       </button>
-      <div
-        className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/inbox:opacity-100 focus-within:opacity-100 max-md:opacity-100"
-        onClick={stop}
-      >
-        <RowAction
-          label={unread ? "Mark read" : "Mark unread"}
-          onClick={() =>
-            void updateInbox(item.environmentId, {
-              action: unread ? "read" : "unread",
-              ids: [item.id],
-            })
-          }
+      {answerInRow ? (
+        <div className="flex flex-wrap items-center gap-1 pr-2 pb-2 pl-[3.25rem]">
+          <InboxActionButtons item={item} resolved={resolved} onOpen={() => void openItem(item)} />
+        </div>
+      ) : null}
+      {hoverActions ? (
+        <div
+          className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/inbox:opacity-100 focus-within:opacity-100 max-md:opacity-100"
+          onClick={stop}
         >
-          <CheckIcon className="size-3.5" />
-        </RowAction>
-        {snoozed ? (
-          <RowAction
-            label="Bring back now"
-            onClick={() =>
-              void updateInbox(item.environmentId, { action: "unsnooze", ids: [item.id] })
-            }
-          >
-            <AlarmClockIcon className="size-3.5 text-info" />
-          </RowAction>
-        ) : (
-          <Menu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
-            <MenuTrigger
-              aria-label="Snooze"
-              title="Snooze"
-              className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          {actions.markRead ? (
+            <RowAction
+              label={unread ? "Mark read" : "Mark unread"}
+              onClick={() =>
+                void updateInbox(item.environmentId, {
+                  action: unread ? "read" : "unread",
+                  ids: [item.id],
+                })
+              }
             >
-              <AlarmClockIcon className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup align="end" side="bottom" className="min-w-44">
-              <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Remind me</div>
-              {presets.map((preset) => (
-                <MenuItem
-                  key={preset.id}
-                  onClick={() =>
-                    void updateInbox(item.environmentId, {
-                      action: "snooze",
-                      ids: [item.id],
-                      until: preset.snoozedUntil,
-                    })
-                  }
-                >
-                  <span className="flex-1">{preset.label}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
-                    {snoozeWakeDescription(preset.snoozedUntil, new Date())}
-                  </span>
-                </MenuItem>
-              ))}
-              {canDismiss ? (
-                <>
-                  <MenuSeparator />
-                  <MenuItem onClick={() => void markInboxItemDone(item)}>Dismiss</MenuItem>
-                </>
-              ) : null}
-            </MenuPopup>
-          </Menu>
-        )}
-        {canDismiss ? (
-          <RowAction label="Dismiss" onClick={() => void markInboxItemDone(item)}>
-            <XIcon className="size-3.5" />
-          </RowAction>
-        ) : null}
-      </div>
+              <CheckIcon className="size-3.5" />
+            </RowAction>
+          ) : null}
+          {snoozed ? (
+            <RowAction
+              label="Bring back now"
+              onClick={() =>
+                void updateInbox(item.environmentId, { action: "unsnooze", ids: [item.id] })
+              }
+            >
+              <AlarmClockIcon className="size-3.5 text-info" />
+            </RowAction>
+          ) : actions.snooze ? (
+            <Menu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+              <MenuTrigger
+                aria-label="Snooze"
+                title="Snooze"
+                className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <AlarmClockIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup align="end" side="bottom" className="min-w-44">
+                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Remind me</div>
+                {presets.map((preset) => (
+                  <MenuItem
+                    key={preset.id}
+                    onClick={() =>
+                      void updateInbox(item.environmentId, {
+                        action: "snooze",
+                        ids: [item.id],
+                        until: preset.snoozedUntil,
+                      })
+                    }
+                  >
+                    <span className="flex-1">{preset.label}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
+                      {snoozeWakeDescription(preset.snoozedUntil, new Date())}
+                    </span>
+                  </MenuItem>
+                ))}
+                {canDismiss ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem onClick={() => void markInboxItemDone(item)}>Dismiss</MenuItem>
+                  </>
+                ) : null}
+              </MenuPopup>
+            </Menu>
+          ) : null}
+          {canDismiss ? (
+            <RowAction label="Dismiss" onClick={() => void markInboxItemDone(item)}>
+              <XIcon className="size-3.5" />
+            </RowAction>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
-});
+}
 
 function RowAction(props: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (

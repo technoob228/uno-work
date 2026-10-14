@@ -47,6 +47,7 @@ import {
   NeedsYouWidget,
   RecentChatsWidget,
   useHomeThreads,
+  useSkippedQuestionThreads,
 } from "./HomeThreads";
 import {
   AiSpendWidget,
@@ -221,6 +222,7 @@ export function HomeStart({
   onAskUno: (prompt: string) => Promise<void>;
 }) {
   const { threads, now } = useHomeThreads();
+  const skippedQuestions = useSkippedQuestionThreads(now);
   const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
   // 01.10: the simple start screen unless Dev mode is on.
   const devMode = useDevMode();
@@ -482,7 +484,7 @@ export function HomeStart({
     const simpleStarters =
       personalStarters.length > 0 ? personalStarters.slice(0, 3) : FIRST_SCREEN_EXAMPLES;
     const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
-    const waiting = attentionThreads(threads, now);
+    const waiting = attentionThreads(threads, now, skippedQuestions);
     // A newcomer (no chats yet) gets one box, the pills and one quiet line, nothing else:
     // no greeting, next step, empty sections, widgets or Customize.
     // (The assistant's own chats — Telegram & co — don't count: not on Home.)

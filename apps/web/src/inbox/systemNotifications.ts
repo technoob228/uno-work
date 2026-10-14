@@ -188,6 +188,36 @@ export function askForPermissionOnFirstGesture(): () => void {
   return cleanup;
 }
 
+const APPROVAL_PREFIX = "Waits for your OK";
+const QUESTION_PREFIX = "Asks";
+
+/**
+ * The notification's text says what is needed — a plain notification has no
+ * buttons, a click opens the chat: "Needs your OK: <command>", "Asked you a
+ * question: <question>". A secret to paste or help in the browser keep their
+ * own words (they already say what to do); other kinds are unchanged.
+ */
+export function systemNotificationBody(kind: string, body: string | null): string | null {
+  const text = body?.trim() ?? "";
+  if (kind === "agent.approval") {
+    const detail = text.startsWith(APPROVAL_PREFIX)
+      ? text
+          .slice(APPROVAL_PREFIX.length)
+          .replace(/^[:.]\s*/, "")
+          .trim()
+      : text;
+    return detail ? `Needs your OK: ${detail}` : "Needs your OK.";
+  }
+  if (kind === "agent.input") {
+    if (!text || text === "Asks you a question.") return "Asked you a question.";
+    if (text.startsWith(`${QUESTION_PREFIX}: `)) {
+      return `Asked you a question: ${text.slice(QUESTION_PREFIX.length + 2).trim()}`;
+    }
+    return text;
+  }
+  return body;
+}
+
 export function windowIsInFront(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
 }
@@ -213,8 +243,9 @@ export function showSystemNotification(input: {
     return;
   }
   try {
+    const body = systemNotificationBody(input.kind, input.body);
     const notification = new window.Notification(input.title, {
-      ...(input.body ? { body: input.body } : {}),
+      ...(body ? { body } : {}),
       tag: input.tag,
     });
     notification.addEventListener("click", () => {

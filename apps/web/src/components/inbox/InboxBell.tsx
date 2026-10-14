@@ -1,33 +1,23 @@
 /**
  * The Inbox as a bell next to the logo (0.0.83): a counter (amber when
  * something waits for you) and a popover over whatever is on screen — the
- * sidebar and the page stay where they were. Each item answers in place:
- * Approve / Deny for an approval, Open, Done, Snooze. "Done" is the same
- * Done as on Home's Continue cards (`inboxDone.ts`), so both agree.
+ * sidebar and the page stay where they were. Each item answers in place, by
+ * why it is there (`InboxItemActions.tsx`): Allow / Decline / View for an
+ * approval, Open chat / Skip for now for a question, Open / Done / Snooze for
+ * the rest. "Done" is the same Done as on Home's Continue cards
+ * (`inboxDone.ts`), so both agree.
  */
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import {
-  AlarmClockIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckCheckIcon,
-  CheckIcon,
-  InboxIcon,
-} from "lucide-react";
+import { BellIcon, BellOffIcon, CheckCheckIcon, InboxIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
-import { markInboxItemDone } from "../../inbox/inboxDone";
 import {
   type InboxEntry,
   isSnoozed,
-  updateInbox,
   updateInboxEverywhere,
   useInboxEntries,
   useInboxNeedsYouCount,
   useInboxUnreadCount,
 } from "../../inbox/inboxStore";
-import { canDismissInboxItem } from "../../inbox/openRequests.logic";
-import { useChatOpenRequests, usePendingApproval } from "../../inbox/usePendingApproval";
 import {
   setSystemNotifications,
   useSystemNotificationsState,
@@ -35,12 +25,10 @@ import {
 import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
-import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
-import { approvalQuestion } from "../computer/home/homeModel";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { InboxActionButtons, WithInboxItemActions } from "./InboxItemActions";
 import { ItemIcon, filterInbox } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
@@ -218,11 +206,6 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
-  const threadId = item.open?.kind === "thread" ? item.open.threadId : null;
-  const isApproval = item.kind === "agent.approval" && threadId !== null;
-  // A question the chat still waits on is answered in the chat, not cleared here.
-  const openRequests = useChatOpenRequests(item.environmentId, threadId);
-  const canDismiss = canDismissInboxItem(item.kind, openRequests);
   const open = () => {
     onNavigate();
     void openItem(item);
@@ -271,148 +254,20 @@ const BellItem = memo(function BellItem({
             ) : null}
           </button>
           <div className="flex flex-wrap items-center gap-1">
-            {isApproval ? (
-              <ApprovalActions
-                item={item}
-                environmentId={item.environmentId}
-                threadId={threadId as ThreadId}
-                body={item.body}
-                onOpen={open}
-              />
-            ) : (
-              <Button size="xs" variant="outline" onClick={open} data-testid="inbox-open">
-                Open
-              </Button>
-            )}
-            {isApproval || !canDismiss ? null : <DoneButton item={item} />}
-            <SnoozeMenu item={item} />
+            <WithInboxItemActions item={item}>
+              {(resolved) => (
+                <InboxActionButtons
+                  item={item}
+                  resolved={resolved}
+                  onOpen={open}
+                  withDone
+                  withSnooze
+                />
+              )}
+            </WithInboxItemActions>
           </div>
         </div>
       </div>
     </li>
   );
 });
-
-function DoneButton({ item }: { item: InboxEntry }) {
-  return (
-    <Button
-      size="xs"
-      variant="ghost"
-      onClick={() => void markInboxItemDone(item)}
-      data-testid="inbox-done"
-    >
-      <CheckIcon />
-      Done
-    </Button>
-  );
-}
-
-function ApprovalActions(props: {
-  item: InboxEntry;
-  environmentId: EnvironmentId;
-  threadId: ThreadId;
-  body: string | null;
-  onOpen: () => void;
-}) {
-  const { approval, phase, responding, respond } = usePendingApproval(
-    props.environmentId,
-    props.threadId,
-  );
-  if (!approval) {
-    // Still waits, details on their way: Open only — Done would drop the request.
-    if (phase === "loading") {
-      return (
-        <Button size="xs" variant="outline" onClick={props.onOpen}>
-          Open
-        </Button>
-      );
-    }
-    // Answered (or gone): nothing to approve any more — open it or clear it.
-    return (
-      <>
-        <Button size="xs" variant="outline" onClick={props.onOpen}>
-          Open
-        </Button>
-        <DoneButton item={props.item} />
-      </>
-    );
-  }
-  const question = approvalQuestion(approval);
-  return (
-    <>
-      {question.subject && !(props.body ?? "").includes(question.subject) ? (
-        <code className="mb-0.5 block w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-          {question.subject}
-        </code>
-      ) : null}
-      <Button
-        size="xs"
-        disabled={responding}
-        onClick={() => void respond("accept")}
-        data-testid="inbox-approve"
-      >
-        <CheckIcon />
-        Approve
-      </Button>
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={responding}
-        onClick={() => void respond("decline")}
-        data-testid="inbox-deny"
-      >
-        Deny
-      </Button>
-      <Button size="xs" variant="ghost" onClick={props.onOpen}>
-        Open
-      </Button>
-    </>
-  );
-}
-
-function SnoozeMenu({ item }: { item: InboxEntry }) {
-  const [open, setOpen] = useState(false);
-  const presets = useMemo(() => (open ? resolveSnoozePresets(new Date()) : []), [open]);
-  if (isSnoozed(item)) {
-    return (
-      <Button
-        size="xs"
-        variant="ghost"
-        onClick={() => void updateInbox(item.environmentId, { action: "unsnooze", ids: [item.id] })}
-      >
-        <AlarmClockIcon />
-        Bring back
-      </Button>
-    );
-  }
-  return (
-    <Menu open={open} onOpenChange={setOpen}>
-      <MenuTrigger
-        aria-label="Snooze"
-        className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <AlarmClockIcon className="size-3.5" />
-        Snooze
-      </MenuTrigger>
-      <MenuPopup align="start" side="bottom" className="min-w-44">
-        {presets.map((preset) => (
-          <MenuItem
-            key={preset.id}
-            onClick={() =>
-              void updateInbox(item.environmentId, {
-                action: "snooze",
-                ids: [item.id],
-                until: preset.snoozedUntil,
-              })
-            }
-          >
-            <span className="flex-1">{preset.label}</span>
-            <span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
-              {snoozeWakeDescription(preset.snoozedUntil, new Date())}
-            </span>
-          </MenuItem>
-        ))}
-      </MenuPopup>
-    </Menu>
-  );
-}
