@@ -68,6 +68,7 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - `PreviewPane.tsx` — сама панель с вкладками + `PathBar` (с middle-ellipsis сворачиванием длинного пути и кнопкой «Copy path»).
 - `FileBrowser.tsx` — модальный браузер файлов, открывается из `<FolderIcon>` в `ChatHeader`.
 - `previewFileKind.ts` (или там же) — детектор `detectFileKind(name)` по расширению.
+- Вкладка «Tasks/Plan» (наследие T3 `PlanSidebar`, теперь `PlanPanel.tsx`) — не своя колонка в ChatView, а вкладка `kind: "tasks"`, id `tasks:<threadId>`, только уровня чата. ChatView публикует выведенный план в `preview/tasksTabStore.ts`, тело вкладки (`TasksTabBody.tsx`) читает его по threadId. Кнопка Tasks/Plan в композере открывает/закрывает вкладку; авто-открытие (`autoOpenPlanSidebar`) — с `source: "agent"`, раз за ход.
 
 Серверная часть: `apps/server/src/workspace/Layers/WorkspaceFileSystem.ts` + `apps/server/src/workspace/Services/WorkspaceFileSystem.ts` — RPC для чтения файлов и листинга директорий. Контракты в `packages/contracts/src/filesystem.ts` + добавлено в `rpc.ts` / `ipc.ts`.
 

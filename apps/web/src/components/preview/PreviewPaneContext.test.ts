@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,7 +7,12 @@ import {
   detectFileKind,
   DUAL_VIEW_KINDS,
   getPreviewBucketState,
+  isTabShown,
+  isTasksTab,
+  makeTasksFile,
   NO_PROJECT_KEY,
+  tasksTabId,
+  threadIdFromTasksFile,
   toggleSourceViewIds,
   type PreviewFile,
   type PreviewBucketState,
@@ -187,5 +193,47 @@ describe("detectFileKind", () => {
   it("returns 'unknown' for unrecognised extensions", () => {
     expect(detectFileKind("archive.zip")).toBe("unknown");
     expect(detectFileKind("noextension")).toBe("unknown");
+  });
+});
+
+describe("tasks tab", () => {
+  const environmentId = "env-1" as EnvironmentId;
+
+  it("has one stable id per thread", () => {
+    const file = makeTasksFile({ threadId: "t-1", environmentId, label: "Tasks" });
+    expect(file).toEqual({
+      id: "tasks:t-1",
+      name: "Tasks",
+      kind: "tasks",
+      content: "",
+      environmentId,
+    });
+    expect(makeTasksFile({ threadId: "t-1", environmentId, label: "Plan" }).id).toBe(file.id);
+    expect(tasksTabId("t-1")).toBe(file.id);
+    expect(isTasksTab(file)).toBe(true);
+    expect(isTasksTab(fileA)).toBe(false);
+  });
+
+  it("reads the thread back from the tab", () => {
+    expect(
+      threadIdFromTasksFile(makeTasksFile({ threadId: "t-9", environmentId, label: "Plan" })),
+    ).toBe("t-9");
+    expect(threadIdFromTasksFile({ id: "tasks:", kind: "tasks" })).toBeNull();
+    expect(threadIdFromTasksFile({ id: "tasks:t-1", kind: "md" })).toBeNull();
+  });
+});
+
+describe("isTabShown", () => {
+  it("is true only for the active tab of an open panel", () => {
+    expect(isTabShown({ open: true, files: [fileA, fileB], activeFileId: "b" }, "b")).toBe(true);
+    expect(isTabShown({ open: true, files: [fileA, fileB], activeFileId: "b" }, "a")).toBe(false);
+    expect(isTabShown({ open: false, files: [fileA, fileB], activeFileId: "b" }, "b")).toBe(false);
+    expect(isTabShown({ open: true, files: [fileA], activeFileId: "b" }, "b")).toBe(false);
+  });
+
+  it("falls back to the first tab when the active id is stale or unset", () => {
+    expect(isTabShown({ open: true, files: [fileA, fileB], activeFileId: null }, "a")).toBe(true);
+    expect(isTabShown({ open: true, files: [fileA, fileB], activeFileId: "zz" }, "a")).toBe(true);
+    expect(isTabShown({ open: true, files: [fileA, fileB], activeFileId: "zz" }, "b")).toBe(false);
   });
 });

@@ -415,8 +415,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             onClick={props.onTogglePlanSidebar}
             title={
               props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
+                ? `Hide ${props.planSidebarLabel.toLowerCase()} tab`
+                : `Show ${props.planSidebarLabel.toLowerCase()} tab`
             }
           >
             <ListTodoIcon />
