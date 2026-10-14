@@ -52,7 +52,7 @@ export const TARGET_BUSY_MESSAGE =
   'У получателя сейчас идёт ход. Повтори позже или передай "waitMs" (до 600000), чтобы сервер дождался и доставил сам.';
 
 /** How the listed/read thread relates to the calling thread. */
-export type AgentThreadRelation = "self" | "child" | "parent" | "peer";
+export type AgentThreadRelation = "self" | "child" | "parent" | "assistant" | "peer";
 
 /** `GET /api/threads?scope=` — children (default), the caller's project, or every project. */
 export type AgentThreadListScope = "children" | "project" | "all";
@@ -63,13 +63,22 @@ export function parseListScope(raw: string | null | undefined): AgentThreadListS
   return value === "children" || value === "project" || value === "all" ? value : null;
 }
 
+/** The person's pinned assistant chat ("Uno"), the one every chat may write to. */
+export function isPinnedAssistantChat(
+  thread: Pick<OrchestrationThreadShell, "assistantRole">,
+): boolean {
+  return thread.assistantRole === "chat";
+}
+
 export function threadRelation(
   caller: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId">,
-  target: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId">,
+  target: Pick<OrchestrationThreadShell, "id" | "spawnedByThreadId" | "assistantRole">,
 ): AgentThreadRelation {
   if (target.id === caller.id) return "self";
   if ((target.spawnedByThreadId ?? null) === caller.id) return "child";
   if ((caller.spawnedByThreadId ?? null) === target.id) return "parent";
+  // The person's pinned assistant chat ("Uno"): every chat may write to it.
+  if (isPinnedAssistantChat(target)) return "assistant";
   return "peer";
 }
 
@@ -163,6 +172,7 @@ export function agentDeliveryBlock(
     | "session"
     | "latestTurn"
     | "latestUserMessageAt"
+    | "assistantRole"
   >,
 ): AgentDeliveryBlock | null {
   if (isClosedToAgents(target)) {

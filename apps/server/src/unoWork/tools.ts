@@ -51,6 +51,7 @@ import {
   saveGeneratedImage,
   type GeneratedImage,
 } from "../assistants/imageGenerate.ts";
+import { uploadsMonthDir } from "../files/chatUploads.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import {
   APP_TYPE_TELEGRAM_BOT,
@@ -197,6 +198,12 @@ export interface UnoWorkToolDeps {
       readonly paths: ReadonlyArray<string>;
       readonly bucketId: number;
       readonly prefix?: string;
+    }) => Effect.Effect<FilesCloudTransferResult, { readonly message: string }>;
+    /** Cloud → this computer; `destinationPath` must be an existing folder in the home. */
+    readonly cloudCopyToComputer?: (input: {
+      readonly bucketId: number;
+      readonly keys: ReadonlyArray<string>;
+      readonly destinationPath: string;
     }) => Effect.Effect<FilesCloudTransferResult, { readonly message: string }>;
   };
   readonly inboxPost: (post: InboxPost) => Effect.Effect<{ readonly id: string }>;
@@ -1624,6 +1631,67 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       }),
   },
   {
+    name: "drive_get",
+    group: "files",
+    description:
+      'Copy Uno Drive files onto this computer so you can open them (keys from drive_find; a key ending in "/" is a whole folder). Into folder (an existing folder, e.g. ~/Documents); default ~/Uploads/YYYY-MM, where chat attachments are saved too. Nothing is overwritten: a taken name gets " (2)". Returns where each one landed.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        keys: {
+          type: "array",
+          items: { type: "string", minLength: 1, maxLength: 1024 },
+          maxItems: 50,
+        },
+        folder: { type: "string", minLength: 1, maxLength: 1024 },
+      },
+      required: ["keys"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) =>
+      `Copy ${Array.isArray(args["keys"]) ? args["keys"].length : 0} item(s) from Uno Drive to this computer`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const drive = deps.files;
+        if (!drive.driveState || !drive.cloudCopyToComputer) {
+          return yield* toolError("Uno Drive isn't available in this Uno Work version.");
+        }
+        const state = yield* asToolError(drive.driveState);
+        if (!state.available || state.bucketId === null) {
+          return yield* toolError(state.message ?? "Uno Drive isn't available.");
+        }
+        const keys = args["keys"] as string[];
+        if (keys.length === 0) return yield* toolError("Name at least one Uno Drive file.");
+        const requested = str(args, "folder");
+        const destination = requested
+          ? resolveUserPath(requested, deps)
+          : uploadsMonthDir(deps.home, new Date());
+        if (!requested) {
+          // The default folder is ours to create (inside the home); a named
+          // one must already exist (Files checks it stays inside the home).
+          yield* Effect.promise(() =>
+            fsp.mkdir(destination, { recursive: true }).catch(() => undefined),
+          );
+        }
+        const result = yield* asToolError(
+          drive.cloudCopyToComputer({
+            bucketId: state.bucketId,
+            keys,
+            destinationPath: destination,
+          }),
+        );
+        return {
+          ok: true,
+          folder: displayPath(destination, deps.home),
+          files: result.files,
+          bytes: result.bytes,
+          paths: (result.paths ?? []).map((landed) => displayPath(landed, deps.home)),
+          ...(result.skipped.length > 0 ? { skipped: result.skipped } : {}),
+        };
+      }),
+  },
+  {
     name: "drive_share_link",
     group: "files",
     description:
@@ -1762,7 +1830,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chats_list",
     group: "chats",
     description:
-      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer.',
+      'List chats: scope "children" (default — chats you started), "project" (every chat in this project; relation self/parent/child/peer) or "all" (every project, only if the person allowed it). Shows status (running, waiting, error, idle), who is in control and the last answer. The person’s assistant chat (Uno) is always listed, relation "assistant": chat_message it to report something it should know.',
     inputSchema: {
       type: "object",
       properties: {

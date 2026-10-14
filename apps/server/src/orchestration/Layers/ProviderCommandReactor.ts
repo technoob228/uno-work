@@ -56,6 +56,9 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { ServerConfig } from "../../config.ts";
+import { resolveAttachmentPathById } from "../../attachmentStore.ts";
+import { appendChatAttachmentsNote, buildChatAttachmentsNote } from "../../files/chatUploads.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -113,9 +116,16 @@ function buildProviderContextMessages(input: {
   }>;
   readonly currentMessageText: string;
   readonly currentAttachments: ReadonlyArray<ChatAttachment>;
+  /** Where each attachment is on disk, for the model (see files/chatUploads). */
+  readonly attachmentsNote?: (attachments: ReadonlyArray<ChatAttachment>) => string | null;
 }): ReadonlyArray<ProviderContextMessage> {
-  const messages = input.messages.slice(-49).map((message) => {
-    const text = sanitizeProviderContextText(message.text);
+  const withNote = (text: string, attachments: ReadonlyArray<ChatAttachment> | undefined) =>
+    attachments && attachments.length > 0 && input.attachmentsNote
+      ? appendChatAttachmentsNote(text, input.attachmentsNote(attachments))
+      : text;
+  const recent = input.messages.slice(-49);
+  const messages = recent.map((message) => {
+    const text = withNote(sanitizeProviderContextText(message.text), message.attachments);
     if (message.attachments && message.attachments.length > 0) {
       return {
         role: message.role,
@@ -128,11 +138,17 @@ function buildProviderContextMessages(input: {
       text,
     } satisfies ProviderContextMessage;
   });
-  const lastUserMessage = messages.toReversed().find((message) => message.role === "user");
-  if (lastUserMessage?.text.trim() !== input.currentMessageText.trim()) {
+  // Compared without the attachment note: it is ours, not the message's.
+  const lastUserMessage = recent.toReversed().find((message) => message.role === "user");
+  const lastUserText =
+    lastUserMessage === undefined ? undefined : sanitizeProviderContextText(lastUserMessage.text);
+  if (lastUserText?.trim() !== input.currentMessageText.trim()) {
     messages.push({
       role: "user",
-      text: sanitizeProviderContextText(input.currentMessageText),
+      text: withNote(
+        sanitizeProviderContextText(input.currentMessageText),
+        input.currentAttachments,
+      ),
       ...(input.currentAttachments.length > 0
         ? { attachments: [...input.currentAttachments] }
         : {}),
@@ -270,6 +286,17 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
+  const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
+    attachments.length === 0
+      ? null
+      : buildChatAttachmentsNote(attachments, {
+          storedImagePath: (attachmentId) =>
+            resolveAttachmentPathById({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachmentId,
+            }),
+        });
   const handledTurnStartKeys = yield* Cache.make<string, true>({
     capacity: HANDLED_TURN_START_KEY_MAX,
     timeToLive: HANDLED_TURN_START_KEY_TTL,
@@ -697,12 +724,17 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
+    // Every harness hears where the attached files are on this computer
+    // (~/Uploads/…); the stored message the UI shows stays clean.
+    const normalizedInput = toNonEmptyProviderInput(
+      appendChatAttachmentsNote(input.messageText, attachmentsNote(normalizedAttachments)),
+    );
     const contextMessages = buildProviderContextMessages({
       messages: thread.messages,
       currentMessageText: input.messageText,
       currentAttachments: normalizedAttachments,
+      attachmentsNote,
     });
     const activeSession = yield* providerService
       .listSessions()

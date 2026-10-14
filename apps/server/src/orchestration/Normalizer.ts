@@ -1,13 +1,19 @@
+import fsPromises from "node:fs/promises";
+import * as OS from "node:os";
+
 import { Effect, FileSystem, Path } from "effect";
 import {
   type ChatAttachment,
+  type ChatFileAttachment,
   type ChatImageAttachment,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  type UploadChatFileAttachment,
   type UploadChatImageAttachment,
   type UploadChatVideoDigestAttachment,
   type VideoDigest,
@@ -16,6 +22,13 @@ import {
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
+import {
+  incomingUploadPath,
+  moveIntoUploads,
+  pruneStaleIncomingUploads,
+  saveBytesToUploads,
+} from "../files/chatUploads.ts";
+import { configuredFilesRoot } from "../files/filesPaths.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import {
   downloadUnoVideoArtifactWithApiKey,
@@ -187,11 +200,78 @@ export const normalizeDispatchCommand = (
             message: `Invalid image attachment payload for '${attachment.name}'.`,
           });
         }
-        return yield* persistImageAttachment({
+        const bytes = Buffer.from(parsed.base64, "base64");
+        const persisted = yield* persistImageAttachment({
           name: attachment.name,
           mimeType: parsed.mimeType,
-          bytes: Buffer.from(parsed.base64, "base64"),
+          bytes,
         });
+        // The person's own copy in ~/Uploads/YYYY-MM (visible in Files); the
+        // turn tells the model this path. A full or read-only home must not
+        // block the message: the picture still reaches the model inline.
+        const savedPath = yield* Effect.tryPromise(() =>
+          saveBytesToUploads({ filesRoot: configuredFilesRoot(), name: attachment.name, bytes }),
+        ).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("chat image attachment was not saved to Uploads", {
+              name: attachment.name,
+              cause: String(cause),
+            }).pipe(Effect.as(null)),
+          ),
+        );
+        return savedPath === null ? persisted : { ...persisted, savedPath };
+      });
+
+    // A non-image file: the composer already staged its bytes in
+    // ~/Uploads/.incoming/<uploadId>; it moves to ~/Uploads/YYYY-MM/<name>.
+    const persistUploadFileAttachment = (attachment: UploadChatFileAttachment) =>
+      Effect.gen(function* () {
+        const homeDir = OS.homedir();
+        const stagedPath = incomingUploadPath(homeDir, attachment.uploadId);
+        const notUploaded = new OrchestrationDispatchCommandError({
+          message: `'${attachment.name}' didn't finish uploading. Attach it again.`,
+        });
+        const stat = yield* Effect.tryPromise(() => fsPromises.lstat(stagedPath)).pipe(
+          Effect.mapError(() => notUploaded),
+        );
+        if (!stat.isFile()) {
+          return yield* notUploaded;
+        }
+        if (stat.size > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: `'${attachment.name}' is too large to attach.`,
+          });
+        }
+        const attachmentId = createAttachmentId(command.threadId);
+        if (!attachmentId) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Failed to create a safe attachment id.",
+          });
+        }
+        const savedPath = yield* Effect.tryPromise(() =>
+          moveIntoUploads({
+            filesRoot: configuredFilesRoot(),
+            sourcePath: stagedPath,
+            name: attachment.name,
+          }),
+        ).pipe(
+          Effect.mapError(
+            () =>
+              new OrchestrationDispatchCommandError({
+                message: `Couldn't save '${attachment.name}' to Uploads.`,
+              }),
+          ),
+        );
+        yield* Effect.promise(() => pruneStaleIncomingUploads(homeDir));
+        const mimeType = attachment.mimeType.trim();
+        return {
+          type: "file" as const,
+          id: attachmentId,
+          name: attachment.name,
+          mimeType: mimeType.length > 0 ? mimeType : "application/octet-stream",
+          sizeBytes: stat.size,
+          path: savedPath,
+        } satisfies ChatFileAttachment;
       });
 
     const normalizedAttachments: ChatAttachment[] = [];
@@ -200,6 +280,10 @@ export const normalizeDispatchCommand = (
     for (const attachment of command.message.attachments) {
       if (attachment.type === "image") {
         normalizedAttachments.push(yield* persistUploadImageAttachment(attachment));
+        continue;
+      }
+      if (attachment.type === "file") {
+        normalizedAttachments.push(yield* persistUploadFileAttachment(attachment));
         continue;
       }
 

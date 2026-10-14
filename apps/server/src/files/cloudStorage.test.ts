@@ -75,6 +75,7 @@ describe("cloud storage", () => {
       destinationDir: target,
     });
     expect(result.files).toBe(2);
+    expect(result.paths).toEqual([nodePath.join(target, "Report (2)")]);
     expect(fs.readFileSync(nodePath.join(target, "Report (2)", "img", "a.png"), "utf8")).toBe(
       "png",
     );
@@ -84,6 +85,7 @@ describe("cloud storage", () => {
       destinationDir: target,
     });
     expect(single.files).toBe(1);
+    expect(single.paths).toEqual([nodePath.join(target, "index.html")]);
     expect(fs.readFileSync(nodePath.join(target, "index.html"), "utf8")).toBe("<h1>hi</h1>");
   });
 

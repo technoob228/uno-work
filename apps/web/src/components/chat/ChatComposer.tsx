@@ -46,7 +46,11 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { chatFileRejection, composerFileFromFile, routeComposerFiles } from "../../chatUploads";
+import { formatFileSize } from "../files/fileTypes";
+import { useComposerFileHandoffStore } from "../computer/composerFileHandoffStore";
 import {
+  type ComposerFileAttachment,
   type ComposerImageAttachment,
   type ComposerVideoAttachment,
   type DraftId,
@@ -111,6 +115,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  FileIcon,
   FileVideoIcon,
   ListTodoIcon,
   LoaderCircleIcon,
@@ -505,11 +510,14 @@ export interface ChatComposerHandle {
   addTerminalContext: (selection: TerminalContextSelection) => void;
   clearVideoAttachments: () => void;
   setVideoAttachments: (videos: ComposerVideoAttachment[]) => void;
+  /** Non-image files (staged on send); cleared/restored like videos. */
+  setFileAttachments: (files: ComposerFileAttachment[]) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
     images: ComposerImageAttachment[];
     videos: ComposerVideoAttachment[];
+    files: ComposerFileAttachment[];
     terminalContexts: TerminalContextDraft[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
@@ -730,6 +738,21 @@ export const ChatComposer = memo(
     const prompt = composerDraft.prompt;
     const composerImages = composerDraft.images;
     const [composerVideos, setComposerVideos] = useState<ComposerVideoAttachment[]>([]);
+    // Non-image files: in memory only, staged on the chat's computer on send.
+    const [composerFiles, setComposerFiles] = useState<ComposerFileAttachment[]>([]);
+    const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
+    const setComposerFilesState = useCallback(
+      (
+        updater: (
+          files: ReadonlyArray<ComposerFileAttachment>,
+        ) => ReadonlyArray<ComposerFileAttachment>,
+      ) => {
+        const next = [...updater(composerFilesRef.current)];
+        composerFilesRef.current = next;
+        setComposerFiles(next);
+      },
+      [],
+    );
     const composerTerminalContexts = composerDraft.terminalContexts;
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
@@ -953,10 +976,10 @@ export const ChatComposer = memo(
       imageAttachmentSupport === "unknown" && composerImages.length > 0;
     const imageAttachmentTooltip =
       imageAttachmentSupport === "unsupported"
-        ? "Attach video, or switch to a vision model for images."
+        ? "Attach files or video. Pictures are saved to Uploads; this model can't see them."
         : imageAttachmentSupport === "unknown"
-          ? "Image support is unknown for this model."
-          : "Attach images or video";
+          ? "Attach files. Image support is unknown for this model."
+          : "Attach files, images or video";
     const composerProviderControls = useMemo(
       () => ({
         showInteractionModeToggle: getProviderInteractionModeToggle(
@@ -1069,10 +1092,16 @@ export const ChatComposer = memo(
       () =>
         deriveComposerSendState({
           prompt,
-          imageCount: composerImages.length + composerVideos.length,
+          imageCount: composerImages.length + composerVideos.length + composerFiles.length,
           terminalContexts: composerTerminalContexts,
         }),
-      [composerImages.length, composerTerminalContexts, composerVideos.length, prompt],
+      [
+        composerFiles.length,
+        composerImages.length,
+        composerTerminalContexts,
+        composerVideos.length,
+        prompt,
+      ],
     );
 
     // ------------------------------------------------------------------
@@ -1495,7 +1524,19 @@ export const ChatComposer = memo(
       setIsDragOverComposer(false);
       cleanupComposerVideos();
       setComposerVideos([]);
-    }, [draftId, activeThreadId, cleanupComposerVideos, promptRef]);
+      setComposerFilesState(() => []);
+    }, [draftId, activeThreadId, cleanupComposerVideos, promptRef, setComposerFilesState]);
+
+    // Files attached on Home's composer for this new chat (after the reset
+    // above, before ChatView's pending send).
+    const handedOffFileCount = useComposerFileHandoffStore((store) =>
+      draftId ? (store.pending[draftId]?.length ?? 0) : 0,
+    );
+    useEffect(() => {
+      if (!draftId || handedOffFileCount === 0) return;
+      const handed = useComposerFileHandoffStore.getState().take(draftId);
+      if (handed.length > 0) setComposerFilesState((current) => [...current, ...handed]);
+    }, [draftId, handedOffFileCount, setComposerFilesState]);
 
     // ------------------------------------------------------------------
     // Footer compact layout observation
@@ -2267,7 +2308,10 @@ export const ChatComposer = memo(
         return;
       }
       const nextImages: ComposerImageAttachment[] = [];
-      let nextImageCount = composerImagesRef.current.length;
+      let nextImageCount =
+        composerImagesRef.current.length +
+        composerVideosRef.current.length +
+        composerFilesRef.current.length;
       let error: string | null = null;
       for (const file of files) {
         if (!file.type.startsWith("image/")) {
@@ -2279,7 +2323,7 @@ export const ChatComposer = memo(
           continue;
         }
         if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
           break;
         }
         const previewUrl = URL.createObjectURL(file);
@@ -2317,7 +2361,10 @@ export const ChatComposer = memo(
       }
 
       const nextVideos: ComposerVideoAttachment[] = [];
-      let nextAttachmentCount = composerImagesRef.current.length + composerVideosRef.current.length;
+      let nextAttachmentCount =
+        composerImagesRef.current.length +
+        composerVideosRef.current.length +
+        composerFilesRef.current.length;
       let error: string | null = null;
       for (const file of files) {
         const mimeType = inferVideoMimeType(file);
@@ -2394,21 +2441,60 @@ export const ChatComposer = memo(
       startComposerVideoProcessing(retryVideo);
     };
 
+    // Any other file (pdf, docx, xlsx, zip…): kept here and staged on the
+    // chat's computer when the message goes; it lands in ~/Uploads/YYYY-MM.
+    const addComposerPlainFiles = (files: File[]) => {
+      if (!activeThreadId || files.length === 0) return;
+      if (pendingUserInputs.length > 0) {
+        toastManager.add({
+          type: "error",
+          title: "Attach files after answering plan questions.",
+        });
+        return;
+      }
+      const nextFiles: ComposerFileAttachment[] = [];
+      let nextAttachmentCount =
+        composerImagesRef.current.length +
+        composerVideosRef.current.length +
+        composerFilesRef.current.length;
+      let error: string | null = null;
+      for (const file of files) {
+        const rejection = chatFileRejection(file);
+        if (rejection) {
+          error = rejection;
+          continue;
+        }
+        if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
+          break;
+        }
+        nextFiles.push(composerFileFromFile(file));
+        nextAttachmentCount += 1;
+      }
+      if (nextFiles.length > 0) {
+        setComposerFilesState((current) => [...current, ...nextFiles]);
+      }
+      setThreadError(activeThreadId, error);
+    };
+
+    const removeComposerFile = (fileId: string) => {
+      setComposerFilesState((current) => current.filter((file) => file.id !== fileId));
+    };
+
     const addComposerFiles = (files: File[]) => {
       if (files.length === 0) return;
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-      const videoFiles = files.filter((file) => inferVideoMimeType(file) !== null);
-      if (imageFiles.length > 0) {
-        addComposerImages(imageFiles);
+      const routed = routeComposerFiles(files, {
+        isVideo: (file) => inferVideoMimeType(file) !== null,
+        imagesSupported: imageAttachmentSupport !== "unsupported",
+      });
+      if (routed.images.length > 0) {
+        addComposerImages(routed.images);
       }
-      if (videoFiles.length > 0) {
-        addComposerVideos(videoFiles);
+      if (routed.videos.length > 0) {
+        addComposerVideos(routed.videos);
       }
-      if (imageFiles.length === 0 && videoFiles.length === 0) {
-        setThreadError(
-          activeThreadId,
-          "Unsupported attachment type. Attach images, MP4, MOV, or WebM video.",
-        );
+      if (routed.files.length > 0) {
+        addComposerPlainFiles(routed.files);
       }
     };
 
@@ -2603,10 +2689,14 @@ export const ChatComposer = memo(
         setVideoAttachments: (videos: ComposerVideoAttachment[]) => {
           setComposerVideosState(() => videos);
         },
+        setFileAttachments: (files: ComposerFileAttachment[]) => {
+          setComposerFilesState(() => files);
+        },
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
           videos: composerVideosRef.current,
+          files: composerFilesRef.current,
           terminalContexts: composerTerminalContextsRef.current,
           selectedPromptEffort,
           selectedModelOptionsForDispatch,
@@ -2635,6 +2725,7 @@ export const ChatComposer = memo(
         selectedPromptEffort,
         selectedProvider,
         selectedProviderModels,
+        setComposerFilesState,
         setComposerVideosState,
       ],
     );
@@ -2660,7 +2751,6 @@ export const ChatComposer = memo(
             <input
               ref={imageAttachmentInputRef}
               type="file"
-              accept="image/*,video/mp4,video/quicktime,video/webm"
               multiple
               className="hidden"
               onChange={onImageAttachmentInputChange}
@@ -3117,7 +3207,9 @@ export const ChatComposer = memo(
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
-                (composerImages.length > 0 || composerVideos.length > 0) && (
+                (composerImages.length > 0 ||
+                  composerVideos.length > 0 ||
+                  composerFiles.length > 0) && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {composerImages.map((image) => (
                       <div
@@ -3235,6 +3327,33 @@ export const ChatComposer = memo(
                         </Button>
                       </div>
                     ))}
+                    {composerFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="relative flex h-16 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-2 pr-7 pl-2.5"
+                        title={`${file.name} — saved to Uploads when you send`}
+                        data-testid="composer-file-attachment"
+                      >
+                        <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-foreground/80">
+                            {file.name}
+                          </div>
+                          <div className="truncate text-[10px] text-muted-foreground">
+                            {formatFileSize(file.sizeBytes)}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                          onClick={() => removeComposerFile(file.id)}
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          <XIcon />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -3337,7 +3456,6 @@ export const ChatComposer = memo(
                   <input
                     ref={imageAttachmentInputRef}
                     type="file"
-                    accept="image/*,video/mp4,video/quicktime,video/webm"
                     multiple
                     className="hidden"
                     onChange={onImageAttachmentInputChange}

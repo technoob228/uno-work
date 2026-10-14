@@ -23,9 +23,10 @@ function attachmentSummary(message: ChatMessage): string | null {
   const videoAttachments = message.attachments?.filter(
     (attachment) => attachment.type === "video_digest",
   );
+  const fileAttachments = message.attachments?.filter((attachment) => attachment.type === "file");
   const imageCount = imageAttachments?.length ?? 0;
   const videoCount = videoAttachments?.length ?? 0;
-  if (imageCount === 0 && videoCount === 0) {
+  if (imageCount === 0 && videoCount === 0 && (fileAttachments?.length ?? 0) === 0) {
     return null;
   }
 
@@ -41,6 +42,9 @@ function attachmentSummary(message: ChatMessage): string | null {
     summaries.push(
       `Attached video digest: ${video.name}, ${Math.round(video.durationMs / 1000)}s, ${video.frameCount} frames, ${video.transcriptSegmentCount} transcript segments`,
     );
+  }
+  for (const file of fileAttachments ?? []) {
+    summaries.push(`Attached file: ${file.name}${file.path ? ` saved at ${file.path}` : ""}`);
   }
   return `[${summaries.join("; ")}]`;
 }

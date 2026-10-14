@@ -8,7 +8,13 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  type SessionPhase,
+  type Thread,
+  type ThreadSession,
+} from "../types";
 import {
   type ComposerImageAttachment,
   type ComposerVideoAttachment,
@@ -120,11 +126,18 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type === "image") {
-      revokeBlobPreviewUrl(attachment.previewUrl);
-    } else {
-      revokeBlobPreviewUrl(attachment.posterPreviewUrl);
-    }
+    revokeBlobPreviewUrl(attachmentPreviewUrl(attachment));
+  }
+}
+
+function attachmentPreviewUrl(attachment: ChatAttachment): string | undefined {
+  switch (attachment.type) {
+    case "image":
+      return attachment.previewUrl;
+    case "video_digest":
+      return attachment.posterPreviewUrl;
+    case "file":
+      return undefined;
   }
 }
 
@@ -134,8 +147,7 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    const previewUrl =
-      attachment.type === "image" ? attachment.previewUrl : attachment.posterPreviewUrl;
+    const previewUrl = attachmentPreviewUrl(attachment);
     if (!previewUrl || !previewUrl.startsWith("blob:")) continue;
     previewUrls.push(previewUrl);
   }

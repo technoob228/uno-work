@@ -64,6 +64,9 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
     }
     case "video_digest":
       return `${attachment.id}.video.json`;
+    // Never written here: the file itself lives at `attachment.path` (~/Uploads).
+    case "file":
+      return `${attachment.id}.file`;
   }
 }
 

@@ -3,6 +3,8 @@ import { it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import {
+  ChatAttachment,
+  ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -807,5 +809,87 @@ it.effect("ModelSelection rejects malformed instance ids", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+const decodeChatAttachment = Schema.decodeUnknownEffect(ChatAttachment);
+const decodeClientCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
+
+it.effect("decodes a saved file attachment and an image with its saved copy", () =>
+  Effect.gen(function* () {
+    const file = yield* decodeChatAttachment({
+      type: "file",
+      id: "thread-1-abc",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1234,
+      path: "/home/me/Uploads/2026-10/report.pdf",
+    });
+    assert.strictEqual(
+      file.type === "file" ? file.path : null,
+      "/home/me/Uploads/2026-10/report.pdf",
+    );
+    const image = yield* decodeChatAttachment({
+      type: "image",
+      id: "thread-1-def",
+      name: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: 10,
+      savedPath: "/home/me/Uploads/2026-10/photo.png",
+    });
+    assert.strictEqual(
+      image.type === "image" ? image.savedPath : null,
+      "/home/me/Uploads/2026-10/photo.png",
+    );
+    // Messages stored before this change have no savedPath.
+    const legacy = yield* decodeChatAttachment({
+      type: "image",
+      id: "thread-1-ghi",
+      name: "old.png",
+      mimeType: "image/png",
+      sizeBytes: 10,
+    });
+    assert.strictEqual(legacy.type === "image" ? legacy.savedPath : "x", undefined);
+  }),
+);
+
+const clientTurnWithFile = (uploadId: string) => ({
+  type: "thread.turn.start",
+  commandId: "cmd-turn-file",
+  threadId: "thread-1",
+  message: {
+    messageId: "msg-file",
+    role: "user",
+    text: "summarize",
+    attachments: [
+      {
+        type: "file",
+        uploadId,
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1234,
+      },
+    ],
+  },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  createdAt: "2026-01-01T00:00:00.000Z",
+});
+
+it.effect("accepts a staged file upload in a client thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientCommand(
+      clientTurnWithFile("0f8fad5b-d9cb-469f-a165-70867728950e"),
+    );
+    assert.strictEqual(parsed.type, "thread.turn.start");
+  }),
+);
+
+it.effect("rejects a staged upload id that could leave the incoming folder", () =>
+  Effect.gen(function* () {
+    for (const uploadId of ["../../etc/passwd", "abc/defghij", ".hidden-file", "short"]) {
+      const result = yield* Effect.exit(decodeClientCommand(clientTurnWithFile(uploadId)));
+      assert.strictEqual(result._tag, "Failure", uploadId);
+    }
   }),
 );

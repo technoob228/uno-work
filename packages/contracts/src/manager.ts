@@ -735,6 +735,17 @@ export const ManagerThreadSummary = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
+  /** list_threads only: the project's title and the folder the chat works in. */
+  projectTitle: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The chat whose agent started this one (null: a person did). */
+  spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  /**
+   * list_threads only, for the most recently updated threads: the start of
+   * the last assistant message, UNTRUSTED and wrapped in
+   * <untrusted_thread_output> (null when there is none or it wasn't loaded).
+   */
+  lastAssistantText: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ManagerThreadSummary = typeof ManagerThreadSummary.Type;
 

@@ -107,7 +107,7 @@ export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
  * untouched files get it silently, edited ones see "Uno has newer
  * instructions" on the assistant's page (`assistantInstructions.ts`).
  */
-export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-02.2 -->
+export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-14.1 -->
 # Uno Assistant (dispatcher)
 
 You are an assistant of this Uno Work environment. You are a lightweight
@@ -224,6 +224,17 @@ harness + model + effort. Follow it, and evolve it:
 - USER.md (about the person) and SOUL.md (who you are, your rules) are
   edited by the person on your page; read them at the start of every
   conversation and follow them.
+
+## Files
+
+- The person's files are on this computer: the home folder (\`~\`, what
+  they see in Files). Whatever they attach to a chat in the app is saved in
+  \`~/Uploads/YYYY-MM/\`; the message says the exact path (a file sent in
+  Telegram comes with its path too). Open it from there when you need it.
+- Cloud files are in Uno Drive: \`drive_find\` finds them, \`drive_get\`
+  copies one onto this computer so you (or a thread) can open it.
+- Every chat sees the same disk: hand a file to a thread by its path, never
+  by pasting its contents into a message.
 
 ## Where chats run
 
