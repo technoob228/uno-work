@@ -101,4 +101,41 @@ describe("assistant engine notice", () => {
       assistantEngineNotice(status({ provider: "xai", model: "grok-4.7" }), { defaultAi: "byok" }),
     ).toBeNull();
   });
+
+  it("on the person's own plan: quiet when ready, points to Settings → AI when it isn't (14.10)", () => {
+    const claudeReady = status({
+      provider: "claude",
+      model: "sonnet",
+      subscriptions: [
+        {
+          provider: "claude",
+          state: "ready",
+          plan: "Claude Max",
+          account: null,
+          signIn: "harness",
+          message: null,
+        },
+      ],
+    });
+    expect(assistantEngineNotice(claudeReady)).toBeNull();
+    const signedOut = status({
+      provider: "chatgpt",
+      model: "gpt-5.6-terra",
+      subscriptions: [
+        {
+          provider: "chatgpt",
+          state: "sign-in",
+          plan: null,
+          account: null,
+          signIn: "assistant",
+          message: "Sign in to ChatGPT for Uno — a link and a code, about a minute.",
+        },
+      ],
+    });
+    expect(assistantEngineNotice(signedOut)).toMatchObject({
+      id: "subscription-not-ready",
+      title: "Uno can't use your ChatGPT plan right now",
+      action: "ai-settings",
+    });
+  });
 });

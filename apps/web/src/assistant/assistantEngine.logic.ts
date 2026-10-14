@@ -8,9 +8,10 @@ import {
   type AssistantLlmStatus,
   BYOK_PROVIDER_IDS,
   type ByokProviderId,
+  isSubscriptionLlmProvider,
 } from "@t3tools/contracts";
 
-export type AssistantEngineAction = "retry" | "install" | "settings" | "use-key";
+export type AssistantEngineAction = "retry" | "install" | "settings" | "ai-settings" | "use-key";
 
 export interface AssistantEngineNotice {
   readonly id: string;
@@ -80,7 +81,22 @@ export function assistantEngineNotice(
     case "ready":
       break;
   }
-  if (status.provider !== "uno") {
+  if (isSubscriptionLlmProvider(status.provider)) {
+    // The person's own Claude / ChatGPT plan (14.10): signed out, or a Hermes
+    // too old for Claude since it was picked.
+    const subscription = status.subscriptions?.find((entry) => entry.provider === status.provider);
+    if (subscription !== undefined && subscription.state !== "ready") {
+      return {
+        id: "subscription-not-ready",
+        variant: "warning",
+        title: `Uno can't use your ${AI_PROVIDER_LABELS[status.provider]} plan right now`,
+        description: subscription.message,
+        detail: null,
+        action: "ai-settings",
+        busy: false,
+      };
+    }
+  } else if (status.provider !== "uno") {
     const key = status.keys.find((entry) => entry.provider === status.provider);
     if (!key?.configured) {
       return {

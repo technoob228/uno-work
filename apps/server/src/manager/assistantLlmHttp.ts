@@ -10,6 +10,10 @@
  * - `POST /api/manager/assistant/llm`  — switch provider / model of the Uno chat.
  * - `GET  /api/manager/assistant/llm/models?provider=` — models a provider offers.
  * - `POST /api/manager/assistant/llm/harness` — install / retry Hermes.
+ * - `POST /api/manager/assistant/llm/sign-in` — start the assistant's own
+ *   sign-in to a subscription (ChatGPT: Hermes' device code → page + code).
+ * - `GET  /api/manager/assistant/llm/sign-in?provider=` — that sign-in's state.
+ * - `POST /api/manager/assistant/llm/sign-in/cancel` — stop waiting for it.
  * - `POST /api/manager/assistant/default-ai` — the account's default AI, as a client read it.
  *
  * Keys travel only inbound (store / test). No response and no log line
@@ -21,6 +25,8 @@ import {
   AiProviderKeyTestInput,
   AssistantLlmProvider,
   AssistantLlmSetInput,
+  AssistantSignInInput,
+  SubscriptionLlmProvider,
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -140,7 +146,9 @@ export const assistantLlmModelsRouteLayer = HttpRouter.add(
     const url = HttpServerRequest.toURL(request);
     const provider = url._tag === "Some" ? url.value.searchParams.get("provider") : null;
     if (!isAssistantLlmProvider(provider)) {
-      return yield* badRequest("provider must be one of uno, xai, openrouter, openai, custom.");
+      return yield* badRequest(
+        "provider must be one of uno, xai, openrouter, openai, custom, claude, chatgpt.",
+      );
     }
     const list = yield* assistantLlm.listModels(provider);
     return HttpServerResponse.jsonUnsafe(list, { status: 200 });
@@ -155,6 +163,57 @@ export const assistantLlmHarnessRouteLayer = HttpRouter.add(
     const assistantLlm = yield* ManagerAssistantLlm;
     const harness = yield* assistantLlm.ensureHarness({ retry: true });
     return HttpServerResponse.jsonUnsafe(harness, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const assistantSignInStartRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/llm/sign-in",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistantLlm = yield* ManagerAssistantLlm;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantSignInInput).pipe(
+      Effect.mapError(() => badRequest("provider must be claude or chatgpt.")),
+    );
+    return yield* assistantLlm.signInStart(input.provider).pipe(
+      Effect.map((status) => HttpServerResponse.jsonUnsafe(status, { status: 200 })),
+      Effect.catchTag("ManagerAssistantError", (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.detail }, { status: 409 })),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const isSubscriptionLlmProvider = Schema.is(SubscriptionLlmProvider);
+
+export const assistantSignInStatusRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/llm/sign-in",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistantLlm = yield* ManagerAssistantLlm;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    const provider = url._tag === "Some" ? url.value.searchParams.get("provider") : null;
+    if (!isSubscriptionLlmProvider(provider)) {
+      return yield* badRequest("provider must be claude or chatgpt.");
+    }
+    const status = yield* assistantLlm.signInStatus(provider);
+    return HttpServerResponse.jsonUnsafe(status, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const assistantSignInCancelRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/llm/sign-in/cancel",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistantLlm = yield* ManagerAssistantLlm;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantSignInInput).pipe(
+      Effect.mapError(() => badRequest("provider must be claude or chatgpt.")),
+    );
+    const status = yield* assistantLlm.signInCancel(input.provider);
+    return HttpServerResponse.jsonUnsafe(status, { status: 200 });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

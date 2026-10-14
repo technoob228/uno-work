@@ -11,8 +11,10 @@ import type {
   AssistantLlmModelList,
   AssistantLlmProvider,
   AssistantLlmStatus,
+  AssistantSignInStatus,
   ByokProviderId,
   EnvironmentId,
+  SubscriptionLlmProvider,
 } from "@t3tools/contracts";
 
 import { environmentFetchJson } from "~/environments/http/target";
@@ -118,6 +120,39 @@ export function ensureAssistantHarness(input: EnvironmentScoped): Promise<Assist
     pathname: "/api/manager/assistant/llm/harness",
     method: "POST",
     body: {},
+  });
+}
+
+/** Start the assistant's own sign-in to a subscription (ChatGPT: a page + a code). */
+export function startAssistantSignIn(
+  input: EnvironmentScoped & { readonly provider: SubscriptionLlmProvider },
+): Promise<AssistantSignInStatus> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/llm/sign-in",
+    method: "POST",
+    body: { provider: input.provider },
+  });
+}
+
+export function getAssistantSignIn(
+  input: EnvironmentScoped & { readonly provider: SubscriptionLlmProvider },
+): Promise<AssistantSignInStatus> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/llm/sign-in",
+    searchParams: { provider: input.provider },
+  });
+}
+
+export function cancelAssistantSignIn(
+  input: EnvironmentScoped & { readonly provider: SubscriptionLlmProvider },
+): Promise<AssistantSignInStatus> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/llm/sign-in/cancel",
+    method: "POST",
+    body: { provider: input.provider },
   });
 }
 

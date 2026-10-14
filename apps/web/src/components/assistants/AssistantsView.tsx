@@ -74,6 +74,7 @@ import { AssistantPage } from "./AssistantPage";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { NewAssistantFlow } from "./NewAssistantFlow";
+import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -947,6 +948,11 @@ function CreateAssistant({
               </p>
             )}
           </div>
+          <AssistantPowerPicker
+            environmentId={environmentId}
+            heading={`What powers ${name.trim() || DEFAULT_ASSISTANT_NAME}`}
+            className="rounded-2xl border border-border p-4"
+          />
           <div className="flex items-center justify-between gap-2">
             <Button variant="ghost" onClick={() => setStep(1)}>
               Back

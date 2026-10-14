@@ -119,3 +119,14 @@ describe("account default AI", () => {
     expect(harnessForAccountDefaultAi("something")).toBeNull();
   });
 });
+
+describe("the person's own plan (14.10)", () => {
+  it("reads as a plan, not a key, and starts on the plan's default model", () => {
+    expect(assistantProviderLabel("claude")).toBe("Your Claude plan");
+    expect(assistantProviderLabel("chatgpt")).toBe("Your ChatGPT plan");
+    expect(defaultAssistantModelFor("claude", [])).toBe("sonnet");
+    expect(defaultAssistantModelFor("chatgpt", [])).toBe("gpt-5.6-terra");
+    expect(assistantModelLabel("sonnet")).toBe("Claude Sonnet");
+    expect(assistantModelLabel("gpt-5.6-terra")).toBe("GPT-5.6 Terra");
+  });
+});

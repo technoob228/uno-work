@@ -63,6 +63,11 @@ import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment
 import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
 import {
+  claudePluginInstalled,
+  hermesSharedHome,
+  readChatgptSignIn,
+} from "../../manager/assistantSubscriptions.ts";
+import {
   ASSISTANT_COMPUTER_ROLE,
   makeOwnComputerRoleReader,
 } from "../../assistants/computerRole.ts";
@@ -125,7 +130,6 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const path = yield* Path.Path;
       const serverConfig = yield* ServerConfig;
       const serverSettingsService = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
@@ -142,11 +146,31 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
 
       // Per-session LLM route (contracts: aiProviders.ts). The gateway key is
       // read fresh per session — on a Work box it often lands after start.
+      const sharedHome = hermesSharedHome(serverConfig.stateDir, instanceId);
       const resolveLlmRoute = (input: {
         readonly threadId: string;
         readonly provider: HermesLlmRoute["provider"];
       }): Effect.Effect<HermesLlmRoute, string> =>
         Effect.gen(function* () {
+          // The person's own subscription (14.10): no key — the sign-in lives
+          // in the shared Hermes home the chat's home links to.
+          if (input.provider === "chatgpt") {
+            const signIn = yield* Effect.promise(() => readChatgptSignIn(sharedHome));
+            if (!signIn.signedIn) {
+              return yield* Effect.fail(
+                "Uno isn't signed in to your ChatGPT on this computer. Sign in under Settings → AI → Assistant, or switch Uno to Uno AI.",
+              );
+            }
+            return { provider: "chatgpt" as const };
+          }
+          if (input.provider === "claude") {
+            if (!(yield* Effect.promise(() => claudePluginInstalled(sharedHome)))) {
+              return yield* Effect.fail(
+                "Uno's Claude connection isn't set up on this computer. Pick “Your Claude plan” again under Settings → AI → Assistant, or switch Uno to Uno AI.",
+              );
+            }
+            return { provider: "claude" as const };
+          }
           if (input.provider === "uno") {
             // A fresh Work box gets its key from the console seconds after
             // sign-in: a first message sent before that waits for it here
@@ -173,7 +197,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
 
       const hermesEnvironment = buildHermesSpawnEnvironment({
         unoApiKey,
-        hermesHome: path.join(serverConfig.stateDir, `hermes-home-${instanceId}`),
+        hermesHome: sharedHome,
       });
       const unoAgentEnv = yield* (yield* UnoAgentAccess).environment();
       // One brief for every harness (agentContext/unoWorkBrief.md) plus the

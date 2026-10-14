@@ -14,6 +14,7 @@ import {
   type AssistantLlmModel,
   type AssistantLlmProvider,
   type EnvironmentId,
+  isSubscriptionLlmProvider,
 } from "@t3tools/contracts";
 import { assistantModelLabel, assistantProviderLabel } from "@t3tools/shared/assistantLlm";
 import { useQuery } from "@tanstack/react-query";
@@ -42,6 +43,8 @@ import { toastManager } from "../ui/toast";
 
 const PROVIDER_ORDER: ReadonlyArray<AssistantLlmProvider> = [
   "uno",
+  "claude",
+  "chatgpt",
   "xai",
   "openrouter",
   "openai",
@@ -130,10 +133,14 @@ export function AssistantModelPicker(props: {
 
   const modelLabel = status ? assistantModelLabel(status.model) : "Grok (latest)";
   const providerLabel = assistantProviderLabel(activeProvider);
+  const subscriptionOf = (entry: AssistantLlmProvider) =>
+    status?.subscriptions?.find((subscription) => subscription.provider === entry);
   const byokNote =
     provider === "uno"
       ? "Counts against this computer's AI limit and your Uno balance."
-      : `Billed by ${AI_PROVIDER_LABELS[provider]} on your key — Uno spend limits don't apply.`;
+      : isSubscriptionLlmProvider(provider)
+        ? `Runs on your ${AI_PROVIDER_LABELS[provider]} plan — Uno doesn't charge; your plan's limits apply.`
+        : `Billed by ${AI_PROVIDER_LABELS[provider]} on your key — Uno spend limits don't apply.`;
 
   if (props.settingsLink) {
     return (
@@ -198,8 +205,15 @@ export function AssistantModelPicker(props: {
             aria-label="Where Uno's AI comes from"
           >
             {PROVIDER_ORDER.map((entry) => {
-              const key = entry === "uno" ? null : keyByProvider.get(entry);
-              const available = entry === "uno" || key?.configured === true;
+              const subscription = isSubscriptionLlmProvider(entry) ? subscriptionOf(entry) : null;
+              // An older daemon doesn't know subscriptions: don't offer them.
+              if (subscription === undefined) return null;
+              const key =
+                entry === "uno" || isSubscriptionLlmProvider(entry)
+                  ? null
+                  : keyByProvider.get(entry);
+              const available =
+                entry === "uno" || key?.configured === true || subscription?.state === "ready";
               const selected = entry === provider;
               return (
                 <button
@@ -226,10 +240,22 @@ export function AssistantModelPicker(props: {
                     ) : null}
                   </span>
                   <span className="flex-1 truncate">
-                    {entry === "uno" ? "Uno gateway" : `${AI_PROVIDER_LABELS[entry]} — your key`}
+                    {entry === "uno"
+                      ? "Uno gateway"
+                      : subscription
+                        ? `Your ${AI_PROVIDER_LABELS[entry]} plan`
+                        : `${AI_PROVIDER_LABELS[entry]} — your key`}
                   </span>
                   {entry === "uno" ? (
                     <span className="text-[11px] text-muted-foreground">default</span>
+                  ) : subscription ? (
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {subscription.state === "ready"
+                        ? (subscription.plan ?? "signed in")
+                        : subscription.state === "needs-hermes"
+                          ? "needs newer Hermes"
+                          : "Sign in"}
+                    </span>
                   ) : available ? (
                     <span className="font-mono text-[11px] text-muted-foreground">
                       ••••{key?.keyHint}
@@ -361,6 +387,10 @@ export function AssistantEngineBanner(props: { readonly environmentId: Environme
         );
       return;
     }
+    if (notice.action === "ai-settings") {
+      void navigate({ to: "/settings/ai" });
+      return;
+    }
     if (notice.action === "settings") {
       void navigate({
         to: "/settings/environment/$environmentId/providers",
@@ -404,7 +434,7 @@ export function AssistantEngineBanner(props: { readonly environmentId: Environme
               <>
                 <KeyRoundIcon /> Use my key
               </>
-            ) : notice.action === "settings" ? (
+            ) : notice.action === "settings" || notice.action === "ai-settings" ? (
               <>
                 <KeyRoundIcon /> Settings
               </>
