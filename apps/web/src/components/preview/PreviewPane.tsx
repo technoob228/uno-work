@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   CodeXmlIcon,
   CopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   EyeIcon,
   FileCode2Icon,
@@ -29,7 +30,7 @@ import {
   AppWindowIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { type EnvironmentId, FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -397,14 +398,74 @@ function MetadataPlaceholder({ file, label }: { file: PreviewFile; label: string
   );
 }
 
-function base64ToBlobUrl(base64: string, mimeType: string): string {
+function base64ToBlob(base64: string, mimeType: string): Blob {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function base64ToBlobUrl(base64: string, mimeType: string): string {
+  return URL.createObjectURL(base64ToBlob(base64, mimeType));
+}
+
+/**
+ * Скачать открытый в превью файл к себе. Файл может жить на удалённой машине,
+ * поэтому читаем его через filesystem.readFile окружения (до жёсткого лимита)
+ * и отдаём браузеру/Electron как обычную загрузку через <a download>.
+ */
+async function resolveDownloadBlob(
+  file: PreviewFile,
+  fallbackEnvironmentId: EnvironmentId | null,
+): Promise<Blob> {
+  const environmentId = file.environmentId ?? fallbackEnvironmentId;
+  if (file.path && environmentId) {
+    const api = readEnvironmentApi(environmentId);
+    if (!api) throw new Error("Окружение недоступно");
+    const data = await api.filesystem.readFile({
+      path: file.path,
+      maxBytes: FILESYSTEM_READ_FILE_HARD_MAX_BYTES,
+    });
+    if (data.truncated) {
+      throw new Error(
+        `Файл больше ${Math.round(FILESYSTEM_READ_FILE_HARD_MAX_BYTES / 1024 / 1024)} МБ — скачайте его с диска напрямую`,
+      );
+    }
+    const mime = data.mimeType ?? "application/octet-stream";
+    return data.encoding === "base64"
+      ? base64ToBlob(data.content, mime)
+      : new Blob([data.content], { type: mime });
+  }
+  if (file.blobUrl) {
+    return (await fetch(file.blobUrl)).blob();
+  }
+  return new Blob([file.content], { type: "text/plain;charset=utf-8" });
+}
+
+async function downloadPreviewFile(
+  file: PreviewFile,
+  fallbackEnvironmentId: EnvironmentId | null,
+): Promise<void> {
+  try {
+    const blob = await resolveDownloadBlob(file, fallbackEnvironmentId);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = file.name;
+    anchor.rel = "noopener";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (error) {
+    toastManager.add({
+      type: "error",
+      title: "Не удалось скачать файл",
+      description: error instanceof Error ? error.message : undefined,
+    });
+  }
 }
 
 const CSV_MAX_ROWS = 500;
@@ -1541,6 +1602,16 @@ function PathBar({
     }
   }, [rawPath]);
 
+  const [downloading, setDownloading] = useState(false);
+  const handleDownload = useCallback(async () => {
+    setDownloading(true);
+    try {
+      await downloadPreviewFile(file, currentChatEnvironmentId ?? null);
+    } finally {
+      setDownloading(false);
+    }
+  }, [file, currentChatEnvironmentId]);
+
   return (
     <div
       className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-card px-2 text-xs"
@@ -1631,6 +1702,26 @@ function PathBar({
             }
           />
           <TooltipPopup side="bottom">{copied ? "Copied!" : "Copy path"}</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={downloading}
+                aria-label="Скачать файл"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {downloading ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <DownloadIcon className="size-3.5" />
+                )}
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">Скачать</TooltipPopup>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger
