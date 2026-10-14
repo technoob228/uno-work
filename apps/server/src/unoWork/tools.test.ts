@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -308,6 +316,7 @@ describe("uno-work tool catalogue", () => {
       "cloud_list",
       "drive_find",
       "drive_save",
+      "drive_get",
       "drive_share_link",
       "chats_list",
       "chat_create",
@@ -507,6 +516,43 @@ describe("approval gate", () => {
     // A clean publish carries no note at all.
     const clean = await run("site_publish", deps, { path: "~/site" });
     expect(clean._tag === "Success" && JSON.stringify(clean.success)).not.toMatch(/note/);
+  });
+
+  it("drive_get copies Drive files into ~/Uploads/YYYY-MM by default and says where", async () => {
+    const { deps, home } = makeDeps();
+    const calls: Array<{ keys: ReadonlyArray<string>; destinationPath: string }> = [];
+    const withDrive: UnoWorkToolDeps = {
+      ...deps,
+      files: {
+        ...deps.files,
+        driveState: Effect.succeed({ available: true, bucketId: 9 } as never),
+        cloudCopyToComputer: (input) =>
+          Effect.sync(() => {
+            calls.push(input);
+            return {
+              files: 1,
+              bytes: 3,
+              skipped: [],
+              paths: [path.join(input.destinationPath, "report.pdf")],
+            };
+          }),
+      },
+    };
+    const result = await run("drive_get", withDrive, { keys: ["Telegram/2026-10/report.pdf"] });
+    expect(result._tag).toBe("Success");
+    const destination = calls[0]!.destinationPath;
+    expect(path.relative(home, destination)).toMatch(/^Uploads[/\\]\d{4}-\d{2}$/);
+    expect(existsSync(destination)).toBe(true);
+    if (result._tag !== "Success") return;
+    expect(result.success).toMatchObject({
+      ok: true,
+      files: 1,
+      paths: [expect.stringMatching(/^~\/Uploads\/\d{4}-\d{2}\/report\.pdf$/)],
+    });
+
+    // A named folder is passed as is (Files refuses one outside the home).
+    await run("drive_get", withDrive, { keys: ["a.txt"], folder: "~/Documents" });
+    expect(calls[1]!.destinationPath).toBe(path.join(home, "Documents"));
   });
 
   it("request_secret: wait false asks the bridge not to hold the turn", async () => {

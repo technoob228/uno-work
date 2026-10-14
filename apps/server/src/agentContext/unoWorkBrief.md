@@ -8,14 +8,14 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 
 - This computer: `computer_status`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
-- Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_save`, `drive_share_link`
+- Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`
 - Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`
 - The person: `notify` (Inbox), `open_in_panel` (URL or file, right panel), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_forms_get`, `site_forms_set` (where form answers go)
 - Databases (Postgres): `db_create`, `db_list`, `db_connection` (puts DATABASE_URL in `.env`, never in the chat)
 - Bots/APIs for others: `app_deploy` if `app_servers_list` says `enabled: true`, else run them here as an app; `app_server_logs`
 - Account: `account_overview`, `computer_create`, `computer_create_status`, `settings_read`
-- Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear here once connected: use them, don't ask to copy things over. A project's `materials/README.md` sums up their files: read it first.
+- Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear here: use them, don't ask to copy things over. A project's `materials/README.md` sums up their files: read it first.
 - Details: `uno_guide` with a topic: `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `databases`, `app-servers`, `account`, `plugins`
 
 Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.
@@ -23,9 +23,9 @@ Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Autho
 ## Where things live
 
 - `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`. Projects go in `~/projects/<name>`.
-- `~/.uno/apps/<id>.json` registers an app on Home; its log is `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK (JS, Python).
-- Cloud storage keeps the person's files (photos, documents); the disk is for programs.
-- The right panel shows pages and files. On a cloud computer it is a browser ON the machine (the person watches, can take control): `localhost` there is the machine. To let them open an app themselves, use `app_show_on_internet`. The browser installs on first use (~30–60 s): retry if `browser_command` says so. A step only the person can do (sign-in, captcha, 2FA, payment): `browser_command` with `requestHelp`.
+- `~/.uno/apps/<id>.json` registers an app on Home; its log is `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK.
+- The person's files: `~` and Uno Drive. What they attach to a chat is saved in `~/Uploads/YYYY-MM/` (the message says where). Uno's log: `~/UnoWork/Assistants/home/NOTES.md`.
+- The right panel shows pages and files. On a cloud computer it is a browser ON the machine (the person watches, can take control): `localhost` there is the machine. To let them open an app themselves, use `app_show_on_internet`. The browser installs on first use: retry if `browser_command` says so. A step only the person can do (sign-in, captcha, 2FA, payment): `browser_command` with `requestHelp`.
 
 ## Their assistant
 

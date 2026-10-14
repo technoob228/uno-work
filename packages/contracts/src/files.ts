@@ -330,6 +330,11 @@ export const FilesCloudTransferResult = Schema.Struct({
   bytes: NonNegativeInt,
   /** Files left out, with the reason (too big, hidden, …). */
   skipped: Schema.Array(Schema.Struct({ name: Schema.String, reason: Schema.String })),
+  /**
+   * Copy to this computer: where each requested key landed (the file, or the
+   * new folder for a folder key), absolute paths. Absent for uploads.
+   */
+  paths: Schema.optional(Schema.Array(Schema.String)),
 });
 export type FilesCloudTransferResult = typeof FilesCloudTransferResult.Type;
 

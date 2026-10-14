@@ -395,9 +395,11 @@ export async function copyToComputer(
 ): Promise<FilesCloudTransferResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const skipped: Array<{ name: string; reason: string }> = [];
+  const landed: string[] = [];
   let files = 0;
   let bytes = 0;
   for (const key of input.keys) {
+    const filesBefore = files;
     const isFolder = key.endsWith("/");
     const objects = isFolder
       ? await listRecursive(deps, input.bucketId, normalizeCloudPrefix(key))
@@ -440,9 +442,11 @@ export async function copyToComputer(
       }
       files += 1;
       bytes += (await fsPromises.stat(target)).size;
+      if (!isFolder) landed.push(target);
     }
+    if (isFolder && files > filesBefore) landed.push(root);
   }
-  return { files, bytes, skipped };
+  return { files, bytes, skipped, paths: landed };
 }
 
 export { ControlPlaneHttpError };
