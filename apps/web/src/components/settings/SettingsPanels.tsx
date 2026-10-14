@@ -749,7 +749,7 @@ export function GeneralSettingsPanel({
 
             <SettingsRow
               title="Auto-open task panel"
-              description="Open the right-side plan and task panel automatically when steps appear."
+              description="Open the plan and task tab in the right panel automatically when steps appear."
               resetAction={
                 settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar ? (
                   <SettingResetButton

@@ -28,6 +28,7 @@ import {
   TableIcon,
   XIcon,
   AppWindowIcon,
+  ListTodoIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type EnvironmentId, FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
@@ -63,6 +64,7 @@ import {
   isBrowserTab,
   isLiveBrowserTab,
   isPluginPanelTab,
+  isTasksTab,
   makePluginPanelFile,
   pluginIdFromPanelFile,
   type PreviewFile,
@@ -90,6 +92,7 @@ import {
 } from "./PluginPanelChat";
 import { AppFrame } from "../apps/AppFrame";
 import { LiveBrowserView } from "./LiveBrowserView";
+import { TasksTabBody, TasksTabName } from "./TasksTabBody";
 import { useChatBrowser } from "./useChatBrowser";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
@@ -114,6 +117,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   "live-browser": MonitorIcon,
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
+  tasks: ListTodoIcon,
   unknown: FileIcon,
 };
 
@@ -132,6 +136,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   "live-browser": "Computer browser",
   "plugin-panel": "Plugin panel",
   app: "App",
+  tasks: "Tasks",
   unknown: "File",
 };
 
@@ -1458,6 +1463,9 @@ function Body({ file }: { file: PreviewFile }) {
   if (file.kind === "live-browser") {
     return <LiveBrowserView file={file} />;
   }
+  if (file.kind === "tasks") {
+    return <TasksTabBody file={file} />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -1751,14 +1759,18 @@ function PathBar({
 async function showTabScopeMenu(input: {
   file: PreviewFile;
   scope: PreviewTabScope;
-  /** Вне чата видны только закреплённые вкладки, переносить их там некуда — только закрыть. */
-  inChat: boolean;
+  /**
+   * Можно ли перенести вкладку на другой уровень. Вне чата видны только
+   * закреплённые вкладки — переносить их там некуда; вкладка задач — всегда
+   * про свой тред. Иначе — только закрыть.
+   */
+  movable: boolean;
   position: { x: number; y: number };
   setTabScope: (id: string, scope: PreviewTabScope) => void;
   closeFile: (id: string) => void;
 }): Promise<void> {
   const items = [
-    ...(input.inChat ? PREVIEW_TAB_SCOPES : [])
+    ...(input.movable ? PREVIEW_TAB_SCOPES : [])
       .filter((scope) => scope !== input.scope)
       .map((scope) => ({
         id: `scope:${scope}`,
@@ -2031,7 +2043,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                     void showTabScopeMenu({
                       file,
                       scope,
-                      inChat: currentChatThreadId !== null,
+                      movable: currentChatThreadId !== null && !isTasksTab(file),
                       position: { x: event.clientX, y: event.clientY },
                       setTabScope,
                       closeFile,
@@ -2043,7 +2055,11 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                       ? "bg-accent text-accent-foreground"
                       : "text-muted-foreground hover:bg-accent/50",
                   )}
-                  title={`${KIND_LABEL[file.kind]} — ${file.name}\nKept in: ${SCOPE_LABEL[scope]} (right-click to change)${dualView ? "\nDouble-click: code ↔ preview" : ""}`}
+                  title={
+                    isTasksTab(file)
+                      ? "Tasks and plan of this chat"
+                      : `${KIND_LABEL[file.kind]} — ${file.name}\nKept in: ${SCOPE_LABEL[scope]} (right-click to change)${dualView ? "\nDouble-click: code ↔ preview" : ""}`
+                  }
                 >
                   <Icon className="size-3.5 shrink-0" />
                   {ScopeIcon ? (
@@ -2054,7 +2070,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                       )}
                     />
                   ) : null}
-                  <span className="max-w-[8rem] truncate">{file.name}</span>
+                  <span className="max-w-[8rem] truncate">
+                    {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
+                  </span>
                   <span
                     role="button"
                     tabIndex={0}
@@ -2160,7 +2178,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       !isBrowserTab(active) &&
       !isPluginPanelTab(active) &&
       !isAppTab(active) &&
-      !isLiveBrowserTab(active) ? (
+      !isLiveBrowserTab(active) &&
+      !isTasksTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
