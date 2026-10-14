@@ -42,6 +42,19 @@ export interface ChatImageAttachment {
   mimeType: string;
   sizeBytes: number;
   previewUrl?: string;
+  /** The person's copy in ~/Uploads/YYYY-MM on the chat's computer. */
+  savedPath?: string;
+}
+
+/** A non-image file, saved in ~/Uploads/YYYY-MM on the chat's computer. */
+export interface ChatFileAttachment {
+  type: "file";
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Absolute path on the chat's computer; empty while still being sent. */
+  path: string;
 }
 
 export interface ChatVideoDigestAttachment {
@@ -58,7 +71,7 @@ export interface ChatVideoDigestAttachment {
   posterPreviewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment | ChatVideoDigestAttachment;
+export type ChatAttachment = ChatImageAttachment | ChatVideoDigestAttachment | ChatFileAttachment;
 
 export interface ChatMessage {
   id: MessageId;

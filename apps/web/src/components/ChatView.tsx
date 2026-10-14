@@ -137,6 +137,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
+import { stageChatFileUpload } from "../chatUploads";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -222,7 +223,7 @@ import { useSidebar } from "./ui/sidebar";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+  "[User attached one or more files or images without additional text. Respond using the conversation context and the attachment(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -2769,6 +2770,7 @@ export default function ChatView(props: ChatViewProps) {
     const {
       images: composerImages,
       videos: composerVideos,
+      files: composerFiles,
       terminalContexts: composerTerminalContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -2784,14 +2786,15 @@ export default function ChatView(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: composerImages.length + composerVideos.length,
+      imageCount: composerImages.length + composerVideos.length + composerFiles.length,
       terminalContexts: composerTerminalContexts,
     });
+    const hasComposerAttachments =
+      composerImages.length > 0 || composerVideos.length > 0 || composerFiles.length > 0;
     if (
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
-      composerImages.length === 0 &&
-      composerVideos.length === 0 &&
+      !hasComposerAttachments &&
       sendableComposerTerminalContexts.length === 0
     ) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -2808,9 +2811,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 &&
-      composerVideos.length === 0 &&
-      sendableComposerTerminalContexts.length === 0
+      !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -2873,6 +2874,7 @@ export default function ChatView(props: ChatViewProps) {
 
     const composerImagesSnapshot = [...composerImages];
     const composerVideosSnapshot = [...composerVideos];
+    const composerFilesSnapshot = [...composerFiles];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const messageTextForSend = appendTerminalContextsToPrompt(
       promptForSend,
@@ -2901,6 +2903,8 @@ export default function ChatView(props: ChatViewProps) {
         jobId: video.jobId!,
         name: video.name,
       })),
+      // Staged on the chat's computer; the server files them in ~/Uploads.
+      ...composerFilesSnapshot.map((file) => stageChatFileUpload(environmentId, file)),
     ]);
     const optimisticImageAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
@@ -2923,7 +2927,19 @@ export default function ChatView(props: ChatViewProps) {
       transcriptSegmentCount: video.digest!.transcript.segments.length,
       posterPreviewUrl: video.previewUrl,
     }));
-    const optimisticAttachments = [...optimisticImageAttachments, ...optimisticVideoAttachments];
+    const optimisticFileAttachments = composerFilesSnapshot.map((file) => ({
+      type: "file" as const,
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      path: "",
+    }));
+    const optimisticAttachments = [
+      ...optimisticImageAttachments,
+      ...optimisticVideoAttachments,
+      ...optimisticFileAttachments,
+    ];
     // Scroll to the current end *before* adding the optimistic message.
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
@@ -2961,6 +2977,7 @@ export default function ChatView(props: ChatViewProps) {
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.clearVideoAttachments();
+    composerRef.current?.setFileAttachments([]);
     composerRef.current?.resetCursorState();
 
     let turnStartSucceeded = false;
@@ -2985,6 +3002,8 @@ export default function ChatView(props: ChatViewProps) {
           titleSeed = `Image: ${firstComposerImageName}`;
         } else if (firstComposerVideoName) {
           titleSeed = `Video: ${firstComposerVideoName}`;
+        } else if (composerFilesSnapshot[0]) {
+          titleSeed = `File: ${composerFilesSnapshot[0].name}`;
         } else if (composerTerminalContextsSnapshot.length > 0) {
           titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
         } else {
@@ -3075,6 +3094,7 @@ export default function ChatView(props: ChatViewProps) {
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
         composerVideosRef.current.length === 0 &&
+        (composerRef.current?.getSendContext().files.length ?? 0) === 0 &&
         composerTerminalContextsRef.current.length === 0
       ) {
         setOptimisticUserMessages((existing) => {
@@ -3094,6 +3114,7 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         composerRef.current?.setVideoAttachments(retryComposerVideos);
+        composerRef.current?.setFileAttachments(composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),

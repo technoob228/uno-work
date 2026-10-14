@@ -97,6 +97,20 @@ export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "prev
   file: File;
 }
 
+/**
+ * A non-image file waiting in the composer (kept in memory only, like
+ * videos); its bytes are staged on the chat's computer when the message is
+ * sent (see chatUploads.ts).
+ */
+export interface ComposerFileAttachment {
+  type: "file";
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  file: File;
+}
+
 export interface ComposerVideoAttachment {
   type: "video";
   id: string;

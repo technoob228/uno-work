@@ -9,7 +9,6 @@
  * @module files/FilesService
  */
 import fsPromises from "node:fs/promises";
-import * as OS from "node:os";
 import nodePath from "node:path";
 
 import {
@@ -78,7 +77,13 @@ import {
   statPath,
   statResolved,
 } from "./fileManager.ts";
-import { FilesPathError, isHiddenPath, resolveFilesRoot, resolveInsideRoot } from "./filesPaths.ts";
+import {
+  configuredFilesRoot,
+  FilesPathError,
+  isHiddenPath,
+  resolveFilesRoot,
+  resolveInsideRoot,
+} from "./filesPaths.ts";
 import {
   driveBotConnect,
   driveBotDisconnect,
@@ -113,8 +118,7 @@ import {
 } from "./shareTokens.ts";
 import { officeShareInfo } from "./shareOffice.ts";
 
-/** Overrides the files root (tests, unusual installs). Defaults to the home dir. */
-export const FILES_ROOT_ENV = "UNO_WORK_FILES_ROOT";
+export { FILES_ROOT_ENV } from "./filesPaths.ts";
 
 export interface FilesServiceShape {
   readonly rootPath: Effect.Effect<string, FilesError>;
@@ -248,7 +252,7 @@ export const makeFilesService = (
   Effect.gen(function* () {
     const shares = yield* FileSharesRepository;
     const settings = yield* ServerSettingsService;
-    const configuredRoot = options.root ?? process.env[FILES_ROOT_ENV]?.trim() ?? OS.homedir();
+    const configuredRoot = options.root ?? configuredFilesRoot();
 
     // Resolved on first use (the home may be created after the daemon starts).
     const rootPath = yield* Effect.cached(

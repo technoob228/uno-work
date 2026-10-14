@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 import {
   ArrowUpIcon,
+  FileIcon,
   FolderIcon,
   FolderUpIcon,
   LockIcon,
@@ -38,7 +39,11 @@ import {
 import { type ClipboardEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { type ComposerImageAttachment, useComposerDraftStore } from "../../../composerDraftStore";
+import {
+  type ComposerFileAttachment,
+  type ComposerImageAttachment,
+  useComposerDraftStore,
+} from "../../../composerDraftStore";
 import { useEnvironmentProviders } from "../../../environments/settings/serverSettings";
 import { useSettings } from "../../../hooks/useSettings";
 import {
@@ -58,7 +63,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
-import { homeImagesFromFiles } from "./homeAttachments";
+import { homeAttachmentsFromFiles } from "./homeAttachments";
 import { homeStartModelSelection } from "./homeStartModel";
 import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
@@ -79,6 +84,8 @@ export interface HomeStartOptions {
   readonly runtimeMode: RuntimeMode;
   /** Pictures attached on Home; they go into the new chat's first message. */
   readonly images?: ReadonlyArray<ComposerImageAttachment>;
+  /** Other files attached on Home (saved to ~/Uploads when the chat sends). */
+  readonly files?: ReadonlyArray<ComposerFileAttachment>;
 }
 
 /**
@@ -173,15 +180,17 @@ export function HomeComposer({
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
   const [images, setImages] = useState<ComposerImageAttachment[]>([]);
+  const [files, setFiles] = useState<ComposerFileAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedEntry = picker.selection
     ? picker.instanceEntries.find((entry) => entry.instanceId === picker.selection?.instanceId)
     : undefined;
 
-  const attachFiles = (files: ReadonlyArray<File>) => {
-    if (files.length === 0) return;
-    const result = homeImagesFromFiles(files, images.length);
+  const attachFiles = (picked: ReadonlyArray<File>) => {
+    if (picked.length === 0) return;
+    const result = homeAttachmentsFromFiles(picked, images.length + files.length);
     if (result.images.length > 0) setImages((current) => [...current, ...result.images]);
+    if (result.files.length > 0) setFiles((current) => [...current, ...result.files]);
     if (result.error) {
       toastManager.add({ type: "error", title: "Couldn't attach", description: result.error });
     }
@@ -193,6 +202,8 @@ export function HomeComposer({
       if (gone) URL.revokeObjectURL(gone.previewUrl);
       return current.filter((image) => image.id !== id);
     });
+  const removeFile = (id: string) =>
+    setFiles((current) => current.filter((file) => file.id !== id));
   const onPaste = (event: ClipboardEvent) => {
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
@@ -206,7 +217,7 @@ export function HomeComposer({
 
   const submit = async () => {
     const prompt = text.trim();
-    if ((!prompt && images.length === 0) || starting) {
+    if ((!prompt && images.length === 0 && files.length === 0) || starting) {
       ref.current?.focus();
       return;
     }
@@ -217,9 +228,11 @@ export function HomeComposer({
         modelSelection: picker.selection,
         runtimeMode,
         images,
+        files,
       });
       // The new chat's draft owns the previews now (no revoke).
       setImages([]);
+      setFiles([]);
       setText("");
     } catch (error) {
       toastManager.add({
@@ -279,11 +292,29 @@ export function HomeComposer({
         {dragging ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[20px] bg-card/90 text-sm font-medium text-primary">
             <FolderUpIcon className="size-4" />
-            Drop pictures to attach, or a project folder / .zip
+            Drop files to attach, or a project folder / .zip
           </div>
         ) : null}
-        {images.length > 0 ? (
+        {images.length > 0 || files.length > 0 ? (
           <div className="flex flex-wrap gap-2 px-3 pt-3" data-testid="home-attachments">
+            {files.map((file) => (
+              <div
+                key={file.id}
+                className="relative flex h-14 max-w-48 min-w-0 items-center gap-2 rounded-lg border bg-muted py-1.5 pr-6 pl-2.5"
+                title={`${file.name} — saved to Uploads when the chat starts`}
+              >
+                <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate text-xs text-foreground/80">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(file.id)}
+                  aria-label={`Remove ${file.name}`}
+                  className="absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full bg-background/85 text-foreground hover:bg-background"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            ))}
             {images.map((image) => (
               <div
                 key={image.id}
@@ -416,7 +447,6 @@ export function HomeComposer({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
             multiple
             hidden
             data-testid="home-attach-input"
@@ -429,8 +459,8 @@ export function HomeComposer({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach pictures"
-            title="Attach pictures — or paste a screenshot"
+            aria-label="Attach files"
+            title="Attach files or pictures — or paste a screenshot"
             data-testid="home-attach"
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
@@ -446,7 +476,7 @@ export function HomeComposer({
             disabled={starting}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              text.trim() || images.length > 0
+              text.trim() || images.length > 0 || files.length > 0
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground",
             )}
