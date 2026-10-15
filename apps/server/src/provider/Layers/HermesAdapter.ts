@@ -84,6 +84,12 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 const PROVIDER = ProviderDriverKind.make("hermes");
 const HERMES_RESUME_VERSION = 1 as const;
 const HERMES_DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "anthropic/claude-haiku-4.5";
+/**
+ * После `session/cancel` даём hermes столько времени довести in-flight
+ * `session/prompt` до конца. Не успел — рвём ACP-сессию: иначе prompt-лок
+ * висит вечно и следующее сообщение треда встаёт в очередь навсегда.
+ */
+const HERMES_INTERRUPT_SETTLE_TIMEOUT_MS = 10_000;
 
 export interface HermesAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
@@ -109,6 +115,17 @@ export interface HermesAdapterLiveOptions {
    * reads the latest snapshot.
    */
   readonly resolveSettings?: Effect.Effect<HermesSettings>;
+  /** Test hook — see HERMES_INTERRUPT_SETTLE_TIMEOUT_MS. */
+  readonly interruptSettleTimeoutMs?: number;
+}
+
+/** The `session/prompt` currently holding the thread's prompt lock. */
+interface InFlightPrompt {
+  readonly turnId: TurnId;
+  /** Completing it makes sendTurn drop the prompt and release the lock. */
+  readonly abort: Deferred.Deferred<void>;
+  /** Completed once the prompt finished, failed or was aborted. */
+  readonly settled: Deferred.Deferred<void>;
 }
 
 interface PendingApproval {
@@ -130,6 +147,7 @@ interface HermesSessionContext {
   lastAppliedModel: string | undefined;
   lastAppliedModeId: string | undefined;
   activeTurnId: TurnId | undefined;
+  inFlightPrompt: InFlightPrompt | undefined;
   stopped: boolean;
 }
 
@@ -179,6 +197,8 @@ export function makeHermesAdapter(
 ) {
   return Effect.gen(function* () {
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("hermes");
+    const interruptSettleTimeoutMs =
+      options?.interruptSettleTimeoutMs ?? HERMES_INTERRUPT_SETTLE_TIMEOUT_MS;
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const serverConfig = yield* Effect.service(ServerConfig);
@@ -573,6 +593,7 @@ export function makeHermesAdapter(
             lastAppliedModel: resumeSessionId ? undefined : configuredModel,
             lastAppliedModeId: undefined,
             activeTurnId: undefined,
+            inFlightPrompt: undefined,
             stopped: false,
           };
 
@@ -688,15 +709,6 @@ export function makeHermesAdapter(
         // applyHermesSessionConfiguration) — сам set_model уедет под лок ниже.
         const displayModel = resolveHermesBaseModelId(model) ?? HERMES_DEFAULT_MODEL;
 
-        yield* offerRuntimeEvent({
-          type: "turn.started",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          turnId,
-          payload: { model: displayModel },
-        });
-
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
         if (input.input?.trim()) {
           promptParts.push({ type: "text", text: input.input.trim() });
@@ -750,12 +762,21 @@ export function makeHermesAdapter(
         // ответ стримит внутри ПЕРВОГО prompt'а — очередь на его стороне
         // неотключаема. Сериализуем prompt'ы сами: turn честно висит pending,
         // пока предыдущий не завершится. interruptTurn (acp.cancel) файберы,
-        // ждущие этот семафор, не отменяет.
+        // ждущие этот семафор, не отменяет. turn.started шлём только взяв лок:
+        // иначе ждущий turn выглядит «работающим», хотя hermes его ещё не видел.
         return yield* withPromptLock(
           input.threadId,
           Effect.gen(function* () {
             // Сессия могла быть перезапущена, пока ждали лок.
             const liveCtx = yield* requireSession(input.threadId);
+            yield* offerRuntimeEvent({
+              type: "turn.started",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: { model: displayModel },
+            });
             // set_model/set_mode нельзя слать во время чужого активного
             // turn'а — поэтому конфигурация тоже под локом.
             const resolvedModel = yield* applyHermesSessionConfiguration({
@@ -770,7 +791,13 @@ export function makeHermesAdapter(
               updatedAt: yield* nowIso,
             };
 
-            const result = yield* liveCtx.acp
+            const inFlight: InFlightPrompt = {
+              turnId,
+              abort: yield* Deferred.make<void>(),
+              settled: yield* Deferred.make<void>(),
+            };
+            liveCtx.inFlightPrompt = inFlight;
+            const outcome = yield* liveCtx.acp
               .prompt({
                 prompt: promptParts,
               })
@@ -778,7 +805,30 @@ export function makeHermesAdapter(
                 Effect.mapError((error) =>
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
                 ),
+                Effect.map((result) => ({ _tag: "completed" as const, result })),
+                // interruptTurn gave up on a graceful cancel: drop the prompt
+                // (interrupting it) so the prompt lock is released.
+                Effect.raceFirst(
+                  Deferred.await(inFlight.abort).pipe(Effect.as({ _tag: "aborted" as const })),
+                ),
+                Effect.ensuring(
+                  Effect.gen(function* () {
+                    if (liveCtx.inFlightPrompt === inFlight) {
+                      liveCtx.inFlightPrompt = undefined;
+                    }
+                    yield* Deferred.succeed(inFlight.settled, undefined);
+                  }),
+                ),
               );
+            if (outcome._tag === "aborted") {
+              // interruptTurn already emitted turn.completed(interrupted).
+              return {
+                threadId: input.threadId,
+                turnId,
+                resumeCursor: liveCtx.session.resumeCursor,
+              };
+            }
+            const result = outcome.result;
 
             liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             liveCtx.session = {
@@ -818,6 +868,46 @@ export function makeHermesAdapter(
             Effect.mapError((error) =>
               mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
             ),
+          ),
+        );
+        const inFlight = ctx.inFlightPrompt;
+        if (!inFlight) {
+          return;
+        }
+        const settled = yield* Deferred.await(inFlight.settled).pipe(
+          Effect.timeoutOption(interruptSettleTimeoutMs),
+        );
+        if (Option.isSome(settled) || ctx.inFlightPrompt !== inFlight) {
+          return;
+        }
+        // hermes ignored session/cancel: the prompt (and with it the prompt
+        // lock) would hang forever and queue every later message. Finish the
+        // turn as interrupted, drop the prompt and tear the ACP session down;
+        // the next sendTurn recovers it through ProviderService (startSession
+        // with the persisted resume cursor).
+        yield* Effect.logWarning("Hermes did not settle the prompt after cancel; restarting", {
+          threadId,
+          turnId: inFlight.turnId,
+          timeoutMs: interruptSettleTimeoutMs,
+        });
+        yield* offerRuntimeEvent({
+          type: "turn.completed",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId,
+          turnId: inFlight.turnId,
+          payload: {
+            state: "interrupted",
+            stopReason: "cancel_timeout",
+            errorMessage: "Hermes did not stop after cancel; session restarted.",
+          },
+        });
+        yield* Deferred.succeed(inFlight.abort, undefined);
+        yield* Deferred.await(inFlight.settled);
+        yield* withThreadLock(
+          threadId,
+          Effect.suspend(() =>
+            sessions.get(threadId) === ctx ? stopSessionInternal(ctx) : Effect.void,
           ),
         );
       });

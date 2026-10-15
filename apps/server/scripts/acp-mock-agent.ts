@@ -20,6 +20,8 @@ const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+/** Never answer session/prompt and ignore session/cancel (wedged agent). */
+const hangPrompt = process.env.T3_ACP_HANG_PROMPT === "1";
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -295,6 +297,10 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
 
+      if (hangPrompt) {
+        return yield* Effect.never;
+      }
+
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";
 
@@ -516,7 +522,9 @@ const program = Effect.gen(function* () {
   );
 
   yield* agent.handleUnknownExtRequest((method, params) => {
-    if (method !== "session/mode/set") {
+    // `session/set_mode` (ACP spec, used by Hermes) and the older
+    // `session/mode/set` alias.
+    if (method !== "session/mode/set" && method !== "session/set_mode") {
       return Effect.fail(AcpError.AcpRequestError.methodNotFound(method));
     }
 
