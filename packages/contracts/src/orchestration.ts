@@ -142,6 +142,23 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+/**
+ * A non-image file attached to a message (pdf, docx, xlsx, zip…). It is not
+ * sent to the model as a part: it lands in the person's `~/Uploads/YYYY-MM/`
+ * on the chat's computer and the turn tells the model where. Same ceiling as
+ * an upload into Files.
+ */
+export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 1024 * 1024 * 1024;
+/** Folder (inside the home / Files root) where chat attachments are saved. */
+export const CHAT_UPLOADS_FOLDER = "Uploads";
+/**
+ * Where the composer stages a file's bytes (relative to the home) before the
+ * turn is sent; the server then moves it to `Uploads/YYYY-MM/<name>`. Hidden
+ * (dot-folder), so a half-sent upload never shows up in Files.
+ */
+export const CHAT_UPLOAD_INCOMING_FOLDER = "Uploads/.incoming";
+export const CHAT_UPLOAD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{7,63}$/i;
+const CHAT_ATTACHMENT_PATH_MAX_CHARS = 4096;
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
 // Correlation id is command id by design in this model.
@@ -160,8 +177,28 @@ export const ChatImageAttachment = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
   mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  /**
+   * Absolute path of the copy saved for the person in `~/Uploads/YYYY-MM/` on
+   * the chat's computer. Absent on older messages, connector (Telegram/Slack)
+   * pictures and video frames.
+   */
+  savedPath: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(CHAT_ATTACHMENT_PATH_MAX_CHARS)),
+  ),
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
+
+/** Any other file, already saved on the chat's computer at `path`. */
+export const ChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  id: ChatAttachmentId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+  /** Absolute path in `~/Uploads/YYYY-MM/` on the chat's computer. */
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(CHAT_ATTACHMENT_PATH_MAX_CHARS)),
+});
+export type ChatFileAttachment = typeof ChatFileAttachment.Type;
 
 export const ChatVideoDigestAttachment = Schema.Struct({
   type: Schema.Literal("video_digest"),
@@ -201,11 +238,30 @@ export const UploadChatVideoDigestAttachment = Schema.Struct({
 });
 export type UploadChatVideoDigestAttachment = typeof UploadChatVideoDigestAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatVideoDigestAttachment]);
+/**
+ * A file the composer already staged at `~/Uploads/.incoming/<uploadId>` on
+ * the chat's computer (chunked `projects.writeFile`); the server moves it to
+ * `~/Uploads/YYYY-MM/<name>` when the turn is dispatched.
+ */
+export const UploadChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  uploadId: TrimmedNonEmptyString.check(Schema.isPattern(CHAT_UPLOAD_ID_PATTERN)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: Schema.String.check(Schema.isMaxLength(255)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+});
+export type UploadChatFileAttachment = typeof UploadChatFileAttachment.Type;
+
+export const ChatAttachment = Schema.Union([
+  ChatImageAttachment,
+  ChatVideoDigestAttachment,
+  ChatFileAttachment,
+]);
 export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([
   UploadChatImageAttachment,
   UploadChatVideoDigestAttachment,
+  UploadChatFileAttachment,
 ]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 

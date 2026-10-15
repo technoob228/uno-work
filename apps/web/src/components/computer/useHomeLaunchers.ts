@@ -26,6 +26,7 @@ import { useTerminalStateStore } from "../../terminalStateStore";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import type { HomeStartOptions } from "./home/HomeComposer";
 import { usePendingSendStore } from "./pendingSendStore";
+import { useComposerFileHandoffStore } from "./composerFileHandoffStore";
 
 export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   const router = useRouter();
@@ -144,6 +145,9 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       // Set on the draft itself: a reused draft doesn't pick up the sticky model.
       if (options.modelSelection) store.setModelSelection(draftId, options.modelSelection);
       if (options.images?.length) store.addImages(draftId, [...options.images]);
+      if (options.files?.length) {
+        useComposerFileHandoffStore.getState().handOff(draftId, options.files);
+      }
       store.setRuntimeMode(draftId, options.runtimeMode);
       store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
       usePendingSendStore.getState().request(draftId, prompt);

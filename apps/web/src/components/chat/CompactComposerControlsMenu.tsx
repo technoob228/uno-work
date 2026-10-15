@@ -92,8 +92,8 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuItem onClick={props.onTogglePlanSidebar}>
               <ListTodoIcon className="size-4 shrink-0" />
               {props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`}
+                ? `Hide ${props.planSidebarLabel.toLowerCase()} tab`
+                : `Show ${props.planSidebarLabel.toLowerCase()} tab`}
             </MenuItem>
           </>
         ) : null}

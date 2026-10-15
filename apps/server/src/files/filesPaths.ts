@@ -10,7 +10,21 @@
  * @module files/filesPaths
  */
 import fsPromises from "node:fs/promises";
+import * as OS from "node:os";
 import nodePath from "node:path";
+
+/** Overrides the files root (tests, unusual installs). Defaults to the home dir. */
+export const FILES_ROOT_ENV = "UNO_WORK_FILES_ROOT";
+
+/**
+ * The folder the Files section shows as "home" (`~`): `UNO_WORK_FILES_ROOT`
+ * when set, else the OS home. Not resolved (no realpath) — see
+ * {@link resolveFilesRoot}.
+ */
+export function configuredFilesRoot(): string {
+  const configured = process.env[FILES_ROOT_ENV]?.trim();
+  return configured ? configured : OS.homedir();
+}
 
 export type FilesPathErrorCode =
   | "invalid_path"

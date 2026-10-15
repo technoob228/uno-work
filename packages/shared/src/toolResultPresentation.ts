@@ -435,6 +435,7 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Couldn't search Uno Drive",
   ],
   drive_save: ["Saving to Uno Drive…", "Saved to Uno Drive", "Couldn't save to Uno Drive"],
+  drive_get: ["Copying from Uno Drive…", "Copied from Uno Drive", "Couldn't copy from Uno Drive"],
   drive_share_link: ["Making a share link…", "Made a share link", "The share link wasn't made"],
   file_open: [
     "Opening the file…",

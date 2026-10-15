@@ -90,8 +90,20 @@ function requireProjectAllowed(
     : Effect.fail(new ManagerProjectNotAllowedError({ projectId }));
 }
 
-function toThreadSummary(shell: OrchestrationThreadShell): ManagerThreadSummary {
+/** What list_threads adds to a thread's summary. */
+type ThreadSummaryExtra = {
+  -readonly [K in "projectTitle" | "cwd" | "spawnedByThreadId" | "lastAssistantText"]?: Exclude<
+    ManagerThreadSummary[K],
+    undefined
+  >;
+};
+
+function toThreadSummary(
+  shell: OrchestrationThreadShell,
+  extra: ThreadSummaryExtra = {},
+): ManagerThreadSummary {
   return {
+    ...extra,
     threadId: shell.id,
     projectId: shell.projectId,
     title: shell.title,
@@ -103,6 +115,26 @@ function toThreadSummary(shell: OrchestrationThreadShell): ManagerThreadSummary 
     hasPendingApprovals: shell.hasPendingApprovals,
     hasPendingUserInput: shell.hasPendingUserInput,
   };
+}
+
+/** Threads in a list_threads reply that also carry their last answer. */
+const MANAGER_LIST_THREADS_PREVIEW_LIMIT = 25;
+const MANAGER_LIST_THREADS_PREVIEW_CHARS = 200;
+
+/** The start of the last non-empty assistant message, or null. */
+export function lastAssistantPreview(
+  messages: ReadonlyArray<{ readonly role: string; readonly text: string }>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const text = message.text.trim();
+    if (text.length === 0) continue;
+    return text.length > MANAGER_LIST_THREADS_PREVIEW_CHARS
+      ? `${text.slice(0, MANAGER_LIST_THREADS_PREVIEW_CHARS)}…`
+      : text;
+  }
+  return null;
 }
 
 function timingSafeStringEqual(a: string, b: string): boolean {
@@ -223,15 +255,48 @@ const makeManagerToolService = Effect.gen(function* () {
           (input.projectId === undefined || project.id === input.projectId),
       );
       const allowedProjectIds = new Set(allowedProjects.map((project) => project.id));
-      const threads = snapshot.threads.filter(
-        (thread) => allowedProjectIds.has(thread.projectId) && thread.archivedAt === null,
+      const projectById = new Map(allowedProjects.map((project) => [project.id, project]));
+      const threads = snapshot.threads
+        .filter((thread) => allowedProjectIds.has(thread.projectId) && thread.archivedAt === null)
+        .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      // "What is everyone doing" in one call: the most recent threads also
+      // carry the start of their last answer (bounded: each is a detail read).
+      const previewIds = new Set(
+        threads.slice(0, MANAGER_LIST_THREADS_PREVIEW_LIMIT).map((thread) => thread.id),
+      );
+      const previews = new Map(
+        yield* Effect.forEach(
+          [...previewIds],
+          (threadId) =>
+            projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
+              Effect.map((detail) => {
+                const text = Option.isSome(detail)
+                  ? lastAssistantPreview(detail.value.messages)
+                  : null;
+                return [threadId, text] as const;
+              }),
+            ),
+          { concurrency: 4 },
+        ),
       );
       return {
         projects: allowedProjects.map((project) => ({
           projectId: project.id,
           title: project.title,
         })),
-        threads: threads.map(toThreadSummary),
+        threads: threads.map((thread) => {
+          const project = projectById.get(thread.projectId);
+          const preview = previews.get(thread.id) ?? null;
+          const extra: ThreadSummaryExtra = {
+            cwd: thread.worktreePath ?? project?.workspaceRoot ?? null,
+            spawnedByThreadId: thread.spawnedByThreadId ?? null,
+          };
+          if (project) extra.projectTitle = project.title;
+          if (previewIds.has(thread.id)) {
+            extra.lastAssistantText = preview === null ? null : wrapUntrustedContent(preview);
+          }
+          return toThreadSummary(thread, extra);
+        }),
       };
     });
 

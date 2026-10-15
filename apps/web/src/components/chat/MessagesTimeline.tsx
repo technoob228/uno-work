@@ -20,6 +20,7 @@ import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
 import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
+  type ChatFileAttachment,
   type ChatImageAttachment,
   type ChatVideoDigestAttachment,
   type TurnDiffSummary,
@@ -33,6 +34,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  FileIcon,
   FileVideoIcon,
   GlobeIcon,
   HammerIcon,
@@ -82,6 +84,8 @@ import {
 } from "./userMessageTerminalContexts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
+import { formatFileSize } from "../files/fileTypes";
+import { displayUploadPath } from "../../chatUploads";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
@@ -374,6 +378,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             (attachment): attachment is ChatVideoDigestAttachment =>
               attachment.type === "video_digest",
           );
+          const userFiles = userAttachments.filter(
+            (attachment): attachment is ChatFileAttachment => attachment.type === "file",
+          );
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
@@ -442,6 +449,13 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                           </div>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+                {userFiles.length > 0 && (
+                  <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
+                    {userFiles.map((file) => (
+                      <UserFileAttachmentChip key={file.id} file={file} />
                     ))}
                   </div>
                 )}
@@ -1140,6 +1154,51 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   }
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
+
+/** A non-image file the person attached: opens from ~/Uploads in the side panel. */
+const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {
+  file: ChatFileAttachment;
+}) {
+  const { file } = props;
+  const { activeThreadEnvironmentId } = use(TimelineRowCtx);
+  const { openFile } = usePreviewPane();
+  const body = (
+    <>
+      <FileIcon className="size-4 shrink-0 text-foreground/70" />
+      <div className="min-w-0 flex-1 text-left">
+        <div className="truncate font-medium text-foreground/80">{file.name}</div>
+        <div className="truncate text-[11px]">
+          {formatFileSize(file.sizeBytes)}
+          {file.path ? ` · ${displayUploadPath(file.path)}` : " · Sending…"}
+        </div>
+      </div>
+    </>
+  );
+  const className =
+    "flex min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background/70 px-2.5 py-2 text-xs text-muted-foreground";
+  if (!file.path) {
+    return <div className={className}>{body}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className={cn(className, "cursor-pointer hover:bg-background")}
+      title={file.path}
+      onClick={() =>
+        openFile({
+          id: file.path,
+          name: file.name,
+          kind: detectFileKind(file.name),
+          content: "",
+          path: file.path,
+          environmentId: activeThreadEnvironmentId,
+        })
+      }
+    >
+      {body}
+    </button>
+  );
+});
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;

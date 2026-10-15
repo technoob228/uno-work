@@ -137,6 +137,7 @@ import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
+import { FilesRecentService } from "./files/FilesRecentService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
@@ -702,6 +703,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(UnoCloudService)({}),
           Layer.mock(UnoComputerService)({}),
           Layer.mock(FilesService)({}),
+          Layer.mock(FilesRecentService)({}),
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
           Layer.mock(ConnectorsService)({

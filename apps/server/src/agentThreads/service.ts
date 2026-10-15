@@ -27,12 +27,13 @@ import {
   type OrchestrationCommand,
   type OrchestrationCommandOrigin,
   type OrchestrationProjectShell,
+  type OrchestrationThread,
   type OrchestrationThreadShell,
   ProjectId,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
-import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { findMarkedAssistantChat, isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
@@ -69,6 +70,7 @@ import {
   parseListScope,
   resolveProviderModelSelection,
   isClosedToAgents,
+  isPinnedAssistantChat,
   threadController,
   threadRelation,
 } from "./logic.ts";
@@ -299,14 +301,28 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
    * Any live thread the caller may talk to: its own project, or any project
    * when the user allowed it. Archived and out-of-scope threads are 404.
    */
-  const loadReachable = (caller: OrchestrationThreadShell, rawThreadId: string | undefined) =>
+  const loadReachable = (
+    caller: OrchestrationThreadShell,
+    rawThreadId: string | undefined,
+    options: {
+      /**
+       * Writing to the person's pinned assistant chat ("Uno") is open to every
+       * chat, whatever its project; reading its transcript is not (it holds
+       * the person's private conversation, Telegram included).
+       */
+      readonly assistantChat?: boolean;
+    } = {},
+  ) =>
     Effect.gen(function* () {
       const trimmed = rawThreadId?.trim() ?? "";
       const notFound = Effect.fail(new Reply({ status: 404, body: THREAD_NOT_FOUND_BODY }));
       if (trimmed.length === 0) return yield* notFound;
       const shell = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
       if (Option.isNone(shell) || shell.value.archivedAt !== null) return yield* notFound;
-      if (!(yield* projectAccess(caller))(shell.value.projectId)) return yield* notFound;
+      const isAssistantChat = options.assistantChat === true && isPinnedAssistantChat(shell.value);
+      if (!isAssistantChat && !(yield* projectAccess(caller))(shell.value.projectId)) {
+        return yield* notFound;
+      }
       return shell.value;
     });
 
@@ -516,7 +532,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           );
         }
         const snapshot = yield* deps.projections.getShellSnapshot();
-        const selected = snapshot.threads
+        const listed = snapshot.threads
           .filter((thread) =>
             scope === "children"
               ? (thread.spawnedByThreadId ?? null) === caller.id && allowed(thread.projectId)
@@ -526,10 +542,25 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
                   : thread.projectId === caller.projectId),
           )
           .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        // The person's assistant chat is always there to write to (relation
+        // "assistant"), first; its last answer only when the caller may read
+        // its project anyway.
+        const assistantChat = findMarkedAssistantChat(snapshot.threads);
+        const withAssistant =
+          assistantChat !== null &&
+          assistantChat.archivedAt === null &&
+          assistantChat.id !== caller.id &&
+          !listed.some((thread) => thread.id === assistantChat.id);
+        const selected = withAssistant ? [assistantChat, ...listed] : listed;
+        const canRead = (thread: OrchestrationThreadShell) =>
+          !isPinnedAssistantChat(thread) || allowed(thread.projectId);
         const threads = yield* Effect.forEach(
           selected,
           (child) =>
-            deps.projections.getThreadDetailById(child.id).pipe(
+            (canRead(child)
+              ? deps.projections.getThreadDetailById(child.id)
+              : Effect.succeed(Option.none<OrchestrationThread>())
+            ).pipe(
               Effect.map((detail) => ({
                 id: child.id,
                 title: child.title,
@@ -621,7 +652,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("send", authorization, (caller) =>
       Effect.gen(function* () {
-        let target = yield* loadReachable(caller, input.threadId);
+        let target = yield* loadReachable(caller, input.threadId, { assistantChat: true });
         if (target.id === caller.id) {
           return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");
         }
@@ -637,7 +668,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         let block = agentDeliveryBlock(caller, target);
         while (block?.error === "target_busy" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
-          target = yield* loadReachable(caller, target.id);
+          target = yield* loadReachable(caller, target.id, { assistantChat: true });
           block = agentDeliveryBlock(caller, target);
         }
         if (block !== null) return yield* fail(block.status, block.error, block.message);

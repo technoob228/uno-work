@@ -69,7 +69,13 @@ import { toastManager } from "../ui/toast";
 import { DeleteDialog, MoveDialog, NameDialog } from "./FilesDialogs";
 import { FileViewer } from "./FileViewer";
 import { FilesNavButtons, useFilesHistory, type FilesHistory } from "./filesHistory";
-import { FilesTree, FilesViewSwitch, useFilesViewMode, type FilesViewMode } from "./FilesTree";
+import {
+  effectiveFilesViewMode,
+  FilesTree,
+  FilesViewSwitch,
+  useFilesViewMode,
+  type FilesViewMode,
+} from "./FilesTree";
 import { UploadPanel, useFilesUploads } from "./FilesUploads";
 import {
   breadcrumbs,
@@ -197,11 +203,13 @@ export function FilesView() {
   const uploads = useFilesUploads(environmentId);
   const [dialog, setDialog] = useState<DialogState>({ type: "none" });
   const closeDialog = useCallback(() => setDialog({ type: "none" }), []);
-  // List (the folder as a table) or Tree (folders on the left, the file on the
-  // right). A phone has no room for two columns, so it always gets the list.
+  // List (the folder as a table), Tree (folders on the left, the file on the
+  // right — the default) or Recent (recent files where the tree is). A phone
+  // has no room for two columns: the list or Recent, the file over it.
   const [storedViewMode, setViewMode] = useFilesViewMode();
   const isMobile = useIsMobile();
-  const viewMode: FilesViewMode = isMobile ? "list" : storedViewMode;
+  const viewMode: FilesViewMode = effectiveFilesViewMode(storedViewMode, isMobile);
+  const splitView = !isMobile && (viewMode === "tree" || viewMode === "recent");
   const history = useFilesHistory(
     search,
     useCallback((next) => void navigate({ search: next }), [navigate]),
@@ -301,18 +309,47 @@ export function FilesView() {
         environmentId={environmentId}
         path={search.file}
         uploads={uploads}
-        embedded={viewMode === "tree"}
+        embedded={splitView}
+        editInline={splitView}
         onUnsavedChange={setViewerUnsaved}
         viewSwitch={
           viewMode === "list" && !isMobile ? (
             <FilesViewSwitch mode={viewMode} onChange={setViewMode} />
           ) : undefined
         }
-        onBack={() => openFolder(search.path ?? dirname(search.file!))}
+        onBack={() =>
+          viewMode === "recent"
+            ? void navigate({ search: search.path ? { path: search.path } : {} })
+            : openFolder(search.path ?? dirname(search.file!))
+        }
         onShare={(entry) => setDialog({ type: "share", entry })}
         onRename={(entry) => setDialog({ type: "rename", entry })}
         onMove={(entry) => setDialog({ type: "move", entries: [entry] })}
         onDelete={(entry) => setDialog({ type: "delete", entries: [entry] })}
+      />
+    ) : null;
+
+  // The left column of Tree and Recent (and the whole screen of Recent on a phone).
+  const filesTree =
+    viewMode === "tree" || viewMode === "recent" ? (
+      <FilesTree
+        environmentId={environmentId}
+        selectedFile={search.file}
+        currentFolder={search.path}
+        onOpenFile={openFileGuarded}
+        onSelectFolder={selectFolder}
+        history={history}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        compactSwitch={isMobile}
+        onOpenHome={() => openFolder(undefined)}
+        onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
+        onCreate={(kind) =>
+          setDialog(kind === "folder" ? { type: "newFolder" } : { type: "newFile", kind })
+        }
+        onUpload={(files) => {
+          if (currentPath) void uploads.start({ targetDir: currentPath, files });
+        }}
       />
     ) : null;
 
@@ -336,32 +373,20 @@ export function FilesView() {
               })
             }
           />
-        ) : viewMode === "tree" ? (
+        ) : splitView ? (
           <div className="flex min-h-0 flex-1" data-testid="files-tree-layout">
-            <div className="w-72 shrink-0 border-r border-border lg:w-80">
-              <FilesTree
-                environmentId={environmentId}
-                selectedFile={search.file}
-                currentFolder={search.path}
-                onOpenFile={openFileGuarded}
-                onSelectFolder={selectFolder}
-                history={history}
-                viewMode={viewMode}
-                onViewModeChange={setViewMode}
-                onOpenHome={() => openFolder(undefined)}
-                onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
-                onCreate={(kind) =>
-                  setDialog(kind === "folder" ? { type: "newFolder" } : { type: "newFile", kind })
-                }
-                onUpload={(files) => {
-                  if (currentPath) void uploads.start({ targetDir: currentPath, files });
-                }}
-              />
-            </div>
+            <div className="w-72 shrink-0 border-r border-border lg:w-80">{filesTree}</div>
             <div className="min-w-0 flex-1">
-              {fileViewer ?? <TreeEmptyState folder={currentPath} />}
+              {fileViewer ?? (
+                <TreeEmptyState
+                  folder={viewMode === "recent" ? null : currentPath}
+                  recent={viewMode === "recent"}
+                />
+              )}
             </div>
           </div>
+        ) : viewMode === "recent" ? (
+          (fileViewer ?? filesTree)
         ) : fileViewer ? (
           fileViewer
         ) : (
@@ -370,7 +395,7 @@ export function FilesView() {
             listing={listing}
             history={history}
             viewSwitch={
-              isMobile ? undefined : <FilesViewSwitch mode={viewMode} onChange={setViewMode} />
+              <FilesViewSwitch mode={viewMode} onChange={setViewMode} compact={isMobile} />
             }
             onOpenFolder={openFolder}
             onOpenFile={openFile}
@@ -1035,13 +1060,14 @@ function FolderBrowser({
 }
 
 /** The right side of the Tree view while no file is picked. */
-function TreeEmptyState({ folder }: { folder: string | null }) {
+function TreeEmptyState({ folder, recent = false }: { folder: string | null; recent?: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
       <FileTextIcon className="mb-1 size-8 text-muted-foreground/40" />
       <p className="text-sm font-medium">Pick a file to see it here</p>
       <p className="max-w-xs text-xs text-muted-foreground">
-        Open folders on the left. A file opens on this side, and you can edit it right here.
+        {recent ? "Pick a recent file on the left." : "Open folders on the left."} A file opens on
+        this side, and you can edit it right here.
         {folder ? ` New files and uploads go to “${folder.split("/").pop() || folder}”.` : ""}
       </p>
     </div>

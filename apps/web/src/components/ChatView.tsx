@@ -100,13 +100,20 @@ import { useWindowInFront } from "../hooks/useWindowInFront";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
-import { useMediaQuery } from "../hooks/useMediaQuery";
-import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { useDevMode } from "../devMode";
-import { detectFileKind, useChatPanelContext, usePreviewPane } from "./preview/PreviewPaneContext";
+import {
+  detectFileKind,
+  isTabShown,
+  makeTasksFile,
+  NO_PROJECT_KEY,
+  tasksTabId,
+  useChatPanelContext,
+  usePreviewPane,
+  type PanelOpenSource,
+} from "./preview/PreviewPaneContext";
+import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   ChevronDownIcon,
@@ -137,6 +144,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
+import { stageChatFileUpload } from "../chatUploads";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -216,13 +224,12 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
-import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+  "[User attached one or more files or images without additional text. Respond using the conversation context and the attachment(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -672,7 +679,15 @@ export default function ChatView(props: ChatViewProps) {
   const { open: sidebarOpen, openMobile, isMobile } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : sidebarOpen;
   const sidebarHidden = isElectron && !sidebarVisible;
-  const { openFile: openPreviewFile, previewLayoutMode } = usePreviewPane();
+  const {
+    openFile: openPreviewFile,
+    openFileForTarget: openPreviewFileForTarget,
+    closeFile: closePreviewFile,
+    previewLayoutMode,
+    open: previewOpen,
+    files: previewFiles,
+    activeFileId: previewActiveFileId,
+  } = usePreviewPane();
   // Встроенный чат сам живёт внутри правой панели — фокус-режим к нему не
   // применяется (иначе композер уехал бы в fixed-оверлей поверх приложения).
   const isPreviewFocusMode = previewLayoutMode === "focus" && !isEmbedded;
@@ -774,13 +789,9 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
-  const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  // Tracks whether the user explicitly dismissed the sidebar for the active turn.
-  const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  // When set, the thread-change reset effect will open the sidebar instead of closing it.
-  // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
-  const planSidebarOpenOnNextThreadRef = useRef(false);
+  // Вкладка задач открывается сама (настройка autoOpenPlanSidebar) один раз за
+  // ход треда: закрыл человек вкладку — до следующего хода она не вернётся.
+  const tasksTabAutoOpenedTurnByThreadRef = useRef(new Map<string, string>());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -1393,6 +1404,15 @@ export default function ChatView(props: ChatViewProps) {
     [activeLatestTurn?.turnId, threadActivities],
   );
   const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
+  // План/задачи показываются вкладкой правой панели (не своей колонкой), см.
+  // preview/tasksTabStore.ts. Кнопка в композере «нажата», пока вкладка на экране.
+  const tasksTabThreadId = isEmbedded ? null : (activeThread?.id ?? null);
+  const planSidebarOpen =
+    tasksTabThreadId !== null &&
+    isTabShown(
+      { open: previewOpen, files: previewFiles, activeFileId: previewActiveFileId },
+      tasksTabId(tasksTabThreadId),
+    );
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -2264,22 +2284,25 @@ export default function ChatView(props: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
+  const openTasksTab = useCallback(
+    (threadId: ThreadId, source: PanelOpenSource, label: string) => {
+      openPreviewFileForTarget(
+        { projectKey: previewProjectKey ?? NO_PROJECT_KEY, threadId },
+        "chat",
+        makeTasksFile({ threadId, environmentId, label }),
+        source,
+      );
+    },
+    [environmentId, openPreviewFileForTarget, previewProjectKey],
+  );
   const togglePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen((open) => {
-      if (open) {
-        planSidebarDismissedForTurnRef.current =
-          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-      } else {
-        planSidebarDismissedForTurnRef.current = null;
-      }
-      return !open;
-    });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
-  const closePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen(false);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+    if (!tasksTabThreadId) return;
+    if (planSidebarOpen) {
+      closePreviewFile(tasksTabId(tasksTabThreadId));
+      return;
+    }
+    openTasksTab(tasksTabThreadId, "person", planSidebarLabel);
+  }, [closePreviewFile, openTasksTab, planSidebarLabel, planSidebarOpen, tasksTabThreadId]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2362,33 +2385,64 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(true);
-    } else {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(false);
-    }
-    planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
 
-  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
-  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  // Вкладка задач в правой панели читает план отсюда: панель живёт вне ChatView.
   useEffect(() => {
-    if (!autoOpenPlanSidebar) return;
+    if (!tasksTabThreadId) return;
+    publishThreadTasks(tasksTabThreadId, {
+      activePlan,
+      proposedPlan: sidebarProposedPlan,
+      label: planSidebarLabel,
+      environmentId,
+      markdownCwd: gitCwd ?? undefined,
+      workspaceRoot: activeWorkspaceRoot,
+    });
+  }, [
+    activePlan,
+    activeWorkspaceRoot,
+    environmentId,
+    gitCwd,
+    planSidebarLabel,
+    sidebarProposedPlan,
+    tasksTabThreadId,
+  ]);
+  useEffect(() => {
+    if (!tasksTabThreadId) return;
+    return () => clearThreadTasks(tasksTabThreadId);
+  }, [tasksTabThreadId]);
+
+  // Auto-open the tasks tab when plan/todo steps arrive for the current turn.
+  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  // Source "agent": a panel the person closed in this chat stays closed (the tab
+  // is added and the panel button gets a badge).
+  const tasksTabPresent =
+    tasksTabThreadId !== null &&
+    previewFiles.some((file) => file.id === tasksTabId(tasksTabThreadId));
+  useEffect(() => {
+    if (!autoOpenPlanSidebar || !tasksTabThreadId) return;
     if (!activePlan) return;
-    if (planSidebarOpen) return;
+    // Diff и правая панель взаимоисключающие: открытая панель закрыла бы diff,
+    // который человек смотрит. Откроем вкладку, когда diff закроют.
+    if (diffOpen) return;
     const latestTurnId = activeLatestTurn?.turnId ?? null;
     if (latestTurnId && activePlan.turnId !== latestTurnId) return;
-    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-    if (planSidebarDismissedForTurnRef.current === turnKey) return;
-    setPlanSidebarOpen(true);
+    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__no_turn__";
+    const autoOpened = tasksTabAutoOpenedTurnByThreadRef.current;
+    if (autoOpened.get(tasksTabThreadId) === turnKey) return;
+    autoOpened.set(tasksTabThreadId, turnKey);
+    if (tasksTabPresent) return;
+    openTasksTab(tasksTabThreadId, "agent", planSidebarLabel);
   }, [
     activePlan,
     activeLatestTurn?.turnId,
     autoOpenPlanSidebar,
-    planSidebarOpen,
+    diffOpen,
+    openTasksTab,
+    planSidebarLabel,
     sidebarProposedPlan?.turnId,
+    tasksTabPresent,
+    tasksTabThreadId,
   ]);
 
   useEffect(() => {
@@ -2769,6 +2823,7 @@ export default function ChatView(props: ChatViewProps) {
     const {
       images: composerImages,
       videos: composerVideos,
+      files: composerFiles,
       terminalContexts: composerTerminalContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -2784,14 +2839,15 @@ export default function ChatView(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: composerImages.length + composerVideos.length,
+      imageCount: composerImages.length + composerVideos.length + composerFiles.length,
       terminalContexts: composerTerminalContexts,
     });
+    const hasComposerAttachments =
+      composerImages.length > 0 || composerVideos.length > 0 || composerFiles.length > 0;
     if (
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
-      composerImages.length === 0 &&
-      composerVideos.length === 0 &&
+      !hasComposerAttachments &&
       sendableComposerTerminalContexts.length === 0
     ) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -2808,9 +2864,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 &&
-      composerVideos.length === 0 &&
-      sendableComposerTerminalContexts.length === 0
+      !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -2873,6 +2927,7 @@ export default function ChatView(props: ChatViewProps) {
 
     const composerImagesSnapshot = [...composerImages];
     const composerVideosSnapshot = [...composerVideos];
+    const composerFilesSnapshot = [...composerFiles];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const messageTextForSend = appendTerminalContextsToPrompt(
       promptForSend,
@@ -2901,6 +2956,8 @@ export default function ChatView(props: ChatViewProps) {
         jobId: video.jobId!,
         name: video.name,
       })),
+      // Staged on the chat's computer; the server files them in ~/Uploads.
+      ...composerFilesSnapshot.map((file) => stageChatFileUpload(environmentId, file)),
     ]);
     const optimisticImageAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
@@ -2923,7 +2980,19 @@ export default function ChatView(props: ChatViewProps) {
       transcriptSegmentCount: video.digest!.transcript.segments.length,
       posterPreviewUrl: video.previewUrl,
     }));
-    const optimisticAttachments = [...optimisticImageAttachments, ...optimisticVideoAttachments];
+    const optimisticFileAttachments = composerFilesSnapshot.map((file) => ({
+      type: "file" as const,
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      path: "",
+    }));
+    const optimisticAttachments = [
+      ...optimisticImageAttachments,
+      ...optimisticVideoAttachments,
+      ...optimisticFileAttachments,
+    ];
     // Scroll to the current end *before* adding the optimistic message.
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
@@ -2961,6 +3030,7 @@ export default function ChatView(props: ChatViewProps) {
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.clearVideoAttachments();
+    composerRef.current?.setFileAttachments([]);
     composerRef.current?.resetCursorState();
 
     let turnStartSucceeded = false;
@@ -2985,6 +3055,8 @@ export default function ChatView(props: ChatViewProps) {
           titleSeed = `Image: ${firstComposerImageName}`;
         } else if (firstComposerVideoName) {
           titleSeed = `Video: ${firstComposerVideoName}`;
+        } else if (composerFilesSnapshot[0]) {
+          titleSeed = `File: ${composerFilesSnapshot[0].name}`;
         } else if (composerTerminalContextsSnapshot.length > 0) {
           titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
         } else {
@@ -3075,6 +3147,7 @@ export default function ChatView(props: ChatViewProps) {
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
         composerVideosRef.current.length === 0 &&
+        (composerRef.current?.getSendContext().files.length ?? 0) === 0 &&
         composerTerminalContextsRef.current.length === 0
       ) {
         setOptimisticUserMessages((existing) => {
@@ -3094,6 +3167,7 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         composerRef.current?.setVideoAttachments(retryComposerVideos);
+        composerRef.current?.setFileAttachments(composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
@@ -3429,9 +3503,8 @@ export default function ChatView(props: ChatViewProps) {
         // Optimistically open the plan sidebar when implementing (not refining).
         // "default" mode here means the agent is executing the plan, which produces
         // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default" && autoOpenPlanSidebar) {
-          planSidebarDismissedForTurnRef.current = null;
-          setPlanSidebarOpen(true);
+        if (nextInteractionMode === "default" && autoOpenPlanSidebar && !isEmbedded) {
+          openTasksTab(threadIdForSend, "person", "Tasks");
         }
         sendInFlightRef.current = false;
       } catch (err) {
@@ -3460,6 +3533,8 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
       autoOpenPlanSidebar,
       environmentId,
+      isEmbedded,
+      openTasksTab,
     ],
   );
 
@@ -3640,8 +3715,10 @@ export default function ChatView(props: ChatViewProps) {
         return waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId));
       })
       .then(() => {
-        // Signal that the plan sidebar should open on the new thread when enabled.
-        planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar;
+        // The new chat opens with its tasks tab (it shows the plan being implemented).
+        if (autoOpenPlanSidebar && !isEmbedded) {
+          openTasksTab(nextThreadId, "person", "Plan");
+        }
         return navigate({
           to: "/$environmentId/$threadId",
           params: {
@@ -3683,6 +3760,8 @@ export default function ChatView(props: ChatViewProps) {
     runtimeMode,
     autoOpenPlanSidebar,
     environmentId,
+    isEmbedded,
+    openTasksTab,
   ]);
 
   const onProviderModelSelect = useCallback(
@@ -4296,21 +4375,6 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
         </div>
         {/* end chat column */}
-
-        {/* Plan sidebar */}
-        {planSidebarOpen && !isEmbedded && !shouldUsePlanSidebarSheet ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onClose={closePlanSidebar}
-          />
-        ) : null}
       </div>
       {/* end horizontal flex container */}
 
@@ -4333,21 +4397,6 @@ export default function ChatView(props: ChatViewProps) {
           />
         ),
       )}
-      {shouldUsePlanSidebarSheet && !isEmbedded ? (
-        <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sheet"
-            onClose={closePlanSidebar}
-          />
-        </RightPanelSheet>
-      ) : null}
 
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />

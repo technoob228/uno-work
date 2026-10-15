@@ -202,6 +202,15 @@ describe("attentionThreads", () => {
     ];
     expect(attentionThreads(threads, NOW).map((t) => t.id)).toEqual(["a-new", "a-old", "q-new"]);
   });
+
+  it("leaves out a question skipped for now, never an approval", () => {
+    const threads = [
+      thread("q", { hasPendingUserInput: true, updatedAt: minutesAgo(1) }),
+      thread("a", { hasPendingApprovals: true, updatedAt: minutesAgo(5) }),
+    ];
+    const skipped = new Set(["env-1:q", "env-1:a"]);
+    expect(attentionThreads(threads, NOW, skipped).map((t) => t.id)).toEqual(["a"]);
+  });
 });
 
 describe("recentThreads", () => {

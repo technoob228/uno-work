@@ -446,6 +446,48 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("tells the harness where attached files are saved, keeping the stored text clean", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-file"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-file"),
+          role: "user",
+          text: "summarize this",
+          attachments: [
+            {
+              type: "file",
+              id: "thread-1-file-1",
+              name: "report.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 3,
+              path: "/home/me/Uploads/2026-10/report.pdf",
+            },
+          ],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input:
+        'summarize this\n\n[Attached file "report.pdf" saved at /home/me/Uploads/2026-10/report.pdf — open it from there whenever you need it again.]',
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.messages.find((message) => message.role === "user")?.text).toBe(
+      "summarize this",
+    );
+  });
+
   it("tells the harness which agent sent a message and how to answer it", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

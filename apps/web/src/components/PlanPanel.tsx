@@ -11,7 +11,6 @@ import {
   ChevronRightIcon,
   EllipsisIcon,
   LoaderIcon,
-  PanelRightCloseIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
@@ -51,7 +50,7 @@ function stepStatusIcon(status: string): React.ReactNode {
   );
 }
 
-interface PlanSidebarProps {
+interface PlanPanelProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
   label?: string;
@@ -59,11 +58,14 @@ interface PlanSidebarProps {
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
-  mode?: "sheet" | "sidebar";
-  onClose: () => void;
 }
 
-const PlanSidebar = memo(function PlanSidebar({
+/**
+ * Plan/task steps of a thread with the proposed plan and its export actions.
+ * Rendered as the body of the "Tasks"/"Plan" tab in the right preview panel
+ * (see `preview/TasksTabBody.tsx`); the panel owns the tab and its close button.
+ */
+const PlanPanel = memo(function PlanPanel({
   activePlan,
   activeProposedPlan,
   label = "Plan",
@@ -71,9 +73,7 @@ const PlanSidebar = memo(function PlanSidebar({
   markdownCwd,
   workspaceRoot,
   timestampFormat,
-  mode = "sidebar",
-  onClose,
-}: PlanSidebarProps) {
+}: PlanPanelProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
@@ -127,16 +127,9 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [environmentId, planMarkdown, workspaceRoot]);
 
   return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-col bg-card/50",
-        mode === "sidebar"
-          ? "h-full w-[340px] shrink-0 border-l border-border/70"
-          : "h-full w-full",
-      )}
-    >
+    <div className="flex h-full min-h-0 w-full flex-col bg-card/50">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/60 px-3">
         <div className="flex items-center gap-2">
           <Badge
             variant="secondary"
@@ -179,15 +172,6 @@ const PlanSidebar = memo(function PlanSidebar({
               </MenuPopup>
             </Menu>
           ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            onClick={onClose}
-            aria-label={`Close ${label.toLowerCase()} sidebar`}
-            className="text-muted-foreground/50 hover:text-foreground/70"
-          >
-            <PanelRightCloseIcon className="size-3.5" />
-          </Button>
         </div>
       </div>
 
@@ -279,5 +263,5 @@ const PlanSidebar = memo(function PlanSidebar({
   );
 });
 
-export default PlanSidebar;
-export type { PlanSidebarProps };
+export default PlanPanel;
+export type { PlanPanelProps };

@@ -95,6 +95,7 @@ import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { EconomyPresence } from "./economy/EconomyPresence.ts";
 import { PRESENCE_OFF } from "./economy/economyReport.ts";
 import { FilesService } from "./files/FilesService.ts";
+import { FilesRecentService } from "./files/FilesRecentService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { checkEmbed } from "./machineApps/embedCheck.ts";
@@ -290,6 +291,7 @@ const makeWsRpcLayer = (
       // Optional: test layers and older compositions run without it (answers "off").
       const economyPresence = Option.getOrUndefined(yield* Effect.serviceOption(EconomyPresence));
       const files = yield* FilesService;
+      const filesRecent = yield* FilesRecentService;
       const machineApps = yield* MachineAppsService;
       const appSdk = yield* AppSdkService;
       const inbox = yield* InboxService;
@@ -1381,6 +1383,14 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.filesSearch]: (input) =>
           observeRpcEffect(WS_METHODS.filesSearch, files.search(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesRecentList]: (input) =>
+          observeRpcEffect(WS_METHODS.filesRecentList, filesRecent.list(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesRecentRecord]: (input) =>
+          observeRpcEffect(WS_METHODS.filesRecentRecord, filesRecent.record(input), {
             "rpc.aggregate": "files",
           }),
         [WS_METHODS.filesShareCreate]: (input) =>

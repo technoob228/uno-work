@@ -90,6 +90,10 @@ import {
   FilesPublishSiteInput,
   FilesPublishSiteResult,
   FilesRenameInput,
+  FilesRecentListInput,
+  FilesRecentListResult,
+  FilesRecentRecordInput,
+  FilesRecentRecordResult,
   FilesSearchInput,
   FilesSearchResult,
   FilesShare,
@@ -493,6 +497,8 @@ export const WS_METHODS = {
   filesMove: "files.move",
   filesDelete: "files.delete",
   filesSearch: "files.search",
+  filesRecentList: "files.recent.list",
+  filesRecentRecord: "files.recent.record",
   filesShareCreate: "files.share.create",
   filesShareList: "files.share.list",
   filesShareRevoke: "files.share.revoke",
@@ -1721,6 +1727,18 @@ export const WsFilesSearchRpc = Rpc.make(WS_METHODS.filesSearch, {
   error: FilesError,
 });
 
+export const WsFilesRecentListRpc = Rpc.make(WS_METHODS.filesRecentList, {
+  payload: FilesRecentListInput,
+  success: FilesRecentListResult,
+  error: FilesError,
+});
+
+export const WsFilesRecentRecordRpc = Rpc.make(WS_METHODS.filesRecentRecord, {
+  payload: FilesRecentRecordInput,
+  success: FilesRecentRecordResult,
+  error: FilesError,
+});
+
 export const WsFilesShareCreateRpc = Rpc.make(WS_METHODS.filesShareCreate, {
   payload: FilesShareCreateInput,
   success: FilesShare,
@@ -2062,6 +2080,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesMoveRpc,
   WsFilesDeleteRpc,
   WsFilesSearchRpc,
+  WsFilesRecentListRpc,
+  WsFilesRecentRecordRpc,
   WsFilesShareCreateRpc,
   WsFilesShareListRpc,
   WsFilesShareRevokeRpc,

@@ -48,6 +48,7 @@ import {
   previewSiteIssueRouteLayer,
 } from "./files/http.ts";
 import { FilesServiceLive } from "./files/FilesService.ts";
+import { FilesRecentServiceLive } from "./files/FilesRecentService.ts";
 import { FileSharesRepositoryLive } from "./persistence/Layers/FileShares.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
@@ -402,8 +403,11 @@ const WorkspaceRegistryLayerLive = Layer.mergeAll(
   // "This computer" reads the same account key and this machine's box id
   // (UnoBoxIdentity, provided further down the runtime pipe).
   UnoComputerServiceLive,
-  // Files app: file manager + public share links (`file_shares` table).
-  FilesServiceLive.pipe(Layer.provide(FileSharesRepositoryLive)),
+  // Files app: file manager + public share links (`file_shares` table), and
+  // Files → Recent on top of it (state dir + the chats' turn summaries).
+  FilesRecentServiceLive.pipe(
+    Layer.provideMerge(FilesServiceLive.pipe(Layer.provide(FileSharesRepositoryLive))),
+  ),
   // Programs found on this machine: same key and box id, plus ServerConfig.
   // "What is using my computer" reads the same scan to name apps and containers.
   ComputerResourcesServiceLive.pipe(Layer.provideMerge(MachineAppsServiceLive)),

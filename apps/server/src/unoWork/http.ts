@@ -316,6 +316,7 @@ const makeDeps = (input: {
         driveRecent: (args) => files.driveRecent(args),
         driveShareCreate: (args) => files.driveShareCreate(args),
         cloudCopyToCloud: (args) => files.cloudCopyToCloud(args),
+        cloudCopyToComputer: (args) => files.cloudCopyToComputer(args),
       },
       inboxPost: (post) => inbox.post(post).pipe(Effect.map((item) => ({ id: item.id }))),
       messengerNotify: ({ text, kind }) =>

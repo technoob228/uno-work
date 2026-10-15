@@ -1,6 +1,7 @@
 /**
  * A file opened in Files: the header (name, what it is, actions) and the
- * opener picked for it — viewer by default, the opener's editor after Edit.
+ * opener picked for it — viewer by default, the opener's editor after Edit
+ * (beside the tree, text-like files open straight in the editor).
  */
 import type { EnvironmentId, FilesEntry } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -51,9 +52,10 @@ import {
   fileExtension,
   fileKindOf,
   formatFileSize,
+  editsInline,
   formatModified,
 } from "./fileTypes";
-import { downloadFile, filesStatQueryOptions } from "./filesApi";
+import { downloadFile, filesStatQueryOptions, recordFileOpened } from "./filesApi";
 import { makeFileSource } from "./fileSource";
 import { ViewerLoading, ViewerMessage } from "./openers/common";
 import type { useFilesUploads } from "./FilesUploads";
@@ -68,6 +70,7 @@ export function FileViewer({
   onMove,
   onDelete,
   embedded = false,
+  editInline = false,
   viewSwitch,
   onUnsavedChange,
 }: {
@@ -81,6 +84,11 @@ export function FileViewer({
   onDelete: (entry: FilesEntry) => void;
   /** Shown beside a tree (Files → Tree): no way back, the tree is the way. */
   embedded?: boolean;
+  /**
+   * Text, markdown and code open straight in their editor (Files → Tree /
+   * Recent, Misha 14.10): no Edit click, ⌘S saves and the editor stays.
+   */
+  editInline?: boolean;
   /** The List | Tree switch, when the header should carry it. */
   viewSwitch?: ReactNode;
   /** True while the editor holds changes that are not saved yet. */
@@ -89,7 +97,9 @@ export function FileViewer({
   const queryClient = useQueryClient();
   const stat = useQuery(filesStatQueryOptions(environmentId, path));
   const entry = stat.data ?? null;
-  const [editing, setEditing] = useState(false);
+  // null = the default: the editor right away for text-like files beside the
+  // tree (`editInline`), the viewer otherwise; true/false = the person chose.
+  const [editChoice, setEditChoice] = useState<boolean | null>(null);
   const [dirty, setDirty] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState<null | (() => void)>(null);
   useSyncExternalStore(subscribeFileOpeners, fileOpenersVersion);
@@ -101,9 +111,23 @@ export function FileViewer({
     [environmentId, entry?.path, entry?.modifiedAt, entry?.size, queryClient],
   );
   const opener = source ? resolveFileOpener(source) : null;
+  const kind = entry ? fileKindOf(entry.name) : "other";
+  const navigate = useNavigate();
+  // Word / Excel / PowerPoint edit in Office (the full editor). Office runs from
+  // the computer serving the page, so the desktop app keeps the simple editors.
+  const inOffice = !isElectron && isOfficeFile(path);
+  const Editor = inOffice ? undefined : opener?.Editor;
+  const inlineEditor = editInline && Editor !== undefined && editsInline(kind);
+  const editing = Editor !== undefined && (editChoice ?? inlineEditor);
+
   useEffect(() => {
     onUnsavedChange?.(editing && dirty);
   }, [dirty, editing, onUnsavedChange]);
+
+  // Opened in Files: on top of Files → Recent (on this computer, every device).
+  useEffect(() => {
+    if (entry?.kind === "file") recordFileOpened(environmentId, entry.path);
+  }, [entry?.kind, entry?.path, environmentId]);
 
   const guard = useCallback(
     (action: () => void) => {
@@ -115,11 +139,14 @@ export function FileViewer({
 
   const closeEditor = useCallback(
     (saved: boolean) => {
-      setEditing(false);
       setDirty(false);
       if (saved) void stat.refetch();
+      // Edited in place (beside the tree): a save keeps the editor open, like a
+      // code editor; Cancel goes back to reading.
+      if (saved && inlineEditor) setEditChoice(null);
+      else setEditChoice(false);
     },
-    [stat],
+    [inlineEditor, stat],
   );
 
   const uploadNewVersion = () => {
@@ -172,13 +199,7 @@ export function FileViewer({
     );
   };
 
-  const kind = entry ? fileKindOf(entry.name) : "other";
   const Icon = FILE_KIND_ICON[kind];
-  const navigate = useNavigate();
-  // Word / Excel / PowerPoint edit in Office (the full editor). Office runs from
-  // the computer serving the page, so the desktop app keeps the simple editors.
-  const inOffice = !isElectron && isOfficeFile(path);
-  const Editor = inOffice ? undefined : opener?.Editor;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -204,7 +225,8 @@ export function FileViewer({
           ) : null}
         </div>
         {viewSwitch}
-        {entry && !editing ? (
+        {/* Edited in place, the file's actions stay; unsaved edits ask first. */}
+        {entry && (!editing || inlineEditor) ? (
           <div className="flex shrink-0 items-center gap-1.5">
             {inOffice ? (
               <Button
@@ -217,8 +239,8 @@ export function FileViewer({
                 <span className="hidden sm:inline">Edit in Office</span>
               </Button>
             ) : null}
-            {Editor ? (
-              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+            {Editor && !editing ? (
+              <Button size="sm" variant="outline" onClick={() => setEditChoice(true)}>
                 <PencilIcon />
                 <span className="hidden sm:inline">{opener?.editLabel ?? "Edit"}</span>
               </Button>
@@ -239,20 +261,20 @@ export function FileViewer({
                 <EllipsisIcon />
               </MenuTrigger>
               <MenuPopup align="end" className="w-56">
-                <MenuItem onClick={uploadNewVersion}>
+                <MenuItem onClick={() => guard(uploadNewVersion)}>
                   <UploadIcon />
                   Upload a new version
                 </MenuItem>
                 <MenuSeparator />
-                <MenuItem onClick={() => onRename(entry)}>
+                <MenuItem onClick={() => guard(() => onRename(entry))}>
                   <TextCursorInputIcon />
                   Rename
                 </MenuItem>
-                <MenuItem onClick={() => onMove(entry)}>
+                <MenuItem onClick={() => guard(() => onMove(entry))}>
                   <FolderInputIcon />
                   Move
                 </MenuItem>
-                <MenuItem variant="destructive" onClick={() => onDelete(entry)}>
+                <MenuItem variant="destructive" onClick={() => guard(() => onDelete(entry))}>
                   <Trash2Icon />
                   Delete
                 </MenuItem>
@@ -312,7 +334,7 @@ export function FileViewer({
               onClick={() => {
                 const action = confirmLeave;
                 setConfirmLeave(null);
-                setEditing(false);
+                setEditChoice(false);
                 setDirty(false);
                 action?.();
               }}

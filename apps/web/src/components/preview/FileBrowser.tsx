@@ -18,6 +18,7 @@ import {
   SearchIcon,
   TableIcon,
   AppWindowIcon,
+  ListTodoIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,6 +54,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   "live-browser": GlobeIcon,
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
+  tasks: ListTodoIcon,
   unknown: FileIcon,
 };
 
@@ -71,6 +73,7 @@ const KIND_BG: Record<PreviewFileKind, string> = {
   "live-browser": "bg-indigo-500/16 text-indigo-700 dark:text-indigo-300",
   "plugin-panel": "bg-violet-500/16 text-violet-700 dark:text-violet-300",
   app: "bg-sky-500/16 text-sky-700 dark:text-sky-300",
+  tasks: "bg-blue-500/16 text-blue-700 dark:text-blue-300",
   unknown: "bg-muted text-muted-foreground",
 };
 

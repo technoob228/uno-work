@@ -24,6 +24,7 @@ import { Schema } from "effect";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
 import {
+  type ChatAttachment,
   type ChatMessage,
   type Project,
   type ProposedPlan,
@@ -162,7 +163,7 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 }
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => {
+  const attachments = message.attachments?.map((attachment): ChatAttachment => {
     if (attachment.type === "image") {
       return {
         type: "image" as const,
@@ -174,6 +175,17 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
           environmentId,
           pathname: attachmentPreviewRoutePath(attachment.id),
         }),
+        ...(attachment.savedPath ? { savedPath: attachment.savedPath } : {}),
+      };
+    }
+    if (attachment.type === "file") {
+      return {
+        type: "file" as const,
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        path: attachment.path,
       };
     }
 

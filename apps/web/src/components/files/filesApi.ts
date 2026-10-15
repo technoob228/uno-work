@@ -36,6 +36,7 @@ export const filesQueryKeys = {
     ["files", "stat", environmentId, path] as const,
   bytes: (environmentId: EnvironmentId | null, path: string, modifiedAt: string) =>
     ["files", "bytes", environmentId, path, modifiedAt] as const,
+  recent: (environmentId: EnvironmentId | null) => ["files", "recent", environmentId] as const,
   shares: (environmentId: EnvironmentId | null, path: string | null) =>
     ["files", "shares", environmentId, path] as const,
   cloudState: (environmentId: EnvironmentId | null) =>
@@ -109,6 +110,43 @@ export function filesStatQueryOptions(environmentId: EnvironmentId | null, path:
     staleTime: 2_000,
     retry: 1,
   });
+}
+
+/** Files → Recent: opened here + changed by agents, kept by the computer. */
+export function filesRecentQueryOptions(environmentId: EnvironmentId | null) {
+  return queryOptions({
+    queryKey: filesQueryKeys.recent(environmentId),
+    queryFn: () => filesApi(environmentId).recentList({}),
+    enabled: environmentId !== null,
+    staleTime: 10_000,
+    retry: 1,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** The same file opened again within this window is not recorded again. */
+const RECORD_OPEN_WINDOW_MS = 30_000;
+const lastRecordedAt = new Map<string, number>();
+
+/**
+ * The person opened a file (Files, the right panel, a pin): the computer
+ * puts it on top of Files → Recent. Best effort — a failure changes nothing
+ * the person sees. The Recent list is not refetched here on purpose: a row
+ * clicked in Recent must not jump to the top under the cursor; the list
+ * catches up the next time it is shown (staleTime).
+ */
+export function recordFileOpened(
+  environmentId: EnvironmentId | null | undefined,
+  path: string,
+): void {
+  if (!environmentId || !path.startsWith("/")) return;
+  const key = `${environmentId}\u0000${path}`;
+  const now = Date.now();
+  if (now - (lastRecordedAt.get(key) ?? 0) < RECORD_OPEN_WINDOW_MS) return;
+  lastRecordedAt.set(key, now);
+  const api = readEnvironmentApi(environmentId);
+  if (!api) return;
+  void api.files.recentRecord({ path }).catch(() => lastRecordedAt.delete(key));
 }
 
 export function filesSharesQueryOptions(environmentId: EnvironmentId | null, path: string | null) {

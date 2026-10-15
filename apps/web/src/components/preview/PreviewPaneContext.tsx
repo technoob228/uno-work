@@ -10,6 +10,7 @@ import {
 import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
+import { recordFileOpened } from "../files/filesApi";
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
@@ -68,6 +69,7 @@ export type PreviewFileKind =
   | "live-browser"
   | "plugin-panel"
   | "app"
+  | "tasks"
   | "unknown";
 
 export interface PreviewFile {
@@ -145,6 +147,17 @@ export function isPluginPanelTab(file: Pick<PreviewFile, "kind">): boolean {
 }
 
 /** A web app of the computer (Nextcloud, Vaultwarden…) shown in a frame. */
+/** A tab showing a file of the computer (not a browser, app or plugin panel). */
+export function isRecordableFileTab(file: Pick<PreviewFile, "kind" | "path">): boolean {
+  return (
+    !!file.path?.startsWith("/") &&
+    file.kind !== "browser" &&
+    file.kind !== "live-browser" &&
+    file.kind !== "plugin-panel" &&
+    file.kind !== "app"
+  );
+}
+
 export function isAppTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "app";
 }
@@ -168,6 +181,61 @@ export function makeAppFile(input: {
     content: input.icon ?? "",
     url: input.url,
   };
+}
+
+/**
+ * Вкладка `id` сейчас на экране: панель открыта, вкладка в ней есть и активна
+ * (без явной активной показывается первая — как в PreviewPane).
+ */
+export function isTabShown(
+  view: {
+    readonly open: boolean;
+    readonly files: ReadonlyArray<Pick<PreviewFile, "id">>;
+    readonly activeFileId: string | null;
+  },
+  id: string,
+): boolean {
+  if (!view.open || !view.files.some((file) => file.id === id)) return false;
+  const shownId = view.files.some((file) => file.id === view.activeFileId)
+    ? view.activeFileId
+    : (view.files[0]?.id ?? null);
+  return shownId === id;
+}
+
+const TASKS_TAB_ID_PREFIX = "tasks:";
+
+/** Вкладка задач/плана треда: одна на тред, только уровня чата. */
+export function isTasksTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "tasks";
+}
+
+export function tasksTabId(threadId: string): string {
+  return `${TASKS_TAB_ID_PREFIX}${threadId}`;
+}
+
+/**
+ * Вкладка «Tasks/Plan» треда. Содержимое не хранится во вкладке: тело читает
+ * его по threadId из `tasksTabStore`, куда его публикует ChatView.
+ */
+export function makeTasksFile(input: {
+  threadId: string;
+  environmentId: EnvironmentId;
+  label: string;
+}): PreviewFile {
+  return {
+    id: tasksTabId(input.threadId),
+    name: input.label,
+    kind: "tasks",
+    content: "",
+    environmentId: input.environmentId,
+  };
+}
+
+/** Тред вкладки задач — по нему тело вкладки ищет план. */
+export function threadIdFromTasksFile(file: Pick<PreviewFile, "id" | "kind">): string | null {
+  if (!isTasksTab(file) || !file.id.startsWith(TASKS_TAB_ID_PREFIX)) return null;
+  const threadId = file.id.slice(TASKS_TAB_ID_PREFIX.length);
+  return threadId.length > 0 ? threadId : null;
 }
 
 const PLUGIN_PANEL_ID_PREFIX = "plugin-panel:";
@@ -440,6 +508,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const openFile = useCallback(
     (file: PreviewFile) => {
       openFileForTarget(currentTarget, personScope, file);
+      // Файл с компьютера, открытый человеком, попадает в Files → Recent.
+      if (file.path && isRecordableFileTab(file)) recordFileOpened(file.environmentId, file.path);
     },
     [currentTarget, openFileForTarget, personScope],
   );

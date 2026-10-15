@@ -140,7 +140,7 @@ interface PromptFromMessageInput {
 }
 
 function describeAttachment(attachment: ChatAttachment): string {
-  if (attachment.type === "image") {
+  if (attachment.type === "image" || attachment.type === "file") {
     return `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`;
   }
 

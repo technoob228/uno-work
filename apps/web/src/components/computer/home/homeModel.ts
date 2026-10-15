@@ -5,6 +5,7 @@
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
 
+import { threadKey } from "../../../inbox/inboxActions.logic";
 import { canOfferChatDone } from "../../../inbox/openRequests.logic";
 import { resolveSidebarThreadStatus } from "../../Sidebar.logic";
 import { isYourTurn } from "../../Sidebar.yourTurn";
@@ -229,13 +230,23 @@ export function pickContinueItems<I extends ContinueInboxItem>(
     .map((entry) => entry.card);
 }
 
-/** Chats waiting for the person: an approval or a question. Approvals first, newest first. */
-export function attentionThreads(threads: ReadonlyArray<HomeThread>, now: number): HomeThread[] {
+/**
+ * Chats waiting for the person: an approval or a question. Approvals first,
+ * newest first. A question skipped for now (`skippedQuestions`: its Inbox
+ * item is snoozed, keys `environmentId:threadId`) stays out until it wakes.
+ */
+export function attentionThreads(
+  threads: ReadonlyArray<HomeThread>,
+  now: number,
+  skippedQuestions: ReadonlySet<string> = new Set(),
+): HomeThread[] {
   return threads
     .filter(
       (thread) =>
         isHomeVisibleThread(thread, now) &&
-        (thread.hasPendingApprovals || thread.hasPendingUserInput),
+        (thread.hasPendingApprovals ||
+          (thread.hasPendingUserInput &&
+            !skippedQuestions.has(threadKey(thread.environmentId, thread.id)))),
     )
     .toSorted(
       (a, b) =>
