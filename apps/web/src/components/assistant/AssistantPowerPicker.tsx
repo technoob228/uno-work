@@ -7,7 +7,8 @@
  * assistant to it as soon as the sign-in lands:
  * - Claude — Claude Code's own sign-in on this computer (the same dialog as
  *   Settings → AI → Agents); the assistant runs it through Nous' official
- *   Hermes plugin.
+ *   Hermes plugin. The first pick sets that up by itself (a newer Hermes,
+ *   the plugin): nobody is asked to update anything (Misha 15.10).
  * - ChatGPT — the assistant's own sign-in (a page and a code), apart from the
  *   Codex CLI's.
  *
@@ -45,7 +46,6 @@ import {
   getAssistantSignIn,
   listAssistantLlmModels,
   startAssistantSignIn,
-  startHermesUpdate,
 } from "../../lib/assistantLlmApi";
 import { cn } from "../../lib/utils";
 import { HarnessSignInDialog } from "../harness/HarnessSignInDialog";
@@ -73,7 +73,10 @@ function cardOf(provider: AssistantLlmProvider): PowerCard {
   return "key";
 }
 
-function subscriptionLine(subscription: SubscriptionLlmStatus): string {
+function subscriptionLine(subscription: SubscriptionLlmStatus, settingUp: boolean): string {
+  if (settingUp) return "Setting it up on this computer — about a minute.";
+  // A note from this computer (a set-up that didn't finish last time).
+  if (subscription.message && subscription.state === "ready") return subscription.message;
   if (subscription.state === "ready") {
     const who = [subscription.plan, subscription.account].filter(Boolean).join(" · ");
     return who.length > 0 ? `${who} · Uno doesn't charge` : "Signed in · Uno doesn't charge";
@@ -289,18 +292,6 @@ export function AssistantPowerPicker(props: {
     (provider) => status?.keys.find((key) => key.provider === provider)?.configured,
   );
 
-  const hermesUpdate = status?.hermesUpdate;
-  const updateHermes = () =>
-    void startHermesUpdate({ environmentId })
-      .then((next) => queryClient.setQueryData(assistantLlmQueryKey(environmentId), next))
-      .catch((error: unknown) =>
-        toastManager.add({
-          type: "error",
-          title: "Couldn't update Hermes",
-          description: error instanceof Error ? error.message : String(error),
-        }),
-      );
-
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: assistantLlmQueryKey(environmentId) });
 
@@ -392,35 +383,14 @@ export function AssistantPowerPicker(props: {
             key={subscription.provider}
             id={subscription.provider}
             title={`Your ${AI_PROVIDER_LABELS[subscription.provider]} plan`}
-            line={subscriptionLine(subscription)}
+            line={subscriptionLine(subscription, picking === subscription.provider)}
             badge={subscription.provider === "claude" ? "Beta" : undefined}
             selected={current === subscription.provider}
             busy={picking === subscription.provider || pending === subscription.provider}
             disabled={subscription.state === "needs-hermes" || subscription.state === "unavailable"}
             onPick={() => pickSubscription(subscription)}
             action={
-              subscription.state === "needs-hermes" ? (
-                hermesUpdate?.state === "running" ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <LoaderCircleIcon className="size-3 animate-spin" /> Updating Hermes…
-                  </span>
-                ) : (
-                  <div className="flex flex-col gap-1">
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      className="self-start"
-                      onClick={updateHermes}
-                      data-testid="assistant-power-hermes-update"
-                    >
-                      Update Hermes
-                    </Button>
-                    {hermesUpdate?.state === "failed" && hermesUpdate.message ? (
-                      <span className="text-[11px] text-destructive">{hermesUpdate.message}</span>
-                    ) : null}
-                  </div>
-                )
-              ) : subscription.state === "sign-in" && pending !== subscription.provider ? (
+              subscription.state === "sign-in" && pending !== subscription.provider ? (
                 <Button
                   size="xs"
                   variant="outline"

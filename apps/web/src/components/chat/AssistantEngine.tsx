@@ -177,7 +177,7 @@ export function AssistantModelPicker(props: {
           "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium text-foreground shadow-xs/5 hover:bg-accent",
           props.compact ? "h-7 sm:h-6" : "h-7 sm:h-6",
         )}
-        title={`Uno runs on Hermes · ${modelLabel} · ${providerLabel}`}
+        title={`Uno runs on ${modelLabel} · ${providerLabel}`}
       >
         <BrainCircuitIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{modelLabel}</span>
@@ -194,9 +194,6 @@ export function AssistantModelPicker(props: {
         <div className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-2">
             <div className="text-sm font-semibold">Uno's AI</div>
-            <div className="text-[11px] text-muted-foreground">
-              Hermes{status?.harness.version ? ` ${status.harness.version}` : ""}
-            </div>
           </div>
 
           <div
@@ -253,7 +250,7 @@ export function AssistantModelPicker(props: {
                       {subscription.state === "ready"
                         ? (subscription.plan ?? "signed in")
                         : subscription.state === "needs-hermes"
-                          ? "needs newer Hermes"
+                          ? "not on this computer yet"
                           : "Sign in"}
                     </span>
                   ) : available ? (

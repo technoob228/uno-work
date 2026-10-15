@@ -51,7 +51,7 @@ export function assistantEngineNotice(
         variant: "info",
         title: "Setting up Uno's engine…",
         description:
-          "Installing Hermes on this computer. The first time takes a minute or two — Uno answers as soon as it's done.",
+          "The first time on this computer takes a minute or two — Uno answers as soon as it's done.",
         detail: harness.logTail,
         action: null,
         busy: true,
@@ -61,7 +61,7 @@ export function assistantEngineNotice(
         id: "missing",
         variant: "warning",
         title: "Uno's engine isn't installed yet",
-        description: "Uno runs on Hermes. Install it to start chatting.",
+        description: "Set it up on this computer to start chatting — a minute or two.",
         detail: null,
         action: "install",
         busy: false,

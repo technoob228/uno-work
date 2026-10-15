@@ -69,6 +69,20 @@ export const HERMES_UV_TOOL_ARGS_CLAUDE_READY: ReadonlyArray<string> = [
 
 export const HERMES_CLAUDE_READY_ENV: Readonly<Record<string, string>> = { HERMES_NIX_BUILD: "1" };
 
+const shellQuote = (arg: string) => `'${arg.replaceAll("'", "'\\''")}'`;
+
+/**
+ * Install Hermes the way every computer should have it (Misha 15.10: "it
+ * should just be there"): the pinned release that also runs the person's
+ * Claude plan; if that can't be built here (no git, GitHub unreachable),
+ * the PyPI Hermes as before — the assistant works either way.
+ */
+export function hermesInstallScript(uvBin: string): string {
+  const pinned = HERMES_UV_TOOL_ARGS_CLAUDE_READY.map(shellQuote).join(" ");
+  const fallback = HERMES_UV_TOOL_ARGS.map(shellQuote).join(" ");
+  return `HERMES_NIX_BUILD=1 ${shellQuote(uvBin)} ${pinned} || ${shellQuote(uvBin)} ${fallback}`;
+}
+
 export const HERMES_INSTALL_DISPLAY = `uv tool install --python ${HERMES_PYTHON} "hermes-agent[acp]" --with "${HERMES_MCP_SPEC}"`;
 
 export interface InstallPlanContext {
@@ -152,10 +166,9 @@ export function resolveInstallPlan(
       // installer into ~/.local/bin (uv brings its own Python). No curl or no
       // network → the job fails with the installer's own words and a Retry.
       const uvBin = nodePath.join(context.homeDir, ".local", "bin", "uv");
-      const uvArgs = HERMES_UV_TOOL_ARGS.map((arg) => `'${arg}'`).join(" ");
       // Download first: `curl … | sh` would hide a failed download (sh of an
       // empty script exits 0) and the error would read "uv: not found".
-      const script = `uv_installer="$(curl -LsSf https://astral.sh/uv/install.sh)" && printf '%s\n' "$uv_installer" | env UV_NO_MODIFY_PATH=1 sh && '${uvBin}' ${uvArgs}`;
+      const script = `uv_installer="$(curl -LsSf https://astral.sh/uv/install.sh)" && printf '%s\n' "$uv_installer" | env UV_NO_MODIFY_PATH=1 sh && { ${hermesInstallScript(uvBin)}; }`;
       return {
         kind: "command",
         command: "sh",
@@ -164,12 +177,21 @@ export function resolveInstallPlan(
         display: `install uv, then ${HERMES_INSTALL_DISPLAY}`,
       };
     }
+    if (context.platform === "win32") {
+      return {
+        kind: "command",
+        command: "uv",
+        args: HERMES_UV_TOOL_ARGS,
+        env: {},
+        display: HERMES_INSTALL_DISPLAY,
+      };
+    }
     return {
       kind: "command",
-      command: "uv",
-      args: HERMES_UV_TOOL_ARGS,
+      command: "sh",
+      args: ["-c", hermesInstallScript("uv")],
       env: {},
-      display: HERMES_INSTALL_DISPLAY,
+      display: `${HERMES_INSTALL_DISPLAY} (Hermes ${HERMES_CLAUDE_READY_VERSION})`,
     };
   }
 

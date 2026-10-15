@@ -201,10 +201,19 @@ export function claudeSignInFromProviders(providers: ReadonlyArray<ServerProvide
   };
 }
 
-/** What the engine panel shows for each subscription (contracts: SubscriptionLlmStatus). */
+/**
+ * What the engine panel shows for each subscription (contracts:
+ * SubscriptionLlmStatus). Hermes is never the person's business (Misha
+ * 15.10): an older Hermes is updated on the first pick of the Claude plan,
+ * so it only shows when that can't happen here or just failed.
+ */
 export function subscriptionStatuses(input: {
   /** Hermes' version on this computer; null when not installed / not probed. */
   readonly hermesVersion: string | null;
+  /** This computer can bring Hermes up to date by itself (not Windows). */
+  readonly hermesUpdatable: boolean;
+  /** The last such update failed, and why; null otherwise. */
+  readonly hermesUpdateError: string | null;
   readonly claude: {
     readonly signedIn: boolean;
     readonly plan: string | null;
@@ -216,36 +225,32 @@ export function subscriptionStatuses(input: {
     input.hermesVersion,
     HERMES_CLAUDE_PLUGIN_MIN_VERSION,
   );
-  const claude: SubscriptionLlmStatus = !claudeHermesOk
-    ? {
-        provider: "claude",
-        state: "needs-hermes",
-        plan: input.claude.plan,
-        account: input.claude.account,
-        signIn: "harness",
-        message: `Needs a newer Hermes on this computer${
-          input.hermesVersion
-            ? ` (it has ${input.hermesVersion}, Claude needs ${HERMES_CLAUDE_PLUGIN_MIN_VERSION}+)`
-            : ""
-        }. Update it here — about a minute.`,
-      }
-    : input.claude.signedIn
+  const claudeBase = {
+    provider: "claude" as const,
+    plan: input.claude.signedIn ? input.claude.plan : null,
+    account: input.claude.signedIn ? input.claude.account : null,
+    signIn: "harness" as const,
+  };
+  const claude: SubscriptionLlmStatus =
+    !claudeHermesOk && !input.hermesUpdatable
       ? {
-          provider: "claude",
-          state: "ready",
-          plan: input.claude.plan,
-          account: input.claude.account,
-          signIn: "harness",
-          message: null,
+          ...claudeBase,
+          state: "unavailable",
+          message: "Not available on this computer yet.",
         }
-      : {
-          provider: "claude",
-          state: "sign-in",
-          plan: null,
-          account: null,
-          signIn: "harness",
-          message: "Sign in to Claude on this computer — Uno uses that sign-in.",
-        };
+      : !claudeHermesOk && input.hermesUpdateError !== null
+        ? {
+            ...claudeBase,
+            state: input.claude.signedIn ? "ready" : "sign-in",
+            message: "Couldn't set it up on this computer last time. Pick it to try again.",
+          }
+        : input.claude.signedIn
+          ? { ...claudeBase, state: "ready", message: null }
+          : {
+              ...claudeBase,
+              state: "sign-in",
+              message: "Sign in to Claude on this computer — Uno uses that sign-in.",
+            };
   const chatgpt: SubscriptionLlmStatus = input.chatgpt.signedIn
     ? {
         provider: "chatgpt",

@@ -115,21 +115,43 @@ describe("subscriptionStatuses", () => {
   const signedOut = { signedIn: false, plan: null, account: null };
   const claudeMax = { signedIn: true, plan: "Claude Max", account: null };
 
-  it("asks for a newer Hermes before anything else for Claude", () => {
+  const updatable = { hermesUpdatable: true, hermesUpdateError: null };
+
+  it("never sends the person to update Hermes: an old one is ready, the first pick updates it (15.10)", () => {
     const [claude] = subscriptionStatuses({
       hermesVersion: "0.19.0",
+      ...updatable,
       claude: claudeMax,
       chatgpt: signedOut,
     });
-    expect(claude?.state).toBe("needs-hermes");
-    expect(claude?.message).toContain("0.21.4");
-    expect(claude?.message).toContain("Update it here");
-    expect(claude?.message).toContain("0.19.0");
+    expect(claude).toMatchObject({ state: "ready", plan: "Claude Max", message: null });
+  });
+
+  it("says it can't here when Hermes can't update itself, and offers a retry after a failed update", () => {
+    const [windows] = subscriptionStatuses({
+      hermesVersion: "0.19.0",
+      hermesUpdatable: false,
+      hermesUpdateError: null,
+      claude: claudeMax,
+      chatgpt: signedOut,
+    });
+    expect(windows?.state).toBe("unavailable");
+    const [failed] = subscriptionStatuses({
+      hermesVersion: "0.19.0",
+      hermesUpdatable: true,
+      hermesUpdateError: "git is missing on this computer.",
+      claude: claudeMax,
+      chatgpt: signedOut,
+    });
+    expect(failed?.state).toBe("ready");
+    expect(failed?.message).toContain("try again");
+    for (const status of [windows, failed]) expect(status?.message ?? "").not.toMatch(/hermes/i);
   });
 
   it("is ready when signed in on a Hermes that loads the plugin; ChatGPT works on 0.19", () => {
     const statuses = subscriptionStatuses({
       hermesVersion: "0.22.0",
+      ...updatable,
       claude: claudeMax,
       chatgpt: { signedIn: true, plan: "ChatGPT Plus", account: "a@b.c" },
     });
@@ -139,6 +161,7 @@ describe("subscriptionStatuses", () => {
     ]);
     const old = subscriptionStatuses({
       hermesVersion: "0.19.0",
+      ...updatable,
       claude: signedOut,
       chatgpt: { signedIn: true, plan: null, account: null },
     });
@@ -148,6 +171,7 @@ describe("subscriptionStatuses", () => {
   it("says how to sign in: Claude Code's sign-in for Claude, the assistant's own for ChatGPT", () => {
     const [claude, chatgpt] = subscriptionStatuses({
       hermesVersion: "0.22.0",
+      ...updatable,
       claude: signedOut,
       chatgpt: signedOut,
     });

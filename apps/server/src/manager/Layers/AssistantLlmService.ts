@@ -11,6 +11,7 @@ import {
   type AssistantLlmModelList,
   type AssistantSignInStatus,
   CommandId,
+  HERMES_CLAUDE_PLUGIN_MIN_VERSION,
   isAssistantProjectId,
   isSubscriptionLlmProvider,
   type SubscriptionLlmProvider,
@@ -178,6 +179,10 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
       const chatgpt = yield* Effect.promise(() => readChatgptSignIn(sharedHome));
       return subscriptionStatuses({
         hermesVersion,
+        // The Claude plan brings its Hermes along on first pick (uv, not on
+        // Windows), unless that just failed here.
+        hermesUpdatable: process.platform !== "win32",
+        hermesUpdateError: hermesUpdate?.state === "failed" ? hermesUpdate.message : null,
         claude: claudeSignInFromProviders(providers),
         chatgpt,
       });
@@ -252,50 +257,86 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
     state: "running" | "succeeded" | "failed";
     message: string | null;
   } | null = null;
+  let hermesUpdateRun: Promise<boolean> | null = null;
+
+  /**
+   * Bring Hermes to the pinned version the Claude plan needs — behind the
+   * scenes (Misha 15.10: nobody should have to know what Hermes is). One run
+   * at a time; resolves true when the new Hermes is there.
+   */
+  const runHermesUpdate = (): Promise<boolean> => {
+    if (hermesUpdateRun !== null) return hermesUpdateRun;
+    hermesUpdate = { state: "running", message: null };
+    hermesUpdateRun = new Promise<boolean>((resolve) => {
+      let output = "";
+      let handle: HarnessProcessHandle | null = null;
+      const timer = setTimeout(() => handle?.kill(), HERMES_UPDATE_TIMEOUT_MS);
+      handle = spawnHarnessProcess({
+        command: "uv",
+        args: HERMES_UV_TOOL_ARGS_CLAUDE_READY,
+        env: {
+          ...withUserLocalBinOnPath(process.env, os.homedir()),
+          ...HERMES_CLAUDE_READY_ENV,
+        },
+        cwd: os.homedir(),
+        onOutput: (chunk) => {
+          output += chunk;
+        },
+        onExit: (exit) => {
+          clearTimeout(timer);
+          const ok = exit.code === 0 && exit.error === undefined;
+          hermesUpdate = ok
+            ? { state: "succeeded", message: null }
+            : {
+                state: "failed",
+                message: exit.error
+                  ? `uv didn't start: ${exit.error.message}`
+                  : /git/i.test(output) && /not found|No such file/i.test(output)
+                    ? "git is missing on this computer."
+                    : lastLines(output, 3) || "The update failed.",
+              };
+          hermesUpdateRun = null;
+          // The probe that sees the new version; the assistant's next
+          // session starts on it.
+          void runPromise(providerRegistry.refresh(HERMES_DRIVER).pipe(Effect.ignore)).then(() =>
+            resolve(ok),
+          );
+        },
+      });
+      handle.endInput();
+    });
+    void runPromise(
+      Effect.logInfo("assistant: updating Hermes for the Claude plan").pipe(
+        Effect.annotateLogs({ version: HERMES_CLAUDE_READY_VERSION }),
+      ),
+    );
+    return hermesUpdateRun;
+  };
 
   const hermesUpdateStart: ManagerAssistantLlmShape["hermesUpdateStart"] = () =>
     Effect.gen(function* () {
-      if (hermesUpdate?.state !== "running") {
-        hermesUpdate = { state: "running", message: null };
-        let output = "";
-        let handle: HarnessProcessHandle | null = null;
-        const timer = setTimeout(() => handle?.kill(), HERMES_UPDATE_TIMEOUT_MS);
-        handle = spawnHarnessProcess({
-          command: "uv",
-          args: HERMES_UV_TOOL_ARGS_CLAUDE_READY,
-          env: {
-            ...withUserLocalBinOnPath(process.env, os.homedir()),
-            ...HERMES_CLAUDE_READY_ENV,
-          },
-          cwd: os.homedir(),
-          onOutput: (chunk) => {
-            output += chunk;
-          },
-          onExit: (exit) => {
-            clearTimeout(timer);
-            const ok = exit.code === 0 && exit.error === undefined;
-            hermesUpdate = ok
-              ? { state: "succeeded", message: null }
-              : {
-                  state: "failed",
-                  message: exit.error
-                    ? `uv didn't start: ${exit.error.message}`
-                    : /git/i.test(output) && /not found|No such file/i.test(output)
-                      ? "Updating Hermes needs git on this computer."
-                      : lastLines(output, 3) || "Updating Hermes failed.",
-                };
-            // The probe that sees the new version; the assistant's next
-            // session starts on it.
-            void runPromise(providerRegistry.refresh(HERMES_DRIVER).pipe(Effect.ignore));
-          },
-        });
-        handle.endInput();
-        yield* Effect.logInfo("assistant: updating Hermes for the Claude plan").pipe(
-          Effect.annotateLogs({ version: HERMES_CLAUDE_READY_VERSION }),
-        );
-      }
+      void runHermesUpdate();
       return yield* status();
     });
+
+  /** The Claude plan, ready on this computer: Hermes new enough, then the plugin. */
+  const ensureClaudeReady = Effect.gen(function* () {
+    const version = (yield* harnessStatus).version;
+    if (!hermesVersionAtLeast(version, HERMES_CLAUDE_PLUGIN_MIN_VERSION)) {
+      const ok = yield* Effect.promise(() => runHermesUpdate());
+      if (!ok) {
+        yield* Effect.logWarning("assistant: Hermes update for Claude failed").pipe(
+          Effect.annotateLogs({ reason: hermesUpdate?.message ?? null }),
+        );
+        return yield* new ManagerAssistantError({
+          detail: `Couldn't set up your Claude plan on this computer${
+            hermesUpdate?.message ? ` (${hermesUpdate.message})` : ""
+          }. Try again in a minute, or keep Uno on Uno AI.`,
+        });
+      }
+    }
+    yield* ensureClaudePlugin;
+  });
 
   const signInJobs = new Map<SubscriptionLlmProvider, SignInJob>();
 
@@ -424,7 +465,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
               `Your ${AI_PROVIDER_LABELS[input.provider]} plan isn't ready for Uno on this computer.`,
           });
         }
-        if (input.provider === "claude") yield* ensureClaudePlugin;
+        if (input.provider === "claude") yield* ensureClaudeReady;
       } else if (input.provider !== "uno") {
         const stored = yield* providerKeys.resolve(input.provider);
         if (stored === null) {
