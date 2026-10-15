@@ -86,12 +86,16 @@ export function FilesViewSwitch({
   mode,
   onChange,
   compact = false,
+  iconsOnly = false,
 }: {
   mode: FilesViewMode;
   onChange: (mode: FilesViewMode) => void;
   /** A phone: no Tree (two columns don't fit), just List | Recent. */
   compact?: boolean | undefined;
+  /** The narrow tree column: labels don't fit next to the + / refresh buttons. */
+  iconsOnly?: boolean | undefined;
 }) {
+  const label = iconsOnly ? "sr-only" : "hidden md:inline";
   const item = (active: boolean) =>
     cn(
       "flex h-7 items-center gap-1.5 rounded-md px-2 text-sm transition-colors",
@@ -111,10 +115,11 @@ export function FilesViewSwitch({
         role="tab"
         aria-selected={mode === "list"}
         className={item(mode === "list")}
+        title="List"
         onClick={() => onChange("list")}
       >
         <ListIcon className="size-3.5" />
-        <span className="hidden md:inline">List</span>
+        <span className={label}>List</span>
       </button>
       {compact ? null : (
         <button
@@ -122,10 +127,11 @@ export function FilesViewSwitch({
           role="tab"
           aria-selected={mode === "tree"}
           className={item(mode === "tree")}
+          title="Tree"
           onClick={() => onChange("tree")}
         >
           <FolderTreeIcon className="size-3.5" />
-          <span className="hidden md:inline">Tree</span>
+          <span className={label}>Tree</span>
         </button>
       )}
       <button
@@ -133,11 +139,12 @@ export function FilesViewSwitch({
         role="tab"
         aria-selected={mode === "recent"}
         className={item(mode === "recent")}
+        title="Recent"
         onClick={() => onChange("recent")}
         data-testid="files-view-recent"
       >
         <ClockIcon className="size-3.5" />
-        <span className="hidden md:inline">Recent</span>
+        <span className={label}>Recent</span>
       </button>
     </div>
   );
@@ -254,6 +261,7 @@ export const FilesTree = memo(function FilesTree(props: {
             mode={props.viewMode}
             onChange={props.onViewModeChange}
             compact={props.compactSwitch}
+            iconsOnly
           />
           <span className="flex-1" />
           <Menu>
