@@ -2283,6 +2283,45 @@ describe("ProviderRuntimeIngestion", () => {
     expect(resolvedPayload?.requestType).toBe("command_execution_approval");
   });
 
+  it("maps unknown request types into generic approval activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "request.opened",
+      eventId: asEventId("evt-request-opened-generic"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: ApprovalRequestId.make("req-generic"),
+      payload: {
+        requestType: "unknown",
+        detail: "Fetch web page: https://example.com",
+      },
+    });
+
+    await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-opened-generic",
+      ),
+    );
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    const requested = thread?.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-opened-generic",
+    );
+    expect(requested?.kind).toBe("approval.requested");
+    expect(requested?.summary).toBe("Approval requested");
+    const payload =
+      requested?.payload && typeof requested.payload === "object"
+        ? (requested.payload as Record<string, unknown>)
+        : undefined;
+    expect(payload?.requestKind).toBe("generic");
+    expect(payload?.requestType).toBe("unknown");
+    expect(payload?.detail).toBe("Fetch web page: https://example.com");
+  });
+
   it("maps runtime.error into errored session state", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

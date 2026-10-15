@@ -16,6 +16,7 @@ import {
   type OrchestrationProposedPlan,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  type ProviderRequestKind,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
@@ -258,9 +259,14 @@ function orchestrationSessionStatusFromRuntimeState(
   }
 }
 
-function requestKindFromCanonicalRequestType(
-  requestType: string | undefined,
-): "command" | "file-read" | "file-change" | undefined {
+/**
+ * Every approval request maps to a kind — anything that is not a command /
+ * file-read / file-change approval (OpenCode `webfetch`/`external_directory`/
+ * `doom_loop`, ACP `fetch`/`think`/`other`, dynamic tool calls, ...) becomes
+ * `generic`. Without a kind the web UI hides the approval and the provider
+ * waits forever for an answer nobody can give.
+ */
+function requestKindFromCanonicalRequestType(requestType: string | undefined): ProviderRequestKind {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -271,7 +277,7 @@ function requestKindFromCanonicalRequestType(
     case "apply_patch_approval":
       return "file-change";
     default:
-      return undefined;
+      return "generic";
   }
 }
 
@@ -306,7 +312,7 @@ function runtimeEventToActivities(
                   : "Approval requested",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
+            requestKind,
             requestType: event.payload.requestType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
           },
@@ -330,7 +336,7 @@ function runtimeEventToActivities(
           summary: "Approval resolved",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
+            requestKind,
             requestType: event.payload.requestType,
             ...(event.payload.decision ? { decision: event.payload.decision } : {}),
           },

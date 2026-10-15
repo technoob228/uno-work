@@ -23,6 +23,7 @@ import {
 } from "../opencodeRuntime.ts";
 import {
   appendOpenCodeAssistantTextDelta,
+  describeOpenCodePermission,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
   visibleUnoAssistantTextFromRaw,
@@ -56,6 +57,8 @@ const runtimeMock = {
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
     subscribedEvents: [] as unknown[],
+    permissionReplies: [] as Array<{ requestID: string; reply: string }>,
+    questionReplies: [] as Array<{ requestID: string; answers: unknown }>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -69,6 +72,8 @@ const runtimeMock = {
     this.state.closeError = null;
     this.state.messages = [];
     this.state.subscribedEvents = [];
+    this.state.permissionReplies = [];
+    this.state.questionReplies = [];
   },
 };
 
@@ -149,6 +154,18 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             targetIndex >= 0
               ? runtimeMock.state.messages.slice(0, targetIndex + 1)
               : runtimeMock.state.messages;
+        },
+      },
+      permission: {
+        reply: async (input: { requestID: string; reply: string }) => {
+          runtimeMock.state.permissionReplies.push(input);
+          return { data: true };
+        },
+      },
+      question: {
+        reply: async (input: { requestID: string; answers: unknown }) => {
+          runtimeMock.state.questionReplies.push(input);
+          return { data: true };
         },
       },
       event: {
@@ -927,6 +944,99 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.threadId, "thread-native-log-failure");
       assert.deepEqual(closeCallsDuringRun, []);
+    }),
+  );
+  it.effect("surfaces non-command permissions as approvals with a readable title", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-webfetch",
+            sessionID: "http://127.0.0.1:9999/session",
+            permission: "webfetch",
+            patterns: ["https://example.com/docs"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+      const adapter = yield* OpenCodeAdapter;
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "request.opened"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-generic-approval"),
+        runtimeMode: "approval-required",
+      });
+      const [opened] = Array.from(yield* Fiber.join(eventsFiber));
+      assert.equal(opened?.type, "request.opened");
+      if (opened?.type === "request.opened") {
+        assert.equal(opened.requestId, "perm-webfetch");
+        assert.equal(opened.payload.requestType, "unknown");
+        assert.equal(opened.payload.detail, "Fetch web page: https://example.com/docs");
+      }
+      assert.deepEqual(runtimeMock.state.permissionReplies, []);
+    }),
+  );
+
+  it.effect("auto-approves permission requests in full-access mode", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-doom-loop",
+            sessionID: "http://127.0.0.1:9999/session",
+            permission: "doom_loop",
+            patterns: ["*"],
+            metadata: {},
+            always: [],
+          },
+        },
+        {
+          type: "permission.replied",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            requestID: "perm-doom-loop",
+            reply: "once",
+          },
+        },
+      ];
+      const adapter = yield* OpenCodeAdapter;
+      const seen: string[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) => Effect.sync(() => seen.push(event.type))),
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-full-access-approval"),
+        runtimeMode: "full-access",
+      });
+      yield* sleep(20);
+      assert.deepEqual(runtimeMock.state.permissionReplies, [
+        { requestID: "perm-doom-loop", reply: "once" },
+      ]);
+      assert.equal(seen.includes("request.opened"), false);
+      assert.equal(seen.includes("request.resolved"), false);
+    }),
+  );
+
+  it.effect("describes OpenCode permissions for the approval card", () =>
+    Effect.sync(() => {
+      assert.equal(describeOpenCodePermission("bash", ["git status"]), "git status");
+      assert.equal(describeOpenCodePermission("edit", []), "edit");
+      assert.equal(describeOpenCodePermission("doom_loop", ["*"]), "Repeated identical tool call");
+      assert.equal(
+        describeOpenCodePermission("external_directory", ["/tmp/other/*"]),
+        "Access files outside the project: /tmp/other/*",
+      );
+      assert.equal(describeOpenCodePermission("my_mcp_tool", []), "My mcp tool");
     }),
   );
 });

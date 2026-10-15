@@ -210,19 +210,68 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   return "dynamic_tool_call";
 }
 
-function mapPermissionToRequestType(
+export function mapPermissionToRequestType(
   permission: string,
 ): "command_execution_approval" | "file_read_approval" | "file_change_approval" | "unknown" {
   switch (permission) {
     case "bash":
       return "command_execution_approval";
     case "read":
+    case "list":
+    case "glob":
+    case "grep":
       return "file_read_approval";
     case "edit":
+    case "write":
+    case "patch":
+    case "multiedit":
       return "file_change_approval";
     default:
+      // Surfaced as a `generic` approval downstream (approve/deny buttons
+      // with the readable title from `describeOpenCodePermission`).
       return "unknown";
   }
+}
+
+const OPENCODE_PERMISSION_TITLES: Readonly<Record<string, string>> = {
+  webfetch: "Fetch web page",
+  websearch: "Web search",
+  codesearch: "Code search",
+  external_directory: "Access files outside the project",
+  doom_loop: "Repeated identical tool call",
+  task: "Run subagent",
+  skill: "Use skill",
+  todowrite: "Update todo list",
+  todoread: "Read todo list",
+  lsp: "Language server query",
+};
+
+function humanizePermissionName(permission: string): string {
+  const known = OPENCODE_PERMISSION_TITLES[permission];
+  if (known) {
+    return known;
+  }
+  const spaced = permission.replace(/[_-]+/g, " ").trim();
+  return spaced.length > 0 ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "Permission";
+}
+
+/**
+ * Readable approval detail for an OpenCode `permission.asked` request. Known
+ * command / file approvals keep the raw patterns (the command or path is the
+ * most useful thing to show); everything else gets a human title so the
+ * generic approval card says what is actually being asked.
+ */
+export function describeOpenCodePermission(
+  permission: string,
+  patterns: ReadonlyArray<string>,
+): string {
+  const meaningfulPatterns = patterns.filter((pattern) => pattern.trim().length > 0);
+  if (mapPermissionToRequestType(permission) !== "unknown") {
+    return meaningfulPatterns.length > 0 ? meaningfulPatterns.join("\n") : permission;
+  }
+  const title = humanizePermissionName(permission);
+  const targets = meaningfulPatterns.filter((pattern) => pattern !== "*");
+  return targets.length > 0 ? `${title}: ${targets.join(", ")}` : title;
 }
 
 function mapPermissionDecision(reply: "once" | "always" | "reject"): string {
@@ -1251,6 +1300,41 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    /**
+     * In full-access mode an approval must never block the turn: OpenCode can
+     * still ask (agent-level `ask` rules such as `doom_loop`, subagent
+     * sessions that don't inherit the session ruleset, ...). Reply `once` on
+     * the user's behalf. Returns `false` when the request still needs a
+     * human — not full-access, or the auto-reply failed — so the caller
+     * falls back to surfacing it in the UI.
+     */
+    const autoApproveInFullAccess = Effect.fn("autoApproveInFullAccess")(function* (
+      context: OpenCodeSessionContext,
+      request: PermissionRequest,
+    ) {
+      if (context.session.runtimeMode !== "full-access") {
+        return false;
+      }
+      const replyExit = yield* Effect.exit(
+        runOpenCodeSdk("permission.reply", () =>
+          context.client.permission.reply({
+            requestID: request.id,
+            reply: "once",
+          }),
+        ),
+      );
+      if (Exit.isFailure(replyExit)) {
+        yield* Effect.logWarning("OpenCode full-access auto-approve failed", {
+          threadId: context.session.threadId,
+          requestId: request.id,
+          permission: request.permission,
+          cause: openCodeRuntimeErrorDetail(Cause.squash(replyExit.cause)),
+        });
+        return false;
+      }
+      return true;
+    });
+
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
@@ -1411,6 +1495,9 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
+          if (yield* autoApproveInFullAccess(context, event.properties)) {
+            break;
+          }
           context.pendingPermissions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1422,10 +1509,10 @@ export function makeOpenCodeAdapter(
             type: "request.opened",
             payload: {
               requestType: mapPermissionToRequestType(event.properties.permission),
-              detail:
-                event.properties.patterns.length > 0
-                  ? event.properties.patterns.join("\n")
-                  : event.properties.permission,
+              detail: describeOpenCodePermission(
+                event.properties.permission,
+                event.properties.patterns,
+              ),
               args: event.properties.metadata,
             },
           });
@@ -1433,6 +1520,12 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.replied": {
+          const request = context.pendingPermissions.get(event.properties.requestID);
+          if (!request) {
+            // Auto-approved (full-access) or not ours: nothing was opened in
+            // the UI, so there is nothing to resolve.
+            break;
+          }
           context.pendingPermissions.delete(event.properties.requestID);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1443,7 +1536,7 @@ export function makeOpenCodeAdapter(
             })),
             type: "request.resolved",
             payload: {
-              requestType: "unknown",
+              requestType: mapPermissionToRequestType(request.permission),
               decision: mapPermissionDecision(event.properties.reply),
             },
           });

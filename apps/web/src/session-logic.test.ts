@@ -114,6 +114,50 @@ describe("derivePendingApprovals", () => {
     ]);
   });
 
+  it("surfaces approvals of unknown request types as generic approvals", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-open-generic",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-generic",
+          requestKind: "generic",
+          requestType: "unknown",
+          detail: "Fetch web page: https://example.com",
+        },
+      }),
+      // Legacy row stored before `generic` existed: no requestKind at all.
+      makeActivity({
+        id: "approval-open-legacy-unknown",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-legacy-unknown",
+          requestType: "unknown",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-generic",
+        requestKind: "generic",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        detail: "Fetch web page: https://example.com",
+      },
+      {
+        requestId: "req-legacy-unknown",
+        requestKind: "generic",
+        createdAt: "2026-02-23T00:00:02.000Z",
+      },
+    ]);
+  });
+
   it("clears stale pending approvals when provider reports unknown pending request", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

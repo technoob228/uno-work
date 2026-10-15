@@ -7,6 +7,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   ProviderDriverKind,
+  type ProviderRequestKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -81,7 +82,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 export interface PendingApproval {
   requestId: ApprovalRequestId;
-  requestKind: "command" | "file-read" | "file-change";
+  requestKind: ProviderRequestKind;
   createdAt: string;
   detail?: string;
 }
@@ -203,6 +204,28 @@ function requestKindFromRequestType(requestType: unknown): PendingApproval["requ
   }
 }
 
+function isProviderRequestKind(value: unknown): value is ProviderRequestKind {
+  return (
+    value === "command" || value === "file-read" || value === "file-change" || value === "generic"
+  );
+}
+
+/**
+ * Every `approval.requested` activity must surface with approve/deny buttons:
+ * an approval the UI hides blocks the provider turn forever. Known request
+ * types keep their specific kind, everything else (including legacy rows that
+ * were stored without a `requestKind`) falls back to `generic`.
+ */
+function approvalRequestKindFromPayload(
+  payload: Record<string, unknown> | null,
+): PendingApproval["requestKind"] {
+  const requestKind = payload?.requestKind;
+  if (isProviderRequestKind(requestKind)) {
+    return requestKind;
+  }
+  return requestKindFromRequestType(payload?.requestType) ?? "generic";
+}
+
 function isStalePendingRequestFailureDetail(detail: string | undefined): boolean {
   const normalized = detail?.toLowerCase();
   if (!normalized) {
@@ -232,21 +255,12 @@ export function derivePendingApprovals(
       payload && typeof payload.requestId === "string"
         ? ApprovalRequestId.make(payload.requestId)
         : null;
-    const requestKind =
-      payload &&
-      (payload.requestKind === "command" ||
-        payload.requestKind === "file-read" ||
-        payload.requestKind === "file-change")
-        ? payload.requestKind
-        : payload
-          ? requestKindFromRequestType(payload.requestType)
-          : null;
     const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
 
-    if (activity.kind === "approval.requested" && requestId && requestKind) {
+    if (activity.kind === "approval.requested" && requestId) {
       openByRequestId.set(requestId, {
         requestId,
-        requestKind,
+        requestKind: approvalRequestKindFromPayload(payload),
         createdAt: activity.createdAt,
         ...(detail ? { detail } : {}),
       });
@@ -1045,12 +1059,9 @@ function extractWorkLogItemType(
 function extractWorkLogRequestKind(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["requestKind"] | undefined {
-  if (
-    payload?.requestKind === "command" ||
-    payload?.requestKind === "file-read" ||
-    payload?.requestKind === "file-change"
-  ) {
-    return payload.requestKind;
+  const requestKind = payload?.requestKind;
+  if (isProviderRequestKind(requestKind)) {
+    return requestKind;
   }
   return requestKindFromRequestType(payload?.requestType) ?? undefined;
 }
