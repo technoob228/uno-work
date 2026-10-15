@@ -227,6 +227,7 @@ import {
   SidebarDPlaces,
   UnoFace,
 } from "./sidebar/SidebarDParts";
+import { SidebarDChatsBar } from "./sidebar/SidebarDChatsBar";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import {
   type DRowMark,
@@ -532,41 +533,6 @@ function SidebarDShowMoreRow(props: {
       >
         {props.hiddenCount > 0 ? `Show ${props.hiddenCount} more` : "Show less"}
       </button>
-    </li>
-  );
-}
-
-/**
- * Sidebar D: the line over the chats — "Add a project" (the dialog then asks
- * where it comes from: the laptop, this computer, Cloud storage, GitHub).
- * How the chats are laid out — classic or inbox — is a setting (Settings →
- * General → "Inbox sidebar"), not a control here (Misha 11.10).
- */
-function SidebarDChatsBar(props: { onAddProject: () => void }) {
-  return (
-    <li
-      className="mt-2 flex h-7 list-none items-center gap-0.5 pr-1 pl-2.5"
-      data-testid="sidebar-d-chats-bar"
-    >
-      <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
-        Chats
-      </span>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="Add a project"
-              data-testid="sidebar-d-add-project"
-              onClick={props.onAddProject}
-              className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <FolderPlusIcon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="top">Add a project</TooltipPopup>
-      </Tooltip>
     </li>
   );
 }
@@ -2755,6 +2721,16 @@ export default function Sidebar() {
       ? selectThreadTerminalState(state.terminalStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  // The person's own chat.new binding (⌘N / ⌘⇧O by default) for the New chat
+  // tooltip, resolved like the Panel button's.
+  const newChatShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "chat.new", {
+        platform,
+        context: { terminalFocus: false, terminalOpen: false },
+      }),
+    [keybindings, platform],
+  );
   const jumpLabelByKey = useMemo(() => {
     const mapping = new Map<string, string>();
     for (const [index, threadKey] of orderedThreadKeys.entries()) {
@@ -3297,7 +3273,11 @@ export default function Sidebar() {
               : dGroups.unoRunning.map((thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true }),
                 )}
-            <SidebarDChatsBar onAddProject={handleAddProject} />
+            <SidebarDChatsBar
+              onNewChat={handleNewThreadClick}
+              newChatShortcutLabel={newChatShortcutLabel}
+              onAddProject={handleAddProject}
+            />
             {dInboxMode ? dStatusList : dProjectList}
             {!dInboxMode && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
