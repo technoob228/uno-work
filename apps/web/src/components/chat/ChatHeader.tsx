@@ -12,8 +12,6 @@ import { type DraftId } from "~/composerDraftStore";
 import {
   CodeIcon,
   DiffIcon,
-  FolderIcon,
-  GlobeIcon,
   MonitorSmartphoneIcon,
   PanelRightIcon,
   SquarePenIcon,
@@ -31,8 +29,6 @@ import { useSidebarDRailVisible } from "../sidebar/sidebarDState";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
-import { useChatBrowser } from "../preview/useChatBrowser";
-import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { toggleDevMode, useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { isElectron } from "../../env";
@@ -72,6 +68,8 @@ interface ChatHeaderProps {
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
+  /** The person's shortcut for the right panel; null — none bound. */
+  panelToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -111,6 +109,7 @@ export const ChatHeader = memo(function ChatHeader({
   terminalOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
+  panelToggleShortcutLabel,
   gitCwd,
   diffOpen,
   onRunProjectScript,
@@ -122,22 +121,17 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const devMode = useDevMode();
-  const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const { isMobile, open, openMobile } = useSidebar();
   // Sidebar D's rail counts as the sidebar: no extra "show sidebar" button.
   const railD = useSidebarDRailVisible();
   const sidebarVisible = isMobile ? openMobile : open || railD;
   const {
     open: previewOpen,
-    files: previewFiles,
     toggleOpen: togglePreview,
-    openBrowser,
     unseenCount: previewUnseenCount,
   } = usePreviewPane();
   // Агент открыл что-то, пока панель этого чата закрыта человеком.
   const previewHasNew = !previewOpen && previewUnseenCount > 0;
-  // Work в облаке: браузер агента на машине — кнопка открывает его.
-  const { browsesOnMachine, openChatBrowser } = useChatBrowser();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -392,43 +386,6 @@ export const ChatHeader = memo(function ChatHeader({
             </TooltipPopup>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() =>
-                  openBrowser({
-                    environmentId: activeThreadEnvironmentId,
-                    startPath: gitCwd ?? openInCwd ?? null,
-                  })
-                }
-                aria-label="Browse files"
-                className={HEADER_ICON_BUTTON_CLASS}
-              >
-                <FolderIcon className="size-3" />
-              </button>
-            }
-          />
-          <TooltipPopup side="bottom">Browse files</TooltipPopup>
-        </Tooltip>
-        {(browserCompanionEnabled || browsesOnMachine) && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={openChatBrowser}
-                  aria-label="Open browser"
-                  className={HEADER_ICON_BUTTON_CLASS}
-                >
-                  <GlobeIcon className="size-3" />
-                </button>
-              }
-            />
-            <TooltipPopup side="bottom">Open browser</TooltipPopup>
-          </Tooltip>
-        )}
         {canContinueOnMachine && !isMobile && (
           <Tooltip>
             <TooltipTrigger
@@ -453,38 +410,45 @@ export const ChatHeader = memo(function ChatHeader({
             onOpenChange={setContinueDialogOpen}
           />
         )}
-        {previewFiles.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={togglePreview}
-                  aria-label={previewHasNew ? "Show panel: new in panel" : "Toggle preview pane"}
-                  aria-pressed={previewOpen}
-                  data-testid="preview-panel-toggle"
-                  className={cn(HEADER_ICON_BUTTON_CLASS, "relative")}
-                >
-                  <PanelRightIcon className="size-3" />
-                  {previewHasNew ? (
-                    <span
-                      aria-hidden
-                      data-testid="preview-panel-new-badge"
-                      className="absolute -right-1 -top-1 size-2 rounded-full bg-primary ring-2 ring-background"
-                    />
-                  ) : null}
-                </button>
-              }
-            />
-            <TooltipPopup side="bottom">
-              {previewHasNew
-                ? previewUnseenCount === 1
-                  ? "New in panel"
-                  : `${previewUnseenCount} new in panel`
-                : "Toggle preview panel"}
-            </TooltipPopup>
-          </Tooltip>
-        )}
+        {/* One Panel button (plan 22): an empty panel opens its launcher —
+            Browser, Files, Terminal, Changes, Apps, Sites. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={togglePreview}
+                aria-label={previewHasNew ? "Panel: new in panel" : "Panel"}
+                aria-pressed={previewOpen}
+                data-testid="preview-panel-toggle"
+                className={cn(
+                  HEADER_ICON_BUTTON_CLASS,
+                  "relative gap-1",
+                  previewOpen && "border-primary/40 bg-primary/15 text-primary",
+                )}
+              >
+                <PanelRightIcon className="size-3" />
+                <span className="hidden pr-0.5 text-xs @3xl/header-actions:inline">Panel</span>
+                {previewHasNew ? (
+                  <span
+                    aria-hidden
+                    data-testid="preview-panel-new-badge"
+                    className="absolute -right-1 -top-1 size-2 rounded-full bg-primary ring-2 ring-background"
+                  />
+                ) : null}
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {previewHasNew
+              ? previewUnseenCount === 1
+                ? "New in panel"
+                : `${previewUnseenCount} new in panel`
+              : panelToggleShortcutLabel
+                ? `Panel ${panelToggleShortcutLabel}`
+                : "Panel"}
+          </TooltipPopup>
+        </Tooltip>
       </div>
     </div>
   );

@@ -16,7 +16,7 @@
  * person's own click here, or their Allow of the agent's `site_unpublish`.
  */
 import type { EnvironmentId, ThreadId, UnoWorkSites } from "@t3tools/contracts";
-import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseQueryResult, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   CopyIcon,
@@ -35,7 +35,6 @@ import { useShallow } from "zustand/react/shallow";
 import { consoleLinks } from "../../account/accountOverview";
 import { isElectron } from "../../env";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
-import { ensureEnvironmentApi } from "../../environmentApi";
 import { cn } from "../../lib/utils";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { openInNewTab } from "../../navigation/useOpenApp";
@@ -58,6 +57,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SiteStatusPill } from "./SiteStatusPill";
 import { unpublishSite } from "./unpublishSite";
+import { useWorkSites } from "./useWorkSites";
 import {
   type AppsSitesTab,
   changeSitePrompt,
@@ -81,12 +81,7 @@ export function SitesListView() {
   const tab: AppsSitesTab = search.tab ?? "apps";
   const machine = useActiveMachine();
   const environmentId = machine.environmentId;
-  const sites = useQuery({
-    queryKey: ["uno-sites", environmentId] as const,
-    queryFn: () => ensureEnvironmentApi(environmentId!).unoComputer.workSites(),
-    enabled: environmentId !== null,
-    refetchInterval: 60_000,
-  });
+  const sites = useWorkSites(environmentId);
   const siteCount = sites.data?.availability === "ok" ? sites.data.sites.length : null;
   const setTab = (next: AppsSitesTab) => void navigate({ to: "/sites", search: { tab: next } });
 

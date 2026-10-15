@@ -41,7 +41,6 @@ import { sanitizeDocumentHtml } from "../../lib/safeHtml";
 import { useOpenApp } from "../../navigation/useOpenApp";
 import { cn } from "../../lib/utils";
 import { openUntrustedLinkExternally, toExternalHttpUrl } from "../../lib/externalLinks";
-import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -65,7 +64,6 @@ import {
   isLiveBrowserTab,
   isPluginPanelTab,
   isTasksTab,
-  makePluginPanelFile,
   pluginIdFromPanelFile,
   type PreviewFile,
   type PreviewFileKind,
@@ -93,7 +91,7 @@ import {
 import { AppFrame } from "../apps/AppFrame";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
-import { useChatBrowser } from "./useChatBrowser";
+import { PanelLauncher } from "./PanelLauncher";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -158,9 +156,6 @@ const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "csv",
   "xlsx",
 ]);
-
-/** Префикс id пунктов меню «+» для панельных плагинов. */
-const PANEL_MENU_ID_PREFIX = "plugin-panel:";
 
 const PREVIEW_WIDTH_STORAGE_KEY = "preview_pane_width";
 const DEFAULT_PREVIEW_WIDTH = 24 * 16;
@@ -1800,8 +1795,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setOpen,
     togglePreviewLayoutMode,
     openBrowser,
-    openFile,
-    currentChatProjectCwd,
     currentChatEnvironmentId,
     toggleSourceView,
     tabScopeById,
@@ -1811,14 +1804,29 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setWidth: setViewWidth,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
-  // Агенты этого чата работают в браузере машины (Work в облаке): «Открыть
-  // страницу» ведёт туда же, а не в браузер этого устройства.
-  const { browsesOnMachine: chatBrowsesOnMachine, openChatBrowser } = useChatBrowser();
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
-  // появиться в меню «+» без переоткрытия (хвост фазы B).
+  // появиться в лаунчере (Apps) без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
-  const pluginsEnabled = useFeatureFlag("plugins");
-  const browserCompanionEnabled = useFeatureFlag("browserCompanion");
+  // «+» в полосе вкладок: лаунчер поверх открытых вкладок, пока человек не
+  // выберет вкладку или не откроет что-то.
+  const [launcherRequested, setLauncherRequested] = useState(false);
+  // Лаунчер забирает фокус (буквенные шорткаты), только когда его позвал
+  // человек: «+» или открытие пустой панели в этом же чате — не при переходе
+  // в чат, где панель уже была открыта.
+  const [launcherFocusPending, setLauncherFocusPending] = useState(false);
+  const openedRef = useRef({ open, threadId: currentChatThreadId });
+  useEffect(() => {
+    const previous = openedRef.current;
+    openedRef.current = { open, threadId: currentChatThreadId };
+    if (open && !previous.open && previous.threadId === currentChatThreadId && files.length === 0) {
+      setLauncherFocusPending(true);
+    }
+  }, [open, currentChatThreadId, files.length]);
+  // Открылась/выбрана вкладка (в т.ч. из лаунчера) или сменился чат — «+» сделал своё.
+  useEffect(() => {
+    setLauncherRequested(false);
+    setLauncherFocusPending(false);
+  }, [activeFileId, files.length, currentChatThreadId]);
 
   // Прокручиваем активную вкладку в видимую область: при длинном ряде вкладок
   // новая вкладка открывалась за правым краем и оставалась невидимой.
@@ -1914,9 +1922,12 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   // Панель может быть скрыта (закрыта, пустая или подавлена настройками), но
   // aside остаётся смонтированным: внутри живут webview всех проектов, и
   // размонтирование убило бы их страницы и сломало команды харнессов.
-  const paneVisible = !suppressed && open && files.length > 0;
+  // Пустая открытая панель в чате — это лаунчер (кнопка Panel в шапке); вне
+  // чата кнопки нет, и пустая панель там не показывается, как раньше.
+  const paneVisible = !suppressed && open && (files.length > 0 || currentChatThreadId !== null);
+  const showLauncher = paneVisible && (files.length === 0 || launcherRequested);
 
-  const active = files.find((f) => f.id === activeFileId) ?? files[0];
+  const active = showLauncher ? undefined : (files.find((f) => f.id === activeFileId) ?? files[0]);
 
   // "Open full screen": the app or document in the panel moves to the main
   // area (the app screen / Files), where it has the whole window.
@@ -2034,7 +2045,10 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
                 <button
                   type="button"
                   data-preview-tab={file.id}
-                  onClick={() => setActiveFile(file.id)}
+                  onClick={() => {
+                    setLauncherRequested(false);
+                    setActiveFile(file.id);
+                  }}
                   onDoubleClick={() => {
                     if (dualView) toggleSourceView(file.id);
                   }}
@@ -2095,50 +2109,35 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
               </Fragment>
             );
           })}
-          <button
-            type="button"
-            onClick={async (event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              const choice = await readLocalApi()?.contextMenu.show(
-                [
-                  { id: "file", label: "Open file…" },
-                  ...(browserCompanionEnabled || chatBrowsesOnMachine
-                    ? [{ id: "page", label: "Open page" }]
-                    : []),
-                  ...(pluginsEnabled && panels.length > 0
-                    ? [
-                        {
-                          id: "panels",
-                          label: "Panels",
-                          children: panels.map((panel) => ({
-                            id: `${PANEL_MENU_ID_PREFIX}${panel.id}`,
-                            label: panel.title,
-                          })),
-                        },
-                      ]
-                    : []),
-                ],
-                { x: rect.left, y: rect.bottom + 4 },
-              );
-              if (choice === "file") {
-                openBrowser({
-                  environmentId: currentChatEnvironmentId ?? active?.environmentId ?? null,
-                  startPath: currentChatProjectCwd ?? null,
-                });
-              } else if (choice === "page") {
-                openChatBrowser();
-              } else if (choice?.startsWith(PANEL_MENU_ID_PREFIX)) {
-                const pluginId = choice.slice(PANEL_MENU_ID_PREFIX.length);
-                const panel = panels.find((candidate) => candidate.id === pluginId);
-                if (panel) openFile(makePluginPanelFile(panel.id, panel.title));
-              }
-            }}
-            aria-label="Open a file, page or plugin panel"
-            title="Open a file, page or plugin panel"
-            className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
-          >
-            <PlusIcon className="relative size-3.5" />
-          </button>
+          {launcherRequested && files.length > 0 ? (
+            <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent px-2 text-xs text-accent-foreground">
+              <PlusIcon className="size-3.5 shrink-0" />
+              New tab
+              <button
+                type="button"
+                aria-label="Close new tab"
+                onClick={() => setLauncherRequested(false)}
+                className="rounded p-0.5 opacity-60 hover:bg-accent hover:opacity-100"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          ) : null}
+          {files.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLauncherRequested(true);
+                setLauncherFocusPending(true);
+              }}
+              aria-label="Open in the panel"
+              title="Open in the panel: browser, files, terminal, apps…"
+              data-testid="panel-launcher-open"
+              className="sticky right-0 inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card text-muted-foreground before:pointer-events-none before:absolute before:inset-0 before:bg-accent before:opacity-0 hover:text-foreground hover:before:opacity-100 sm:size-6"
+            >
+              <PlusIcon className="relative size-3.5" />
+            </button>
+          ) : null}
         </div>
         {fullScreenTarget ? (
           <Button
@@ -2183,6 +2182,24 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
+        {showLauncher ? (
+          <PanelLauncher
+            panels={panels}
+            takeFocus={launcherFocusPending}
+            onFocusTaken={() => setLauncherFocusPending(false)}
+            onOpenedTab={() => setLauncherRequested(false)}
+            onOpenedElsewhere={() => {
+              // The terminal drawer / Changes open beside the chat: an empty
+              // panel has nothing left to show.
+              if (files.length === 0) setOpen(false);
+              else setLauncherRequested(false);
+            }}
+            onDismiss={() => {
+              if (files.length === 0) setOpen(false);
+              else setLauncherRequested(false);
+            }}
+          />
+        ) : null}
         {paneVisible && active && !isBrowserTab(active) ? <Body file={active} /> : null}
         <BrowserViews activeId={active?.id ?? null} />
       </div>

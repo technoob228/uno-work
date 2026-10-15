@@ -113,6 +113,7 @@ import {
   type PanelOpenSource,
 } from "./preview/PreviewPaneContext";
 import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
+import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -687,6 +688,7 @@ export default function ChatView(props: ChatViewProps) {
     open: previewOpen,
     files: previewFiles,
     activeFileId: previewActiveFileId,
+    toggleOpen: togglePreviewOpen,
   } = usePreviewPane();
   // Встроенный чат сам живёт внутри правой панели — фокус-режим к нему не
   // применяется (иначе композер уехал бы в fixed-оверлей поверх приложения).
@@ -1851,6 +1853,11 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const panelToggleShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "rightPanel.toggle", nonTerminalShortcutLabelOptions),
+    [keybindings, nonTerminalShortcutLabelOptions],
+  );
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
       return;
@@ -1954,6 +1961,38 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     setTerminalOpen(!terminalState.terminalOpen);
   }, [activeThreadRef, setTerminalOpen, terminalState.terminalOpen]);
+  // The right panel's launcher opens this chat's terminal drawer and Changes
+  // (they are not panel tabs). Only the main chat publishes them; a tile that
+  // makes no sense here (no project, not git) gets null and is not shown.
+  const publishChatPanelActions = useChatPanelActionsStore((store) => store.publish);
+  const withdrawChatPanelActions = useChatPanelActionsStore((store) => store.withdraw);
+  const panelActionsThreadId = isEmbedded ? null : (activeThread?.id ?? null);
+  const terminalAvailable = activeProject !== undefined;
+  const changesAvailable = isServerThread && isGitRepo;
+  useEffect(() => {
+    if (panelActionsThreadId === null) return;
+    publishChatPanelActions({
+      threadId: panelActionsThreadId,
+      openTerminal: terminalAvailable ? () => setTerminalOpen(true) : null,
+      openChanges: changesAvailable
+        ? () => {
+            if (!diffOpen) onToggleDiff();
+          }
+        : null,
+    });
+  }, [
+    changesAvailable,
+    diffOpen,
+    onToggleDiff,
+    panelActionsThreadId,
+    publishChatPanelActions,
+    setTerminalOpen,
+    terminalAvailable,
+  ]);
+  useEffect(() => {
+    if (panelActionsThreadId === null) return;
+    return () => withdrawChatPanelActions(panelActionsThreadId);
+  }, [panelActionsThreadId, withdrawChatPanelActions]);
   const splitTerminal = useCallback(() => {
     if (!activeThreadRef || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
@@ -2710,6 +2749,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "rightPanel.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        togglePreviewOpen();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -2740,6 +2786,7 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    togglePreviewOpen,
     toggleTerminalVisibility,
   ]);
 
@@ -3985,6 +4032,7 @@ export default function ChatView(props: ChatViewProps) {
             terminalOpen={terminalState.terminalOpen}
             terminalToggleShortcutLabel={terminalToggleShortcutLabel}
             diffToggleShortcutLabel={diffPanelShortcutLabel}
+            panelToggleShortcutLabel={panelToggleShortcutLabel}
             gitCwd={gitCwd}
             diffOpen={diffOpen}
             onRunProjectScript={runProjectScript}
