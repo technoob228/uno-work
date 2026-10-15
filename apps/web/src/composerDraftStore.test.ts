@@ -1375,6 +1375,20 @@ describe("composerDraftStore sticky composer settings", () => {
       activeProvider: "claudeAgent",
     });
   });
+
+  it("a new chat on 'New chats start on' leaves the last pick alone (15.10)", () => {
+    const store = useComposerDraftStore.getState();
+    const threadId = ThreadId.make("thread-new-chat-start");
+    const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+    // What handleNewThread does: the last pick first, then the chosen model.
+    store.setStickyModelSelection(modelSelection(CODEX_DRIVER, "gpt-5.4"));
+    store.applyStickyState(threadRef);
+    store.setModelSelection(threadRef, modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6"));
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe("claudeAgent");
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex");
+  });
 });
 
 describe("composerDraftStore provider-scoped option updates", () => {

@@ -104,30 +104,47 @@ export function useHomeModelPicker(environmentId: EnvironmentId | null) {
     }
     return out;
   }, [instanceEntries, settings]);
-  const selection = useMemo(
-    () =>
-      homeStartModelSelection({
-        stickyActiveProvider,
-        stickyModelSelectionByProvider,
-        providers,
-        settings,
-      }),
-    [providers, settings, stickyActiveProvider, stickyModelSelectionByProvider],
-  );
+  // A pick made here, for this start. With "New chats start on" set (15.10)
+  // the sticky pick no longer moves the start model, so it is held here.
+  const [picked, setPicked] = useState<ModelSelection | null>(null);
+  const selection = useMemo(() => {
+    if (picked) {
+      const provider = providers.find((candidate) => candidate.instanceId === picked.instanceId);
+      const model =
+        provider?.enabled && provider.installed
+          ? resolveAppModelSelectionForInstance(
+              picked.instanceId,
+              settings,
+              providers,
+              picked.model,
+            )
+          : null;
+      if (model) return { ...picked, model };
+    }
+    return homeStartModelSelection({
+      stickyActiveProvider,
+      stickyModelSelectionByProvider,
+      providers,
+      settings,
+    });
+  }, [picked, providers, settings, stickyActiveProvider, stickyModelSelectionByProvider]);
   const pick = (instanceId: ProviderInstanceId, model: string) => {
     const resolved = resolveAppModelSelectionForInstance(instanceId, settings, providers, model);
     if (!resolved) return;
-    // What the chat composer does on a pick: it becomes the next chat's default.
+    setPicked({ instanceId, model: resolved });
+    // What the chat composer does on a pick: it becomes the last one picked.
     setStickyModelSelection({ instanceId, model: resolved });
   };
   /** Effort and the other traits: kept on the sticky pick, as the chat composer does. */
   const setOptions = (options: ReadonlyArray<ProviderOptionSelection> | undefined) => {
     if (!selection) return;
-    setStickyModelSelection({
+    const next: ModelSelection = {
       instanceId: selection.instanceId,
       model: selection.model,
       ...(options && options.length > 0 ? { options } : {}),
-    });
+    };
+    setPicked(next);
+    setStickyModelSelection(next);
   };
   return { selection, instanceEntries, modelOptionsByInstance, pick, setOptions };
 }

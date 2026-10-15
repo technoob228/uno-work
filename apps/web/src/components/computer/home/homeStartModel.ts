@@ -1,14 +1,47 @@
 /**
  * The model Home's composer starts a chat on, before the person picks one:
- * exactly what "New chat" would give now — the model last picked in any chat
- * composer (the draft store's sticky pick) when that harness is still there,
- * else the machine's usable default (the Uno gateway on a fresh Work box).
+ * exactly what "New chat" would give now — the person's "New chats start on"
+ * (Settings → AI) when it can run here, else the model last picked in any
+ * chat composer (the draft store's sticky pick) when that harness is still
+ * there, else the machine's usable default (the Uno gateway on a fresh Work
+ * box).
  */
 import type { ModelSelection, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import { resolveSelectableModel } from "@t3tools/shared/model";
 
-import { resolveAppModelSelectionForInstance } from "../../../modelSelection";
+import {
+  getAppModelOptionsForInstance,
+  resolveAppModelSelectionForInstance,
+} from "../../../modelSelection";
+import { deriveProviderInstanceEntries } from "../../../providerInstances";
 import { pickUsableDefaultModelSelection } from "../../../providerModels";
+
+/**
+ * "New chats start on" (Misha 15.10), when it can run on this computer now:
+ * its harness on and installed, its model still listed. Null otherwise — new
+ * chats then start the way they did before the setting, without a word.
+ */
+export function newChatModelSelection(input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
+}): ModelSelection | null {
+  const chosen = input.settings.newChatModelSelection ?? null;
+  if (!chosen) return null;
+  const provider = input.providers.find((candidate) => candidate.instanceId === chosen.instanceId);
+  if (!provider?.enabled || !provider.installed) return null;
+  const entry = deriveProviderInstanceEntries(input.providers).find(
+    (candidate) => candidate.instanceId === chosen.instanceId,
+  );
+  if (!entry) return null;
+  // No stand-in model: a model gone from the list means the choice is off.
+  const model = resolveSelectableModel(
+    entry.driverKind,
+    chosen.model,
+    getAppModelOptionsForInstance(input.settings, entry),
+  );
+  return model ? { ...chosen, model } : null;
+}
 
 export function homeStartModelSelection(input: {
   readonly stickyActiveProvider: ProviderInstanceId | null;
@@ -16,6 +49,8 @@ export function homeStartModelSelection(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
 }): ModelSelection | null {
+  const chosen = newChatModelSelection(input);
+  if (chosen) return chosen;
   const active = input.stickyActiveProvider;
   if (active) {
     const sticky = input.stickyModelSelectionByProvider[active];

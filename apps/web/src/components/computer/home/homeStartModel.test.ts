@@ -2,7 +2,7 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 
-import { homeStartModelSelection } from "./homeStartModel";
+import { homeStartModelSelection, newChatModelSelection } from "./homeStartModel";
 
 function provider(input: {
   provider: string;
@@ -74,5 +74,84 @@ describe("homeStartModelSelection", () => {
         settings: DEFAULT_UNIFIED_SETTINGS,
       })?.instanceId,
     ).toBe("uno");
+  });
+});
+
+describe("New chats start on (15.10)", () => {
+  const sticky = {
+    stickyActiveProvider: id("uno"),
+    stickyModelSelectionByProvider: {
+      [id("uno")]: { instanceId: id("uno"), model: "uno/moonshotai/kimi-k2.7-code" },
+    },
+  };
+  const choose = (instanceId: string, model: string) => ({
+    ...DEFAULT_UNIFIED_SETTINGS,
+    newChatModelSelection: { instanceId: id(instanceId), model },
+  });
+
+  it("is off by default: new chats follow the last pick", () => {
+    expect(DEFAULT_UNIFIED_SETTINGS.newChatModelSelection).toBeNull();
+    expect(
+      newChatModelSelection({ providers: [uno, claude], settings: DEFAULT_UNIFIED_SETTINGS }),
+    ).toBeNull();
+    expect(
+      homeStartModelSelection({
+        ...sticky,
+        providers: [uno, claude],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+
+  it("wins over the last pick in any chat", () => {
+    expect(
+      homeStartModelSelection({
+        ...sticky,
+        providers: [uno, claude],
+        settings: choose("claudeAgent", "claude-sonnet-5"),
+      }),
+    ).toEqual({ instanceId: "claudeAgent", model: "claude-sonnet-5" });
+  });
+
+  it("falls back to the last pick when its harness is off or not installed", () => {
+    for (const gone of [
+      { ...claude, enabled: false },
+      { ...claude, installed: false },
+    ]) {
+      const settings = choose("claudeAgent", "claude-sonnet-5");
+      expect(newChatModelSelection({ providers: [uno, gone], settings })).toBeNull();
+      expect(
+        homeStartModelSelection({ ...sticky, providers: [uno, gone], settings })?.instanceId,
+      ).toBe("uno");
+    }
+  });
+
+  it("falls back when the harness is gone from this computer", () => {
+    expect(
+      newChatModelSelection({
+        providers: [uno],
+        settings: choose("claudeAgent", "claude-sonnet-5"),
+      }),
+    ).toBeNull();
+  });
+
+  it("falls back when its model is no longer listed, rather than picking another", () => {
+    const settings = choose("claudeAgent", "claude-retired-1");
+    expect(newChatModelSelection({ providers: [uno, claude], settings })).toBeNull();
+    expect(homeStartModelSelection({ ...sticky, providers: [uno, claude], settings })).toEqual({
+      instanceId: "uno",
+      model: "uno/moonshotai/kimi-k2.7-code",
+    });
+  });
+
+  it("falls back to the machine default with no last pick either", () => {
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: null,
+        stickyModelSelectionByProvider: {},
+        providers: [uno, { ...claude, installed: false }],
+        settings: choose("claudeAgent", "claude-sonnet-5"),
+      }),
+    ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
   });
 });

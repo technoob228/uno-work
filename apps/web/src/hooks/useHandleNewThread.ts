@@ -3,8 +3,10 @@ import {
   DEFAULT_RUNTIME_MODE,
   isAssistantProjectId,
   type EnvironmentId,
+  type ModelSelection,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -21,10 +23,29 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { usePrimaryEnvironmentId } from "../environments/primary";
-import { useEnvironmentProviders } from "../environments/settings/serverSettings";
+import {
+  readEnvironmentServerConfig,
+  useEnvironmentProviders,
+} from "../environments/settings/serverSettings";
+import { newChatModelSelection } from "../components/computer/home/homeStartModel";
 import { createStarterProject } from "../starterProject";
 import { useDefaultEnvironment } from "./useDefaultEnvironment";
-import { useSettings } from "./useSettings";
+import { getClientSettings, useSettings } from "./useSettings";
+
+/**
+ * "New chats start on" (Settings → AI, Misha 15.10) for a new chat in
+ * `projectRef`. Null when it isn't set or can't run on that computer: the chat
+ * then starts on the last pick, as before. The assistant's chat never asks — it
+ * runs on Hermes.
+ */
+function newChatStartSelection(projectRef: ScopedProjectRef): ModelSelection | null {
+  if (isAssistantProjectId(projectRef.projectId)) return null;
+  const config = readEnvironmentServerConfig(projectRef.environmentId);
+  return newChatModelSelection({
+    providers: config?.providers ?? [],
+    settings: { ...DEFAULT_UNIFIED_SETTINGS, ...config?.settings, ...getClientSettings() },
+  });
+}
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -51,10 +72,13 @@ function useNewThreadState() {
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
         getDraftThread,
+        getComposerDraft,
         applyStickyState,
+        setModelSelection,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
       } = useComposerDraftStore.getState();
+      const startOn = newChatStartSelection(projectRef);
       const currentRouteTarget = getCurrentRouteTarget();
       const project = projects.find(
         (candidate) =>
@@ -85,6 +109,22 @@ function useNewThreadState() {
           setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, storedDraftThread.draftId, {
             threadId: storedDraftThread.threadId,
           });
+          // A kept draft nothing was typed into is still a new chat: it starts
+          // on the chosen model too, not on whatever it was opened with. Not
+          // the one on screen — a model just picked there stays.
+          const kept = getComposerDraft(storedDraftThread.draftId);
+          const onScreen =
+            currentRouteTarget?.kind === "draft" &&
+            currentRouteTarget.draftId === storedDraftThread.draftId;
+          if (
+            startOn &&
+            !onScreen &&
+            (kept?.prompt.trim() ?? "") === "" &&
+            (kept?.images.length ?? 0) === 0 &&
+            (kept?.terminalContexts.length ?? 0) === 0
+          ) {
+            setModelSelection(storedDraftThread.draftId, startOn);
+          }
           useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
           if (
             currentRouteTarget?.kind === "draft" &&
@@ -138,6 +178,7 @@ function useNewThreadState() {
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
         applyStickyState(draftId);
+        if (startOn) setModelSelection(draftId, startOn);
         useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
 
         await router.navigate({

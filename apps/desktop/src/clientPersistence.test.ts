@@ -59,6 +59,7 @@ const clientSettings: ClientSettings = {
   diffIgnoreWhitespace: true,
   diffWordWrap: true,
   featureFlags: {},
+  newChatModelSelection: null,
   onboardingCompleted: false,
   unoLastModelRoute: "default",
   favorites: [],

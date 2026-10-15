@@ -171,6 +171,11 @@ export const ClientSettingsSchema = Schema.Struct({
   featureFlags: Schema.Record(Schema.String, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  // "New chats start on" (Settings → AI, Misha 15.10): the harness and model
+  // every new chat starts on. `null` — the one last picked in any chat.
+  newChatModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   onboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   unoLastModelRoute: UnoModelRoute.pipe(
     Schema.withDecodingDefault(Effect.succeed("default" as const)),
@@ -911,6 +916,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
   featureFlags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
+  newChatModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(

@@ -75,6 +75,13 @@ export function useEnvironmentServerConfig(
   return isPrimaryEnvironmentId(environmentId) ? primaryConfig : savedConfig;
 }
 
+/** {@link useEnvironmentServerConfig} outside React (a click, a shortcut). */
+export function readEnvironmentServerConfig(environmentId: EnvironmentId): ServerConfig | null {
+  return isPrimaryEnvironmentId(environmentId)
+    ? getServerConfig()
+    : (useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig ?? null);
+}
+
 /** Settings of one environment, or `null` before its first sync. */
 export function useEnvironmentSettings(environmentId: EnvironmentId | null): ServerSettings | null {
   return useEnvironmentServerConfig(environmentId)?.settings ?? null;
