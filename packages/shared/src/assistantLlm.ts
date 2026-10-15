@@ -10,9 +10,11 @@ import {
   ASSISTANT_HARNESS_INSTANCE_ID,
   ASSISTANT_LLM_PROVIDER_OPTION_ID,
   AI_PROVIDER_LABELS,
+  type AssistantLlmModel,
   type AssistantLlmProvider,
   type ModelSelection,
   ProviderInstanceId,
+  type SubscriptionLlmProvider,
 } from "@t3tools/contracts";
 
 const PROVIDERS: ReadonlySet<string> = new Set(Object.keys(AI_PROVIDER_LABELS));
@@ -134,6 +136,9 @@ export function defaultAssistantModelFor(
   modelIds: ReadonlyArray<string>,
 ): string | null {
   if (provider === "uno") return ASSISTANT_DEFAULT_GATEWAY_MODEL;
+  if (provider === "claude" || provider === "chatgpt") {
+    return SUBSCRIPTION_DEFAULT_MODEL[provider];
+  }
   if (provider === "openrouter" && modelIds.includes(OPENROUTER_LATEST_GROK)) {
     return OPENROUTER_LATEST_GROK;
   }
@@ -149,6 +154,8 @@ const OPENROUTER_LATEST_GROK = "~x-ai/grok-latest";
  * "x-ai/grok-4.7" → "Grok 4.7", "openai/gpt-5" → "gpt-5".
  */
 export function assistantModelLabel(model: string): string {
+  const subscriptionLabel = SUBSCRIPTION_MODEL_LABELS.get(model);
+  if (subscriptionLabel !== undefined) return subscriptionLabel;
   if (/^uno\/smart$/i.test(model)) return "Smart";
   if (/^uno\/fast$/i.test(model)) return "Fast";
   const bare = model.slice(model.lastIndexOf("/") + 1);
@@ -158,14 +165,51 @@ export function assistantModelLabel(model: string): string {
   return bare;
 }
 
-/** Short provider label for the chat header: "Uno gateway" / "Your xAI key". */
+/** Short provider label for the chat header: "Uno gateway" / "Your xAI key" / "Your Claude plan". */
 export function assistantProviderLabel(provider: AssistantLlmProvider): string {
+  if (provider === "claude" || provider === "chatgpt") {
+    return `Your ${AI_PROVIDER_LABELS[provider]} plan`;
+  }
   return provider === "uno"
     ? AI_PROVIDER_LABELS.uno
     : provider === "custom"
       ? "Your key (custom)"
       : `Your ${AI_PROVIDER_LABELS[provider]} key`;
 }
+
+/**
+ * Models the assistant offers on a subscription (14.10). Claude: the
+ * plugin's aliases, which follow the newest release of each family
+ * (`sonnet` → claude-sonnet-5-5). ChatGPT: what Hermes' `openai-codex`
+ * provider serves on a ChatGPT plan (its curated list, 0.19–0.22).
+ */
+export const SUBSCRIPTION_MODELS: Readonly<
+  Record<SubscriptionLlmProvider, ReadonlyArray<AssistantLlmModel>>
+> = {
+  claude: [
+    { id: "sonnet", name: "Claude Sonnet (latest)" },
+    { id: "opus", name: "Claude Opus (latest)" },
+    { id: "haiku", name: "Claude Haiku (latest)" },
+  ],
+  chatgpt: [
+    { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
+    { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
+    { id: "gpt-5.5", name: "GPT-5.5" },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 mini" },
+  ],
+};
+
+export const SUBSCRIPTION_DEFAULT_MODEL: Readonly<Record<SubscriptionLlmProvider, string>> = {
+  claude: "sonnet",
+  chatgpt: "gpt-5.6-terra",
+};
+
+const SUBSCRIPTION_MODEL_LABELS: ReadonlyMap<string, string> = new Map(
+  Object.values(SUBSCRIPTION_MODELS).flatMap((models) =>
+    models.map((model) => [model.id, model.name.replace(/ \(latest\)$/, "")] as const),
+  ),
+);
 
 /** Last four characters of a secret, for display. */
 export function secretKeyHint(secret: string): string {

@@ -78,7 +78,9 @@ import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
   type HermesLlmRoute,
-  hermesLlmRouteEnvironment,
+  applyHermesLlmRoute,
+  hermesProviderIdOf,
+  hermesThreadHomeLinks,
   makeHermesAcpRuntime,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
@@ -87,6 +89,7 @@ import {
 } from "../acp/HermesAcpSupport.ts";
 import { buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
+import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
@@ -193,6 +196,8 @@ interface HermesSessionContext {
   stopped: boolean;
   /** LLM provider the hermes process was started with (env is per process). */
   readonly llmProvider: AssistantLlmProvider;
+  /** Hermes' own provider id of that process (`openai-api`, `openai-codex`, the Claude plugin). */
+  readonly hermesProvider: string;
   /**
    * The session starts empty (not resumed) — its first prompt carries the
    * chat's visible history (hermesHandoff.ts). Cleared after that prompt.
@@ -478,6 +483,7 @@ export function makeHermesAdapter(
             runtime: ctx.acp,
             sessionId: ctx.sessionId,
             model,
+            hermesProvider: ctx.hermesProvider,
             mapError: (cause) =>
               mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/set_model", cause),
           });
@@ -587,12 +593,14 @@ export function makeHermesAdapter(
           const threadHermesHome = nodePath.join(baseHermesHome, "threads", input.threadId);
           const configuredModel =
             resolveHermesBaseModelId(hermesModelSelection?.model) ?? HERMES_DEFAULT_MODEL;
+          const hermesProvider = hermesProviderIdOf(llmRoute);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
               fileSystem.writeFileString(
                 nodePath.join(threadHermesHome, "config.yaml"),
                 buildHermesConfigYaml({
                   model: configuredModel,
+                  provider: hermesProvider,
                   mcpServers,
                   mcpToolTimeoutSec: {
                     // The assistant's wait_for_thread blocks for up to an hour;
@@ -619,6 +627,25 @@ export function makeHermesAdapter(
                   detail: `Failed to prepare HERMES_HOME: ${cause.message}`,
                   cause,
                 }),
+            ),
+          );
+
+          // What the chat's home borrows from the shared one: Hermes' runtime
+          // (≥ 0.21), the assistant's ChatGPT sign-in, the Claude plugin.
+          yield* Effect.tryPromise(() =>
+            linkThreadHome(
+              hermesThreadHomeLinks({
+                provider: llmProvider,
+                threadHome: threadHermesHome,
+                sharedHome: baseHermesHome,
+                join: nodePath.join,
+              }),
+            ),
+          ).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("hermes thread home links failed").pipe(
+                Effect.annotateLogs({ threadId: input.threadId, cause: String(cause) }),
+              ),
             ),
           );
 
@@ -656,16 +683,20 @@ export function makeHermesAdapter(
           // hermes process for this thread is not up yet.
           yield* repairHermesSessionHistory(threadHermesHome);
 
+          const baseEnvironment = {
+            ...options?.environment,
+            ...options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }),
+          };
           const sessionEnvironment = {
-            ...(options?.environment ?? {}),
-            ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
             // The route wins over the static gateway env and the app label of
-            // the bridge overlay: it already carries the right base URL.
-            ...(llmRoute ? hermesLlmRouteEnvironment(llmRoute) : {}),
+            // the bridge overlay: it already carries the right base URL (or,
+            // on a subscription, takes the gateway key out).
+            ...(llmRoute ? applyHermesLlmRoute(baseEnvironment, llmRoute) : baseEnvironment),
             HERMES_HOME: threadHermesHome,
           };
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings: effectiveHermesSettings,
+            hermesProvider,
             ...(Object.keys(sessionEnvironment).length > 0
               ? { environment: sessionEnvironment }
               : {}),
@@ -792,6 +823,7 @@ export function makeHermesAdapter(
             lastTurnId: undefined,
             stopped: false,
             llmProvider,
+            hermesProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
             replyTextTurnId: undefined,
             completedTurnId: undefined,

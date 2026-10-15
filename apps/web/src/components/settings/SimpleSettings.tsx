@@ -47,6 +47,7 @@ import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "../chat/AssistantEngine";
+import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
 import { resolveProviderPaneKind } from "../chat/modelPickerProviderPane";
@@ -220,11 +221,16 @@ function DefaultAiSection({ environmentId }: { readonly environmentId: Environme
   return (
     <SettingsSection title="Default AI for your assistant and apps">
       {assistantLlm.supported ? (
-        <SettingsRow
-          title="Assistant"
-          description="What Uno, your assistant, thinks with: Uno AI, or a key or gateway of your own from “AI provider keys” below."
-          control={<AssistantModelPicker environmentId={environmentId} testId="settings-ai-uno" />}
-        />
+        <>
+          <SettingsRow
+            title="Assistant"
+            description="What Uno, your assistant, thinks with: Uno AI, your own Claude or ChatGPT plan, or a key of your own from “AI provider keys” below."
+            control={
+              <AssistantModelPicker environmentId={environmentId} testId="settings-ai-uno" />
+            }
+          />
+          <AssistantPowerPicker environmentId={environmentId} className="px-4 pb-3 sm:px-5" />
+        </>
       ) : null}
       {assistantProject && work ? (
         <SettingsRow

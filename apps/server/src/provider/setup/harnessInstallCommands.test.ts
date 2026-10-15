@@ -59,8 +59,17 @@ describe("resolveInstallPlan", () => {
     expect(packageFor("opencode")).toBe("opencode-ai@latest");
   });
 
-  it("installs hermes through uv, passing the extras and mcp pin unquoted", () => {
+  it("installs the pinned Hermes that runs a Claude plan, falling back to PyPI's (15.10)", () => {
     const plan = resolveInstallPlan(driver("hermes"), baseContext);
+    if (plan.kind !== "command") throw new Error("expected a command plan");
+    expect(plan.command).toBe("sh");
+    expect(plan.args[1]).toBe(
+      "HERMES_NIX_BUILD=1 'uv' 'tool' 'install' '--force' '--python' '3.12' 'hermes-agent[acp] @ git+https://github.com/NousResearch/hermes-agent@v2026.9.24' '--with' 'mcp>=1.9,<2' || 'uv' 'tool' 'install' '--force' '--python' '3.12' 'hermes-agent[acp]' '--with' 'mcp>=1.9,<2'",
+    );
+  });
+
+  it("installs hermes through uv on windows, passing the extras and mcp pin unquoted", () => {
+    const plan = resolveInstallPlan(driver("hermes"), { ...baseContext, platform: "win32" });
     if (plan.kind !== "command") throw new Error("expected a command plan");
     expect(plan.command).toBe("uv");
     expect(plan.args).toEqual([
@@ -82,7 +91,7 @@ describe("resolveInstallPlan", () => {
     expect(plan.args[0]).toBe("-c");
     expect(plan.args[1]).toContain("https://astral.sh/uv/install.sh");
     expect(plan.args[1]).toContain(
-      "'/home/unowork/.local/bin/uv' 'tool' 'install' '--force' '--python' '3.12' 'hermes-agent[acp]' '--with' 'mcp>=1.9,<2'",
+      "|| '/home/unowork/.local/bin/uv' 'tool' 'install' '--force' '--python' '3.12' 'hermes-agent[acp]' '--with' 'mcp>=1.9,<2'",
     );
   });
 

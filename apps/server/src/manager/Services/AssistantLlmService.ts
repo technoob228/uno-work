@@ -4,6 +4,8 @@ import type {
   AssistantLlmProvider,
   AssistantLlmSetInput,
   AssistantLlmStatus,
+  AssistantSignInStatus,
+  SubscriptionLlmProvider,
 } from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect } from "effect";
@@ -30,6 +32,26 @@ export interface ManagerAssistantLlmShape {
   readonly ensureHarness: (input: {
     readonly retry: boolean;
   }) => Effect.Effect<AssistantHarnessStatus>;
+  /**
+   * The assistant's own sign-in to a subscription (14.10): ChatGPT through
+   * Hermes' device code. Claude has none of its own — it uses Claude Code's
+   * sign-in on this computer (fails with a sentence saying so).
+   */
+  readonly signInStart: (
+    provider: SubscriptionLlmProvider,
+  ) => Effect.Effect<AssistantSignInStatus, ManagerAssistantError>;
+  readonly signInStatus: (
+    provider: SubscriptionLlmProvider,
+  ) => Effect.Effect<AssistantSignInStatus>;
+  readonly signInCancel: (
+    provider: SubscriptionLlmProvider,
+  ) => Effect.Effect<AssistantSignInStatus>;
+  /**
+   * Update Hermes on this computer to the pinned version the Claude plan
+   * needs (harnessInstallCommands: HERMES_CLAUDE_READY_REF). Runs in the
+   * background; `status().hermesUpdate` follows it.
+   */
+  readonly hermesUpdateStart: () => Effect.Effect<AssistantLlmStatus, ManagerAssistantError>;
 }
 
 export class ManagerAssistantLlm extends Context.Service<

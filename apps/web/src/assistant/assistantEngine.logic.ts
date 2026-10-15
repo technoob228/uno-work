@@ -8,9 +8,10 @@ import {
   type AssistantLlmStatus,
   BYOK_PROVIDER_IDS,
   type ByokProviderId,
+  isSubscriptionLlmProvider,
 } from "@t3tools/contracts";
 
-export type AssistantEngineAction = "retry" | "install" | "settings" | "use-key";
+export type AssistantEngineAction = "retry" | "install" | "settings" | "ai-settings" | "use-key";
 
 export interface AssistantEngineNotice {
   readonly id: string;
@@ -50,7 +51,7 @@ export function assistantEngineNotice(
         variant: "info",
         title: "Setting up Uno's engine…",
         description:
-          "Installing Hermes on this computer. The first time takes a minute or two — Uno answers as soon as it's done.",
+          "The first time on this computer takes a minute or two — Uno answers as soon as it's done.",
         detail: harness.logTail,
         action: null,
         busy: true,
@@ -60,7 +61,7 @@ export function assistantEngineNotice(
         id: "missing",
         variant: "warning",
         title: "Uno's engine isn't installed yet",
-        description: "Uno runs on Hermes. Install it to start chatting.",
+        description: "Set it up on this computer to start chatting — a minute or two.",
         detail: null,
         action: "install",
         busy: false,
@@ -80,7 +81,22 @@ export function assistantEngineNotice(
     case "ready":
       break;
   }
-  if (status.provider !== "uno") {
+  if (isSubscriptionLlmProvider(status.provider)) {
+    // The person's own Claude / ChatGPT plan (14.10): signed out, or a Hermes
+    // too old for Claude since it was picked.
+    const subscription = status.subscriptions?.find((entry) => entry.provider === status.provider);
+    if (subscription !== undefined && subscription.state !== "ready") {
+      return {
+        id: "subscription-not-ready",
+        variant: "warning",
+        title: `Uno can't use your ${AI_PROVIDER_LABELS[status.provider]} plan right now`,
+        description: subscription.message,
+        detail: null,
+        action: "ai-settings",
+        busy: false,
+      };
+    }
+  } else if (status.provider !== "uno") {
     const key = status.keys.find((entry) => entry.provider === status.provider);
     if (!key?.configured) {
       return {

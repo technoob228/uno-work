@@ -32,6 +32,7 @@ import { AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
+import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { EmojiAvatar, LevelPicker, nextEmoji } from "./AssistantBits";
 import {
   ASSISTANT_NAME_MAX,
@@ -346,6 +347,7 @@ export function NewAssistantFlow({
   if (step.kind === "review" && plan) {
     return (
       <ReviewCard
+        environmentId={environmentId}
         plan={plan}
         availability={availability}
         home={home}
@@ -495,6 +497,7 @@ export function NewAssistantFlow({
 }
 
 function ReviewCard({
+  environmentId,
   plan,
   availability,
   home,
@@ -504,6 +507,7 @@ function ReviewCard({
   onBack,
   onCreate,
 }: {
+  environmentId: EnvironmentId;
   plan: AssistantPlan;
   availability: AssistantsAvailability;
   home: AssistantHome;
@@ -615,6 +619,20 @@ function ReviewCard({
           testId="assistant-home-own"
         />
       </div>
+
+      {home === "here" ? (
+        <div className="rounded-2xl border border-border/70 px-4 py-3">
+          <h2 className="pb-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            What powers {name}
+          </h2>
+          <AssistantPowerPicker environmentId={environmentId} />
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="assistant-review-power-own">
+          On its own computer {name} starts on Uno AI. Switch it to your Claude or ChatGPT plan in
+          that computer's Settings → AI.
+        </p>
+      )}
 
       {home === "here" ? null : availability === "no-account" ? (
         <div

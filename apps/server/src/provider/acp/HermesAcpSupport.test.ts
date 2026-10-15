@@ -6,7 +6,10 @@ import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   buildHermesConfigYaml,
-  hermesLlmRouteEnvironment,
+  applyHermesLlmRoute,
+  applyHermesAcpModelSelection as applyModelSelectionForTest,
+  hermesProviderIdOf,
+  hermesThreadHomeLinks,
   buildHermesSpawnEnvironment,
   parseMcpJsonToAcpServers,
   resolveHermesBaseModelId,
@@ -162,6 +165,7 @@ describe("buildHermesConfigYaml", () => {
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
+        '  api_mode: "chat_completions"',
         "providers:",
         '  "openai-api":',
         "    request_timeout_seconds: 180",
@@ -272,12 +276,16 @@ describe("buildHermesConfigYaml skills", () => {
 describe("hermes LLM route (0.0.84)", () => {
   it("points the openai-api provider at the route's endpoint and key", () => {
     expect(
-      hermesLlmRouteEnvironment({
-        provider: "xai",
-        apiKey: "xai-key",
-        baseUrl: "https://api.x.ai/v1",
-      }),
+      applyHermesLlmRoute(
+        { HOME: "/home/u" },
+        {
+          provider: "xai",
+          apiKey: "xai-key",
+          baseUrl: "https://api.x.ai/v1",
+        },
+      ),
     ).toEqual({
+      HOME: "/home/u",
       HERMES_INFERENCE_PROVIDER: "openai-api",
       OPENAI_API_KEY: "xai-key",
       OPENAI_BASE_URL: "https://api.x.ai/v1",
@@ -307,5 +315,122 @@ describe("hermes LLM route (0.0.84)", () => {
     expect(buildHermesConfigYaml({ model: "uno/smart", mcpServers: [] })).not.toContain(
       "auxiliary",
     );
+  });
+});
+
+const slashJoin = (...parts: ReadonlyArray<string>) => parts.join("/");
+
+describe("hermes on the person's own subscription (14.10)", () => {
+  const gatewayEnv = {
+    HOME: "/home/u",
+    HERMES_INFERENCE_PROVIDER: "openai-api",
+    OPENAI_API_KEY: "uno-gateway-key",
+    OPENAI_BASE_URL: "https://ai.uno/v1",
+    STT_OPENAI_BASE_URL: "https://ai.uno/v1",
+    ANTHROPIC_BASE_URL: "https://ai.uno",
+    ANTHROPIC_AUTH_TOKEN: "uno-gateway-key",
+  };
+
+  it("runs Claude on the plugin's provider with no Uno key and nothing pointing Claude elsewhere", () => {
+    const env = applyHermesLlmRoute(gatewayEnv, { provider: "claude" });
+    expect(env).toEqual({
+      HOME: "/home/u",
+      HERMES_INFERENCE_PROVIDER: "claude-subscription-directsdk-experimental",
+    });
+  });
+
+  it("runs ChatGPT on Hermes' openai-codex provider without the gateway key", () => {
+    const env = applyHermesLlmRoute(gatewayEnv, { provider: "chatgpt" });
+    expect(env.HERMES_INFERENCE_PROVIDER).toBe("openai-codex");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.OPENAI_BASE_URL).toBeUndefined();
+  });
+
+  it("names Hermes' provider for config.yaml and the ACP auth method", () => {
+    expect(hermesProviderIdOf(undefined)).toBe("openai-api");
+    expect(hermesProviderIdOf({ provider: "uno", apiKey: "k", baseUrl: "u" })).toBe("openai-api");
+    expect(hermesProviderIdOf({ provider: "chatgpt" })).toBe("openai-codex");
+    expect(hermesProviderIdOf({ provider: "claude" })).toBe(
+      "claude-subscription-directsdk-experimental",
+    );
+  });
+
+  it("writes the subscription's provider into config.yaml with a long stream timeout", () => {
+    const yaml = buildHermesConfigYaml({
+      model: "sonnet",
+      provider: "claude-subscription-directsdk-experimental",
+      mcpServers: [],
+      speechToText: false,
+    });
+    expect(yaml).toContain(
+      'model:\n  provider: "claude-subscription-directsdk-experimental"\n  default: "sonnet"',
+    );
+    expect(yaml).toContain(
+      'providers:\n  "claude-subscription-directsdk-experimental":\n    stale_timeout_seconds: 900\n',
+    );
+    expect(yaml).not.toContain("request_timeout_seconds");
+  });
+
+  it("links the shared runtime always, the ChatGPT sign-in and the Claude plugin by provider", () => {
+    const base = { threadHome: "/s/h/threads/t1", sharedHome: "/s/h", join: slashJoin };
+    expect(hermesThreadHomeLinks({ ...base, provider: "uno" })).toEqual([
+      { path: "/s/h/threads/t1/installs", target: "/s/h/installs", directory: true },
+    ]);
+    expect(
+      hermesThreadHomeLinks({ ...base, provider: "chatgpt" }).map((link) => link.path),
+    ).toEqual([
+      "/s/h/threads/t1/installs",
+      "/s/h/threads/t1/auth.json",
+      "/s/h/threads/t1/auth.lock",
+    ]);
+    expect(hermesThreadHomeLinks({ ...base, provider: "claude" })).toContainEqual({
+      path: "/s/h/threads/t1/plugins/claude-subscription-directsdk-experimental",
+      target: "/s/h/plugins/claude-subscription-directsdk-experimental",
+      directory: true,
+    });
+  });
+
+  it("keeps the gateway's model switch working when Hermes ≥ 0.21 refuses the pivot", async () => {
+    const calls: Array<string> = [];
+    await Effect.runPromise(
+      applyModelSelectionForTest({
+        runtime: {
+          request: ((_method: string, params: { modelId: string }) => {
+            calls.push(params.modelId);
+            return params.modelId.startsWith("openrouter:")
+              ? Effect.fail(
+                  new EffectAcpErrors.AcpRequestError({
+                    code: -32603,
+                    errorMessage: "no provider",
+                  }),
+                )
+              : Effect.succeed({});
+          }) as never,
+        },
+        sessionId: "s",
+        model: "uno/smart",
+        mapError: (cause) => cause,
+      }),
+    );
+    expect(calls).toEqual(["openrouter:uno/smart", "openai-api:uno/smart"]);
+  });
+
+  it("sets a subscription's model in one call (the openrouter pivot fails there)", async () => {
+    const calls: Array<string> = [];
+    await Effect.runPromise(
+      applyModelSelectionForTest({
+        runtime: {
+          request: ((_method: string, params: { modelId: string }) => {
+            calls.push(params.modelId);
+            return Effect.succeed({});
+          }) as never,
+        },
+        sessionId: "s",
+        model: "gpt-5.5",
+        hermesProvider: "openai-codex",
+        mapError: (cause) => cause,
+      }),
+    );
+    expect(calls).toEqual(["openai-codex:gpt-5.5"]);
   });
 });

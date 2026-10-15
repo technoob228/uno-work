@@ -9,7 +9,12 @@
  *   the assistant (`/v1/apps/uno-assistant`);
  * - bring your own key — an API key of another provider the person stored on
  *   this machine (xAI, OpenRouter, OpenAI, or any OpenAI-compatible base URL
- *   as "custom"). Billed by that provider; Uno spend limits don't apply.
+ *   as "custom"). Billed by that provider; Uno spend limits don't apply;
+ * - the person's own subscription (Misha 14.10) — `claude`: their Claude
+ *   Pro / Max plan through Nous' official Hermes plugin, which drives the
+ *   official Claude Code CLI signed in on this computer; `chatgpt`: their
+ *   ChatGPT plan through Hermes' own `openai-codex` sign-in (its own tokens,
+ *   apart from the Codex CLI's). Uno doesn't charge for these.
  *
  * Keys live in the daemon's secret store and never leave it: every read of a
  * key returns only its last four characters.
@@ -34,15 +39,44 @@ export const BYOK_PROVIDER_IDS: ReadonlyArray<ByokProviderId> = [
   "custom",
 ];
 
-/** Where the assistant's LLM comes from: the Uno gateway or a stored key. */
+/** Where the assistant's LLM comes from: the Uno gateway, a stored key, or a subscription. */
 export const AssistantLlmProvider = Schema.Literals([
   "uno",
   "xai",
   "openrouter",
   "openai",
   "custom",
+  "claude",
+  "chatgpt",
 ]);
 export type AssistantLlmProvider = typeof AssistantLlmProvider.Type;
+
+/** The person's own subscriptions the assistant can run on. */
+export const SubscriptionLlmProvider = Schema.Literals(["claude", "chatgpt"]);
+export type SubscriptionLlmProvider = typeof SubscriptionLlmProvider.Type;
+
+export const SUBSCRIPTION_LLM_PROVIDERS: ReadonlyArray<SubscriptionLlmProvider> = [
+  "claude",
+  "chatgpt",
+];
+
+export function isSubscriptionLlmProvider(
+  provider: AssistantLlmProvider,
+): provider is SubscriptionLlmProvider {
+  return provider === "claude" || provider === "chatgpt";
+}
+
+/** Hermes' provider id for each subscription (`HERMES_INFERENCE_PROVIDER`, config.yaml). */
+export const HERMES_SUBSCRIPTION_PROVIDER_IDS: Readonly<Record<SubscriptionLlmProvider, string>> = {
+  claude: "claude-subscription-directsdk-experimental",
+  chatgpt: "openai-codex",
+};
+
+/**
+ * Oldest Hermes that loads the Claude plugin (its `requires_hermes`). Hermes
+ * since 0.20 ships only through its own installer — PyPI stops at 0.19.
+ */
+export const HERMES_CLAUDE_PLUGIN_MIN_VERSION = "0.21.4";
 
 /** OpenAI-compatible base URLs of the built-in BYOK providers. */
 export const BYOK_PROVIDER_BASE_URLS: Readonly<Record<Exclude<ByokProviderId, "custom">, string>> =
@@ -58,6 +92,8 @@ export const AI_PROVIDER_LABELS: Readonly<Record<AssistantLlmProvider, string>> 
   openrouter: "OpenRouter",
   openai: "OpenAI",
   custom: "Custom",
+  claude: "Claude",
+  chatgpt: "ChatGPT",
 };
 
 /** Harness instance the assistant chat always runs on. */
@@ -168,6 +204,59 @@ export const AssistantHarnessStatus = Schema.Struct({
 });
 export type AssistantHarnessStatus = typeof AssistantHarnessStatus.Type;
 
+/**
+ * One subscription as the assistant could use it:
+ * - `ready`         — signed in, the assistant can run on it now;
+ * - `sign-in`       — not signed in on this computer (`signIn` says how);
+ * - `needs-hermes`  — this Hermes is too old (Claude needs
+ *                     {@link HERMES_CLAUDE_PLUGIN_MIN_VERSION});
+ * - `unavailable`   — can't run here (`message` says why).
+ */
+export const SubscriptionLlmState = Schema.Literals([
+  "ready",
+  "sign-in",
+  "needs-hermes",
+  "unavailable",
+]);
+export type SubscriptionLlmState = typeof SubscriptionLlmState.Type;
+
+export const SubscriptionLlmStatus = Schema.Struct({
+  provider: SubscriptionLlmProvider,
+  state: SubscriptionLlmState,
+  /** "Claude Max", "ChatGPT Plus"… when the sign-in names it. */
+  plan: Schema.NullOr(Schema.String),
+  /** Who is signed in (email), when known. */
+  account: Schema.NullOr(Schema.String),
+  /**
+   * How to sign in: `harness` — the Claude Code sign-in Uno Work already has
+   * (Settings → AI → Agents); `assistant` — the assistant's own ChatGPT
+   * sign-in (`POST /api/manager/assistant/llm/sign-in`).
+   */
+  signIn: Schema.Literals(["harness", "assistant"]),
+  message: Schema.NullOr(Schema.String),
+});
+export type SubscriptionLlmStatus = typeof SubscriptionLlmStatus.Type;
+
+/** A sign-in to the person's ChatGPT for the assistant (Hermes' device code). */
+export const AssistantSignInState = Schema.Literals(["waiting", "succeeded", "failed", "idle"]);
+export type AssistantSignInState = typeof AssistantSignInState.Type;
+
+export const AssistantSignInStatus = Schema.Struct({
+  provider: SubscriptionLlmProvider,
+  state: AssistantSignInState,
+  /** The page to open ("https://auth.openai.com/codex/device"). */
+  url: Schema.NullOr(Schema.String),
+  /** The code to type there. */
+  code: Schema.NullOr(Schema.String),
+  message: Schema.NullOr(Schema.String),
+});
+export type AssistantSignInStatus = typeof AssistantSignInStatus.Type;
+
+export const AssistantSignInInput = Schema.Struct({
+  provider: SubscriptionLlmProvider,
+});
+export type AssistantSignInInput = typeof AssistantSignInInput.Type;
+
 export const AssistantLlmStatus = Schema.Struct({
   threadId: Schema.NullOr(Schema.String),
   provider: AssistantLlmProvider,
@@ -181,6 +270,22 @@ export const AssistantLlmStatus = Schema.Struct({
    * seconds after sign-in). A message sent now waits for it. Absent = false.
    */
   gatewayPending: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The person's subscriptions as the assistant could use them (14.10).
+   * Absent: an older daemon that can't run the assistant on them — clients
+   * don't offer them then.
+   */
+  subscriptions: Schema.optionalKey(Schema.Array(SubscriptionLlmStatus)),
+  /**
+   * Updating Hermes to the version the Claude plan needs (`POST
+   * /api/manager/assistant/llm/hermes-update`). Absent: never started here.
+   */
+  hermesUpdate: Schema.optionalKey(
+    Schema.Struct({
+      state: Schema.Literals(["running", "succeeded", "failed"]),
+      message: Schema.NullOr(Schema.String),
+    }),
+  ),
 });
 export type AssistantLlmStatus = typeof AssistantLlmStatus.Type;
 

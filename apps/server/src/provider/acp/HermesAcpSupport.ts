@@ -23,8 +23,13 @@
  *
  * @module HermesAcpSupport
  */
-import type { AssistantLlmProvider, HermesSettings, RuntimeMode } from "@t3tools/contracts";
-import { UNO_GATEWAY_BASE_URL } from "@t3tools/contracts";
+import type {
+  AssistantLlmProvider,
+  HermesSettings,
+  RuntimeMode,
+  SubscriptionLlmProvider,
+} from "@t3tools/contracts";
+import { HERMES_SUBSCRIPTION_PROVIDER_IDS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts";
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
@@ -57,6 +62,8 @@ export interface HermesAcpRuntimeInput extends Omit<
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly hermesSettings: HermesAcpRuntimeSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
+  /** Hermes' provider of this session ({@link hermesProviderIdOf}); the gateway when absent. */
+  readonly hermesProvider?: string;
 }
 
 export interface HermesSpawnEnvironmentInput {
@@ -103,24 +110,128 @@ export function hermesAppLabelEnvironment(appId: string | null): Record<string, 
  * only from the environment (`openai-api` provider + `OPENAI_*`), so this is
  * a per-process env overlay; switching providers restarts the process (the
  * session resumes from the thread's own HERMES_HOME).
+ *
+ * Or the person's own subscription (14.10): Hermes' own provider for it
+ * (`openai-codex`, the Claude plugin), with no key in the environment — the
+ * sign-in lives in the shared Hermes home the thread's home links to
+ * ({@link linkHermesThreadHome}).
  */
-export interface HermesLlmRoute {
-  readonly provider: AssistantLlmProvider;
+export type HermesLlmRoute = HermesEndpointRoute | HermesSubscriptionRoute;
+
+export interface HermesEndpointRoute {
+  readonly provider: Exclude<AssistantLlmProvider, SubscriptionLlmProvider>;
   readonly apiKey: string;
   readonly baseUrl: string;
 }
 
+export interface HermesSubscriptionRoute {
+  readonly provider: SubscriptionLlmProvider;
+}
+
+export function isHermesSubscriptionRoute(route: HermesLlmRoute): route is HermesSubscriptionRoute {
+  return route.provider === "claude" || route.provider === "chatgpt";
+}
+
+/** Hermes' provider id for a route (`HERMES_INFERENCE_PROVIDER`, config.yaml, ACP auth method). */
+export function hermesProviderIdOf(route: HermesLlmRoute | undefined): string {
+  return route !== undefined && isHermesSubscriptionRoute(route)
+    ? HERMES_SUBSCRIPTION_PROVIDER_IDS[route.provider]
+    : HERMES_GATEWAY_PROVIDER;
+}
+
 /**
- * Env overlay of a route. On the gateway speech-to-text stays on the gateway;
- * with a brought key it is off (see {@link buildHermesConfigYaml}) — Hermes
- * would send that key to the gateway's STT otherwise.
+ * Variables a subscription session must not carry: the gateway key (nothing
+ * of Uno's goes to a process that doesn't need it) and anything that would
+ * point Claude Code at an API key or another backend — the Claude plugin
+ * refuses to start with those, by design.
  */
-export function hermesLlmRouteEnvironment(route: HermesLlmRoute): Record<string, string> {
-  return {
-    HERMES_INFERENCE_PROVIDER: HERMES_GATEWAY_PROVIDER,
-    OPENAI_API_KEY: route.apiKey,
-    OPENAI_BASE_URL: route.baseUrl,
-  };
+const SUBSCRIPTION_DROPPED_ENV: ReadonlyArray<string> = [
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "STT_OPENAI_BASE_URL",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_FOUNDRY_API_KEY",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+/**
+ * The session's environment with a route applied. On the gateway speech-to-
+ * text stays on the gateway; with a brought key or a subscription it is off
+ * (see {@link buildHermesConfigYaml}) — Hermes would send that key to the
+ * gateway's STT otherwise.
+ */
+export function applyHermesLlmRoute(
+  environment: Readonly<Record<string, string | undefined>>,
+  route: HermesLlmRoute,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [name, value] of Object.entries(environment)) {
+    if (value !== undefined) next[name] = value;
+  }
+  if (isHermesSubscriptionRoute(route)) {
+    for (const name of SUBSCRIPTION_DROPPED_ENV) delete next[name];
+    next.HERMES_INFERENCE_PROVIDER = HERMES_SUBSCRIPTION_PROVIDER_IDS[route.provider];
+    return next;
+  }
+  next.HERMES_INFERENCE_PROVIDER = HERMES_GATEWAY_PROVIDER;
+  next.OPENAI_API_KEY = route.apiKey;
+  next.OPENAI_BASE_URL = route.baseUrl;
+  return next;
+}
+
+/** Folder name of the Claude plugin in a Hermes home's `plugins/` (its manifest name). */
+export const HERMES_CLAUDE_PLUGIN_DIR = "claude-subscription-directsdk-experimental";
+/** Catalog name `hermes plugins install` takes. */
+export const HERMES_CLAUDE_PLUGIN_CATALOG_NAME = "claude-subscription-directsdk";
+
+/**
+ * What a chat's own HERMES_HOME borrows from the shared Hermes home
+ * (`<stateDir>/hermes-home-<instance>`, the parent of `threads/`), as
+ * symlinks — Hermes writes through them (`utils.atomic_replace` keeps a
+ * symlink):
+ *
+ * - `installs/` — Hermes ≥ 0.21 keeps a Python runtime per home there
+ *   (~400 MB, installed from the network on first start). Shared, a new chat
+ *   costs nothing; unused by older Hermes.
+ * - `auth.json` + `auth.lock` (ChatGPT) — the assistant's one ChatGPT
+ *   sign-in. ChatGPT refresh tokens are single-use: every chat on its own
+ *   copy would rotate the others out. One file under one lock is one token.
+ * - `plugins/<Claude plugin>` (Claude) — model-provider plugins are imported
+ *   straight from `$HERMES_HOME/plugins/`.
+ */
+export interface HermesThreadHomeLink {
+  /** Path inside the thread's home. */
+  readonly path: string;
+  /** Where it points, inside the shared home. */
+  readonly target: string;
+  /** The target is a directory to create when missing (a file is left to Hermes). */
+  readonly directory: boolean;
+}
+
+export function hermesThreadHomeLinks(input: {
+  readonly provider: AssistantLlmProvider;
+  readonly threadHome: string;
+  readonly sharedHome: string;
+  readonly join: (...parts: ReadonlyArray<string>) => string;
+}): ReadonlyArray<HermesThreadHomeLink> {
+  const { join, threadHome, sharedHome } = input;
+  const link = (relative: ReadonlyArray<string>, directory: boolean): HermesThreadHomeLink => ({
+    path: join(threadHome, ...relative),
+    target: join(sharedHome, ...relative),
+    directory,
+  });
+  const links = [link(["installs"], true)];
+  if (input.provider === "chatgpt") {
+    links.push(link(["auth.json"], false), link(["auth.lock"], false));
+  }
+  if (input.provider === "claude") {
+    links.push(link(["plugins", HERMES_CLAUDE_PLUGIN_DIR], true));
+  }
+  return links;
 }
 
 export function buildHermesAcpSpawnInput(
@@ -148,9 +259,9 @@ export const makeHermesAcpRuntime = (
       AcpSessionRuntime.layer({
         ...input,
         spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
-        // Hermes публикует auth-метод с id = активный провайдер; провайдер
-        // у нас всегда пинится в openai-api через env.
-        authMethodId: HERMES_GATEWAY_PROVIDER,
+        // Hermes публикует auth-метод с id = активный провайдер: openai-api
+        // (шлюз/ключ через env) или провайдер подписки.
+        authMethodId: input.hermesProvider ?? HERMES_GATEWAY_PROVIDER,
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
@@ -184,6 +295,8 @@ export function applyHermesAcpModelSelection<E>(input: {
   readonly runtime: HermesModelSelectionRuntime;
   readonly sessionId: string;
   readonly model: string;
+  /** Hermes' provider of the session; the gateway (`openai-api`) when absent. */
+  readonly hermesProvider?: string;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
 }): Effect.Effect<void, E> {
   const setModel = (providerNamespace: string) =>
@@ -194,7 +307,18 @@ export function applyHermesAcpModelSelection<E>(input: {
       })
       .pipe(Effect.mapError(input.mapError));
 
+  const target = input.hermesProvider ?? HERMES_GATEWAY_PROVIDER;
+  // The pivot exists for openai-api's namespaced ids (`anthropic/…`). A
+  // subscription's ids are bare and its provider is set directly; the pivot
+  // would even fail there (no OpenRouter credentials — probed 14.10).
+  if (target !== HERMES_GATEWAY_PROVIDER) {
+    return setModel(target).pipe(Effect.asVoid);
+  }
+  // Hermes ≥ 0.21 refuses the pivot without OpenRouter credentials, and no
+  // longer needs it (its switch keeps the endpoint — checked 15.10 against a
+  // local endpoint): the pivot is best effort, the target call decides.
   return setModel(HERMES_MODEL_SWITCH_PIVOT_PROVIDER).pipe(
+    Effect.catch(() => Effect.void),
     Effect.andThen(setModel(HERMES_GATEWAY_PROVIDER)),
     Effect.asVoid,
   );
@@ -282,8 +406,16 @@ export const HERMES_AGENT_VERIFY_ON_STOP = false;
  */
 export const HERMES_TITLE_GENERATION_TIMEOUT_SECONDS = 15;
 
+/**
+ * A subscription's stream may stay quiet a long time (Claude Code thinks
+ * before it answers); the Claude plugin's own docs ask for 900 s.
+ */
+export const HERMES_SUBSCRIPTION_STALE_TIMEOUT_SECONDS = 900;
+
 export function buildHermesConfigYaml(input: {
   readonly model: string;
+  /** Hermes' provider ({@link hermesProviderIdOf}); the gateway when absent. */
+  readonly provider?: string;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   /**
    * Shared skill folders Hermes reads read-only (`skills.external_dirs`): the
@@ -308,18 +440,27 @@ export function buildHermesConfigYaml(input: {
   readonly mcpToolTimeoutSec?: Readonly<Record<string, number>>;
 }): string {
   const quote = JSON.stringify;
+  const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
   const lines: Array<string> = [
     "agent:",
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
     `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
     `  verify_on_stop: ${HERMES_AGENT_VERIFY_ON_STOP}`,
     "model:",
-    `  provider: ${quote(HERMES_GATEWAY_PROVIDER)}`,
+    `  provider: ${quote(provider)}`,
     `  default: ${quote(input.model)}`,
+    // Hermes ≥ 0.21 talks to an `openai-api` endpoint over the Responses API
+    // (`/v1/responses`) by default; the gateway and brought keys speak Chat
+    // Completions, which 0.19 used anyway.
+    ...(provider === HERMES_GATEWAY_PROVIDER ? [`  api_mode: "chat_completions"`] : []),
     "providers:",
-    `  ${quote(HERMES_GATEWAY_PROVIDER)}:`,
-    `    request_timeout_seconds: ${HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS}`,
-    `    stale_timeout_seconds: ${HERMES_GATEWAY_STALE_TIMEOUT_SECONDS}`,
+    `  ${quote(provider)}:`,
+    ...(provider === HERMES_GATEWAY_PROVIDER
+      ? [
+          `    request_timeout_seconds: ${HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS}`,
+          `    stale_timeout_seconds: ${HERMES_GATEWAY_STALE_TIMEOUT_SECONDS}`,
+        ]
+      : [`    stale_timeout_seconds: ${HERMES_SUBSCRIPTION_STALE_TIMEOUT_SECONDS}`]),
     // STT-фолбэк самого hermes: без явного provider полез бы в faster-whisper
     // (150MB модель на диск). base_url приходит из env STT_OPENAI_BASE_URL.
     ...(input.speechToText === false

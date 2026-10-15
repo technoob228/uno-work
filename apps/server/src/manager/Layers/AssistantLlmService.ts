@@ -9,7 +9,12 @@ import {
   ASSISTANT_PROJECT_ID,
   AI_PROVIDER_LABELS,
   type AssistantLlmModelList,
+  type AssistantSignInStatus,
   CommandId,
+  HERMES_CLAUDE_PLUGIN_MIN_VERSION,
+  isAssistantProjectId,
+  isSubscriptionLlmProvider,
+  type SubscriptionLlmProvider,
   ProviderDriverKind,
   type ProviderInstallJobStatus,
   type ProviderSetupJobId,
@@ -22,19 +27,32 @@ import {
   defaultAssistantModelFor,
   readAssistantLlmProvider,
   sameAssistantModelSelection,
+  SUBSCRIPTION_DEFAULT_MODEL,
+  SUBSCRIPTION_MODELS,
 } from "@t3tools/shared/assistantLlm";
 import { Effect, Layer, Ref } from "effect";
 import * as crypto from "node:crypto";
 import * as os from "node:os";
 
 import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
+import { ServerConfig } from "../../config.ts";
+import { HERMES_CLAUDE_PLUGIN_CATALOG_NAME } from "../../provider/acp/HermesAcpSupport.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { fetchHermesModelCatalog } from "../../provider/Layers/HermesProvider.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { HarnessSetup } from "../../provider/setup/HarnessSetupService.ts";
-import { withUserLocalBinOnPath } from "../../provider/setup/harnessProcess.ts";
+import {
+  HERMES_CLAUDE_READY_ENV,
+  HERMES_CLAUDE_READY_VERSION,
+  HERMES_UV_TOOL_ARGS_CLAUDE_READY,
+} from "../../provider/setup/harnessInstallCommands.ts";
+import {
+  type HarnessProcessHandle,
+  spawnHarnessProcess,
+  withUserLocalBinOnPath,
+} from "../../provider/setup/harnessProcess.ts";
 import {
   type HermesMcpProbeResult,
   probeHermesMcpHttp,
@@ -47,12 +65,48 @@ import {
   orderAssistantModels,
 } from "../assistantLlm.ts";
 import {
+  claudePluginInstalled,
+  claudeSignInFromProviders,
+  hermesCommandEnvironment,
+  hermesSharedHome,
+  hermesVersionAtLeast,
+  parseDeviceSignIn,
+  readChatgptSignIn,
+  stripAnsi,
+  subscriptionStatuses,
+} from "../assistantSubscriptions.ts";
+import {
   ManagerAssistantLlm,
   type ManagerAssistantLlmShape,
 } from "../Services/AssistantLlmService.ts";
 import { ManagerAssistantError } from "../Services/AssistantService.ts";
 
 const HERMES_DRIVER = ProviderDriverKind.make("hermes");
+/** A device code is good for ~15 minutes; the sign-in stops waiting then. */
+const SIGN_IN_TIMEOUT_MS = 15 * 60_000;
+const PLUGIN_INSTALL_TIMEOUT_MS = 4 * 60_000;
+/** Building Hermes from its tag: ~25 s on a fast box, minutes on a small one. */
+const HERMES_UPDATE_TIMEOUT_MS = 15 * 60_000;
+
+interface SignInJob {
+  status: AssistantSignInStatus;
+  output: string;
+  handle: HarnessProcessHandle | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+function idleSignIn(provider: SubscriptionLlmProvider): AssistantSignInStatus {
+  return { provider, state: "idle", url: null, code: null, message: null };
+}
+
+function lastLines(text: string, count = 4): string {
+  return stripAnsi(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(-count)
+    .join("\n");
+}
 
 const makeManagerAssistantLlm = Effect.gen(function* () {
   const snapshotQuery = yield* ProjectionSnapshotQuery;
@@ -62,7 +116,10 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
   const providerKeys = yield* AiProviderKeys;
   const gatewayKey = yield* UnoGatewayKey;
   const serverSettings = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
   const installJobId = yield* Ref.make<ProviderSetupJobId | null>(null);
+  const sharedHome = hermesSharedHome(serverConfig.stateDir, ASSISTANT_HARNESS_INSTANCE_ID);
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
 
   const toError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -116,6 +173,255 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
     return deriveAssistantHarnessStatus({ snapshot, job, mcp });
   });
 
+  const subscriptions = (hermesVersion: string | null) =>
+    Effect.gen(function* () {
+      const providers = yield* providerRegistry.getProviders;
+      const chatgpt = yield* Effect.promise(() => readChatgptSignIn(sharedHome));
+      return subscriptionStatuses({
+        hermesVersion,
+        // The Claude plan brings its Hermes along on first pick (uv, not on
+        // Windows), unless that just failed here.
+        hermesUpdatable: process.platform !== "win32",
+        hermesUpdateError: hermesUpdate?.state === "failed" ? hermesUpdate.message : null,
+        claude: claudeSignInFromProviders(providers),
+        chatgpt,
+      });
+    });
+
+  const hermesBinary = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    return settings?.providers.hermes.binaryPath || "hermes";
+  });
+
+  const hermesEnv = () =>
+    hermesCommandEnvironment({
+      env: withUserLocalBinOnPath(process.env, os.homedir()),
+      sharedHome,
+    });
+
+  /**
+   * The Claude plugin in the shared Hermes home (catalog-pinned by Hermes):
+   * `hermes plugins install claude-subscription-directsdk`. A model-provider
+   * plugin needs no enabling — Hermes imports it from `plugins/`.
+   */
+  const ensureClaudePlugin = Effect.gen(function* () {
+    if (yield* Effect.promise(() => claudePluginInstalled(sharedHome))) return;
+    const binary = yield* hermesBinary;
+    // `--yes-deps` (answer the dependency question without a terminal) came
+    // with Hermes 0.22; 0.21 doesn't know it and installs without asking.
+    const hermesVersion = (yield* harnessStatus).version;
+    const consentFlag = hermesVersionAtLeast(hermesVersion, "0.22.0") ? ["--yes-deps"] : [];
+    const result = yield* Effect.promise(
+      () =>
+        new Promise<{ readonly ok: boolean; readonly output: string }>((resolve) => {
+          let output = "";
+          let handle: HarnessProcessHandle | null = null;
+          const timer = setTimeout(() => handle?.kill(), PLUGIN_INSTALL_TIMEOUT_MS);
+          handle = spawnHarnessProcess({
+            command: binary,
+            args: [
+              "plugins",
+              "install",
+              HERMES_CLAUDE_PLUGIN_CATALOG_NAME,
+              ...consentFlag,
+              "--no-enable",
+            ],
+            env: hermesEnv(),
+            cwd: os.homedir(),
+            onOutput: (chunk) => {
+              output += chunk;
+            },
+            onExit: (exit) => {
+              clearTimeout(timer);
+              resolve({ ok: exit.code === 0 && exit.error === undefined, output });
+            },
+          });
+          handle.endInput();
+        }),
+    );
+    const installed = yield* Effect.promise(() => claudePluginInstalled(sharedHome));
+    if (!installed) {
+      yield* Effect.logWarning("assistant: Claude plugin install failed").pipe(
+        Effect.annotateLogs({ ok: result.ok, tail: lastLines(result.output, 6) }),
+      );
+      return yield* new ManagerAssistantError({
+        detail: `Couldn't connect Uno to your Claude plan on this computer.${
+          result.output ? ` Hermes said: ${lastLines(result.output, 2)}` : ""
+        }`,
+      });
+    }
+    yield* Effect.logInfo("assistant: Claude plugin installed");
+  });
+
+  let hermesUpdate: {
+    state: "running" | "succeeded" | "failed";
+    message: string | null;
+  } | null = null;
+  let hermesUpdateRun: Promise<boolean> | null = null;
+
+  /**
+   * Bring Hermes to the pinned version the Claude plan needs — behind the
+   * scenes (Misha 15.10: nobody should have to know what Hermes is). One run
+   * at a time; resolves true when the new Hermes is there.
+   */
+  const runHermesUpdate = (): Promise<boolean> => {
+    if (hermesUpdateRun !== null) return hermesUpdateRun;
+    hermesUpdate = { state: "running", message: null };
+    hermesUpdateRun = new Promise<boolean>((resolve) => {
+      let output = "";
+      let handle: HarnessProcessHandle | null = null;
+      const timer = setTimeout(() => handle?.kill(), HERMES_UPDATE_TIMEOUT_MS);
+      handle = spawnHarnessProcess({
+        command: "uv",
+        args: HERMES_UV_TOOL_ARGS_CLAUDE_READY,
+        env: {
+          ...withUserLocalBinOnPath(process.env, os.homedir()),
+          ...HERMES_CLAUDE_READY_ENV,
+        },
+        cwd: os.homedir(),
+        onOutput: (chunk) => {
+          output += chunk;
+        },
+        onExit: (exit) => {
+          clearTimeout(timer);
+          const ok = exit.code === 0 && exit.error === undefined;
+          hermesUpdate = ok
+            ? { state: "succeeded", message: null }
+            : {
+                state: "failed",
+                message: exit.error
+                  ? `uv didn't start: ${exit.error.message}`
+                  : /git/i.test(output) && /not found|No such file/i.test(output)
+                    ? "git is missing on this computer."
+                    : lastLines(output, 3) || "The update failed.",
+              };
+          hermesUpdateRun = null;
+          // The probe that sees the new version; the assistant's next
+          // session starts on it.
+          void runPromise(providerRegistry.refresh(HERMES_DRIVER).pipe(Effect.ignore)).then(() =>
+            resolve(ok),
+          );
+        },
+      });
+      handle.endInput();
+    });
+    void runPromise(
+      Effect.logInfo("assistant: updating Hermes for the Claude plan").pipe(
+        Effect.annotateLogs({ version: HERMES_CLAUDE_READY_VERSION }),
+      ),
+    );
+    return hermesUpdateRun;
+  };
+
+  const hermesUpdateStart: ManagerAssistantLlmShape["hermesUpdateStart"] = () =>
+    Effect.gen(function* () {
+      void runHermesUpdate();
+      return yield* status();
+    });
+
+  /** The Claude plan, ready on this computer: Hermes new enough, then the plugin. */
+  const ensureClaudeReady = Effect.gen(function* () {
+    const version = (yield* harnessStatus).version;
+    if (!hermesVersionAtLeast(version, HERMES_CLAUDE_PLUGIN_MIN_VERSION)) {
+      const ok = yield* Effect.promise(() => runHermesUpdate());
+      if (!ok) {
+        yield* Effect.logWarning("assistant: Hermes update for Claude failed").pipe(
+          Effect.annotateLogs({ reason: hermesUpdate?.message ?? null }),
+        );
+        return yield* new ManagerAssistantError({
+          detail: `Couldn't set up your Claude plan on this computer${
+            hermesUpdate?.message ? ` (${hermesUpdate.message})` : ""
+          }. Try again in a minute, or keep Uno on Uno AI.`,
+        });
+      }
+    }
+    yield* ensureClaudePlugin;
+  });
+
+  const signInJobs = new Map<SubscriptionLlmProvider, SignInJob>();
+
+  const signInStart: ManagerAssistantLlmShape["signInStart"] = (provider) =>
+    Effect.gen(function* () {
+      if (provider === "claude") {
+        return yield* new ManagerAssistantError({
+          detail:
+            "Uno uses Claude Code's sign-in on this computer: sign in to Claude under Settings → AI → Agents.",
+        });
+      }
+      const running = signInJobs.get(provider);
+      if (running?.status.state === "waiting") return running.status;
+      const binary = yield* hermesBinary;
+      const job: SignInJob = {
+        status: { provider, state: "waiting", url: null, code: null, message: null },
+        output: "",
+        handle: null,
+        timer: null,
+      };
+      signInJobs.set(provider, job);
+      const finish = (next: Omit<AssistantSignInStatus, "provider" | "url" | "code">) => {
+        if (job.status.state !== "waiting") return;
+        if (job.timer !== null) clearTimeout(job.timer);
+        job.status = { ...job.status, ...next };
+      };
+      job.handle = spawnHarnessProcess({
+        command: binary,
+        args: ["auth", "add", "openai-codex"],
+        env: hermesEnv(),
+        cwd: os.homedir(),
+        onOutput: (chunk) => {
+          job.output += chunk;
+          const parsed = parseDeviceSignIn(job.output);
+          job.status = {
+            ...job.status,
+            url: parsed.url ?? job.status.url,
+            code: parsed.code ?? job.status.code,
+          };
+        },
+        onExit: (exit) => {
+          void readChatgptSignIn(sharedHome).then((signIn) => {
+            if (exit.code === 0 && signIn.signedIn) {
+              finish({ state: "succeeded", message: null });
+            } else {
+              finish({
+                state: "failed",
+                message: exit.error
+                  ? `Hermes didn't start: ${exit.error.message}`
+                  : lastLines(job.output, 3) || "The ChatGPT sign-in didn't finish.",
+              });
+            }
+          });
+        },
+      });
+      job.handle.endInput();
+      job.timer = setTimeout(() => {
+        job.handle?.kill();
+        finish({ state: "failed", message: "The code expired. Start the sign-in again." });
+      }, SIGN_IN_TIMEOUT_MS);
+      yield* Effect.logInfo("assistant: ChatGPT sign-in started");
+      // The page and code come within a second or two; hand them back in
+      // this answer when they are already there.
+      for (let attempt = 0; attempt < 20 && job.status.code === null; attempt += 1) {
+        if (job.status.state !== "waiting") break;
+        yield* Effect.sleep("250 millis");
+      }
+      return job.status;
+    });
+
+  const signInStatus: ManagerAssistantLlmShape["signInStatus"] = (provider) =>
+    Effect.sync(() => signInJobs.get(provider)?.status ?? idleSignIn(provider));
+
+  const signInCancel: ManagerAssistantLlmShape["signInCancel"] = (provider) =>
+    Effect.sync(() => {
+      const job = signInJobs.get(provider);
+      if (job === undefined) return idleSignIn(provider);
+      if (job.status.state === "waiting") {
+        job.handle?.kill();
+        if (job.timer !== null) clearTimeout(job.timer);
+        job.status = { ...job.status, state: "idle", message: null };
+      }
+      return job.status;
+    });
+
   const findChat = Effect.gen(function* () {
     const snapshot = yield* snapshotQuery
       .getShellSnapshot()
@@ -131,20 +437,36 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
         : DEFAULT_ASSISTANT_MODEL_SELECTION;
       const keys = yield* providerKeys.list();
       const gatewayState = yield* gatewayKey.keyState();
+      const harness = yield* harnessStatus;
       return {
         threadId: chat?.id ?? null,
         provider: readAssistantLlmProvider(selection),
         model: selection.model,
-        harness: yield* harnessStatus,
+        harness,
         keys,
         gatewayConfigured: gatewayState === "ready",
         ...(gatewayState === "pending" ? { gatewayPending: true } : {}),
+        subscriptions: yield* subscriptions(harness.version),
+        ...(hermesUpdate !== null ? { hermesUpdate } : {}),
       };
     });
 
   const setLlm: ManagerAssistantLlmShape["setLlm"] = (input) =>
     Effect.gen(function* () {
-      if (input.provider !== "uno") {
+      if (isSubscriptionLlmProvider(input.provider)) {
+        const harness = yield* harnessStatus;
+        const subscription = (yield* subscriptions(harness.version)).find(
+          (entry) => entry.provider === input.provider,
+        );
+        if (subscription === undefined || subscription.state !== "ready") {
+          return yield* new ManagerAssistantError({
+            detail:
+              subscription?.message ??
+              `Your ${AI_PROVIDER_LABELS[input.provider]} plan isn't ready for Uno on this computer.`,
+          });
+        }
+        if (input.provider === "claude") yield* ensureClaudeReady;
+      } else if (input.provider !== "uno") {
         const stored = yield* providerKeys.resolve(input.provider);
         if (stored === null) {
           return yield* new ManagerAssistantError({
@@ -170,12 +492,24 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
           { origin: assistantCommandOrigin({ assistantKey: ASSISTANT_PROJECT_ID }) },
         )
         .pipe(Effect.mapError(toError("Failed to switch the assistant's model.")));
-      // One engine for all of the assistant's conversations (0.0.85).
+      // One engine for all of the assistant's conversations (0.0.85) — and,
+      // since 14.10, every assistant's on this computer: "what powers your
+      // assistant" is one choice per computer (new assistants already start
+      // on the Uno chat's engine).
       const snapshot = yield* snapshotQuery
         .getShellSnapshot()
         .pipe(Effect.mapError(toError("Failed to load chats.")));
+      const otherAssistants = snapshot.threads.filter(
+        (thread) =>
+          isAssistantProjectId(thread.projectId) &&
+          thread.projectId !== ASSISTANT_PROJECT_ID &&
+          thread.archivedAt === null &&
+          thread.assistantRole !== "spawned" &&
+          (thread.spawnedByThreadId ?? null) === null &&
+          thread.modelSelection.instanceId === ASSISTANT_HARNESS_INSTANCE_ID,
+      );
       yield* Effect.forEach(
-        listAssistantConversations(snapshot.threads).filter(
+        [...listAssistantConversations(snapshot.threads), ...otherAssistants].filter(
           (thread) =>
             thread.id !== chat.id && !sameAssistantModelSelection(thread.modelSelection, next),
         ),
@@ -234,6 +568,14 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
           error: catalog.length === 0 ? "Could not load the Uno gateway's model list." : null,
         } satisfies AssistantLlmModelList;
       }
+      if (isSubscriptionLlmProvider(provider)) {
+        return {
+          provider,
+          models: SUBSCRIPTION_MODELS[provider],
+          defaultModel: SUBSCRIPTION_DEFAULT_MODEL[provider],
+          error: null,
+        } satisfies AssistantLlmModelList;
+      }
       const result = yield* providerKeys.listModels(provider);
       if (!result.ok) {
         return { provider, models: [], defaultModel: null, error: result.error };
@@ -280,7 +622,16 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
       return yield* harnessStatus;
     });
 
-  return { status, setLlm, listModels, ensureHarness } satisfies ManagerAssistantLlmShape;
+  return {
+    status,
+    setLlm,
+    listModels,
+    ensureHarness,
+    signInStart,
+    signInStatus,
+    signInCancel,
+    hermesUpdateStart,
+  } satisfies ManagerAssistantLlmShape;
 });
 
 export const ManagerAssistantLlmLive = Layer.effect(ManagerAssistantLlm, makeManagerAssistantLlm);
