@@ -28,7 +28,12 @@ import { cn } from "~/lib/utils";
 import { folderDisplayName, useHomeFolderPath } from "../../hooks/useFolderChats";
 import { normalizeProjectPathForComparison } from "../../lib/projectPaths";
 import { type ChatFolderSource, openFolderForChat } from "../../navigation/newProjectStore";
-import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../../store";
+import { sortProjectsForSidebar } from "../Sidebar.logic";
 import { GitHubIcon } from "../Icons";
 import { Button } from "../ui/button";
 import {
@@ -80,18 +85,24 @@ export function FolderChipMenu({
   const [pickingFolder, setPickingFolder] = useState(false);
   const home = useHomeFolderPath(environmentId);
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  // Newest chat first, as in the sidebar. The project's own updatedAt barely
+  // moves (it is the folder's settings), so a folder worked in every day could
+  // fall off the list behind ones untouched since spring (15.10).
   const folders = useMemo(() => {
     const homeKey = home ? normalizeProjectPathForComparison(home) : null;
-    return projects
-      .filter(
-        (project) =>
-          project.environmentId === environmentId &&
-          !isAssistantProjectId(project.id) &&
-          normalizeProjectPathForComparison(project.cwd) !== homeKey,
-      )
-      .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
-      .slice(0, MAX_FOLDERS);
-  }, [environmentId, home, projects]);
+    const mine = projects.filter(
+      (project) =>
+        project.environmentId === environmentId &&
+        !isAssistantProjectId(project.id) &&
+        normalizeProjectPathForComparison(project.cwd) !== homeKey,
+    );
+    return sortProjectsForSidebar(
+      mine,
+      threads.filter((thread) => thread.environmentId === environmentId),
+      "updated_at",
+    ).slice(0, MAX_FOLDERS);
+  }, [environmentId, home, projects, threads]);
 
   return (
     <>

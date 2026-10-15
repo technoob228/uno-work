@@ -713,6 +713,13 @@ function Notice({ title, children }: { title: string; children: React.ReactNode 
   );
 }
 
+const PICKABLE_COMPUTERS_SHOWN = 3;
+
+/**
+ * Cloud computers this one can switch to: archived ones can't be opened from
+ * here (they stay in the Uno console), so only live ones show, "on" first, the
+ * rest behind "N more" (15.10: a long wall of archived chips said nothing).
+ */
 function CloudComputers({
   candidates,
   onPick,
@@ -720,10 +727,21 @@ function CloudComputers({
   candidates: ReadonlyArray<{ id: number; name: string; status: string }>;
   onPick: (boxId: number) => void;
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const pickable = candidates
+    .filter((candidate) => candidate.status !== "archived" && candidate.status !== "deleted")
+    .toSorted(
+      (a, b) =>
+        Number(computerPowerState(b.status) === "on") -
+        Number(computerPowerState(a.status) === "on"),
+    );
+  if (pickable.length === 0) return null;
+  const shown = showAll ? pickable : pickable.slice(0, PICKABLE_COMPUTERS_SHOWN);
+  const hidden = pickable.length - shown.length;
   return (
     <div className="-mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       <span>Your Uno computers:</span>
-      {candidates.map((candidate) => (
+      {shown.map((candidate) => (
         <Button key={candidate.id} size="xs" variant="outline" onClick={() => onPick(candidate.id)}>
           <MonitorIcon />
           {candidate.name}
@@ -732,6 +750,11 @@ function CloudComputers({
           </span>
         </Button>
       ))}
+      {hidden > 0 ? (
+        <Button size="xs" variant="ghost" onClick={() => setShowAll(true)}>
+          {hidden} more
+        </Button>
+      ) : null}
     </div>
   );
 }

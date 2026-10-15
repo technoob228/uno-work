@@ -240,10 +240,12 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   );
 });
 
-/** Account and computer on top, Search ⌘K and New chat as icons. No footer. */
+/**
+ * Account and computer on top, Search ⌘K as an icon. No footer. New chat is Home
+ * right below (15.10: a second New chat icon up here squeezed the account name).
+ */
 export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: boolean }) {
   const computerName = useSidebarDComputerName();
-  const goHome = useGoHome();
   const openPalette = useCommandPaletteStore((store) => store.setOpen);
   const { isMobile, setOpen } = useSidebar();
   const row = (
@@ -256,9 +258,6 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
         testId="sidebar-search"
       >
         <SearchIcon />
-      </SidebarDHeaderIcon>
-      <SidebarDHeaderIcon label="New chat" onClick={goHome} testId="sidebar-header-new-chat">
-        <SquarePenIcon />
       </SidebarDHeaderIcon>
       {isMobile ? null : (
         <SidebarDHeaderIcon
