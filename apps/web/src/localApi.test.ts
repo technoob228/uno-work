@@ -694,6 +694,7 @@ describe("wsApi", () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
       browserAutomationLevel: "full" as const,
+      browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
@@ -770,6 +771,7 @@ describe("wsApi", () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
       browserAutomationLevel: "full" as const,
+      browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,

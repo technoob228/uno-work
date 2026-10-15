@@ -54,6 +54,7 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
 - `commandPalette.toggle`: open or close the global command palette
 - `sidebar.toggle`: hide or show the sidebar
+- `rightPanel.toggle`: open or close the right panel (the Panel button in a chat's header). No default key — `mod+j` is `terminal.toggle`
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor

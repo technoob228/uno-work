@@ -128,6 +128,16 @@ export const BrowserExecutor = Schema.Literals(["auto", "local", "server"]);
 export type BrowserExecutor = typeof BrowserExecutor.Type;
 export const DEFAULT_BROWSER_EXECUTOR: BrowserExecutor = "auto";
 
+// Where a browser tab the PERSON opens goes (the chip "Opens in" in the
+// browser tab's address bar): "app" — the desktop app's own browser in the
+// panel; "computer" — the chat computer's browser with live view and Take
+// control; "auto" — the computer's browser when the chat's agents browse
+// there (a cloud computer), else the app. Per device. Not the agent's
+// routing: that is `ServerBrowserSettings.executor` on the daemon.
+export const BrowserOpenIn = Schema.Literals(["auto", "app", "computer"]);
+export type BrowserOpenIn = typeof BrowserOpenIn.Type;
+export const DEFAULT_BROWSER_OPEN_IN: BrowserOpenIn = "auto";
+
 export const ServerBrowserSettings = Schema.Struct({
   executor: BrowserExecutor.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_EXECUTOR)),
@@ -145,6 +155,9 @@ export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   browserAutomationLevel: BrowserAutomationLevel.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTOMATION_LEVEL)),
+  ),
+  browserOpenIn: BrowserOpenIn.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_OPEN_IN)),
   ),
   browserProfileScope: BrowserProfileScope.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_PROFILE_SCOPE)),
@@ -908,6 +921,7 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   browserAutomationLevel: Schema.optionalKey(BrowserAutomationLevel),
+  browserOpenIn: Schema.optionalKey(BrowserOpenIn),
   browserProfileScope: Schema.optionalKey(BrowserProfileScope),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
