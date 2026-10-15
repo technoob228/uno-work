@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.135 — 2026-10-15
+
+- One "Panel" button in the chat header instead of the folder, globe and panel icons. The dot still says something new is in the panel.
+- An empty panel (and "+" in its tab strip) shows big tiles: Browser, Files, Terminal, Changes, Apps, Sites — press the letter to open. Tiles that make no sense here are hidden, not greyed out.
+- Browser opens a tab right away. On a cloud computer it is the computer's browser: live picture, Take control / Hand back. If the browser can't start, the tab says why with "Try again" instead of nothing happening.
+- In the desktop app, the browser tab's address bar has "Opens in": this app or the computer's browser, with "Use by default".
+
 ## v0.0.134 — 2026-10-15
 
 - Files works like an editor: Tree is the default, a file opens on the right and you edit it in place; "Recent" shows files you opened and files agents changed (All / Opened / By agents). In the narrow tree column List / Tree / Recent are icons, so nothing spills over the open file.
