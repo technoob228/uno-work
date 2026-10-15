@@ -48,6 +48,17 @@ import {
 } from "../opencodeRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
+/** Max parent hops when checking whether a session descends from ours. */
+const OPENCODE_CHILD_SESSION_MAX_DEPTH = 8;
+const OPENCODE_FOREIGN_SESSION_CACHE_LIMIT = 1_000;
+/** Child-session events routed into the main thread's approval flow. */
+const OPENCODE_CHILD_ROUTED_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "permission.asked",
+  "permission.replied",
+  "question.asked",
+  "question.replied",
+  "question.rejected",
+]);
 const OPENCODE_STALE_TURN_WAIT = "2 seconds";
 const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
 const UNO_IMAGE_CONTEXT_MAX_CHARS = 24_000;
@@ -76,6 +87,15 @@ interface OpenCodeSessionContext {
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
   readonly openCodeSessionId: string;
+  /**
+   * OpenCode sessions spawned (transitively) by the main session — subagent
+   * `task` runs. Their permission / question requests must reach the same
+   * approval flow, otherwise the child blocks forever and so does the parent
+   * turn waiting on the `task` tool.
+   */
+  readonly childSessionIds: Set<string>;
+  /** Sessions verified (via `session.get`) not to descend from ours. */
+  readonly foreignSessionIds: Set<string>;
   readonly pendingPermissions: Map<string, PermissionRequest>;
   readonly pendingQuestions: Map<string, QuestionRequest>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
@@ -309,6 +329,32 @@ function appendTurnItem(
     return;
   }
   resolveTurnSnapshot(context, turnId).items.push(item);
+}
+
+/** Track subagent sessions announced via `session.created` / `session.updated`. */
+function trackChildSession(context: OpenCodeSessionContext, event: OpenCodeSubscribedEvent): void {
+  if (event.type === "session.created" || event.type === "session.updated") {
+    // Defensive: older/forked servers may publish partial `info`.
+    const info = event.properties.info as Partial<typeof event.properties.info> | undefined;
+    const parentId = info?.parentID;
+    if (info?.id === undefined) {
+      return;
+    }
+    if (
+      parentId !== undefined &&
+      (parentId === context.openCodeSessionId || context.childSessionIds.has(parentId))
+    ) {
+      context.childSessionIds.add(info.id);
+      context.foreignSessionIds.delete(info.id);
+    }
+    return;
+  }
+  if (event.type === "session.deleted") {
+    const deletedId = (event.properties.info as { id?: unknown } | undefined)?.id;
+    if (typeof deletedId === "string") {
+      context.childSessionIds.delete(deletedId);
+    }
+  }
 }
 
 function ensureSessionContext(
@@ -1335,14 +1381,71 @@ export function makeOpenCodeAdapter(
       return true;
     });
 
+    /**
+     * Whether `sessionId` descends from the main session. Fast path is the
+     * set fed by `session.created`; when that event was missed (stream
+     * reconnect, subscription started late) walk the `parentID` chain via
+     * `session.get` and cache the verdict.
+     */
+    const isChildSession = Effect.fn("isChildSession")(function* (
+      context: OpenCodeSessionContext,
+      sessionId: string,
+    ) {
+      if (context.childSessionIds.has(sessionId)) {
+        return true;
+      }
+      if (context.foreignSessionIds.has(sessionId)) {
+        return false;
+      }
+      const chain: string[] = [];
+      let cursor: string | undefined = sessionId;
+      for (
+        let depth = 0;
+        cursor !== undefined && depth < OPENCODE_CHILD_SESSION_MAX_DEPTH;
+        depth++
+      ) {
+        if (cursor === context.openCodeSessionId || context.childSessionIds.has(cursor)) {
+          for (const id of chain) context.childSessionIds.add(id);
+          return true;
+        }
+        if (context.foreignSessionIds.has(cursor)) {
+          break;
+        }
+        chain.push(cursor);
+        const lookupId: string = cursor;
+        const lookup = yield* Effect.exit(
+          runOpenCodeSdk("session.get", () => context.client.session.get({ sessionID: lookupId })),
+        );
+        if (Exit.isFailure(lookup)) {
+          // Unknown — don't cache, a later event may succeed.
+          return false;
+        }
+        cursor = lookup.value.data?.parentID;
+      }
+      if (context.foreignSessionIds.size >= OPENCODE_FOREIGN_SESSION_CACHE_LIMIT) {
+        context.foreignSessionIds.clear();
+      }
+      for (const id of chain) context.foreignSessionIds.add(id);
+      return false;
+    });
+
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
     ) {
+      trackChildSession(context, event);
       const payloadSessionId =
         "properties" in event ? (event.properties as { sessionID?: unknown }).sessionID : undefined;
       if (payloadSessionId !== context.openCodeSessionId) {
-        return;
+        // Subagent sessions: only their approvals / questions are routed —
+        // their text and tool parts belong to the `task` tool card.
+        if (
+          typeof payloadSessionId !== "string" ||
+          !OPENCODE_CHILD_ROUTED_EVENT_TYPES.has(event.type) ||
+          !(yield* isChildSession(context, payloadSessionId))
+        ) {
+          return;
+        }
       }
 
       const turnId = context.activeTurnId;
@@ -1834,6 +1937,8 @@ export function makeOpenCodeAdapter(
           server: started.server,
           directory,
           openCodeSessionId: started.openCodeSession.id,
+          childSessionIds: new Set(),
+          foreignSessionIds: new Set(),
           pendingPermissions: new Map(),
           pendingQuestions: new Map(),
           partById: new Map(),
