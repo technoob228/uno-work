@@ -187,6 +187,7 @@ import {
   resolveSnoozePresets,
   snoozeWakeDescription,
   snoozeWakeLabel,
+  threadNeedsUser,
 } from "./Sidebar.snooze";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
@@ -234,6 +235,7 @@ import {
   groupChatsByStatusForSidebarD,
   groupChatsForSidebarD,
   isRunningStatus,
+  previewDGroup,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
   SIDEBAR_D_UNO_FOLDED_KEY,
   unoRunningLabel,
@@ -506,6 +508,30 @@ function SidebarDSectionLabel(props: { label: string }) {
       className="list-none px-2.5 pt-3 pb-1 text-xs font-medium text-sidebar-muted-foreground/70"
     >
       {props.label}
+    </li>
+  );
+}
+
+/** Sidebar D: "Show 12 more" / "Show less" under a group cut to its first chats. */
+function SidebarDShowMoreRow(props: {
+  hiddenCount: number;
+  nested?: boolean;
+  testId: string;
+  onToggle: () => void;
+}) {
+  return (
+    <li className="list-none">
+      <button
+        type="button"
+        onClick={props.onToggle}
+        data-testid={props.testId}
+        className={cn(
+          "flex h-6 w-full cursor-pointer items-center rounded-md pr-2 text-left text-xs text-sidebar-muted-foreground/55 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring",
+          props.nested ? "pl-8" : "pl-2.5",
+        )}
+      >
+        {props.hiddenCount > 0 ? `Show ${props.hiddenCount} more` : "Show less"}
+      </button>
     </li>
   );
 }
@@ -1971,16 +1997,62 @@ export default function Sidebar() {
     [setFoldedProjectKeys],
   );
 
+  // Each group shows its first few chats; the rest wait behind "Show N more"
+  // (this window only — a fresh window starts short again).
+  const [dExpandedGroupKeys, setDExpandedGroupKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleDGroupExpanded = useCallback((key: string) => {
+    setDExpandedGroupKeys((keys) => {
+      const next = new Set(keys);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const dPreviews = useMemo(() => {
+    const preview = (key: string, chats: ReadonlyArray<SidebarThreadSummary>) =>
+      previewDGroup({
+        chats,
+        expanded: dExpandedGroupKeys.has(key),
+        // The open chat and one waiting on the person never hide.
+        keepVisible: (thread) => threadKeyOf(thread) === routeThreadKey || threadNeedsUser(thread),
+      });
+    return {
+      projects: new Map(
+        dGroups.projects.map((project) => [
+          project.key,
+          preview(`project:${project.key}`, project.chats),
+        ]),
+      ),
+      recents: preview("recents", dGroups.recents),
+      status: new Map(
+        dStatusSections.map((section) => [
+          section.id,
+          preview(`status:${section.id}`, section.chats),
+        ]),
+      ),
+    };
+  }, [dExpandedGroupKeys, dGroups, dStatusSections, routeThreadKey]);
+
   const orderedThreads = useMemo(
     () =>
       sidebarD
         ? [
             ...pinnedThreads,
             ...(unoChildrenFolded ? [] : dGroups.unoRunning),
-            ...dGroups.projects.flatMap((project) =>
-              isProjectFolded(project) ? [] : project.chats,
-            ),
-            ...dGroups.recents,
+            ...(dInboxMode
+              ? dStatusSections.flatMap(
+                  (section) => dPreviews.status.get(section.id)?.visible ?? section.chats,
+                )
+              : [
+                  ...dGroups.projects.flatMap((project) =>
+                    isProjectFolded(project)
+                      ? []
+                      : (dPreviews.projects.get(project.key)?.visible ?? project.chats),
+                  ),
+                  ...dPreviews.recents.visible,
+                ]),
             ...renderedSnoozedThreads,
             ...renderedSettledThreads,
           ]
@@ -1993,6 +2065,9 @@ export default function Sidebar() {
     [
       activeThreads,
       dGroups,
+      dInboxMode,
+      dPreviews,
+      dStatusSections,
       isProjectFolded,
       pinnedThreads,
       renderedSettledThreads,
@@ -3109,6 +3184,7 @@ export default function Sidebar() {
       {dGroups.projects.map((group) => {
         const folded = isProjectFolded(group);
         const project = projectByKey.get(group.key) ?? null;
+        const preview = dPreviews.projects.get(group.key);
         return (
           <li key={group.key} className="list-none">
             <ul role="list" className="flex flex-col gap-px">
@@ -3138,29 +3214,58 @@ export default function Sidebar() {
                     : null
                 }
               />
-              {folded
-                ? null
-                : group.chats.map((thread) =>
+              {folded ? null : (
+                <>
+                  {(preview?.visible ?? group.chats).map((thread) =>
                     renderRow(thread, "active", { d: true, nested: true }),
                   )}
+                  {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+                    <SidebarDShowMoreRow
+                      nested
+                      hiddenCount={preview.hiddenCount}
+                      testId={`sidebar-d-show-more-project-${group.key}`}
+                      onToggle={() => toggleDGroupExpanded(`project:${group.key}`)}
+                    />
+                  ) : null}
+                </>
+              )}
             </ul>
           </li>
         );
       })}
       {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-      {dGroups.recents.map((thread) => renderRow(thread, "active", { d: true }))}
+      {dPreviews.recents.visible.map((thread) => renderRow(thread, "active", { d: true }))}
+      {dPreviews.recents.hiddenCount > 0 || dPreviews.recents.canCollapse ? (
+        <SidebarDShowMoreRow
+          hiddenCount={dPreviews.recents.hiddenCount}
+          testId="sidebar-d-show-more-recents"
+          onToggle={() => toggleDGroupExpanded("recents")}
+        />
+      ) : null}
     </>
   );
   const dStatusList = (
     <>
-      {dStatusSections.map((section) => (
-        <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
-          <ul role="list" className="flex flex-col gap-px">
-            <SidebarDSectionLabel label={section.label} />
-            {section.chats.map((thread) => renderRow(thread, "active", { d: true }))}
-          </ul>
-        </li>
-      ))}
+      {dStatusSections.map((section) => {
+        const preview = dPreviews.status.get(section.id);
+        return (
+          <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
+            <ul role="list" className="flex flex-col gap-px">
+              <SidebarDSectionLabel label={section.label} />
+              {(preview?.visible ?? section.chats).map((thread) =>
+                renderRow(thread, "active", { d: true }),
+              )}
+              {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+                <SidebarDShowMoreRow
+                  hiddenCount={preview.hiddenCount}
+                  testId={`sidebar-d-show-more-status-${section.id}`}
+                  onToggle={() => toggleDGroupExpanded(`status:${section.id}`)}
+                />
+              ) : null}
+            </ul>
+          </li>
+        );
+      })}
       {snoozedThreads.length > 0 ? (
         // Snoozed is a status too: in the inbox it sits in the list, not on a shelf.
         <li className="list-none" data-testid="sidebar-d-status-snoozed">
