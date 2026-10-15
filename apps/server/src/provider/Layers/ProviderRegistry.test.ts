@@ -349,24 +349,26 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
 
-      it.effect("returns ready when account/read is empty but codex is signed in (codex 0.162)", () =>
-        Effect.gen(function* () {
-          const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
-            Effect.succeed(
-              makeCodexProbeSnapshot({
-                account: {
-                  account: null,
-                  requiresOpenaiAuth: true,
-                },
-                authMethod: "chatgpt",
-              }),
-            ),
-          );
+      it.effect(
+        "returns ready when account/read is empty but codex is signed in (codex 0.162)",
+        () =>
+          Effect.gen(function* () {
+            const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+              Effect.succeed(
+                makeCodexProbeSnapshot({
+                  account: {
+                    account: null,
+                    requiresOpenaiAuth: true,
+                  },
+                  authMethod: "chatgpt",
+                }),
+              ),
+            );
 
-          assert.strictEqual(status.status, "ready");
-          assert.strictEqual(status.auth.status, "authenticated");
-          assert.strictEqual(status.auth.type, "chatgpt");
-        }),
+            assert.strictEqual(status.status, "ready");
+            assert.strictEqual(status.auth.status, "authenticated");
+            assert.strictEqual(status.auth.type, "chatgpt");
+          }),
       );
 
       it.effect(

@@ -300,16 +300,14 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const accountResponse = yield* client.request("account/read", {});
   const authMethod =
     !accountResponse.account && accountResponse.requiresOpenaiAuth
-      ? yield* client
-          .request("getAuthStatus", { includeToken: false, refreshToken: false })
-          .pipe(
-            Effect.map((status) =>
-              typeof status.authMethod === "string" && status.authMethod.length > 0
-                ? status.authMethod
-                : null,
-            ),
-            Effect.orElseSucceed(() => null),
-          )
+      ? yield* client.request("getAuthStatus", { includeToken: false, refreshToken: false }).pipe(
+          Effect.map((status) =>
+            typeof status.authMethod === "string" && status.authMethod.length > 0
+              ? status.authMethod
+              : null,
+          ),
+          Effect.orElseSucceed(() => null),
+        )
       : null;
   if (!accountResponse.account && accountResponse.requiresOpenaiAuth && !authMethod) {
     return {
