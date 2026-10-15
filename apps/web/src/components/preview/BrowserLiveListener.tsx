@@ -11,6 +11,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { useStore } from "../../store";
 import { liveBrowserTabId, liveBrowserTabName, setBrowserLiveState } from "./browserLiveStore";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
+import { shouldCloseSetupTabOnState } from "./browserSource";
 import {
   findTabScopeKey,
   makeBrowserSetupFile,
@@ -74,7 +75,12 @@ export function BrowserLiveListener() {
         const previousSetup = setupStatus;
         setupStatus = state.setup.status;
         if (state.setup.status === "ready") {
-          if (findTabScopeKey(statesRef.current, setupTabId)) closeRef.current(setupTabId);
+          if (
+            shouldCloseSetupTabOnState(previousSetup, state.setup.status) &&
+            findTabScopeKey(statesRef.current, setupTabId)
+          ) {
+            closeRef.current(setupTabId);
+          }
         } else if (
           !first &&
           previousSetup !== state.setup.status &&
@@ -135,6 +141,10 @@ export function BrowserLiveListener() {
             makeLiveBrowserFile({ environmentId, page, projectKey }),
             "agent",
           );
+          // The page is here: the "Opening the page…" placeholder goes.
+          if (state.setup.status === "ready" && findTabScopeKey(statesRef.current, setupTabId)) {
+            closeRef.current(setupTabId);
+          }
         }
 
         // Страница закрылась на машине (сайт закрыл попап, браузер перезапущен)

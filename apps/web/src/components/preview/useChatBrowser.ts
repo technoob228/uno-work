@@ -4,10 +4,11 @@ import { readEnvironmentApi } from "../../environmentApi";
 import { isElectron } from "../../env";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
-import { useBrowserLiveState } from "./browserLiveStore";
+import { liveBrowserTabId, readBrowserLiveState, useBrowserLiveState } from "./browserLiveStore";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import {
+  afterComputerBrowserOpen,
   availableBrowserSources,
   type BrowserSource,
   resolveBrowserOpenSource,
@@ -38,6 +39,7 @@ export function useChatBrowser(): {
     openFileForTarget,
     openUrl,
     setOpen,
+    closeFile,
   } = usePreviewPane();
   const liveState = useBrowserLiveState(currentChatEnvironmentId);
   const browsesOnMachine = liveState?.agentsBrowseHere === true;
@@ -79,15 +81,32 @@ export function useChatBrowser(): {
         // The chat has one page on the computer: a new address goes there.
         if (url === "") return;
       }
-      // Новую страницу вкладкой откроет BrowserLiveListener, когда она появится
-      // в состоянии машины. Браузер ещё ставится (первое использование) —
-      // показываем установку; страница откроется сама. Панель открывает человек
-      // уже сейчас: иначе вкладка от слушателя (он открывает «как агент») в
-      // закрытой им панели легла бы бейджем.
-      setOpen(true);
       const environmentId = currentChatEnvironmentId;
-      void readEnvironmentApi(environmentId)
-        ?.browserLive.open({
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "Couldn't open the computer's browser",
+          description: "This computer isn't connected right now.",
+        });
+        return;
+      }
+      // Сразу что-то видимое (стенд 15.10: клик по Browser «ничего не делал»,
+      // пока машина запускала браузер): вкладка установки — она же
+      // «The browser is ready. Opening the page…», а без браузера — его
+      // установка. Страницу откроем сами по ответу машины (или
+      // BrowserLiveListener по её появлению), заглушку уберём.
+      const setupTabId = liveBrowserTabId(environmentId, BROWSER_LIVE_SETUP_PAGE_ID);
+      if (!existing) {
+        openFileForTarget(
+          target,
+          "chat",
+          makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
+        );
+      }
+      setOpen(true);
+      void api.browserLive
+        .open({
           context: {
             ...(currentChatThreadId ? { threadId: currentChatThreadId } : {}),
             ...(currentChatProjectCwd ? { cwd: currentChatProjectCwd } : {}),
@@ -95,14 +114,35 @@ export function useChatBrowser(): {
           url,
         })
         .then((result) => {
-          if (result.pageId !== BROWSER_LIVE_SETUP_PAGE_ID) return;
-          openFileForTarget(
-            target,
-            "chat",
-            makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
-          );
+          const next = afterComputerBrowserOpen({
+            resultPageId: result.pageId,
+            state: readBrowserLiveState(environmentId),
+          });
+          if (next.kind === "setup") {
+            openFileForTarget(
+              target,
+              "chat",
+              makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
+            );
+            return;
+          }
+          if (next.kind === "page") {
+            openFileForTarget(
+              target,
+              "chat",
+              makeLiveBrowserFile({
+                environmentId,
+                page: next.page,
+                projectKey: currentProjectKey,
+              }),
+            );
+            closeFile(setupTabId);
+          }
+          // "wait": the page isn't in the machine's state yet — the listener
+          // opens it when it appears and takes the placeholder away.
         })
         .catch((error: unknown) => {
+          if (!existing) closeFile(setupTabId);
           toastManager.add({
             type: "error",
             title: "Couldn't open the computer's browser",
@@ -115,6 +155,7 @@ export function useChatBrowser(): {
       currentChatProjectCwd,
       currentChatThreadId,
       currentProjectKey,
+      closeFile,
       liveState,
       openFileForTarget,
       openUrl,

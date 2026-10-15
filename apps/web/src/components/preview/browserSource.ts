@@ -15,7 +15,13 @@
  *
  * Pure, so the rules are tested directly.
  */
-import type { BrowserOpenIn } from "@t3tools/contracts";
+import {
+  BROWSER_LIVE_SETUP_PAGE_ID,
+  type BrowserLivePage,
+  type BrowserLiveState,
+  type BrowserLiveSetupStatus,
+  type BrowserOpenIn,
+} from "@t3tools/contracts";
 
 export type BrowserSource = "app" | "computer";
 
@@ -72,4 +78,34 @@ export function isDefaultBrowserSource(setting: BrowserOpenIn, source: BrowserSo
 /** Ticking "Use by default" makes this source the default; unticking gives the choice back to Uno ("auto"). */
 export function nextBrowserOpenIn(source: BrowserSource, checked: boolean): BrowserOpenIn {
   return checked ? source : "auto";
+}
+
+/**
+ * What the panel does when the computer answered "open": its setup tab (the
+ * browser is being set up), the page's tab (it is already in the machine's
+ * state), or wait for the page to appear (BrowserLiveListener opens it).
+ */
+export function afterComputerBrowserOpen(input: {
+  readonly resultPageId: string;
+  readonly state: BrowserLiveState | null;
+}):
+  | { readonly kind: "setup" }
+  | { readonly kind: "page"; readonly page: BrowserLivePage }
+  | { readonly kind: "wait" } {
+  if (input.resultPageId === BROWSER_LIVE_SETUP_PAGE_ID) return { kind: "setup" };
+  const page = input.state?.pages.find((candidate) => candidate.pageId === input.resultPageId);
+  return page ? { kind: "page", page } : { kind: "wait" };
+}
+
+/**
+ * The setup tab goes away when the browser BECOMES ready (or is ready at the
+ * first snapshot). A setup tab opened while it was already ready is the
+ * placeholder "Opening the page…" of a person's Browser click: the page's own
+ * tab replaces it, not the next state update.
+ */
+export function shouldCloseSetupTabOnState(
+  previous: BrowserLiveSetupStatus | null,
+  current: BrowserLiveSetupStatus,
+): boolean {
+  return current === "ready" && previous !== "ready";
 }

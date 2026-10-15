@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import type { BrowserLivePage, BrowserLiveState } from "@t3tools/contracts";
+
 import {
+  afterComputerBrowserOpen,
   availableBrowserSources,
   isDefaultBrowserSource,
   nextBrowserOpenIn,
   resolveBrowserOpenSource,
+  shouldCloseSetupTabOnState,
   showBrowserSourceChip,
 } from "./browserSource";
 
@@ -97,5 +101,44 @@ describe("Use by default", () => {
   it("ticking makes the source the default, unticking gives the choice back to auto", () => {
     expect(nextBrowserOpenIn("computer", true)).toBe("computer");
     expect(nextBrowserOpenIn("computer", false)).toBe("auto");
+  });
+});
+
+describe("Browser on the computer: something visible at once", () => {
+  const page = { pageId: "p1", url: "", title: "" } as unknown as BrowserLivePage;
+  const state = (pages: BrowserLivePage[]) => ({ pages }) as unknown as BrowserLiveState;
+
+  it("the machine is setting the browser up: its setup tab", () => {
+    expect(afterComputerBrowserOpen({ resultPageId: "setup", state: state([]) })).toEqual({
+      kind: "setup",
+    });
+  });
+
+  it("the page is already in the machine's state: its tab opens right away", () => {
+    expect(afterComputerBrowserOpen({ resultPageId: "p1", state: state([page]) })).toEqual({
+      kind: "page",
+      page,
+    });
+  });
+
+  it("the page isn't in the state yet: the placeholder stays until it appears", () => {
+    expect(afterComputerBrowserOpen({ resultPageId: "p1", state: state([]) })).toEqual({
+      kind: "wait",
+    });
+    expect(afterComputerBrowserOpen({ resultPageId: "p1", state: null })).toEqual({
+      kind: "wait",
+    });
+  });
+
+  it("the placeholder opened while the browser was ready is not closed by the next update", () => {
+    // Stand 15.10: the setup tab was closed on every "ready" snapshot.
+    expect(shouldCloseSetupTabOnState("ready", "ready")).toBe(false);
+  });
+
+  it("the setup tab goes when the browser becomes ready, or is ready at the first look", () => {
+    expect(shouldCloseSetupTabOnState("installing", "ready")).toBe(true);
+    expect(shouldCloseSetupTabOnState("missing", "ready")).toBe(true);
+    expect(shouldCloseSetupTabOnState(null, "ready")).toBe(true);
+    expect(shouldCloseSetupTabOnState("ready", "installing")).toBe(false);
   });
 });
