@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.136 — 2026-10-15
+
+- ⌘J (Ctrl+J on Windows and Linux) opens and closes the panel. The terminal moved to Ctrl+` (as in VS Code), also from inside the terminal. If you never changed these keys, Work moves them for you; keys you set yourself stay as they are.
+
 ## v0.0.135 — 2026-10-15
 
 - One "Panel" button in the chat header instead of the folder, globe and panel icons. The dot still says something new is in the panel.
