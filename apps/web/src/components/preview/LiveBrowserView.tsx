@@ -32,6 +32,7 @@ import { toastManager } from "../ui/toast";
 import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachineIdentities";
 import { matchCredentialsForOrigin } from "./BrowserPane";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
+import { BrowserSourceChip } from "./BrowserSourceChip";
 import { useBrowserLivePage, useBrowserLiveState } from "./browserLiveStore";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import type { PreviewFile } from "./PreviewPaneContext";
@@ -121,7 +122,7 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar environmentId={environmentId} page={page} human={human} />
+      <Toolbar environmentId={environmentId} page={page} human={human} tabId={file.id} />
       <LocationStrip environmentId={environmentId} location={state.location} />
       {page.help ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
@@ -410,10 +411,12 @@ function Toolbar({
   environmentId,
   page,
   human,
+  tabId,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
   human: boolean;
+  tabId: string;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
   const [draft, setDraft] = useState(page.url);
@@ -538,6 +541,7 @@ function Toolbar({
       >
         <RotateCwIcon />
       </Button>
+      <BrowserSourceChip source="computer" tabId={tabId} url={page.url} />
       <form
         className="min-w-0 flex-1"
         onSubmit={(event) => {

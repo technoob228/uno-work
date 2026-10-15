@@ -51,6 +51,7 @@ import {
   setBrowserTabAutomationHandler,
 } from "./BrowserAutomationRegistry";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
+import { BrowserSourceChip } from "./BrowserSourceChip";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import {
   isBrowserTab,
@@ -783,6 +784,7 @@ function BrowserView({
           >
             {loading ? <XIcon className="size-3.5" /> : <RotateCwIcon className="size-3.5" />}
           </button>
+          <BrowserSourceChip source="app" tabId={tab.id} url={currentUrl} />
           <form
             className="flex min-w-0 flex-1"
             onSubmit={(event) => {

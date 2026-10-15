@@ -1,0 +1,75 @@
+/**
+ * Where a browser tab the person opens goes — the chip "Opens in" in the
+ * browser tab's address bar (plan 22, step 4).
+ *
+ *   - "app"      — the desktop app's own browser, right in the panel
+ *                  (Electron <webview>, BrowserPane). Only in the desktop app.
+ *   - "computer" — the chat computer's browser (LiveBrowserView): a live
+ *                  picture, Take control / Hand back. Any client connected to
+ *                  a computer whose daemon has the browser.
+ *
+ * The choice is the person's (`browserOpenIn`, per device). The agent's
+ * browser commands don't follow it: they follow the daemon's
+ * `browser.executor` (browserCommandRouter) — so a page the agent opened
+ * stays where the agent works.
+ *
+ * Pure, so the rules are tested directly.
+ */
+import type { BrowserOpenIn } from "@t3tools/contracts";
+
+export type BrowserSource = "app" | "computer";
+
+export const BROWSER_SOURCE_LABEL: Record<BrowserSource, string> = {
+  app: "This app",
+  computer: "The computer's browser",
+};
+
+/** The line under a source in the chip's menu. */
+export const BROWSER_SOURCE_DESCRIPTION: Record<BrowserSource, string> = {
+  app: "Right here in the panel, with your logins and phone sizes",
+  computer: "Runs on the computer, also when the app is closed. Take control any time",
+};
+
+/** The sources this client actually has, in menu order. */
+export function availableBrowserSources(input: {
+  /** The desktop app (it has <webview>). */
+  readonly desktopApp: boolean;
+  /** The chat's computer reports its browser (`subscribeBrowserLive` answered). */
+  readonly computerBrowser: boolean;
+}): BrowserSource[] {
+  const sources: BrowserSource[] = [];
+  if (input.desktopApp) sources.push("app");
+  if (input.computerBrowser) sources.push("computer");
+  return sources;
+}
+
+/** A choice needs two things to choose from: one source — no chip. */
+export function showBrowserSourceChip(sources: ReadonlyArray<BrowserSource>): boolean {
+  return sources.length >= 2;
+}
+
+/**
+ * Where "Browser" (the launcher tile, "+") opens a page. The person's default
+ * wins when this client has it; otherwise (and for "auto") the old rule: the
+ * computer's browser when the chat's agents browse there (a cloud computer),
+ * else the panel's own browser tab (the desktop webview, or the companion
+ * extension's tab in the web build — as before the chip existed).
+ */
+export function resolveBrowserOpenSource(input: {
+  readonly setting: BrowserOpenIn;
+  readonly sources: ReadonlyArray<BrowserSource>;
+  readonly agentsBrowseOnComputer: boolean;
+}): BrowserSource {
+  if (input.setting !== "auto" && input.sources.includes(input.setting)) return input.setting;
+  return input.agentsBrowseOnComputer && input.sources.includes("computer") ? "computer" : "app";
+}
+
+/** "Use by default" is ticked only when the person chose this very source. */
+export function isDefaultBrowserSource(setting: BrowserOpenIn, source: BrowserSource): boolean {
+  return setting === source;
+}
+
+/** Ticking "Use by default" makes this source the default; unticking gives the choice back to Uno ("auto"). */
+export function nextBrowserOpenIn(source: BrowserSource, checked: boolean): BrowserOpenIn {
+  return checked ? source : "auto";
+}
