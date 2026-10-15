@@ -31,7 +31,7 @@ import {
   ListTodoIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type EnvironmentId, FILESYSTEM_READ_FILE_HARD_MAX_BYTES } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -98,7 +98,14 @@ import { CodeFileView } from "./CodeFileView";
 import { HtmlFileFrame } from "./HtmlFileFrame";
 import { MemoizedScrollArea, useScrollMemoryRef } from "./previewScrollArea";
 import { TableEditableBody } from "./TableEditor";
-import { parseDelimitedRows, resolveWriteTarget, spreadsheetColumnLabel } from "./previewFileUtils";
+import {
+  parseDelimitedRows,
+  type PreviewDownloadSource,
+  previewDownloadSource,
+  resolveWriteTarget,
+  spreadsheetColumnLabel,
+} from "./previewFileUtils";
+import { readFileBytes } from "../files/filesApi";
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   md: FileTextIcon,
@@ -412,44 +419,32 @@ function base64ToBlobUrl(base64: string, mimeType: string): string {
 }
 
 /**
- * Скачать открытый в превью файл к себе. Файл может жить на удалённой машине,
- * поэтому читаем его через filesystem.readFile окружения (до жёсткого лимита)
- * и отдаём браузеру/Electron как обычную загрузку через <a download>.
+ * The bytes behind a tab's Download button. A file of a computer comes over
+ * the Files raw route (streamed, any size up to what Files serves, falling
+ * back to the socket reader); a picture pinned from a chat from its blob.
  */
-async function resolveDownloadBlob(
-  file: PreviewFile,
-  fallbackEnvironmentId: EnvironmentId | null,
-): Promise<Blob> {
-  const environmentId = file.environmentId ?? fallbackEnvironmentId;
-  if (file.path && environmentId) {
-    const api = readEnvironmentApi(environmentId);
-    if (!api) throw new Error("Окружение недоступно");
-    const data = await api.filesystem.readFile({
-      path: file.path,
-      maxBytes: FILESYSTEM_READ_FILE_HARD_MAX_BYTES,
-    });
-    if (data.truncated) {
-      throw new Error(
-        `Файл больше ${Math.round(FILESYSTEM_READ_FILE_HARD_MAX_BYTES / 1024 / 1024)} МБ — скачайте его с диска напрямую`,
-      );
-    }
-    const mime = data.mimeType ?? "application/octet-stream";
-    return data.encoding === "base64"
-      ? base64ToBlob(data.content, mime)
-      : new Blob([data.content], { type: mime });
+async function resolveDownloadBlob(source: PreviewDownloadSource): Promise<Blob> {
+  switch (source.kind) {
+    case "computer":
+      return new Blob([await readFileBytes(source.environmentId, source.path)]);
+    case "blob":
+      return (await fetch(source.blobUrl)).blob();
+    case "content":
+      return new Blob([source.content], { type: "text/plain;charset=utf-8" });
   }
-  if (file.blobUrl) {
-    return (await fetch(file.blobUrl)).blob();
-  }
-  return new Blob([file.content], { type: "text/plain;charset=utf-8" });
 }
 
+/**
+ * Save the tab's file in the person's downloads: a plain `<a download>` —
+ * the browser's download bar on the web; in the desktop app Electron's own
+ * download handling (no will-download hook: it asks where to save).
+ */
 async function downloadPreviewFile(
   file: PreviewFile,
-  fallbackEnvironmentId: EnvironmentId | null,
+  source: PreviewDownloadSource,
 ): Promise<void> {
   try {
-    const blob = await resolveDownloadBlob(file, fallbackEnvironmentId);
+    const blob = await resolveDownloadBlob(source);
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -462,7 +457,7 @@ async function downloadPreviewFile(
   } catch (error) {
     toastManager.add({
       type: "error",
-      title: "Не удалось скачать файл",
+      title: "Couldn't download the file",
       description: error instanceof Error ? error.message : undefined,
     });
   }
@@ -1605,15 +1600,20 @@ function PathBar({
     }
   }, [rawPath]);
 
+  const downloadSource = useMemo(
+    () => previewDownloadSource(file, currentChatEnvironmentId ?? null),
+    [file, currentChatEnvironmentId],
+  );
   const [downloading, setDownloading] = useState(false);
   const handleDownload = useCallback(async () => {
+    if (!downloadSource) return;
     setDownloading(true);
     try {
-      await downloadPreviewFile(file, currentChatEnvironmentId ?? null);
+      await downloadPreviewFile(file, downloadSource);
     } finally {
       setDownloading(false);
     }
-  }, [file, currentChatEnvironmentId]);
+  }, [file, downloadSource]);
 
   return (
     <div
@@ -1706,26 +1706,29 @@ function PathBar({
           />
           <TooltipPopup side="bottom">{copied ? "Copied!" : "Copy path"}</TooltipPopup>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={downloading}
-                aria-label="Скачать файл"
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {downloading ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <DownloadIcon className="size-3.5" />
-                )}
-              </button>
-            }
-          />
-          <TooltipPopup side="bottom">Скачать</TooltipPopup>
-        </Tooltip>
+        {downloadSource ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-label="Download"
+                  data-testid="preview-download"
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {downloading ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <DownloadIcon className="size-3.5" />
+                  )}
+                </button>
+              }
+            />
+            <TooltipPopup side="bottom">Download</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

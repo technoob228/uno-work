@@ -1,3 +1,5 @@
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import type { PreviewFile } from "./PreviewPaneContext";
 
 export function computeRelativePath(absolutePath: string, projectCwd: string): string | null {
@@ -96,4 +98,42 @@ export function spreadsheetColumnLabel(index: number): string {
 export function delimiterForFileName(name: string): string {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   return ext === "tsv" ? "\t" : ",";
+}
+
+/** Panel tabs that are not a file: nothing to download there. */
+const NOT_A_FILE_KINDS: ReadonlySet<PreviewFile["kind"]> = new Set([
+  "browser",
+  "live-browser",
+  "plugin-panel",
+  "app",
+  "tasks",
+]);
+
+/** Where the Download button of a panel tab takes the bytes from. */
+export type PreviewDownloadSource =
+  /** A file of a computer: read from there (any size the Files raw route serves). */
+  | { readonly kind: "computer"; readonly path: string; readonly environmentId: EnvironmentId }
+  /** Bytes the app already holds (a picture pinned from a chat, an attachment preview). */
+  | { readonly kind: "blob"; readonly blobUrl: string }
+  /** Text the tab was opened with (a snippet from a chat). */
+  | { readonly kind: "content"; readonly content: string };
+
+/**
+ * What the tab's Download button saves, or null when the tab has no file
+ * (browser, app, plugin panel, tasks) or nothing to save — then the button
+ * isn't shown. Every file kind the panel shows (picture, PDF, Word, Excel,
+ * Markdown, code, CSV, a web page…) gets one: Katya 15.10.
+ */
+export function previewDownloadSource(
+  file: Pick<PreviewFile, "kind" | "path" | "blobUrl" | "content" | "environmentId">,
+  fallbackEnvironmentId: EnvironmentId | null,
+): PreviewDownloadSource | null {
+  if (NOT_A_FILE_KINDS.has(file.kind)) return null;
+  const environmentId = file.environmentId ?? fallbackEnvironmentId;
+  if (file.path && environmentId) {
+    return { kind: "computer", path: file.path, environmentId };
+  }
+  if (file.blobUrl) return { kind: "blob", blobUrl: file.blobUrl };
+  if (file.content.length > 0) return { kind: "content", content: file.content };
+  return null;
 }
