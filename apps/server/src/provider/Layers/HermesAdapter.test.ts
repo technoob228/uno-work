@@ -5,12 +5,14 @@ import { fileURLToPath } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { Context, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   HermesSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderRuntimeEvent,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -183,4 +185,94 @@ makeHermesAdapterTestLayer({ T3_ACP_PROMPT_RESPONSE_TEXT: "HTTP 402: Insufficien
       }),
     );
   },
+);
+
+const sleep = (ms: number) =>
+  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+/** Mock ACP agent that never answers `session/prompt` and ignores cancel. */
+const makeWedgedHermesLayer = () =>
+  Layer.effect(
+    HermesAdapter,
+    Effect.gen(function* () {
+      const mock = yield* Effect.promise(() => makeMockHermes());
+      return yield* makeHermesAdapter(
+        Schema.decodeSync(HermesSettings)({ binaryPath: mock.wrapperPath }),
+        {
+          environment: { HERMES_HOME: mock.hermesHome, T3_ACP_HANG_PROMPT: "1" },
+          interruptSettleTimeoutMs: 1_000,
+        },
+      );
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-hermes-adapter-test-" }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+it.effect(
+  "starts a queued turn only after the prompt lock and restarts hermes when cancel is ignored",
+  () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("hermes-wedged-thread");
+      const adapter = yield* HermesAdapter;
+      const events: ProviderRuntimeEvent[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("hermes"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const firstTurn = yield* adapter
+        .sendTurn({ threadId, input: "first", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* sleep(300);
+      const secondTurn = yield* adapter
+        .sendTurn({ threadId, input: "second", attachments: [] })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* sleep(300);
+
+      // The second turn is queued behind the first prompt: it must not
+      // look "working" yet.
+      const startedBeforeInterrupt = events.filter((event) => event.type === "turn.started");
+      assert.equal(startedBeforeInterrupt.length, 1);
+      const firstTurnId = startedBeforeInterrupt[0]?.turnId;
+
+      const interrupt = yield* adapter.interruptTurn(threadId).pipe(Effect.forkChild);
+      yield* sleep(100);
+      // Hermes ignores session/cancel; advance past the settle timeout.
+      yield* TestClock.adjust("2 seconds");
+      yield* Fiber.join(interrupt);
+
+      const first = yield* Fiber.join(firstTurn);
+      assert.equal(first.turnId, firstTurnId);
+
+      const completed = events.find(
+        (event) => event.type === "turn.completed" && event.turnId === firstTurnId,
+      );
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "interrupted");
+      }
+      assert.equal(
+        events.some((event) => event.type === "session.exited"),
+        true,
+      );
+      assert.equal(yield* adapter.hasSession(threadId), false);
+
+      // The prompt lock was released: the queued turn got past it (and
+      // found the torn-down session) instead of waiting forever. It never
+      // emitted turn.started.
+      const second = yield* Fiber.join(secondTurn);
+      assert.equal(Exit.isFailure(second), true);
+      assert.equal(events.filter((event) => event.type === "turn.started").length, 1);
+    }).pipe(Effect.provide(makeWedgedHermesLayer())),
+  30_000,
 );
