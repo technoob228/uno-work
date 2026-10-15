@@ -19,6 +19,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
   Cause,
+  Clock,
   Deferred,
   Effect,
   Exit,
@@ -92,6 +93,13 @@ const OPENCODE_CHILD_SESSION_LIFECYCLE_EVENT_TYPES: ReadonlySet<string> = new Se
   "session.updated",
   "session.deleted",
 ]);
+/**
+ * Without having seen `busy` for the active turn, reconciliation after an
+ * event-stream reconnect only trusts an idle status once the prompt was
+ * accepted at least this long ago — OpenCode flips the session to busy
+ * asynchronously after `promptAsync`.
+ */
+const OPENCODE_RECONCILE_MIN_TURN_AGE_MS = 5_000;
 const OPENCODE_STALE_TURN_WAIT = "2 seconds";
 /**
  * How long a shared OpenCode server outlives its last session. Covers a
@@ -152,6 +160,14 @@ interface OpenCodeSessionContext {
   readonly compactionMessageIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   promptIdle: Deferred.Deferred<void> | undefined;
+  /**
+   * Set once OpenCode accepted `promptAsync` for a turn. Event-stream
+   * reconciliation only completes a turn whose prompt was accepted, so a
+   * reconnect racing `sendTurn` can't finish a turn that never started.
+   */
+  promptAccepted: { readonly turnId: TurnId; readonly at: number } | undefined;
+  /** Turn for which a `session.status: busy` event was observed. */
+  busyObservedTurnId: TurnId | undefined;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeModel: ReturnType<typeof parseOpenCodeModelSlug> | undefined;
@@ -195,6 +211,12 @@ export interface OpenCodeAdapterLiveOptions {
   }) => Record<string, string>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * Liveness window for the event SSE stream. OpenCode sends
+   * `server.heartbeat` every ~10 s; no event at all for this long means the
+   * stream is wedged and gets aborted + resubscribed. Test hook.
+   */
+  readonly eventStreamIdleTimeoutMs?: number;
   /**
    * Which SSE stream to read session events from.
    *
@@ -1131,52 +1153,83 @@ export function makeOpenCodeAdapter(
     const adapterScope = yield* Scope.Scope;
 
     const openEventStream = (input: {
-      readonly baseUrl: string;
-      readonly serverPassword?: string | undefined;
-      readonly streamKey: string;
+      readonly client: OpencodeClient;
       readonly signal: AbortSignal;
     }): Effect.Effect<
       Stream.Stream<OpenCodeSubscribedEvent, OpenCodeRuntimeError>,
       OpenCodeRuntimeError
     > => {
-      const client = openCodeRuntime.createOpenCodeSdkClient({
-        baseUrl: input.baseUrl,
-        directory: input.streamKey.startsWith("dir:")
-          ? input.streamKey.slice("dir:".length)
-          : serverConfig.cwd,
-        ...(input.serverPassword ? { serverPassword: input.serverPassword } : {}),
-      });
+      const { client } = input;
       const toError = (operation: string) => (cause: unknown) =>
         new OpenCodeRuntimeError({
           operation,
           detail: openCodeRuntimeErrorDetail(cause),
           cause,
         });
+      // Surface transport errors instead of the SDK's silent infinite
+      // in-iterator retries (which also lose events): one attempt, then the
+      // iterator ends and the hub resubscribes (and reconciles).
+      let lastSseError: unknown;
+      const sseOptions = {
+        signal: input.signal,
+        sseMaxRetryAttempts: 1,
+        onSseError: (error: unknown) => {
+          lastSseError = error;
+        },
+      };
+      const failOnSseError = (operation: string) =>
+        Stream.suspend(() =>
+          lastSseError === undefined || input.signal.aborted
+            ? Stream.empty
+            : Stream.fail(toError(operation)(lastSseError)),
+        );
       return eventSource === "global"
-        ? runOpenCodeSdk("global.event", () => client.global.event({ signal: input.signal })).pipe(
+        ? runOpenCodeSdk("global.event", () => client.global.event(sseOptions)).pipe(
             Effect.map((subscription) =>
               Stream.fromAsyncIterable(subscription.stream, toError("global.event")).pipe(
                 Stream.map((envelope) => envelope.payload as OpenCodeSubscribedEvent),
+                Stream.concat(failOnSseError("global.event")),
               ),
             ),
           )
         : runOpenCodeSdk("event.subscribe", () =>
-            client.event.subscribe(undefined, { signal: input.signal }),
+            client.event.subscribe(undefined, sseOptions),
           ).pipe(
             Effect.map((subscription) =>
-              Stream.fromAsyncIterable(subscription.stream, toError("event.subscribe")),
+              Stream.fromAsyncIterable(subscription.stream, toError("event.subscribe")).pipe(
+                Stream.concat(failOnSseError("event.subscribe")),
+              ),
             ),
           );
     };
 
-    const makeEventHub = (baseUrl: string, serverPassword?: string) =>
-      makeSessionEventHub<OpenCodeSubscribedEvent, OpenCodeRuntimeError>({
-        open: (streamKey, signal) =>
-          openEventStream({ baseUrl, serverPassword, streamKey, signal }),
+    const makeEventHub = (baseUrl: string, serverPassword?: string) => {
+      // One SDK client per stream key, reused across resubscribes.
+      const clients = new Map<string, OpencodeClient>();
+      const clientFor = (streamKey: string) => {
+        let client = clients.get(streamKey);
+        if (!client) {
+          client = openCodeRuntime.createOpenCodeSdkClient({
+            baseUrl,
+            directory: streamKey.startsWith("dir:")
+              ? streamKey.slice("dir:".length)
+              : serverConfig.cwd,
+            ...(serverPassword ? { serverPassword } : {}),
+          });
+          clients.set(streamKey, client);
+        }
+        return client;
+      };
+      return makeSessionEventHub<OpenCodeSubscribedEvent, OpenCodeRuntimeError>({
+        open: (streamKey, signal) => openEventStream({ client: clientFor(streamKey), signal }),
         sessionIdOf: openCodeEventSessionId,
         describeError: openCodeRuntimeErrorDetail,
         callbackScope: adapterScope,
+        ...(options?.eventStreamIdleTimeoutMs !== undefined
+          ? { idleTimeoutMs: options.eventStreamIdleTimeoutMs }
+          : {}),
       });
+    };
 
     // Shared servers: one `opencode serve` per distinct environment, for all
     // threads of this instance. Falls back to a server per thread when the
@@ -1681,6 +1734,11 @@ export function makeOpenCodeAdapter(
             state: "failed",
             errorMessage: normalizeUnoBillingErrorMessage(rawMessage),
           });
+        } else if (Exit.isSuccess(sent) && context.activeTurnId === turnId) {
+          // A fresh run of the same turn: reconciliation must again wait for
+          // it to go busy (or age) before trusting an idle status.
+          context.busyObservedTurnId = undefined;
+          context.promptAccepted = { turnId, at: yield* Clock.currentTimeMillis };
         }
       }).pipe(Effect.forkIn(context.sessionScope));
       return true;
@@ -2062,6 +2120,9 @@ export function makeOpenCodeAdapter(
         }
 
         case "session.status": {
+          if (event.properties.status.type === "busy" && turnId) {
+            context.busyObservedTurnId = turnId;
+          }
           if (event.properties.status.type === "busy") {
             updateProviderSession(context, {
               status: "running",
@@ -2152,6 +2213,56 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    /**
+     * Events published while the SSE stream was down are lost (OpenCode's
+     * event stream has no replay), most importantly the `session.status:
+     * idle` that ends a turn. After every (re)subscribe ask OpenCode directly
+     * and complete the active turn if the session is already idle.
+     */
+    const reconcileSessionStatus = Effect.fn("reconcileOpenCodeSessionStatus")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      const turnId = context.activeTurnId;
+      const accepted = context.promptAccepted;
+      if (!turnId || accepted?.turnId !== turnId) {
+        return;
+      }
+      if (
+        context.busyObservedTurnId !== turnId &&
+        (yield* Clock.currentTimeMillis) - accepted.at < OPENCODE_RECONCILE_MIN_TURN_AGE_MS
+      ) {
+        return;
+      }
+      const statusExit = yield* Effect.exit(
+        runOpenCodeSdk("session.status", () => context.client.session.status()),
+      );
+      if (Exit.isFailure(statusExit)) {
+        yield* Effect.logWarning("OpenCode session.status reconcile failed", {
+          threadId: context.session.threadId,
+          cause: openCodeRuntimeErrorDetail(Cause.squash(statusExit.cause)),
+        });
+        return;
+      }
+      // OpenCode drops idle sessions from the status map.
+      const status = statusExit.value.data?.[context.openCodeSessionId] ?? { type: "idle" };
+      if (status.type !== "idle" || context.activeTurnId !== turnId) {
+        return;
+      }
+      if (context.stallRetry?.turnId === turnId && context.stallRetry.awaitingIdle) {
+        // The stalled run is over; the stall retry continues this turn.
+        context.stallRetry.awaitingIdle = false;
+        return;
+      }
+      yield* Effect.logWarning("OpenCode session went idle while the event stream was down", {
+        threadId: context.session.threadId,
+        turnId,
+      });
+      yield* completeActiveTurn(context, {
+        state: "completed",
+        raw: { source: "session.status.reconcile", status },
+      });
+    });
+
     const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
       // The hub owns the SSE subscription (one per server and stream, shared
       // by every session on that server); unsubscribing on scope close is the
@@ -2168,6 +2279,18 @@ export function makeOpenCodeAdapter(
             OPENCODE_CHILD_ROUTED_EVENT_TYPES.has(event.type)
               ? handleSubscribedEvent(context, event)
               : Effect.void,
+          onStreamLive: () => reconcileSessionStatus(context),
+          onStreamDisconnected: (info) =>
+            writeNativeEventBestEffort(context.session.threadId, {
+              observedAt: nowIso(),
+              event: {
+                provider: PROVIDER,
+                threadId: context.session.threadId,
+                providerThreadId: context.openCodeSessionId,
+                type: "t3.event_stream.disconnected",
+                payload: info,
+              },
+            }),
           onClosed: (detail) =>
             Effect.gen(function* () {
               if (yield* Ref.get(context.stopped)) return;
@@ -2418,6 +2541,8 @@ export function makeOpenCodeAdapter(
           compactionMessageIds: new Set(),
           turns: [],
           promptIdle: undefined,
+          promptAccepted: undefined,
+          busyObservedTurnId: undefined,
           stallRetry: undefined,
           activeTurnId: undefined,
           activeAgent: undefined,
@@ -2603,6 +2728,10 @@ export function makeOpenCodeAdapter(
           }),
         ),
       );
+
+      if (context.activeTurnId === turnId) {
+        context.promptAccepted = { turnId, at: yield* Clock.currentTimeMillis };
+      }
 
       return {
         threadId: input.threadId,
