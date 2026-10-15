@@ -9,7 +9,9 @@
  *
  * Names are kept as the person had them; a taken name becomes `name (2).ext`
  * and nothing is ever overwritten (exclusive create / hard link, not a
- * check-then-write).
+ * check-then-write). Any kind of file may come (a script, an installer…):
+ * none is ever run, and every one is left `0644` — readable, never
+ * executable, whatever mode the staged copy had.
  *
  * @module files/chatUploads
  */
@@ -28,6 +30,8 @@ import { numberedName } from "./filesPaths.ts";
 const NAME_MAX_BYTES = 200;
 const EXTENSION_MAX_CHARS = 16;
 const MAX_NAME_ATTEMPTS = 10_000;
+/** rw-r--r--: an attachment is a document, never a program to run. */
+export const CHAT_UPLOAD_FILE_MODE = 0o644;
 /** Staged uploads nobody sent are dropped after this long. */
 export const CHAT_UPLOAD_INCOMING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -110,7 +114,9 @@ export async function saveBytesToUploads(input: {
   for (let attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt += 1) {
     const target = nodePath.join(directory, candidateName(name, attempt));
     try {
-      await fsPromises.writeFile(target, input.bytes, { flag: "wx" });
+      await fsPromises.writeFile(target, input.bytes, { flag: "wx", mode: CHAT_UPLOAD_FILE_MODE });
+      // The umask may only take bits away; chmod pins exactly 0644.
+      await fsPromises.chmod(target, CHAT_UPLOAD_FILE_MODE);
       return target;
     } catch (error) {
       if (isErrno(error, "EEXIST")) continue;
@@ -151,6 +157,9 @@ export async function moveIntoUploads(input: {
     const target = nodePath.join(directory, candidateName(name, attempt));
     try {
       await placeExclusive(input.sourcePath, target);
+      // The staged copy came through projects.writeFile with whatever mode it
+      // got there: never leave an attachment executable.
+      await fsPromises.chmod(target, CHAT_UPLOAD_FILE_MODE);
       return target;
     } catch (error) {
       if (isErrno(error, "EEXIST")) continue;

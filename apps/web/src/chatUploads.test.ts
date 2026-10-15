@@ -10,6 +10,7 @@ import {
   displayUploadPath,
   routeComposerFiles,
 } from "./chatUploads";
+import { PROJECT_UPLOAD_MAX_FILE_BYTES } from "./projectUpload";
 
 const entry = (name: string, type: string, size = 10) => ({ name, type, size });
 const isVideo = (file: { type: string }) => file.type.startsWith("video/");
@@ -35,6 +36,38 @@ describe("routeComposerFiles", () => {
     expect(routeComposerFiles([big], { isVideo, imagesSupported: true }).files).toEqual([big]);
     const small = entry("small.png", "image/png");
     expect(routeComposerFiles([small], { isVideo, imagesSupported: false }).files).toEqual([small]);
+  });
+});
+
+describe("any safe file can be attached", () => {
+  const kinds = [
+    entry("Report.pdf", "application/pdf"),
+    entry(
+      "Contract.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+    entry("Budget.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    entry("Deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    entry("notes.txt", "text/plain"),
+    entry("README.md", "text/markdown"),
+    entry("data.csv", "text/csv"),
+    entry("config.json", "application/json"),
+    entry("site.zip", "application/zip"),
+    entry("backup.tar.gz", "application/gzip"),
+    entry("script.py", "text/x-python"),
+    entry("Setup.exe", "application/x-msdownload"),
+    entry("Makefile", ""),
+  ];
+
+  it("takes every document, archive and code file as a file (never as a picture)", () => {
+    const routed = routeComposerFiles(kinds, { isVideo, imagesSupported: true });
+    expect(routed.files).toEqual(kinds);
+    expect(routed.images).toEqual([]);
+    for (const file of kinds) expect(chatFileRejection(file)).toBeNull();
+  });
+
+  it("has the same size limit as an upload to Files", () => {
+    expect(PROVIDER_SEND_TURN_MAX_FILE_BYTES).toBe(PROJECT_UPLOAD_MAX_FILE_BYTES);
   });
 });
 

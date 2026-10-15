@@ -25,6 +25,18 @@ describe("homeAttachmentsFromFiles", () => {
     expect(result.files.map((file) => file.name)).toEqual(["a.pdf"]);
   });
 
+  it("takes documents, archives and code from Home too", () => {
+    const names = ["a.docx", "b.xlsx", "c.pptx", "d.zip", "e.py", "f.csv", "g.json", "h.exe"];
+    const result = homeAttachmentsFromFiles(
+      names.map((name) => new File(["x"], name)),
+      0,
+      preview,
+    );
+    expect(result.error).toBeNull();
+    expect(result.images).toHaveLength(0);
+    expect(result.files.map((file) => file.name)).toEqual(names);
+  });
+
   it("sends a picture too big to inline as a file", () => {
     const big = new File(["x"], "huge.png", { type: "image/png" });
     Object.defineProperty(big, "size", { value: PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1 });
