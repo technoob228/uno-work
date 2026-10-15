@@ -12,6 +12,7 @@ import {
   ResolvedKeybindingFromConfig,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  migrateLegacyTerminalToggle,
   parseKeybindingShortcut,
 } from "./keybindings.ts";
 import { KeybindingsConfigError } from "@t3tools/contracts";
@@ -289,6 +290,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           assert.isTrue(byCommand.has(defaultRule.command), `expected ${defaultRule.command}`);
         }
         assert.isTrue(byCommand.has("script.run-tests.run"));
+        // The terminal on the person's own key: ⌘J is free for the panel.
+        assert.equal(byCommand.get("rightPanel.toggle")?.key, "mod+j");
       }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
@@ -310,8 +313,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
-      assert.isFalse(persisted.some((entry) => entry.command === "terminal.toggle"));
-      assert.isTrue(persisted.some((entry) => entry.command === "script.custom-action.run"));
+      // mod+j stays the person's: the panel gets no key; the terminal its Ctrl+`.
+      assert.isFalse(persisted.some((entry) => entry.command === "rightPanel.toggle"));
+      assert.deepEqual(
+        persisted.find((entry) => entry.key === "mod+j"),
+        { key: "mod+j", command: "script.custom-action.run" },
+      );
+      assert.equal(persisted.find((entry) => entry.command === "terminal.toggle")?.key, "ctrl+`");
 
       assert.isTrue(
         messages.some((message) =>
@@ -327,6 +335,104 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       ),
     );
   });
+
+  it.effect("moves the old default terminal ⌘J to Ctrl+` and gives ⌘J to the panel", () => {
+    const messages: string[] = [];
+    const logger = Logger.make(({ message }) => {
+      messages.push(String(message));
+    });
+
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      // A keybindings.json written by 0.0.135: the old default list plus a script.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+r", command: "script.run-tests.run" },
+        { key: "mod+j", command: "terminal.toggle" },
+        { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
+      ]);
+
+      const sync = Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+      yield* sync;
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      // Same place, new key.
+      assert.deepEqual(persisted[1], { key: "ctrl+`", command: "terminal.toggle" });
+      assert.isFalse(
+        persisted.some((entry) => entry.command === "terminal.toggle" && entry.key === "mod+j"),
+      );
+      assert.deepEqual(
+        persisted.find((entry) => entry.command === "rightPanel.toggle"),
+        { key: "mod+j", command: "rightPanel.toggle" },
+      );
+      assert.equal(persisted[0]?.command, "script.run-tests.run");
+      assert.equal(
+        messages.filter((message) => message.includes("moved the terminal toggle")).length,
+        1,
+      );
+
+      // The next start finds nothing to do and leaves the file alone.
+      const afterFirst = yield* fs.readFileString(keybindingsConfigPath);
+      yield* sync;
+      assert.equal(yield* fs.readFileString(keybindingsConfigPath), afterFirst);
+      assert.equal(
+        messages.filter((message) => message.includes("moved the terminal toggle")).length,
+        1,
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          makeKeybindingsLayer(),
+          Logger.layer([logger], { mergeWithExisting: false }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("migrateLegacyTerminalToggle leaves the person's own choices alone", () =>
+    Effect.sync(() => {
+      const legacy = { key: "mod+j", command: "terminal.toggle" } as const;
+      // The terminal on another key: nothing to move.
+      const custom = [{ key: "mod+shift+t", command: "terminal.toggle" }] as const;
+      assert.deepEqual(migrateLegacyTerminalToggle(custom), { config: custom, migrated: false });
+      // A rule for the panel already: the person has decided.
+      const withPanel = [legacy, { key: "mod+p", command: "rightPanel.toggle" }] as const;
+      assert.isFalse(migrateLegacyTerminalToggle(withPanel).migrated);
+      // Ctrl+` taken by another rule: the terminal stays on ⌘J.
+      const backquoteTaken = [legacy, { key: "ctrl+`", command: "script.build.run" }] as const;
+      assert.isFalse(migrateLegacyTerminalToggle(backquoteTaken).migrated);
+      // The old default with a `when` is the person's own rule.
+      const withWhen = [{ ...legacy, when: "terminalFocus" }] as const;
+      assert.isFalse(migrateLegacyTerminalToggle(withWhen).migrated);
+      // The untouched old default moves in place.
+      assert.deepEqual(
+        migrateLegacyTerminalToggle([{ key: "mod+b", command: "sidebar.toggle" }, legacy]),
+        {
+          config: [
+            { key: "mod+b", command: "sidebar.toggle" },
+            { key: "ctrl+`", command: "terminal.toggle" },
+          ],
+          migrated: true,
+        },
+      );
+    }),
+  );
+
+  it.effect("parses ctrl+backquote", () =>
+    Effect.sync(() => {
+      assert.deepEqual(parseKeybindingShortcut("ctrl+`"), {
+        key: "`",
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+        modKey: false,
+      });
+    }),
+  );
 
   it.effect("upserts custom keybindings to configured path", () =>
     Effect.gen(function* () {

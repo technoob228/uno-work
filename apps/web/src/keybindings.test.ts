@@ -18,6 +18,7 @@ import {
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
+  isRightPanelToggleShortcut,
   isTerminalToggleShortcut,
   resolveShortcutCommand,
   shouldShowModelPickerJumpHints,
@@ -30,6 +31,7 @@ import {
   threadTraversalDirectionFromCommand,
   type ShortcutEventLike,
 } from "./keybindings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 
 function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
   return {
@@ -728,5 +730,57 @@ describe("plus key parsing", () => {
         platform: "Linux",
       }),
     );
+  });
+});
+
+describe("shipped defaults: ⌘J is the panel, Ctrl+` the terminal (0.0.136)", () => {
+  const defaults = DEFAULT_RESOLVED_KEYBINDINGS;
+  const inTerminal = { context: { terminalFocus: true, terminalOpen: true } };
+
+  it("⌘J on a Mac and Ctrl+J elsewhere toggle the right panel, not the terminal", () => {
+    const mac = event({ key: "j", metaKey: true });
+    assert.isTrue(isRightPanelToggleShortcut(mac, defaults, { platform: "MacIntel" }));
+    assert.isFalse(isTerminalToggleShortcut(mac, defaults, { platform: "MacIntel" }));
+    const linux = event({ key: "j", ctrlKey: true });
+    assert.isTrue(isRightPanelToggleShortcut(linux, defaults, { platform: "Linux" }));
+    // From inside the terminal too, as ⌘J used to close it.
+    assert.isTrue(
+      isRightPanelToggleShortcut(linux, defaults, { platform: "Linux", ...inTerminal }),
+    );
+  });
+
+  it("Ctrl+` toggles the terminal on every platform, also from inside it", () => {
+    const backquote = event({ key: "`", code: "Backquote", ctrlKey: true });
+    for (const platform of ["MacIntel", "Linux", "Win32"]) {
+      assert.isTrue(isTerminalToggleShortcut(backquote, defaults, { platform }), platform);
+      assert.isTrue(
+        isTerminalToggleShortcut(backquote, defaults, { platform, ...inTerminal }),
+        platform,
+      );
+    }
+    // ⌘` on a Mac is the system's window switch — not ours.
+    assert.isFalse(
+      isTerminalToggleShortcut(event({ key: "`", code: "Backquote", metaKey: true }), defaults, {
+        platform: "MacIntel",
+      }),
+    );
+  });
+
+  it("Ctrl+` by the key's place on non-US layouts (^, ё, dead key)", () => {
+    for (const key of ["^", "ё", "Dead", "<"]) {
+      assert.isTrue(
+        isTerminalToggleShortcut(event({ key, code: "Backquote", ctrlKey: true }), defaults, {
+          platform: "Linux",
+        }),
+        key,
+      );
+    }
+  });
+
+  it("labels: ⌘J and ⌃` on a Mac, Ctrl+J and Ctrl+` elsewhere", () => {
+    assert.equal(shortcutLabelForCommand(defaults, "rightPanel.toggle", "MacIntel"), "⌘J");
+    assert.equal(shortcutLabelForCommand(defaults, "rightPanel.toggle", "Linux"), "Ctrl+J");
+    assert.equal(shortcutLabelForCommand(defaults, "terminal.toggle", "MacIntel"), "⌃`");
+    assert.equal(shortcutLabelForCommand(defaults, "terminal.toggle", "Linux"), "Ctrl+`");
   });
 });

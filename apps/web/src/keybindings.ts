@@ -48,6 +48,9 @@ const TERMINAL_LINE_START = "\u0001";
 const TERMINAL_LINE_END = "\u0005";
 const TERMINAL_DELETE_TO_LINE_START = "\u0015";
 const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  // Ctrl+` (the terminal) by the key's place: on non-US layouts that key
+  // types "^", "ё", "<" or is a dead key.
+  Backquote: ["`"],
   BracketLeft: ["["],
   BracketRight: ["]"],
   Digit0: ["0"],
@@ -345,6 +348,14 @@ export function isTerminalToggleShortcut(
   options?: ShortcutMatchOptions,
 ): boolean {
   return matchesCommandShortcut(event, keybindings, "terminal.toggle", options);
+}
+
+export function isRightPanelToggleShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "rightPanel.toggle", options);
 }
 
 export function isTerminalSplitShortcut(

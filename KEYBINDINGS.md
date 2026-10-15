@@ -19,7 +19,8 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
 
 ```json
 [
-  { "key": "mod+j", "command": "terminal.toggle" },
+  { "key": "mod+j", "command": "rightPanel.toggle" },
+  { "key": "ctrl+`", "command": "terminal.toggle" },
   { "key": "mod+d", "command": "terminal.split", "when": "terminalFocus" },
   { "key": "mod+n", "command": "terminal.new", "when": "terminalFocus" },
   { "key": "mod+w", "command": "terminal.close", "when": "terminalFocus" },
@@ -54,7 +55,10 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
 - `commandPalette.toggle`: open or close the global command palette
 - `sidebar.toggle`: hide or show the sidebar
-- `rightPanel.toggle`: open or close the right panel (the Panel button in a chat's header). No default key — `mod+j` is `terminal.toggle`
+- `rightPanel.toggle`: open or close the right panel (the Panel button in a chat's header)
+
+Before 0.0.136 `mod+j` was `terminal.toggle`. On start the server moves that untouched old default in your `keybindings.json` to `` ctrl+` `` (in place) and gives `mod+j` to `rightPanel.toggle`. A terminal you bound to another key, an existing `rightPanel.toggle` rule, or `` ctrl+` `` already taken by another rule — the file is left as you wrote it.
+
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor

@@ -18,8 +18,19 @@ type WhenToken =
   | { type: "lparen" }
   | { type: "rparen" };
 
+/** The terminal's default before 0.0.136 — what the daemon migrates to {@link TERMINAL_TOGGLE_DEFAULT_KEY}. */
+export const LEGACY_TERMINAL_TOGGLE_RULE: KeybindingRule = {
+  key: "mod+j",
+  command: "terminal.toggle",
+};
+export const TERMINAL_TOGGLE_DEFAULT_KEY = "ctrl+`";
+
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
-  { key: "mod+j", command: "terminal.toggle" },
+  // The right panel on ⌘J / Ctrl+J (Misha 15.10); the terminal moved to
+  // Ctrl+` as in VS Code. The daemon migrates the old untouched default
+  // (`mod+j` → terminal.toggle) in people's keybindings.json on start.
+  { key: "mod+j", command: "rightPanel.toggle" },
+  { key: TERMINAL_TOGGLE_DEFAULT_KEY, command: "terminal.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },

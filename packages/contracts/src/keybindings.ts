@@ -53,8 +53,8 @@ const STATIC_KEYBINDING_COMMANDS = [
   "terminal.new",
   "terminal.close",
   "diff.toggle",
-  // The right panel (the Panel button in a chat's header). No default key:
-  // ⌘J is terminal.toggle — the person can bind it in keybindings.json.
+  // The right panel (the Panel button in a chat's header): ⌘J / Ctrl+J by
+  // default since 0.0.136; the terminal moved to Ctrl+`.
   "rightPanel.toggle",
   "commandPalette.toggle",
   "sidebar.toggle",

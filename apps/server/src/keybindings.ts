@@ -47,6 +47,8 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   DEFAULT_KEYBINDINGS,
   DEFAULT_RESOLVED_KEYBINDINGS,
+  LEGACY_TERMINAL_TOGGLE_RULE,
+  TERMINAL_TOGGLE_DEFAULT_KEY,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
@@ -122,6 +124,36 @@ function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): bo
   const rightContext = keybindingShortcutContext(right);
   if (!leftContext || !rightContext) return false;
   return leftContext === rightContext;
+}
+
+/**
+ * ⌘J moved from the terminal to the right panel (0.0.136, Misha 15.10); the
+ * terminal went to Ctrl+`. A keybindings.json written before that holds the
+ * old default `{ key: "mod+j", command: "terminal.toggle" }` verbatim: that
+ * rule — untouched, no `when` — moves to Ctrl+` in place, and the missing
+ * defaults then give ⌘J to the panel. Anything else is the person's choice
+ * and stays: the terminal on another key, a rule for the panel already, or
+ * Ctrl+` taken by another rule. Pure; `migrated: false` → same array.
+ */
+export function migrateLegacyTerminalToggle(config: ReadonlyArray<KeybindingRule>): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly migrated: boolean;
+} {
+  const index = config.findIndex((entry) =>
+    isSameKeybindingRule(entry, LEGACY_TERMINAL_TOGGLE_RULE),
+  );
+  if (index === -1) return { config, migrated: false };
+  if (config.some((entry) => entry.command === "rightPanel.toggle")) {
+    return { config, migrated: false };
+  }
+  const moved: KeybindingRule = { key: TERMINAL_TOGGLE_DEFAULT_KEY, command: "terminal.toggle" };
+  if (config.some((entry, other) => other !== index && hasSameShortcutContext(entry, moved))) {
+    return { config, migrated: false };
+  }
+  return {
+    config: config.map((entry, other) => (other === index ? moved : entry)),
+    migrated: true,
+  };
 }
 
 function encodeShortcut(shortcut: KeybindingShortcut): string | null {
@@ -476,7 +508,13 @@ const makeKeybindings = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      const migration = migrateLegacyTerminalToggle(runtimeConfig.keybindings);
+      if (migration.migrated) {
+        yield* Effect.logInfo("moved the terminal toggle from mod+j to ctrl+` (old default)", {
+          path: keybindingsConfigPath,
+        });
+      }
+      const customConfig = migration.config;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -514,6 +552,7 @@ const makeKeybindings = Effect.gen(function* () {
         });
       }
       if (missingDefaults.length === 0) {
+        if (migration.migrated) yield* writeConfigAtomically(customConfig);
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }

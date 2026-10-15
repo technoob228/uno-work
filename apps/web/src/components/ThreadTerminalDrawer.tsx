@@ -36,6 +36,7 @@ import {
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
   isTerminalToggleShortcut,
+  isRightPanelToggleShortcut,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
 } from "../keybindings";
@@ -420,6 +421,7 @@ export function TerminalViewport({
       const options = { context: { terminalFocus: true, terminalOpen: true } };
       if (
         isTerminalToggleShortcut(event, currentKeybindings, options) ||
+        isRightPanelToggleShortcut(event, currentKeybindings, options) ||
         isTerminalSplitShortcut(event, currentKeybindings, options) ||
         isTerminalNewShortcut(event, currentKeybindings, options) ||
         isTerminalCloseShortcut(event, currentKeybindings, options) ||
