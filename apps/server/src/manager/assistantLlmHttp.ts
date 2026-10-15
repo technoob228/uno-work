@@ -14,6 +14,8 @@
  *   sign-in to a subscription (ChatGPT: Hermes' device code → page + code).
  * - `GET  /api/manager/assistant/llm/sign-in?provider=` — that sign-in's state.
  * - `POST /api/manager/assistant/llm/sign-in/cancel` — stop waiting for it.
+ * - `POST /api/manager/assistant/llm/hermes-update` — update Hermes to the
+ *   version the Claude plan needs (background; the status follows it).
  * - `POST /api/manager/assistant/default-ai` — the account's default AI, as a client read it.
  *
  * Keys travel only inbound (store / test). No response and no log line
@@ -214,6 +216,21 @@ export const assistantSignInCancelRouteLayer = HttpRouter.add(
     );
     const status = yield* assistantLlm.signInCancel(input.provider);
     return HttpServerResponse.jsonUnsafe(status, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const assistantHermesUpdateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/llm/hermes-update",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const assistantLlm = yield* ManagerAssistantLlm;
+    return yield* assistantLlm.hermesUpdateStart().pipe(
+      Effect.map((status) => HttpServerResponse.jsonUnsafe(status, { status: 200 })),
+      Effect.catchTag("ManagerAssistantError", (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.detail }, { status: 409 })),
+      ),
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

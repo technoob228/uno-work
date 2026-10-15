@@ -223,9 +223,11 @@ export function subscriptionStatuses(input: {
         plan: input.claude.plan,
         account: input.claude.account,
         signIn: "harness",
-        message: `Running Uno on your Claude plan needs Hermes ${HERMES_CLAUDE_PLUGIN_MIN_VERSION} or newer on this computer${
-          input.hermesVersion ? ` (it has ${input.hermesVersion})` : ""
-        }.`,
+        message: `Needs a newer Hermes on this computer${
+          input.hermesVersion
+            ? ` (it has ${input.hermesVersion}, Claude needs ${HERMES_CLAUDE_PLUGIN_MIN_VERSION}+)`
+            : ""
+        }. Update it here — about a minute.`,
       }
     : input.claude.signedIn
       ? {

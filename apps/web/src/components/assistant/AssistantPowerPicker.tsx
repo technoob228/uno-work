@@ -45,6 +45,7 @@ import {
   getAssistantSignIn,
   listAssistantLlmModels,
   startAssistantSignIn,
+  startHermesUpdate,
 } from "../../lib/assistantLlmApi";
 import { cn } from "../../lib/utils";
 import { HarnessSignInDialog } from "../harness/HarnessSignInDialog";
@@ -101,7 +102,7 @@ function PowerCardButton(props: {
       className={cn(
         "flex flex-col gap-2 rounded-lg border p-3 transition-colors",
         props.selected ? "border-primary bg-primary/5" : "border-border",
-        props.disabled ? "opacity-60" : "hover:bg-accent/40",
+        props.disabled ? null : "hover:bg-accent/40",
       )}
       data-testid={`assistant-power-${props.id}`}
     >
@@ -111,7 +112,7 @@ function PowerCardButton(props: {
         aria-checked={props.selected}
         disabled={props.disabled || props.busy}
         onClick={props.onPick}
-        className="flex w-full cursor-pointer items-start gap-2.5 text-left disabled:cursor-default"
+        className="flex w-full cursor-pointer items-start gap-2.5 text-left disabled:cursor-default disabled:opacity-60"
       >
         <span
           className={cn(
@@ -288,6 +289,18 @@ export function AssistantPowerPicker(props: {
     (provider) => status?.keys.find((key) => key.provider === provider)?.configured,
   );
 
+  const hermesUpdate = status?.hermesUpdate;
+  const updateHermes = () =>
+    void startHermesUpdate({ environmentId })
+      .then((next) => queryClient.setQueryData(assistantLlmQueryKey(environmentId), next))
+      .catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Couldn't update Hermes",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: assistantLlmQueryKey(environmentId) });
 
@@ -386,7 +399,28 @@ export function AssistantPowerPicker(props: {
             disabled={subscription.state === "needs-hermes" || subscription.state === "unavailable"}
             onPick={() => pickSubscription(subscription)}
             action={
-              subscription.state === "sign-in" && pending !== subscription.provider ? (
+              subscription.state === "needs-hermes" ? (
+                hermesUpdate?.state === "running" ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <LoaderCircleIcon className="size-3 animate-spin" /> Updating Hermes…
+                  </span>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="self-start"
+                      onClick={updateHermes}
+                      data-testid="assistant-power-hermes-update"
+                    >
+                      Update Hermes
+                    </Button>
+                    {hermesUpdate?.state === "failed" && hermesUpdate.message ? (
+                      <span className="text-[11px] text-destructive">{hermesUpdate.message}</span>
+                    ) : null}
+                  </div>
+                )
+              ) : subscription.state === "sign-in" && pending !== subscription.provider ? (
                 <Button
                   size="xs"
                   variant="outline"

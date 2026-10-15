@@ -123,6 +123,16 @@ export function ensureAssistantHarness(input: EnvironmentScoped): Promise<Assist
   });
 }
 
+/** Update Hermes to the version the Claude plan needs (runs in the background). */
+export function startHermesUpdate(input: EnvironmentScoped): Promise<AssistantLlmStatus> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/llm/hermes-update",
+    method: "POST",
+    body: {},
+  });
+}
+
 /** Start the assistant's own sign-in to a subscription (ChatGPT: a page + a code). */
 export function startAssistantSignIn(
   input: EnvironmentScoped & { readonly provider: SubscriptionLlmProvider },

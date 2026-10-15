@@ -123,6 +123,7 @@ describe("subscriptionStatuses", () => {
     });
     expect(claude?.state).toBe("needs-hermes");
     expect(claude?.message).toContain("0.21.4");
+    expect(claude?.message).toContain("Update it here");
     expect(claude?.message).toContain("0.19.0");
   });
 

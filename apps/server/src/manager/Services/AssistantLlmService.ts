@@ -46,6 +46,12 @@ export interface ManagerAssistantLlmShape {
   readonly signInCancel: (
     provider: SubscriptionLlmProvider,
   ) => Effect.Effect<AssistantSignInStatus>;
+  /**
+   * Update Hermes on this computer to the pinned version the Claude plan
+   * needs (harnessInstallCommands: HERMES_CLAUDE_READY_REF). Runs in the
+   * background; `status().hermesUpdate` follows it.
+   */
+  readonly hermesUpdateStart: () => Effect.Effect<AssistantLlmStatus, ManagerAssistantError>;
 }
 
 export class ManagerAssistantLlm extends Context.Service<

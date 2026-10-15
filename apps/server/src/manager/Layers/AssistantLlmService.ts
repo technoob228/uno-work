@@ -43,6 +43,11 @@ import { fetchHermesModelCatalog } from "../../provider/Layers/HermesProvider.ts
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { HarnessSetup } from "../../provider/setup/HarnessSetupService.ts";
 import {
+  HERMES_CLAUDE_READY_ENV,
+  HERMES_CLAUDE_READY_VERSION,
+  HERMES_UV_TOOL_ARGS_CLAUDE_READY,
+} from "../../provider/setup/harnessInstallCommands.ts";
+import {
   type HarnessProcessHandle,
   spawnHarnessProcess,
   withUserLocalBinOnPath,
@@ -63,6 +68,7 @@ import {
   claudeSignInFromProviders,
   hermesCommandEnvironment,
   hermesSharedHome,
+  hermesVersionAtLeast,
   parseDeviceSignIn,
   readChatgptSignIn,
   stripAnsi,
@@ -78,6 +84,8 @@ const HERMES_DRIVER = ProviderDriverKind.make("hermes");
 /** A device code is good for ~15 minutes; the sign-in stops waiting then. */
 const SIGN_IN_TIMEOUT_MS = 15 * 60_000;
 const PLUGIN_INSTALL_TIMEOUT_MS = 4 * 60_000;
+/** Building Hermes from its tag: ~25 s on a fast box, minutes on a small one. */
+const HERMES_UPDATE_TIMEOUT_MS = 15 * 60_000;
 
 interface SignInJob {
   status: AssistantSignInStatus;
@@ -110,6 +118,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const installJobId = yield* Ref.make<ProviderSetupJobId | null>(null);
   const sharedHome = hermesSharedHome(serverConfig.stateDir, ASSISTANT_HARNESS_INSTANCE_ID);
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
 
   const toError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
@@ -193,6 +202,10 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
   const ensureClaudePlugin = Effect.gen(function* () {
     if (yield* Effect.promise(() => claudePluginInstalled(sharedHome))) return;
     const binary = yield* hermesBinary;
+    // `--yes-deps` (answer the dependency question without a terminal) came
+    // with Hermes 0.22; 0.21 doesn't know it and installs without asking.
+    const hermesVersion = (yield* harnessStatus).version;
+    const consentFlag = hermesVersionAtLeast(hermesVersion, "0.22.0") ? ["--yes-deps"] : [];
     const result = yield* Effect.promise(
       () =>
         new Promise<{ readonly ok: boolean; readonly output: string }>((resolve) => {
@@ -205,7 +218,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
               "plugins",
               "install",
               HERMES_CLAUDE_PLUGIN_CATALOG_NAME,
-              "--yes-deps",
+              ...consentFlag,
               "--no-enable",
             ],
             env: hermesEnv(),
@@ -234,6 +247,55 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
     }
     yield* Effect.logInfo("assistant: Claude plugin installed");
   });
+
+  let hermesUpdate: {
+    state: "running" | "succeeded" | "failed";
+    message: string | null;
+  } | null = null;
+
+  const hermesUpdateStart: ManagerAssistantLlmShape["hermesUpdateStart"] = () =>
+    Effect.gen(function* () {
+      if (hermesUpdate?.state !== "running") {
+        hermesUpdate = { state: "running", message: null };
+        let output = "";
+        let handle: HarnessProcessHandle | null = null;
+        const timer = setTimeout(() => handle?.kill(), HERMES_UPDATE_TIMEOUT_MS);
+        handle = spawnHarnessProcess({
+          command: "uv",
+          args: HERMES_UV_TOOL_ARGS_CLAUDE_READY,
+          env: {
+            ...withUserLocalBinOnPath(process.env, os.homedir()),
+            ...HERMES_CLAUDE_READY_ENV,
+          },
+          cwd: os.homedir(),
+          onOutput: (chunk) => {
+            output += chunk;
+          },
+          onExit: (exit) => {
+            clearTimeout(timer);
+            const ok = exit.code === 0 && exit.error === undefined;
+            hermesUpdate = ok
+              ? { state: "succeeded", message: null }
+              : {
+                  state: "failed",
+                  message: exit.error
+                    ? `uv didn't start: ${exit.error.message}`
+                    : /git/i.test(output) && /not found|No such file/i.test(output)
+                      ? "Updating Hermes needs git on this computer."
+                      : lastLines(output, 3) || "Updating Hermes failed.",
+                };
+            // The probe that sees the new version; the assistant's next
+            // session starts on it.
+            void runPromise(providerRegistry.refresh(HERMES_DRIVER).pipe(Effect.ignore));
+          },
+        });
+        handle.endInput();
+        yield* Effect.logInfo("assistant: updating Hermes for the Claude plan").pipe(
+          Effect.annotateLogs({ version: HERMES_CLAUDE_READY_VERSION }),
+        );
+      }
+      return yield* status();
+    });
 
   const signInJobs = new Map<SubscriptionLlmProvider, SignInJob>();
 
@@ -344,6 +406,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
         gatewayConfigured: gatewayState === "ready",
         ...(gatewayState === "pending" ? { gatewayPending: true } : {}),
         subscriptions: yield* subscriptions(harness.version),
+        ...(hermesUpdate !== null ? { hermesUpdate } : {}),
       };
     });
 
@@ -526,6 +589,7 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
     signInStart,
     signInStatus,
     signInCancel,
+    hermesUpdateStart,
   } satisfies ManagerAssistantLlmShape;
 });
 

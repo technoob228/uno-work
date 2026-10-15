@@ -276,6 +276,16 @@ export const AssistantLlmStatus = Schema.Struct({
    * don't offer them then.
    */
   subscriptions: Schema.optionalKey(Schema.Array(SubscriptionLlmStatus)),
+  /**
+   * Updating Hermes to the version the Claude plan needs (`POST
+   * /api/manager/assistant/llm/hermes-update`). Absent: never started here.
+   */
+  hermesUpdate: Schema.optionalKey(
+    Schema.Struct({
+      state: Schema.Literals(["running", "succeeded", "failed"]),
+      message: Schema.NullOr(Schema.String),
+    }),
+  ),
 });
 export type AssistantLlmStatus = typeof AssistantLlmStatus.Type;
 

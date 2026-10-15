@@ -44,6 +44,31 @@ export const HERMES_UV_TOOL_ARGS: ReadonlyArray<string> = [
   HERMES_MCP_SPEC,
 ];
 
+/**
+ * The Hermes the assistant needs for the person's Claude plan (≥ 0.21.4, the
+ * Claude plugin's floor). Hermes stopped publishing to PyPI after 0.19 and
+ * its `setup.py` refuses to build a wheel outside Nix (`HERMES_NIX_BUILD=1`
+ * is that guard's own switch); its official installer pulls ~2.5 GB of
+ * tools. The same `uv tool install` from a pinned release tag is ~200 MB and
+ * needs `git` (checked 15.10: 0.21.5, ACP, MCP, the Claude plugin). Pinned:
+ * an upgrade is a deliberate change of this tag.
+ */
+export const HERMES_CLAUDE_READY_REF = "v2026.9.24";
+export const HERMES_CLAUDE_READY_VERSION = "0.21.5";
+
+export const HERMES_UV_TOOL_ARGS_CLAUDE_READY: ReadonlyArray<string> = [
+  "tool",
+  "install",
+  "--force",
+  "--python",
+  HERMES_PYTHON,
+  `hermes-agent[acp] @ git+https://github.com/NousResearch/hermes-agent@${HERMES_CLAUDE_READY_REF}`,
+  "--with",
+  HERMES_MCP_SPEC,
+];
+
+export const HERMES_CLAUDE_READY_ENV: Readonly<Record<string, string>> = { HERMES_NIX_BUILD: "1" };
+
 export const HERMES_INSTALL_DISPLAY = `uv tool install --python ${HERMES_PYTHON} "hermes-agent[acp]" --with "${HERMES_MCP_SPEC}"`;
 
 export interface InstallPlanContext {

@@ -46,7 +46,10 @@ export function useAssistantLlm(environmentId: EnvironmentId | null): AssistantL
     refetchInterval: (current) => {
       const data = current.state.data;
       const state = data?.harness.state;
-      return state === "installing" || state === "checking" || data?.gatewayPending === true
+      return state === "installing" ||
+        state === "checking" ||
+        data?.gatewayPending === true ||
+        data?.hermesUpdate?.state === "running"
         ? BUSY_POLL_MS
         : IDLE_POLL_MS;
     },

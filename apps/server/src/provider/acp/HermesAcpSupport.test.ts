@@ -165,6 +165,7 @@ describe("buildHermesConfigYaml", () => {
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
+        '  api_mode: "chat_completions"',
         "providers:",
         '  "openai-api":',
         "    request_timeout_seconds: 180",
@@ -387,6 +388,31 @@ describe("hermes on the person's own subscription (14.10)", () => {
       target: "/s/h/plugins/claude-subscription-directsdk-experimental",
       directory: true,
     });
+  });
+
+  it("keeps the gateway's model switch working when Hermes ≥ 0.21 refuses the pivot", async () => {
+    const calls: Array<string> = [];
+    await Effect.runPromise(
+      applyModelSelectionForTest({
+        runtime: {
+          request: ((_method: string, params: { modelId: string }) => {
+            calls.push(params.modelId);
+            return params.modelId.startsWith("openrouter:")
+              ? Effect.fail(
+                  new EffectAcpErrors.AcpRequestError({
+                    code: -32603,
+                    errorMessage: "no provider",
+                  }),
+                )
+              : Effect.succeed({});
+          }) as never,
+        },
+        sessionId: "s",
+        model: "uno/smart",
+        mapError: (cause) => cause,
+      }),
+    );
+    expect(calls).toEqual(["openrouter:uno/smart", "openai-api:uno/smart"]);
   });
 
   it("sets a subscription's model in one call (the openrouter pivot fails there)", async () => {

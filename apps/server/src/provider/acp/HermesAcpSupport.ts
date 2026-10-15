@@ -314,7 +314,11 @@ export function applyHermesAcpModelSelection<E>(input: {
   if (target !== HERMES_GATEWAY_PROVIDER) {
     return setModel(target).pipe(Effect.asVoid);
   }
+  // Hermes ≥ 0.21 refuses the pivot without OpenRouter credentials, and no
+  // longer needs it (its switch keeps the endpoint — checked 15.10 against a
+  // local endpoint): the pivot is best effort, the target call decides.
   return setModel(HERMES_MODEL_SWITCH_PIVOT_PROVIDER).pipe(
+    Effect.catch(() => Effect.void),
     Effect.andThen(setModel(HERMES_GATEWAY_PROVIDER)),
     Effect.asVoid,
   );
@@ -445,6 +449,10 @@ export function buildHermesConfigYaml(input: {
     "model:",
     `  provider: ${quote(provider)}`,
     `  default: ${quote(input.model)}`,
+    // Hermes ≥ 0.21 talks to an `openai-api` endpoint over the Responses API
+    // (`/v1/responses`) by default; the gateway and brought keys speak Chat
+    // Completions, which 0.19 used anyway.
+    ...(provider === HERMES_GATEWAY_PROVIDER ? [`  api_mode: "chat_completions"`] : []),
     "providers:",
     `  ${quote(provider)}:`,
     ...(provider === HERMES_GATEWAY_PROVIDER
