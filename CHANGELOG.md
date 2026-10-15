@@ -8,6 +8,18 @@
 
 ---
 
+## v0.0.133 — 2026-10-15
+
+- Settings → AI: "New chats start on" — keep "The last one I picked" or choose one model every new chat starts on (Home, New chat, ⌘N, a new chat in a folder). Picking another model inside a chat changes only that chat.
+- Codex signed in with ChatGPT no longer shows "You were signed out of Codex": newer Codex versions answer the sign-in check differently, Work now reads it right.
+- "Work in" lists the folders you worked in last, newest chat first (a folder used every day could fall off the list).
+- "Your Uno computers" shows only computers you can open, "on" first, three at a time; archived ones stay in the Uno console.
+- The sidebar header no longer has a second New chat icon (Home right below does the same); the account name gets the room.
+- Read keeps a chat where it is; Read, Snooze and Done on chat rows and in the right-click menu.
+- Files: Tree view next to List, back / forward / up arrows.
+- A pinned app or document opens beside the chat, with "Open full screen".
+- Settings → AI: the assistant's AI moved here; Agents list (Claude, ChatGPT, OpenCode, Cursor) with a sign-in that survives a closed tab, custom harnesses, AI provider keys.
+
 ## v0.0.132 — 2026-10-13
 
 - Home hints: instead of "Next step for «title»", a small model reads the end of your last chats and suggests concrete follow-ups (an open item, a failing check, a promised step) in the language of the chat. Needs Uno AI; without it, no hints from chats. Cached for a few hours.
