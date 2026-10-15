@@ -29,6 +29,13 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  /**
+   * How codex is signed in (`chatgpt`, `apikey`, …) per `getAuthStatus`, asked
+   * only when `account/read` comes back empty: codex 0.162 answers it with
+   * `account: null` for a working ChatGPT login (15.10, Mac: `codex login
+   * status` "Logged in using ChatGPT", Work said "You were signed out").
+   */
+  readonly authMethod?: string | null;
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
@@ -291,7 +298,20 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const version = versionMatch ? versionMatch[1] : undefined;
 
   const accountResponse = yield* client.request("account/read", {});
-  if (!accountResponse.account && accountResponse.requiresOpenaiAuth) {
+  const authMethod =
+    !accountResponse.account && accountResponse.requiresOpenaiAuth
+      ? yield* client
+          .request("getAuthStatus", { includeToken: false, refreshToken: false })
+          .pipe(
+            Effect.map((status) =>
+              typeof status.authMethod === "string" && status.authMethod.length > 0
+                ? status.authMethod
+                : null,
+            ),
+            Effect.orElseSucceed(() => null),
+          )
+      : null;
+  if (!accountResponse.account && accountResponse.requiresOpenaiAuth && !authMethod) {
     return {
       account: accountResponse,
       version,
@@ -312,6 +332,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 
   return {
     account: accountResponse,
+    authMethod,
     version,
     models: appendCustomCodexModels(models, input.customModels ?? []),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
@@ -366,7 +387,10 @@ const makePendingCodexProvider = (codexSettings: CodexSettings): ServerProviderD
   });
 };
 
-function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]): {
+function accountProbeStatus(
+  account: CodexAppServerProviderSnapshot["account"],
+  authMethod: string | null = null,
+): {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProvider["auth"];
   readonly message?: string;
@@ -382,6 +406,10 @@ function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]):
 
   if (account.account) {
     return { status: "ready", auth };
+  }
+
+  if (authMethod) {
+    return { status: "ready", auth: { status: "authenticated", type: authMethod } };
   }
 
   if (account.requiresOpenaiAuth) {
@@ -481,7 +509,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const snapshot = probeResult.success.value;
-  const accountStatus = accountProbeStatus(snapshot.account);
+  const accountStatus = accountProbeStatus(snapshot.account, snapshot.authMethod ?? null);
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
