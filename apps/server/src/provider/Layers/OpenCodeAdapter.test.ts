@@ -9,6 +9,7 @@ import { Context, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } fr
 import { beforeEach } from "vitest";
 
 import {
+  ApprovalRequestId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -68,6 +69,8 @@ const runtimeMock = {
     connectEnvironments: [] as Array<NodeJS.ProcessEnv | undefined>,
     permissionReplies: [] as Array<{ requestID: string; reply: string }>,
     questionReplies: [] as Array<{ requestID: string; answers: unknown }>,
+    sessionParents: {} as Record<string, string | undefined>,
+    sessionGetCalls: [] as string[],
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -86,6 +89,8 @@ const runtimeMock = {
     this.state.connectEnvironments.length = 0;
     this.state.permissionReplies = [];
     this.state.questionReplies = [];
+    this.state.sessionParents = {};
+    this.state.sessionGetCalls = [];
   },
 };
 
@@ -142,6 +147,14 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
+        },
+        get: async ({ sessionID }: { sessionID: string }) => {
+          runtimeMock.state.sessionGetCalls.push(sessionID);
+          if (!(sessionID in runtimeMock.state.sessionParents)) {
+            throw new Error(`session not found: ${sessionID}`);
+          }
+          const parentID = runtimeMock.state.sessionParents[sessionID];
+          return { data: { id: sessionID, ...(parentID ? { parentID } : {}) } };
         },
         promptAsync: async (input: unknown) => {
           runtimeMock.state.promptCalls.push(input);
@@ -1378,6 +1391,119 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       ]);
       assert.equal(seen.includes("request.opened"), false);
       assert.equal(seen.includes("request.resolved"), false);
+    }),
+  );
+
+  it.effect("routes subagent (child session) approvals into the main thread", () =>
+    Effect.gen(function* () {
+      const mainSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "session.created",
+          properties: {
+            sessionID: "child-1",
+            info: { id: "child-1", parentID: mainSessionId },
+          },
+        },
+        {
+          type: "session.created",
+          properties: {
+            sessionID: "grandchild-1",
+            info: { id: "grandchild-1", parentID: "child-1" },
+          },
+        },
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-other-thread",
+            sessionID: "foreign-session",
+            permission: "bash",
+            patterns: ["rm -rf /"],
+            metadata: {},
+            always: [],
+          },
+        },
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-grandchild",
+            sessionID: "grandchild-1",
+            permission: "external_directory",
+            patterns: ["/etc/*"],
+            metadata: {},
+            always: [],
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "child-1",
+            info: { id: "child-msg", role: "assistant" },
+          },
+        },
+      ];
+      runtimeMock.state.sessionParents = { "foreign-session": undefined };
+      const adapter = yield* OpenCodeAdapter;
+      const opened: string[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            if (event.type === "request.opened" && event.requestId) {
+              opened.push(event.requestId);
+            }
+          }),
+        ),
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-child-approval"),
+        runtimeMode: "approval-required",
+      });
+      yield* sleep(20);
+      assert.deepEqual(opened, ["perm-grandchild"]);
+      assert.deepEqual(runtimeMock.state.sessionGetCalls, ["foreign-session"]);
+
+      yield* adapter.respondToRequest(
+        asThreadId("thread-child-approval"),
+        ApprovalRequestId.make("perm-grandchild"),
+        "accept",
+      );
+      assert.deepEqual(runtimeMock.state.permissionReplies, [
+        { requestID: "perm-grandchild", reply: "once" },
+      ]);
+    }),
+  );
+
+  it.effect("resolves missed child sessions via the parent chain and auto-approves them", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-missed-child",
+            sessionID: "missed-child",
+            permission: "read",
+            patterns: ["/repo/.env"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+      runtimeMock.state.sessionParents = {
+        "missed-child": "http://127.0.0.1:9999/session",
+      };
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-missed-child"),
+        runtimeMode: "full-access",
+      });
+      yield* sleep(20);
+      assert.deepEqual(runtimeMock.state.sessionGetCalls, ["missed-child"]);
+      assert.deepEqual(runtimeMock.state.permissionReplies, [
+        { requestID: "perm-missed-child", reply: "once" },
+      ]);
     }),
   );
 });

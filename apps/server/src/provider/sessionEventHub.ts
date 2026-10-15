@@ -20,6 +20,12 @@ import { Cause, Effect, Exit, Fiber, Scope, Stream } from "effect";
 export interface SessionEventSubscriber<Ev> {
   readonly onEvent: (event: Ev) => Effect.Effect<void>;
   readonly onClosed: (detail: string) => Effect.Effect<void>;
+  /**
+   * Events whose session id matches no subscriber of the stream (e.g. an
+   * OpenCode subagent's child session) are offered to every subscriber that
+   * sets this, so a subscriber can claim events of sessions it spawned.
+   */
+  readonly onUnroutedEvent?: (event: Ev) => Effect.Effect<void>;
 }
 
 export interface SessionEventHub<Ev> {
@@ -71,15 +77,25 @@ export const makeSessionEventHub = <Ev, E>(
       Effect.suspend(() => {
         const sessionId = options.sessionIdOf(event);
         const subscriber = sessionId === undefined ? undefined : entry.subscribers.get(sessionId);
-        if (!subscriber) return Effect.void;
         // One session's bug must not stop the stream for the others.
-        return subscriber.onEvent(event).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("session-event-hub.subscriber-failed", {
-              sessionId,
-              cause: Cause.pretty(cause),
-            }),
-          ),
+        const guard = (effect: Effect.Effect<void>) =>
+          effect.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("session-event-hub.subscriber-failed", {
+                sessionId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        if (subscriber) return guard(subscriber.onEvent(event));
+        const claimants = [...entry.subscribers.values()].filter(
+          (candidate) => candidate.onUnroutedEvent !== undefined,
+        );
+        if (claimants.length === 0) return Effect.void;
+        return Effect.forEach(
+          claimants,
+          (candidate) => guard(candidate.onUnroutedEvent!(event)),
+          { discard: true },
         );
       });
 
