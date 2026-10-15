@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Context, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { beforeEach } from "vitest";
 
 import {
@@ -62,6 +63,20 @@ const runtimeMock = {
     questionReplies: [] as Array<{ requestID: string; answers: unknown }>,
     sessionParents: {} as Record<string, string | undefined>,
     sessionGetCalls: [] as string[],
+    /**
+     * Per-subscribe scripts. When null, the first subscription yields
+     * `subscribedEvents` and then stays open (like a live SSE stream) until
+     * aborted; later subscriptions stay open with no events.
+     */
+    subscriptionScripts: null as Array<{
+      readonly events: unknown[];
+      readonly end: "close" | "hang";
+      /** Events are only yielded once this resolves. */
+      readonly gate?: Promise<void>;
+    }> | null,
+    subscribeCount: 0,
+    sessionStatuses: {} as Record<string, { type: string }>,
+    sessionStatusCalls: 0,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -79,6 +94,10 @@ const runtimeMock = {
     this.state.questionReplies = [];
     this.state.sessionParents = {};
     this.state.sessionGetCalls = [];
+    this.state.subscriptionScripts = null;
+    this.state.subscribeCount = 0;
+    this.state.sessionStatuses = {};
+    this.state.sessionStatusCalls = 0;
   },
 };
 
@@ -122,8 +141,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       };
     }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
-  createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
-    ({
+  createOpenCodeSdkClient: ({ baseUrl, serverPassword }) => {
+    // Subscriptions are counted per client (= per session) so sessions left
+    // running by earlier tests in the shared layer can't consume a script.
+    let clientSubscribeCount = 0;
+    return {
       session: {
         create: async () => {
           runtimeMock.state.sessionCreateUrls.push(baseUrl);
@@ -134,6 +156,10 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
+        },
+        status: async () => {
+          runtimeMock.state.sessionStatusCalls += 1;
+          return { data: { ...runtimeMock.state.sessionStatuses } };
         },
         get: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.sessionGetCalls.push(sessionID);
@@ -182,15 +208,37 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
       },
       event: {
-        subscribe: async () => ({
-          stream: (async function* () {
-            for (const event of runtimeMock.state.subscribedEvents) {
-              yield event;
-            }
-          })(),
-        }),
+        subscribe: async (_parameters: unknown, options?: { signal?: AbortSignal }) => {
+          const index = clientSubscribeCount;
+          clientSubscribeCount += 1;
+          runtimeMock.state.subscribeCount += 1;
+          const scripts = runtimeMock.state.subscriptionScripts;
+          const script = scripts
+            ? (scripts[index] ?? { events: [], end: "hang" as const })
+            : {
+                events: index === 0 ? runtimeMock.state.subscribedEvents : [],
+                end: "hang" as const,
+              };
+          const signal = options?.signal;
+          return {
+            stream: (async function* () {
+              if ("gate" in script && script.gate) {
+                await script.gate;
+              }
+              for (const event of script.events) {
+                yield event;
+              }
+              if (script.end === "hang" && signal && !signal.aborted) {
+                await new Promise<void>((resolve) =>
+                  signal.addEventListener("abort", () => resolve(), { once: true }),
+                );
+              }
+            })(),
+          };
+        },
       },
-    }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
+    } as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>;
+  },
   loadOpenCodeInventory: () =>
     Effect.fail(
       new OpenCodeRuntimeError({
@@ -1162,6 +1210,172 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.deepEqual(runtimeMock.state.permissionReplies, [
         { requestID: "perm-missed-child", reply: "once" },
       ]);
+    }),
+  );
+  it.effect("resubscribes after a clean stream end and completes a turn that went idle", () =>
+    Effect.gen(function* () {
+      const mainSessionId = "http://127.0.0.1:9999/session";
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      runtimeMock.state.subscriptionScripts = [
+        {
+          gate,
+          events: [
+            { type: "server.connected", properties: {} },
+            {
+              type: "session.status",
+              properties: { sessionID: mainSessionId, status: { type: "busy" } },
+            },
+          ],
+          // OpenCode ends `/event` cleanly on instance dispose; the idle
+          // status that follows is published while we are disconnected.
+          end: "close",
+        },
+        { events: [{ type: "server.connected", properties: {} }], end: "hang" },
+      ];
+      runtimeMock.state.sessionStatuses = {};
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-stream-reconnect");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const completedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "turn.completed" && event.threadId === threadId),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const { turnId } = yield* adapter.sendTurn({
+        threadId,
+        input: "Do the thing",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "openai/gpt-5",
+        },
+      });
+      release();
+      // Let the first subscription drain, then advance past the reconnect
+      // backoff (Effect.sleep runs on the TestClock under it.effect).
+      yield* sleep(20);
+      yield* TestClock.adjust("1 second");
+      yield* sleep(20);
+
+      const [completed] = Array.from(yield* Fiber.join(completedFiber));
+      assert.equal(completed?.turnId, turnId);
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "completed");
+      }
+      assert.equal(runtimeMock.state.subscribeCount, 2);
+      assert.equal(runtimeMock.state.sessionStatusCalls >= 1, true);
+      const session = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId);
+      assert.equal(session?.status, "ready");
+    }),
+  );
+
+  it.effect("keeps the active turn when OpenCode still reports busy after a reconnect", () =>
+    Effect.gen(function* () {
+      const mainSessionId = "http://127.0.0.1:9999/session";
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      runtimeMock.state.subscriptionScripts = [
+        {
+          gate,
+          events: [
+            { type: "server.connected", properties: {} },
+            {
+              type: "session.status",
+              properties: { sessionID: mainSessionId, status: { type: "busy" } },
+            },
+          ],
+          end: "close",
+        },
+        { events: [{ type: "server.connected", properties: {} }], end: "hang" },
+      ];
+      runtimeMock.state.sessionStatuses = { [mainSessionId]: { type: "busy" } };
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-stream-reconnect-busy");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const { turnId } = yield* adapter.sendTurn({
+        threadId,
+        input: "Long task",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "openai/gpt-5",
+        },
+      });
+      release();
+      yield* sleep(20);
+      yield* TestClock.adjust("1 second");
+      yield* sleep(20);
+
+      assert.equal(runtimeMock.state.subscribeCount, 2);
+      assert.equal(runtimeMock.state.sessionStatusCalls >= 1, true);
+      const session = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId);
+      assert.equal(session?.status, "running");
+      assert.equal(session?.activeTurnId, turnId);
+    }),
+  );
+
+  it.effect("resubscribes when the event stream goes silent past the liveness window", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscriptionScripts = [
+        // Connected, then nothing — not even heartbeats.
+        { events: [{ type: "server.connected", properties: {} }], end: "hang" },
+        { events: [{ type: "server.connected", properties: {} }], end: "hang" },
+      ];
+      const adapterLayer = Layer.effect(
+        OpenCodeAdapter,
+        makeOpenCodeAdapter(openCodeAdapterTestSettings, { eventStreamIdleTimeoutMs: 60 }),
+      ).pipe(
+        Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerSettingsService.layerTest({
+            providers: {
+              opencode: {
+                binaryPath: "fake-opencode",
+                serverUrl: "http://127.0.0.1:9999",
+                serverPassword: "secret-password",
+              },
+            },
+          }),
+        ),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const result = yield* Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId: asThreadId("thread-stream-silent"),
+          runtimeMode: "full-access",
+        });
+        yield* sleep(20);
+        // Past the 60 ms liveness window (watchdog ticks every 20 ms), then
+        // past the reconnect backoff.
+        yield* TestClock.adjust("100 millis");
+        yield* sleep(20);
+        yield* TestClock.adjust("1 second");
+        yield* sleep(20);
+        return {
+          subscribeCount: runtimeMock.state.subscribeCount,
+          sessions: yield* adapter.listSessions(),
+        };
+      }).pipe(Effect.provide(adapterLayer));
+
+      assert.equal(result.subscribeCount >= 2, true);
+      assert.equal(result.sessions.length, 1);
     }),
   );
 });

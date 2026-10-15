@@ -16,7 +16,19 @@ import {
 } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Cause, Deferred, Effect, Exit, Option, Queue, Random, Ref, Scope, Stream } from "effect";
+import {
+  Cause,
+  Clock,
+  Deferred,
+  Effect,
+  Exit,
+  Option,
+  Queue,
+  Random,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
@@ -48,6 +60,21 @@ import {
 } from "../opencodeRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
+const OPENCODE_EVENT_STREAM_IDLE_TIMEOUT_MS = 45_000;
+/**
+ * Consecutive subscribe attempts that deliver no event at all before the
+ * session is declared dead (~50 s with the backoff below). Any received event
+ * resets the counter.
+ */
+const OPENCODE_EVENT_STREAM_MAX_CONSECUTIVE_FAILURES = 12;
+const OPENCODE_EVENT_STREAM_RECONNECT_MIN_MS = 250;
+const OPENCODE_EVENT_STREAM_RECONNECT_MAX_MS = 5_000;
+/**
+ * Without having seen `busy` for the active turn, reconciliation only trusts
+ * an idle status once the prompt was accepted at least this long ago —
+ * OpenCode flips the session to busy asynchronously after `promptAsync`.
+ */
+const OPENCODE_RECONCILE_MIN_TURN_AGE_MS = 5_000;
 /** Max parent hops when checking whether a session descends from ours. */
 const OPENCODE_CHILD_SESSION_MAX_DEPTH = 8;
 const OPENCODE_FOREIGN_SESSION_CACHE_LIMIT = 1_000;
@@ -81,6 +108,10 @@ type OpenCodeSubscribedEvent =
     ? TEvent
     : never;
 
+type EventStreamStep =
+  | { readonly _tag: "next"; readonly result: IteratorResult<OpenCodeSubscribedEvent, unknown> }
+  | { readonly _tag: "error"; readonly cause: OpenCodeRuntimeError };
+
 interface OpenCodeSessionContext {
   session: ProviderSession;
   readonly client: OpencodeClient;
@@ -105,6 +136,14 @@ interface OpenCodeSessionContext {
   readonly completedAssistantPartIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
   promptIdle: Deferred.Deferred<void> | undefined;
+  /**
+   * Set once OpenCode accepted `promptAsync` for a turn. Event-stream
+   * reconciliation only completes a turn whose prompt was accepted, so a
+   * reconnect racing `sendTurn` can't finish a turn that never started.
+   */
+  promptAccepted: { readonly turnId: TurnId; readonly at: number } | undefined;
+  /** Turn for which a `session.status: busy` event was observed. */
+  busyObservedTurnId: TurnId | undefined;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeModel: ReturnType<typeof parseOpenCodeModelSlug> | undefined;
@@ -131,6 +170,12 @@ export interface OpenCodeAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * Liveness window for the `/event` SSE stream. OpenCode sends
+   * `server.heartbeat` every ~10 s; no event at all for this long means the
+   * stream is wedged and gets aborted + resubscribed. Test hook.
+   */
+  readonly eventStreamIdleTimeoutMs?: number;
 }
 
 function nowIso(): string {
@@ -956,6 +1001,9 @@ export function makeOpenCodeAdapter(
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const eventStreamIdleTimeoutMs =
+      options?.eventStreamIdleTimeoutMs ?? OPENCODE_EVENT_STREAM_IDLE_TIMEOUT_MS;
+    const watchdogIntervalMs = Math.max(10, Math.min(5_000, eventStreamIdleTimeoutMs / 3));
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every
@@ -1701,6 +1749,9 @@ export function makeOpenCodeAdapter(
         }
 
         case "session.status": {
+          if (event.properties.status.type === "busy" && turnId) {
+            context.busyObservedTurnId = turnId;
+          }
           if (event.properties.status.type === "busy") {
             updateProviderSession(context, {
               status: "running",
@@ -1783,42 +1834,213 @@ export function makeOpenCodeAdapter(
       }
     });
 
-    const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
-      // One AbortController per session scope. The finalizer fires when
-      // the scope closes (explicit stop, unexpected exit, or layer
-      // shutdown) and cancels the in-flight `event.subscribe` fetch so
-      // the async iterable unwinds cleanly.
-      const eventsAbortController = new AbortController();
-      yield* Scope.addFinalizer(
-        context.sessionScope,
-        Effect.sync(() => eventsAbortController.abort()),
+    /**
+     * Events published while the SSE stream was down are lost (OpenCode's
+     * `/event` has no replay), most importantly the `session.status: idle`
+     * that ends a turn. After every (re)subscribe ask OpenCode directly and
+     * complete the active turn if the session is already idle.
+     */
+    const reconcileSessionStatus = Effect.fn("reconcileSessionStatus")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      const turnId = context.activeTurnId;
+      const accepted = context.promptAccepted;
+      if (!turnId || accepted?.turnId !== turnId) {
+        return;
+      }
+      if (
+        context.busyObservedTurnId !== turnId &&
+        (yield* Clock.currentTimeMillis) - accepted.at < OPENCODE_RECONCILE_MIN_TURN_AGE_MS
+      ) {
+        return;
+      }
+      const statusExit = yield* Effect.exit(
+        runOpenCodeSdk("session.status", () => context.client.session.status()),
       );
+      if (Exit.isFailure(statusExit)) {
+        yield* Effect.logWarning("OpenCode session.status reconcile failed", {
+          threadId: context.session.threadId,
+          cause: openCodeRuntimeErrorDetail(Cause.squash(statusExit.cause)),
+        });
+        return;
+      }
+      // OpenCode drops idle sessions from the status map.
+      const status = statusExit.value.data?.[context.openCodeSessionId] ?? { type: "idle" };
+      if (status.type !== "idle" || context.activeTurnId !== turnId) {
+        return;
+      }
+      yield* Effect.logWarning("OpenCode session went idle while the event stream was down", {
+        threadId: context.session.threadId,
+        turnId,
+      });
+      yield* completeActiveTurn(context, {
+        state: "completed",
+        raw: { source: "session.status.reconcile", status },
+      });
+    });
 
-      // Fibers forked into `context.sessionScope` are interrupted
-      // automatically when the scope closes — no bookkeeping required.
-      yield* Effect.flatMap(
-        runOpenCodeSdk("event.subscribe", () =>
-          context.client.event.subscribe(undefined, {
-            signal: eventsAbortController.signal,
-          }),
-        ),
-        (subscription) =>
-          Stream.fromAsyncIterable(
-            subscription.stream,
-            (cause) =>
+    /**
+     * One `/event` subscription. Resolves (never fails for transport
+     * reasons) when the stream ends, errors, or goes silent past the
+     * liveness window; fails only if handling an event fails.
+     */
+    const runEventSubscription = Effect.fn("runEventSubscription")(function* (
+      context: OpenCodeSessionContext,
+      sessionAbort: AbortController,
+    ) {
+      const attemptAbort = new AbortController();
+      const abortAttempt = () => attemptAbort.abort();
+      sessionAbort.signal.addEventListener("abort", abortAttempt);
+      let lastSseError: unknown;
+      let received = 0;
+      let lastEventAt = yield* Clock.currentTimeMillis;
+      let wentSilent = false;
+      const body = Effect.gen(function* () {
+        const subscriptionExit = yield* Effect.exit(
+          runOpenCodeSdk("event.subscribe", () =>
+            context.client.event.subscribe(undefined, {
+              signal: attemptAbort.signal,
+              // Surface transport errors to us instead of the SDK's silent
+              // infinite in-iterator retries (which also lose events).
+              sseMaxRetryAttempts: 1,
+              onSseError: (error: unknown) => {
+                lastSseError = error;
+              },
+            }),
+          ),
+        );
+        if (Exit.isFailure(subscriptionExit)) {
+          return openCodeRuntimeErrorDetail(Cause.squash(subscriptionExit.cause));
+        }
+        const iterator = subscriptionExit.value.stream[Symbol.asyncIterator]();
+        // Liveness watchdog: a wedged connection (half-open socket, stalled
+        // proxy) never errors, it just stops delivering. Abort the attempt
+        // so the iterator unwinds and the pump resubscribes. A side fiber
+        // instead of a per-event timeout keeps the hot delta path cheap.
+        yield* Effect.gen(function* () {
+          while (!attemptAbort.signal.aborted) {
+            yield* Effect.sleep(watchdogIntervalMs);
+            if ((yield* Clock.currentTimeMillis) - lastEventAt >= eventStreamIdleTimeoutMs) {
+              wentSilent = true;
+              attemptAbort.abort();
+              return;
+            }
+          }
+        }).pipe(Effect.forkScoped);
+        while (true) {
+          const step: EventStreamStep = yield* Effect.tryPromise({
+            try: () => iterator.next(),
+            catch: (cause) =>
               new OpenCodeRuntimeError({
                 operation: "event.subscribe",
                 detail: openCodeRuntimeErrorDetail(cause),
                 cause,
               }),
-          ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
-      ).pipe(
+          }).pipe(
+            Effect.map((result): EventStreamStep => ({ _tag: "next", result })),
+            Effect.catch((cause) => Effect.succeed<EventStreamStep>({ _tag: "error", cause })),
+          );
+          if (wentSilent) {
+            return `no OpenCode events for ${eventStreamIdleTimeoutMs} ms (heartbeat missing)`;
+          }
+          if (step._tag === "error") {
+            return step.cause.detail;
+          }
+          if (step.result.done) {
+            return lastSseError !== undefined
+              ? openCodeRuntimeErrorDetail(lastSseError)
+              : "event stream ended";
+          }
+          lastEventAt = yield* Clock.currentTimeMillis;
+          received += 1;
+          if (received === 1) {
+            // First event (`server.connected`) proves the subscription is
+            // live: anything published from here on reaches us, so the
+            // status snapshot can't miss a later transition.
+            yield* reconcileSessionStatus(context);
+          }
+          yield* handleSubscribedEvent(context, step.result.value);
+        }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            sessionAbort.signal.removeEventListener("abort", abortAttempt);
+            attemptAbort.abort();
+          }),
+        ),
+        Effect.scoped,
+      );
+      const reason = yield* body;
+      return { reason, received };
+    });
+
+    const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
+      // One AbortController per session scope. The finalizer fires when
+      // the scope closes (explicit stop, unexpected exit, or layer
+      // shutdown) and cancels the in-flight `event.subscribe` fetch.
+      const eventsAbortController = new AbortController();
+      yield* Scope.addFinalizer(
+        context.sessionScope,
+        Effect.sync(() => eventsAbortController.abort()),
+      );
+      const isStopping = Effect.gen(function* () {
+        return eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped));
+      });
+
+      // Resubscribe loop: OpenCode ends `/event` cleanly on instance dispose,
+      // and the SDK just stops iterating on a dropped connection — either way
+      // a single subscription silently leaves the session deaf (turns stay
+      // "working" forever). Fibers forked into `context.sessionScope` are
+      // interrupted automatically when the scope closes.
+      yield* Effect.gen(function* () {
+        let consecutiveFailures = 0;
+        let attempt = 0;
+        while (!(yield* isStopping)) {
+          attempt += 1;
+          const result = yield* runEventSubscription(context, eventsAbortController);
+          if (yield* isStopping) {
+            return;
+          }
+          consecutiveFailures = result.received > 0 ? 0 : consecutiveFailures + 1;
+          yield* Effect.logWarning("OpenCode event stream disconnected; resubscribing", {
+            threadId: context.session.threadId,
+            openCodeSessionId: context.openCodeSessionId,
+            reason: result.reason,
+            attempt,
+            consecutiveFailures,
+            activeTurnId: context.activeTurnId,
+          });
+          yield* writeNativeEventBestEffort(context.session.threadId, {
+            observedAt: nowIso(),
+            event: {
+              provider: PROVIDER,
+              threadId: context.session.threadId,
+              providerThreadId: context.openCodeSessionId,
+              type: "t3.event_stream.disconnected",
+              payload: { reason: result.reason, attempt, consecutiveFailures },
+            },
+          });
+          if (consecutiveFailures >= OPENCODE_EVENT_STREAM_MAX_CONSECUTIVE_FAILURES) {
+            yield* emitUnexpectedExit(
+              context,
+              `OpenCode event stream unavailable: ${result.reason}`,
+            );
+            return;
+          }
+          const backoffMs =
+            consecutiveFailures === 0
+              ? OPENCODE_EVENT_STREAM_RECONNECT_MIN_MS
+              : Math.min(
+                  OPENCODE_EVENT_STREAM_RECONNECT_MIN_MS * 2 ** consecutiveFailures,
+                  OPENCODE_EVENT_STREAM_RECONNECT_MAX_MS,
+                );
+          yield* Effect.sleep(backoffMs);
+        }
+      }).pipe(
         Effect.exit,
         Effect.flatMap((exit) =>
           Effect.gen(function* () {
-            // Expected paths: caller aborted the fetch or the session
-            // has already been marked stopped. Treat as a clean exit.
-            if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+            if (yield* isStopping) {
               return;
             }
             if (Exit.isFailure(exit)) {
@@ -1948,6 +2170,8 @@ export function makeOpenCodeAdapter(
           completedAssistantPartIds: new Set(),
           turns: [],
           promptIdle: undefined,
+          promptAccepted: undefined,
+          busyObservedTurnId: undefined,
           activeTurnId: undefined,
           activeAgent: undefined,
           activeModel: undefined,
@@ -2131,6 +2355,10 @@ export function makeOpenCodeAdapter(
           }),
         ),
       );
+
+      if (context.activeTurnId === turnId) {
+        context.promptAccepted = { turnId, at: yield* Clock.currentTimeMillis };
+      }
 
       return {
         threadId: input.threadId,
