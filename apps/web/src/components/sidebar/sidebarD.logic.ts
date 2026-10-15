@@ -191,6 +191,42 @@ export function groupChatsByStatusForSidebarD<T>(input: {
   });
 }
 
+/**
+ * Chats one group (a project, Recents, a status section) shows before
+ * "Show N more" (Misha 15.10): read-but-not-Done chats kept piling up — a
+ * project could list a hundred. Same rule as T3 Code and our pre-D sidebar.
+ */
+export const SIDEBAR_D_GROUP_PREVIEW_LIMIT = 5;
+
+export interface DGroupPreview<T> {
+  /** Rows to render, in the group's order. */
+  readonly visible: ReadonlyArray<T>;
+  /** Rows behind "Show N more" (0 when the group is short or opened). */
+  readonly hiddenCount: number;
+  /** The group is opened past its limit: "Show less" folds it back. */
+  readonly canCollapse: boolean;
+}
+
+/**
+ * The first `limit` chats of a group, plus any chat past them that must stay
+ * in sight (`keepVisible`: the open chat, one waiting on the person) — those
+ * keep their place in the order instead of jumping up.
+ */
+export function previewDGroup<T>(input: {
+  readonly chats: ReadonlyArray<T>;
+  readonly expanded: boolean;
+  readonly keepVisible: (chat: T) => boolean;
+  readonly limit?: number;
+}): DGroupPreview<T> {
+  const limit = input.limit ?? SIDEBAR_D_GROUP_PREVIEW_LIMIT;
+  if (input.chats.length <= limit) {
+    return { visible: input.chats, hiddenCount: 0, canCollapse: false };
+  }
+  if (input.expanded) return { visible: input.chats, hiddenCount: 0, canCollapse: true };
+  const visible = input.chats.filter((chat, index) => index < limit || input.keepVisible(chat));
+  return { visible, hiddenCount: input.chats.length - visible.length, canCollapse: false };
+}
+
 /** "3 running", or nothing. */
 export function unoRunningLabel(count: number): string | null {
   return count > 0 ? `${count} running` : null;

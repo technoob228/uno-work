@@ -12,6 +12,8 @@ import {
   isRunningStatus,
   needsYouPlace,
   parseFoldedProjects,
+  previewDGroup,
+  SIDEBAR_D_GROUP_PREVIEW_LIMIT,
   sidebarDRailShown,
   statusSectionOf,
   unoRunningLabel,
@@ -270,5 +272,37 @@ describe("sidebar D, classic: every project stays in the sidebar", () => {
       ["docs", 0],
     ]);
     expect(result.recents.map((chat) => chat.id)).toEqual(["b"]);
+  });
+});
+
+const ids = (count: number) => Array.from({ length: count }, (_, index) => `c${index}`);
+
+describe("sidebar D: a group shows five chats, the rest behind Show more", () => {
+  it("shows a short group whole, with no button", () => {
+    const preview = previewDGroup({ chats: ids(5), expanded: false, keepVisible: () => false });
+    expect(SIDEBAR_D_GROUP_PREVIEW_LIMIT).toBe(5);
+    expect(preview).toEqual({ visible: ids(5), hiddenCount: 0, canCollapse: false });
+  });
+
+  it("cuts a long group to five and counts the rest", () => {
+    const preview = previewDGroup({ chats: ids(100), expanded: false, keepVisible: () => false });
+    expect(preview.visible).toEqual(ids(5));
+    expect(preview.hiddenCount).toBe(95);
+    expect(preview.canCollapse).toBe(false);
+  });
+
+  it("keeps the open chat and one waiting on the person in their place", () => {
+    const preview = previewDGroup({
+      chats: ids(9),
+      expanded: false,
+      keepVisible: (chat) => chat === "c7" || chat === "c6",
+    });
+    expect(preview.visible).toEqual(["c0", "c1", "c2", "c3", "c4", "c6", "c7"]);
+    expect(preview.hiddenCount).toBe(2);
+  });
+
+  it("opened, shows everything and offers Show less", () => {
+    const preview = previewDGroup({ chats: ids(8), expanded: true, keepVisible: () => false });
+    expect(preview).toEqual({ visible: ids(8), hiddenCount: 0, canCollapse: true });
   });
 });
