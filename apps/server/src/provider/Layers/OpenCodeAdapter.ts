@@ -1634,6 +1634,41 @@ export function makeOpenCodeAdapter(
       return true;
     });
 
+    /**
+     * In full-access mode an approval must never block the turn: OpenCode can
+     * still ask (agent-level `ask` rules such as `doom_loop`, subagent
+     * sessions that don't inherit the session ruleset, ...). Reply `once` on
+     * the user's behalf. Returns `false` when the request still needs a
+     * human — not full-access, or the auto-reply failed — so the caller
+     * falls back to surfacing it in the UI.
+     */
+    const autoApproveInFullAccess = Effect.fn("autoApproveInFullAccess")(function* (
+      context: OpenCodeSessionContext,
+      request: PermissionRequest,
+    ) {
+      if (context.session.runtimeMode !== "full-access") {
+        return false;
+      }
+      const replyExit = yield* Effect.exit(
+        runOpenCodeSdk("permission.reply", () =>
+          context.client.permission.reply({
+            requestID: request.id,
+            reply: "once",
+          }),
+        ),
+      );
+      if (Exit.isFailure(replyExit)) {
+        yield* Effect.logWarning("OpenCode full-access auto-approve failed", {
+          threadId: context.session.threadId,
+          requestId: request.id,
+          permission: request.permission,
+          cause: openCodeRuntimeErrorDetail(Cause.squash(replyExit.cause)),
+        });
+        return false;
+      }
+      return true;
+    });
+
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeSubscribedEvent,
@@ -1815,6 +1850,9 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
+          if (yield* autoApproveInFullAccess(context, event.properties)) {
+            break;
+          }
           context.pendingPermissions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1837,6 +1875,12 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.replied": {
+          const request = context.pendingPermissions.get(event.properties.requestID);
+          if (!request) {
+            // Auto-approved (full-access) or not ours: nothing was opened in
+            // the UI, so there is nothing to resolve.
+            break;
+          }
           context.pendingPermissions.delete(event.properties.requestID);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1847,7 +1891,7 @@ export function makeOpenCodeAdapter(
             })),
             type: "request.resolved",
             payload: {
-              requestType: "unknown",
+              requestType: mapPermissionToRequestType(request.permission),
               decision: mapPermissionDecision(event.properties.reply),
             },
           });

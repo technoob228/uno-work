@@ -66,6 +66,8 @@ const runtimeMock = {
     /** Keeps the stream open after the events (a closed stream ends the session). */
     subscribeHoldOpenMs: 0,
     connectEnvironments: [] as Array<NodeJS.ProcessEnv | undefined>,
+    permissionReplies: [] as Array<{ requestID: string; reply: string }>,
+    questionReplies: [] as Array<{ requestID: string; answers: unknown }>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -82,6 +84,8 @@ const runtimeMock = {
     this.state.subscribeDelayMs = 0;
     this.state.subscribeHoldOpenMs = 0;
     this.state.connectEnvironments.length = 0;
+    this.state.permissionReplies = [];
+    this.state.questionReplies = [];
   },
 };
 
@@ -163,6 +167,18 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             targetIndex >= 0
               ? runtimeMock.state.messages.slice(0, targetIndex + 1)
               : runtimeMock.state.messages;
+        },
+      },
+      permission: {
+        reply: async (input: { requestID: string; reply: string }) => {
+          runtimeMock.state.permissionReplies.push(input);
+          return { data: true };
+        },
+      },
+      question: {
+        reply: async (input: { requestID: string; answers: unknown }) => {
+          runtimeMock.state.questionReplies.push(input);
+          return { data: true };
         },
       },
       event: {
@@ -1283,5 +1299,85 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         ),
       );
     },
+  );
+  it.effect("surfaces non-command permissions as approvals with a readable title", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-webfetch",
+            sessionID: "http://127.0.0.1:9999/session",
+            permission: "webfetch",
+            patterns: ["https://example.com/docs"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+      const adapter = yield* OpenCodeAdapter;
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "request.opened"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-generic-approval"),
+        runtimeMode: "approval-required",
+      });
+      const [opened] = Array.from(yield* Fiber.join(eventsFiber));
+      assert.equal(opened?.type, "request.opened");
+      if (opened?.type === "request.opened") {
+        assert.equal(opened.requestId, "perm-webfetch");
+        assert.equal(opened.payload.requestType, "unknown");
+        assert.equal(opened.payload.detail, "Open a web page: https://example.com/docs");
+      }
+      assert.deepEqual(runtimeMock.state.permissionReplies, []);
+    }),
+  );
+
+  it.effect("auto-approves permission requests in full-access mode", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "permission.asked",
+          properties: {
+            id: "perm-doom-loop",
+            sessionID: "http://127.0.0.1:9999/session",
+            permission: "doom_loop",
+            patterns: ["*"],
+            metadata: {},
+            always: [],
+          },
+        },
+        {
+          type: "permission.replied",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            requestID: "perm-doom-loop",
+            reply: "once",
+          },
+        },
+      ];
+      const adapter = yield* OpenCodeAdapter;
+      const seen: string[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) => Effect.sync(() => seen.push(event.type))),
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-full-access-approval"),
+        runtimeMode: "full-access",
+      });
+      yield* sleep(20);
+      assert.deepEqual(runtimeMock.state.permissionReplies, [
+        { requestID: "perm-doom-loop", reply: "once" },
+      ]);
+      assert.equal(seen.includes("request.opened"), false);
+      assert.equal(seen.includes("request.resolved"), false);
+    }),
   );
 });
