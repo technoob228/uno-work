@@ -8,6 +8,17 @@
 
 ---
 
+## v0.0.134 — 2026-10-15
+
+- Files works like an editor: Tree is the default, a file opens on the right and you edit it in place; "Recent" shows files you opened and files agents changed (All / Opened / By agents). In the narrow tree column List / Tree / Recent are icons, so nothing spills over the open file.
+- A file opened from a chat opens beside the chat; Download button on a file in the right panel; Tasks / Plan opens as a tab in the right panel.
+- Needs you: approvals get Allow / Decline / View, questions get Open chat / Skip for now.
+- Chat attachments are saved to ~/Uploads/<year-month> and the model is told where they are; the assistant brief says where your files are, and Drive files can be brought onto the disk.
+- The assistant and your chats see each other: the assistant can find and read the chats it started and you started.
+- Settings → AI → Assistant: choose what Uno thinks with — Uno AI, your Claude plan, your ChatGPT plan or your own key. The Claude plan sets itself up on first pick; Hermes updates in place (~200 MB) instead of a 2.5 GB installer.
+- Sidebar: each group shows five chats, the rest behind "Show N more".
+- Fewer stuck chats: OpenCode reconnects its event stream and finishes a turn that ended while it was disconnected; subagent approvals reach the main chat; full access approves OpenCode permission prompts by itself; Hermes no longer hangs on a cancel it ignores.
+
 ## v0.0.133 — 2026-10-15
 
 - Settings → AI: "New chats start on" — keep "The last one I picked" or choose one model every new chat starts on (Home, New chat, ⌘N, a new chat in a folder). Picking another model inside a chat changes only that chat.
