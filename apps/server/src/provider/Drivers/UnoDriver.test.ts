@@ -104,6 +104,19 @@ describe("UnoDriver catalog normalization", () => {
     });
   });
 
+  it("sets backstop request and chunk timeouts for both Uno gateway providers", () => {
+    const config = JSON.parse(__unoDriverTest.buildUnoConfigContent("uno-key", {})) as {
+      readonly provider?: Record<string, { readonly options?: Record<string, unknown> }>;
+    };
+
+    for (const providerId of ["uno", "uno-russia"]) {
+      expect(config.provider?.[providerId]?.options).toMatchObject({
+        timeout: 600_000,
+        chunkTimeout: 120_000,
+      });
+    }
+  });
+
   it("does not disable reasoning by default for mandatory-reasoning model families", () => {
     const openai = __unoDriverTest.normalizeUnoCatalogEntry("default", {
       id: "openai/gpt-5.5",

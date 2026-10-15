@@ -470,6 +470,18 @@ function resolveUnoSearchBridge(): UnoSearchBridge | undefined {
   return { nodeBin, scriptPath };
 }
 
+/**
+ * Backstop LLM timeouts for the Uno gateway providers, honoured by uno-code's
+ * provider fetch wrapper (`packages/opencode/src/provider/provider.ts`):
+ * `timeout` aborts the whole request, `chunkTimeout` aborts an SSE stream
+ * that goes silent between chunks. Without them opencode applies no timeout
+ * at all and a stalled upstream keeps the turn "working" until the session
+ * reaper kills it. The gateway itself cuts silent streams at 45-60 s, so
+ * these only fire when that safety net fails.
+ */
+const UNO_PROVIDER_REQUEST_TIMEOUT_MS = 600_000;
+const UNO_PROVIDER_CHUNK_TIMEOUT_MS = 120_000;
+
 function buildUnoConfigContent(
   unoApiKey: string,
   models: UnoCatalog,
@@ -511,6 +523,8 @@ function buildUnoConfigContent(
         options: {
           baseURL: UNO_GATEWAY_BASE_URL,
           apiKey: "{env:UNO_API_KEY}",
+          timeout: UNO_PROVIDER_REQUEST_TIMEOUT_MS,
+          chunkTimeout: UNO_PROVIDER_CHUNK_TIMEOUT_MS,
         },
         models: opencodeModelsByProvider[UNO_PROVIDER_ID],
       },
@@ -520,6 +534,8 @@ function buildUnoConfigContent(
         options: {
           baseURL: UNO_RUSSIA_GATEWAY_BASE_URL,
           apiKey: "{env:UNO_API_KEY}",
+          timeout: UNO_PROVIDER_REQUEST_TIMEOUT_MS,
+          chunkTimeout: UNO_PROVIDER_CHUNK_TIMEOUT_MS,
         },
         models: opencodeModelsByProvider[UNO_RUSSIA_PROVIDER_ID],
       },
