@@ -33,7 +33,8 @@ import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachine
 import { matchCredentialsForOrigin } from "./BrowserPane";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { BrowserSourceChip } from "./BrowserSourceChip";
-import { useBrowserLivePage, useBrowserLiveState } from "./browserLiveStore";
+import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
+import { useChatBrowser } from "./useChatBrowser";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import type { PreviewFile } from "./PreviewPaneContext";
 
@@ -64,6 +65,8 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   const pageId = file.livePageId ?? null;
   const state = useBrowserLiveState(environmentId);
   const page = useBrowserLivePage(environmentId, pageId);
+  const openError = useBrowserOpenError(environmentId);
+  const { openInSource } = useChatBrowser();
   const connected = state !== null;
   // readEnvironmentApi собирает новый объект на каждый вызов — держим один на
   // окружение, иначе подписка на кадры пересоздавалась бы на каждую отрисовку.
@@ -112,6 +115,9 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   }
   if (!state || !api) {
     return <Placeholder text="Connecting to the computer's browser…" />;
+  }
+  if (pageId === BROWSER_LIVE_SETUP_PAGE_ID && openError) {
+    return <BrowserOpenErrorView error={openError} onRetry={() => openInSource("computer")} />;
   }
   if (pageId === BROWSER_LIVE_SETUP_PAGE_ID || (!page && state.setup.status !== "ready")) {
     return <BrowserSetupView environmentId={environmentId} setup={state.setup} />;
@@ -395,6 +401,24 @@ function BrowserSetupView({
         {setup.step ? `${setup.step}. ` : ""}This happens once on this computer. The page opens by
         itself when it's ready — you can keep working.
       </div>
+    </div>
+  );
+}
+
+/** The person's Browser click failed on the computer: say so here, with Try again. */
+function BrowserOpenErrorView({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+      data-testid="browser-open-error"
+    >
+      <MonitorIcon className="size-6 text-muted-foreground" />
+      <div className="font-medium">The computer's browser didn't start</div>
+      <div className="max-w-sm text-xs break-words text-muted-foreground">{error}</div>
+      <Button size="sm" onClick={onRetry}>
+        <RotateCwIcon />
+        Try again
+      </Button>
     </div>
   );
 }

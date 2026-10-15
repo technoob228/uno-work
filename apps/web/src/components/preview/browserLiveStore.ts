@@ -76,3 +76,31 @@ export function liveBrowserTabName(page: Pick<BrowserLivePage, "title" | "url">)
   }
   return "Browser";
 }
+
+/**
+ * Why the person's last "open the computer's browser" failed, per computer
+ * (the setup tab shows it with Try again instead of vanishing). Cleared when
+ * the person tries again or the page opens.
+ */
+let openErrors: Readonly<Record<string, string>> = {};
+
+export const setBrowserOpenError = (environmentId: EnvironmentId, error: string | null): void => {
+  if (error === null) {
+    if (!(environmentId in openErrors)) return;
+    const { [environmentId]: _removed, ...rest } = openErrors;
+    openErrors = rest;
+  } else {
+    openErrors = { ...openErrors, [environmentId]: error };
+  }
+  emit();
+};
+
+export function useBrowserOpenError(
+  environmentId: EnvironmentId | null | undefined,
+): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => (environmentId ? (openErrors[environmentId] ?? null) : null),
+    () => null,
+  );
+}

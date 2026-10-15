@@ -4,7 +4,12 @@ import { readEnvironmentApi } from "../../environmentApi";
 import { isElectron } from "../../env";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
-import { liveBrowserTabId, readBrowserLiveState, useBrowserLiveState } from "./browserLiveStore";
+import {
+  liveBrowserTabId,
+  readBrowserLiveState,
+  setBrowserOpenError,
+  useBrowserLiveState,
+} from "./browserLiveStore";
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import {
@@ -97,6 +102,7 @@ export function useChatBrowser(): {
       // установка. Страницу откроем сами по ответу машины (или
       // BrowserLiveListener по её появлению), заглушку уберём.
       const setupTabId = liveBrowserTabId(environmentId, BROWSER_LIVE_SETUP_PAGE_ID);
+      setBrowserOpenError(environmentId, null);
       if (!existing) {
         openFileForTarget(
           target,
@@ -138,16 +144,23 @@ export function useChatBrowser(): {
             );
             closeFile(setupTabId);
           }
+          setBrowserOpenError(environmentId, null);
           // "wait": the page isn't in the machine's state yet — the listener
           // opens it when it appears and takes the placeholder away.
         })
         .catch((error: unknown) => {
-          if (!existing) closeFile(setupTabId);
-          toastManager.add({
-            type: "error",
-            title: "Couldn't open the computer's browser",
-            description: error instanceof Error ? error.message : String(error),
-          });
+          const message = error instanceof Error ? error.message : String(error);
+          if (existing) {
+            toastManager.add({
+              type: "error",
+              title: "Couldn't open the page in the computer's browser",
+              description: message,
+            });
+            return;
+          }
+          // The tab stays and says so, with Try again (stand 15.10: the tab
+          // vanished and only a toast was left for a second).
+          setBrowserOpenError(environmentId, message);
         });
     },
     [
