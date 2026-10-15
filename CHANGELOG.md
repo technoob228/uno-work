@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.137 — 2026-10-15
+
+- Attach any file to a chat — documents, spreadsheets, slides, archives, code — by the paperclip, paste or drag & drop, in a chat or on Home. The file goes straight to ~/Uploads/<year-month> on your computer (never made executable), and the model is told where it is. Pictures work as before.
+- Download on every file open in the right panel: pictures, PDF, Word/Excel/PowerPoint, Markdown, code, CSV, web pages, attachments. Files on your computer download whole, without the old 25 MB limit.
+- New chat is back at the top of the sidebar, next to Add a project.
+
 ## v0.0.136 — 2026-10-15
 
 - ⌘J (Ctrl+J on Windows and Linux) opens and closes the panel. The terminal moved to Ctrl+` (as in VS Code), also from inside the terminal. If you never changed these keys, Work moves them for you; keys you set yourself stay as they are.
