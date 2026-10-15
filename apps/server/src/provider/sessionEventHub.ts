@@ -131,11 +131,9 @@ export const makeSessionEventHub = <Ev, E>(
           (candidate) => candidate.onUnroutedEvent !== undefined,
         );
         if (claimants.length === 0) return Effect.void;
-        return Effect.forEach(
-          claimants,
-          (candidate) => guard(candidate.onUnroutedEvent!(event)),
-          { discard: true },
-        );
+        return Effect.forEach(claimants, (candidate) => guard(candidate.onUnroutedEvent!(event)), {
+          discard: true,
+        });
       });
 
     const idleTimeoutMs = options.idleTimeoutMs ?? SESSION_EVENT_STREAM_IDLE_TIMEOUT_MS;
