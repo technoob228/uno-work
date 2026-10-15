@@ -69,3 +69,20 @@ export function launcherTileForKey(
   const letter = event.key.toUpperCase();
   return tiles.find((tile) => tile.key === letter)?.id ?? null;
 }
+
+/**
+ * Letters go to the launcher unless the person is typing somewhere (an input,
+ * a textarea — the terminal's too — or rich text like the composer). Focus
+ * on a button (Panel, just clicked) or nowhere is not typing.
+ */
+export function isTypingTarget(
+  target: {
+    readonly tagName?: string;
+    readonly isContentEditable?: boolean;
+  } | null,
+): boolean {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = (target.tagName ?? "").toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}

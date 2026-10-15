@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isTypingTarget,
   type LauncherContext,
   launcherTileForKey,
   visibleLauncherTiles,
@@ -81,5 +82,20 @@ describe("launcherTileForKey", () => {
     expect(key("b", { ctrlKey: true })).toBeNull();
     expect(key("Enter")).toBeNull();
     expect(key("x")).toBeNull();
+  });
+});
+
+describe("isTypingTarget", () => {
+  it("letters reach the launcher from the Panel button or from nowhere", () => {
+    expect(isTypingTarget({ tagName: "BUTTON", isContentEditable: false })).toBe(false);
+    expect(isTypingTarget({ tagName: "BODY", isContentEditable: false })).toBe(false);
+    expect(isTypingTarget(null)).toBe(false);
+  });
+
+  it("not while the person types: inputs, the terminal's textarea, the composer", () => {
+    expect(isTypingTarget({ tagName: "INPUT" })).toBe(true);
+    expect(isTypingTarget({ tagName: "textarea" })).toBe(true);
+    expect(isTypingTarget({ tagName: "SELECT" })).toBe(true);
+    expect(isTypingTarget({ tagName: "DIV", isContentEditable: true })).toBe(true);
   });
 });

@@ -35,6 +35,7 @@ import { Skeleton } from "../ui/skeleton";
 import { useChatPanelActions } from "./chatPanelActions";
 import {
   type LauncherTileId,
+  isTypingTarget,
   launcherTileForKey,
   visibleLauncherTiles,
 } from "./panelLauncher.logic";
@@ -95,8 +96,13 @@ export function PanelLauncher({
 
   useEffect(() => {
     if (!takeFocus) return;
-    rootRef.current?.focus({ preventScroll: true });
     onFocusTaken();
+    // After this frame's other focus moves (the composer refocuses itself on
+    // some updates), not before them.
+    const frame = window.requestAnimationFrame(() => {
+      rootRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [takeFocus, onFocusTaken]);
 
   const panelList = pluginsEnabled ? panels : [];
@@ -127,7 +133,7 @@ export function PanelLauncher({
     sites: sites?.length ?? null,
   });
 
-  const open = (id: LauncherTileId) => {
+  const open = (id: LauncherTileId): void => {
     switch (id) {
       case "browser":
         openChatBrowser();
@@ -152,6 +158,24 @@ export function PanelLauncher({
     }
   };
 
+  // Letters work while the launcher is on screen and the person isn't typing
+  // somewhere — right after clicking Panel too (focus on the button).
+  const lettersRef = useRef({ tiles, open, view });
+  lettersRef.current = { tiles, open, view };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const current = lettersRef.current;
+      if (event.defaultPrevented || current.view !== "tiles") return;
+      if (isTypingTarget(event.target instanceof HTMLElement ? event.target : null)) return;
+      const id = launcherTileForKey(current.tiles, event);
+      if (!id) return;
+      event.preventDefault();
+      current.open(id);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <div
       ref={rootRef}
@@ -164,12 +188,6 @@ export function PanelLauncher({
           event.preventDefault();
           return;
         }
-        if (view !== "tiles") return;
-        if (event.target instanceof HTMLInputElement) return;
-        const id = launcherTileForKey(tiles, event);
-        if (!id) return;
-        event.preventDefault();
-        open(id);
       }}
       className="flex h-full min-h-0 flex-col overflow-y-auto px-4 py-5 outline-none"
     >
