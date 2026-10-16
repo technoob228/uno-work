@@ -1,6 +1,6 @@
 /**
  * The password field of a share link, with Generate (a readable random
- * password, shown in clear), Copy, and "Copy link and password" — enabled once
+ * password, shown in clear), Copy, and "Copy link and password" — shown once
  * the link exists. Used by Files → Share and the panel's ↗ share popover.
  * Without `onPasswordChange` it only shows a password already set on a link.
  */
@@ -77,19 +77,20 @@ export function PasswordGenerateControls({
           {copyPassword.isCopied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        className="self-start"
-        disabled={!bothText}
-        title={link ? undefined : "Create the link first"}
-        onClick={() => bothText && copyBoth.copyToClipboard(bothText, bothText)}
-        data-testid="share-copy-link-and-password"
-      >
-        {copyBoth.isCopied ? <CheckIcon /> : <CopyIcon />}
-        {copyBoth.isCopied ? "Copied" : "Copy link and password"}
-      </Button>
+      {/* Only once the link exists (Misha 16.10: a greyed-out button before it confused). */}
+      {bothText ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          className="self-start"
+          onClick={() => copyBoth.copyToClipboard(bothText, bothText)}
+          data-testid="share-copy-link-and-password"
+        >
+          {copyBoth.isCopied ? <CheckIcon /> : <CopyIcon />}
+          {copyBoth.isCopied ? "Copied" : "Copy link and password"}
+        </Button>
+      ) : null}
     </div>
   );
 }

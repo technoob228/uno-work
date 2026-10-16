@@ -26,8 +26,8 @@ const tile = (context: LauncherContext, id: string) =>
   visibleLauncherTiles(context).find((candidate) => candidate.id === id);
 
 describe("visibleLauncherTiles", () => {
-  it("a git project chat on a cloud computer: Your site first, then the agent's browser", () => {
-    expect(ids(everything)).toEqual(["site", "agentBrowser", "files", "changes", "apps"]);
+  it("a git project chat on a cloud computer: Your site first, the agent's browser last", () => {
+    expect(ids(everything)).toEqual(["site", "files", "changes", "apps", "agentBrowser"]);
   });
 
   it("no Terminal tile: it opens at the bottom of the chat", () => {

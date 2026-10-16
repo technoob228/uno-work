@@ -1,14 +1,14 @@
 /**
- * Веб-режим встроенного браузера. Electron-webview здесь нет, поэтому браузером
- * управляет расширение Uno Work Companion во вкладках пользователя. Панель
- * детектит расширение, ведёт по установке и открывает адреса через него.
+ * Веб-режим встроенного браузера. Electron-webview здесь нет: страница
+ * открывается новой вкладкой браузера человека. Расширение Uno Work Companion —
+ * необязательное: только чтобы агент работал во вкладках человека; если оно
+ * стоит, адреса открываются через него.
  */
 import {
   CheckCircle2Icon,
   DownloadIcon,
   ExternalLinkIcon,
   Loader2Icon,
-  PuzzleIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -76,15 +76,6 @@ export function CompanionExtensionPanel({
     }
   }, [url]);
 
-  if (detectState === "checking") {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-muted-foreground">
-        <Loader2Icon className="size-6 animate-spin opacity-60" />
-        <p className="text-xs">Looking for the Uno Work Companion extension…</p>
-      </div>
-    );
-  }
-
   if (detectState === "connected") {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center text-muted-foreground">
@@ -112,42 +103,75 @@ export function CompanionExtensionPanel({
     );
   }
 
+  // No extension (the usual case): the page opens in a new tab of this
+  // browser — no install needed. The extension is an optional extra, explained
+  // in plain words below (Misha 16.10: "it asks for some extension — what is
+  // it and why").
+  let host: string | null = null;
+  try {
+    host = url ? new URL(url).hostname : null;
+  } catch {
+    host = null;
+  }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 overflow-auto px-6 py-6 text-muted-foreground">
-      <PuzzleIcon className="size-8 opacity-40" />
+    <div
+      className="flex h-full flex-col items-center justify-center gap-4 overflow-auto px-6 py-6 text-muted-foreground"
+      data-testid="your-browser-panel"
+    >
+      <ExternalLinkIcon className="size-8 opacity-40" />
       <div className="space-y-1 text-center">
-        <p className="text-sm font-medium text-foreground">
-          Connect the Uno Work Companion extension
-        </p>
+        <p className="text-sm font-medium text-foreground">Opens in your browser</p>
         <p className="mx-auto max-w-sm text-xs">
-          In the web version, the agent browses through the extension, in your own tabs and
-          sessions. No passwords, no remote browser.
+          {url
+            ? "Sites open in a new tab of this browser, with your own sign-ins."
+            : "Enter an address above. It opens in a new tab of this browser."}
         </p>
       </div>
-      <ol className="max-w-sm list-decimal space-y-1 pl-5 text-left text-xs">
-        <li>Download the archive and unzip it into a folder.</li>
-        <li>
-          Open <span className="font-mono">chrome://extensions</span> and turn on Developer mode.
-        </li>
-        <li>Click "Load unpacked" and pick the folder from the archive.</li>
-        <li>Come back here and reload the page.</li>
-      </ol>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button size="sm" render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}>
-          <DownloadIcon className="size-3.5" />
-          Download extension
+      {url ? (
+        <Button size="sm" onClick={onOpenExternal} data-testid="your-browser-open-tab">
+          <ExternalLinkIcon className="size-3.5" />
+          Open {host ?? "it"} in a new tab
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void check()}>
-          <RefreshCwIcon className="size-3.5" />
-          Check again
-        </Button>
-        {url ? (
-          <Button size="sm" variant="ghost" onClick={onOpenExternal}>
-            <ExternalLinkIcon className="size-3.5" />
-            Open in a new tab
-          </Button>
-        ) : null}
-      </div>
+      ) : null}
+      <details className="mx-auto mt-2 max-w-sm text-xs">
+        <summary className="cursor-pointer text-center text-muted-foreground/80 hover:text-foreground">
+          Want the agent to work in this browser too?
+        </summary>
+        <div className="mt-2 space-y-2 text-left">
+          <p>
+            Only if you want the agent to click and type in your own tabs (with your sign-ins). For
+            that, add the Uno Work Companion extension to Chrome. You don't need it to open sites —
+            the agent also has its own browser on your computer.
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Download the archive and unzip it into a folder.</li>
+            <li>
+              Open <span className="font-mono">chrome://extensions</span> and turn on Developer
+              mode.
+            </li>
+            <li>Click "Load unpacked" and pick the folder from the archive.</li>
+            <li>Come back and press Check again.</li>
+          </ol>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="xs"
+              variant="outline"
+              render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}
+            >
+              <DownloadIcon className="size-3.5" />
+              Download extension
+            </Button>
+            <Button size="xs" variant="ghost" onClick={() => void check()}>
+              {detectState === "checking" ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCwIcon className="size-3.5" />
+              )}
+              Check again
+            </Button>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

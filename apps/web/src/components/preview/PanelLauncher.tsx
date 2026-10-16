@@ -110,7 +110,6 @@ function PanelLauncherV2({
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
-  const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const pluginsEnabled = useFeatureFlag("plugins");
   const demoDesktop = useDemoDesktop();
   const desktop = isElectron || demoDesktop;
@@ -245,14 +244,23 @@ function PanelLauncherV2({
           <ul className="flex flex-col gap-px" data-testid="panel-launcher-list">
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
+              const secondary = tile.id === "agentBrowser";
               const where =
                 tile.id === "site"
-                  ? `Opens on ${deviceName}${browserCompanionEnabled && !desktop ? " (Uno's browser tab)" : ""}. Turn on Comment to leave notes and see errors.`
+                  ? desktop
+                    ? `Opens on ${deviceName}. Turn on Comment to leave notes and see errors.`
+                    : "Opens in a new tab of your browser, with your own sign-ins."
                   : tile.id === "agentBrowser"
                     ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works there; your sign-ins stay on that computer.`
                     : undefined;
               return (
-                <li key={tile.id} className="list-none">
+                <li
+                  key={tile.id}
+                  className={cn(
+                    "list-none",
+                    secondary && "mt-2 border-t border-border/60 pt-2 opacity-75 hover:opacity-100",
+                  )}
+                >
                   <button
                     type="button"
                     data-testid={`panel-launcher-${tile.id}`}
