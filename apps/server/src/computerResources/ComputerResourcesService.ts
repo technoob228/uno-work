@@ -38,6 +38,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   lstat,
+  mkdir,
   readFile,
   readdir,
   readlink,
@@ -46,6 +47,7 @@ import {
   stat,
   statfs,
   truncate,
+  writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -760,9 +762,59 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
     // One `du` at a time: two walks of the same disk only slow each other.
     let duQueue: Promise<unknown> = Promise.resolve();
 
+    // Idle disk priority on Linux, not only low CPU: a walk of a full disk used
+    // to keep Files and everything else waiting on the disk (Misha 16.10, 39 GB).
+    const ionice = platform === "linux" && existsSync("/usr/bin/ionice");
+    const lowPriority = (command: string, args: string[]): [string, string[]] =>
+      ionice
+        ? ["ionice", ["-c", "3", "nice", "-n", "19", command, ...args]]
+        : ["nice", ["-n", "19", command, ...args]];
+
+    // The home folder's last measurement survives restarts and wakes: Disk shows
+    // it at once (with when it was measured) while a fresh one runs.
+    const persistScans = options.background !== false;
+    const scanCacheFile = path.join(home, ".cache", "uno-work", "disk-scan.json");
+    const saveScan = (target: string, state: DiskScan) => {
+      if (!persistScans || state.at === null || state.error) return;
+      const value = {
+        path: target,
+        at: state.at,
+        total: state.total,
+        entries: state.entries,
+        unreadable: state.unreadable,
+      };
+      void mkdir(path.dirname(scanCacheFile), { recursive: true })
+        .then(() => writeFile(scanCacheFile, JSON.stringify(value), { mode: 0o600 }))
+        .catch(() => undefined);
+    };
+    const loadScan = async (target: string): Promise<DiskScan | null> => {
+      if (!persistScans) return null;
+      try {
+        const raw = JSON.parse(await readFile(scanCacheFile, "utf8")) as {
+          path?: unknown;
+          at?: unknown;
+          total?: unknown;
+          entries?: unknown;
+          unreadable?: unknown;
+        };
+        if (raw.path !== target || typeof raw.at !== "number" || !Array.isArray(raw.entries))
+          return null;
+        return {
+          at: raw.at,
+          total: typeof raw.total === "number" ? raw.total : null,
+          entries: raw.entries as UnoDiskEntry[],
+          unreadable: typeof raw.unreadable === "number" ? raw.unreadable : 0,
+          error: null,
+          running: null,
+        };
+      } catch {
+        return null;
+      }
+    };
+
     const runDu = (target: string): Promise<ExecResult> => {
       const job = duQueue.then(() =>
-        exec("nice", ["-n", "19", "du", "-xk", "-d", "1", target], DISK_SCAN_TIMEOUT_MS),
+        exec(...lowPriority("du", ["-xk", "-d", "1", target]), DISK_SCAN_TIMEOUT_MS),
       );
       duQueue = job.catch(() => undefined);
       return job;
@@ -816,7 +868,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
     const measurePaths = async (paths: string[]): Promise<number | null> => {
       const existing = paths.filter((p) => existsSync(p));
       if (existing.length === 0) return 0;
-      const result = await exec("du", ["-sk", ...existing], 120_000);
+      const result = await exec(...lowPriority("du", ["-sk", ...existing]), 120_000);
       const lines = parseDu(result.stdout);
       return lines.length === 0 ? null : lines.reduce((s, l) => s + l.bytes, 0);
     };
@@ -964,6 +1016,13 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
           const realHome = await realpath(home).catch(() => home);
           const isHome = target === realHome;
           let state = scans.get(target);
+          if (!state && isHome) {
+            const saved = await loadScan(target);
+            if (saved) {
+              state = saved;
+              scans.set(target, state);
+            }
+          }
           if (!state) {
             state = {
               at: null,
@@ -979,6 +1038,9 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
           if ((stale || input.rescan) && !state.running) {
             const s = state;
             s.running = scanFolder(target, s)
+              .then(() => {
+                if (isHome) saveScan(target, s);
+              })
               .catch(() => {
                 s.error = "Couldn't measure this folder.";
               })

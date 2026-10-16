@@ -71,6 +71,30 @@ async function entryForDirent(
   }
 }
 
+/**
+ * Checks per folder item at a time: a folder of thousands (Downloads, a photo
+ * dump) used to queue them all at once on Node's few I/O threads, and every
+ * other file call of the daemon waited behind them.
+ */
+const LIST_STAT_CONCURRENCY = 32;
+
+async function mapLimited<T, R>(
+  items: ReadonlyArray<T>,
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = Array.from<R>({ length: items.length });
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function sortEntries(entries: FilesEntry[]): FilesEntry[] {
   return entries.toSorted((left, right) => {
     if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
@@ -100,7 +124,9 @@ export async function listFolder(
     ? dirents
     : dirents.filter((dirent) => !dirent.name.startsWith("."));
   const entries = (
-    await Promise.all(visible.map((dirent) => entryForDirent(rootReal, directory, dirent)))
+    await mapLimited(visible, LIST_STAT_CONCURRENCY, (dirent) =>
+      entryForDirent(rootReal, directory, dirent),
+    )
   ).filter((entry): entry is FilesEntry => entry !== null);
   return {
     path: directory,
