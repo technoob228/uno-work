@@ -22,6 +22,7 @@ import type {
   FilesCloudState,
   FilesCloudTransferResult,
 } from "@t3tools/contracts";
+import { DRIVE_GIT_ROOT } from "@t3tools/shared/unoDrive";
 
 import {
   ControlPlaneHttpError,
@@ -171,7 +172,9 @@ export function parseListing(raw: unknown, prefix: string) {
     .filter((folder) => folder.startsWith(prefix) && folder.endsWith("/"))
     .map((folder) => ({ prefix: folder, name: lastSegment(folder) }))
     // Older copies of Office documents; people reach them via Office → Versions.
-    .filter((folder) => folder.name !== CLOUD_VERSIONS_FOLDER);
+    .filter((folder) => folder.name !== CLOUD_VERSIONS_FOLDER)
+    // Git projects synced between computers (`uno project`): reached through git.
+    .filter((folder) => !(prefix === "" && folder.name === DRIVE_GIT_ROOT));
   const objects = (Array.isArray(record["objects"]) ? record["objects"] : []).flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const object = item as Record<string, unknown>;

@@ -29,12 +29,14 @@ function fakeConsole(routes: Record<string, (init?: RequestInit) => unknown>) {
 }
 
 describe("Uno Drive client", () => {
-  it("leaves older copies (.versions) out of recent files and search", async () => {
+  it("leaves older copies (.versions) and git projects (.uno-git) out of recent files and search", async () => {
     const { deps } = fakeConsole({
       "GET /api/v1/drive/recent?limit=30": () => ({
         files: [
           { key: "Reports/q3.pdf", size: 10 },
           { key: "Reports/.versions/q3.pdf/2026-10-16T09-00-00-000Z.pdf", size: 9 },
+          { key: ".uno-git/notes/refs.json", size: 300 },
+          { key: ".uno-git/notes/bundles/2026-10-16T09-00-00-000Z-ab12cd.bundle", size: 900 },
         ],
       }),
     });

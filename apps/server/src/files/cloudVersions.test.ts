@@ -69,6 +69,7 @@ describe("which replaced files are kept", () => {
   });
 
   it("skips huge files, older copies and the tail of a bulk copy", () => {
+    expect(cloudVersionSkipReason(".uno-git/notes/refs.json", 10, 0)).toMatch(/git/);
     expect(cloudVersionSkipReason("a.mp4", CLOUD_VERSION_MAX_BYTES + 1, 0)).toMatch(/200 MB/);
     expect(cloudVersionSkipReason("a/.versions/b/x.txt", 1, 0)).toMatch(/older copy/);
     expect(cloudVersionSkipReason("a.txt", 1, CLOUD_VERSIONS_PER_TRANSFER)).toMatch(/first 50/);
