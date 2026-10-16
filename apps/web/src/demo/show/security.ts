@@ -5,7 +5,9 @@ import { waitFor } from "./p4";
 
 async function openSecurity(): Promise<boolean> {
   if (!location.hash.startsWith("#/settings/security")) location.hash = "#/settings/security";
-  return waitFor(() => document.querySelector("[aria-label='Internet access for all computers']") !== null);
+  return waitFor(
+    () => document.querySelector("[aria-label='Internet access for all computers']") !== null,
+  );
 }
 
 function click(selector: string) {
@@ -38,5 +40,7 @@ demoShow.s4 = async () => {
   if (!(await openSecurity())) return;
   click("[aria-label='Show advanced security']");
   await new Promise((resolve) => setTimeout(resolve, 300));
-  document.querySelector("[aria-label='Hide advanced security']")?.scrollIntoView({ block: "start" });
+  document
+    .querySelector("[aria-label='Hide advanced security']")
+    ?.scrollIntoView({ block: "start" });
 };

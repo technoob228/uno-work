@@ -29,6 +29,7 @@ export function demoSecurityHandlers(
       (computer): DemoComputer => ({ ...computer, mode: "inherit" as ComputerIsolation }),
     ),
     devices: [] as Array<{ name: string; last_seen?: string }>,
+    unoAi: true,
     emergency: null as Protection["emergency"],
   };
 
@@ -36,7 +37,7 @@ export function demoSecurityHandlers(
     isolation: {
       all: state.all,
       computers: state.computers.map((computer) => ({ ...computer })),
-      uno_ai_when_isolated: true,
+      uno_ai_when_isolated: state.unoAi,
       limited_allow: ["github.com", "registry.npmjs.org", "pypi.org", "archive.ubuntu.com"],
     },
     private_network: {
@@ -53,14 +54,15 @@ export function demoSecurityHandlers(
     http.get("*/_account/api/v1/security/protection", () => HttpResponse.json(protection())),
     http.put("*/_account/api/v1/security/isolation", async ({ request }) => {
       const body = (await request.json()) as IsolationBody;
-      if (body.scope === "all") state.all = body.mode;
+      if (body.scope === "uno_ai") state.unoAi = body.on;
+      else if (body.scope === "all") state.all = body.mode;
       else {
         const computer = state.computers.find((item) => item.id === body.box_id);
         if (computer) computer.mode = body.mode;
       }
       // The first time something is isolated the mock "adds" a laptop once the
       // dialog was seen — here simply after a while, so both states show.
-      if (state.devices.length === 0 && body.mode === "isolated") {
+      if (state.devices.length === 0 && body.scope !== "uno_ai" && body.mode === "isolated") {
         setTimeout(() => state.devices.push({ name: "MacBook", last_seen: ago(0) }), 20_000);
       }
       return HttpResponse.json(protection());

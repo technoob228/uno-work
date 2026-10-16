@@ -55,7 +55,8 @@ export interface Protection {
 
 export type IsolationBody =
   | { readonly scope: "all"; readonly mode: IsolationMode }
-  | { readonly scope: "computer"; readonly box_id: number; readonly mode: ComputerIsolation };
+  | { readonly scope: "computer"; readonly box_id: number; readonly mode: ComputerIsolation }
+  | { readonly scope: "uno_ai"; readonly on: boolean };
 
 export interface EmergencyStopBody {
   readonly note?: string;
@@ -112,7 +113,8 @@ export function needsPrivateNetwork(protection: Protection): boolean {
   if (protection.private_network.set_up) return false;
   const { all, computers } = protection.isolation;
   return (
-    all === "isolated" || computers.some((computer) => effectiveMode(all, computer.mode) === "isolated")
+    all === "isolated" ||
+    computers.some((computer) => effectiveMode(all, computer.mode) === "isolated")
   );
 }
 

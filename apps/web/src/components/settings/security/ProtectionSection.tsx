@@ -23,8 +23,10 @@ import {
   ShieldIcon,
 } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 
-import { accountRequest } from "../../../account/unoAccount";
+import { AccountHttpError, accountRequest } from "../../../account/unoAccount";
+import { DEMO } from "../../../demo/demoFlag";
 import { Alert, AlertDescription, AlertTitle } from "../../ui/alert";
 import {
   AlertDialog,
@@ -85,6 +87,11 @@ function errorText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Something went wrong.";
 }
 
+/** The server answers 404 while protection is not on for this account (flag SECURITY_PROTECTION). */
+function notEnabled(error: unknown): boolean {
+  return error instanceof AccountHttpError && error.status === 404;
+}
+
 export function ProtectionSection() {
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -103,7 +110,10 @@ export function ProtectionSection() {
       }),
   });
   const [networkOpen, setNetworkOpen] = useState(false);
+  // Isolated picked while no device is in the private network: ask first.
+  const [confirmIsolate, setConfirmIsolate] = useState<IsolationBody | null>(null);
 
+  if (query.isError && notEnabled(query.error)) return null;
   if (query.isError) {
     return (
       <SettingsSection title="Protection">
@@ -131,6 +141,13 @@ export function ProtectionSection() {
   const all = data.isolation.all;
   const busy = setIsolation.isPending;
   const missingNetwork = needsPrivateNetwork(data);
+  const change = (body: IsolationBody) => {
+    if (body.scope !== "uno_ai" && body.mode === "isolated" && !data.private_network.set_up) {
+      setConfirmIsolate(body);
+      return;
+    }
+    setIsolation.mutate(body);
+  };
 
   return (
     <>
@@ -145,7 +162,7 @@ export function ProtectionSection() {
               value={all}
               disabled={busy}
               label="Internet access for all computers"
-              onChange={(mode) => setIsolation.mutate({ scope: "all", mode })}
+              onChange={(mode) => change({ scope: "all", mode })}
             />
           }
         >
@@ -154,6 +171,8 @@ export function ProtectionSection() {
               data={data}
               missingNetwork={missingNetwork}
               onOpenNetwork={() => setNetworkOpen(true)}
+              onUnoAi={(on) => setIsolation.mutate({ scope: "uno_ai", on })}
+              busy={busy}
             />
           ) : null}
         </SettingsRow>
@@ -172,9 +191,7 @@ export function ProtectionSection() {
                   all={all}
                   disabled={busy}
                   label={`Internet access for ${computer.name}`}
-                  onChange={(mode) =>
-                    setIsolation.mutate({ scope: "computer", box_id: computer.id, mode })
-                  }
+                  onChange={(mode) => change({ scope: "computer", box_id: computer.id, mode })}
                 />
               }
             />
@@ -199,6 +216,43 @@ export function ProtectionSection() {
       </SettingsSection>
 
       <PrivateNetworkDialog data={data} open={networkOpen} onOpenChange={setNetworkOpen} />
+      <AlertDialog
+        open={confirmIsolate !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmIsolate(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Set up your private network first?</AlertDialogTitle>
+            <AlertDialogDescription>
+              An isolated computer answers only inside your private network, and no device is in it
+              yet. If you isolate now, you can&apos;t open that computer until you add one.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const body = confirmIsolate;
+                setConfirmIsolate(null);
+                if (body) setIsolation.mutate(body);
+              }}
+            >
+              Isolate anyway
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmIsolate(null);
+                setNetworkOpen(true);
+              }}
+            >
+              <NetworkIcon />
+              Set up first
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </>
   );
 }
@@ -269,6 +323,8 @@ function IsolatedExtras(props: {
   readonly data: Protection;
   readonly missingNetwork: boolean;
   readonly onOpenNetwork: () => void;
+  readonly onUnoAi: (on: boolean) => void;
+  readonly busy: boolean;
 }) {
   const network = props.data.private_network;
   return (
@@ -300,7 +356,12 @@ function IsolatedExtras(props: {
             AI agents on your computers can still use Uno AI. Nothing else gets out.
           </span>
         </span>
-        <Switch checked={props.data.isolation.uno_ai_when_isolated} aria-label="Keep Uno AI on" />
+        <Switch
+          checked={props.data.isolation.uno_ai_when_isolated}
+          disabled={props.busy}
+          onCheckedChange={props.onUnoAi}
+          aria-label="Keep Uno AI on"
+        />
       </Label>
     </div>
   );
@@ -317,6 +378,8 @@ function EmergencyRow({ data }: { readonly data: Protection }) {
       (await accountRequest("POST", emergencyStopPath, body)) as Protection,
     onSuccess: (next) => {
       queryClient.setQueryData(protectionKey, next);
+      // The computers list (status) and the access overview change too.
+      void queryClient.invalidateQueries({ queryKey: ["account"] });
       setOpen(false);
       setNote("");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -449,6 +512,63 @@ function EmergencyBanner({ report }: { readonly report: EmergencyReport }) {
 }
 
 function PrivateNetworkDialog(props: {
+  readonly data: Protection;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  return DEMO ? <PrivateNetworkQrDialog {...props} /> : <PrivateNetworkVpnAppDialog {...props} />;
+}
+
+/**
+ * Until Uno's own private network exists (one QR per device, every computer
+ * inside), a computer joins one through the VPN app on it (WireGuard, App
+ * Store) — installed before the computer is isolated.
+ */
+function PrivateNetworkVpnAppDialog(props: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  const navigate = useNavigate();
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogPopup className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <NetworkIcon className="size-5 shrink-0" />
+            Set up your private network
+          </DialogTitle>
+          <DialogDescription>
+            Isolated computers answer only inside your private network. Set it up before you isolate
+            a computer.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm">
+            <li>On the computer, install WireGuard from the App Store.</li>
+            <li>In the WireGuard app there, add your laptop or phone.</li>
+            <li>Turn the tunnel on on your device. Now isolate the computer.</li>
+          </ol>
+        </DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+            Later
+          </Button>
+          <Button
+            onClick={() => {
+              props.onOpenChange(false);
+              void navigate({ to: "/computer", search: { store: "1" } });
+            }}
+          >
+            Open the App Store
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/** The target design (the mock): Uno's own private network, one QR per device. */
+function PrivateNetworkQrDialog(props: {
   readonly data: Protection;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;

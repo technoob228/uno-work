@@ -72,8 +72,8 @@ export function SecuritySettings() {
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold text-foreground">Advanced</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">
-                  Who got into each computer (every way in, ours too), SSH, open ports and
-                  addresses allowed in Limited mode.
+                  Who got into each computer (every way in, ours too), SSH, open ports and addresses
+                  allowed in Limited mode.
                 </p>
               </div>
               <ChevronDownIcon
