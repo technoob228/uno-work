@@ -791,47 +791,34 @@ function when(iso) {
 }
 
 /**
- * True when the cloud's history shares a commit with HEAD here. Tips not
- * here yet are fetched into a scratch namespace first, dropped after.
+ * True when the cloud's history shares a commit with HEAD here. Only the
+ * cloud's HEAD branch is looked at (one ref, bounded): when its tip isn't
+ * here yet it is fetched into a scratch ref, always dropped after.
  * @param {string} name
- * @param {string[]} tips
+ * @param {import("./git-remote-uno.mjs").RemoteState} state
  * @param {{ cwd: string, env: NodeJS.ProcessEnv }} at
  */
-async function sharesHistory(name, tips, at) {
+async function sharesHistory(name, state, at) {
   const run = (/** @type {string[]} */ args, input = "") => git(args, { ...at, input });
-  const checked = await run(["cat-file", "--batch-check"], `${tips.join("\n")}\n`);
-  let candidates = checked.stdout
-    .split("\n")
-    .filter((line) => line && !line.endsWith(" missing"))
-    .map((line) => line.split(" ")[0] ?? "");
-  let scratch = [];
-  if (candidates.length === 0) {
-    const fetched = await run([
-      "fetch",
-      "--no-tags",
-      "-q",
-      `uno::${name}`,
-      "+refs/*:refs/uno-check/*",
-    ]);
+  const ref =
+    (state.head && state.refs[state.head] ? state.head : null) ??
+    Object.keys(state.refs).find((candidate) => candidate.startsWith("refs/heads/")) ??
+    Object.keys(state.refs)[0];
+  const tip = ref ? state.refs[ref] : undefined;
+  if (!ref || !tip) return true;
+  const here = await run(["cat-file", "-e", tip]);
+  if (here.code === 0) return (await run(["merge-base", "HEAD", tip])).code === 0;
+  const scratch = `refs/uno-check/${process.pid}`;
+  try {
+    const fetched = await run(["fetch", "--no-tags", "-q", `uno::${name}`, `+${ref}:${scratch}`]);
     if (fetched.code !== 0) {
       throw new UnoGitError(
         `Couldn't read "${name}" from your Uno cloud: ${fetched.stderr.trim()}`,
       );
     }
-    scratch = (await run(["for-each-ref", "--format=%(refname)", "refs/uno-check/"])).stdout
-      .split("\n")
-      .filter(Boolean);
-    candidates = scratch;
-  }
-  try {
-    for (const candidate of candidates) {
-      if ((await run(["merge-base", "HEAD", candidate])).code === 0) return true;
-    }
-    return false;
+    return (await run(["merge-base", "HEAD", scratch])).code === 0;
   } finally {
-    if (scratch.length > 0) {
-      await run(["update-ref", "--stdin"], scratch.map((ref) => `delete ${ref}\n`).join(""));
-    }
+    await run(["update-ref", "-d", scratch]);
   }
 }
 
@@ -875,8 +862,7 @@ async function projectSync(planned, ctx) {
   if (!branch) throw new UnoCliError("Switch to a branch first (git switch -c main).");
   if (!hasRemote) {
     const state = await readRemote(openStorage({ home: ctx.home, env: ctx.env }), name);
-    const tips = [...new Set(Object.values(state.refs))];
-    if (tips.length > 0 && !(await sharesHistory(name, tips, at))) {
+    if (Object.keys(state.refs).length > 0 && !(await sharesHistory(name, state, at))) {
       throw new UnoCliError(
         `"${name}" in the Uno cloud is a different project. Save this one under another name: uno project sync --name ${name}-2`,
       );
