@@ -121,7 +121,6 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   // "Advanced sharing" fold inside the page.
   { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
   { label: "Computer access", to: "/settings/computer-access", icon: ShieldCheckIcon },
-  { label: "Security", to: "/settings/security", icon: LockIcon },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
@@ -166,6 +165,7 @@ export const SIMPLE_SETTINGS_PATHS = {
   computer: "/settings/computer",
   /** The person's own computer: what agents may do there, the journal, Stop all (13.11). */
   myComputer: "/settings/my-computer",
+  security: "/settings/security",
   keyboard: "/settings/keyboard",
   developer: "/settings/developer",
 } as const;
@@ -180,6 +180,8 @@ export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
   { label: "Projects", to: SIMPLE_SETTINGS_PATHS.projects, icon: FolderKanbanIcon },
   { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
   { label: "My computer", to: SIMPLE_SETTINGS_PATHS.myComputer, icon: LaptopIcon },
+  // 16.10 Misha: Security out of Developer — internet access and the red button are for everyone.
+  { label: "Security", to: SIMPLE_SETTINGS_PATHS.security, icon: LockIcon },
   { label: "Keyboard", to: SIMPLE_SETTINGS_PATHS.keyboard, icon: KeyboardIcon },
   { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
 ];

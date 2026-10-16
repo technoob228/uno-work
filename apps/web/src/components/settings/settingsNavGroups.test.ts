@@ -34,7 +34,6 @@ describe("buildSettingsNavGroups", () => {
       "/settings/vault",
       "/settings/workspace",
       "/settings/computer-access",
-      "/settings/security",
       "/settings/extensions",
     ]);
     expect(machine!.entries.map((entry) => entry.to)).toEqual([
@@ -75,7 +74,6 @@ describe("buildSettingsNavGroups", () => {
       "Labs",
       "My machines",
       "Computer access",
-      "Security",
     ]);
   });
 
@@ -116,6 +114,7 @@ describe("simple settings (01.10)", () => {
       "Projects",
       "Computer",
       "My computer",
+      "Security",
       "Keyboard",
       "Developer",
     ]);
@@ -160,6 +159,7 @@ describe("gating 28.10: Connectors and Skills only with the assistants update", 
       "Projects",
       "Computer",
       "My computer",
+      "Security",
       "Keyboard",
       "Developer",
     ]);
