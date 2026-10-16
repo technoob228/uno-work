@@ -1,10 +1,12 @@
 /**
  * Runs an app's one primary action (`appPrimaryAction`): Open (already signed
- * in with Uno when the app can), Start, or a chat with Uno that sets it up or
- * fixes it. Shared by Home, the desktop grid, the sidebar and the app's card,
- * so the same button does the same thing everywhere.
+ * in with Uno when the app can; a web app only the computer reaches — in the
+ * computer's own browser), Start and then open, Settings (⚙), or a chat with
+ * Uno that fixes it. Shared by Home, the desktop grid, the sidebar and Apps &
+ * sites, so a click does the same thing everywhere.
  */
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, UnoMachineAppActionInput } from "@t3tools/contracts";
 import { useCallback } from "react";
 
@@ -26,6 +28,13 @@ export function confirmShowOnInternet(name: string): boolean {
   );
 }
 
+/** A program with a page to show once it runs: a web port, or an address of its own. */
+function hasWindow(tile: ProgramTile): boolean {
+  const app = tile.machineApp;
+  if (!app || app.telegramBot) return false;
+  return app.url !== null || app.port !== null;
+}
+
 export interface AppPrimaryRunner {
   /** Do the tile's primary action. Returns the action it ran. */
   readonly run: (tile: ProgramTile) => AppPrimaryAction;
@@ -41,7 +50,8 @@ export function useAppPrimaryAction(input: {
   const { environmentId } = input;
   const boxId = input.boxId ?? null;
   const queryClient = useQueryClient();
-  const { openHere } = useOpenApp();
+  const { openHere, openComputerApp } = useOpenApp();
+  const navigate = useNavigate();
   const launchers = useHomeLaunchers(environmentId);
   const start = useMutation(machineAppActionMutationOptions(environmentId, queryClient));
   const { sendToUno } = launchers;
@@ -65,8 +75,22 @@ export function useAppPrimaryAction(input: {
           }
           break;
         }
+        case "openOnComputer":
+          openComputerApp({ key: tile.key, name: tile.name, icon: tile.icon });
+          break;
+        case "settings":
+          void navigate({ to: "/computer", search: { app: tile.key } });
+          break;
         case "start":
           if (action.machineAppId) {
+            // Something to look at (a web page): its window says "Starting…"
+            // and shows the app once it answers. A program without one starts
+            // in place — the tile says "Starting…".
+            if (hasWindow(tile)) {
+              // The window starts it (AppView), so a reload there starts it too.
+              openComputerApp({ key: tile.key, name: tile.name, icon: tile.icon });
+              break;
+            }
             startMutate(
               { appId: action.machineAppId, action: "start" },
               {
@@ -85,36 +109,7 @@ export function useAppPrimaryAction(input: {
         case "telegram":
           if (action.url) openInNewTab(action.url);
           break;
-        case "publish":
-          if (action.machineAppId && confirmShowOnInternet(tile.name)) {
-            const appId = action.machineAppId;
-            startMutate(
-              { appId, action: "publish" },
-              {
-                onSuccess: (apps) => {
-                  const url = apps.apps.find((entry) => entry.id === appId)?.publication?.url;
-                  // A new tab only from the person's own click (popup blockers).
-                  toastManager.add({
-                    type: "success",
-                    title: `${tile.name} is on the internet`,
-                    description: url ?? "Its address appears in a few seconds.",
-                    ...(url
-                      ? { actionProps: { children: "Open", onClick: () => openInNewTab(url) } }
-                      : {}),
-                  });
-                },
-                onError: (error) =>
-                  toastManager.add({
-                    type: "error",
-                    title: `${tile.name} isn't on the internet`,
-                    description: error instanceof Error ? error.message : String(error),
-                  }),
-              },
-            );
-          }
-          break;
         case "token":
-        case "setup":
         case "fix":
           if (action.prompt) void sendToUno(action.prompt);
           break;
@@ -124,7 +119,7 @@ export function useAppPrimaryAction(input: {
       }
       return action;
     },
-    [boxId, environmentId, openHere, sendToUno, startMutate],
+    [boxId, environmentId, navigate, openComputerApp, openHere, sendToUno, startMutate],
   );
 
   return {

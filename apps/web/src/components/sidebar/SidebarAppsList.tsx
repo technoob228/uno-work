@@ -13,6 +13,7 @@ import {
   PanelRightIcon,
   PinIcon,
   PinOffIcon,
+  SettingsIcon,
   ShoppingBagIcon,
   SquareTerminalIcon,
 } from "lucide-react";
@@ -162,11 +163,20 @@ function AppRow({
   const pinned = url ? isPinned("app", url) : false;
   const app = url ? { url, name: tile.name, icon: tile.icon } : null;
   const action = appPrimaryAction(tile);
+  // ⚙: the app's settings — its card on Home (address, internet, start/stop, remove).
+  const openSettings = () => {
+    onNavigate();
+    void navigate({ to: "/computer", search: { app: tile.key } });
+  };
 
   return (
     <li className="group/app relative list-none">
       <button
         type="button"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          openSettings();
+        }}
         onClick={() => {
           // Installing or asleep: the app's card on Home says why.
           if (action.disabled) {
@@ -174,14 +184,13 @@ function AppRow({
             void navigate({ to: "/computer" });
             return;
           }
-          // Starting stays here; Open and the chats with Uno go to the main area.
-          if (action.kind !== "start" || action.machineAppId === null) onNavigate();
+          onNavigate();
           primary.run(tile);
         }}
         title={[primaryActionTitle(tile, action), url].filter(Boolean).join("\n")}
         className={cn(
           "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg pl-1.5 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2",
-          app ? "pr-14" : "pr-1.5",
+          app ? "pr-20" : "pr-8",
         )}
       >
         <span className="relative shrink-0">
@@ -210,41 +219,53 @@ function AppRow({
         </span>
         <ActionChip action={action} busy={starting} className="shrink-0" />
       </button>
-      {app ? (
-        <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/app:opacity-100 focus-within:opacity-100 max-md:opacity-100">
-          <button
-            type="button"
-            aria-label={`Open ${tile.name} beside a chat`}
-            title="Open beside a chat"
-            onClick={() => {
-              onNavigate();
-              openBeside(app);
-            }}
-            className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground max-md:hidden"
-          >
-            <PanelRightIcon className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label={pinned ? `Unpin ${tile.name}` : `Pin ${tile.name}`}
-            title={pinned ? "Unpin" : "Pin to the sidebar"}
-            onClick={() =>
-              toggle({
-                kind: "app",
-                title: tile.name,
-                target: app.url,
-                icon: tile.icon,
-              })
-            }
-            className={cn(
-              "inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground",
-              pinned ? "text-primary" : "text-muted-foreground",
-            )}
-          >
-            {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
-          </button>
-        </div>
-      ) : null}
+      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/app:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+        {app ? (
+          <>
+            <button
+              type="button"
+              aria-label={`Open ${tile.name} beside a chat`}
+              title="Open beside a chat"
+              onClick={() => {
+                onNavigate();
+                openBeside(app);
+              }}
+              className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground max-md:hidden"
+            >
+              <PanelRightIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={pinned ? `Unpin ${tile.name}` : `Pin ${tile.name}`}
+              title={pinned ? "Unpin" : "Pin to the sidebar"}
+              onClick={() =>
+                toggle({
+                  kind: "app",
+                  title: tile.name,
+                  target: app.url,
+                  icon: tile.icon,
+                })
+              }
+              className={cn(
+                "inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground",
+                pinned ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          aria-label={`${tile.name} settings`}
+          title="Settings"
+          onClick={openSettings}
+          data-testid="app-row-settings"
+          className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <SettingsIcon className="size-3.5" />
+        </button>
+      </div>
     </li>
   );
 }

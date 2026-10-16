@@ -317,17 +317,28 @@ export function ComputerView() {
   };
 
   /**
-   * A tile's click is its one primary action (Open / Start / Set up with Uno /
-   * Fix with Uno); while it has none yet (installing, asleep) — its details.
+   * A tile's click is its one primary action (Open / Start / Fix with Uno);
+   * with nothing to open, or while it has nothing to do yet (installing,
+   * asleep) — its settings (⚙).
    */
   const openTile = (tile: ProgramTile) => {
-    if (!appPrimaryAction(tile).disabled) {
+    const action = appPrimaryAction(tile);
+    if (!action.disabled && action.kind !== "settings") {
       primary.run(tile);
       return;
     }
     resetTileMutations();
     setDetailsKey(tile.key);
   };
+
+  // ⚙ of an app from the sidebar / Apps & sites lands here with ?app=<tile key>.
+  useEffect(() => {
+    if (!routeSearch.app) return;
+    resetTileMutations();
+    setDetailsKey(routeSearch.app);
+    void navigate({ to: "/computer", search: {}, replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
+  }, [navigate, routeSearch.app]);
 
   // The sidebar's "App Store" row lands here with ?store=1.
   const storeAvailable = builtIns.onAppStore !== null;

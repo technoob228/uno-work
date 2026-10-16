@@ -18,7 +18,7 @@ import {
   FolderOpenIcon,
   GlobeIcon,
   HardDriveIcon,
-  InfoIcon,
+  SettingsIcon,
   LayoutGridIcon,
   ShoppingBagIcon,
   SparklesIcon,
@@ -43,16 +43,16 @@ export function primaryActionTitle(tile: ProgramTile, action: AppPrimaryAction):
   switch (action.kind) {
     case "open":
       return `Open ${name}`;
+    case "openOnComputer":
+      return `Open ${name} — in the computer's browser`;
+    case "settings":
+      return `${name} — runs without a window. Click for its settings`;
     case "telegram":
       return `Open ${name} in Telegram`;
     case "token":
       return `${name} — waiting for its Telegram token`;
-    case "publish":
-      return `${name} answers only inside the computer — show it on the internet to open it`;
     case "start":
       return `Start ${name}`;
-    case "setup":
-      return `Set up ${name} with Uno`;
     case "fix":
       return `Fix ${name} with Uno`;
     case "installing":
@@ -165,11 +165,11 @@ export function ProgramIcon({
 /** Soft colours of the primary-action chip, by what it does. */
 const ACTION_CHIP: Record<AppPrimaryAction["kind"], string> = {
   open: "bg-primary/10 text-primary",
+  openOnComputer: "bg-primary/10 text-primary",
+  settings: "bg-muted text-muted-foreground",
   telegram: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   token: "bg-warning/10 text-warning-foreground",
-  publish: "bg-primary/10 text-primary",
   start: "bg-primary/10 text-primary",
-  setup: "bg-primary/10 text-primary",
   fix: "bg-destructive/10 text-destructive-foreground",
   installing: "bg-muted text-muted-foreground",
   asleep: "bg-muted text-muted-foreground",
@@ -189,7 +189,9 @@ export function ActionChip({
   busy?: boolean;
   className?: string;
 }) {
-  if (action.kind === "open") return null;
+  // A click opens it (or its settings): nothing to spell under the tile.
+  if (action.kind === "open" || action.kind === "openOnComputer" || action.kind === "settings")
+    return null;
   return (
     <span
       className={cn(
@@ -251,6 +253,14 @@ export function TileShell({
         type="button"
         disabled={disabled}
         onClick={onClick}
+        onContextMenu={
+          onDetails
+            ? (event) => {
+                event.preventDefault();
+                onDetails();
+              }
+            : undefined
+        }
         title={[title ?? label, aiNote, aiWarning ? `⚠ ${aiWarning} (Settings → Apps)` : null]
           .filter(Boolean)
           .join("\n")}
@@ -325,10 +335,12 @@ export function TileShell({
           size="icon-xs"
           variant="ghost"
           className="absolute top-1 right-1 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
-          aria-label={`About ${label}`}
+          aria-label={`${label} settings`}
+          title="Settings"
           onClick={onDetails}
+          data-testid="program-settings"
         >
-          <InfoIcon />
+          <SettingsIcon />
         </Button>
       ) : null}
     </li>

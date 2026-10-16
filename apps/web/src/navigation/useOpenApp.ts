@@ -30,6 +30,17 @@ export interface AppTarget {
   readonly icon?: string | null;
 }
 
+/**
+ * One of the computer's apps by its tile (`/app?app=<key>`): the window starts
+ * it when needed ("Starting…"), then shows it — framed, or in the computer's
+ * own browser when only the computer reaches it (AppView).
+ */
+export interface ComputerAppTarget {
+  readonly key: string;
+  readonly name: string;
+  readonly icon?: string | null;
+}
+
 export function openInNewTab(url: string): void {
   const api = readLocalApi();
   if (api) {
@@ -47,8 +58,13 @@ export function openInNewTab(url: string): void {
  * is a build-time constant), so the hook order never changes.
  */
 function useOpenAppInTabs() {
+  const navigate = useNavigate();
   const open = useCallback((app: AppTarget) => openInNewTab(app.url), []);
-  return { openHere: open, openBeside: open, openInNewTab };
+  const openComputerApp = useCallback(
+    (app: ComputerAppTarget) => void navigate({ to: "/computer", search: { app: app.key } }),
+    [navigate],
+  );
+  return { openHere: open, openBeside: open, openInNewTab, openComputerApp };
 }
 
 export const useOpenApp: typeof useOpenAppInApp = isWebLite ? useOpenAppInTabs : useOpenAppInApp;
@@ -108,5 +124,16 @@ function useOpenAppInApp() {
     [inChat, machine.environmentId, navigate, preview, setAppFullscreen, sortOrder],
   );
 
-  return { openHere, openBeside, openInNewTab };
+  const openComputerApp = useCallback(
+    (app: ComputerAppTarget) => {
+      setAppFullscreen(false);
+      void navigate({
+        to: "/app",
+        search: { app: app.key, name: app.name, ...(app.icon ? { icon: app.icon } : {}) },
+      });
+    },
+    [navigate, setAppFullscreen],
+  );
+
+  return { openHere, openBeside, openInNewTab, openComputerApp };
 }

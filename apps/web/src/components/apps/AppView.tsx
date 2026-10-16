@@ -9,8 +9,13 @@
  *
  * Only addresses of this computer's apps (or pinned apps) are framed: a
  * crafted link can't dress an arbitrary site in Uno's chrome.
+ *
+ * `/app?app=<tile key>` opens one of the computer's apps by its tile, like a
+ * PC (Misha 16.10): "Starting…" while it starts, then the app — framed when
+ * this browser reaches its address, else in the computer's own browser
+ * (ComputerAppPage). Its settings are the ⚙ in the bar.
  */
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
   HouseIcon,
@@ -20,21 +25,29 @@ import {
   PinIcon,
   PinOffIcon,
   RotateCwIcon,
+  SettingsIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useNavStore } from "../../navigation/navStore";
 import { useGoHome } from "../../navigation/useGoHome";
 import { useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { computerLocalUrl } from "../computer/appPrimaryAction";
+import { machineAppActionMutationOptions } from "../computer/computerQueries";
+import { useStartingAppId } from "../computer/useAppPrimaryAction";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppFrame } from "./AppFrame";
+import { ComputerAppPage } from "./ComputerAppPage";
 import { appHost, belongsToComputer } from "./appAddress";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
@@ -42,9 +55,19 @@ const routeApi = getRouteApi("/_chat/app");
 
 export function AppView() {
   const search = routeApi.useSearch();
-  const url = search.url ?? null;
-  const name = search.name?.trim() || (url ? appHost(url) : "App");
   const { tiles, loading } = useProgramTiles();
+  const machine = useActiveMachine();
+  const navigate = useNavigate();
+  const startingId = useStartingAppId();
+  // Opened by its tile: the address comes from the app once it runs.
+  const byKey = search.app
+    ? (tiles.find((candidate) => candidate.key === search.app) ?? null)
+    : null;
+  const running = byKey?.status === "running";
+  const localUrl = byKey && running && !byKey.openUrl ? computerLocalUrl(byKey) : null;
+  const url = search.url ?? (running ? (byKey?.openUrl ?? localUrl) : null) ?? null;
+  const onComputer = url !== null && url === localUrl && machine.environmentId !== null;
+  const name = search.name?.trim() || byKey?.name || (url ? appHost(url) : "App");
   const { pins, isPinned, toggle } = usePins();
   const { openBeside, openInNewTab } = useOpenApp();
   const goHome = useGoHome();
@@ -53,18 +76,20 @@ export function AppView() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const tile = useMemo(() => {
+    if (byKey) return byKey;
     if (!url) return null;
     return tiles.find((candidate) => belongsToComputer(url, [candidate.openUrl])) ?? null;
-  }, [tiles, url]);
+  }, [byKey, tiles, url]);
   const icon = search.icon ?? tile?.icon ?? null;
   const known = useMemo(
     () =>
       url !== null &&
-      belongsToComputer(url, [
-        ...tiles.map((candidate) => candidate.openUrl),
-        ...pins.filter((pin) => pin.kind === "app").map((pin) => pin.target),
-      ]),
-    [pins, tiles, url],
+      (onComputer ||
+        belongsToComputer(url, [
+          ...tiles.map((candidate) => candidate.openUrl),
+          ...pins.filter((pin) => pin.kind === "app").map((pin) => pin.target),
+        ])),
+    [onComputer, pins, tiles, url],
   );
 
   // Leaving the app (Home, another screen) always ends full screen.
@@ -73,28 +98,104 @@ export function AppView() {
   const pinned = url ? isPinned("app", url) : false;
   const app = url ? { url, name, icon } : null;
 
-  const frame = !url ? (
-    <Notice title="No app to open">Pick an app in the sidebar or on your Home screen.</Notice>
-  ) : !known && loading ? (
-    <div className="flex h-full items-center justify-center">
-      <Spinner className="size-5 text-muted-foreground" />
-    </div>
-  ) : !known ? (
-    <Notice title="This address isn't one of this computer's apps">
-      Uno Work only shows this computer's own apps inside it. You can still open{" "}
-      <span className="font-mono text-foreground">{appHost(url)}</span> in a new browser tab.
-      <div className="mt-4">
-        <Button variant="outline" onClick={() => openInNewTab(url)}>
-          <ExternalLinkIcon />
-          Open in a new tab
-        </Button>
-      </div>
-    </Notice>
-  ) : (
-    <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} />
-  );
+  const openSettings = byKey
+    ? () => void navigate({ to: "/computer", search: { app: byKey.key } })
+    : null;
+  // Not running and it can start here: the window starts it, once, and says "Starting…".
+  const queryClient = useQueryClient();
+  const start = useMutation(machineAppActionMutationOptions(machine.environmentId, queryClient));
+  const startedFor = useRef<string | null>(null);
+  const machineApp = byKey?.machineApp ?? null;
+  const canStartHere =
+    machineApp !== null &&
+    machineApp.canStart &&
+    (byKey?.status === "stopped" || byKey?.status === "failed" || byKey?.status === "unknown");
+  const startMutate = start.mutate;
+  useEffect(() => {
+    if (!canStartHere || !machineApp || startedFor.current === machineApp.id) return;
+    if (startingId === machineApp.id) return;
+    startedFor.current = machineApp.id;
+    startMutate({ appId: machineApp.id, action: "start" });
+  }, [canStartHere, machineApp, startMutate, startingId]);
+  const startError =
+    start.isError && startedFor.current === machineApp?.id
+      ? start.error instanceof Error
+        ? start.error.message
+        : String(start.error)
+      : null;
+  const starting =
+    byKey !== null &&
+    !running &&
+    startError === null &&
+    (byKey.status === "installing" ||
+      canStartHere ||
+      (startingId !== null && startingId === machineApp?.id));
 
-  if (fullscreen && app && known) {
+  const frame =
+    search.app && !byKey && loading ? (
+      <div className="flex h-full items-center justify-center">
+        <Spinner className="size-5 text-muted-foreground" />
+      </div>
+    ) : search.app && !byKey ? (
+      <Notice title="This app isn't on this computer">
+        Pick an app in the sidebar or on your Home screen.
+      </Notice>
+    ) : byKey && starting ? (
+      <div className="flex h-full items-center justify-center" data-testid="app-starting">
+        <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          {byKey.status === "installing" ? "Installing…" : "Starting…"}
+        </span>
+      </div>
+    ) : byKey && !url ? (
+      <Notice
+        title={
+          startError !== null || byKey.status === "failed"
+            ? `${name} didn't start`
+            : running
+              ? `${name} has nothing to show`
+              : `${name} isn't running`
+        }
+      >
+        {startError ??
+          (byKey.status === "failed"
+            ? "It stopped with an error. Its settings have the details and Fix with Uno."
+            : running
+              ? "It runs without a window — a script or a bot. Its settings show what it does."
+              : "This computer can't start it by itself. Its settings have Start and Fix with Uno.")}
+        {openSettings ? (
+          <div className="mt-4">
+            <Button variant="outline" onClick={openSettings}>
+              <SettingsIcon />
+              Settings
+            </Button>
+          </div>
+        ) : null}
+      </Notice>
+    ) : onComputer && url && machine.environmentId ? (
+      <ComputerAppPage environmentId={machine.environmentId} url={url} name={name} />
+    ) : !url ? (
+      <Notice title="No app to open">Pick an app in the sidebar or on your Home screen.</Notice>
+    ) : !known && loading ? (
+      <div className="flex h-full items-center justify-center">
+        <Spinner className="size-5 text-muted-foreground" />
+      </div>
+    ) : !known ? (
+      <Notice title="This address isn't one of this computer's apps">
+        Uno Work only shows this computer's own apps inside it. You can still open{" "}
+        <span className="font-mono text-foreground">{appHost(url)}</span> in a new browser tab.
+        <div className="mt-4">
+          <Button variant="outline" onClick={() => openInNewTab(url)}>
+            <ExternalLinkIcon />
+            Open in a new tab
+          </Button>
+        </div>
+      </Notice>
+    ) : (
+      <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} />
+    );
+
+  if (fullscreen && app && known && !onComputer) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
         <div className="fixed inset-0 z-50 bg-background">
@@ -152,11 +253,16 @@ export function AppView() {
             <div className="truncate text-sm font-medium text-foreground">{name}</div>
             {url ? (
               <div className="truncate font-mono text-[11px] text-muted-foreground max-sm:hidden">
-                {appHost(url)}
+                {onComputer ? `${appHost(url)} · on the computer` : appHost(url)}
               </div>
             ) : null}
           </div>
-          {app && known ? (
+          {openSettings && !(app && known && !onComputer) ? (
+            <BarButton label="Settings" onClick={openSettings}>
+              <SettingsIcon />
+            </BarButton>
+          ) : null}
+          {app && known && !onComputer ? (
             <div className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
               <BarButton label="Reload" onClick={() => setReloadKey((key) => key + 1)}>
                 <RotateCwIcon />
@@ -186,6 +292,11 @@ export function AppView() {
               <BarButton label="Full screen" onClick={() => setFullscreen(true)}>
                 <Maximize2Icon />
               </BarButton>
+              {openSettings ? (
+                <BarButton label="Settings" onClick={openSettings}>
+                  <SettingsIcon />
+                </BarButton>
+              ) : null}
             </div>
           ) : null}
         </header>

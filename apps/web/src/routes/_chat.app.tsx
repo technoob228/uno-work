@@ -5,18 +5,25 @@ import { parseAppUrl } from "../components/apps/appAddress";
 
 export interface AppRouteSearch {
   readonly url?: string;
+  /** A tile of the computer (`ProgramTile.key`): started if needed, then shown. */
+  readonly app?: string;
   readonly name?: string;
   readonly icon?: string;
 }
 
-/** `/app?url=<app address>&name=<name>&icon=<emoji>` — an app inside Uno Work. */
+/**
+ * `/app?url=<app address>&name=<name>&icon=<emoji>` — an app inside Uno Work;
+ * `/app?app=<tile key>` — one of the computer's apps by its tile.
+ */
 export const Route = createFileRoute("/_chat/app")({
   validateSearch: (search: Record<string, unknown>): AppRouteSearch => {
     const url = parseAppUrl(search["url"]);
     const name = typeof search["name"] === "string" ? search["name"].slice(0, 120) : undefined;
     const icon = typeof search["icon"] === "string" ? search["icon"].slice(0, 16) : undefined;
+    const app = typeof search["app"] === "string" ? search["app"].slice(0, 200) : undefined;
     return {
       ...(url ? { url } : {}),
+      ...(app ? { app } : {}),
       ...(name ? { name } : {}),
       ...(icon ? { icon } : {}),
     };

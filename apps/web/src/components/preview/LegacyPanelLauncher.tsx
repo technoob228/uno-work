@@ -89,7 +89,7 @@ export function LegacyPanelLauncher({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const pluginsEnabled = useFeatureFlag("plugins");
-  const { browsesOnMachine, openChatBrowser } = useChatBrowser();
+  const { browsesOnMachine, openChatBrowser, openInSource } = useChatBrowser();
   const chatActions = useChatPanelActions(currentChatThreadId);
   const machine = useActiveMachine();
   const programs = useProgramTiles();
@@ -113,8 +113,11 @@ export function LegacyPanelLauncher({
     () =>
       programs.tiles.flatMap((tile) => {
         const action = appPrimaryAction(tile);
-        return action.kind === "open" && !action.disabled && action.url
-          ? [{ tile, url: action.url }]
+        // A web app only the computer reaches opens in the computer's own browser.
+        return (action.kind === "open" || action.kind === "openOnComputer") &&
+          !action.disabled &&
+          action.url
+          ? [{ tile, url: action.url, onComputer: action.kind === "openOnComputer" }]
           : [];
       }),
     [programs.tiles],
@@ -251,7 +254,7 @@ export function LegacyPanelLauncher({
                       </li>
                     ))
                   : null}
-                {openableApps.map(({ tile, url }) => (
+                {openableApps.map(({ tile, url, onComputer }) => (
                   <ListRow
                     key={tile.key}
                     icon={
@@ -266,7 +269,8 @@ export function LegacyPanelLauncher({
                     title={tile.name}
                     subtitle={tile.product ?? tile.caption}
                     onClick={() => {
-                      openAppTab(makeAppFile({ url, name: tile.name, icon: tile.icon }));
+                      if (onComputer) openInSource("computer", url);
+                      else openAppTab(makeAppFile({ url, name: tile.name, icon: tile.icon }));
                       onOpenedTab();
                     }}
                   />

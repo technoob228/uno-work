@@ -9,6 +9,8 @@ import {
 export interface ComputerRouteSearch {
   /** "1" = open the App Store over the desktop (the sidebar's App Store row). */
   readonly store?: "1";
+  /** An app's settings (⚙) to open, by its tile key — from the sidebar and Apps & sites. */
+  readonly app?: string;
   /** What's using the computer: the processor / memory / disk / network drill-down. */
   readonly look?: ResourceLook;
 }
@@ -19,6 +21,7 @@ export const Route = createFileRoute("/_chat/computer")({
     return {
       ...(search["store"] === "1" || search["store"] === 1 ? { store: "1" as const } : {}),
       ...(look ? { look } : {}),
+      ...(typeof search["app"] === "string" ? { app: search["app"].slice(0, 200) } : {}),
     };
   },
   component: ComputerView,

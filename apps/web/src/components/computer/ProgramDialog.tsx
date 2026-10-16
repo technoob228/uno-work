@@ -18,6 +18,7 @@ import type {
 import {
   CirclePlayIcon,
   CircleStopIcon,
+  SettingsIcon,
   LoaderIcon,
   MoonIcon,
   WrenchIcon,
@@ -454,11 +455,11 @@ function AiSpendingBlock({
 
 const PRIMARY_ICON: Record<AppPrimaryAction["kind"], typeof ExternalLinkIcon> = {
   open: ExternalLinkIcon,
+  openOnComputer: ExternalLinkIcon,
+  settings: SettingsIcon,
   telegram: SendIcon,
   token: KeyRoundIcon,
-  publish: GlobeIcon,
   start: CirclePlayIcon,
-  setup: SparklesIcon,
   fix: WrenchIcon,
   installing: LoaderIcon,
   asleep: MoonIcon,
@@ -567,7 +568,9 @@ export function ProgramDialog({
     !app.loopbackOnly;
   const blocked = machineApps?.publishBlockedReason ?? null;
   const busy = pendingAction !== null || remove.pending;
-  const primary = tile && onPrimaryAction ? appPrimaryAction(tile) : null;
+  // In its own settings, "Settings" isn't an action.
+  const primaryAction = tile && onPrimaryAction ? appPrimaryAction(tile) : null;
+  const primary = primaryAction?.kind === "settings" ? null : primaryAction;
   // The big button starts it; the row below keeps only the other things.
   const startIsPrimary = primary?.kind === "start" && primary.machineAppId !== null;
   const nonWebForwards = publication?.forwards.filter(
@@ -739,7 +742,7 @@ export function ProgramDialog({
                       )}
                       Hide from the internet
                     </Button>
-                  ) : publishable && !blocked && primary?.kind !== "publish" ? (
+                  ) : publishable && !blocked ? (
                     <Button
                       size="sm"
                       variant={primary ? "outline" : "default"}

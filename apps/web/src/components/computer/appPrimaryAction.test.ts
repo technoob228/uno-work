@@ -103,27 +103,29 @@ describe("appPrimaryAction", () => {
     expect(action.kind).toBe("fix");
   });
 
-  it("offers Set up with Uno for a running app with no web address (a bot, a CLI app)", () => {
+  it("opens the settings of a running app with nothing to open (a script, a CLI app)", () => {
     const action = appPrimaryAction(tileOf({ machineApps: [machineApp()] }));
-    expect(action).toMatchObject({ kind: "setup", label: "Set up with Uno" });
-    expect(action.prompt).toBe(
-      "Help me set up my-bot on this computer. Ask me only what you need.",
-    );
+    expect(action).toMatchObject({ kind: "settings", machineAppId: "docker:my-bot" });
+    expect(action.prompt).toBeNull();
   });
 
-  it("offers Show on the internet for a running web port nobody can open yet", () => {
+  it("opens a running web port in the computer's own browser, not Show on the internet", () => {
     const action = appPrimaryAction(
       tileOf({
         machineApps: [machineApp({ id: "port:3000", source: "port", port: 3000, http: true })],
       }),
     );
-    expect(action).toMatchObject({ kind: "publish", machineAppId: "port:3000" });
+    expect(action).toMatchObject({
+      kind: "openOnComputer",
+      label: "Open",
+      url: "http://localhost:3000/",
+      machineAppId: "port:3000",
+    });
   });
 
-  it("offers Set up with Uno for a running App Store app with no address", () => {
+  it("opens the settings of a running App Store app with no address", () => {
     const action = appPrimaryAction(tileOf({ storeApps: [storeApp({ url: null })] }));
-    expect(action.kind).toBe("setup");
-    expect(action.prompt).toContain("Files & documents (Nextcloud)");
+    expect(action.kind).toBe("settings");
   });
 
   it("shows Installing… turned off while it installs", () => {
@@ -172,11 +174,13 @@ describe("appPrimaryAction", () => {
       canStart: false,
     });
 
-    it("offers Show on the internet, not Set up with Uno, for a web app only the computer reaches", () => {
+    it("opens a web app only the computer reaches in the computer's browser", () => {
       const action = appPrimaryAction(tileOf({ machineApps: [web] }));
-      expect(action.kind).toBe("publish");
-      expect(action.label).toBe("Show on the internet");
-      expect(action.machineAppId).toBe("manifest:orders");
+      expect(action).toMatchObject({
+        kind: "openOnComputer",
+        url: "http://localhost:8087/",
+        machineAppId: "manifest:orders",
+      });
     });
 
     it("opens it right here when the browser runs on that machine", () => {
@@ -184,11 +188,11 @@ describe("appPrimaryAction", () => {
       expect(action).toMatchObject({ kind: "open", url: "http://localhost:8087/" });
     });
 
-    it("falls back to Uno when this machine can't show apps on the internet", () => {
+    it("opens it the same way when this machine can't show apps on the internet", () => {
       const action = appPrimaryAction(
         tileOf({ machineApps: [web], publishBlockedReason: "Only an Uno computer can…" }),
       );
-      expect(action.kind).toBe("setup");
+      expect(action.kind).toBe("openOnComputer");
     });
 
     const bot = machineApp({
