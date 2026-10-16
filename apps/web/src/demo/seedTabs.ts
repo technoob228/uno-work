@@ -1,11 +1,11 @@
 /**
  * Point 4 of the w0138 mock: tabs to look at. Three chats of the project
  * "landing" (two on the MacBook, one on uno-product) with their own tabs,
- * two files pinned to the project and the Pult app pinned everywhere.
+ * files of the project and the Pult app everywhere.
  *
  * The real panel takes these as its starting state (PreviewPaneProvider asks
  * `demoHooks.previewInitialStates`); flipping the "Panel tabs" switch lays the
- * same tabs out the other way (B: everything belongs to the project).
+ * same tabs out the other way ("What you open goes to": Project or the chat).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
@@ -99,48 +99,43 @@ const view = (base: PreviewBucketState, activeFileId: string): PreviewBucketStat
 });
 
 export function seedPreviewStates(
-  layout: DemoSwitches["tabs"],
+  newTabsGo: DemoSwitches["newTabsGo"],
 ): Record<string, PreviewBucketState> {
-  const pinned = [mac("README.md"), mac("pricing.md")];
-  const chats: Record<string, PreviewFile[]> = {
-    [SEEDED_CHATS.copy]: [mac("hero.md", "agent"), mac("flow-2.md", "agent"), pricingPage()],
-    [SEEDED_CHATS.hero]: [mac("assets/hero-variants.png", "agent"), mac("brand-guide.pdf")],
-    [SEEDED_CHATS.pricing]: [product("pricing-research.docx", "agent"), product("competitors.md")],
+  // What the person kept for the project, and per chat: what the agent opened
+  // (always the chat's) and what the person opened there (Project or the chat,
+  // by the "What you open goes to" switch).
+  const projectTabs = [mac("README.md"), mac("pricing.md")];
+  const byAgent: Record<string, PreviewFile[]> = {
+    [SEEDED_CHATS.copy]: [mac("hero.md", "agent"), mac("flow-2.md", "agent")],
+    [SEEDED_CHATS.hero]: [mac("assets/hero-variants.png", "agent")],
+    [SEEDED_CHATS.pricing]: [product("pricing-research.docx", "agent")],
   };
-  const active: Record<string, string> = {
-    [SEEDED_CHATS.copy]: chats[SEEDED_CHATS.copy]![0]!.id,
-    [SEEDED_CHATS.hero]: chats[SEEDED_CHATS.hero]![0]!.id,
-    [SEEDED_CHATS.pricing]: chats[SEEDED_CHATS.pricing]![0]!.id,
+  const byPerson: Record<string, PreviewFile[]> = {
+    [SEEDED_CHATS.copy]: [pricingPage()],
+    [SEEDED_CHATS.hero]: [mac("brand-guide.pdf")],
+    [SEEDED_CHATS.pricing]: [product("competitors.md")],
   };
   const states: Record<string, PreviewBucketState> = {
     [GLOBAL_SCOPE_KEY]: bucket([pultApp()]),
+    [projectScopeKey(LANDING_PROJECT_KEY)]: bucket(
+      newTabsGo === "project" ? [...projectTabs, ...Object.values(byPerson).flat()] : projectTabs,
+    ),
   };
-  if (layout === "project") {
-    // B, like Codex: whatever was opened in any chat is a tab of the project;
-    // each chat only remembers which tab it had in front.
-    states[projectScopeKey(LANDING_PROJECT_KEY)] = bucket([
-      ...pinned,
-      ...Object.values(chats).flat(),
-    ]);
-    for (const [threadId, activeId] of Object.entries(active)) {
-      states[chatScopeKey(threadId)] = view(DEFAULT_PREVIEW_BUCKET_STATE, activeId);
-    }
-    return states;
-  }
-  states[projectScopeKey(LANDING_PROJECT_KEY)] = bucket(pinned);
-  for (const [threadId, files] of Object.entries(chats)) {
-    states[chatScopeKey(threadId)] = view(bucket(files), active[threadId]!);
+  for (const [threadId, agentTabs] of Object.entries(byAgent)) {
+    const own = newTabsGo === "project" ? agentTabs : [...agentTabs, ...byPerson[threadId]!];
+    states[chatScopeKey(threadId)] = view(bucket(own), agentTabs[0]!.id);
   }
   return states;
 }
 
-demoHooks.previewInitialStates = () => seedPreviewStates(useDemoStore.getState().switches.tabs);
+demoHooks.previewInitialStates = () =>
+  seedPreviewStates(useDemoStore.getState().switches.newTabsGo);
 
 // The switch lays the same tabs out the other way at once.
 useDemoStore.subscribe((state, previous) => {
-  if (state.switches.tabs === previous.switches.tabs) return;
+  if (state.switches.newTabsGo === previous.switches.newTabsGo) return;
   const set = demoHooks.setPreviewStates as
     | ((states: Record<string, PreviewBucketState>) => void)
     | undefined;
-  set?.(seedPreviewStates(state.switches.tabs));
+  set?.(seedPreviewStates(state.switches.newTabsGo));
 });

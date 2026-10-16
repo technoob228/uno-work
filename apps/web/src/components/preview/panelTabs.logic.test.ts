@@ -30,7 +30,12 @@ const research = file("research.docx");
 
 describe("groupStripTabs", () => {
   it("groups left to right: Everywhere → Project → This chat", () => {
-    const scopes = { [pult.id]: "global", [readme.id]: "project", [pricing.id]: "project", [hero.id]: "chat" } as const;
+    const scopes = {
+      [pult.id]: "global",
+      [readme.id]: "project",
+      [pricing.id]: "project",
+      [hero.id]: "chat",
+    } as const;
     expect(groupStripTabs([pult, readme, pricing, hero], scopes)).toEqual([
       { scope: "global", files: [pult] },
       { scope: "project", files: [readme, pricing] },
@@ -157,7 +162,9 @@ describe("tabs saved by 0.0.137 and earlier", () => {
   // long levels only. The groups read it as is — no new format, no migration.
   const saved = {
     [GLOBAL_SCOPE_KEY]: [{ id: "browser-3", name: "Pult", url: "https://pult.example/" }],
-    [projectScopeKey("landing")]: [{ id: "browser-7", name: "Stage", url: "https://stage.example/" }],
+    [projectScopeKey("landing")]: [
+      { id: "browser-7", name: "Stage", url: "https://stage.example/" },
+    ],
   };
 
   it("come back as the Everywhere and Project groups", () => {

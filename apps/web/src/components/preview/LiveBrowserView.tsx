@@ -32,6 +32,7 @@ import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachineIdentities";
 import { matchCredentialsForOrigin } from "./BrowserPane";
+import { BrowserHelpCard } from "./BrowserHelpCard";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
 import { useChatBrowser } from "./useChatBrowser";
@@ -79,7 +80,10 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   useEffect(() => {
     if (!api || !pageId) return;
     setFrame(null);
-    return api.browserLive.subscribeFrames({ pageId }, setFrame);
+    // Only this page's pictures, whatever else the stream carries.
+    return api.browserLive.subscribeFrames({ pageId }, (next) => {
+      if (next.pageId === pageId) setFrame(next);
+    });
   }, [api, pageId]);
 
   const human = page?.control === "human";
@@ -128,31 +132,10 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar environmentId={environmentId} page={page} human={human} tabId={file.id} />
+      <Toolbar environmentId={environmentId} page={page} human={human} />
       <LocationStrip environmentId={environmentId} location={state.location} />
-      {page.help ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          <HandIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="min-w-0 flex-1">
-            <div className="font-medium">The agent needs you</div>
-            <div className="text-muted-foreground">{page.help.reason}</div>
-          </div>
-          {human ? (
-            <Button size="xs" onClick={() => void setControl("agent")}>
-              Done — hand back
-            </Button>
-          ) : (
-            <>
-              <Button size="xs" onClick={() => void setControl("human")}>
-                Take control
-              </Button>
-              <Button size="xs" variant="ghost" onClick={() => void setControl("agent")}>
-                Done
-              </Button>
-            </>
-          )}
-        </div>
-      ) : null}
+      {/* Sign-in, captcha, 2FA: the same card as above the chat's composer. */}
+      <BrowserHelpCard environmentId={environmentId} page={page} where="panel" />
       <Screen
         pageId={pageId}
         environmentId={environmentId}
@@ -162,6 +145,7 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         onTakeControl={() => void setControl("human")}
       />
       <div
+        hidden={page.help !== null}
         className={cn(
           "flex items-center gap-2 border-t px-3 py-1.5 text-xs",
           human ? "border-primary/40 bg-primary/5" : "border-border",
@@ -442,12 +426,10 @@ function Toolbar({
   environmentId,
   page,
   human,
-  tabId,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
   human: boolean;
-  tabId: string;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
   const [draft, setDraft] = useState(page.url);

@@ -1,6 +1,6 @@
 /**
  * "All tabs ▾" at the end of the panel's tab row (w0138, point 4): every tab
- * this chat can see — its own, the project's pins, the ones pinned everywhere
+ * this chat can see — its own group, the Project group, Everywhere
  * — plus documents open in other chats of the project. A click opens the
  * document here; "Go to chat" jumps to the chat that has it. That is how the
  * person glances at a document of another chat without moving it anywhere.
@@ -20,7 +20,7 @@ import {
   type PreviewFileKind,
   usePreviewPane,
 } from "./PreviewPaneContext";
-import { collectAllTabs, type OtherChatTab, type PanelTabsLayout } from "./panelTabs.logic";
+import { collectAllTabs, type OtherChatTab } from "./panelTabs.logic";
 import { usePanelChatDirectory } from "./usePanelChats";
 
 type KindIcon = React.ComponentType<{ className?: string }>;
@@ -28,13 +28,11 @@ type KindIcon = React.ComponentType<{ className?: string }>;
 export function AllTabsMenu({
   kindIcon,
   projectName,
-  layout,
   open,
   onOpenChange,
 }: {
   kindIcon: Record<PreviewFileKind, KindIcon>;
   projectName: string | null;
-  layout: PanelTabsLayout;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -145,10 +143,8 @@ export function AllTabsMenu({
             {sections ? (
               <>
                 <Section
-                  title={layout === "project" ? "Only in this chat" : "This chat"}
-                  empty={
-                    currentChatThreadId && layout === "pins" ? "Nothing open in this chat" : null
-                  }
+                  title="This chat"
+                  empty={currentChatThreadId ? "Nothing open only in this chat" : null}
                 >
                   {currentChatThreadId
                     ? sections.thisChat.map((file) => (
@@ -163,16 +159,8 @@ export function AllTabsMenu({
                 </Section>
                 {currentChatThreadId ? (
                   <Section
-                    title={
-                      layout === "project"
-                        ? `Project · ${projectName ?? "this project"}`
-                        : `Pinned · ${projectName ?? "this project"}`
-                    }
-                    empty={
-                      layout === "project"
-                        ? null
-                        : "Drag a tab left of the line to pin it to the project"
-                    }
+                    title={projectName ? `Project · ${projectName}` : "Project"}
+                    empty="Drag a tab into the Project group to keep it across chats"
                   >
                     {sections.project.map((file) => (
                       <Row
@@ -184,7 +172,7 @@ export function AllTabsMenu({
                     ))}
                   </Section>
                 ) : null}
-                <Section title="In every chat" empty={null}>
+                <Section title="Everywhere" empty={null}>
                   {sections.everywhere.map((file) => (
                     <Row
                       key={file.id}

@@ -170,7 +170,11 @@ const FOLD_ORDER: ReadonlyArray<ReadonlyArray<PreviewTabScope>> = [
 ];
 
 function rowWidth(
-  groups: ReadonlyArray<{ readonly scope: PreviewTabScope; readonly count: number; readonly active: boolean }>,
+  groups: ReadonlyArray<{
+    readonly scope: PreviewTabScope;
+    readonly count: number;
+    readonly active: boolean;
+  }>,
   folded: ReadonlyArray<PreviewTabScope>,
   chrome: number,
 ): number {

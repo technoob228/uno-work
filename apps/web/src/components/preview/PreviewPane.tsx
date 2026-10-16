@@ -90,7 +90,7 @@ import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
 import { AllTabsMenu } from "./AllTabsMenu";
 import { useCurrentProjectName } from "./usePanelChats";
-import { DEMO, demoHooks, useDemoSwitch } from "../../demo/demoFlag";
+import { DEMO, demoHooks } from "../../demo/demoFlag";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -1745,8 +1745,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setWidth: setViewWidth,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
-  // w0138 p4: tabs of the chat + pins (A, default) or of the project (B).
-  const tabsLayout = useDemoSwitch("tabs");
   const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
   const [allTabsOpen, setAllTabsOpen] = useState(false);
   useEffect(() => {
@@ -1978,7 +1976,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           <PanelTabStrip
             files={files}
             activeId={active?.id ?? null}
-            layout={tabsLayout}
             projectName={projectName}
             kindIcon={KIND_ICON}
             kindLabel={KIND_LABEL}
@@ -2021,7 +2018,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           <AllTabsMenu
             kindIcon={KIND_ICON}
             projectName={projectName}
-            layout={tabsLayout}
             open={allTabsOpen}
             onOpenChange={setAllTabsOpen}
           />
