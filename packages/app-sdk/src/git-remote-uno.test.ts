@@ -3,7 +3,7 @@
  * temp folders, a temp HOME and no system config, the helper found on PATH
  * exactly as git finds it on a cloud computer.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -13,7 +13,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  FAKE_STORAGE_DELAY_ENV,
   FAKE_STORAGE_ENV,
+  bundleTime,
+  collectBundles,
+  logKey,
   NOT_CLOUD,
   folderStorage,
   listProjects,
@@ -92,6 +96,42 @@ function cloneTo(dirName: string, name: string) {
   const dir = path.join(root, dirName);
   ok(root, "clone", "-q", "-o", "uno", `uno::${name}`, dir);
   return dir;
+}
+
+/** git in the background (two computers at once). */
+function gitAsync(cwd: string, ...args: string[]): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("git", args, { cwd, env: { ...env, [FAKE_STORAGE_DELAY_ENV]: "300" } });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stderr.on("data", (chunk) => (out += chunk));
+    child.on("close", (code) => resolve({ code: code ?? 1, out }));
+  });
+}
+
+/** Make unnamed bundle files look two hours old (their key carries the time). */
+function ageUnnamedBundles(name: string, named: ReadonlyArray<string>) {
+  const dir = path.join(cloud, ".uno-git", name, "bundles");
+  const old = new Date(Date.now() - 2 * 3600_000).toISOString().replace(/[:.]/g, "-");
+  for (const file of fs.readdirSync(dir)) {
+    if (named.some((key) => key.endsWith(`/${file}`))) continue;
+    fs.renameSync(path.join(dir, file), path.join(dir, file.replace(/^[^Z]+Z/, old)));
+  }
+}
+
+/** Every bundle the current state names is there, and a fresh clone has every ref. */
+async function expectConsistent(name: string) {
+  const current = await state(name);
+  for (const bundle of current.bundles) {
+    expect(fs.existsSync(path.join(cloud, bundle.key))).toBe(true);
+  }
+  const check = path.join(root, `check-${Math.random().toString(16).slice(2)}`);
+  ok(root, "clone", "-q", "--no-checkout", `uno::${name}`, check);
+  for (const [ref, id] of Object.entries(current.refs)) {
+    expect(ok(check, "cat-file", "-t", id)).toMatch(/commit|tag/);
+    expect(ref).toMatch(/^refs\//);
+  }
+  return current;
 }
 
 const state = (name: string) => readRemote(folderStorage(cloud), name);
@@ -213,6 +253,11 @@ describe("git-remote-uno", () => {
     const empty = await state("app");
     expect(empty.refs).toEqual({});
     expect(empty.bundles).toEqual([]);
+    // The file stays until it is an hour old (a push in flight may name it).
+    expect(bundleFiles("app")).toHaveLength(1);
+    expect(await collectBundles(folderStorage(cloud), "app")).toBe(0);
+    ageUnnamedBundles("app", []);
+    expect(await collectBundles(folderStorage(cloud), "app")).toBe(1);
     expect(bundleFiles("app")).toEqual([]);
   });
 
@@ -233,11 +278,129 @@ describe("git-remote-uno", () => {
     expect(packed.bundles).toHaveLength(1);
     expect(packed.bundles[0]!.prerequisites).toEqual([]);
     expect(packed.bundles[0]!.tips).toEqual(packed.refs);
-    expect(bundleFiles("big")).toEqual([path.basename(packed.bundles[0]!.key)]);
+    // The old bundles stay for now: someone may be reading the state before.
+    expect(bundleFiles("big")).toHaveLength(6);
 
     const b = cloneTo("b", "big");
     expect(ok(b, "rev-parse", "HEAD")).toBe(ok(a, "rev-parse", "HEAD"));
     expect(ok(b, "rev-list", "--count", "HEAD")).toBe("6");
+
+    // An hour later the next push clears what no state names.
+    ageUnnamedBundles("big", [packed.bundles[0]!.key]);
+    commit(b, "last.txt", "last\n", "last");
+    ok(b, "push", "uno", "main");
+    const after = await state("big");
+    expect(bundleFiles("big").toSorted()).toEqual(
+      after.bundles.map((bundle) => path.basename(bundle.key)).toSorted(),
+    );
+    expect(after.seq).toBeGreaterThan(packed.seq);
+    await expectConsistent("big");
+  }, 30_000);
+
+  it("two computers pushing different branches at once: both land or one is told to fetch first", async () => {
+    const a = newRepo("a", "race");
+    ok(a, "push", "uno", "main");
+    const b = cloneTo("b", "race");
+    for (let round = 0; round < 4; round += 1) {
+      const idA = commit(a, `a${round}.txt`, `${round}\n`, `a ${round}`);
+      const idB = commit(b, `b${round}.txt`, `${round}\n`, `b ${round}`);
+      const [fromA, fromB] = await Promise.all([
+        gitAsync(a, "push", "uno", `HEAD:refs/heads/a${round}`),
+        gitAsync(b, "push", "uno", `HEAD:refs/heads/b${round}`),
+      ]);
+      const current = await expectConsistent("race");
+      for (const [result, ref, id] of [
+        [fromA, `refs/heads/a${round}`, idA],
+        [fromB, `refs/heads/b${round}`, idB],
+      ] as const) {
+        if (result.code === 0) expect(current.refs[ref]).toBe(id);
+        else {
+          expect(result.out).toMatch(/fetch first/);
+          expect(current.refs[ref]).toBeUndefined();
+        }
+      }
+    }
+  }, 30_000);
+
+  it("two computers fast-forwarding the same branch at once: one lands, the other is refused", async () => {
+    const a = newRepo("a", "same");
+    ok(a, "push", "uno", "main");
+    const b = cloneTo("b", "same");
+    for (let round = 0; round < 3; round += 1) {
+      // Both start from what the cloud has (the last loser drops its commit).
+      for (const dir of [a, b]) {
+        ok(dir, "fetch", "-q", "uno");
+        ok(dir, "reset", "-q", "--hard", "uno/main");
+      }
+      const idA = commit(a, `a${round}.txt`, "a\n", `a ${round}`);
+      const idB = commit(b, `b${round}.txt`, "b\n", `b ${round}`);
+      const [fromA, fromB] = await Promise.all([
+        gitAsync(a, "push", "uno", "main"),
+        gitAsync(b, "push", "uno", "main"),
+      ]);
+      expect([fromA.code, fromB.code].filter((code) => code === 0)).toHaveLength(1);
+      const winner = fromA.code === 0 ? idA : idB;
+      const loser = fromA.code === 0 ? fromB : fromA;
+      expect(loser.out).toMatch(/fetch first|rejected/);
+      expect((await expectConsistent("same")).refs["refs/heads/main"]).toBe(winner);
+    }
+  }, 30_000);
+
+  it("refuses to push from a shallow copy", () => {
+    const a = newRepo("a", "deep");
+    commit(a, "more.txt", "more\n", "second");
+    const shallow = path.join(root, "shallow");
+    ok(root, "clone", "-q", "--depth", "1", pathToFileURL(a).href, shallow);
+    ok(shallow, "remote", "add", "uno", "uno::deep");
+    const refused = git(shallow, "push", "uno", "HEAD:refs/heads/main");
+    expect(refused.code).not.toBe(0);
+    expect(refused.out).toContain("This copy is shallow (cloned with --depth)");
+    expect(fs.existsSync(path.join(cloud, ".uno-git", "deep"))).toBe(false);
+  });
+
+  it("refuses a damaged cloud copy and touches nothing", () => {
+    const write = (name: string, body: unknown) => {
+      const file = path.join(cloud, logKey(name, 1));
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(body));
+    };
+    const id = "a".repeat(40);
+    const base = { version: 1, seq: 1, head: "refs/heads/main", refs: { "refs/heads/main": id } };
+    write("evil", {
+      ...base,
+      bundles: [{ key: ".uno-git/other/bundles/x.bundle", size: 1, tips: {}, prerequisites: [] }],
+    });
+    write("badref", { ...base, refs: { "refs/heads/a b": id }, bundles: [] });
+    write("badid", { ...base, refs: { "refs/heads/main": "xyz" }, bundles: [] });
+    for (const name of ["evil", "badref", "badid"]) {
+      const result = git(root, "ls-remote", `uno::${name}`);
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain(`The cloud copy of ${name} looks damaged`);
+    }
+  });
+
+  it("reads the first layout (refs.json) and moves it to the log on the next push", async () => {
+    const a = newRepo("a", "old");
+    ok(a, "push", "uno", "main");
+    const dir = path.join(cloud, ".uno-git", "old");
+    const first = JSON.parse(fs.readFileSync(path.join(dir, "log", "000000000001.json"), "utf8"));
+    delete first.seq;
+    fs.writeFileSync(path.join(dir, "refs.json"), JSON.stringify(first));
+    fs.rmSync(path.join(dir, "log"), { recursive: true });
+
+    const b = cloneTo("b", "old");
+    commit(b, "next.txt", "next\n", "next");
+    ok(b, "push", "uno", "main");
+    expect(fs.existsSync(path.join(dir, "refs.json"))).toBe(false);
+    expect((await state("old")).seq).toBeGreaterThanOrEqual(1);
+    await expectConsistent("old");
+  });
+
+  it("reads the time out of a bundle key", () => {
+    expect(bundleTime(".uno-git/x/bundles/2026-10-16T22-13-15-291Z-7886e4.bundle")).toBe(
+      Date.parse("2026-10-16T22:13:15.291Z"),
+    );
+    expect(bundleTime(".uno-git/x/bundles/whatever.bundle")).toBeNull();
   });
 
   it("says what's wrong with a bad name, and clones an empty project as empty", () => {

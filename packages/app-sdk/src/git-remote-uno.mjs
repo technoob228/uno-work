@@ -12,26 +12,36 @@
 // it from any terminal too). `uno project ...` (uno-cli.mjs) builds on it.
 //
 // Storage layout, under a hidden root of the Drive bucket:
-//   .uno-git/<name>/refs.json          refs, HEAD and the list of bundles
-//   .uno-git/<name>/bundles/<t>.bundle git bundles, each on top of the previous
-// A push uploads one bundle of what the cloud doesn't have yet, then rewrites
-// refs.json; a fetch unbundles what this repository doesn't have yet.
+//   .uno-git/<name>/log/<seq>.json      the state after each change: refs, HEAD,
+//                                       bundles (seq zero-padded to 12; the
+//                                       highest is current; last 50 kept)
+//   .uno-git/<name>/bundles/<t>.bundle  git bundles, each on top of earlier ones
+//   .uno-git/<name>/refs.json           the first layout (read, migrated on push)
+//
+// Two computers pushing at once can't lose each other's work: a new state is
+// written only to a log entry that doesn't exist yet (If-None-Match: *), so
+// exactly one of them gets seq N+1; the other re-reads, re-checks
+// fast-forward and tries once more, or answers "fetch first". Bundles are
+// never deleted while a state names them, and unreferenced ones only once
+// they are an hour old (a push in flight may be about to name its bundle).
 //
 // Bytes go straight between this computer and storage through links the Uno
 // console signs, with this computer's own key read from the daemon's
 // settings.json — never printed, never written anywhere else. No key (a
 // laptop, a computer not signed in to Uno): the helper says so and stops.
 //
-// Tests only: UNO_GIT_FAKE_STORAGE_DIR=<dir> keeps the "cloud" in a folder.
+// Tests only: UNO_GIT_FAKE_STORAGE_DIR=<dir> keeps the "cloud" in a folder
+// (UNO_GIT_FAKE_STORAGE_DELAY_MS=<ms> waits up to that long before each
+// conditional write, to make pushes race).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createReadStream, createWriteStream, readFileSync, realpathSync } from "node:fs";
+import { createReadStream, createWriteStream, readFileSync, realpathSync, rmSync } from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as readline from "node:readline";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
@@ -43,13 +53,24 @@ export const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const MAX_BUNDLE_BYTES = 2 * 1024 * 1024 * 1024;
 /** More bundles than this → one full bundle after the push. */
 export const COMPACT_MAX_BUNDLES = 20;
+/** Log entries kept. */
+export const LOG_KEEP = 50;
+/** A bundle no state names is deleted only once it is older than this. */
+export const BUNDLE_GC_AGE_MS = 60 * 60_000;
+/** A push whose bundle went up longer ago than this doesn't name it (GC may come). */
+const COMMIT_DEADLINE_MS = 50 * 60_000;
+/** A transfer with no bytes moving for this long is given up. */
+export const STALL_MS = 60_000;
 /** Test-only switch: the "cloud" is this folder. */
 export const FAKE_STORAGE_ENV = "UNO_GIT_FAKE_STORAGE_DIR";
+export const FAKE_STORAGE_DELAY_ENV = "UNO_GIT_FAKE_STORAGE_DELAY_MS";
 export const DEFAULT_CONSOLE_URL = "https://console.uno4.dev";
 /** Where the daemon says its settings.json is (written next to the SDK). */
 export const DAEMON_POINTER = ".uno/sdk/daemon.json";
 
 export const NOT_CLOUD = "uno:: remotes work on Uno cloud computers signed in to Uno.";
+export const SHALLOW =
+  "This copy is shallow (cloned with --depth). Run git fetch --unshallow first.";
 
 /** A failure to print as is. */
 export class UnoGitError extends Error {}
@@ -79,7 +100,23 @@ export function slugName(/** @type {string} */ raw) {
   return NAME_RE.test(slug) ? slug : null;
 }
 
-const refsKey = (/** @type {string} */ name) => `${GIT_ROOT}${name}/refs.json`;
+const legacyRefsKey = (/** @type {string} */ name) => `${GIT_ROOT}${name}/refs.json`;
+const logPrefix = (/** @type {string} */ name) => `${GIT_ROOT}${name}/log/`;
+export const logKey = (/** @type {string} */ name, /** @type {number} */ seq) =>
+  `${logPrefix(name)}${String(seq).padStart(12, "0")}.json`;
+const bundlesPrefix = (/** @type {string} */ name) => `${GIT_ROOT}${name}/bundles/`;
+
+/** `2026-10-16T22-13-15-291Z-7886e4`: sorts by time, safe in a key. */
+const stamp = (/** @type {number} */ at = Date.now()) =>
+  `${new Date(at).toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`;
+
+/** When a bundle key's stamp says it was made; null when it doesn't say. */
+export function bundleTime(/** @type {string} */ key) {
+  const match = /(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z-[0-9a-f]+\.bundle$/.exec(key);
+  if (!match) return null;
+  const at = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
+  return Number.isFinite(at) ? at : null;
+}
 
 // ── This computer's key ─────────────────────────────────────────────────
 
@@ -98,6 +135,21 @@ export function defaultSettingsFiles(/** @type {string} */ home) {
     "/var/lib/uno-work/userdata/settings.json",
     path.join(home, ".t3", "userdata", "settings.json"),
   ];
+}
+
+/** https only; plain http only to this computer (a dev console). */
+function safeConsoleUrl(/** @type {unknown} */ raw) {
+  if (typeof raw !== "string") return null;
+  try {
+    const url = new URL(raw);
+    const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    if (url.protocol === "https:" || (url.protocol === "http:" && local)) {
+      return raw.replace(/\/+$/, "");
+    }
+  } catch {
+    // not a URL
+  }
+  return null;
 }
 
 /**
@@ -119,14 +171,10 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
     const token = typeof uno?.boxToken === "string" ? uno.boxToken.trim() : "";
     if (!token) continue;
     const boxId = Number(uno.boxId);
-    const consoleUrl =
-      typeof pointer?.consoleUrl === "string" && /^https?:\/\//.test(pointer.consoleUrl)
-        ? pointer.consoleUrl
-        : DEFAULT_CONSOLE_URL;
     return {
       token,
       boxId: Number.isSafeInteger(boxId) && boxId > 0 ? boxId : null,
-      consoleUrl: consoleUrl.replace(/\/+$/, ""),
+      consoleUrl: safeConsoleUrl(pointer?.consoleUrl) ?? DEFAULT_CONSOLE_URL,
     };
   }
   return null;
@@ -138,12 +186,13 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
  * @typedef {{
  *   read(key: string): Promise<Buffer | null>,
  *   download(key: string, file: string): Promise<boolean>,
- *   write(key: string, bytes: Buffer): Promise<void>,
+ *   write(key: string, bytes: Buffer, options?: { ifNoneMatch?: boolean }): Promise<boolean>,
  *   upload(key: string, file: string, size: number): Promise<void>,
- *   list(prefix: string): Promise<{ folders: string[], objects: Array<{ key: string, size: number }> }>,
+ *   list(prefix: string): Promise<{ folders: string[], objects: Array<{ key: string, size: number }>, truncated: boolean }>,
  *   remove(key: string): Promise<void>,
  *   who: { boxId: number | null, hostname: string },
  * }} Storage
+ *   write: false when `ifNoneMatch` and the key already exists (nothing written).
  */
 
 /**
@@ -153,14 +202,20 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
  */
 export function openStorage(where) {
   const fake = where.env[FAKE_STORAGE_ENV]?.trim();
-  if (fake) return folderStorage(fake);
+  if (fake) return folderStorage(fake, Number(where.env[FAKE_STORAGE_DELAY_ENV]) || 0);
   const creds = machineCredentials(where);
   if (!creds) throw new UnoGitError(NOT_CLOUD);
   return consoleStorage(creds);
 }
 
-/** @param {string} root @returns {Storage} */
-export function folderStorage(root) {
+/**
+ * A folder standing in for the cloud (tests). Conditional writes are atomic
+ * (a hard link fails when the name exists), like If-None-Match on storage.
+ * @param {string} root
+ * @param {number} [delayMs] wait up to this long before each conditional write
+ * @returns {Storage}
+ */
+export function folderStorage(root, delayMs = 0) {
   const fileOf = (/** @type {string} */ key) => {
     const file = path.resolve(root, key);
     if (!file.startsWith(path.resolve(root) + path.sep)) throw new UnoGitError(`Bad key ${key}`);
@@ -169,12 +224,25 @@ export function folderStorage(root) {
   const place = async (
     /** @type {string} */ key,
     /** @type {(tmp: string) => Promise<void>} */ fill,
+    exclusive = false,
   ) => {
     const file = fileOf(key);
     await fsp.mkdir(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     await fill(tmp);
-    await fsp.rename(tmp, file);
+    if (!exclusive) {
+      await fsp.rename(tmp, file);
+      return true;
+    }
+    try {
+      await fsp.link(tmp, file);
+      return true;
+    } catch (error) {
+      if (/** @type {{ code?: string }} */ (error).code === "EEXIST") return false;
+      throw error;
+    } finally {
+      await fsp.rm(tmp, { force: true });
+    }
   };
   return {
     who: { boxId: null, hostname: os.hostname() },
@@ -184,8 +252,15 @@ export function folderStorage(root) {
         () => true,
         () => false,
       ),
-    write: (key, bytes) => place(key, (tmp) => fsp.writeFile(tmp, bytes)),
-    upload: (key, file) => place(key, (tmp) => fsp.copyFile(file, tmp)),
+    write: async (key, bytes, options = {}) => {
+      if (options.ifNoneMatch && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * delayMs));
+      }
+      return place(key, (tmp) => fsp.writeFile(tmp, bytes), options.ifNoneMatch === true);
+    },
+    upload: async (key, file) => {
+      await place(key, (tmp) => fsp.copyFile(file, tmp));
+    },
     list: async (prefix) => {
       const dir = path.join(root, prefix);
       const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -194,11 +269,11 @@ export function folderStorage(root) {
       for (const entry of entries) {
         if (entry.isDirectory()) folders.push(`${prefix}${entry.name}/`);
         else if (!entry.name.endsWith(".tmp")) {
-          const stats = await fsp.stat(path.join(dir, entry.name));
-          objects.push({ key: `${prefix}${entry.name}`, size: stats.size });
+          const stats = await fsp.stat(path.join(dir, entry.name)).catch(() => null);
+          if (stats) objects.push({ key: `${prefix}${entry.name}`, size: stats.size });
         }
       }
-      return { folders, objects };
+      return { folders, objects, truncated: false };
     },
     remove: (key) => fsp.rm(fileOf(key), { recursive: true, force: true }),
   };
@@ -220,6 +295,32 @@ const PUT_ATTEMPTS = 4;
 const PART_CONCURRENCY = 2;
 
 /**
+ * An abort signal that fires after `ms` without a `kick()`.
+ * @param {number} ms
+ */
+function stallGuard(ms) {
+  const controller = new AbortController();
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const kick = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(new Error("stalled")), ms);
+    timer.unref?.();
+  };
+  kick();
+  return { signal: controller.signal, kick, done: () => clearTimeout(timer) };
+}
+
+/** A pass-through that kicks the guard on every chunk. */
+const kicking = (/** @type {() => void} */ kick) =>
+  new Transform({
+    transform(chunk, _encoding, callback) {
+      kick();
+      callback(null, chunk);
+    },
+  });
+
+/**
  * The person's Drive bucket through the console (`/api/v1/drive`, bucket
  * presign/objects routes — the ones the daemon's Files use).
  * @param {{ token: string, boxId: number | null, consoleUrl: string }} creds
@@ -234,7 +335,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       response = await fetchImpl(`${creds.consoleUrl}${route}`, {
         ...init,
         headers: { Authorization: `Bearer ${creds.token}`, "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(STALL_MS),
       });
     } catch {
       throw new UnoGitError("Couldn't reach the Uno console. Check the internet connection.");
@@ -269,37 +370,58 @@ export function consoleStorage(creds, fetchImpl = fetch) {
     }
     return url;
   };
-  /** One GET of a stored object; null when it doesn't exist. */
-  const get = async (/** @type {string} */ key) => {
-    const response = await fetchImpl(await getUrl(key)).catch(() => null);
-    if (!response) throw new UnoGitError("Couldn't reach Uno cloud storage.");
-    if (response.status === 404) {
-      await response.body?.cancel().catch(() => undefined);
-      return null;
+  /**
+   * One GET of a stored object, its body through `sink`; false when it doesn't exist.
+   * @param {string} key
+   * @param {(body: Readable) => Promise<void>} sink
+   */
+  const get = async (key, sink) => {
+    const guard = stallGuard(STALL_MS);
+    try {
+      const response = await fetchImpl(await getUrl(key), { signal: guard.signal }).catch(
+        () => null,
+      );
+      if (!response) throw new UnoGitError("Couldn't reach Uno cloud storage.");
+      if (response.status === 404) {
+        await response.body?.cancel().catch(() => undefined);
+        return false;
+      }
+      if (!response.ok || !response.body) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new UnoGitError(`Uno cloud storage answered ${response.status} for ${key}.`);
+      }
+      const body = Readable.fromWeb(/** @type {any} */ (response.body)).pipe(kicking(guard.kick));
+      await sink(body).catch((error) => {
+        throw guard.signal.aborted
+          ? new UnoGitError("Uno cloud storage stopped sending data. Try again.")
+          : error;
+      });
+      return true;
+    } finally {
+      guard.done();
     }
-    if (!response.ok || !response.body) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new UnoGitError(`Uno cloud storage answered ${response.status} for ${key}.`);
-    }
-    return response;
   };
 
   /**
-   * PUT with retries. `body()` gives a fresh body each try.
+   * PUT with retries (network and 5xx only). `make()` gives a fresh body each try.
    * @param {string} url
-   * @param {() => { body: Buffer | ReadableStream, length: number }} make
-   * @returns {Promise<number>} 0 on success, else the last status (0 = network)
+   * @param {(kick: () => void) => { body: Buffer | ReadableStream, length: number }} make
+   * @param {Record<string, string>} [headers]
+   * @returns {Promise<number>} -1 on success, else the last status (0 = network)
    */
-  const put = async (url, make, attempts = PUT_ATTEMPTS) => {
+  const put = async (url, make, headers = {}) => {
     let status = 0;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      const { body, length } = make();
+    for (let attempt = 1; attempt <= PUT_ATTEMPTS; attempt += 1) {
+      const guard = stallGuard(STALL_MS);
+      const { body, length } = make(guard.kick);
       const response = await fetchImpl(url, {
         method: "PUT",
         body: /** @type {any} */ (body),
-        headers: { "content-length": String(length) },
+        headers: { ...headers, "content-length": String(length) },
+        signal: guard.signal,
         ...(Buffer.isBuffer(body) ? {} : { duplex: "half" }),
       }).catch(() => null);
+      guard.done();
       await response?.body?.cancel().catch(() => undefined);
       if (response?.ok) return -1;
       status = response?.status ?? 0;
@@ -320,7 +442,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
    * (big files on storage with a small single-PUT limit).
    * @param {string} key
    * @param {number} size
-   * @param {(start: number, end: number) => () => { body: Buffer | ReadableStream, length: number }} range
+   * @param {(start: number, end: number) => (kick: () => void) => { body: Buffer | ReadableStream, length: number }} range
    */
   const uploadRange = async (key, size, range) => {
     const plan = await presign({ key, method: "put", size });
@@ -352,8 +474,10 @@ export function consoleStorage(creds, fetchImpl = fetch) {
     };
     remember(plan);
     let next = 1;
+    // One part failing stops the other worker too.
+    const stopped = { failed: false };
     const worker = async () => {
-      while (next <= parts) {
+      while (next <= parts && !stopped.failed) {
         const part = next;
         next += 1;
         const start = (part - 1) * partSize;
@@ -384,7 +508,14 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       }
     };
     try {
-      await Promise.all(Array.from({ length: Math.min(PART_CONCURRENCY, parts) }, worker));
+      await Promise.all(
+        Array.from({ length: Math.min(PART_CONCURRENCY, parts) }, () =>
+          worker().catch((error) => {
+            stopped.failed = true;
+            throw error;
+          }),
+        ),
+      );
       await presign({ key, method: "complete", upload_id: uploadId });
     } catch (error) {
       await abort();
@@ -395,27 +526,38 @@ export function consoleStorage(creds, fetchImpl = fetch) {
   return {
     who: { boxId: creds.boxId, hostname: os.hostname() },
     read: async (key) => {
-      const response = await get(key);
-      return response ? Buffer.from(await response.arrayBuffer()) : null;
+      /** @type {Buffer[]} */
+      const chunks = [];
+      const found = await get(key, async (body) => {
+        for await (const chunk of body) chunks.push(chunk);
+      });
+      return found ? Buffer.concat(chunks) : null;
     },
-    download: async (key, file) => {
-      const response = await get(key);
-      if (!response) return false;
-      await pipeline(Readable.fromWeb(/** @type {any} */ (response.body)), createWriteStream(file));
-      return true;
+    download: (key, file) => get(key, (body) => pipeline(body, createWriteStream(file))),
+    write: async (key, bytes, options = {}) => {
+      if (!options.ifNoneMatch) {
+        await uploadRange(key, bytes.length, () => () => ({ body: bytes, length: bytes.length }));
+        return true;
+      }
+      // Small and conditional: always one PUT (parts can't be conditional).
+      const plan = await presign({ key, method: "put", size: bytes.length });
+      if (plan?.multipart === true || typeof plan?.url !== "string") {
+        throw new UnoGitError("The Uno console didn't return an upload link.");
+      }
+      const status = await put(plan.url, () => ({ body: bytes, length: bytes.length }), {
+        "if-none-match": "*",
+      });
+      if (status === -1) return true;
+      if (status === 412) return false;
+      throw putFailed(status);
     },
-    write: (key, bytes) =>
-      uploadRange(key, bytes.length, (start, end) => () => ({
-        body: bytes.subarray(start, end),
-        length: end - start,
-      })),
     upload: (key, file, size) =>
-      uploadRange(key, size, (start, end) => () => ({
+      uploadRange(key, size, (start, end) => (kick) => ({
         body:
           end <= start
             ? Buffer.alloc(0)
             : /** @type {ReadableStream} */ (
-                Readable.toWeb(createReadStream(file, { start, end: end - 1 }))
+                Readable.toWeb(createReadStream(file, { start, end: end - 1 }).pipe(kicking(kick)))
               ),
         length: end - start,
       })),
@@ -433,6 +575,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
               ? [{ key: object.key, size: Number(object.size) || 0 }]
               : [],
         ),
+        truncated: raw?.truncated === true,
       };
     },
     remove: async (key) => {
@@ -443,20 +586,23 @@ export function consoleStorage(creds, fetchImpl = fetch) {
   };
 }
 
-// ── The remote's state (refs.json) ──────────────────────────────────────
+// ── The remote's state ──────────────────────────────────────────────────
 
 /**
  * @typedef {{ key: string, created: string, size: number, tips: Record<string, string>,
  *   prerequisites: string[] }} BundleEntry
- * @typedef {{ version: 1, refs: Record<string, string>, head: string | null,
+ * @typedef {{ version: 1, seq: number, refs: Record<string, string>, head: string | null,
  *   bundles: BundleEntry[], updatedAt: string | null, rev: string | null,
- *   updatedBy: { boxId: number | null, hostname: string } | null }} RemoteState
+ *   updatedBy: { boxId: number | null, hostname: string } | null,
+ *   legacy?: boolean }} RemoteState
+ *   seq 0: no log yet (an empty project, or one in the first layout: `legacy`).
  */
 
 /** @returns {RemoteState} */
 export function emptyState() {
   return {
     version: 1,
+    seq: 0,
     refs: {},
     head: null,
     bundles: [],
@@ -466,32 +612,143 @@ export function emptyState() {
   };
 }
 
+const REF_RE = /^refs\/\S+$/;
+const ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 /**
+ * A state read from the cloud, checked before anything trusts it: refs,
+ * ids and bundle keys of this project only.
+ * @param {string} name
+ * @param {any} raw
+ * @param {number} seq
+ * @returns {RemoteState}
+ */
+export function checkState(name, raw, seq) {
+  const damaged = (/** @type {string} */ why) =>
+    new UnoGitError(`The cloud copy of ${name} looks damaged (${why}); nothing was changed.`);
+  if (!raw || typeof raw !== "object") throw damaged("not a state");
+  if (raw.version !== 1) {
+    throw new UnoGitError(
+      `The cloud copy of ${name} was saved by a newer Uno Work. Update Uno Work on this computer.`,
+    );
+  }
+  const refsOk = (/** @type {unknown} */ refs) =>
+    !!refs &&
+    typeof refs === "object" &&
+    Object.entries(refs).every(([ref, id]) => REF_RE.test(ref) && ID_RE.test(String(id)));
+  if (!refsOk(raw.refs)) throw damaged("refs");
+  if (raw.head !== null && raw.head !== undefined && !REF_RE.test(String(raw.head))) {
+    throw damaged("HEAD");
+  }
+  const bundles = raw.bundles ?? [];
+  if (!Array.isArray(bundles)) throw damaged("bundles");
+  const prefix = bundlesPrefix(name);
+  for (const bundle of bundles) {
+    const key = String(bundle?.key ?? "");
+    if (
+      !key.startsWith(prefix) ||
+      !/^[A-Za-z0-9._-]+\.bundle$/.test(key.slice(prefix.length)) ||
+      !refsOk(bundle.tips) ||
+      !Array.isArray(bundle.prerequisites) ||
+      !bundle.prerequisites.every((/** @type {unknown} */ id) => ID_RE.test(String(id))) ||
+      !Number.isFinite(Number(bundle.size))
+    ) {
+      throw damaged("bundle list");
+    }
+  }
+  if (seq > 0 && raw.seq !== seq) throw damaged("log order");
+  return {
+    ...emptyState(),
+    ...raw,
+    seq,
+    refs: { ...raw.refs },
+    head: raw.head ?? null,
+    bundles,
+  };
+}
+
+/** @param {string} name @param {Buffer} bytes @param {number} seq */
+function parseState(name, bytes, seq) {
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new UnoGitError(
+      `The cloud copy of ${name} looks damaged (unreadable); nothing was changed.`,
+    );
+  }
+  return checkState(name, parsed, seq);
+}
+
+/** Log entries of a project, by seq. */
+async function logSeqs(/** @type {Storage} */ storage, /** @type {string} */ name) {
+  const listing = await storage.list(logPrefix(name));
+  return listing.objects
+    .map((object) => /\/(\d{12})\.json$/.exec(object.key)?.[1])
+    .filter((digits) => digits !== undefined)
+    .map(Number)
+    .toSorted((a, b) => a - b);
+}
+
+/**
+ * The current state: the highest log entry, else the first layout's
+ * refs.json, else an empty project.
  * @param {Storage} storage
  * @param {string} name
  * @returns {Promise<RemoteState>}
  */
 export async function readRemote(storage, name) {
-  const raw = await storage.read(refsKey(name));
-  if (!raw) return emptyState();
-  /** @type {any} */
-  let parsed;
-  try {
-    parsed = JSON.parse(raw.toString("utf8"));
-  } catch {
-    throw new UnoGitError(`The Uno cloud copy of "${name}" is damaged (refs.json).`);
+  for (let attempt = 1; ; attempt += 1) {
+    const seqs = await logSeqs(storage, name);
+    const latest = seqs.at(-1);
+    if (latest === undefined) {
+      const legacy = await storage.read(legacyRefsKey(name));
+      if (!legacy) return emptyState();
+      return { ...parseState(name, legacy, 0), legacy: true };
+    }
+    const bytes = await storage.read(logKey(name, latest));
+    if (bytes) return parseState(name, bytes, latest);
+    // Pruned between the listing and the read: list again, once.
+    if (attempt >= 2) throw new UnoGitError(`Couldn't read the cloud copy of ${name}. Try again.`);
   }
-  if (parsed?.version !== 1) {
-    throw new UnoGitError(
-      `The Uno cloud copy of "${name}" was saved by a newer Uno Work. Update Uno Work on this computer.`,
-    );
-  }
-  return {
-    ...emptyState(),
-    ...parsed,
-    refs: { ...parsed.refs },
-    bundles: Array.isArray(parsed.bundles) ? parsed.bundles : [],
+}
+
+/**
+ * Write `next` as the state after `before` — only if no one else did first.
+ * Returns what was written when ours is now the current state, else null.
+ * @param {Storage} storage
+ * @param {string} name
+ * @param {RemoteState} before
+ * @param {Omit<RemoteState, "seq" | "rev" | "updatedAt" | "updatedBy">} next
+ */
+async function commitState(storage, name, before, next) {
+  const seq = before.seq + 1;
+  const rev = randomBytes(8).toString("hex");
+  const { legacy: _legacy, ...rest } = /** @type {RemoteState} */ (next);
+  const state = {
+    ...rest,
+    version: 1,
+    seq,
+    rev,
+    updatedAt: new Date().toISOString(),
+    updatedBy: storage.who,
   };
+  const key = logKey(name, seq);
+  const bytes = Buffer.from(`${JSON.stringify(state, null, 2)}\n`);
+  if (!(await storage.write(key, bytes, { ifNoneMatch: true }))) {
+    // Maybe ours after all (an answer lost on the way, a retry refused): look.
+    const there = await storage.read(key).catch(() => null);
+    let theirs = null;
+    try {
+      theirs = there ? JSON.parse(there.toString("utf8"))?.rev : null;
+    } catch {
+      // not ours
+    }
+    if (theirs !== rev) return null;
+  }
+  if (before.legacy) await storage.remove(legacyRefsKey(name)).catch(() => undefined);
+  return { key, bytes };
 }
 
 /**
@@ -571,22 +828,63 @@ async function presentObjects(/** @type {Iterable<string>} */ ids) {
   return present;
 }
 
-/** The prerequisites (`-<sha>` lines) of a bundle file's header. */
-async function bundlePrerequisites(/** @type {string} */ file) {
+/** The prerequisites (`-<sha>` lines) of a bundle file's header (read to its end). */
+export async function bundlePrerequisites(/** @type {string} */ file) {
   const handle = await fsp.open(file, "r");
   try {
-    const buffer = Buffer.alloc(1 << 16);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const text = buffer.subarray(0, bytesRead).toString("latin1");
-    const header = text.slice(0, Math.max(0, text.indexOf("\n\n")));
-    return header
+    /** @type {Buffer[]} */
+    const chunks = [];
+    let position = 0;
+    for (;;) {
+      const buffer = Buffer.alloc(1 << 16);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      chunks.push(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+      if (Buffer.concat(chunks).includes("\n\n")) break;
+    }
+    const text = Buffer.concat(chunks).toString("latin1");
+    const end = text.indexOf("\n\n");
+    return (end >= 0 ? text.slice(0, end) : text)
       .split("\n")
       .filter((line) => line.startsWith("-"))
       .map((line) => line.slice(1).split(" ")[0] ?? "")
-      .filter((id) => /^[0-9a-f]{40,64}$/.test(id));
+      .filter((id) => ID_RE.test(id));
   } finally {
     await handle.close();
   }
+}
+
+// What to undo when the helper is stopped midway (Ctrl-C, a killed git).
+/** @type {Set<string>} */
+const tempRefs = new Set();
+/** @type {Set<string>} */
+const tempFiles = new Set();
+
+/** Drop temporary refs and files right now (also from a signal handler). */
+export function cleanupNow() {
+  for (const file of tempFiles) rmSync(file, { force: true });
+  tempFiles.clear();
+  if (tempRefs.size > 0) {
+    spawnSync("git", ["update-ref", "--stdin"], {
+      input: [...tempRefs].map((ref) => `delete ${ref}\n`).join(""),
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    tempRefs.clear();
+  }
+}
+
+/** A temp file path, removed by `dropTemp` or `cleanupNow`. */
+async function tempFile(/** @type {string} */ dir) {
+  await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${stamp()}.bundle`);
+  tempFiles.add(file);
+  return file;
+}
+
+async function dropTemp(/** @type {string} */ file) {
+  await fsp.rm(file, { force: true });
+  tempFiles.delete(file);
 }
 
 /**
@@ -601,10 +899,12 @@ async function bundlePrerequisites(/** @type {string} */ file) {
 async function createBundle(file, tips, exclude, progress) {
   const tag = `${process.pid}-${randomBytes(3).toString("hex")}`;
   const refs = tips.map((_, index) => `refs/uno-tmp/${tag}/${index}`);
-  const updates = refs.map((ref, index) => `update ${ref} ${tips[index]}\n`).join("");
-  const made = await git(["update-ref", "--stdin"], { input: updates });
-  if (made.code !== 0) throw new UnoGitError(`git update-ref failed: ${made.stderr.trim()}`);
+  for (const ref of refs) tempRefs.add(ref);
   try {
+    const made = await git(["update-ref", "--stdin"], {
+      input: refs.map((ref, index) => `update ${ref} ${tips[index]}\n`).join(""),
+    });
+    if (made.code !== 0) throw new UnoGitError(`git update-ref failed: ${made.stderr.trim()}`);
     const result = await git([
       "bundle",
       "create",
@@ -620,11 +920,13 @@ async function createBundle(file, tips, exclude, progress) {
     await git(["update-ref", "--stdin"], {
       input: refs.map((ref) => `delete ${ref}\n`).join(""),
     });
+    for (const ref of refs) tempRefs.delete(ref);
   }
 }
 
-const stamp = () =>
-  `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`;
+async function isShallow() {
+  return (await git(["rev-parse", "--is-shallow-repository"])).stdout.trim() === "true";
+}
 
 const megabytes = (/** @type {number} */ bytes) =>
   bytes < 1024 * 1024
@@ -650,6 +952,7 @@ export async function serve(io) {
   let storage = null;
   const store = () => (storage ??= io.storage());
   const tmpDir = path.join(io.gitDir, "uno", "tmp");
+  await sweepTmp(tmpDir);
   /** @type {RemoteState | null} */
   let listed = null;
   const say = (/** @type {string} */ line) => {
@@ -666,71 +969,89 @@ export async function serve(io) {
     }
   };
 
-  for (;;) {
-    const line = await nextLine();
-    if (line === null || line === "") break;
-    if (line === "capabilities") {
-      io.output.write("option\nfetch\npush\n\n");
-    } else if (line.startsWith("option ")) {
-      const [, key, value = ""] = line.split(" ");
-      if (key === "verbosity") options.verbosity = Number(value) || 0;
-      else if (key === "progress") options.progress = value === "true";
-      else if (key === "force") options.force = value === "true";
-      else if (key === "dry-run") options.dryRun = value === "true";
-      else {
-        io.output.write("unsupported\n");
-        continue;
+  try {
+    await answer();
+  } finally {
+    // Also on a failure: an open stdin would keep this process (and git) waiting.
+    lines.close();
+  }
+
+  async function answer() {
+    for (;;) {
+      const line = await nextLine();
+      if (line === null || line === "") break;
+      if (line === "capabilities") {
+        io.output.write("option\nfetch\npush\n\n");
+      } else if (line.startsWith("option ")) {
+        const [, key, value = ""] = line.split(" ");
+        if (key === "verbosity") options.verbosity = Number(value) || 0;
+        else if (key === "progress") options.progress = value === "true";
+        else if (key === "force") options.force = value === "true";
+        else if (key === "dry-run") options.dryRun = value === "true";
+        else {
+          io.output.write("unsupported\n");
+          continue;
+        }
+        io.output.write("ok\n");
+      } else if (line === "list" || line === "list for-push") {
+        listed = await readRemote(store(), io.name);
+        const out = Object.entries(listed.refs)
+          .toSorted(([a], [b]) => a.localeCompare(b))
+          .map(([ref, id]) => `${id} ${ref}\n`);
+        if (listed.head && listed.refs[listed.head]) out.push(`@${listed.head} HEAD\n`);
+        io.output.write(`${out.join("")}\n`);
+      } else if (line.startsWith("fetch ")) {
+        const wants = (await batch(line)).map((item) => item.split(" ")[1] ?? "").filter(Boolean);
+        await fetchObjects({
+          storage: store(),
+          name: io.name,
+          wants,
+          tmpDir,
+          listed,
+          say,
+          progress: options.progress,
+        });
+        io.output.write("\n");
+      } else if (line.startsWith("push ")) {
+        const specs = (await batch(line)).map((item) => {
+          const spec = item.slice("push ".length);
+          const force = spec.startsWith("+");
+          const [src = "", dst = ""] = (force ? spec.slice(1) : spec).split(":");
+          return { force, src, dst };
+        });
+        const results = await pushRefs({
+          storage: store(),
+          name: io.name,
+          specs,
+          tmpDir,
+          force: options.force,
+          dryRun: options.dryRun,
+          progress: options.progress,
+          say,
+        });
+        io.output.write(
+          `${specs
+            .map(({ dst }) => {
+              const error = results.get(dst);
+              return error ? `error ${dst} ${error}\n` : `ok ${dst}\n`;
+            })
+            .join("")}\n`,
+        );
+      } else {
+        throw new UnoGitError(`Unknown command from git: ${line}`);
       }
-      io.output.write("ok\n");
-    } else if (line === "list" || line === "list for-push") {
-      listed = await readRemote(store(), io.name);
-      const out = Object.entries(listed.refs)
-        .toSorted(([a], [b]) => a.localeCompare(b))
-        .map(([ref, id]) => `${id} ${ref}\n`);
-      if (listed.head && listed.refs[listed.head]) out.push(`@${listed.head} HEAD\n`);
-      io.output.write(`${out.join("")}\n`);
-    } else if (line.startsWith("fetch ")) {
-      const wants = (await batch(line)).map((item) => item.split(" ")[1] ?? "").filter(Boolean);
-      await fetchObjects({
-        storage: store(),
-        name: io.name,
-        wants,
-        tmpDir,
-        listed,
-        say,
-        progress: options.progress,
-      });
-      io.output.write("\n");
-    } else if (line.startsWith("push ")) {
-      const specs = (await batch(line)).map((item) => {
-        const spec = item.slice("push ".length);
-        const force = spec.startsWith("+");
-        const [src = "", dst = ""] = (force ? spec.slice(1) : spec).split(":");
-        return { force, src, dst };
-      });
-      const results = await pushRefs({
-        storage: store(),
-        name: io.name,
-        specs,
-        tmpDir,
-        force: options.force,
-        dryRun: options.dryRun,
-        progress: options.progress,
-        say,
-      });
-      io.output.write(
-        `${specs
-          .map(({ dst }) => {
-            const error = results.get(dst);
-            return error ? `error ${dst} ${error}\n` : `ok ${dst}\n`;
-          })
-          .join("")}\n`,
-      );
-    } else {
-      throw new UnoGitError(`Unknown command from git: ${line}`);
     }
   }
-  lines.close();
+}
+
+/** Leftovers of a helper that was killed: temp files older than an hour. */
+async function sweepTmp(/** @type {string} */ dir) {
+  const entries = await fsp.readdir(dir).catch(() => []);
+  for (const entry of entries) {
+    const file = path.join(dir, entry);
+    const stats = await fsp.stat(file).catch(() => null);
+    if (stats && Date.now() - stats.mtimeMs > 60 * 60_000) await fsp.rm(file, { force: true });
+  }
 }
 
 /**
@@ -747,21 +1068,18 @@ export async function fetchObjects(input) {
     const present = await presentObjects([...input.wants, ...tips]);
     const missing = () => input.wants.filter((id) => !present.has(id));
     if (missing().length === 0) return;
-    const needed = [];
-    for (const bundle of state.bundles) {
-      if (Object.values(bundle.tips).every((id) => present.has(id))) continue;
-      needed.push(bundle);
-    }
+    const needed = state.bundles.filter(
+      (bundle) => !Object.values(bundle.tips).every((id) => present.has(id)),
+    );
     const total = needed.reduce((sum, bundle) => sum + (Number(bundle.size) || 0), 0);
     if (input.progress && needed.length > 0) {
       input.say(`uno: downloading ${input.name} from your Uno cloud (${megabytes(total)})`);
     }
-    await fsp.mkdir(input.tmpDir, { recursive: true });
     let vanished = false;
     for (const bundle of needed) {
       if (missing().length === 0) break;
       if (Object.values(bundle.tips).every((id) => present.has(id))) continue;
-      const file = path.join(input.tmpDir, `${stamp()}.bundle`);
+      const file = await tempFile(input.tmpDir);
       try {
         if (!(await input.storage.download(bundle.key, file))) {
           vanished = true;
@@ -769,30 +1087,31 @@ export async function fetchObjects(input) {
         }
         await gitOk(["bundle", "unbundle", file], "git bundle unbundle");
       } finally {
-        await fsp.rm(file, { force: true });
+        await dropTemp(file);
       }
       for (const id of Object.values(bundle.tips)) present.add(id);
     }
-    // Packed again by a push from another computer meanwhile: read the new list once.
+    // Packed again by a push from another computer meanwhile: read the new state once.
     if (vanished && attempt === 1) continue;
     const still = await presentObjects(input.wants);
     const lost = input.wants.filter((id) => !still.has(id));
     if (lost.length === 0) return;
     throw new UnoGitError(
       vanished
-        ? `The Uno cloud copy of "${input.name}" changed while downloading. Try again.`
-        : `The Uno cloud copy of "${input.name}" is missing ${lost[0]}.`,
+        ? `The cloud copy of ${input.name} changed while downloading. Try again.`
+        : `The cloud copy of ${input.name} is missing ${lost[0]}.`,
     );
   }
 }
 
 /** The ref HEAD should name after an update. */
-async function chooseHead(
-  /** @type {RemoteState} */ state,
+function chooseHead(
+  /** @type {Record<string, string>} */ refs,
+  /** @type {string | null} */ head,
   /** @type {string | null} */ preferred,
 ) {
-  if (state.head && state.refs[state.head]) return state.head;
-  const heads = Object.keys(state.refs)
+  if (head && refs[head]) return head;
+  const heads = Object.keys(refs)
     .filter((ref) => ref.startsWith("refs/heads/"))
     .toSorted();
   if (preferred && heads.includes(preferred)) return preferred;
@@ -802,38 +1121,36 @@ async function chooseHead(
 }
 
 /**
- * Push: check each ref, upload one bundle of what's new, then rewrite
- * refs.json (re-read just before, so a push from another computer meanwhile
- * is noticed). Returns dst → error text (absent = ok).
- * @param {{ storage: Storage, name: string, specs: Array<{ force: boolean, src: string, dst: string }>,
- *   tmpDir: string, force: boolean, dryRun: boolean, progress: boolean, say: (line: string) => void }} input
- * @returns {Promise<Map<string, string>>}
+ * What a push may change on top of `before`, and the refs it can't.
+ * @param {Array<{ force: boolean, src: string, dst: string }>} specs
+ * @param {RemoteState} before
+ * @param {boolean} forceAll
  */
-export async function pushRefs(input) {
+async function planUpdates(specs, before, forceAll) {
   /** @type {Map<string, string>} */
   const errors = new Map();
-  const before = await readRemote(input.storage, input.name);
   /** @type {Array<{ dst: string, id: string | null }>} */
   const updates = [];
-  for (const spec of input.specs) {
+  for (const spec of specs) {
     const { dst } = spec;
-    if (!dst.startsWith("refs/")) {
+    if (!REF_RE.test(dst)) {
       errors.set(dst, "only full ref names can be pushed");
       continue;
     }
     const old = before.refs[dst] ?? null;
     if (spec.src === "") {
-      if (old !== null) updates.push({ dst, id: null });
+      if (old === null) errors.set(dst, "not found");
+      else updates.push({ dst, id: null });
       continue;
     }
     const resolved = await git(["rev-parse", "--verify", "--quiet", spec.src]);
     const id = resolved.stdout.trim();
-    if (resolved.code !== 0 || !id) {
+    if (resolved.code !== 0 || !ID_RE.test(id)) {
       errors.set(dst, `${spec.src} doesn't name a commit here`);
       continue;
     }
     if (old === id) continue;
-    if (old !== null && !(spec.force || input.force)) {
+    if (old !== null && !(spec.force || forceAll)) {
       if (dst.startsWith("refs/tags/")) {
         errors.set(dst, "already exists");
         continue;
@@ -849,85 +1166,161 @@ export async function pushRefs(input) {
     }
     updates.push({ dst, id });
   }
-  if (updates.length === 0 || input.dryRun) return errors;
-  const failAll = (/** @type {string} */ why) => {
-    for (const update of updates) errors.set(update.dst, why);
-    return errors;
-  };
-
-  /** @type {BundleEntry | null} */
-  let entry = null;
-  const tips = [...new Set(updates.flatMap((update) => (update.id ? [update.id] : [])))];
-  if (tips.length > 0) {
-    await fsp.mkdir(input.tmpDir, { recursive: true });
-    const file = path.join(input.tmpDir, `${stamp()}.bundle`);
-    try {
-      const exclude = [...(await presentObjects(Object.values(before.refs)))];
-      if (await createBundle(file, tips, exclude, input.progress)) {
-        const { size } = await fsp.stat(file);
-        if (size > MAX_BUNDLE_BYTES) {
-          input.say(
-            `uno: this push is ${megabytes(size)}; one push to your Uno cloud can be at most 2 GB. Keep big files (videos, datasets, archives) in Uno Drive, not in git.`,
-          );
-          return failAll("too big for the Uno cloud (over 2 GB in one push)");
-        }
-        if (input.progress) input.say(`uno: saving ${megabytes(size)} to your Uno cloud`);
-        const key = `${GIT_ROOT}${input.name}/bundles/${stamp()}.bundle`;
-        await input.storage.upload(key, file, size);
-        entry = {
-          key,
-          created: new Date().toISOString(),
-          size,
-          tips: Object.fromEntries(updates.flatMap((u) => (u.id ? [[u.dst, u.id]] : []))),
-          prerequisites: await bundlePrerequisites(file),
-        };
-      }
-    } finally {
-      await fsp.rm(file, { force: true });
-    }
-  }
-
-  // Commit: the remote must still be what we built on.
-  const current = await readRemote(input.storage, input.name);
-  if (current.rev !== before.rev) {
-    const moved = updates.some(
-      (update) => (current.refs[update.dst] ?? null) !== (before.refs[update.dst] ?? null),
-    );
-    const repacked = before.bundles.some(
-      (bundle) => !current.bundles.some((other) => other.key === bundle.key),
-    );
-    if (moved || repacked) {
-      if (entry) await input.storage.remove(entry.key).catch(() => undefined);
-      return failAll("fetch first");
-    }
-  }
-  /** @type {RemoteState} */
-  const next = { ...current, refs: { ...current.refs }, bundles: [...current.bundles] };
-  for (const update of updates) {
-    if (update.id === null) delete next.refs[update.dst];
-    else next.refs[update.dst] = update.id;
-  }
-  if (entry) next.bundles.push(entry);
-  const dropped = Object.keys(next.refs).length === 0 ? next.bundles.splice(0) : [];
-  const branch = (await git(["symbolic-ref", "--quiet", "HEAD"])).stdout.trim() || null;
-  next.head = await chooseHead(next, branch);
-  next.updatedAt = new Date().toISOString();
-  next.rev = randomBytes(8).toString("hex");
-  next.updatedBy = input.storage.who;
-  await input.storage.write(refsKey(input.name), Buffer.from(`${JSON.stringify(next, null, 2)}\n`));
-  for (const bundle of dropped) await input.storage.remove(bundle.key).catch(() => undefined);
-
-  await compact({ ...input, state: next }).catch((error) =>
-    input.say(
-      `uno: couldn't pack ${input.name} in your Uno cloud (${error.message}); it still works.`,
-    ),
-  );
-  return errors;
+  return { errors, updates };
 }
 
 /**
- * Many bundles, or bundles much bigger than the last full one: replace them
- * with one full bundle of every ref (only when this repository has them all).
+ * Push: check each ref, upload one bundle of what the cloud doesn't have,
+ * then write the next state with a compare-and-swap; when another computer
+ * got there first, re-read and try once more. Returns dst → error text
+ * (absent = ok).
+ * @param {{ storage: Storage, name: string, specs: Array<{ force: boolean, src: string, dst: string }>,
+ *   tmpDir: string, force: boolean, dryRun: boolean, progress: boolean, say: (line: string) => void }} input
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function pushRefs(input) {
+  if (await isShallow()) {
+    input.say(`uno: ${SHALLOW}`);
+    return new Map(
+      input.specs.map(({ dst }) => [dst, "shallow copy: run git fetch --unshallow first"]),
+    );
+  }
+  for (let attempt = 1; ; attempt += 1) {
+    const before = await readRemote(input.storage, input.name);
+    const { errors, updates } = await planUpdates(input.specs, before, input.force);
+    if (updates.length === 0 || input.dryRun) return errors;
+    const failAll = (/** @type {string} */ why) => {
+      for (const update of updates) errors.set(update.dst, why);
+      return errors;
+    };
+
+    /** @type {(BundleEntry & { uploadedAt: number }) | null} */
+    let entry = null;
+    const tips = [...new Set(updates.flatMap((update) => (update.id ? [update.id] : [])))];
+    if (tips.length > 0) {
+      const file = await tempFile(input.tmpDir);
+      try {
+        // Only what `before` names may be left out: the cloud has all of it.
+        const exclude = [...(await presentObjects(Object.values(before.refs)))];
+        if (await createBundle(file, tips, exclude, input.progress)) {
+          const { size } = await fsp.stat(file);
+          if (size > MAX_BUNDLE_BYTES) {
+            input.say(
+              `uno: this push is ${megabytes(size)}; one push to your Uno cloud can be at most 2 GB. Keep big files (videos, datasets, archives) in Uno Drive, not in git.`,
+            );
+            return failAll("too big for the Uno cloud (over 2 GB in one push)");
+          }
+          if (input.progress) input.say(`uno: saving ${megabytes(size)} to your Uno cloud`);
+          const key = `${bundlesPrefix(input.name)}${stamp()}.bundle`;
+          const prerequisites = await bundlePrerequisites(file);
+          await input.storage.upload(key, file, size);
+          entry = {
+            key,
+            created: new Date().toISOString(),
+            size,
+            tips: Object.fromEntries(updates.flatMap((u) => (u.id ? [[u.dst, u.id]] : []))),
+            prerequisites,
+            uploadedAt: Date.now(),
+          };
+        }
+      } finally {
+        await dropTemp(file);
+      }
+    }
+    if (entry && Date.now() - entry.uploadedAt > COMMIT_DEADLINE_MS) {
+      await input.storage.remove(entry.key).catch(() => undefined);
+      return failAll("took too long; push again");
+    }
+
+    const refs = { ...before.refs };
+    for (const update of updates) {
+      if (update.id === null) delete refs[update.dst];
+      else refs[update.dst] = update.id;
+    }
+    const { uploadedAt: _uploadedAt, ...bundle } = entry ?? { uploadedAt: 0 };
+    // No refs left: no bundles either (the files go with the cleanup below).
+    const bundles =
+      Object.keys(refs).length === 0
+        ? []
+        : [...before.bundles, ...(entry ? [/** @type {BundleEntry} */ (bundle)] : [])];
+    const branch = (await git(["symbolic-ref", "--quiet", "HEAD"])).stdout.trim() || null;
+    const next = { ...before, refs, bundles, head: chooseHead(refs, before.head, branch) };
+    const written = await commitState(input.storage, input.name, before, next);
+    if (written) {
+      await checkStorageRefusesOverwrites(input, written);
+      await housekeeping({ ...input }).catch((error) =>
+        input.say(
+          `uno: couldn't tidy ${input.name} in your Uno cloud (${error.message}); it still works.`,
+        ),
+      );
+      return errors;
+    }
+    // Another computer saved first: our bundle was never named, drop it.
+    if (entry) await input.storage.remove(entry.key).catch(() => undefined);
+    if (attempt >= 2) return failAll("fetch first");
+  }
+}
+
+/**
+ * Once per repository: the storage must refuse to overwrite an existing log
+ * entry (If-None-Match), else two computers pushing at the same moment
+ * could lose one push. Writing the same bytes again is harmless either way.
+ * @param {{ storage: Storage, tmpDir: string, say: (line: string) => void }} input
+ * @param {{ key: string, bytes: Buffer }} written
+ */
+async function checkStorageRefusesOverwrites(input, written) {
+  const marker = path.join(input.tmpDir, "..", "overwrite-check");
+  if (await fsp.stat(marker).catch(() => null)) return;
+  if (await input.storage.write(written.key, written.bytes, { ifNoneMatch: true })) {
+    input.say(
+      "uno: warning: this Uno cloud storage doesn't refuse overwrites, so two computers pushing at the same moment could lose one push. Please tell Uno support.",
+    );
+    return;
+  }
+  await fsp.mkdir(path.dirname(marker), { recursive: true });
+  await fsp.writeFile(marker, `${new Date().toISOString()}\n`);
+}
+
+/**
+ * After a push: pack bundles when due, keep the last LOG_KEEP log entries,
+ * delete bundles no current state names once they are an hour old.
+ * @param {{ storage: Storage, name: string, tmpDir: string, progress: boolean }} input
+ */
+async function housekeeping(input) {
+  await compact({ ...input, state: await readRemote(input.storage, input.name) });
+  const seqs = await logSeqs(input.storage, input.name);
+  const latest = seqs.at(-1) ?? 0;
+  for (const seq of seqs) {
+    if (seq <= latest - LOG_KEEP) await input.storage.remove(logKey(input.name, seq));
+  }
+  await collectBundles(input.storage, input.name);
+}
+
+/**
+ * Delete bundle files the current state doesn't name and that are older
+ * than BUNDLE_GC_AGE_MS (younger ones may belong to a push in flight).
+ * @param {Storage} storage
+ * @param {string} name
+ * @param {number} [now]
+ */
+export async function collectBundles(storage, name, now = Date.now()) {
+  const state = await readRemote(storage, name);
+  const named = new Set(state.bundles.map((bundle) => bundle.key));
+  const { objects } = await storage.list(bundlesPrefix(name));
+  let deleted = 0;
+  for (const object of objects) {
+    const made = bundleTime(object.key);
+    if (named.has(object.key) || made === null || now - made < BUNDLE_GC_AGE_MS) continue;
+    await storage.remove(object.key);
+    deleted += 1;
+  }
+  return deleted;
+}
+
+/**
+ * Many bundles, or bundles much bigger than the last full one: name one
+ * full bundle of every ref instead (only when this repository has them
+ * all and isn't shallow). Old bundles stay until collectBundles' age rule.
  * @param {{ storage: Storage, name: string, state: RemoteState, tmpDir: string, progress: boolean }} input
  */
 export async function compact(input) {
@@ -935,46 +1328,34 @@ export async function compact(input) {
   if (state.bundles.length < 2) return false;
   const full = state.bundles.findLast((bundle) => bundle.prerequisites.length === 0);
   const total = state.bundles.reduce((sum, bundle) => sum + (Number(bundle.size) || 0), 0);
-  if (!(state.bundles.length > COMPACT_MAX_BUNDLES || (full && total > 2 * full.size)))
+  if (!(state.bundles.length > COMPACT_MAX_BUNDLES || (full && total > 2 * full.size))) {
     return false;
+  }
+  if (await isShallow()) return false;
   const tips = [...new Set(Object.values(state.refs))];
   if ((await presentObjects(tips)).size !== tips.length) return false;
-  await fsp.mkdir(input.tmpDir, { recursive: true });
-  const file = path.join(input.tmpDir, `${stamp()}.bundle`);
+  const file = await tempFile(input.tmpDir);
   try {
     if (!(await createBundle(file, tips, [], input.progress))) return false;
     const { size } = await fsp.stat(file);
     if (size > MAX_BUNDLE_BYTES) return false;
-    const key = `${GIT_ROOT}${input.name}/bundles/${stamp()}.bundle`;
+    const key = `${bundlesPrefix(input.name)}${stamp()}.bundle`;
     await input.storage.upload(key, file, size);
-    const current = await readRemote(input.storage, input.name);
-    if (current.rev !== state.rev) {
-      await input.storage.remove(key).catch(() => undefined);
-      return false;
-    }
-    /** @type {RemoteState} */
-    const next = {
-      ...state,
-      bundles: [
-        {
-          key,
-          created: new Date().toISOString(),
-          size,
-          tips: { ...state.refs },
-          prerequisites: [],
-        },
-      ],
-      rev: randomBytes(8).toString("hex"),
+    const packed = {
+      key,
+      created: new Date().toISOString(),
+      size,
+      tips: { ...state.refs },
+      prerequisites: [],
     };
-    await input.storage.write(
-      refsKey(input.name),
-      Buffer.from(`${JSON.stringify(next, null, 2)}\n`),
-    );
-    for (const bundle of state.bundles)
-      await input.storage.remove(bundle.key).catch(() => undefined);
-    return true;
+    if (await commitState(input.storage, input.name, state, { ...state, bundles: [packed] })) {
+      return true;
+    }
+    // Another push came first: this full bundle was never named.
+    await input.storage.remove(key).catch(() => undefined);
+    return false;
   } finally {
-    await fsp.rm(file, { force: true });
+    await dropTemp(file);
   }
 }
 
@@ -987,6 +1368,13 @@ export async function main(argv, options = {}) {
   const env = options.env ?? process.env;
   const home = options.home ?? os.homedir();
   const name = projectNameOf(argv[1] ?? argv[0] ?? "");
+  /** @type {NodeJS.Signals[]} */
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
+  const stop = () => {
+    cleanupNow();
+    process.exit(130);
+  };
+  for (const signal of signals) process.on(signal, stop);
   try {
     if (!name) {
       throw new UnoGitError(
@@ -1004,6 +1392,10 @@ export async function main(argv, options = {}) {
   } catch (error) {
     process.stderr.write(`uno: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
+    process.stdin.destroy();
+  } finally {
+    cleanupNow();
+    for (const signal of signals) process.off(signal, stop);
   }
 }
 
