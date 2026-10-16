@@ -19,6 +19,7 @@ import {
   CircleHelpIcon,
   CreditCardIcon,
   FolderIcon,
+  GaugeIcon,
   HouseIcon,
   InboxIcon,
   LayoutGridIcon,
@@ -59,6 +60,7 @@ import {
 } from "./SidebarDAccountButton";
 import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
+import { usePultNeedsCount, usePultPlace } from "../../pult/pultHooks";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
 /** The computer this window works on, by the name the person knows it by. */
@@ -323,7 +325,7 @@ function PlaceRow(props: {
 function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  return (to: "/files" | "/sites") => {
+  return (to: "/files" | "/sites" | "/pult") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     void navigate({ to });
@@ -369,6 +371,8 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
+  const pultRow = usePultPlace();
+  const pultNeeds = usePultNeedsCount();
   return (
     <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
       <PlaceRow
@@ -382,6 +386,15 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-home"
         tour="home"
       />
+      {pultRow ? (
+        <PlaceRow
+          icon={<GaugeIcon />}
+          label={pultNeeds ? `Пульт · ${pultNeeds}` : "Пульт"}
+          active={pathname.startsWith("/pult")}
+          onClick={() => open("/pult")}
+          testId="sidebar-nav-pult"
+        />
+      ) : null}
       <PlaceRow
         icon={<FolderIcon />}
         label="Files"

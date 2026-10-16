@@ -39,6 +39,7 @@ function useActiveFollowsOpenChat(router: DemoRouter) {
   }, [router]);
 }
 
+// Pult 4: this build shows only the Pult points (the Work mock has its own site).
 const POINTS: ReadonlyArray<{
   key: DemoShowKey;
   title: string;
@@ -46,53 +47,35 @@ const POINTS: ReadonlyArray<{
   switches?: ReadonlyArray<keyof DemoSwitches>;
 }> = [
   {
-    key: "p1",
-    title: "Лаунчер панели",
-    hint: "Две плитки браузера (этот Mac / браузер агента), без Terminal, Apps всегда.",
+    key: "q1",
+    title: "Пульт за 5 секунд",
+    hint: "Одна строка «где ты нужен», вопросы с кнопками ответа, задачи списком: точка, прогресс, где.",
+    switches: ["pult"],
   },
   {
-    key: "p2",
-    title: "Комментарии и отладка в браузере",
-    hint: "C — комментировать элементы и области, D — консоль и сеть, «Ask agent to fix».",
+    key: "q2",
+    title: "Ответить одним нажатием",
+    hint: "Кнопка в Пульте — и ответ уходит сообщением в настоящий чат задачи, агент отвечает.",
   },
   {
-    key: "p3",
-    title: "Вкладка на весь экран",
-    hint: "Плотный блок «шаг + композер», сворачивание в мини-окно, ответ подсказкой.",
-    switches: ["chatDock"],
+    key: "q3",
+    title: "Задача: что нужно, где смотреть, прод",
+    hint: "Клик по задаче — её чат в центре, справа: от тебя, ссылка+пароль, прод/стейдж, что осталось. Остальное — «Подробнее».",
   },
   {
-    key: "p4",
-    title: "Вкладки: чат, проект, везде",
-    hint: "Закрепы слева, булавка на вкладке, «All tabs» с вкладками из других чатов.",
-    switches: ["tabs"],
+    key: "q4",
+    title: "Диспетчер: «нужна ли помощь Спаркам?»",
+    hint: "Одно поле наверху Пульта отвечает по всем чатам. ⇧⌘K — фокус.",
   },
   {
-    key: "p5",
-    title: "Верх сайдбара",
-    hint: "Один заголовок говорит, что показано; ✎ New chat крайний справа; компьютеры.",
-    switches: ["sidebarViewSwitch"],
+    key: "q5",
+    title: "Скрин + строка → в нужный чат",
+    hint: "Вставь скрин (⌘V) и напиши правку — диспетчер найдёт чат задачи и передаст.",
   },
   {
-    key: "p5b",
-    title: "Сайдбар: фильтр и группировка",
-    hint: "Всё в меню заголовка: Group by, проекты и компьютеры чипами; активный фильтр — чип с ×.",
-  },
-  {
-    key: "p6",
-    title: "Чаты ассистента в сайдбаре",
-    hint: "Шеврон у ассистента раскрывает его чаты, «+» — новый чат с ним.",
-  },
-  {
-    key: "p7",
-    title: "Ассистенты: команда и онбординг",
-    hint: "Uno, Builder, Scout; «+ New assistant» — 6 шагов; страница ассистента.",
-  },
-  {
-    key: "p8",
-    title: "↗ у файла: редактор или ссылка",
-    hint: "На Mac — меню «Open in…» / «Share with a link…», на облаке — сразу Share.",
-    switches: ["platform"],
+    key: "q6",
+    title: "Выкатки, просьбы, лимиты, алерты, решения",
+    hint: "Отдельные экраны в меню «Задачи ▾» — сверху Пульта, не на главном экране.",
   },
 ];
 
@@ -164,7 +147,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         className="fixed bottom-2.5 left-2.5 z-[90] inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
       >
         <EyeIcon className="size-3.5" />
-        Что смотреть · 9
+        Что смотреть · Пульт
         <ChevronUpIcon className="size-3.5 text-muted-foreground" />
       </button>
     );
@@ -182,7 +165,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         <div className="min-w-0">
           <div className="text-sm font-semibold">Что смотреть</div>
           <div className="text-[11px] text-muted-foreground">
-            Мок Uno Work 0.0.138 · данные выдуманные, ничего не уходит наружу
+            Пульт 4 внутри мока Uno Work · данные выдуманные, ничего не уходит наружу
           </div>
         </div>
         <button

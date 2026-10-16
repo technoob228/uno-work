@@ -7,6 +7,7 @@
  * `demoHooks.previewInitialStates`); flipping the "Panel tabs" switch lays the
  * same tabs out the other way (B: everything belongs to the project).
  */
+import { makePultFile } from "../components/preview/PreviewPaneContext";
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import {
@@ -67,10 +68,8 @@ const mac = (relative: string, openedBy?: "agent") => file(MAC_ROOT, ENV_MAC, re
 const product = (relative: string, openedBy?: "agent") =>
   file(PRODUCT_ROOT, ENV_PRODUCT, relative, openedBy);
 
-function pultApp(): PreviewFile {
-  const url = `${location.origin}${import.meta.env.BASE_URL}demo-files/pult.html`;
-  return { id: "app:demo-pult", name: "Pult", kind: "app", content: "", url };
-}
+// Pult 4: the Pult is a real tab of Work now, not a static page.
+const pultApp = (): PreviewFile => makePultFile();
 
 const bucket = (files: ReadonlyArray<PreviewFile>): PreviewBucketState => ({
   ...DEFAULT_PREVIEW_BUCKET_STATE,

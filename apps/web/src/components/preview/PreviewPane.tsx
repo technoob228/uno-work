@@ -27,6 +27,7 @@ import {
   XIcon,
   AppWindowIcon,
   ListTodoIcon,
+  GaugeIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -62,6 +63,7 @@ import {
   isLiveBrowserTab,
   isPluginPanelTab,
   isTasksTab,
+  isPultTab,
   pluginIdFromPanelFile,
   type PreviewFile,
   type PreviewFileKind,
@@ -83,6 +85,7 @@ import {
 import { AppFrame } from "../apps/AppFrame";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
+import { PultView } from "../pult/PultView";
 import { PanelLauncher } from "./PanelLauncher";
 import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
@@ -120,6 +123,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
   tasks: ListTodoIcon,
+  pult: GaugeIcon,
   unknown: FileIcon,
 };
 
@@ -139,6 +143,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   "plugin-panel": "Plugin panel",
   app: "App",
   tasks: "Tasks",
+  pult: "Pult",
   unknown: "File",
 };
 
@@ -1442,6 +1447,9 @@ function Body({ file }: { file: PreviewFile }) {
   if (file.kind === "tasks") {
     return <TasksTabBody file={file} />;
   }
+  if (file.kind === "pult") {
+    return <PultView layout="panel" />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -2063,7 +2071,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       !isPluginPanelTab(active) &&
       !isAppTab(active) &&
       !isLiveBrowserTab(active) &&
-      !isTasksTab(active) ? (
+      !isTasksTab(active) &&
+      !isPultTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>

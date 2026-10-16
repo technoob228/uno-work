@@ -41,6 +41,8 @@ import {
   type WireThread,
 } from "./heavyFixtures";
 import { assistantHandlers, seedAssistantTeam } from "./assistantsFixtures";
+import { PULT_DEMO } from "./pultThreads";
+import { usePultStore } from "../pult/pultStore";
 
 const SEED_VERSION = "w0138-1";
 
@@ -570,6 +572,11 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       }
       if (target && command.type === "thread.turn.start") {
         const message = command.message as { messageId: string; text: string };
+        // Pult 4: a message from the Pult answers the chat's open question too.
+        if (message.text.startsWith("(Пульт)")) {
+          answerChat(machine, String(command.threadId), message.text);
+          return { sequence: commandSequence };
+        }
         if (typeof command.titleSeed === "string" && target.title === "New chat")
           target.title = command.titleSeed;
         startTurn(target, message.messageId, message.text);
@@ -624,8 +631,19 @@ function startTurn(target: WireThread & Record<string, unknown>, messageId: stri
   });
 }
 
+/** Pult 4: what the agent says to a message from the Pult (made up, short, Russian like Misha's chats). */
+function pultReply(text: string): string {
+  const body = text.replace(/^\(Пульт\)\s*/, "");
+  if (/^Выбрал:/.test(body)) return `Принял: ${body.replace(/^Выбрал:\s*/, "«")}». Делаю, статус отпишу в Пульт.`;
+  if (/^Готово:/.test(body)) return "Вижу, спасибо. Продолжаю — отпишу в Пульт, когда закончу.";
+  if (/скрин|кнопк|экран|переделать|поправ/i.test(body)) return "Вижу скрин. Поправлю в этом ходе и пришлю до/после.";
+  if (/статус|как дела/i.test(body)) return "Одной строкой: работаю по плану, тебя не жду. Следующий статус — в Пульт.";
+  return "Принял, учту в этом ходе.";
+}
+
 /** What the agent says after the person's answer (made up, calm). */
 function replyAfter(threadId: string, answer: string): string {
+  if (answer.startsWith("(Пульт)")) return pultReply(answer);
   const chat = chatById(threadId);
   const ask = chat?.ask;
   if (/^(deny|not yet|remind me later|only in billing)/i.test(answer)) {
@@ -874,6 +892,7 @@ function addDemoProject(
 export async function startDemo(): Promise<void> {
   seedLocalStorage();
   seedAssistantTeam();
+  usePultStore.getState().load(PULT_DEMO);
   void loadAgentFrame();
   // Touch every fixture once so a typo in them fails loudly at start.
   void CHATS.length;
@@ -937,6 +956,9 @@ export async function startDemo(): Promise<void> {
       }),
     ),
     http.get("*/_account/api/v1/boxes", () => HttpResponse.json({ boxes: accountBoxes() })),
+    // Pult 4: two account calls the mock did not answer (404 in the console).
+    http.get("*/_account/api/v1/ai/chats", () => HttpResponse.json({ chats: [] })),
+    http.get("*/_account/api/v1/box-subscription", () => HttpResponse.json({})),
     http.get("*/_account/api/v1/boxes/:id", ({ params }) => {
       const found = accountBoxes().find((item) => String(item.id) === String(params.id));
       return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });

@@ -35,6 +35,8 @@ export interface DemoSwitches {
   readonly tabs: "pins" | "project";
   /** p5: the sidebar's view is picked from its header (A), or only in Settings (B). */
   readonly sidebarViewSwitch: "header" | "settings";
+  /** Pult 4: the Pult is a tab of the right panel (1), or a screen in the middle (2). */
+  readonly pult: "panel" | "center";
 }
 
 export const DEMO_SWITCH_DEFAULTS: DemoSwitches = {
@@ -42,6 +44,7 @@ export const DEMO_SWITCH_DEFAULTS: DemoSwitches = {
   chatDock: "mini",
   tabs: "pins",
   sidebarViewSwitch: "header",
+  pult: "panel",
 };
 
 export const DEMO_SWITCH_OPTIONS: {
@@ -69,6 +72,13 @@ export const DEMO_SWITCH_OPTIONS: {
     options: [
       { id: "pins", name: "A · Chat + pins" },
       { id: "project", name: "B · Per project" },
+    ],
+  },
+  pult: {
+    label: "Пульт",
+    options: [
+      { id: "panel", name: "1 · Вкладка справа" },
+      { id: "center", name: "2 · Экран в центре" },
     ],
   },
   sidebarViewSwitch: {
@@ -134,7 +144,7 @@ export function demoDesktop(): boolean {
  * function that puts the interface into the state to look at (opens a chat,
  * the panel, a tab, a menu…). Filled by the code of each point (demo only).
  */
-export type DemoShowKey = "p1" | "p2" | "p3" | "p4" | "p5" | "p5b" | "p6" | "p7" | "p8";
+export type DemoShowKey = "p1" | "p2" | "p3" | "p4" | "p5" | "p5b" | "p6" | "p7" | "p8" | "q1" | "q2" | "q3" | "q4" | "q5" | "q6";
 export const demoShow: Partial<Record<DemoShowKey, () => void | Promise<void>>> = {};
 
 /** Extra synchronous answers the always-loaded app asks the demo (empty outside it). */

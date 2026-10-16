@@ -71,6 +71,7 @@ export type PreviewFileKind =
   | "plugin-panel"
   | "app"
   | "tasks"
+  | "pult"
   | "unknown";
 
 export interface PreviewFile {
@@ -209,6 +210,17 @@ export function isTabShown(
     ? view.activeFileId
     : (view.files[0]?.id ?? null);
   return shownId === id;
+}
+
+export const PULT_TAB_ID = "pult:main";
+
+/** The Pult (the board of agent work): one tab, pinned everywhere. */
+export function isPultTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "pult";
+}
+
+export function makePultFile(): PreviewFile {
+  return { id: PULT_TAB_ID, name: "Пульт", kind: "pult", content: "" };
 }
 
 const TASKS_TAB_ID_PREFIX = "tasks:";
