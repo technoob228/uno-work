@@ -90,7 +90,7 @@ export async function composeFileIn(dir: string): Promise<string | null> {
 }
 
 export const COMPOSE_ON_APP_SERVER_MESSAGE = (file: string) =>
-  `this project has ${file}: it is several services, and an app server runs one process. Don't split it. Run all of it on this computer with docker compose (docker compose up -d --build, restart: unless-stopped, its database as a compose container), then app_show_on_internet for each web port. If it doesn't fit this computer, tell the person what is short and the options from account_overview.`;
+  `this project has ${file}: it is several services, and an app server runs one process. Don't split it. Run all of it on this computer with docker compose (docker compose up -d --build, restart: unless-stopped, its database as a compose container), then app_show_on_internet for each web port. If it doesn't fit this computer, tell the person what is short (memory, disk, in numbers) and offer only a bigger plan: its price + VAT and the upgrade link from account_overview.`;
 
 async function packProject(dir: string): Promise<Packed> {
   const stat = await fsp.stat(dir);

@@ -63,6 +63,15 @@ describe("Uno Work environment brief", () => {
     expect(brief).not.toMatch(/always-on plan \(Small and up\)/);
   });
 
+  it("a project that doesn't fit: only a bigger plan with its price + VAT (Misha 16.10)", () => {
+    const brief = buildUnoWorkBrief();
+    const deploy = brief.split("## Deploying a project")[1]!.split("\n## ")[0]!;
+    expect(deploy).toMatch(/docker compose up -d --build/);
+    expect(deploy).toMatch(/offer only the next plan up: its price \+ VAT/);
+    expect(deploy).toMatch(/No second computer, no server of your own/);
+    expect(deploy).not.toContain("`computer_create`");
+  });
+
   it("task rules: ask early, no raw output, computer notes are not the person", () => {
     expect(UNO_WORK_TASK_RULES).toMatch(/Ask first for what only the person can give/);
     expect(UNO_WORK_TASK_RULES).toMatch(/"SELFTEST OK"/);

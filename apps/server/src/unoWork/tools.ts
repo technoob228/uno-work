@@ -762,7 +762,7 @@ const consoleOk = (
       // times, each asking for Allow, with no reason shown).
       return Effect.fail(
         toolError(
-          `Couldn't ${what}: ${detail || "the plan has no room for it"}. This is the plan's limit: tell the person this reason and what they can do (the upgrade link is in account_overview). Don't try again with another size or name: each try asks them to Allow.`,
+          `Couldn't ${what}: ${detail || "the plan has no room for it"}. This is the plan's limit: tell the person this reason in numbers and offer a bigger plan (its price + VAT, the upgrade link from account_overview). Don't try again with another size or name: each try asks them to Allow.`,
         ),
       );
     case reply.status === 403 || reply.status === 404:
