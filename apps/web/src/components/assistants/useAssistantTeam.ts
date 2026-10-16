@@ -149,3 +149,23 @@ export function useTeamMember(environmentId: string, projectId: string): TeamMem
     ) ?? null
   );
 }
+
+/**
+ * The teammate a chat belongs to (its folder is a teammate's, not Uno's):
+ * its header shows that face and name instead of Uno's.
+ */
+export function useTeammateOfThread(environmentId: string, threadId: string): TeamMember | null {
+  const projectId = useStore(
+    (state) =>
+      selectSidebarThreadsAcrossEnvironments(state).find(
+        (thread) => thread.environmentId === environmentId && thread.id === threadId,
+      )?.projectId ?? null,
+  );
+  const team = useAssistantTeam();
+  if (projectId === null || projectId === ASSISTANT_PROJECT_ID) return null;
+  return (
+    team.find(
+      (member) => member.environmentId === environmentId && member.projectId === projectId,
+    ) ?? null
+  );
+}

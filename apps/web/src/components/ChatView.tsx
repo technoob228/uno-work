@@ -3425,6 +3425,20 @@ export default function ChatView(props: ChatViewProps) {
     setActivePendingUserInputQuestionIndex,
   ]);
 
+  // A typed value, "Skip" or a connected app answers the question at once
+  // (an assistant setting itself up asks one at a time, 16.10).
+  const onAnswerActivePendingUserInput = useCallback(
+    (questionId: string, answer: string) => {
+      if (!activePendingUserInput) return;
+      const others = activePendingResolvedAnswers ?? {};
+      void onRespondToUserInput(activePendingUserInput.requestId, {
+        ...others,
+        [questionId]: answer,
+      });
+    },
+    [activePendingResolvedAnswers, activePendingUserInput, onRespondToUserInput],
+  );
+
   const onPreviousActivePendingUserInputQuestion = useCallback(() => {
     if (!activePendingProgress) {
       return;
@@ -4320,6 +4334,7 @@ export default function ChatView(props: ChatViewProps) {
                     onRespondToApproval={onRespondToApproval}
                     onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
                     onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                    onAnswerActivePendingUserInput={onAnswerActivePendingUserInput}
                     onPreviousActivePendingUserInputQuestion={
                       onPreviousActivePendingUserInputQuestion
                     }

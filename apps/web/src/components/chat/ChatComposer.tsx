@@ -85,6 +85,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
+import { ComposerBrowserHelpPanel } from "../preview/BrowserHelpCard";
 import { ComposerToolApprovalPanel } from "./ComposerToolApprovalPanel";
 import {
   PersonalAiPanel,
@@ -644,6 +645,8 @@ export interface ChatComposerProps {
   ) => Promise<void>;
   onSelectActivePendingUserInputOption: (questionId: string, optionLabel: string) => void;
   onAdvanceActivePendingUserInput: () => void;
+  /** Answers the active question at once (a typed value, Skip, a connected app). */
+  onAnswerActivePendingUserInput?: (questionId: string, answer: string) => void;
   onPreviousActivePendingUserInputQuestion: () => void;
   onChangeActivePendingUserInputCustomAnswer: (
     questionId: string,
@@ -730,6 +733,7 @@ export const ChatComposer = memo(
       onRespondToApproval,
       onSelectActivePendingUserInputOption,
       onAdvanceActivePendingUserInput,
+      onAnswerActivePendingUserInput,
       onPreviousActivePendingUserInputQuestion,
       onChangeActivePendingUserInputCustomAnswer,
       onProviderModelSelect,
@@ -3053,6 +3057,7 @@ export const ChatComposer = memo(
             }}
           >
             <ComposerSecretRequestPanel threadId={activeThread?.id} />
+            <ComposerBrowserHelpPanel environmentId={environmentId} threadId={activeThread?.id} />
             <ComposerToolApprovalPanel threadId={activeThread?.id} />
             <PremiumCreditNotice
               environmentId={environmentId}
@@ -3089,6 +3094,7 @@ export const ChatComposer = memo(
                     questionIndex={activePendingQuestionIndex}
                     onToggleOption={onSelectActivePendingUserInputOption}
                     onAdvance={onAdvanceActivePendingUserInput}
+                    onAnswer={onAnswerActivePendingUserInput}
                   />
                 </div>
               ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -3129,6 +3135,7 @@ export const ChatComposer = memo(
                   questionIndex={activePendingQuestionIndex}
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
+                  onAnswer={onAnswerActivePendingUserInput}
                 />
                 <div className="px-3 pb-3 sm:px-4">
                   <div

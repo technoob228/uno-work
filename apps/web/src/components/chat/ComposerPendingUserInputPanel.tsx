@@ -1,11 +1,15 @@
-import { type ApprovalRequestId } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef } from "react";
+import { type ApprovalRequestId, type UserInputQuestion } from "@t3tools/contracts";
+import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
+import { usePrimaryEnvironmentId } from "../../environments/primary/context";
+import { useConnectorActions } from "../setup/steps/ConnectorsStep";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon, PlugIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 
 interface PendingUserInputPanelProps {
@@ -15,6 +19,11 @@ interface PendingUserInputPanelProps {
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
+  /**
+   * Answers the active question right away — a typed value, "Skip", or an
+   * app connected from the card (an assistant setting itself up, 16.10).
+   */
+  onAnswer?: ((questionId: string, answer: string) => void) | undefined;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -24,6 +33,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
+  onAnswer,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -38,9 +48,95 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
+      onAnswer={onAnswer}
     />
   );
 });
+
+/** A short field right in the card: a name, an email, a time, a link. */
+function InlineAnswer(props: {
+  readonly question: UserInputQuestion;
+  readonly disabled: boolean;
+  readonly onAnswer: (answer: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  const input = props.question.input!;
+  const submit = () => {
+    if (value.trim()) props.onAnswer(value.trim());
+  };
+  return (
+    <div className="mt-3 flex items-center gap-2" data-testid="pending-input-field">
+      <Input
+        size="sm"
+        type={input.kind === "email" ? "email" : input.kind === "url" ? "url" : "text"}
+        placeholder={input.placeholder}
+        value={value}
+        disabled={props.disabled}
+        autoFocus
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            submit();
+          }
+        }}
+        className="flex-1"
+      />
+      <Button size="sm" disabled={props.disabled || !value.trim()} onClick={submit}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
+/** "Connect GitHub" inside the question: the app's own page opens, the card answers itself. */
+function InlineConnect(props: {
+  readonly connect: NonNullable<UserInputQuestion["connect"]>;
+  readonly disabled: boolean;
+  readonly onConnected: () => void;
+}) {
+  const environmentId = usePrimaryEnvironmentId();
+  const actions = useConnectorActions(environmentId);
+  const [asked, setAsked] = useState(false);
+  const connected = actions.byProvider.get(props.connect.provider as never)?.connected === true;
+  const onConnected = useEffectEvent(props.onConnected);
+  useEffect(() => {
+    if (asked && connected) onConnected();
+  }, [asked, connected]);
+  const waiting = actions.pending?.provider === props.connect.provider;
+  return (
+    <div className="mt-3" data-testid="pending-input-connect">
+      {connected ? (
+        <div className="flex items-center gap-2 text-sm">
+          <CheckIcon className="size-4 text-success" />
+          {props.connect.name} is connected
+          {asked ? null : (
+            <Button size="xs" variant="outline" onClick={props.onConnected}>
+              Use it
+            </Button>
+          )}
+        </div>
+      ) : (
+        <Button
+          size="sm"
+          disabled={props.disabled || waiting}
+          onClick={() => {
+            setAsked(true);
+            void actions.connect(props.connect.provider as never);
+          }}
+        >
+          {waiting ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <PlugIcon className="size-3.5" />
+          )}
+          {waiting ? `Waiting for ${props.connect.name}…` : `Connect ${props.connect.name}`}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   prompt,
@@ -49,6 +145,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
+  onAnswer,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
@@ -56,6 +153,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
+  onAnswer?: ((questionId: string, answer: string) => void) | undefined;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
@@ -122,6 +220,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   if (!activeQuestion) {
     return null;
   }
+  // The answer a Connect button sends isn't an option to click.
+  const shownOptions = activeQuestion.options.filter(
+    (option) => option.label !== activeQuestion.connect?.doneLabel,
+  );
 
   return (
     <div className="px-4 py-3 sm:px-5">
@@ -138,11 +240,29 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         </div>
       </div>
       <p className="mt-1.5 text-sm text-foreground/90">{activeQuestion.question}</p>
+      {activeQuestion.detail ? (
+        <p className="mt-1 text-xs leading-snug text-muted-foreground">{activeQuestion.detail}</p>
+      ) : null}
+      {activeQuestion.connect && onAnswer ? (
+        <InlineConnect
+          connect={activeQuestion.connect}
+          disabled={isResponding}
+          onConnected={() => onAnswer(activeQuestion.id, activeQuestion.connect!.doneLabel)}
+        />
+      ) : null}
+      {activeQuestion.input && onAnswer ? (
+        <InlineAnswer
+          key={activeQuestion.id}
+          question={activeQuestion}
+          disabled={isResponding}
+          onAnswer={(answer) => onAnswer(activeQuestion.id, answer)}
+        />
+      ) : null}
       {activeQuestion.multiSelect ? (
         <p className="mt-1 text-xs text-muted-foreground/65">Select one or more options.</p>
       ) : null}
       <div className="mt-3 space-y-1">
-        {activeQuestion.options.map((option, index) => {
+        {shownOptions.map((option, index) => {
           const isSelected = progress.selectedOptionLabels.includes(option.label);
           const shortcutKey = index < 9 ? index + 1 : null;
           return (
@@ -184,6 +304,20 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           );
         })}
       </div>
+      {activeQuestion.skippable && onAnswer ? (
+        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{activeQuestion.input ? "" : "Or type your own answer below."}</span>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={isResponding}
+            onClick={() => onAnswer(activeQuestion.id, "Skip")}
+            data-testid="pending-input-skip"
+          >
+            Skip
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 });

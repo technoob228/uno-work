@@ -31,17 +31,23 @@ export interface DemoSwitches {
   readonly platform: "desktop" | "cloud";
   /** p3: a full-screen tab folds the chat into a mini window, or into a narrow column. */
   readonly chatDock: "mini" | "column";
-  /** p4: tabs live in the chat with pins (A), or in the project like Codex (B). */
-  readonly tabs: "pins" | "project";
+  /** p4: the tab groups (Everywhere / Project / This chat) carry a small icon, or only an outline. */
+  readonly tabGroupIcons: "icon" | "plain";
+  /** p4: what the person opens in a chat lands in the Project group (stays across its chats) or in the chat's. */
+  readonly newTabsGo: "project" | "chat";
   /** p5: the sidebar's view is picked from its header (A), or only in Settings (B). */
   readonly sidebarViewSwitch: "header" | "settings";
+  /** p9: the apps as they are (GitHub and Drive connected), or nothing connected yet. */
+  readonly connectors: "connected" | "empty";
 }
 
 export const DEMO_SWITCH_DEFAULTS: DemoSwitches = {
   platform: "desktop",
   chatDock: "mini",
-  tabs: "pins",
+  tabGroupIcons: "icon",
+  newTabsGo: "project",
   sidebarViewSwitch: "header",
+  connectors: "connected",
 };
 
 export const DEMO_SWITCH_OPTIONS: {
@@ -64,11 +70,18 @@ export const DEMO_SWITCH_OPTIONS: {
       { id: "column", name: "Narrow column" },
     ],
   },
-  tabs: {
-    label: "Panel tabs",
+  tabGroupIcons: {
+    label: "Tab groups",
     options: [
-      { id: "pins", name: "A · Chat + pins" },
-      { id: "project", name: "B · Per project" },
+      { id: "icon", name: "With an icon" },
+      { id: "plain", name: "Outline only" },
+    ],
+  },
+  newTabsGo: {
+    label: "What you open goes to",
+    options: [
+      { id: "project", name: "Project" },
+      { id: "chat", name: "This chat" },
     ],
   },
   sidebarViewSwitch: {
@@ -76,6 +89,13 @@ export const DEMO_SWITCH_OPTIONS: {
     options: [
       { id: "header", name: "A · Header menu" },
       { id: "settings", name: "B · Settings" },
+    ],
+  },
+  connectors: {
+    label: "Connectors",
+    options: [
+      { id: "connected", name: "GitHub + Drive connected" },
+      { id: "empty", name: "Nothing connected" },
     ],
   },
 };
@@ -134,7 +154,7 @@ export function demoDesktop(): boolean {
  * function that puts the interface into the state to look at (opens a chat,
  * the panel, a tab, a menu…). Filled by the code of each point (demo only).
  */
-export type DemoShowKey = "p1" | "p2" | "p3" | "p4" | "p5" | "p5b" | "p6" | "p7" | "p8" | "p9";
+export type DemoShowKey = "p1" | "p2" | "p2b" | "p3" | "p4" | "p5" | "p5b" | "p6" | "p7" | "p8" | "p9";
 export const demoShow: Partial<Record<DemoShowKey, () => void | Promise<void>>> = {};
 
 /** Extra synchronous answers the always-loaded app asks the demo (empty outside it). */

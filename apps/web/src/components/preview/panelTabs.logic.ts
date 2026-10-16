@@ -1,17 +1,13 @@
 /**
- * The right panel's tab row and "All tabs" menu (w0138, point 4): which tabs
- * sit where, and what the menu lists. Pure functions — PanelTabStrip and
- * AllTabsMenu render them, unit tests check them.
+ * The right panel's tab row and "All tabs" menu (w0138, point 4; Misha
+ * 16.10): the row is up to three outlined groups, like tab groups in Chrome —
+ * **Everywhere → Project → This chat**, left to right, widest to narrowest.
+ * An empty group isn't drawn. Moving to another chat of the same project keeps
+ * Everywhere and Project as they are; only the chat's group changes. Pure
+ * functions — PanelTabStrip and AllTabsMenu render them, unit tests check them.
  *
- * Two layouts of the same three levels (`previewTabScopes`):
- *
- * - `pins` (default) — like pinned tabs in a browser: on the left the tabs
- *   kept for longer than this chat, icon only (first "everywhere", then
- *   "project"); a thin divider; then the tabs of this chat with their names.
- *   Another chat of the same project keeps the pins, swaps the chat's tabs.
- * - `project` — like Codex: what the person opens belongs to the project and
- *   shows in every chat of it; each chat remembers which tab it had open.
- *   Only "everywhere" tabs are icon-only pins there.
+ * The groups are the existing levels of `previewTabScopes` (global / project
+ * / chat) — nothing new is stored, saved tabs of older versions read as is.
  */
 
 import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey, scopeOfKey } from "./previewTabScopes";
@@ -19,45 +15,22 @@ import type { PreviewTabScope, PreviewTabTarget } from "./previewTabScopes";
 // Types only: PreviewPaneContext imports this module's neighbours by value.
 import type { PreviewFile } from "./PreviewPaneContext";
 
-export type PanelTabsLayout = "pins" | "project";
-
-export interface StripTabs {
-  /** Icon-only pins on the left, in display order. */
-  readonly pinned: ReadonlyArray<PreviewFile>;
-  /** Named tabs after the divider. */
-  readonly named: ReadonlyArray<PreviewFile>;
+export interface TabGroup {
+  readonly scope: PreviewTabScope;
+  readonly files: ReadonlyArray<PreviewFile>;
 }
 
-/** Split the visible tabs (already ordered global → project → chat) into pins and named tabs. */
-export function splitStripTabs(
+/** Visible tabs (already ordered global → project → chat) as groups; empty groups are left out. */
+export function groupStripTabs(
   files: ReadonlyArray<PreviewFile>,
   tabScopeById: Readonly<Record<string, PreviewTabScope>>,
-  layout: PanelTabsLayout,
-): StripTabs {
-  const isPin = (file: PreviewFile) => {
-    const scope = tabScopeById[file.id] ?? "chat";
-    return layout === "pins" ? scope !== "chat" : scope === "global";
-  };
-  return { pinned: files.filter(isPin), named: files.filter((file) => !isPin(file)) };
-}
-
-/**
- * Where a tab goes when it is dropped on the other side of the divider: onto
- * the pins = kept for the project (an "everywhere" pin stays where it is);
- * onto the named tabs = back to this chat (in `project` layout — the project).
- */
-export function scopeForDrop(
-  zone: "pinned" | "named",
-  current: PreviewTabScope,
-  layout: PanelTabsLayout,
-): PreviewTabScope | null {
-  if (zone === "pinned") {
-    if (layout === "project") return current === "global" ? null : "global";
-    return current === "chat" ? "project" : null;
-  }
-  if (current === "chat") return null;
-  if (layout === "project") return current === "global" ? "project" : null;
-  return "chat";
+): ReadonlyArray<TabGroup> {
+  return (["global", "project", "chat"] as const)
+    .map((scope) => ({
+      scope,
+      files: files.filter((file) => (tabScopeById[file.id] ?? "chat") === scope),
+    }))
+    .filter((group) => group.files.length > 0);
 }
 
 /** What the "All tabs" menu needs to know about a chat to name it and go there. */
@@ -151,57 +124,80 @@ export function collectAllTabs(input: {
   };
 }
 
-/** Menu labels of a tab's level — the person's words, with the project's name. */
-export function scopeChoiceLabel(
-  scope: PreviewTabScope,
-  projectName: string | null,
-  layout: PanelTabsLayout,
-): string {
-  switch (scope) {
-    case "chat":
-      return layout === "project" ? "Only in this chat" : "Keep in this chat";
-    case "project":
-      return layout === "project"
-        ? `In every chat of ${projectName ?? "the project"}`
-        : `Pin to project ${projectName ?? ""}`.trim();
-    case "global":
-      return "Show in every chat";
-  }
+/** Name of a group in the row, the menus and "All tabs". */
+export const GROUP_LABEL: Record<PreviewTabScope, string> = {
+  global: "Everywhere",
+  project: "Project",
+  chat: "This chat",
+};
+
+/** "Move to" choices of a tab's menu. */
+export function moveToLabel(scope: PreviewTabScope, projectName: string | null): string {
+  if (scope === "project") return projectName ? `Project · ${projectName}` : "Project";
+  return GROUP_LABEL[scope];
 }
 
-/** One line under a tab's name: where it lives. */
+/** One line in a tab's tooltip: where it lives. */
 export function scopeHint(scope: PreviewTabScope, projectName: string | null): string {
   switch (scope) {
     case "chat":
-      return "Open in this chat";
+      return "Only in this chat";
     case "project":
-      return `Pinned to project ${projectName ?? ""}`.trim();
+      return `In every chat of ${projectName ?? "the project"}`;
     case "global":
-      return "Shown in every chat";
+      return "Everywhere — in every chat and screen";
   }
 }
 
 /**
- * Widths of the named tabs, like Chrome: each tab shrinks from 180 to 72 px;
- * when even that doesn't fit, the inactive tabs fold into icons and only the
- * active one keeps its name (it is always fully in view). Past that the row
- * scrolls, with a fade on the side that has more.
+ * Widths, like Chrome: a tab shrinks from 180 to 72 px; when the row still
+ * doesn't fit, inactive tabs fold into icons — the chat's group first, then
+ * Project, then Everywhere, so the groups that stay across chats change last.
+ * The active tab always keeps its name; past that the row scrolls with a fade.
  */
 export const TAB_MAX_WIDTH = 180;
 export const TAB_MIN_WIDTH = 72;
 export const TAB_ICON_WIDTH = 28;
-export const TAB_GAP = 4;
+export const TAB_GAP = 2;
+/** Outline padding of a group, plus its icon when groups carry one, plus the gap after it. */
+export const GROUP_CHROME = { icon: 30, plain: 10 } as const;
 
-export type StripFit = "names" | "icons";
+const FOLD_ORDER: ReadonlyArray<ReadonlyArray<PreviewTabScope>> = [
+  [],
+  ["chat"],
+  ["chat", "project"],
+  ["chat", "project", "global"],
+];
 
-export function fitStripTabs(available: number, count: number): StripFit {
-  if (count <= 1) return "names";
-  return count * TAB_MIN_WIDTH + (count - 1) * TAB_GAP <= available ? "names" : "icons";
+function rowWidth(
+  groups: ReadonlyArray<{ readonly scope: PreviewTabScope; readonly count: number; readonly active: boolean }>,
+  folded: ReadonlyArray<PreviewTabScope>,
+  chrome: number,
+): number {
+  let width = 0;
+  for (const group of groups) {
+    const fold = folded.includes(group.scope);
+    const named = fold ? (group.active ? 1 : 0) : group.count;
+    const icons = group.count - named;
+    width += chrome + named * TAB_MIN_WIDTH + icons * TAB_ICON_WIDTH + (group.count - 1) * TAB_GAP;
+  }
+  return width;
 }
 
-/** Short label of a pinned tab: the name without its extension ("README", "pricing"). */
-export function pinLabel(file: Pick<PreviewFile, "name" | "kind">): string {
-  if (file.kind === "app" || file.kind === "browser") return file.name;
-  const dot = file.name.lastIndexOf(".");
-  return dot > 0 ? file.name.slice(0, dot) : file.name;
+/** Groups whose inactive tabs show as icons, so the row fits `available` px. */
+export function foldedGroups(input: {
+  readonly available: number;
+  readonly groups: ReadonlyArray<{
+    readonly scope: PreviewTabScope;
+    readonly count: number;
+    /** The active tab is in this group. */
+    readonly active: boolean;
+  }>;
+  readonly withIcons: boolean;
+}): ReadonlyArray<PreviewTabScope> {
+  const chrome = input.withIcons ? GROUP_CHROME.icon : GROUP_CHROME.plain;
+  for (const folded of FOLD_ORDER) {
+    if (rowWidth(input.groups, folded, chrome) <= input.available) return folded;
+  }
+  return FOLD_ORDER[FOLD_ORDER.length - 1]!;
 }

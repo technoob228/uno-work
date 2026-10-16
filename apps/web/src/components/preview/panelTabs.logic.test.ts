@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectAllTabs,
-  fitStripTabs,
-  pinLabel,
-  scopeChoiceLabel,
-  scopeForDrop,
-  splitStripTabs,
+  foldedGroups,
+  groupStripTabs,
+  moveToLabel,
   type PanelChatInfo,
 } from "./panelTabs.logic";
 import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
@@ -30,44 +28,48 @@ const hero = file("hero.md");
 const pricing = file("pricing.md");
 const research = file("research.docx");
 
-describe("splitStripTabs", () => {
-  const scopes = { [pult.id]: "global", [readme.id]: "project", [hero.id]: "chat" } as const;
-  const files = [pult, readme, hero];
-
-  it("A: everything kept longer than the chat is an icon pin, the chat's tabs are named", () => {
-    expect(splitStripTabs(files, scopes, "pins")).toEqual({
-      pinned: [pult, readme],
-      named: [hero],
-    });
+describe("groupStripTabs", () => {
+  it("groups left to right: Everywhere → Project → This chat", () => {
+    const scopes = { [pult.id]: "global", [readme.id]: "project", [pricing.id]: "project", [hero.id]: "chat" } as const;
+    expect(groupStripTabs([pult, readme, pricing, hero], scopes)).toEqual([
+      { scope: "global", files: [pult] },
+      { scope: "project", files: [readme, pricing] },
+      { scope: "chat", files: [hero] },
+    ]);
   });
 
-  it("B: project tabs are ordinary named tabs, only 'everywhere' is pinned", () => {
-    expect(splitStripTabs(files, scopes, "project")).toEqual({
-      pinned: [pult],
-      named: [readme, hero],
-    });
-  });
-
-  it("a tab without a known level counts as the chat's", () => {
-    expect(splitStripTabs([hero], {}, "pins").named).toEqual([hero]);
+  it("an empty group is not drawn; a tab of unknown level is the chat's", () => {
+    expect(groupStripTabs([hero], {})).toEqual([{ scope: "chat", files: [hero] }]);
   });
 });
 
-describe("scopeForDrop", () => {
-  it("A: a chat tab dropped on the pins is pinned to the project", () => {
-    expect(scopeForDrop("pinned", "chat", "pins")).toBe("project");
+describe("foldedGroups", () => {
+  const groups = [
+    { scope: "global", count: 1, active: false },
+    { scope: "project", count: 2, active: false },
+    { scope: "chat", count: 3, active: true },
+  ] as const;
+
+  it("nothing folds while every tab gets 72 px", () => {
+    // 3 groups × 30 + 6 × 72 + (0 + 1 + 2) × 2 = 528
+    expect(foldedGroups({ available: 528, groups, withIcons: true })).toEqual([]);
   });
-  it("A: a pin dropped among the chat's tabs goes back to the chat", () => {
-    expect(scopeForDrop("named", "project", "pins")).toBe("chat");
-    expect(scopeForDrop("named", "global", "pins")).toBe("chat");
+
+  it("the chat's group folds first, so Everywhere and Project stay as they were", () => {
+    expect(foldedGroups({ available: 500, groups, withIcons: true })).toEqual(["chat"]);
   });
-  it("A: dropping where it already is does nothing; 'everywhere' stays everywhere", () => {
-    expect(scopeForDrop("named", "chat", "pins")).toBeNull();
-    expect(scopeForDrop("pinned", "global", "pins")).toBeNull();
+
+  it("then Project, then Everywhere", () => {
+    expect(foldedGroups({ available: 360, groups, withIcons: true })).toEqual(["chat", "project"]);
+    expect(foldedGroups({ available: 100, groups, withIcons: true })).toEqual([
+      "chat",
+      "project",
+      "global",
+    ]);
   });
-  it("B: the pin zone means 'everywhere', leaving it means the project", () => {
-    expect(scopeForDrop("pinned", "project", "project")).toBe("global");
-    expect(scopeForDrop("named", "global", "project")).toBe("project");
+
+  it("groups without icons take less room", () => {
+    expect(foldedGroups({ available: 470, groups, withIcons: false })).toEqual([]);
   });
 });
 
@@ -142,43 +144,23 @@ describe("collectAllTabs", () => {
   });
 });
 
-describe("scopeChoiceLabel", () => {
+describe("moveToLabel", () => {
   it("names the project", () => {
-    expect(scopeChoiceLabel("project", "landing", "pins")).toBe("Pin to project landing");
-    expect(scopeChoiceLabel("chat", "landing", "pins")).toBe("Keep in this chat");
-    expect(scopeChoiceLabel("global", "landing", "pins")).toBe("Show in every chat");
-  });
-});
-
-describe("fitStripTabs", () => {
-  it("keeps names while every tab gets at least 72 px", () => {
-    expect(fitStripTabs(300, 4)).toBe("names"); // 4×72 + 3×4 = 300
-    expect(fitStripTabs(299, 4)).toBe("icons");
-  });
-  it("a single tab always keeps its name", () => {
-    expect(fitStripTabs(40, 1)).toBe("names");
-  });
-});
-
-describe("pinLabel", () => {
-  it("drops the extension of files, keeps app and page names", () => {
-    expect(pinLabel({ name: "README.md", kind: "md" })).toBe("README");
-    expect(pinLabel({ name: ".env", kind: "text" })).toBe(".env");
-    expect(pinLabel({ name: "Pult", kind: "app" })).toBe("Pult");
+    expect(moveToLabel("project", "landing")).toBe("Project · landing");
+    expect(moveToLabel("chat", "landing")).toBe("This chat");
+    expect(moveToLabel("global", "landing")).toBe("Everywhere");
   });
 });
 
 describe("tabs saved by 0.0.137 and earlier", () => {
   // `uno_preview_tabs_v1` as older versions wrote it: browser tabs of the
-  // long levels only. The pins read it as is — no new format, no migration.
+  // long levels only. The groups read it as is — no new format, no migration.
   const saved = {
     [GLOBAL_SCOPE_KEY]: [{ id: "browser-3", name: "Pult", url: "https://pult.example/" }],
-    [projectScopeKey("landing")]: [
-      { id: "browser-7", name: "Stage", url: "https://stage.example/" },
-    ],
+    [projectScopeKey("landing")]: [{ id: "browser-7", name: "Stage", url: "https://stage.example/" }],
   };
 
-  it("come back as pins: every chat first, then the project", () => {
+  it("come back as the Everywhere and Project groups", () => {
     const restored = restoreTabs(saved);
     const states = Object.fromEntries(
       Object.entries(restored).map(([key, files]) => [
@@ -190,9 +172,15 @@ describe("tabs saved by 0.0.137 and earlier", () => {
       projectKey: "landing",
       threadId: "t1",
     });
-    const strip = splitStripTabs(files, tabScopeById, "pins");
-    expect(strip.pinned.map((tab) => tab.id)).toEqual(["browser-3", "browser-7"]);
-    expect(strip.named).toEqual([]);
+    expect(
+      groupStripTabs(files, tabScopeById).map((group) => [
+        group.scope,
+        group.files.map((tab) => tab.id),
+      ]),
+    ).toEqual([
+      ["global", ["browser-3"]],
+      ["project", ["browser-7"]],
+    ]);
   });
 
   it("the agent mark is not written into the saved format", () => {

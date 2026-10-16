@@ -48,7 +48,7 @@ export const PRESETS: ReadonlyArray<{
   {
     id: "observer",
     name: "Observer",
-    line: "Reads your chats and sends you summaries. Changes nothing.",
+    line: "Reads your chats, apps and pages and sends you summaries. Changes nothing, uses no logins or keys, sets up no one.",
     examples: "“What moved today” every evening; never writes anywhere.",
   },
 ];
@@ -198,6 +198,8 @@ export interface AssistantProfile {
   /** The setup was finished (or skipped with "Later"). */
   readonly setUpAt: string | null;
   readonly revokedAt: string | null;
+  /** Uno isn't revoked, it's paused: scheduled tasks and the bot wait (critics track 3). */
+  readonly pausedAt?: string | null;
   /**
    * What it can use beyond projects and computers (track 3, Misha 16.10):
    * connectors, the browser and its logins, the vault, skills. Absent = full
@@ -338,14 +340,6 @@ export function rightsBeyondParent(
  * set up, automatically — each child keeps only what is within its parent.
  * Returns the child as it becomes and, in plain words, what it loses.
  */
-/** The four apps of the Uno account, by provider id, for "Scout will lose: …". */
-const APP_NAME: Readonly<Record<string, string>> = {
-  github: "GitHub",
-  "google-drive": "Google Drive",
-  notion: "Notion",
-  gmail: "Gmail & Calendar",
-};
-
 export function clampToParent(
   parent: Pick<AssistantProfile, "preset" | "projects" | "computers" | "access">,
   child: AssistantProfile,
@@ -356,44 +350,29 @@ export function clampToParent(
     lost.push(`${PRESET_NAME[child.preset]} → ${PRESET_NAME[parent.preset]}`);
     next = { ...next, preset: parent.preset };
   }
-  const clampList = (
-    p: "all" | ReadonlyArray<string>,
-    c: "all" | ReadonlyArray<string>,
-    word: (id: string) => string,
-  ): "all" | ReadonlyArray<string> => {
-    if (p === "all") return c;
-    const kept = c === "all" ? p : c.filter((id) => p.includes(id));
-    const gone = c === "all" ? [] : c.filter((id) => !p.includes(id));
-    for (const id of gone) lost.push(word(id));
-    return kept;
-  };
-  next = { ...next, projects: clampList(parent.projects, child.projects, (id) => id) };
+  if (parent.projects !== "all") {
+    const allowed = parent.projects;
+    if (child.projects === "all") {
+      lost.push("projects beyond " + allowed.join(", "));
+      next = { ...next, projects: allowed };
+    } else {
+      for (const id of child.projects) if (!allowed.includes(id)) lost.push(id);
+      next = { ...next, projects: child.projects.filter((id) => allowed.includes(id)) };
+    }
+  }
   const parentAccess = accessOf(parent);
   const childAccess = accessOf(child);
-  const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
   const browser =
-    rank[childAccess.browser] > rank[parentAccess.browser]
+    BROWSER_RANK[childAccess.browser] > BROWSER_RANK[parentAccess.browser]
       ? parentAccess.browser
       : childAccess.browser;
   if (browser !== childAccess.browser) lost.push("using the browser freely");
   const access: AssistantAccess = {
     ...childAccess,
     browser,
-    connectors: clampList(
-      parentAccess.connectors,
-      childAccess.connectors,
-      (id) => APP_NAME[id] ?? id.replace(/^mcp:/, ""),
-    ),
-    logins: clampList(
-      parentAccess.logins,
-      childAccess.logins,
-      (id) => `login ${id.replace(/^cred-/, "")}`,
-    ),
-    secrets: clampList(
-      parentAccess.secrets,
-      childAccess.secrets,
-      (id) => `key ${id.replace(/^cred-/, "")}`,
-    ),
+    connectors: clampConnectors(parentAccess.connectors, childAccess.connectors, lost),
+    logins: clampPicks(parentAccess.logins, childAccess.logins, "login", lost),
+    secrets: clampPicks(parentAccess.secrets, childAccess.secrets, "key", lost),
     projectSkills: childAccess.projectSkills && parentAccess.projectSkills,
   };
   if (childAccess.projectSkills && !access.projectSkills) lost.push("project skills");
@@ -408,18 +387,21 @@ export function clampToParent(
 export function brainLine(
   profile: Pick<AssistantProfile, "brain" | "name">,
   team: ReadonlyArray<Pick<AssistantProfile, "brain" | "name">>,
+  /** The computer whose sign-in it uses (a plan is signed in per computer). */
+  signedInOn?: string,
 ): string {
   const others = team
     .filter((other) => other.name !== profile.name && other.brain === profile.brain)
     .map((other) => other.name);
   const shared = others.length > 0 ? ` · shared with ${others.join(", ")}` : "";
+  const where = signedInOn ? ` (signed in on ${signedInOn})` : "";
   switch (profile.brain) {
     case "uno":
       return `Uno AI · from your plan's AI hours${shared}`;
     case "claude":
-      return `Uses your Claude plan's limits${shared}`;
+      return `Your Claude plan${where} · one limit with your own chats${shared}`;
     case "chatgpt":
-      return `Uses your ChatGPT plan's limits${shared}`;
+      return `Your ChatGPT plan${where} · one limit with your own chats${shared}`;
     case "key":
       return `Your own key · billed by its provider${shared}`;
   }
@@ -494,12 +476,29 @@ export function ownComputerName(name: string): string {
 // ── What it did ───────────────────────────────────────────────────────────
 
 /** Kinds the Inbox also gets (decision 16.10): money, deleting, a deploy, a new teammate. */
-export type ActivityKind = "chat" | "money" | "delete" | "deploy" | "teammate" | "access" | "note";
+export type ActivityKind =
+  | "chat"
+  | "money"
+  | "delete"
+  | "deploy"
+  | "teammate"
+  | "access"
+  | "note"
+  /** A call to a connected app (GitHub, Drive…). */
+  | "connector"
+  /** Signed in to a site with a saved login. */
+  | "login"
+  /** Used a key or token in a command. */
+  | "key"
+  /** Stopped by its rights — what it wanted and couldn't. */
+  | "denied";
 
 export interface AssistantActivityEntry {
   readonly at: string;
   readonly kind: ActivityKind;
   readonly text: string;
+  /** "you": you said yes to it; "auto": its rights let it, nobody asked. */
+  readonly by?: "you" | "auto";
 }
 
 export const IMPORTANT_ACTIVITY: ReadonlySet<ActivityKind> = new Set([
@@ -514,7 +513,12 @@ export const IMPORTANT_ACTIVITY: ReadonlySet<ActivityKind> = new Set([
 export function activityFeed(
   own: ReadonlyArray<AssistantActivityEntry>,
   chats: ReadonlyArray<{ readonly title: string; readonly at: string }>,
-): ReadonlyArray<AssistantActivityEntry & { readonly important: boolean }> {
+): ReadonlyArray<
+  Omit<AssistantActivityEntry, "by"> & {
+    readonly by: "you" | "auto" | null;
+    readonly important: boolean;
+  }
+> {
   return [
     ...own,
     ...chats.map((chat) => ({ at: chat.at, kind: "chat" as const, text: chat.title })),
@@ -524,6 +528,7 @@ export function activityFeed(
       at: entry.at,
       kind: entry.kind,
       text: entry.text,
+      by: "by" in entry && entry.by ? entry.by : null,
       important: IMPORTANT_ACTIVITY.has(entry.kind),
     }));
 }
@@ -696,19 +701,38 @@ export function telegramStartLink(bot: string, code: string): string {
   return `https://t.me/${bot.replace(/^@/, "")}?start=${encodeURIComponent(code)}`;
 }
 
-// ── What it can use: connectors, browser, vault, skills (track 3) ─────────
+// ── What it can use: connectors, browser, keys, skills (track 3) ──────────
 
-/** "off": never opens pages; "safe": reads, asks before Buy / Send / Delete; "full": like you. */
-export type BrowserUse = "off" | "safe" | "full";
+/** Reads pages only (Observer) sits between Off and Careful (critics track 3). */
+export type BrowserUse = "off" | "read" | "safe" | "full";
+
+/**
+ * A connector's level for one assistant — the daemon's `AssistantAppLevel`
+ * (localAssistantStore.ts: `read` lets only the tools that change nothing
+ * through), checked on every call.
+ */
+export type AppLevel = "none" | "read" | "write";
+
+/** Every connected app at one level ("All" / "None"), or a level per app ("Pick"). */
+export type ConnectorAccess = AppLevel | Readonly<Record<string, AppLevel>>;
+
+/** Saved logins or keys: all, none, or the ticked ones. */
+export type Picks = "all" | "none" | ReadonlyArray<string>;
+
+export type PickMode = "all" | "pick" | "none";
 
 export interface AssistantAccess {
-  /** Connector ids — a provider ("github") or a server of your own ("mcp:context7"). */
-  readonly connectors: "all" | ReadonlyArray<string>;
+  /**
+   * The four apps of the Uno account, by provider id. Servers you added
+   * yourself (`settings.mcpServers`) reach every chat on the computer and
+   * can't be limited per assistant yet — they are not in here.
+   */
+  readonly connectors: ConnectorAccess;
   readonly browser: BrowserUse;
   /** Saved logins (vault entries with a site) it may sign in with. */
-  readonly logins: "all" | ReadonlyArray<string>;
-  /** Vault entries it may use in commands (keys, tokens). */
-  readonly secrets: "all" | ReadonlyArray<string>;
+  readonly logins: Picks;
+  /** Keys and tokens from the vault it may use in commands. */
+  readonly secrets: Picks;
   /** The skills that live in its projects' folders. */
   readonly projectSkills: boolean;
   /** Skills of its own (catalog ids). */
@@ -716,7 +740,7 @@ export interface AssistantAccess {
 }
 
 export const FULL_ACCESS: AssistantAccess = {
-  connectors: "all",
+  connectors: "write",
   browser: "full",
   logins: "all",
   secrets: "all",
@@ -724,9 +748,9 @@ export const FULL_ACCESS: AssistantAccess = {
   personalSkills: [],
 };
 
-/** A new teammate: what you pick, nothing secret until you say so. */
+/** A new teammate (decision 16.10): no logins or keys until you tick them. */
 export const NEW_TEAMMATE_ACCESS: AssistantAccess = {
-  connectors: "all",
+  connectors: "write",
   browser: "safe",
   logins: [],
   secrets: [],
@@ -734,14 +758,35 @@ export const NEW_TEAMMATE_ACCESS: AssistantAccess = {
   personalSkills: [],
 };
 
+const APP_LEVELS: ReadonlySet<string> = new Set(["none", "read", "write"]);
+
+/** Reads what an older mock saved ("all", a list of ids) as today's shape. */
+export function normalizeAccess(raw: AssistantAccess): AssistantAccess {
+  const connectors = raw.connectors as unknown;
+  let normalized: ConnectorAccess;
+  if (connectors === "all") normalized = "write";
+  else if (typeof connectors === "string" && APP_LEVELS.has(connectors))
+    normalized = connectors as AppLevel;
+  else if (Array.isArray(connectors))
+    normalized = Object.fromEntries(
+      (connectors as string[])
+        .filter((id) => !id.startsWith("mcp:"))
+        .map((id) => [id, "write" as AppLevel]),
+    );
+  else if (connectors && typeof connectors === "object")
+    normalized = connectors as Record<string, AppLevel>;
+  else normalized = "write";
+  return { ...raw, connectors: normalized };
+}
+
 export function accessOf(profile: Pick<AssistantProfile, "access">): AssistantAccess {
-  return profile.access ?? FULL_ACCESS;
+  return profile.access ? normalizeAccess(profile.access) : FULL_ACCESS;
 }
 
 /** Uno's default — "Full access to this computer", nothing to read further. */
 export function isFullAccess(access: AssistantAccess): boolean {
   return (
-    access.connectors === "all" &&
+    access.connectors === "write" &&
     access.browser === "full" &&
     access.logins === "all" &&
     access.secrets === "all" &&
@@ -758,35 +803,105 @@ export const BROWSER_USE: ReadonlyArray<{
   {
     id: "safe",
     name: "Careful",
-    line: "Opens and reads pages; asks you before Buy, Send or Delete.",
+    line: "Opens pages and fills forms; asks you before Buy, Send or Delete.",
   },
+  { id: "read", name: "Reads", line: "Only opens and reads pages — clicks nothing." },
   { id: "off", name: "Off", line: "Doesn't use the browser." },
 ];
 
-/** "all" / a picked list, read against what exists now. */
+// ── Connectors: All / Pick / None, and a level per app ────────────────────
+
+export const APP_LEVEL_NAME: Readonly<Record<AppLevel, string>> = {
+  none: "No",
+  read: "Reads",
+  write: "Reads & changes",
+};
+
+export function connectorMode(access: ConnectorAccess): PickMode {
+  if (access === "none") return "none";
+  return typeof access === "string" ? "all" : "pick";
+}
+
+export function connectorLevel(access: ConnectorAccess, id: string): AppLevel {
+  return typeof access === "string" ? access : (access[id] ?? "none");
+}
+
+/** Switching the mode keeps what it can: All → Pick ticks every app at the same level. */
+export function setConnectorMode(
+  access: ConnectorAccess,
+  mode: PickMode,
+  appIds: ReadonlyArray<string>,
+): ConnectorAccess {
+  if (mode === "none") return "none";
+  if (mode === "all") return access === "read" ? "read" : "write";
+  return Object.fromEntries(appIds.map((id) => [id, connectorLevel(access, id)]));
+}
+
+export function setConnectorLevel(
+  access: ConnectorAccess,
+  id: string,
+  level: AppLevel,
+  appIds: ReadonlyArray<string>,
+): ConnectorAccess {
+  const base = typeof access === "string" ? setConnectorMode(access, "pick", appIds) : access;
+  return { ...(base as Record<string, AppLevel>), [id]: level };
+}
+
+/** "GitHub — reads and changes · Google Drive — reads only" / "Every connected app — reads only". */
+export function connectorsLine(
+  access: ConnectorAccess,
+  apps: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+): string {
+  if (apps.length === 0) return "Nothing connected yet.";
+  if (access === "none") return "No apps.";
+  if (access === "write") return `Every connected app — reads and changes (${apps.length}).`;
+  if (access === "read") return `Every connected app — reads only (${apps.length}).`;
+  const parts = apps
+    .filter((app) => connectorLevel(access, app.id) !== "none")
+    .map(
+      (app) =>
+        `${app.name} — ${connectorLevel(access, app.id) === "write" ? "reads and changes" : "reads only"}`,
+    );
+  return parts.length === 0 ? "No apps." : `${parts.join(" · ")}.`;
+}
+
+// ── Logins and keys: All / Pick / None ────────────────────────────────────
+
+export function picksMode(picks: Picks): PickMode {
+  return picks === "all" ? "all" : picks === "none" ? "none" : "pick";
+}
+
+/** Switching to Pick starts from what it has now ("all" → everything ticked). */
+export function setPicksMode(picks: Picks, mode: PickMode, allIds: ReadonlyArray<string>): Picks {
+  if (mode === "all" || mode === "none") return mode;
+  if (picks === "all") return allIds;
+  return picks === "none" ? [] : picks;
+}
+
+/** "all" / "none" / a picked list, read against what exists now. */
 export function pickedOf<T extends { readonly id: string }>(
-  picked: "all" | ReadonlyArray<string>,
+  picked: Picks,
   items: ReadonlyArray<T>,
 ): ReadonlyArray<T> {
   if (picked === "all") return items;
+  if (picked === "none") return [];
   const ids = new Set(picked);
   return items.filter((item) => ids.has(item.id));
 }
 
-/** Toggles one id in a picked list ("all" turns into "all but this one"). */
+/** Ticks or unticks one (from "all": everything but this one). */
 export function togglePicked(
-  picked: "all" | ReadonlyArray<string>,
+  picked: Picks,
   id: string,
   allIds: ReadonlyArray<string>,
-): "all" | ReadonlyArray<string> {
-  const current = picked === "all" ? allIds : picked;
-  const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-  return allIds.length > 0 && allIds.every((item) => next.includes(item)) ? "all" : next;
+): ReadonlyArray<string> {
+  const current = picked === "all" ? allIds : picked === "none" ? [] : picked;
+  return current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
 }
 
-/** One plain line for a picked list: "Everything (3)", "GitHub, Notion", "Nothing yet". */
+/** One plain line for picks: "every saved key (3)", "GitHub, Notion", or the none-words. */
 export function pickedLine(
-  picked: "all" | ReadonlyArray<string>,
+  picked: Picks,
   names: ReadonlyArray<{ readonly id: string; readonly name: string }>,
   words: { readonly all: string; readonly none: string },
 ): string {
@@ -798,26 +913,147 @@ export function pickedLine(
   return items.length > 3 ? `${shown.join(", ")} +${items.length - 3}` : shown.join(", ");
 }
 
+// ── Presets set the blocks; a hand edit makes it "Custom" ─────────────────
+
+/**
+ * What a preset means for the blocks (critics track 3): Observer reads apps
+ * and pages only, uses no logins or keys; Helper and Full change things
+ * (Helper asks first). Logins and keys a teammate was given stay — those are
+ * picked one by one; Uno has them all.
+ */
+export function presetAccess(
+  preset: AssistantPreset,
+  current: AssistantAccess,
+  isUno: boolean,
+): AssistantAccess {
+  switch (preset) {
+    case "observer":
+      return { ...current, connectors: "read", browser: "read", logins: "none", secrets: "none" };
+    case "helper":
+      return {
+        ...current,
+        connectors: "write",
+        browser: "safe",
+        logins: isUno ? "all" : current.logins === "none" ? [] : current.logins,
+        secrets: isUno ? "all" : current.secrets === "none" ? [] : current.secrets,
+      };
+    case "full":
+      return {
+        ...current,
+        connectors: "write",
+        browser: "full",
+        logins: isUno ? "all" : current.logins === "none" ? [] : current.logins,
+        secrets: isUno ? "all" : current.secrets === "none" ? [] : current.secrets,
+      };
+  }
+}
+
+const samePicks = (a: Picks, b: Picks) =>
+  typeof a === "string" || typeof b === "string"
+    ? a === b
+    : a.length === b.length && a.every((id) => b.includes(id));
+
+const sameConnectors = (a: ConnectorAccess, b: ConnectorAccess) =>
+  typeof a === "string" || typeof b === "string"
+    ? a === b
+    : Object.keys({ ...a, ...b }).every((id) => (a[id] ?? "none") === (b[id] ?? "none"));
+
+/** The blocks no longer match the preset — it reads "Custom (based on Helper)". */
+export function isCustomAccess(
+  preset: AssistantPreset,
+  access: AssistantAccess,
+  isUno: boolean,
+): boolean {
+  const expected = presetAccess(preset, access, isUno);
+  return !(
+    sameConnectors(access.connectors, expected.connectors) &&
+    access.browser === expected.browser &&
+    samePicks(access.logins, expected.logins) &&
+    samePicks(access.secrets, expected.secrets)
+  );
+}
+
+export function presetLabel(preset: AssistantPreset, custom: boolean): string {
+  return custom ? `Custom (based on ${PRESET_NAME[preset]})` : PRESET_NAME[preset];
+}
+
+// ── A child never gets more than its parent ───────────────────────────────
+
+const LEVEL_RANK: Readonly<Record<AppLevel, number>> = { none: 0, read: 1, write: 2 };
+export const BROWSER_RANK: Readonly<Record<BrowserUse, number>> = {
+  off: 0,
+  read: 1,
+  safe: 2,
+  full: 3,
+};
+
+const minLevel = (a: AppLevel, b: AppLevel): AppLevel => (LEVEL_RANK[a] <= LEVEL_RANK[b] ? a : b);
+
+/** The child's connectors cut to the parent's; `lost` in plain words. */
+export function clampConnectors(
+  parent: ConnectorAccess,
+  child: ConnectorAccess,
+  lost: string[],
+): ConnectorAccess {
+  if (typeof parent === "string" && typeof child === "string") {
+    const level = minLevel(parent, child);
+    if (level !== child) lost.push(level === "none" ? "every app" : "changes in apps");
+    return level;
+  }
+  const ids = Object.keys({
+    ...(typeof parent === "string" ? {} : parent),
+    ...(typeof child === "string" ? {} : child),
+  });
+  const out: Record<string, AppLevel> = {};
+  for (const id of ids) {
+    const was = connectorLevel(child, id);
+    const now = minLevel(was, connectorLevel(parent, id));
+    out[id] = now;
+    if (now !== was) lost.push(now === "none" ? appName(id) : `changes in ${appName(id)}`);
+  }
+  if (typeof child === "string" && child !== "none" && typeof parent !== "string")
+    lost.push("apps connected later");
+  return out;
+}
+
+function clampPicks(parent: Picks, child: Picks, word: string, lost: string[]): Picks {
+  if (parent === "all") return child;
+  if (parent === "none") {
+    if (child === "all") lost.push(`every ${word}`);
+    else if (child !== "none") for (const id of child) lost.push(`${word} ${shortId(id)}`);
+    return "none";
+  }
+  if (child === "all") {
+    lost.push(`${word}s you save later`);
+    return parent;
+  }
+  if (child === "none") return "none";
+  for (const id of child) if (!parent.includes(id)) lost.push(`${word} ${shortId(id)}`);
+  return child.filter((id) => parent.includes(id));
+}
+
+const shortId = (id: string) => id.replace(/^cred-/, "");
+
+/** The four apps of the Uno account, by provider id, for "Scout will lose: …". */
+export const APP_NAME: Readonly<Record<string, string>> = {
+  github: "GitHub",
+  "google-drive": "Google Drive",
+  notion: "Notion",
+  gmail: "Gmail & Calendar",
+};
+
+const appName = (id: string) => APP_NAME[id] ?? id;
+
 /** What a child would get beyond its parent's access (decision 14.10 (3)). */
 export function accessBeyondParent(
   parent: AssistantAccess,
   child: AssistantAccess,
 ): ReadonlyArray<string> {
   const beyond: string[] = [];
-  const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
-  if (rank[child.browser] > rank[parent.browser]) beyond.push("the browser");
-  const listBeyond = (
-    p: "all" | ReadonlyArray<string>,
-    c: "all" | ReadonlyArray<string>,
-    word: string,
-  ) => {
-    if (p === "all") return;
-    if (c === "all") beyond.push(`all ${word}`);
-    else for (const id of c) if (!p.includes(id)) beyond.push(id);
-  };
-  listBeyond(parent.connectors, child.connectors, "connectors");
-  listBeyond(parent.logins, child.logins, "logins");
-  listBeyond(parent.secrets, child.secrets, "passwords");
+  clampConnectors(parent.connectors, child.connectors, beyond);
+  if (BROWSER_RANK[child.browser] > BROWSER_RANK[parent.browser]) beyond.push("the browser");
+  clampPicks(parent.logins, child.logins, "login", beyond);
+  clampPicks(parent.secrets, child.secrets, "key", beyond);
   if (child.projectSkills && !parent.projectSkills) beyond.push("project skills");
   return beyond;
 }

@@ -41,7 +41,13 @@ import {
   type DemoMachine,
   type WireThread,
 } from "./heavyFixtures";
-import { answerTeamRpc, assistantHandlers, seedAssistantTeam } from "./assistantsFixtures";
+import {
+  answerSetupChat,
+  answerTeamRpc,
+  assistantHandlers,
+  isSetupChat,
+  seedAssistantTeam,
+} from "./assistantsFixtures";
 
 const SEED_VERSION = "w0138-1";
 
@@ -272,7 +278,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
 }
 
 function initialStream(machine: DemoMachine, request: NormalizedWsRpcRequestBody) {
-  const live = demoBrowserLiveInitial(machine, request);
+  const live = demoBrowserLiveInitial(machine, request, (method, value) =>
+    harnesses.get(machine.environmentId)?.emitStreamValue(method, value),
+  );
   if (live) return live;
   const model = modelFor(machine);
   switch (request._tag) {
@@ -512,7 +520,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       const answers = (command.answers ?? {}) as Record<string, unknown>;
       const first = Object.values(answers)[0];
       const text = Array.isArray(first) ? first.join(", ") : String(first ?? "OK");
-      answerChat(machine, String(command.threadId), text);
+      // p7: an assistant setting itself up answers by its own script.
+      const setup = isSetupChat(String(command.threadId));
+      answerChat(machine, String(command.threadId), text, !setup);
+      if (setup) answerSetupChat(machine.environmentId, String(command.threadId), text);
       return { sequence: commandSequence };
     }
     case "project.create": {
@@ -652,7 +663,13 @@ function replyAfter(threadId: string, answer: string): string {
  * itself): the question / approval resolves, their answer goes in the chat,
  * the agent works a moment and replies; the Inbox item of the chat is gone.
  */
-export function answerChat(machine: DemoMachine, threadId: string, answer: string) {
+export function answerChat(
+  machine: DemoMachine,
+  threadId: string,
+  answer: string,
+  /** false: whoever asked replies itself (an assistant's setup chat). */
+  autoReply = true,
+) {
   const model = modelFor(machine);
   const target = model.threads.find((t) => t.id === threadId) as
     | (WireThread & Record<string, unknown>)
@@ -681,7 +698,8 @@ export function answerChat(machine: DemoMachine, threadId: string, answer: strin
     ),
   );
   publishInbox(machine);
-  setTimeout(() => finishTurn(machine, threadId, replyAfter(threadId, answer)), 2400);
+  if (autoReply)
+    setTimeout(() => finishTurn(machine, threadId, replyAfter(threadId, answer)), 2400);
 }
 
 /** For the variants' cards: answer by environment id. */
@@ -731,6 +749,62 @@ export function demoResetChatIn(environmentId: string, threadId: string) {
 export function demoAgentRepliesIn(environmentId: string, threadId: string, text: string) {
   const machine = machineByEnv(environmentId);
   if (machine) finishTurn(machine, threadId, text);
+}
+
+/**
+ * p2b: the person asks (`userText`), the agent answers (`agentText`) and keeps
+ * working — a running turn, as while it waits for the person in its browser.
+ */
+export function demoAgentWorksIn(
+  environmentId: string,
+  threadId: string,
+  userText: string,
+  agentText: string,
+) {
+  const machine = machineByEnv(environmentId);
+  if (!machine) return;
+  const target = modelFor(machine).threads.find((t) => t.id === threadId) as
+    | (WireThread & Record<string, unknown>)
+    | undefined;
+  if (!target) return;
+  const now = new Date().toISOString();
+  const stamp = Date.now();
+  const turnId = `turn-${threadId}-work-${stamp}`;
+  const message = (role: "user" | "assistant", text: string, turn: string | null) => ({
+    id: `${threadId}-${role}-${stamp}`,
+    role,
+    text,
+    turnId: turn,
+    streaming: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+  (target.messages as unknown[]).push(
+    message("user", userText, null),
+    message("assistant", agentText, turnId),
+  );
+  Object.assign(target, {
+    updatedAt: now,
+    latestTurn: {
+      turnId,
+      state: "running",
+      requestedAt: now,
+      startedAt: now,
+      completedAt: null,
+      assistantMessageId: null,
+    },
+    session: {
+      threadId,
+      status: "running",
+      providerName: "uno",
+      runtimeMode: "full-access",
+      activeTurnId: turnId,
+      lastError: null,
+      updatedAt: now,
+    },
+  });
+  touch(modelFor(machine));
+  publishThread(machine, threadId);
 }
 
 /**
@@ -793,6 +867,77 @@ export function demoAgentAsksApprovalIn(
       lastError: null,
       updatedAt: now,
     },
+  });
+  touch(model);
+  publishThread(machine, threadId);
+}
+
+/** p7: the assistant's setup chat — a new thread in its folder, the assistant speaks first. */
+function createDemoThread(
+  machine: DemoMachine,
+  input: { threadId: string; projectId: string; title: string },
+) {
+  const model = modelFor(machine);
+  const now = new Date().toISOString();
+  model.threads.unshift({
+    id: input.threadId,
+    projectId: input.projectId,
+    title: input.title,
+    // The same as the chats around it (the schema wants one).
+    modelSelection: (model.threads[0] as { modelSelection?: unknown } | undefined)?.modelSelection,
+    interactionMode: "default",
+    runtimeMode: "full-access",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    pinnedAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    spawnedByThreadId: null,
+    controller: "human",
+    controlChangedAt: null,
+    // A teammate's own chat — not Uno's main one.
+    assistantRole: null,
+    deletedAt: null,
+    messages: [],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+    session: null,
+  } as never);
+  touch(model);
+  publishThread(machine, input.threadId);
+}
+
+/** p7: the assistant says `text` and, with a question, waits for the answer (a quiz card). */
+function assistantSays(
+  machine: DemoMachine,
+  threadId: string,
+  text: string,
+  question?: Record<string, unknown>,
+) {
+  finishTurn(machine, threadId, text);
+  if (!question) return;
+  const model = modelFor(machine);
+  const thread = model.threads.find((t) => t.id === threadId) as
+    | (WireThread & Record<string, unknown>)
+    | undefined;
+  if (!thread) return;
+  const stamp = Date.now();
+  const turn = thread.latestTurn as { turnId: string } | null;
+  (thread.activities as Array<Record<string, unknown>>).push({
+    id: `${threadId}-ask-${stamp}`,
+    tone: "info",
+    kind: "user-input.requested",
+    summary: "Waiting for your answer",
+    payload: { requestId: `${threadId}-req-${stamp}`, questions: [question] },
+    turnId: turn?.turnId ?? null,
+    createdAt: new Date().toISOString(),
   });
   touch(model);
   publishThread(machine, threadId);
@@ -968,7 +1113,11 @@ export async function startDemo(): Promise<void> {
       HttpResponse.json({ state: "idle", current: DEMO_VERSION, available: null }),
     ),
     http.get("*/api/health", () => HttpResponse.json({ ok: true, version: DEMO_VERSION })),
-    ...assistantHandlers({ machineForHost, addProject: addDemoProject }),
+    ...assistantHandlers({
+      machineForHost,
+      addProject: addDemoProject,
+      chat: { create: createDemoThread, says: assistantSays },
+    }),
     // The Uno account (accountTransport() is "work-proxy" in the demo): the
     // person signed in, the computers on the account (two clouds + one asleep).
     http.get("*/_account/auth/me", () =>

@@ -391,7 +391,7 @@ const SCRIPT = String.raw`
     var typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""));
     if (typing && e.key !== "Escape") return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (k === "c" || k === "d" || k === "Escape") {
+    if (k === "c" || k === "Escape") {
       if (mode === "comment") block(e);
       emit("key", { key: k });
     }

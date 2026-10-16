@@ -3,12 +3,13 @@
  * panel is open with nothing in it, and from "+" in the tab strip. Each tile
  * opens a thing that already exists. Pure, so the rules are tested directly.
  *
- *   - Browser          — the browser of this device (the desktop app's own,
- *                        right in the panel): you click, the agent sees, and
- *                        it has Comment and Debug.
- *   - Agent's browser  — the browser on the chat's computer (a cloud one):
- *                        the agent works there, you watch it live and can
- *                        take control.
+ *   - Your site        — always first: the person opens their site or app
+ *                        right in the panel and comments on it / debugs it
+ *                        (one Comment button, like Codex). Not a setting,
+ *                        not a choice between browsers (Misha 16.10).
+ *   - Agent's browser  — a different tool: the browser on the chat's cloud
+ *                        computer. The agent works there; the person signs
+ *                        in for it when it asks (login, captcha, 2FA).
  *   - Files, Changes   — as before.
  *   - Apps             — always: the person's apps on every computer and
  *                        their sites, with an empty state that says how to
@@ -18,49 +19,44 @@
  * a tile that opened something somewhere else confused people (16.10).
  */
 import type { ProgramStatus } from "../computer/programModel";
-import type { BrowserSource } from "./browserSource";
 
-export type LauncherTileId = "browser" | "agentBrowser" | "files" | "changes" | "apps";
+export type LauncherTileId = "site" | "agentBrowser" | "files" | "changes" | "apps";
 
 export interface LauncherTileCopy {
   readonly id: LauncherTileId;
   readonly name: string;
   /** The letter that opens it while the launcher has focus (like t3's empty panel). */
   readonly key: string;
-  /** With Shift: the agent's browser is ⇧B — "the other browser". */
-  readonly shift?: boolean;
   readonly description: string;
-  /** Where "Browser" opens by default (`browserOpenIn`); only when both browsers are here. */
-  readonly isDefault?: boolean;
 }
 
-/** Display order (the default browser goes first, see below). */
+/** Display order: Your site is always first. */
 export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
-  { id: "browser", name: "Browser", key: "B", description: "Open the site here — you click" },
+  {
+    id: "site",
+    name: "Your site",
+    key: "S",
+    description: "Open your site or app — comment and debug right on the page",
+  },
   {
     id: "agentBrowser",
     name: "Agent's browser",
     key: "B",
-    shift: true,
-    description: "Watch the agent in its browser",
+    description: "The browser on the agent's computer — sign in for it when it asks",
   },
   { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
   { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
   { id: "apps", name: "Apps", key: "A", description: "Your apps and sites" },
 ];
 
-/** "B", "⇧B" — what the tile's key chip says. */
-export function launcherKeyLabel(tile: Pick<LauncherTileCopy, "key" | "shift">): string {
-  return tile.shift ? `⇧${tile.key}` : tile.key;
+/** What the tile's key chip says. */
+export function launcherKeyLabel(tile: Pick<LauncherTileCopy, "key">): string {
+  return tile.key;
 }
 
 export interface LauncherContext {
-  /** This device's browser in the panel: the desktop app's own (or the companion's tab on the web). */
-  readonly canBrowseHere: boolean;
   /** The chat computer's browser, by its name ("uno-product"); null — this chat has none. */
   readonly agentBrowserOn: string | null;
-  /** Where Browser / "+" open a page now (the person's default, else Uno's rule). */
-  readonly defaultBrowser: BrowserSource;
   /** A computer to browse files on. */
   readonly hasComputer: boolean;
   /** The chat on screen is a saved chat in a git project (its Changes panel). */
@@ -68,40 +64,24 @@ export interface LauncherContext {
 }
 
 export function visibleLauncherTiles(context: LauncherContext): LauncherTileCopy[] {
-  const both = context.canBrowseHere && context.agentBrowserOn !== null;
-  const tiles: LauncherTileCopy[] = [];
-  for (const tile of LAUNCHER_TILES) {
+  return LAUNCHER_TILES.filter((tile) => {
     switch (tile.id) {
-      case "browser":
-        if (!context.canBrowseHere) break;
-        tiles.push(both ? { ...tile, isDefault: context.defaultBrowser === "app" } : tile);
-        break;
-      case "agentBrowser":
-        if (context.agentBrowserOn === null) break;
-        tiles.push(both ? { ...tile, isDefault: context.defaultBrowser === "computer" } : tile);
-        break;
-      case "files":
-        if (context.hasComputer) tiles.push(tile);
-        break;
-      case "changes":
-        if (context.canOpenChanges) tiles.push(tile);
-        break;
+      case "site":
       case "apps":
-        // Always: with no apps it says how to get one.
-        tiles.push(tile);
-        break;
+        // Always: Your site is the default tool; Apps says how to get one.
+        return true;
+      case "agentBrowser":
+        return context.agentBrowserOn !== null;
+      case "files":
+        return context.hasComputer;
+      case "changes":
+        return context.canOpenChanges;
     }
-  }
-  // The default browser first: it is the one most people want.
-  const agentIndex = tiles.findIndex((tile) => tile.id === "agentBrowser");
-  if (agentIndex > 0 && tiles[agentIndex]?.isDefault) {
-    const [agent] = tiles.splice(agentIndex, 1);
-    tiles.unshift(agent!);
-  }
-  return tiles;
+    return false;
+  });
 }
 
-/** The tile a letter opens (Shift counts: B and ⇧B are two tiles; no other modifier), or null. */
+/** The tile a letter opens (no modifiers), or null. */
 export function launcherTileForKey(
   tiles: ReadonlyArray<LauncherTileCopy>,
   event: {
@@ -112,11 +92,10 @@ export function launcherTileForKey(
     readonly shiftKey?: boolean;
   },
 ): LauncherTileId | null {
-  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
   if (event.key.length !== 1) return null;
   const letter = event.key.toUpperCase();
-  const shift = event.shiftKey === true;
-  return tiles.find((tile) => tile.key === letter && (tile.shift === true) === shift)?.id ?? null;
+  return tiles.find((tile) => tile.key === letter)?.id ?? null;
 }
 
 /**

@@ -1,0 +1,64 @@
+{
+ "github-login": {
+  "fields": [
+   {
+    "name": "login",
+    "x": 167,
+    "y": 206,
+    "w": 306,
+    "h": 32
+   },
+   {
+    "name": "password",
+    "x": 167,
+    "y": 283,
+    "w": 306,
+    "h": 32
+   }
+  ],
+  "buttons": [
+   {
+    "action": "submit",
+    "x": 167,
+    "y": 331,
+    "w": 306,
+    "h": 32
+   }
+  ],
+  "slots": []
+ },
+ "github-2fa": {
+  "fields": [
+   {
+    "name": "code",
+    "x": 167,
+    "y": 206,
+    "w": 306,
+    "h": 32
+   }
+  ],
+  "buttons": [
+   {
+    "action": "submit",
+    "x": 167,
+    "y": 250,
+    "w": 306,
+    "h": 32
+   }
+  ],
+  "slots": []
+ },
+ "github-repo": {
+  "fields": [],
+  "buttons": [],
+  "slots": [
+   {
+    "name": "user",
+    "x": 460,
+    "y": 22,
+    "w": 120,
+    "h": 20
+   }
+  ]
+ }
+}

@@ -13,9 +13,7 @@ import {
 } from "./panelLauncher.logic";
 
 const everything: LauncherContext = {
-  canBrowseHere: true,
   agentBrowserOn: "uno-product",
-  defaultBrowser: "app",
   hasComputer: true,
   canOpenChanges: true,
 };
@@ -25,62 +23,48 @@ const tile = (context: LauncherContext, id: string) =>
   visibleLauncherTiles(context).find((candidate) => candidate.id === id);
 
 describe("visibleLauncherTiles", () => {
-  it("a git project chat on a cloud computer, in the desktop app: both browsers, in order", () => {
-    expect(ids(everything)).toEqual(["browser", "agentBrowser", "files", "changes", "apps"]);
+  it("a git project chat on a cloud computer: Your site first, then the agent's browser", () => {
+    expect(ids(everything)).toEqual(["site", "agentBrowser", "files", "changes", "apps"]);
   });
 
   it("no Terminal tile: it opens at the bottom of the chat", () => {
     expect(ids(everything)).not.toContain("terminal");
   });
 
-  it("the default browser carries the mark — only when there are two to choose from", () => {
-    expect(tile(everything, "browser")?.isDefault).toBe(true);
-    expect(tile(everything, "agentBrowser")?.isDefault).toBe(false);
-    const computer = { ...everything, defaultBrowser: "computer" as const };
-    expect(tile(computer, "browser")?.isDefault).toBe(false);
-    expect(tile(computer, "agentBrowser")?.isDefault).toBe(true);
-    const onlyHere = { ...everything, agentBrowserOn: null };
-    expect(tile(onlyHere, "browser")?.isDefault).toBeUndefined();
-  });
-
-  it("the default browser goes first", () => {
-    expect(ids({ ...everything, defaultBrowser: "computer" })).toEqual([
-      "agentBrowser",
-      "browser",
-      "files",
-      "changes",
-      "apps",
-    ]);
+  it("two different tools, not one browser with a default: no default mark anywhere", () => {
+    for (const shown of visibleLauncherTiles(everything)) {
+      expect(shown).not.toHaveProperty("isDefault");
+    }
   });
 
   it("says what each browser is for, in plain words", () => {
-    expect(tile(everything, "browser")?.description).toBe("Open the site here — you click");
-    expect(tile(everything, "agentBrowser")?.description).toBe("Watch the agent in its browser");
+    expect(tile(everything, "site")?.name).toBe("Your site");
+    expect(tile(everything, "site")?.description).toBe(
+      "Open your site or app — comment and debug right on the page",
+    );
+    expect(tile(everything, "agentBrowser")?.name).toBe("Agent's browser");
+    expect(tile(everything, "agentBrowser")?.description).toBe(
+      "The browser on the agent's computer — sign in for it when it asks",
+    );
   });
 
-  it("a chat on this Mac: no Agent's browser", () => {
-    expect(ids({ ...everything, agentBrowserOn: null })).not.toContain("agentBrowser");
-  });
-
-  it("the web build with no companion: only the agent's browser", () => {
-    expect(ids({ ...everything, canBrowseHere: false })).toEqual([
-      "agentBrowser",
+  it("a chat on this Mac: no Agent's browser, Your site still first", () => {
+    expect(ids({ ...everything, agentBrowserOn: null })).toEqual([
+      "site",
       "files",
       "changes",
       "apps",
     ]);
   });
 
-  it("Apps is always there, even with nothing else", () => {
+  it("Your site and Apps are always there, even with nothing else", () => {
     expect(
       ids({
-        ...everything,
-        canBrowseHere: false,
         agentBrowserOn: null,
         hasComputer: false,
         canOpenChanges: false,
       }),
-    ).toEqual(["apps"]);
+    ).toEqual(["site", "apps"]);
   });
 
   it("no computer: no Files; not a git project: no Changes", () => {
@@ -88,10 +72,11 @@ describe("visibleLauncherTiles", () => {
     expect(ids({ ...everything, canOpenChanges: false })).not.toContain("changes");
   });
 
-  it("every tile has its own key; the agent's browser is ⇧B", () => {
+  it("every tile has its own letter: S for the site, B for the agent's browser", () => {
     const keys = LAUNCHER_TILES.map(launcherKeyLabel);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(launcherKeyLabel(tile(everything, "agentBrowser")!)).toBe("⇧B");
+    expect(launcherKeyLabel(tile(everything, "site")!)).toBe("S");
+    expect(launcherKeyLabel(tile(everything, "agentBrowser")!)).toBe("B");
   });
 });
 
@@ -111,8 +96,8 @@ describe("launcherTileForKey", () => {
     });
 
   it("one letter opens its tile, either case", () => {
-    expect(key("b")).toBe("browser");
-    expect(key("B", { shiftKey: true })).toBe("agentBrowser");
+    expect(key("s")).toBe("site");
+    expect(key("b")).toBe("agentBrowser");
     expect(key("F")).toBe("files");
     expect(key("c")).toBe("changes");
     expect(key("a")).toBe("apps");

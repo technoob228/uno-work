@@ -33,7 +33,6 @@ import { toastManager } from "../ui/toast";
 import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachineIdentities";
 import { matchCredentialsForOrigin } from "./BrowserPane";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
-import { BrowserSourceChip } from "./BrowserSourceChip";
 import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
 import { useChatBrowser } from "./useChatBrowser";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
@@ -573,7 +572,6 @@ function Toolbar({
       >
         <RotateCwIcon />
       </Button>
-      <BrowserSourceChip source="computer" tabId={tabId} url={page.url} />
       <form
         className="min-w-0 flex-1"
         onSubmit={(event) => {

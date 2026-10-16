@@ -445,6 +445,28 @@ export const UserInputQuestion = Schema.Struct({
   multiSelect: Schema.optional(Schema.Boolean).pipe(
     Schema.withConstructorDefault(Effect.succeed(false)),
   ),
+  /**
+   * Optional extras of a question an assistant asks while it sets itself up
+   * (Misha 16.10): a longer explanation under it, a short field for a value
+   * (name, email, time, link), a Connect button for an app, and "Skip".
+   * Older clients ignore them and show the options.
+   */
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  input: Schema.optional(
+    Schema.Struct({
+      placeholder: TrimmedNonEmptyStringSchema,
+      kind: Schema.optional(Schema.Literals(["text", "email", "url", "time"])),
+    }),
+  ),
+  connect: Schema.optional(
+    Schema.Struct({
+      provider: TrimmedNonEmptyStringSchema,
+      name: TrimmedNonEmptyStringSchema,
+      /** The answer sent once the app is connected. */
+      doneLabel: TrimmedNonEmptyStringSchema,
+    }),
+  ),
+  skippable: Schema.optional(Schema.Boolean),
 });
 export type UserInputQuestion = typeof UserInputQuestion.Type;
 

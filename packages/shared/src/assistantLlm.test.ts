@@ -101,7 +101,7 @@ describe("labels", () => {
     expect(assistantModelLabel("uno/fast")).toBe("Fast");
     expect(assistantModelLabel("x-ai/grok-4.7")).toBe("Grok 4.7");
     expect(assistantModelLabel("openai/gpt-5")).toBe("gpt-5");
-    expect(assistantProviderLabel("uno")).toBe("Uno gateway");
+    expect(assistantProviderLabel("uno")).toBe("Uno AI");
     expect(assistantProviderLabel("xai")).toBe("Your xAI key");
   });
 

@@ -1,8 +1,9 @@
 /**
- * Comment and Debug state of each browser tab (by tab id), plus the one
- * per-device switch "Agent sees the console". In a store, not in the tab's
- * component: the chrome row, the page layer and the drawer read it, and the
- * demo's "Показать" sets it up.
+ * Comment mode of each browser tab (by tab id): one mode, like Codex — on,
+ * the page takes notes (crosshair, pins) and its console and network show
+ * below; off, the page is just the page. No settings (Misha 16.10). In a
+ * store, not in the tab's component: the chrome row, the page layer and the
+ * drawer read it, and the demo's "Показать" sets it up.
  */
 import { create } from "zustand";
 
@@ -20,11 +21,13 @@ export type PageCommentDraft =
   | { readonly kind: "edit"; readonly commentId: string };
 
 export interface PageToolsTab {
+  /** Comment mode is on: notes on the page, its console and network below. */
   readonly commenting: boolean;
   readonly comments: ReadonlyArray<PageComment>;
   readonly draft: PageCommentDraft | null;
   readonly console: ReadonlyArray<ConsoleEntry>;
   readonly network: ReadonlyArray<NetworkEntry>;
+  /** In comment mode: the console/network list is expanded (else just its header row). */
   readonly debugOpen: boolean;
   readonly debugTab: "console" | "network";
 }
@@ -35,31 +38,20 @@ export const EMPTY_PAGE_TOOLS_TAB: PageToolsTab = {
   draft: null,
   console: [],
   network: [],
-  debugOpen: false,
+  debugOpen: true,
   debugTab: "console",
 };
 
-const AGENT_SEES_CONSOLE_KEY = "uno:browser-agent-sees-console";
-
-function readAgentSeesConsole(): boolean {
-  try {
-    return localStorage.getItem(AGENT_SEES_CONSOLE_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
 interface PageToolsStore {
   readonly tabs: Readonly<Record<string, PageToolsTab>>;
-  /** The agent can read the console of the panel's browser (on by default). */
-  readonly agentSeesConsole: boolean;
   /** The errors panel's height (px), dragged by its top edge; one for all tabs. */
   readonly debugHeight: number;
   readonly setDebugHeight: (height: number) => void;
   readonly patch: (tabId: string, patch: Partial<PageToolsTab>) => void;
-  readonly setAgentSeesConsole: (on: boolean) => void;
-  readonly toggleCommenting: (tabId: string) => void;
-  readonly toggleDebug: (tabId: string) => void;
+  /** The one button (and C): comment mode on/off. */
+  readonly toggleMode: (tabId: string) => void;
+  /** Esc: a note being written goes first, then the mode. */
+  readonly escape: (tabId: string) => boolean;
   /** A new document: its console and network start empty (pending comments stay). */
   readonly resetLogs: (tabId: string) => void;
   readonly addConsole: (tabId: string, entry: ConsoleEntry) => void;
@@ -78,20 +70,17 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
     }));
   return {
     tabs: {},
-    agentSeesConsole: readAgentSeesConsole(),
     debugHeight: 180,
     setDebugHeight: (height) => set({ debugHeight: Math.round(height) }),
     patch,
-    setAgentSeesConsole: (on) => {
-      try {
-        localStorage.setItem(AGENT_SEES_CONSOLE_KEY, on ? "1" : "0");
-      } catch {
-        // private mode: just for this session
-      }
-      set({ agentSeesConsole: on });
+    toggleMode: (tabId) => patch(tabId, { commenting: !tab(tabId).commenting, draft: null }),
+    escape: (tabId) => {
+      const current = tab(tabId);
+      if (current.draft) patch(tabId, { draft: null });
+      else if (current.commenting) patch(tabId, { commenting: false });
+      else return false;
+      return true;
     },
-    toggleCommenting: (tabId) => patch(tabId, { commenting: !tab(tabId).commenting, draft: null }),
-    toggleDebug: (tabId) => patch(tabId, { debugOpen: !tab(tabId).debugOpen }),
     resetLogs: (tabId) => patch(tabId, { console: [], network: [] }),
     addConsole: (tabId, entry) => patch(tabId, { console: pushCapped(tab(tabId).console, entry) }),
     addNetwork: (tabId, entry) => patch(tabId, { network: pushCapped(tab(tabId).network, entry) }),
