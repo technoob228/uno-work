@@ -25,15 +25,16 @@ import {
 
 export type BrowserSource = "app" | "computer";
 
+/** Same words as the launcher's two tiles (w0138). */
 export const BROWSER_SOURCE_LABEL: Record<BrowserSource, string> = {
-  app: "This app",
-  computer: "The computer's browser",
+  app: "Browser",
+  computer: "Agent's browser",
 };
 
 /** The line under a source in the chip's menu. */
 export const BROWSER_SOURCE_DESCRIPTION: Record<BrowserSource, string> = {
-  app: "Right here in the panel, with your logins and phone sizes",
-  computer: "Runs on the computer, also when the app is closed. Take control any time",
+  app: "On this device: you click, the agent sees. Comment and debug",
+  computer: "On the computer: the agent works, you watch live. Take control any time",
 };
 
 /** The sources this client actually has, in menu order. */

@@ -92,7 +92,8 @@ demoShow.p2 = async () => {
 
 function findFrame(url: string): HTMLIFrameElement | null {
   return (
-    [...document.querySelectorAll<HTMLIFrameElement>("iframe")].find((frame) => frame.src === url) ??
-    null
+    [...document.querySelectorAll<HTMLIFrameElement>("iframe")].find(
+      (frame) => frame.src === url,
+    ) ?? null
   );
 }

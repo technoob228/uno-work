@@ -3386,31 +3386,31 @@ export const ChatComposer = memo(
                           onRemove={() => removeComposerFile(file.id)}
                         />
                       ) : (
-                      <div
-                        key={file.id}
-                        className="relative flex h-16 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-2 pr-7 pl-2.5"
-                        title={`${file.name} — saved to Uploads when you send`}
-                        data-testid="composer-file-attachment"
-                      >
-                        <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-medium text-foreground/80">
-                            {file.name}
-                          </div>
-                          <div className="truncate text-[10px] text-muted-foreground">
-                            {formatFileSize(file.sizeBytes)}
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
-                          onClick={() => removeComposerFile(file.id)}
-                          aria-label={`Remove ${file.name}`}
+                        <div
+                          key={file.id}
+                          className="relative flex h-16 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-2 pr-7 pl-2.5"
+                          title={`${file.name} — saved to Uploads when you send`}
+                          data-testid="composer-file-attachment"
                         >
-                          <XIcon />
-                        </Button>
-                      </div>
+                          <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xs font-medium text-foreground/80">
+                              {file.name}
+                            </div>
+                            <div className="truncate text-[10px] text-muted-foreground">
+                              {formatFileSize(file.sizeBytes)}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                            onClick={() => removeComposerFile(file.id)}
+                            aria-label={`Remove ${file.name}`}
+                          >
+                            <XIcon />
+                          </Button>
+                        </div>
                       ),
                     )}
                   </div>
