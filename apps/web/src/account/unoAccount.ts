@@ -93,6 +93,16 @@ export class AccountHttpError extends ControlPlaneHttpError {
 
 function errorFrom(status: number, body: unknown): Error {
   if (status === 401) return new AccountSignInRequiredError();
+  // After "Stop everything & report" nothing wakes the computers in the
+  // background (Settings → Security); the server says so in plain words.
+  if (
+    body &&
+    typeof body === "object" &&
+    (body as { error?: unknown }).error === "SECURITY_HOLD" &&
+    typeof (body as { detail?: unknown }).detail === "string"
+  ) {
+    return new AccountHttpError(status, (body as { detail: string }).detail, body);
+  }
   const detail =
     typeof body === "string" ? body : body && typeof body === "object" ? JSON.stringify(body) : "";
   return new AccountHttpError(
