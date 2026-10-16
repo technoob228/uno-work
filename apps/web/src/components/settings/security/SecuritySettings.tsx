@@ -21,7 +21,7 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/coll
 import { SettingsPageContainer } from "../settingsLayout";
 import { AccessJournal, SecurityOverview } from "./AccessJournal";
 import { NetworkAccess } from "./NetworkAccess";
-import { ProtectionSection } from "./ProtectionSection";
+import { ProtectionSection, useProtectionOff } from "./ProtectionSection";
 
 export function SecuritySettings() {
   const transport = accountTransport();
@@ -48,6 +48,18 @@ export function SecuritySettings() {
   const selected = boxes.find((b) => b.id === selectedId) ?? null;
   // A link from a notification (?box=) is about the details: open Advanced.
   const [advancedOpen, setAdvancedOpen] = useState(pickedId !== null);
+  const protectionOff = useProtectionOff();
+  const details = (
+    <>
+      <SecurityOverview boxes={boxes} selectedId={selectedId} onSelect={setPicked} />
+      {selected ? (
+        <>
+          <NetworkAccess key={`net-${selected.id}`} box={selected} />
+          <AccessJournal key={`log-${selected.id}`} box={selected} />
+        </>
+      ) : null}
+    </>
+  );
 
   return (
     <SettingsPageContainer>
@@ -57,6 +69,8 @@ export function SecuritySettings() {
         <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
           <CloudIcon className="size-4" /> No cloud computers on this account yet.
         </p>
+      ) : protectionOff ? (
+        details
       ) : (
         <>
           <ProtectionSection />
@@ -80,15 +94,7 @@ export function SecuritySettings() {
                 className={`size-4 shrink-0 text-muted-foreground transition-transform ${advancedOpen ? "rotate-180" : ""}`}
               />
             </CollapsibleTrigger>
-            <CollapsiblePanel className="flex flex-col gap-8">
-              <SecurityOverview boxes={boxes} selectedId={selectedId} onSelect={setPicked} />
-              {selected ? (
-                <>
-                  <NetworkAccess key={`net-${selected.id}`} box={selected} />
-                  <AccessJournal key={`log-${selected.id}`} box={selected} />
-                </>
-              ) : null}
-            </CollapsiblePanel>
+            <CollapsiblePanel className="flex flex-col gap-8">{details}</CollapsiblePanel>
           </Collapsible>
         </>
       )}
