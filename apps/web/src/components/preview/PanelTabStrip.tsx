@@ -11,6 +11,13 @@
  * Dragging, like Chrome: a tab dragged along its group changes places, into
  * another outline moves there (a line shows where it lands; while dragging,
  * missing groups show as empty slots). Right-click → Move to is the fallback.
+ * The slots appear a tick after the drag starts: changing the row's layout
+ * inside `dragstart` makes Chrome/Electron cancel the drag on the spot (Misha
+ * 16.10, point 3 — "dragging into another group does nothing").
+ *
+ * Each tab carries a tiny mark of its group (bubble / folder / globe — the
+ * same icons as the group labels; dropped when the tab shrinks to an icon), and
+ * its tooltip says where it stays pinned (`scopeHint`).
  * Tabs size like Chrome (`foldedGroups`): 180 → 72 px, then inactive tabs
  * fold into icons — the chat's group first; the active tab keeps its name and
  * stays in view; past that the row scrolls with a fade at the edge. Tabs the
@@ -40,10 +47,12 @@ import {
   usePreviewPane,
 } from "./PreviewPaneContext";
 import {
+  dropBeforeId,
   foldedGroups,
   GROUP_LABEL,
   GROUP_ORDER,
   groupLabelWidth,
+  groupsForDrag,
   groupStripTabs,
   moveToLabel,
   scopeHint,
@@ -110,6 +119,18 @@ function DropLine() {
   return <span aria-hidden className="h-5 w-0.5 shrink-0 rounded-full bg-primary" />;
 }
 
+/** The tab's group, tiny and quiet, after its name (Misha 16.10, point 4). */
+function GroupMark({ scope }: { scope: PreviewTabScope }) {
+  const Icon = GROUP_ICON[scope];
+  return (
+    <Icon
+      aria-hidden
+      data-tab-group-mark={scope}
+      className="size-2.5 shrink-0 text-muted-foreground/60"
+    />
+  );
+}
+
 function AgentMark({ file }: { file: PreviewFile }) {
   if (file.openedBy !== "agent") return null;
   return (
@@ -140,6 +161,10 @@ export function PanelTabStrip({
   const withIcons = useDemoSwitch("tabGroupIcons") === "icon";
   const [menu, setMenu] = useState<MenuState>(null);
   const [dragging, setDragging] = useState<{ id: string; scope: PreviewTabScope } | null>(null);
+  // The dragged tab, known from the first dragover on; `dragging` (what the row
+  // draws) follows a tick later — see the header comment.
+  const draggingRef = useRef<{ id: string; scope: PreviewTabScope } | null>(null);
+  const dragTimerRef = useRef<number | null>(null);
   const [drop, setDrop] = useState<DropSpot>(null);
   const [collapsed, setCollapsed] = useState<ReadonlyArray<PreviewTabScope>>(readCollapsed);
   const toggleCollapsed = (scope: PreviewTabScope) => {
@@ -215,15 +240,24 @@ export function PanelTabStrip({
 
   // ── Dragging, like Chrome: along the group to reorder, into another outline to move ──
   const finishDrag = () => {
+    if (dragTimerRef.current !== null) window.clearTimeout(dragTimerRef.current);
+    dragTimerRef.current = null;
+    draggingRef.current = null;
     setDragging(null);
     setDrop(null);
   };
+  useEffect(
+    () => () => {
+      if (dragTimerRef.current !== null) window.clearTimeout(dragTimerRef.current);
+    },
+    [],
+  );
   const aim = (spot: NonNullable<DropSpot>) => {
     if (drop?.scope !== spot.scope || drop.beforeId !== spot.beforeId) setDrop(spot);
   };
   const dropTarget = (scope: PreviewTabScope) => ({
     onDragOver: (event: React.DragEvent) => {
-      if (!dragging) return;
+      if (!draggingRef.current) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       // Over the outline but not over a tab: the end of the group.
@@ -235,8 +269,9 @@ export function PanelTabStrip({
       setDrop((current) => (current?.scope === scope ? null : current));
     },
     onDrop: (event: React.DragEvent) => {
+      const id = event.dataTransfer.getData(DRAG_TYPE) || draggingRef.current?.id;
+      if (!id) return;
       event.preventDefault();
-      const id = event.dataTransfer.getData(DRAG_TYPE);
       const spot = drop ?? { scope, beforeId: null };
       finishDrag();
       if (id) setTabScope(id, spot.scope, spot.beforeId);
@@ -249,12 +284,10 @@ export function PanelTabStrip({
     groupFiles: ReadonlyArray<PreviewFile>,
     file: PreviewFile,
   ) => {
-    if (!dragging) return;
+    if (!draggingRef.current) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const index = groupFiles.findIndex((item) => item.id === file.id);
-    const before =
-      event.clientX < rect.left + rect.width / 2 ? file : (groupFiles[index + 1] ?? null);
-    aim({ scope, beforeId: before?.id ?? null });
+    const leftHalf = event.clientX < rect.left + rect.width / 2;
+    aim({ scope, beforeId: dropBeforeId(groupFiles, file.id, leftHalf) });
   };
   const dragSource = (file: PreviewFile) =>
     movable(file)
@@ -263,7 +296,15 @@ export function PanelTabStrip({
           onDragStart: (event: React.DragEvent) => {
             event.dataTransfer.setData(DRAG_TYPE, file.id);
             event.dataTransfer.effectAllowed = "move";
-            setDragging({ id: file.id, scope: scopeOf(file) });
+            const started = { id: file.id, scope: scopeOf(file) };
+            draggingRef.current = started;
+            // Not now: the empty slots would shift the row under the pointer
+            // inside dragstart, and Chrome would cancel the drag.
+            if (dragTimerRef.current !== null) window.clearTimeout(dragTimerRef.current);
+            dragTimerRef.current = window.setTimeout(() => {
+              dragTimerRef.current = null;
+              if (draggingRef.current === started) setDragging(started);
+            }, 0);
           },
           onDragEnd: finishDrag,
         }
@@ -282,12 +323,7 @@ export function PanelTabStrip({
   };
 
   // While a tab is dragged in a chat, every group it could go to shows — empty ones as slots.
-  const shown: ReadonlyArray<{ scope: PreviewTabScope; files: ReadonlyArray<PreviewFile> }> =
-    dragging && inChat
-      ? GROUP_ORDER.map(
-          (scope) => groups.find((group) => group.scope === scope) ?? { scope, files: [] },
-        )
-      : groups;
+  const shown = groupsForDrag(groups, dragging !== null && inChat);
   const fade = `linear-gradient(to right, ${edges.left ? "transparent, black 24px" : "black"}, ${
     edges.right ? "black calc(100% - 24px), transparent" : "black"
   })`;
@@ -335,6 +371,9 @@ export function PanelTabStrip({
                       onClick={() => toggleCollapsed(scope)}
                       className={cn(
                         "inline-flex h-5 shrink-0 items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default",
+                        // An empty slot's label is a disabled button, and Chrome
+                        // swallows drag events on it: let them reach the outline.
+                        groupFiles.length === 0 && "pointer-events-none",
                         withIcons ? "min-w-5 justify-center px-1" : "px-1.5",
                         groupFiles.length === 0 ? "text-muted-foreground" : LABEL_TINT[scope],
                         groupFiles.length > 0 && "cursor-pointer hover:brightness-95",
@@ -419,6 +458,7 @@ export function PanelTabStrip({
                           <span className="min-w-0 flex-1 truncate">
                             {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
                           </span>
+                          <GroupMark scope={scope} />
                           <button
                             type="button"
                             aria-label={`Close ${file.name}`}

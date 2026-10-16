@@ -2,7 +2,7 @@
  * The right panel's tab row (w0138, point 4; Misha 16.10): up to three
  * outlined groups, like tab groups in Chrome — **This chat → Project →
  * Everywhere**, left to right: the wider the group, the further right. An
- * empty group isn't drawn. Moving to another chat of the same project keeps
+ * empty group isn't drawn — except while a tab is dragged, as a slot to drop into. Moving to another chat of the same project keeps
  * Everywhere and Project as they are; only the chat's group changes. Pure
  * functions — PanelTabStrip renders them, unit tests check them.
  *
@@ -34,6 +34,37 @@ export function groupStripTabs(
 }
 
 /**
+ * Groups drawn while a tab is being dragged (Misha 16.10, point 3): all three,
+ * This chat → Project → Everywhere — a missing one as an empty slot, so a tab
+ * can be dropped into a group that has no tabs yet. Not dragging: as is.
+ */
+export function groupsForDrag(
+  groups: ReadonlyArray<TabGroup>,
+  dragging: boolean,
+): ReadonlyArray<TabGroup> {
+  if (!dragging) return groups;
+  return GROUP_ORDER.map(
+    (scope) => groups.find((group) => group.scope === scope) ?? { scope, files: [] },
+  );
+}
+
+/**
+ * Where a tab dragged over `overId` of a group lands: before it when the
+ * pointer is on its left half, else before the next tab of the group (null —
+ * at the group's end). Feeds `moveTabScope(…, scope, beforeId)`.
+ */
+export function dropBeforeId(
+  groupFiles: ReadonlyArray<PreviewFile>,
+  overId: string,
+  leftHalf: boolean,
+): string | null {
+  const index = groupFiles.findIndex((file) => file.id === overId);
+  if (index === -1) return null;
+  if (leftHalf) return overId;
+  return groupFiles[index + 1]?.id ?? null;
+}
+
+/**
  * Tabs a group shows: all of them; folded (its label clicked, like Chrome)
  * only the open one, if it is in this group — the same rule as a folded
  * project in the sidebar.
@@ -59,15 +90,18 @@ export function moveToLabel(scope: PreviewTabScope, projectName: string | null):
   return GROUP_LABEL[scope];
 }
 
-/** One line in a tab's tooltip: where it lives. */
+/**
+ * One line in a tab's tooltip, under its name: where it stays pinned (Misha
+ * 16.10, point 5).
+ */
 export function scopeHint(scope: PreviewTabScope, projectName: string | null): string {
   switch (scope) {
     case "chat":
-      return "Only in this chat";
+      return "Pinned while you're in this chat";
     case "project":
-      return `In every chat of ${projectName ?? "the project"}`;
+      return `Pinned while you're in ${projectName?.trim() || "this project"}`;
     case "global":
-      return "Everywhere — in every chat and screen";
+      return "Always pinned — in every chat and screen";
   }
 }
 
