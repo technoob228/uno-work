@@ -275,20 +275,21 @@ export function requestPayload(input: {
   };
 }
 
-/** "Send all errors": every error and warning of the console and every failed request. */
+/**
+ * "Ask agent to fix all (N)": every error of the console and every failed
+ * request — the same N as on the Errors button (warnings go one by one).
+ */
 export function allErrorsPayload(input: {
   readonly page: string;
   readonly console: ReadonlyArray<ConsoleEntry>;
   readonly network: ReadonlyArray<NetworkEntry>;
 }): PanelContextPayload | null {
-  const problems = input.console.filter(
-    (entry) => entry.level === "error" || entry.level === "warn",
-  );
+  const problems = input.console.filter((entry) => entry.level === "error");
   const failed = input.network.filter(isFailedRequest);
   const count = problems.length + failed.length;
   if (count === 0) return null;
   const path = pagePath(input.page);
-  const title = `${count} ${count === 1 ? "problem" : "problems"} on ${path}`;
+  const title = `${count} ${count === 1 ? "error" : "errors"} on ${path}`;
   const sections = [`# ${title}`, "", `Page: ${input.page}`, ""];
   if (problems.length > 0) {
     sections.push("## Console", "");
@@ -302,7 +303,7 @@ export function allErrorsPayload(input: {
     card: {
       kind: "errors",
       title,
-      chip: `${count} ${count === 1 ? "problem" : "problems"} · ${path}`,
+      chip: `${count} ${count === 1 ? "error" : "errors"} · ${path}`,
       preview:
         problems[0]?.message ??
         (failed[0] ? `${failed[0].method} ${shortUrl(failed[0].url)}` : null),
@@ -322,7 +323,7 @@ export function allErrorsPayload(input: {
         })),
       ],
     },
-    fileName: `problems-${slug(path)}.md`,
+    fileName: `errors-${slug(path)}.md`,
     markdown: sections.join("\n"),
   };
 }

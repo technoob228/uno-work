@@ -138,13 +138,14 @@ describe("Ask agent to fix", () => {
     expect(payload.markdown).toContain("500 Internal Server Error in 84 ms");
   });
 
-  it("Send all errors: console problems and failed requests, nothing else", () => {
+  it("fix all: console errors and failed requests — the Errors button's count", () => {
     const payload = allErrorsPayload({
       page: "http://x/pricing",
       console: [error, warning, { ...error, id: "l", level: "log", message: "hello" }],
       network: [failed, ok],
     });
-    expect(payload?.card.title).toBe("3 problems on /pricing");
+    expect(payload?.card.title).toBe("2 errors on /pricing");
+    expect(payload?.markdown).not.toContain("No yearly price");
     expect(payload?.markdown).not.toContain("hello");
     expect(payload?.markdown).not.toContain("app.css");
     expect(allErrorsPayload({ page: "http://x/", console: [], network: [ok] })).toBeNull();

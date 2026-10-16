@@ -20,6 +20,7 @@ import { useRouter } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  ChevronRightIcon,
   CheckIcon,
   CopyIcon,
   DicesIcon,
@@ -49,9 +50,11 @@ import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Toggle } from "../ui/toggle";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { AssistantAvatar } from "./AssistantAvatar";
+import { TeammateAccess } from "./TeammateAccess";
 import {
   type AssistantDraft,
   type AssistantPreset,
@@ -65,7 +68,8 @@ import {
   defaultDraft,
   nextAvatar,
   projectsLine,
-  skillsFor,
+  roleSkills,
+  toggleRole,
   uniqueName,
 } from "./assistantTeam.logic";
 import { useAssistantTeamStore } from "./assistantTeamStore";
@@ -148,6 +152,8 @@ function Choice(props: {
   readonly title: string;
   readonly badge?: string | undefined;
   readonly line: string;
+  /** A second, lighter line: an example of what it means. */
+  readonly example?: string | undefined;
   readonly children?: ReactNode;
   readonly testId?: string;
 }) {
@@ -164,8 +170,17 @@ function Choice(props: {
         aria-checked={props.selected}
         onClick={props.onPick}
         data-testid={props.testId}
-        className="flex w-full cursor-pointer items-start gap-2.5 px-3 py-2.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
+        className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-3 py-2.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
+        <span
+          aria-hidden
+          className={cn(
+            "mt-1.5 grid size-4 shrink-0 place-items-center rounded-full border",
+            props.selected ? "border-primary bg-primary" : "border-input",
+          )}
+        >
+          {props.selected ? <span className="size-1.5 rounded-full bg-primary-foreground" /> : null}
+        </span>
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
           {props.icon}
         </span>
@@ -179,44 +194,36 @@ function Choice(props: {
             ) : null}
           </span>
           <span className="block text-xs leading-snug text-muted-foreground">{props.line}</span>
-        </span>
-        <span
-          aria-hidden
-          className={cn(
-            "mt-1 grid size-4 shrink-0 place-items-center rounded-full border",
-            props.selected ? "border-primary bg-primary" : "border-input",
-          )}
-        >
-          {props.selected ? <span className="size-1.5 rounded-full bg-primary-foreground" /> : null}
+          {props.example ? (
+            <span className="mt-0.5 block text-xs leading-snug text-muted-foreground/70 italic">
+              {props.example}
+            </span>
+          ) : null}
         </span>
       </button>
       {props.selected && props.children ? (
-        <div className="px-3 pb-3 pl-[3.25rem]">{props.children}</div>
+        <div className="px-3 pb-3 pl-[4.5rem]">{props.children}</div>
       ) : null}
     </div>
   );
 }
 
+/** A chip on the shared toggle (critics D7: one look of a picked chip everywhere). */
 function Chip(props: {
   readonly on: boolean;
   readonly onClick: () => void;
   readonly children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={props.on}
-      onClick={props.onClick}
-      className={cn(
-        "inline-flex h-7 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs transition-colors",
-        props.on
-          ? "border-primary/50 bg-primary/10 text-foreground"
-          : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
+    <Toggle
+      variant="outline"
+      size="xs"
+      pressed={props.on}
+      onPressedChange={() => props.onClick()}
+      className="rounded-full px-2.5 text-xs"
     >
-      {props.on ? <CheckIcon className="size-3" /> : null}
       {props.children}
-    </button>
+    </Toggle>
   );
 }
 
@@ -319,9 +326,14 @@ function ChannelStep(props: {
   readonly patch: OnboardingState["patch"];
 }) {
   const [token, setToken] = useState("");
+  const [otherWays, setOtherWays] = useState(props.draft.channel === "own-bot");
+  const who = props.draft.name.trim() || "it";
   return (
     <div className="flex flex-col gap-4">
-      <StepHeading title="Where do you talk to it?" line="You can always talk to it here, too." />
+      <StepHeading
+        title={`Where do you talk to ${who}?`}
+        line={`You can always talk to ${who} here, too.`}
+      />
       <div role="radiogroup" className="flex flex-col gap-2">
         <Choice
           selected={props.draft.channel === "uno-bot"}
@@ -341,31 +353,6 @@ function ChannelStep(props: {
           </p>
         </Choice>
         <Choice
-          selected={props.draft.channel === "own-bot"}
-          onPick={() => props.patch({ channel: "own-bot" })}
-          icon={<MessageCircleIcon className="size-4" />}
-          title="Telegram, a bot of its own"
-          line="Its own name in Telegram. Make a bot with @BotFather and paste its token."
-          testId="assistant-setup-channel-own-bot"
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              size="sm"
-              placeholder="123456:ABC-…"
-              value={token}
-              onChange={(event) => setToken(event.currentTarget.value)}
-              className="font-mono"
-            />
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => openInstallDocs("https://t.me/BotFather")}
-            >
-              @BotFather <ExternalLinkIcon className="size-3" />
-            </Button>
-          </div>
-        </Choice>
-        <Choice
           selected={props.draft.channel === "slack"}
           onPick={() => props.patch({ channel: "slack" })}
           icon={<SlackIcon className="size-4" />}
@@ -373,6 +360,41 @@ function ChannelStep(props: {
           line="Uno's Slack app. It writes under its own name, in the channels you pick."
           testId="assistant-setup-channel-slack"
         />
+        {otherWays ? (
+          <Choice
+            selected={props.draft.channel === "own-bot"}
+            onPick={() => props.patch({ channel: "own-bot" })}
+            icon={<MessageCircleIcon className="size-4" />}
+            title="Telegram, a bot of its own"
+            line="Its own name in Telegram. Make a bot with @BotFather and paste its token."
+            testId="assistant-setup-channel-own-bot"
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                size="sm"
+                placeholder="123456:ABC-…"
+                value={token}
+                onChange={(event) => setToken(event.currentTarget.value)}
+                className="font-mono"
+              />
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => openInstallDocs("https://t.me/BotFather")}
+              >
+                @BotFather <ExternalLinkIcon className="size-3" />
+              </Button>
+            </div>
+          </Choice>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOtherWays(true)}
+            className="cursor-pointer self-start text-xs text-muted-foreground hover:text-foreground"
+          >
+            Other ways…
+          </button>
+        )}
       </div>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <ShieldCheckIcon className="size-3.5" /> It answers only you. Others who write to the bot
@@ -386,7 +408,9 @@ function AccessStep(props: {
   readonly draft: AssistantDraft;
   readonly patch: OnboardingState["patch"];
   readonly thisComputer: string | null;
+  readonly isUno: boolean;
 }) {
+  const [advanced, setAdvanced] = useState(false);
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const machines = useMachineRows();
   const names = useMemo(
@@ -419,7 +443,10 @@ function AccessStep(props: {
   };
   return (
     <div className="flex flex-col gap-4">
-      <StepHeading title="What can it open?" line="Everything else stays closed to it." />
+      <StepHeading
+        title={`What can ${props.draft.name.trim() || "it"} open?`}
+        line="Everything else stays closed."
+      />
       <section className="flex flex-col gap-1">
         <div className="flex items-center justify-between px-2">
           <span className="text-xs font-medium text-muted-foreground">Projects</span>
@@ -472,6 +499,33 @@ function AccessStep(props: {
           ))}
         </section>
       ) : null}
+      <section className="flex flex-col gap-1">
+        {advanced || props.isUno ? (
+          <>
+            <span className="px-2 text-xs font-medium text-muted-foreground">
+              {props.isUno ? "On this computer" : "Advanced · apps, browser, passwords, skills"}
+            </span>
+            <div className="rounded-lg border border-border">
+              <TeammateAccess
+                name={props.draft.name.trim() || "it"}
+                access={props.draft.access}
+                onChange={(access) => props.patch({ access })}
+                foldWhenFull={props.isUno}
+              />
+            </div>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdvanced(true)}
+            className="flex cursor-pointer items-center gap-1 self-start px-2 text-xs text-muted-foreground hover:text-foreground"
+            data-testid="assistant-setup-advanced"
+          >
+            <ChevronRightIcon className="size-3" />
+            Advanced: apps, browser, passwords, skills
+          </button>
+        )}
+      </section>
     </div>
   );
 }
@@ -489,7 +543,10 @@ function RightsStep(props: {
   const [details, setDetails] = useState(false);
   return (
     <div className="flex flex-col gap-4">
-      <StepHeading title="What may it do?" line="Change it any time on its page." />
+      <StepHeading
+        title={`What may ${props.draft.name.trim() || "it"} do?`}
+        line="Change it any time on its page."
+      />
       <div role="radiogroup" className="flex flex-col gap-2">
         {PRESETS.map((preset) => (
           <Choice
@@ -499,6 +556,7 @@ function RightsStep(props: {
             icon={PRESET_ICON[preset.id]}
             title={preset.name}
             line={preset.line}
+            example={`For example: ${preset.examples}`}
             testId={`assistant-setup-preset-${preset.id}`}
           />
         ))}
@@ -534,7 +592,7 @@ function BrainStep(props: {
   return (
     <div className="flex flex-col gap-4">
       <StepHeading
-        title="What does it run on?"
+        title={`What does ${props.draft.name.trim() || "it"} run on?`}
         line="Any AI on this computer. A plan you sign in to stays here for your other assistants too."
       />
       {props.environmentId ? (
@@ -560,7 +618,7 @@ function WhoStep(props: {
   readonly isUno: boolean;
 }) {
   const { draft, patch } = props;
-  const skills = skillsFor(draft.roles).slice(0, 8);
+  const skills = roleSkills(draft.roles);
   return (
     <div className="flex flex-col gap-4">
       <StepHeading title="Who is it?" />
@@ -600,7 +658,7 @@ function WhoStep(props: {
             <Chip
               key={role}
               on={draft.roles.includes(role)}
-              onClick={() => patch({ roles: toggle(draft.roles, role) })}
+              onClick={() => patch(toggleRole(draft, role))}
             >
               {role}
             </Chip>
@@ -634,6 +692,9 @@ function WhoStep(props: {
       <section className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">Skills</span>
         <div className="flex flex-wrap gap-1.5">
+          {skills.length === 0 ? (
+            <span className="text-xs text-muted-foreground">Pick a role to see its skills.</span>
+          ) : null}
           {skills.map((skill) => (
             <Chip
               key={skill}
@@ -897,7 +958,8 @@ export function AssistantOnboardingDialog() {
         data-testid="assistant-setup"
         data-step={step}
       >
-        <div className="flex min-h-[29rem] flex-col gap-5 p-6">
+        {/* One height for every step (critics 16.10): the window doesn't jump. */}
+        <div className="flex h-[min(37rem,85vh)] flex-col gap-5 p-6">
           {step > 0 && step <= STEP_COUNT ? (
             <div className="flex items-center gap-3 pr-8">
               <div
@@ -920,7 +982,7 @@ export function AssistantOnboardingDialog() {
             </div>
           ) : null}
 
-          <div className="flex-1">
+          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
             {step === 0 ? (
               <IntroStep
                 isUno={isUno || (target.kind === "new" && team.length === 0)}
@@ -931,7 +993,12 @@ export function AssistantOnboardingDialog() {
             ) : step === 1 ? (
               <ChannelStep draft={draft} patch={patch} />
             ) : step === 2 ? (
-              <AccessStep draft={draft} patch={patch} thisComputer={homeEnvironmentId} />
+              <AccessStep
+                draft={draft}
+                patch={patch}
+                thisComputer={homeEnvironmentId}
+                isUno={isUno}
+              />
             ) : step === 3 ? (
               <RightsStep draft={draft} patch={patch} />
             ) : step === 4 ? (
@@ -993,9 +1060,15 @@ export function AssistantOnboardingDialog() {
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <LaptopIcon className="size-3.5" /> Lives on{" "}
-                {computerLabels.get(ready?.environmentId ?? "") ?? "this computer"}
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <LaptopIcon className="size-3.5 shrink-0" />
+                <span className="min-w-0">
+                  Lives on {computerLabels.get(ready?.environmentId ?? "") ?? "this computer"}
+                  {machines.find((machine) => machine.environmentId === ready?.environmentId)
+                    ?.kind === "computer"
+                    ? " — it pauses while this computer sleeps; on a cloud computer it keeps working."
+                    : " — works even when your laptop is closed."}
+                </span>
               </span>
               <Button variant="ghost" size="sm" onClick={close}>
                 Close

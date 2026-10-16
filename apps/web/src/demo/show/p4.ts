@@ -41,6 +41,8 @@ export async function openLandingChat(environmentId: string, threadId: string) {
   // Wide enough to see the pins, the divider and the chat's tabs side by side.
   pane()?.setWidth(Math.min(600, Math.round(window.innerWidth * 0.42)));
   await new Promise((resolve) => setTimeout(resolve, 250));
+  // Once more after the chat has settled (its view may be written right after the switch).
+  pane()?.setWidth(Math.min(600, Math.round(window.innerWidth * 0.42)));
   return true;
 }
 

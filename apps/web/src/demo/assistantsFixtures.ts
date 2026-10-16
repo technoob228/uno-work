@@ -287,7 +287,8 @@ export function seedAssistantTeam() {
   // Profiles saved by an earlier mock (before p9) get the team's access.
   for (const profile of TEAM) {
     const key = `${profile.environmentId}:${profile.projectId}`;
-    if (profile.access && !store.profiles[key]?.access) store.patch(key, { access: profile.access });
+    if (profile.access && !store.profiles[key]?.access)
+      store.patch(key, { access: profile.access });
   }
 }
 
@@ -295,10 +296,18 @@ export function seedAssistantTeam() {
 
 type Provider = "github" | "google-drive" | "notion" | "gmail";
 const CONNECTOR_META: ReadonlyArray<{ provider: Provider; name: string; description: string }> = [
-  { provider: "google-drive", name: "Google Drive", description: "Read your files and save new ones." },
+  {
+    provider: "google-drive",
+    name: "Google Drive",
+    description: "Read your files and save new ones.",
+  },
   { provider: "github", name: "GitHub", description: "Repos, issues and pull requests." },
   { provider: "notion", name: "Notion", description: "Pages and databases you share with Uno." },
-  { provider: "gmail", name: "Gmail & Calendar", description: "Read mail, draft replies, see your day." },
+  {
+    provider: "gmail",
+    name: "Gmail & Calendar",
+    description: "Read mail, draft replies, see your day.",
+  },
 ];
 const ACCOUNT: Record<Provider, string> = {
   github: "technoob228",
@@ -339,9 +348,24 @@ function connectorsState() {
 
 const VAULT = [
   { id: "cred-github", label: "GitHub", url: "https://github.com/login", username: "technoob228" },
-  { id: "cred-hostkey", label: "Hostkey", url: "https://my.hostkey.com", username: "misha@getuno.xyz" },
-  { id: "cred-stripe", label: "Stripe dashboard", url: "https://dashboard.stripe.com", username: "misha@getuno.xyz" },
-  { id: "cred-cloudflare", label: "Cloudflare", url: "https://dash.cloudflare.com", username: "shubaduba4th@gmail.com" },
+  {
+    id: "cred-hostkey",
+    label: "Hostkey",
+    url: "https://my.hostkey.com",
+    username: "misha@getuno.xyz",
+  },
+  {
+    id: "cred-stripe",
+    label: "Stripe dashboard",
+    url: "https://dashboard.stripe.com",
+    username: "misha@getuno.xyz",
+  },
+  {
+    id: "cred-cloudflare",
+    label: "Cloudflare",
+    url: "https://dash.cloudflare.com",
+    username: "shubaduba4th@gmail.com",
+  },
   { id: "cred-cloudflare-token", label: "Cloudflare API token", url: "", username: "" },
   { id: "cred-openai", label: "OpenAI API key", url: "", username: "" },
   { id: "cred-hostkey-api", label: "Hostkey API key", url: "", username: "" },
@@ -354,12 +378,42 @@ export function answerTeamRpc(tag: string): unknown {
 }
 
 const PROJECT_SKILLS = [
-  { name: "release-train", project: "fishcode", path: ".claude/skills/release-train/SKILL.md", description: "How a release goes out." },
-  { name: "go-migrations", project: "fishcode", path: ".claude/skills/go-migrations/SKILL.md", description: "Writing a migration safely." },
-  { name: "electron-release", project: "uno-work-app", path: ".claude/skills/electron-release/SKILL.md", description: "Building and notarizing the Mac app." },
-  { name: "browser-tests", project: "uno-work-app", path: ".claude/skills/browser-tests/SKILL.md", description: "Running the browser tests." },
-  { name: "landing-copy", project: "landing", path: ".claude/skills/landing-copy/SKILL.md", description: "Our words on the landing." },
-  { name: "pult-post", project: "uno-project", path: ".claude/skills/pult-post/SKILL.md", description: "Posting to the Pult." },
+  {
+    name: "release-train",
+    project: "fishcode",
+    path: ".claude/skills/release-train/SKILL.md",
+    description: "How a release goes out.",
+  },
+  {
+    name: "go-migrations",
+    project: "fishcode",
+    path: ".claude/skills/go-migrations/SKILL.md",
+    description: "Writing a migration safely.",
+  },
+  {
+    name: "electron-release",
+    project: "uno-work-app",
+    path: ".claude/skills/electron-release/SKILL.md",
+    description: "Building and notarizing the Mac app.",
+  },
+  {
+    name: "browser-tests",
+    project: "uno-work-app",
+    path: ".claude/skills/browser-tests/SKILL.md",
+    description: "Running the browser tests.",
+  },
+  {
+    name: "landing-copy",
+    project: "landing",
+    path: ".claude/skills/landing-copy/SKILL.md",
+    description: "Our words on the landing.",
+  },
+  {
+    name: "pult-post",
+    project: "uno-project",
+    path: ".claude/skills/pult-post/SKILL.md",
+    description: "Posting to the Pult.",
+  },
 ];
 
 // ── What each computer's daemon answers ───────────────────────────────────
@@ -564,7 +618,13 @@ export function assistantHandlers(input: {
       return HttpResponse.json({ ok: true });
     }),
     http.post("*/api/manager/mcp/probe", () =>
-      HttpResponse.json({ ok: true, toolCount: 7, needsAuth: false, error: null }),
+      HttpResponse.json({
+        ok: true,
+        toolCount: 3,
+        toolNames: ["resolve-library-id", "get-library-docs", "search"],
+        needsAuth: false,
+        error: null,
+      }),
     ),
     http.get("*/api/manager/project-skills", () => HttpResponse.json({ skills: PROJECT_SKILLS })),
     http.get("*/api/manager/assistant/file", ({ request }) => {

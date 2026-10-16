@@ -79,7 +79,11 @@ export function ConnectorsSettings() {
                 onClick={() =>
                   void navigate({
                     to: "/assistants",
-                    search: { view: "profile", env: member.environmentId, project: member.projectId },
+                    search: {
+                      view: "profile",
+                      env: member.environmentId,
+                      project: member.projectId,
+                    },
                   })
                 }
                 className="flex w-full cursor-pointer items-center gap-3 border-t border-border/60 px-4 py-2.5 text-left first:border-t-0 hover:bg-accent/40 sm:px-5"
@@ -90,11 +94,16 @@ export function ConnectorsSettings() {
                   className="size-6"
                   emojiClassName="text-xs"
                 />
-                <span className="w-24 shrink-0 truncate text-sm font-medium">{member.profile.name}</span>
+                <span className="w-24 shrink-0 truncate text-sm font-medium">
+                  {member.profile.name}
+                </span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                   {connected.length === 0
                     ? "—"
-                    : pickedLine(access.connectors, names, { all: "Every connected app", none: "No apps" })}
+                    : pickedLine(access.connectors, names, {
+                        all: "Every connected app",
+                        none: "No apps",
+                      })}
                 </span>
                 <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
               </button>
@@ -117,14 +126,17 @@ export function ConnectorsSettings() {
           <div className="mt-2 flex flex-col gap-1.5 rounded-xl border border-border px-4 py-3 text-xs">
             <p className="text-muted-foreground">
               Apps: an OAuth grant kept by your Uno account; agents on every computer of the account
-              get their tools from the built-in MCP server <code className="font-mono">uno-work</code>.
-              Servers of your own go to <code className="font-mono">settings.mcpServers</code> and
-              reach every new chat. A teammate gets only what its token allows.
+              get their tools from the built-in MCP server{" "}
+              <code className="font-mono">uno-work</code>. Servers of your own go to{" "}
+              <code className="font-mono">settings.mcpServers</code> and reach every new chat. A
+              teammate gets only what its token allows.
             </p>
             {items.map((item) => (
               <div key={item.id} className="flex gap-2">
                 <span className="w-32 shrink-0 truncate">{item.name}</span>
-                <span className="min-w-0 truncate font-mono text-muted-foreground">{item.tech}</span>
+                <span className="min-w-0 truncate font-mono text-muted-foreground">
+                  {item.tech}
+                </span>
               </div>
             ))}
           </div>

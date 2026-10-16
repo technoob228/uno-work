@@ -65,7 +65,11 @@ export function useConnectorItems() {
       needsReconnect: connector?.needsReconnect,
     };
   });
-  return { items: connectorItems({ apps, servers }), actions, loading: actions.connectors.isPending };
+  return {
+    items: connectorItems({ apps, servers }),
+    actions,
+    loading: actions.connectors.isPending,
+  };
 }
 
 export function useVaultEntries() {
@@ -109,7 +113,10 @@ function Block(props: {
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-t border-border/70 px-3 py-2.5 first:border-t-0" data-testid={props.testId}>
+    <div
+      className="border-t border-border/70 px-3 py-2.5 first:border-t-0"
+      data-testid={props.testId}
+    >
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
           {props.icon}
@@ -128,7 +135,9 @@ function Block(props: {
                 aria-expanded={open}
                 className="mt-1 inline-flex cursor-pointer items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
               >
-                <ChevronRightIcon className={cn("size-3 transition-transform", open && "rotate-90")} />
+                <ChevronRightIcon
+                  className={cn("size-3 transition-transform", open && "rotate-90")}
+                />
                 Details
               </button>
               {open ? <div className="mt-1.5 flex flex-col gap-0.5">{props.details}</div> : null}
@@ -168,7 +177,9 @@ function CheckLine(props: {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs text-foreground">{props.label}</span>
         {props.tech ? (
-          <span className="block truncate font-mono text-[11px] text-muted-foreground">{props.tech}</span>
+          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+            {props.tech}
+          </span>
         ) : null}
       </span>
     </button>
@@ -204,7 +215,10 @@ export function TeammateAccess(props: {
 
   if (props.foldWhenFull && isFullAccess(access) && !limiting) {
     return (
-      <div className={cn("flex items-start gap-2.5 px-3 py-2.5", props.className)} data-testid="teammate-access-full">
+      <div
+        className={cn("flex items-start gap-2.5 px-3 py-2.5", props.className)}
+        data-testid="teammate-access-full"
+      >
         <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
           <ShieldCheckIcon className="size-3.5" />
         </span>
@@ -215,7 +229,12 @@ export function TeammateAccess(props: {
           </div>
         </div>
         {readOnly ? null : (
-          <Button size="xs" variant="ghost" onClick={() => setLimiting(true)} data-testid="teammate-access-limit">
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => setLimiting(true)}
+            data-testid="teammate-access-limit"
+          >
             Limit…
           </Button>
         )}
@@ -310,7 +329,10 @@ export function TeammateAccess(props: {
               {connectors.items.map((item) => (
                 <CheckLine
                   key={item.id}
-                  checked={item.connected && pickedOf(access.connectors, connected).some((c) => c.id === item.id)}
+                  checked={
+                    item.connected &&
+                    pickedOf(access.connectors, connected).some((c) => c.id === item.id)
+                  }
                   disabled={readOnly || !item.connected}
                   onToggle={() =>
                     set({
@@ -382,7 +404,12 @@ export function TeammateAccess(props: {
             }}
           >
             {BROWSER_USE.map((option) => (
-              <Toggle key={option.id} value={option.id} aria-label={option.line} className="px-2 text-xs">
+              <Toggle
+                key={option.id}
+                value={option.id}
+                aria-label={option.line}
+                className="px-2 text-xs"
+              >
                 {option.name}
               </Toggle>
             ))}
@@ -398,7 +425,9 @@ export function TeammateAccess(props: {
               vault.logins.map((entry) => (
                 <CheckLine
                   key={entry.id}
-                  checked={pickedOf(access.logins, vault.logins).some((item) => item.id === entry.id)}
+                  checked={pickedOf(access.logins, vault.logins).some(
+                    (item) => item.id === entry.id,
+                  )}
                   disabled={readOnly || access.browser === "off"}
                   onToggle={() =>
                     set({
@@ -411,7 +440,8 @@ export function TeammateAccess(props: {
                   }
                   label={
                     <>
-                      {siteOf(entry.url)} <span className="text-muted-foreground">· {entry.username}</span>
+                      {siteOf(entry.url)}{" "}
+                      <span className="text-muted-foreground">· {entry.username}</span>
                     </>
                   }
                   tech={`vault › ${entry.label} · filled by Uno (vault.fill)`}
@@ -460,7 +490,9 @@ export function TeammateAccess(props: {
               {vault.secrets.map((entry) => (
                 <CheckLine
                   key={entry.id}
-                  checked={pickedOf(access.secrets, vault.secrets).some((item) => item.id === entry.id)}
+                  checked={pickedOf(access.secrets, vault.secrets).some(
+                    (item) => item.id === entry.id,
+                  )}
                   disabled={readOnly}
                   onToggle={() =>
                     set({
@@ -514,7 +546,9 @@ export function TeammateAccess(props: {
         }
         details={
           <>
-            <span className="px-1.5 text-[11px] font-medium text-muted-foreground">From projects</span>
+            <span className="px-1.5 text-[11px] font-medium text-muted-foreground">
+              From projects
+            </span>
             {skills.length === 0 ? (
               <span className="px-1.5 text-xs text-muted-foreground">
                 A project’s skills are folders with a SKILL.md in .claude/skills/.
@@ -531,7 +565,9 @@ export function TeammateAccess(props: {
                 </div>
               ))
             )}
-            <span className="mt-1 px-1.5 text-[11px] font-medium text-muted-foreground">Its own</span>
+            <span className="mt-1 px-1.5 text-[11px] font-medium text-muted-foreground">
+              Its own
+            </span>
             <div className="flex flex-wrap gap-1 px-1.5">
               {personal.map((skill) => (
                 <Toggle

@@ -47,7 +47,8 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
   const warnings = tab.console.filter((entry) => entry.level === "warn").length;
   const failed = tab.network.filter(isFailedRequest).length;
   const all = allErrorsPayload({ page: pageUrl, console: tab.console, network: tab.network });
-  const problems = errors + warnings + failed;
+  // The same N as "Errors · N" on the address row.
+  const problems = errors + failed;
 
   const onResizeDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;

@@ -96,6 +96,33 @@ export const SKILLS_BY_ROLE: Readonly<Record<string, ReadonlyArray<string>>> = {
   Ops: ["Check servers", "Watch releases", "Disk and load alerts", "Backups"],
 };
 
+/** Names offered to a new teammate (critics 16.10: the name comes filled in). */
+export const SUGGESTED_NAMES = ["Ada", "Scout", "Builder", "Juno", "Milo", "Echo", "Iris"] as const;
+
+export function suggestName(taken: ReadonlyArray<string>): string {
+  const lower = new Set(taken.map((name) => name.trim().toLowerCase()));
+  return SUGGESTED_NAMES.find((name) => !lower.has(name.toLowerCase())) ?? uniqueName("Ada", taken);
+}
+
+/** Only the skills of the picked roles (critics 16.10), in role order. */
+export function roleSkills(roles: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [...new Set(roles.flatMap((role) => SKILLS_BY_ROLE[role] ?? []))];
+}
+
+/** Picking a role turns its first two skills on; dropping it drops them. */
+export function toggleRole(
+  draft: Pick<AssistantDraft, "roles" | "skills">,
+  role: string,
+): Pick<AssistantDraft, "roles" | "skills"> {
+  if (draft.roles.includes(role)) {
+    const roles = draft.roles.filter((item) => item !== role);
+    const keep = new Set(roleSkills(roles));
+    return { roles, skills: draft.skills.filter((skill) => keep.has(skill)) };
+  }
+  const added = (SKILLS_BY_ROLE[role] ?? []).slice(0, 2);
+  return { roles: [...draft.roles, role], skills: [...new Set([...draft.skills, ...added])] };
+}
+
 export function skillsFor(roles: ReadonlyArray<string>): ReadonlyArray<string> {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -214,7 +241,7 @@ export function defaultDraft(input: {
     computers: input.thisComputer ? [input.thisComputer] : [],
     preset: DEFAULT_PRESET,
     brain: "uno",
-    name: input.forUno ? "Uno" : "",
+    name: input.forUno ? "Uno" : suggestName(input.existing.map((profile) => profile.name)),
     emoji: input.forUno ? null : avatar.emoji,
     tone: input.forUno ? "violet" : avatar.tone,
     roles: input.forUno ? ["Personal assistant"] : [],
@@ -563,7 +590,10 @@ export function pickedLine(
 }
 
 /** What a child would get beyond its parent's access (decision 14.10 (3)). */
-export function accessBeyondParent(parent: AssistantAccess, child: AssistantAccess): ReadonlyArray<string> {
+export function accessBeyondParent(
+  parent: AssistantAccess,
+  child: AssistantAccess,
+): ReadonlyArray<string> {
   const beyond: string[] = [];
   const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
   if (rank[child.browser] > rank[parent.browser]) beyond.push("the browser");

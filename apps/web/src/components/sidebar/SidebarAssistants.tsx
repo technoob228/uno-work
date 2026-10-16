@@ -299,21 +299,21 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             its own row only before there is a team; with one, it is in the
             Team block of every assistant's page. */}
         {live.length > 1 ? null : (
-        <li className="list-none">
-          <button
-            type="button"
-            onClick={() => openNew()}
-            data-testid="sidebar-new-assistant"
-            className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center">
-              <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/40">
-                <PlusIcon className="size-3" />
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={() => openNew()}
+              data-testid="sidebar-new-assistant"
+              className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center">
+                <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/40">
+                  <PlusIcon className="size-3" />
+                </span>
               </span>
-            </span>
-            New assistant
-          </button>
-        </li>
+              New assistant
+            </button>
+          </li>
         )}
       </ul>
       <AssistantOnboardingDialog />

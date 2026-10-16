@@ -167,7 +167,7 @@ export function FileSharePopover({
             <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate text-sm font-medium">Share “{name}”</span>
           </div>
-          <p className="text-xs leading-snug text-muted-foreground">
+          <p className={cn("text-xs leading-snug text-muted-foreground", url && "hidden")}>
             {route === "cloud-copy"
               ? `${computerName} can't be reached from the internet, so Uno puts a copy in Cloud storage → ${SHARED_COPIES_PREFIX} and links to it. Nothing is uploaded until you press the button.`
               : `The link opens this file on ${computerName}. If it's asleep, it wakes up for the visitor — the first open takes a few seconds.`}
@@ -264,10 +264,12 @@ export function FileSharePopover({
                     className={cn("text-xs", !passwordAvailable && "text-muted-foreground")}
                   >
                     Require a password
-                    {passwordAvailable ? null : (
-                      <span className="font-normal"> · not for Cloud storage links yet</span>
-                    )}
                   </Label>
+                  {passwordAvailable ? null : (
+                    <span className="text-[11px] text-muted-foreground">
+                      · not for Cloud storage links yet
+                    </span>
+                  )}
                 </div>
                 {passwordAvailable && withPassword ? (
                   <Input
@@ -317,7 +319,7 @@ export function FileSharePopover({
                 <button
                   type="button"
                   onClick={() => setRouteOverride(route === "cloud-copy" ? null : "cloud-copy")}
-                  className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  className="self-start text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                 >
                   {route === "cloud-copy"
                     ? "Link to the file on the computer instead"
