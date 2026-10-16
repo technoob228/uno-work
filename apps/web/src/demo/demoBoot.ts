@@ -8,6 +8,7 @@
 import { ORCHESTRATION_WS_METHODS, WS_METHODS, type InboxItem } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { HttpResponse, delay, http, ws } from "msw";
+import { demoSecurityHandlers } from "./demoSecurity";
 import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
@@ -1136,6 +1137,7 @@ export async function startDemo(): Promise<void> {
       const found = accountBoxes().find((item) => String(item.id) === String(params.id));
       return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });
     }),
+    ...demoSecurityHandlers(accountBoxes().map(({ id, name, status }) => ({ id, name, status }))),
     http.all("*/_account/*", () => HttpResponse.json({}, { status: 404 })),
     // p2: the test site's backend (/api/order → 500, a missing image).
     ...demoSiteHandlers,

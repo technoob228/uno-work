@@ -112,7 +112,6 @@ const FLAT_APP_NAV_ITEMS: ReadonlyArray<FlatNavItem> = [
   // "Advanced sharing" fold inside the page.
   { label: "My machines", to: "/settings/workspace", icon: LayersIcon },
   { label: "Computer access", to: "/settings/computer-access", icon: ShieldCheckIcon },
-  { label: "Security", to: "/settings/security", icon: LockIcon },
   { label: "Extensions", to: "/settings/extensions", icon: PuzzleIcon, flag: "plugins" },
 ];
 
@@ -153,6 +152,7 @@ export const SIMPLE_SETTINGS_PATHS = {
   connectors: "/settings/connectors",
   assistants: "/settings/assistants-phone",
   computer: "/settings/computer",
+  security: "/settings/security",
   developer: "/settings/developer",
 } as const;
 
@@ -170,6 +170,8 @@ export function simpleNavEntries(withConnectors = DEMO): ReadonlyArray<SettingsN
       : []),
     { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
     { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+    // 16.10 Misha: Security out of Developer — isolation and the red button are for everyone.
+    { label: "Security", to: SIMPLE_SETTINGS_PATHS.security, icon: LockIcon },
     { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
   ];
 }

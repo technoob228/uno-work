@@ -167,7 +167,11 @@ export type DemoShowKey =
   | "p6"
   | "p7"
   | "p8"
-  | "p9";
+  | "p9"
+  | "s1"
+  | "s2"
+  | "s3"
+  | "s4";
 export const demoShow: Partial<Record<DemoShowKey, () => void | Promise<void>>> = {};
 
 /** Extra synchronous answers the always-loaded app asks the demo (empty outside it). */

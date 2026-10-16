@@ -46,64 +46,24 @@ const POINTS: ReadonlyArray<{
   switches?: ReadonlyArray<keyof DemoSwitches>;
 }> = [
   {
-    key: "p1",
-    title: "Лаунчер панели",
-    hint: "Две разные кнопки: «Your site» (всегда первая) и «Agent's browser»; без Terminal, Apps всегда.",
+    key: "s1",
+    title: "Security — в простых настройках",
+    hint: "Settings → Security рядом с Computer, без Developer. Сверху простое (доступ в интернет, красная кнопка), ниже «Advanced» — как было.",
   },
   {
-    key: "p2",
-    title: "Комментарии и отладка в браузере",
-    hint: "Одна кнопка Comment (C): заметки к элементам и областям + консоль и сеть внизу, «Ask agent to fix».",
+    key: "s2",
+    title: "Изоляция: все компьютеры или один",
+    hint: "Open / Limited / Isolated для всех; у компьютера — «как у всех» или своё. Isolated: приватная сеть (QR для WireGuard) и «Keep Uno AI on».",
   },
   {
-    key: "p2b",
-    title: "Браузер агента: войти за агента",
-    hint: "Агент просит войти (логин, капча, 2FA) — Take control, вошёл, Hand back; дальше агент работает с этой сессией.",
+    key: "s3",
+    title: "Красная кнопка «Stop everything & report»",
+    hint: "Подтверждение со списком компьютеров, «что заметили», «sign out everywhere». После — «We've been notified and are looking into it».",
   },
   {
-    key: "p3",
-    title: "Вкладка на весь экран",
-    hint: "Плотный блок «шаг + композер», сворачивание в мини-окно, ответ подсказкой.",
-    switches: ["chatDock"],
-  },
-  {
-    key: "p4",
-    title: "Вкладки: чат, проект, везде",
-    hint: "Группы как в Chrome, слева направо: This chat → Project → Everywhere. Тащи вкладку внутри группы или в другую обводку (линия — куда встанет); клик по метке группы сворачивает её. Перейди в другой чат landing — Project и Everywhere на месте.",
-    switches: ["tabGroupIcons", "newTabsGo"],
-  },
-  {
-    key: "p5",
-    title: "Верх сайдбара",
-    hint: "Один заголовок говорит, что показано; ✎ New chat крайний справа; компьютеры. Сверни проект открытого чата — под ним останется только этот чат.",
-    switches: ["sidebarViewSwitch"],
-  },
-  {
-    key: "p5b",
-    title: "Сайдбар: фильтр и группировка",
-    hint: "Всё в меню заголовка: Group by, проекты и компьютеры чипами; активный фильтр — чип с ×.",
-  },
-  {
-    key: "p6",
-    title: "Чаты ассистента в сайдбаре",
-    hint: "Шеврон у ассистента раскрывает его чаты, «+» — новый чат с ним.",
-  },
-  {
-    key: "p7",
-    title: "Ассистенты: команда и онбординг",
-    hint: "Uno, Builder, Scout; «+ New assistant» — 6 шагов; страница ассистента.",
-  },
-  {
-    key: "p8",
-    title: "↗ у файла: редактор или ссылка",
-    hint: "На Mac — меню «Open in…» / «Share with a link…», на облаке — сразу Share. С паролем — Generate, Copy и «Copy link and password».",
-    switches: ["platform"],
-  },
-  {
-    key: "p9",
-    title: "Продвинутые настройки тиммейта",
-    hint: "Settings → Connectors (прямой адрес #/settings/connectors); у тиммейта — коннекторы с уровнями, браузер и логины, ключи, скиллы.",
-    switches: ["connectors"],
+    key: "s4",
+    title: "Advanced",
+    hint: "Журнал заходов, SSH, открытые порты, «кто может достучаться» — по одному компьютеру.",
   },
 ];
 
@@ -176,7 +136,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="demo-panel-pill"
-        title="Что смотреть — 10 пунктов мока"
+        title="Что смотреть — Security"
         className="fixed top-1/2 left-[16rem] z-[90] inline-flex translate-x-1 -translate-y-1/2 cursor-pointer flex-row items-center gap-1.5 rounded-full border border-border bg-popover px-1 py-2.5 text-[11px] font-medium text-popover-foreground shadow-lg [writing-mode:vertical-rl] hover:bg-accent"
       >
         <EyeIcon className="size-3.5" />
@@ -197,7 +157,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         <div className="min-w-0">
           <div className="text-sm font-semibold">Что смотреть</div>
           <div className="text-[11px] text-muted-foreground">
-            Мок Uno Work 0.0.138 · данные выдуманные, ничего не уходит наружу
+            Мок Security · Uno Work 0.0.141 · данные выдуманные, ничего не уходит наружу
           </div>
         </div>
         <button
