@@ -30,6 +30,7 @@ import {
   BROWSER_BRIDGE_COMMAND_RESULT_PATH,
   BROWSER_BRIDGE_LOGIN_PATH,
   BROWSER_BRIDGE_OPEN_PATH,
+  authorizeLocalBridgeRequest,
   BrowserBridge,
   isAllowedBridgeCommand,
   isAllowedBridgeFilePath,
@@ -315,7 +316,7 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return bridgeRefusalText(thread);
     }
@@ -391,7 +392,7 @@ export const browserBridgeCommandRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return bridgeRefusalText(thread);
     }
@@ -440,7 +441,7 @@ export const browserBridgeLoginRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return bridgeRefusalText(thread);
     }
@@ -563,7 +564,7 @@ export const secretsRequestRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return bridgeRefusalText(thread);
     }
