@@ -45,7 +45,7 @@ export function HomeAppWidget({ app }: { app: UnoMachineApp }) {
     return (
       <p className="text-xs text-muted-foreground">
         {app.status === "running"
-          ? `${app.name} can't be shown from here yet — turn on “Show on the internet” for it.`
+          ? `${app.name} runs inside this computer — open it from Apps to see it.`
           : `Start ${app.name} to see its widget.`}
       </p>
     );

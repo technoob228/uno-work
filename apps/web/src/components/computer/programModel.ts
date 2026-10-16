@@ -197,10 +197,30 @@ export function isBrowserOnMachine(hostname: string): boolean {
   return LOOPBACK_HOSTS.has(hostname.toLowerCase());
 }
 
-export function machineAppOpenUrl(app: UnoMachineApp, browserOnMachine: boolean): string | null {
+/**
+ * Can this page show the address inside it? An `http:` address inside an
+ * `https:` Uno Work is blocked by the browser as mixed content — the window
+ * just stays empty. That was Misha's Пульт (16.10): "on the internet" through a
+ * plain port forward is `http://<computer>:<port>/`.
+ */
+export function canShowInPage(
+  url: string,
+  pageProtocol: string = typeof window === "undefined" ? "https:" : window.location.protocol,
+): boolean {
+  return !url.startsWith("http:") || pageProtocol === "http:";
+}
+
+export function machineAppOpenUrl(
+  app: UnoMachineApp,
+  browserOnMachine: boolean,
+  pageProtocol?: string,
+): string | null {
   if (app.url) return app.url;
   if (app.status !== "running") return null;
-  if (app.publication?.url && app.http) return app.publication.url;
+  // An http public address can't show in an https Work: the app opens on the
+  // computer instead (its localhost, in the computer's browser).
+  if (app.publication?.url && app.http && canShowInPage(app.publication.url, pageProtocol))
+    return app.publication.url;
   if (browserOnMachine && app.localUrl) return app.localUrl;
   return null;
 }

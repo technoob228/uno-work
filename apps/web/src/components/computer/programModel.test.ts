@@ -70,7 +70,9 @@ describe("opening a program", () => {
     const published = app({
       publication: pub(43000, "http://h:43000/"),
     });
-    expect(machineAppOpenUrl(published, false)).toBe("http://h:43000/");
+    expect(machineAppOpenUrl(published, false, "http:")).toBe("http://h:43000/");
+    // From an https Work the http address would stay blank (mixed content).
+    expect(machineAppOpenUrl(published, false, "https:")).toBeNull();
     expect(machineAppOpenUrl(app({}), true)).toBe("http://localhost:3000/");
     // From a remote browser, localhost would be the viewer's own laptop.
     expect(machineAppOpenUrl(app({}), false)).toBeNull();

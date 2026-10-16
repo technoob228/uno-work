@@ -649,7 +649,20 @@ export function ProgramDialog({
                 />
               ) : null}
               {publication?.url ? (
-                <AddressRow label="On the internet" url={publication.url} />
+                <>
+                  <AddressRow label="On the internet" url={publication.url} />
+                  {publication.url.startsWith("http:") ? (
+                    <p
+                      className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-relaxed"
+                      data-testid="program-public-http-warning"
+                    >
+                      <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                      Anyone with this address can open it — no sign-in, and the connection isn't
+                      encrypted. You don't need it to use the app yourself: a click on the app opens
+                      it in Uno Work. Hide it when nobody else needs it.
+                    </p>
+                  ) : null}
+                </>
               ) : null}
               {tile.storeApp ? (
                 <SignInBlock
@@ -695,8 +708,8 @@ export function ProgramDialog({
                 <AddressRow label="On this computer" url={app.localUrl} />
               ) : app && app.port !== null && app.status === "running" && !publication ? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  It answers on port {app.port} inside this computer. To open it from anywhere —
-                  this browser, your phone, a friend — show it on the internet.
+                  It answers on port {app.port} inside this computer. A click on the app opens it
+                  right here, in Uno Work — nothing else is needed to use it yourself.
                 </p>
               ) : null}
 
@@ -714,8 +727,9 @@ export function ProgramDialog({
                 ) : (
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     <strong className="font-medium text-foreground">Show on the internet</strong>{" "}
-                    gives it a public address. Anyone with the address can reach it, so do it for
-                    things that have their own login or are meant to be public.
+                    only if someone else — your phone, a friend, another service — must reach it. It
+                    gets a public address anyone can open, with no sign-in and no encryption, so do
+                    it for things that have their own login or are meant to be public.
                   </p>
                 )
               ) : null}

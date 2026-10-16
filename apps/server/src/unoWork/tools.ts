@@ -1106,7 +1106,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_show_on_internet",
     group: "computer",
     description:
-      'Give a running web app a public https address so it opens from anywhere (the "Show on the internet" button). Anyone with the address can reach it — the person always approves this. The app must listen on 0.0.0.0, not only 127.0.0.1.',
+      'Give a running web app a public address (http://<computer>:<port>/ — plain http, no sign-in) so others can reach it: their phone, a friend, a webhook (the "Show on the internet" button). Not needed for the person to use the app themselves: a click on it opens it in Uno Work. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -1115,7 +1115,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     },
     level: "sensitive",
     approvalTitle: (args) => `Show ${appIdLabel(args)} on the internet`,
-    approvalDetail: () => "Anyone with the address will be able to open it.",
+    approvalDetail: () =>
+      "Anyone with the address will be able to open it — no sign-in, and the connection isn't encrypted.",
     run: (deps, args) => appAction(deps, args, "publish"),
   },
   {

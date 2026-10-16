@@ -51,7 +51,7 @@ export function assistantPageOfUrl(
 export function useOpenInboxItem() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { openHere } = useOpenApp();
+  const { openHere, openComputerApp } = useOpenApp();
   const { isMobile, setOpenMobile } = useSidebar();
 
   return useCallback(
@@ -111,19 +111,23 @@ export function useOpenInboxItem() {
       const base = app
         ? machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname))
         : null;
+      if (app && !base && app.status === "running" && app.http) {
+        // A cloud computer's app this browser can't reach: its window opens
+        // it in the computer's own browser — no need to put it on the internet.
+        openComputerApp({ key: app.id, name: app.name, icon: app.icon });
+        return;
+      }
       if (!app || !base) {
-        // Not there, stopped, or running but not reachable from this browser
-        // (a cloud computer's app that isn't shown on the internet): Home has
-        // the Start / "Show on the internet" buttons for it.
+        // Not there or stopped: Home has its Start button.
         toastManager.add({
           type: "info",
           title:
             app?.status === "running"
-              ? `${item.source.name} can't be opened from here yet`
+              ? `${item.source.name} can't be opened from here`
               : `${item.source.name} isn't running`,
           description:
             app?.status === "running"
-              ? "Open it on Home and turn on “Show on the internet”, then open the notification again."
+              ? "It runs without a window. Its settings on Home show what it does."
               : "Start it on Home, then open the notification again.",
         });
         void navigate({ to: "/computer" });
@@ -135,6 +139,6 @@ export function useOpenInboxItem() {
         icon: app.icon,
       });
     },
-    [isMobile, navigate, openHere, queryClient, setOpenMobile],
+    [isMobile, navigate, openComputerApp, openHere, queryClient, setOpenMobile],
   );
 }
