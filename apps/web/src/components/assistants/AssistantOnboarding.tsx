@@ -34,7 +34,7 @@ import {
   SlackIcon,
   ZapIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 
@@ -58,7 +58,7 @@ import { TeammateAccess } from "./TeammateAccess";
 import {
   type AssistantDraft,
   type AssistantPreset,
-  BRAIN_NAME,
+  brainLine,
   CHANNEL_NAME,
   CHARACTER_CHIPS,
   PRESETS,
@@ -67,6 +67,7 @@ import {
   assistantKeyOf,
   defaultDraft,
   nextAvatar,
+  ownComputerName,
   projectsLine,
   roleSkills,
   toggleRole,
@@ -79,6 +80,10 @@ import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
 export const UNO_ASSISTANT_BOT = "uno_team_bot";
 
 const STEP_COUNT = 6;
+
+/** Where a limited assistant lives: the picked computer, or the new one. */
+const ownLabel = (draft: AssistantDraft) =>
+  draft.ownComputer ?? ownComputerName(draft.name.trim() || "assistant");
 
 // ── Who opens it, and where it is ─────────────────────────────────────────
 
@@ -536,9 +541,93 @@ const PRESET_ICON: Readonly<Record<AssistantPreset, ReactNode>> = {
   observer: <EyeIcon className="size-4" />,
 };
 
+/**
+ * Decision 16.10 (Misha): limited rights hold only on a computer of its own —
+ * on a shared one any assistant can read the others' files. Picking Observer
+ * or Helper asks where it lives: a new Lite computer (default) or one you have.
+ */
+function OwnComputerPick(props: {
+  readonly draft: AssistantDraft;
+  readonly patch: OnboardingState["patch"];
+  readonly homeEnvironmentId: string | null;
+}) {
+  const machines = useMachineRows();
+  const team = useAssistantTeam();
+  // "Its own" means nobody else lives there: not you, not another assistant.
+  const taken = new Set(
+    team.flatMap((member) => [member.environmentId, member.profile.ownComputer ?? ""]),
+  );
+  const others = machines.filter(
+    (machine) =>
+      machine.environmentId !== null &&
+      machine.environmentId !== props.homeEnvironmentId &&
+      !taken.has(machine.environmentId) &&
+      !taken.has(machine.label),
+  );
+  const name = props.draft.name.trim() || "it";
+  const fresh = ownComputerName(props.draft.name.trim() || "assistant");
+  const ref = useRef<HTMLElement>(null);
+  // It appears when Observer or Helper is picked — bring it into view.
+  useEffect(() => ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }), []);
+  return (
+    <section
+      ref={ref}
+      className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5"
+      data-testid="assistant-setup-own-computer"
+    >
+      <span className="text-sm font-medium">Runs on its own computer</span>
+      <span className="text-xs text-muted-foreground">
+        Limits hold only there: next to you, {name} could still read every file on your computer.
+      </span>
+      <div role="radiogroup" className="mt-1 flex flex-col gap-0.5">
+        {[
+          { id: null, label: `A new Lite computer — ${fresh}`, detail: "made when you finish" },
+          ...others.map((machine) => ({
+            id: machine.label,
+            label: machine.label,
+            detail: machine.status === "sleeping" ? "asleep — wakes when needed" : undefined,
+          })),
+        ].map((option) => (
+          <button
+            key={option.id ?? "new"}
+            type="button"
+            role="radio"
+            aria-checked={props.draft.ownComputer === option.id}
+            onClick={() => props.patch({ ownComputer: option.id })}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-accent/50"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "grid size-3.5 shrink-0 place-items-center rounded-full border",
+                props.draft.ownComputer === option.id ? "border-primary" : "border-input",
+              )}
+            >
+              {props.draft.ownComputer === option.id ? (
+                <span className="size-1.5 rounded-full bg-primary" />
+              ) : null}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            {option.detail ? (
+              <span className="shrink-0 text-xs text-muted-foreground">{option.detail}</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+      {others.length === 0 ? (
+        <span className="px-1.5 text-xs text-muted-foreground">
+          Your other computers already have you or an assistant on them.
+        </span>
+      ) : null}
+    </section>
+  );
+}
+
 function RightsStep(props: {
   readonly draft: AssistantDraft;
   readonly patch: OnboardingState["patch"];
+  readonly isUno: boolean;
+  readonly homeEnvironmentId: string | null;
 }) {
   const [details, setDetails] = useState(false);
   return (
@@ -561,6 +650,13 @@ function RightsStep(props: {
           />
         ))}
       </div>
+      {props.isUno || props.draft.preset === "full" ? null : (
+        <OwnComputerPick
+          draft={props.draft}
+          patch={props.patch}
+          homeEnvironmentId={props.homeEnvironmentId}
+        />
+      )}
       <div className="flex flex-col gap-1">
         <button
           type="button"
@@ -712,6 +808,8 @@ function WhoStep(props: {
 
 function ReadyStep(props: {
   readonly draft: AssistantDraft;
+  readonly team: ReadonlyArray<TeamMember>;
+  readonly isUno: boolean;
   readonly ready: Ready;
   readonly computerLabels: ReadonlyMap<string, string>;
   readonly onWriteHere: (task: string) => void;
@@ -726,7 +824,16 @@ function ReadyStep(props: {
       `${projectsLine(draft.projects)} · ${draft.computers.map((id) => props.computerLabels.get(id) ?? "this computer").join(", ") || "this computer"}`,
     ],
     ["May", PRESET_NAME[draft.preset]],
-    ["Runs on", BRAIN_NAME[draft.brain]],
+    ...(props.isUno || draft.preset === "full"
+      ? []
+      : [["Lives on", `${ownLabel(draft)} — its own computer`] satisfies [string, string]]),
+    [
+      "AI",
+      brainLine(
+        { name: draft.name, brain: draft.brain },
+        props.team.filter((member) => !member.revoked).map((member) => member.profile),
+      ),
+    ],
   ];
   return (
     <div className="flex flex-col gap-4">
@@ -749,7 +856,9 @@ function ReadyStep(props: {
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 truncate">{value}</dd>
+            <dd className="min-w-0 truncate" title={value}>
+              {value}
+            </dd>
           </div>
         ))}
       </dl>
@@ -907,6 +1016,10 @@ export function AssistantOnboardingDialog() {
         createdAt: now,
         setUpAt: now,
         revokedAt: null,
+        access: draft.access,
+        // Limited rights live on a computer of their own (16.10). The new Lite
+        // one is made by the console's computer flow — the mock keeps its name.
+        ownComputer: !isUno && draft.preset !== "full" ? ownLabel({ ...draft, name }) : null,
       });
       let link: string | null = null;
       if (draft.channel === "uno-bot") {
@@ -1000,7 +1113,12 @@ export function AssistantOnboardingDialog() {
                 isUno={isUno}
               />
             ) : step === 3 ? (
-              <RightsStep draft={draft} patch={patch} />
+              <RightsStep
+                draft={draft}
+                patch={patch}
+                isUno={isUno}
+                homeEnvironmentId={homeEnvironmentId}
+              />
             ) : step === 4 ? (
               <BrainStep draft={draft} patch={patch} environmentId={homeEnvironmentId} />
             ) : step === 5 ? (
@@ -1008,6 +1126,8 @@ export function AssistantOnboardingDialog() {
             ) : ready ? (
               <ReadyStep
                 draft={draft}
+                team={team}
+                isUno={isUno}
                 ready={ready}
                 computerLabels={computerLabels}
                 onWriteHere={(task) => void writeHere(task)}
@@ -1063,11 +1183,18 @@ export function AssistantOnboardingDialog() {
               <span className="inline-flex min-w-0 items-center gap-1.5">
                 <LaptopIcon className="size-3.5 shrink-0" />
                 <span className="min-w-0">
-                  Lives on {computerLabels.get(ready?.environmentId ?? "") ?? "this computer"}
-                  {machines.find((machine) => machine.environmentId === ready?.environmentId)
-                    ?.kind === "computer"
-                    ? " — it pauses while this computer sleeps; on a cloud computer it keeps working."
-                    : " — works even when your laptop is closed."}
+                  {!isUno && draft.preset !== "full"
+                    ? `Lives on ${ownLabel(draft)}, its own computer — keeps working when your laptop is closed.`
+                    : null}
+                  {!isUno && draft.preset !== "full" ? null : (
+                    <>
+                      Lives on {computerLabels.get(ready?.environmentId ?? "") ?? "this computer"}
+                      {machines.find((machine) => machine.environmentId === ready?.environmentId)
+                        ?.kind === "computer"
+                        ? " — it pauses while this computer sleeps; on a cloud computer it keeps working."
+                        : " — works even when your laptop is closed."}
+                    </>
+                  )}
                 </span>
               </span>
               <Button variant="ghost" size="sm" onClick={close}>

@@ -15,7 +15,11 @@ import { ASSISTANT_PROJECT_ID, type AssistantLlmStatus } from "@t3tools/contract
 import { HttpResponse, http } from "msw";
 
 import type { AssistantProfile } from "../components/assistants/assistantTeam.logic";
-import { useAssistantTeamStore } from "../components/assistants/assistantTeamStore";
+import {
+  type RightsCutDetail,
+  teamEvents,
+  useAssistantTeamStore,
+} from "../components/assistants/assistantTeamStore";
 import {
   CHATS,
   INBOX,
@@ -219,6 +223,20 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
       { name: "Morning plan", when: "every day 08:00" },
       { name: "Hostkey invoice reminder", when: "Oct 11, 10:00" },
     ],
+    activity: [
+      {
+        at: ago(60 * 26),
+        kind: "teammate",
+        text: "Set up Scout — Observer, landing and uno-project",
+      },
+      {
+        at: ago(60 * 24 * 3),
+        kind: "money",
+        text: "Paid the Hostkey invoice — $347, you said yes",
+      },
+      { at: ago(60 * 5), kind: "deploy", text: "Published misha-week-1015.uno4.me" },
+      { at: ago(60 * 2), kind: "note", text: "Saved the morning plan to NOTES.md" },
+    ],
   },
   {
     environmentId: MACHINES.product.environmentId,
@@ -240,6 +258,11 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     setUpAt: ago(60 * 24 * 6),
     revokedAt: null,
     schedule: [{ name: "Nightly test run", when: "every day 03:00" }],
+    ownComputer: "builder-box",
+    activity: [
+      { at: ago(60 * 20), kind: "deploy", text: "Deployed fishcode feat/kv-service to stage" },
+      { at: ago(60 * 9), kind: "delete", text: "Deleted 3 merged branches in uno-work-app" },
+    ],
     access: {
       connectors: ["github", "mcp:context7"],
       browser: "safe",
@@ -269,6 +292,10 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     setUpAt: ago(60 * 26),
     revokedAt: null,
     schedule: [{ name: "Competitors digest", when: "Mondays 09:00" }],
+    ownComputer: "scout-box",
+    activity: [
+      { at: ago(60 * 30), kind: "note", text: "Saved “Competitors — week 41” to Google Drive" },
+    ],
     access: {
       connectors: ["google-drive"],
       browser: "safe",
@@ -280,16 +307,66 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
   },
 ];
 
-/** The team's profiles, unless the person changed them in this browser already. */
-export function seedAssistantTeam() {
+type DemoInboxSpec = (typeof INBOX)[number];
+
+/**
+ * The team's profiles, unless the person changed them in this browser
+ * already — and the notice the daemon will send when cutting rights cuts
+ * what an assistant set up (decision 16.10): a card in Needs you.
+ */
+export function seedAssistantTeam(hooks: { readonly addInbox: (spec: DemoInboxSpec) => void }) {
   const store = useAssistantTeamStore.getState();
   store.seed(TEAM);
-  // Profiles saved by an earlier mock (before p9) get the team's access.
+  // Profiles saved by an earlier mock (before p9/16.10) get what's new.
   for (const profile of TEAM) {
     const key = `${profile.environmentId}:${profile.projectId}`;
-    if (profile.access && !store.profiles[key]?.access)
-      store.patch(key, { access: profile.access });
+    const saved = useAssistantTeamStore.getState().profiles[key];
+    if (!saved) continue;
+    const missing: Partial<AssistantProfile> = {
+      ...(profile.access && !saved.access ? { access: profile.access } : {}),
+      ...(profile.ownComputer && saved.ownComputer === undefined
+        ? { ownComputer: profile.ownComputer }
+        : {}),
+      ...(profile.activity && !saved.activity ? { activity: profile.activity } : {}),
+    };
+    if (Object.keys(missing).length > 0) store.patch(key, missing);
   }
+  teamEvents.addEventListener("rights-cut", (event) => {
+    const { by, losses } = (event as CustomEvent<RightsCutDetail>).detail;
+    const machine =
+      (Object.keys(MACHINES) as MachineKey[]).find(
+        (key) => MACHINES[key].environmentId === by.environmentId,
+      ) ?? "work";
+    const first = losses[0]!;
+    const firstProfile = Object.values(useAssistantTeamStore.getState().profiles).find(
+      (profile) => profile.name === first.name,
+    );
+    hooks.addInbox({
+      id: `i-rights-cut-${Date.now()}`,
+      machine,
+      kind: "agent.done",
+      minutesAgo: 0,
+      title:
+        losses.length === 1
+          ? `${first.name} lost some access`
+          : `${losses.length} assistants lost some access`,
+      body: `${by.name}'s rights changed, so what it set up was cut to match. ${losses
+        .map((loss) => `${loss.name}: ${loss.lost.join(", ")}`)
+        .join(" · ")}.`,
+      source: {
+        kind: "system",
+        id: `assistant-rights:${first.key}`,
+        name: by.name,
+        icon: firstProfile?.emoji ?? "🔒",
+      },
+      open: firstProfile
+        ? {
+            kind: "url",
+            url: `uno://assistant/${firstProfile.environmentId}/${firstProfile.projectId}`,
+          }
+        : null,
+    });
+  });
 }
 
 // ── p9: Connectors, the vault, the projects' skills ───────────────────────

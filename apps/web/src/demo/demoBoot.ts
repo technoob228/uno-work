@@ -910,9 +910,16 @@ function addDemoProject(
   emitShell(machine, { kind: "project-upserted", sequence: model.snapshotSequence, project });
 }
 
+/** A card arriving in a computer's Inbox right now (the team's notices). */
+function addDemoInbox(spec: (typeof INBOX)[number]) {
+  const machine = MACHINES[spec.machine];
+  inboxes.set(machine.environmentId, [buildInboxItem(spec), ...inboxItemsFor(machine)]);
+  publishInbox(machine);
+}
+
 export async function startDemo(): Promise<void> {
   seedLocalStorage();
-  seedAssistantTeam();
+  seedAssistantTeam({ addInbox: addDemoInbox });
   void loadAgentFrame();
   // Touch every fixture once so a typo in them fails loudly at start.
   void CHATS.length;

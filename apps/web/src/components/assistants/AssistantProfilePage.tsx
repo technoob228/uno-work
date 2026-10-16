@@ -49,11 +49,19 @@ import { TeammateAccess } from "./TeammateAccess";
 import { useAssistantOnboarding } from "./AssistantOnboarding";
 import {
   ACTIVITY_LABEL,
+  type AssistantAccess,
   accessOf,
+  activityFeed,
   type AssistantPreset,
+  type AssistantProfile,
   type AssistantTreeNode,
-  BRAIN_NAME,
+  brainLine,
   CHANNEL_NAME,
+  cascadeRights,
+  lossLine,
+  needsOwnComputer,
+  ownComputerName,
+  type RightsLoss,
   PRESETS,
   PRESET_NAME,
   buildAssistantTree,
@@ -261,6 +269,135 @@ function TreeBranch(props: {
   );
 }
 
+type RightsPatch = Partial<
+  Pick<AssistantProfile, "preset" | "projects" | "computers" | "access" | "ownComputer">
+>;
+
+interface PendingRights {
+  readonly rights: RightsPatch;
+  readonly title: string;
+  readonly losses: ReadonlyArray<RightsLoss>;
+  /** Limited rights from now on: it moves to a computer of its own. */
+  readonly movesOut: boolean;
+  readonly from: "role" | "access";
+}
+
+function RightsWarning(props: {
+  readonly pending: PendingRights;
+  readonly name: string;
+  readonly onApply: () => void;
+  readonly onCancel: () => void;
+}) {
+  const { pending } = props;
+  return (
+    <div
+      className="flex flex-col gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/8 px-3 py-2 text-xs"
+      data-testid="assistant-profile-rights-warning"
+    >
+      {pending.losses.length > 0 ? (
+        <p className="text-foreground">{lossLine(pending.losses)}.</p>
+      ) : null}
+      {pending.movesOut && pending.rights.ownComputer ? (
+        <p className="text-muted-foreground">
+          {props.name} moves to a computer of its own ({pending.rights.ownComputer}, Lite): on yours
+          it could still read every file, whatever you limit here.
+        </p>
+      ) : null}
+      {pending.losses.length > 0 ? (
+        <p className="text-muted-foreground">You'll get a card in Needs you with the same list.</p>
+      ) : null}
+      <div className="flex gap-1.5">
+        <Button size="xs" onClick={props.onApply} data-testid="assistant-profile-rights-apply">
+          Apply
+        </Button>
+        <Button size="xs" variant="ghost" onClick={props.onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function OwnComputerLine(props: { readonly member: TeamMember; readonly onMove: () => void }) {
+  const { profile } = props.member;
+  if (profile.ownComputer) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1">
+          <Pill>
+            <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+            {profile.ownComputer}
+          </Pill>
+          <span className="text-xs text-muted-foreground">its own computer</span>
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Your files stay out of its reach — it opens only what you gave it.
+        </span>
+      </div>
+    );
+  }
+  if (needsOwnComputer(profile, false)) {
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <span className="text-xs text-amber-700 dark:text-amber-400">
+          Limited rights hold only on a computer of its own — next to you it could read every file.
+        </span>
+        <Button size="xs" variant="outline" onClick={props.onMove}>
+          Move to its own computer
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <span className="text-sm">
+      Next to you on {props.member.computerLabel || "this computer"}
+      <span className="ml-2 text-xs text-muted-foreground">full access can run anywhere</span>
+    </span>
+  );
+}
+
+const ACTIVITY_ICON: Readonly<Record<string, string>> = {
+  chat: "💬",
+  money: "💳",
+  delete: "🗑️",
+  deploy: "🚀",
+  teammate: "🧑‍🤝‍🧑",
+  access: "🔒",
+  note: "📝",
+};
+
+function ActivityList(props: { readonly feed: ReturnType<typeof activityFeed> }) {
+  if (props.feed.length === 0) {
+    return <p className="text-sm text-muted-foreground">Nothing yet.</p>;
+  }
+  return (
+    <div
+      className="overflow-hidden rounded-xl border border-border"
+      data-testid="assistant-profile-activity"
+    >
+      {props.feed.map((entry) => (
+        <div
+          key={`${entry.at}-${entry.kind}-${entry.text}`}
+          className="flex items-start gap-3 border-t border-border/70 px-3 py-2 text-sm first:border-t-0"
+        >
+          <span className="w-5 shrink-0 text-center">{ACTIVITY_ICON[entry.kind] ?? "•"}</span>
+          <span className="min-w-0 flex-1">
+            {entry.text}
+            {entry.important ? (
+              <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
+                also in Needs you
+              </span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {formatRelativeTimeLabel(entry.at)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AssistantProfilePage(props: {
   readonly environmentId: string;
   readonly projectId: string;
@@ -280,6 +417,10 @@ export function AssistantProfilePage(props: {
   const openNewAssistant = useAssistantOnboarding((state) => state.openNew);
   const [changingBrain, setChangingBrain] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [tab, setTab] = useState<"overview" | "activity">("overview");
+  const storeProfiles = useAssistantTeamStore((store) => store.profiles);
+  const setRights = useAssistantTeamStore((store) => store.setRights);
+  const [pending, setPending] = useState<PendingRights | null>(null);
 
   const back = (
     <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/assistants" })}>
@@ -334,14 +475,60 @@ export function AssistantProfilePage(props: {
   const descendants = descendantKeys(team, member.key);
   const computers = profile.computers.map((id) => labels.get(id) ?? "a computer");
 
-  const setPreset = (preset: AssistantPreset) => {
-    patchProfile(member.key, { preset });
+  const live = team.filter((item) => !item.revoked).map((item) => item.profile);
+  const applyRights = (rights: RightsPatch, title: string) => {
+    const losses = setRights(member.key, rights, profile);
+    setPending(null);
     toastManager.add({
       type: "success",
-      title: `${profile.name}: ${PRESET_NAME[preset]}`,
-      description: "From its next step.",
+      title,
+      description:
+        losses.length > 0
+          ? `${lossLine(losses, false)}. It's in Needs you too.`
+          : "From its next step.",
     });
   };
+  // Decision 16.10: cutting its rights cuts what it set up — say who loses
+  // what before it happens, and moving to limited rights takes a computer of
+  // its own.
+  const changeRights = (rights: RightsPatch, title: string, from: PendingRights["from"]) => {
+    const withComputer: RightsPatch =
+      rights.preset && needsOwnComputer({ ...profile, preset: rights.preset }, member.isUno)
+        ? { ...rights, ownComputer: ownComputerName(profile.name) }
+        : rights;
+    const { losses } = cascadeRights(
+      { ...storeProfiles, [member.key]: storeProfiles[member.key] ?? profile },
+      member.key,
+      withComputer,
+    );
+    const movesOut = withComputer.ownComputer !== undefined && !profile.ownComputer;
+    if (losses.length === 0 && !movesOut) {
+      applyRights(withComputer, title);
+      return;
+    }
+    setPending({ rights: withComputer, title, losses, movesOut, from });
+  };
+  const setPreset = (preset: AssistantPreset) =>
+    changeRights({ preset }, `${profile.name}: ${PRESET_NAME[preset]}`, "role");
+  const setAccess = (access: AssistantAccess) =>
+    changeRights({ access }, `${profile.name}: access changed`, "access");
+  const shownPreset = pending?.rights.preset ?? profile.preset;
+  const shownAccess = pending?.rights.access ?? accessOf(profile);
+  const warning = pending ? (
+    <RightsWarning
+      pending={pending}
+      name={profile.name}
+      onApply={() => applyRights(pending.rights, pending.title)}
+      onCancel={() => setPending(null)}
+    />
+  ) : null;
+  const feed = activityFeed(
+    profile.activity ?? [],
+    [...member.chats.conversations, ...member.chats.work].map((thread) => ({
+      title: thread.title,
+      at: new Date(threadActivityMs(thread)).toISOString(),
+    })),
+  );
   const doRevoke = () => {
     const more = revoke(member.key);
     setConfirmRevoke(false);
@@ -402,7 +589,10 @@ export function AssistantProfilePage(props: {
                 <p className="text-sm text-muted-foreground">{profileLine(profile)}</p>
                 <p className="text-xs text-muted-foreground">
                   {profile.character ? `${profile.character} · ` : ""}
-                  Takes tasks only from you · lives on {member.computerLabel || "this computer"}
+                  Takes tasks only from you · lives on{" "}
+                  {profile.ownComputer
+                    ? `${profile.ownComputer}, its own computer`
+                    : member.computerLabel || "this computer"}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -423,267 +613,337 @@ export function AssistantProfilePage(props: {
               </div>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <Section title="Now" testId="assistant-profile-now">
-                {running.length > 0 ? (
-                  running
-                    .slice(0, 4)
-                    .map((thread) => (
-                      <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
-                    ))
-                ) : (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">Idle — nothing running.</p>
-                )}
-                {(profile.schedule ?? []).map((task) => (
-                  <div
-                    key={task.name}
-                    className="flex h-8 items-center gap-2 border-t border-border/70 px-3 text-sm"
-                  >
-                    <CalendarClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate">{task.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{task.when}</span>
-                  </div>
-                ))}
-              </Section>
-
-              <Section title={`Chats · ${member.chats.conversations.length}`}>
-                {member.chats.conversations.length > 0 ? (
-                  member.chats.conversations
-                    .slice(0, 6)
-                    .map((thread) => (
-                      <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
-                    ))
-                ) : (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet.</p>
-                )}
-              </Section>
+            <div
+              className="-mt-2 flex gap-4 border-b border-border text-sm"
+              role="tablist"
+              data-testid="assistant-profile-tabs"
+            >
+              {(
+                [
+                  ["overview", "Overview"],
+                  ["activity", `Activity · ${feed.length}`],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  onClick={() => setTab(id)}
+                  className={cn(
+                    "-mb-px cursor-pointer border-b-2 pb-2 transition-colors",
+                    tab === id
+                      ? "border-foreground font-medium text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
-            <Section title="Access and role" testId="assistant-profile-access">
-              <Row label="May">
-                <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="What it may do">
-                  {PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={profile.preset === preset.id}
-                      disabled={member.revoked}
-                      onClick={() => setPreset(preset.id)}
-                      title={preset.line}
-                      className={cn(
-                        "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default",
-                        profile.preset === preset.id
-                          ? "border-primary/50 bg-primary/10 text-foreground"
-                          : "border-border text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {preset.name}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {PRESETS.find((preset) => preset.id === profile.preset)?.line}
-                </p>
-              </Row>
-              <Row label="Projects">
-                <div className="flex flex-wrap gap-1">
-                  {profile.projects === "all" ? (
-                    <Pill>Every project</Pill>
-                  ) : (
-                    profile.projects.map((name) => <Pill key={name}>{name}</Pill>)
-                  )}
-                </div>
-              </Row>
-              <Row label="Computers">
-                <div className="flex flex-wrap gap-1">
-                  {computers.map((label) => (
-                    <Pill key={label}>
-                      <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
-                      {label}
-                    </Pill>
-                  ))}
-                </div>
-              </Row>
-              <Row label="Role" last={profile.skills.length === 0}>
-                <div className="flex flex-wrap gap-1">
-                  {profile.roles.length > 0 ? (
-                    profile.roles.map((role) => <Pill key={role}>{role}</Pill>)
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </div>
-              </Row>
-              {profile.skills.length > 0 ? (
-                <Row label="Skills" last>
-                  <div className="flex flex-wrap gap-1">
-                    {profile.skills.map((skill) => (
-                      <Pill key={skill} muted>
-                        {skill}
-                      </Pill>
+            {tab === "activity" ? (
+              <ActivityList feed={feed} />
+            ) : (
+              <>
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Section title="Now" testId="assistant-profile-now">
+                    {running.length > 0 ? (
+                      running
+                        .slice(0, 4)
+                        .map((thread) => (
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
+                        ))
+                    ) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">
+                        Idle — nothing running.
+                      </p>
+                    )}
+                    {(profile.schedule ?? []).map((task) => (
+                      <div
+                        key={task.name}
+                        className="flex h-8 items-center gap-2 border-t border-border/70 px-3 text-sm"
+                      >
+                        <CalendarClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">{task.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{task.when}</span>
+                      </div>
                     ))}
-                  </div>
-                </Row>
-              ) : null}
-            </Section>
+                  </Section>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <Section
-                title="Runs on"
-                action={
-                  member.revoked ? null : (
+                  <Section title={`Chats · ${member.chats.conversations.length}`}>
+                    {member.chats.conversations.length > 0 ? (
+                      member.chats.conversations
+                        .slice(0, 6)
+                        .map((thread) => (
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
+                        ))
+                    ) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet.</p>
+                    )}
+                  </Section>
+                </div>
+
+                <Section title="Access and role" testId="assistant-profile-access">
+                  <Row label="May">
+                    <div
+                      className="flex flex-wrap gap-1"
+                      role="radiogroup"
+                      aria-label="What it may do"
+                    >
+                      {PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={shownPreset === preset.id}
+                          disabled={member.revoked}
+                          onClick={() => setPreset(preset.id)}
+                          title={preset.line}
+                          className={cn(
+                            "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default",
+                            shownPreset === preset.id
+                              ? "border-primary/50 bg-primary/10 text-foreground"
+                              : "border-border text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          {preset.name}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {PRESETS.find((preset) => preset.id === shownPreset)?.line}
+                    </p>
+                    {pending?.from === "role" ? <div className="mt-2">{warning}</div> : null}
+                  </Row>
+                  {member.isUno ? null : (
+                    <Row label="Lives on">
+                      <OwnComputerLine
+                        member={member}
+                        onMove={() =>
+                          applyRights(
+                            { ownComputer: ownComputerName(profile.name) },
+                            `${profile.name} moves to its own computer`,
+                          )
+                        }
+                      />
+                    </Row>
+                  )}
+                  <Row label="Projects">
+                    <div className="flex flex-wrap gap-1">
+                      {profile.projects === "all" ? (
+                        <Pill>Every project</Pill>
+                      ) : (
+                        profile.projects.map((name) => <Pill key={name}>{name}</Pill>)
+                      )}
+                    </div>
+                  </Row>
+                  <Row label="Computers">
+                    <div className="flex flex-wrap gap-1">
+                      {computers.map((label) => (
+                        <Pill key={label}>
+                          <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+                          {label}
+                        </Pill>
+                      ))}
+                    </div>
+                  </Row>
+                  <Row label="Role" last={profile.skills.length === 0}>
+                    <div className="flex flex-wrap gap-1">
+                      {profile.roles.length > 0 ? (
+                        profile.roles.map((role) => <Pill key={role}>{role}</Pill>)
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </Row>
+                  {profile.skills.length > 0 ? (
+                    <Row label="Skills" last>
+                      <div className="flex flex-wrap gap-1">
+                        {profile.skills.map((skill) => (
+                          <Pill key={skill} muted>
+                            {skill}
+                          </Pill>
+                        ))}
+                      </div>
+                    </Row>
+                  ) : null}
+                </Section>
+
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Section
+                    title="Runs on"
+                    action={
+                      member.revoked ? null : (
+                        <button
+                          type="button"
+                          onClick={() => setChangingBrain((value) => !value)}
+                          className="cursor-pointer text-xs text-primary hover:underline"
+                        >
+                          {changingBrain ? "Done" : "Change"}
+                        </button>
+                      )
+                    }
+                  >
+                    {changingBrain ? (
+                      <AssistantPowerPicker
+                        environmentId={member.environmentId as EnvironmentId}
+                        value={profile.brain}
+                        onChange={(brain) => patchProfile(member.key, { brain })}
+                        note={`Only for ${profile.name}.`}
+                        className="p-2 [&_[role=radiogroup]]:grid-cols-1"
+                      />
+                    ) : (
+                      <div className="px-3 py-2" data-testid="assistant-profile-brain">
+                        <p className="text-sm">{brainLine(profile, live)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {profile.brain === "uno"
+                            ? "Its own AI, counted in your plan."
+                            : "Its own AI on your account; Uno doesn't charge for it."}
+                        </p>
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Where you talk">
+                    <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
+                      <SendIcon className="size-3.5 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {CHANNEL_NAME[profile.channel]}
+                      </span>
+                      {profile.channelHandle ? (
+                        <span className="text-xs text-muted-foreground">
+                          {profile.channelHandle}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-primary">Link</span>
+                      )}
+                    </div>
+                    <div className="flex h-9 items-center gap-2 px-3 text-sm">
+                      <MessageCircleIcon className="size-3.5 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">Here in Uno Work</span>
+                      <span className="text-xs text-muted-foreground">always</span>
+                    </div>
+                  </Section>
+                </div>
+
+                <Section
+                  title="What it can use"
+                  testId="assistant-profile-can-use"
+                  action={
                     <button
                       type="button"
-                      onClick={() => setChangingBrain((value) => !value)}
+                      onClick={() => void navigate({ to: "/settings/connectors" })}
                       className="cursor-pointer text-xs text-primary hover:underline"
                     >
-                      {changingBrain ? "Done" : "Change"}
+                      Connectors in Settings
                     </button>
-                  )
-                }
-              >
-                {changingBrain ? (
-                  <AssistantPowerPicker
-                    environmentId={member.environmentId as EnvironmentId}
-                    value={profile.brain}
-                    onChange={(brain) => patchProfile(member.key, { brain })}
-                    note={`Only for ${profile.name}.`}
-                    className="p-2 [&_[role=radiogroup]]:grid-cols-1"
-                  />
-                ) : (
-                  <p className="px-3 py-2 text-sm">
-                    {BRAIN_NAME[profile.brain]}
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {profile.brain === "uno"
-                        ? "included in your plan"
-                        : profile.brain === "key"
-                          ? "billed by the key's provider"
-                          : "your plan's limits apply · Uno doesn't charge"}
-                    </span>
-                  </p>
-                )}
-              </Section>
-
-              <Section title="Where you talk">
-                <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
-                  <SendIcon className="size-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{CHANNEL_NAME[profile.channel]}</span>
-                  {profile.channelHandle ? (
-                    <span className="text-xs text-muted-foreground">{profile.channelHandle}</span>
-                  ) : (
-                    <span className="text-xs text-primary">Link</span>
-                  )}
-                </div>
-                <div className="flex h-9 items-center gap-2 px-3 text-sm">
-                  <MessageCircleIcon className="size-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">Here in Uno Work</span>
-                  <span className="text-xs text-muted-foreground">always</span>
-                </div>
-              </Section>
-            </div>
-
-            <Section
-              title="What it can use"
-              testId="assistant-profile-can-use"
-              action={
-                <button
-                  type="button"
-                  onClick={() => void navigate({ to: "/settings/connectors" })}
-                  className="cursor-pointer text-xs text-primary hover:underline"
+                  }
                 >
-                  Connectors in Settings
-                </button>
-              }
-            >
-              <TeammateAccess
-                name={profile.name}
-                access={accessOf(profile)}
-                onChange={member.revoked ? null : (access) => patchProfile(member.key, { access })}
-                foldWhenFull
-              />
-            </Section>
-
-            <Section title="Memory">
-              <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
-              <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
-            </Section>
-
-            <Section
-              title="Team"
-              testId="assistant-profile-team"
-              action={
-                <button
-                  type="button"
-                  onClick={() => openNewAssistant()}
-                  className="cursor-pointer text-xs text-primary hover:underline"
-                  data-testid="assistant-profile-new-assistant"
-                >
-                  New assistant
-                </button>
-              }
-            >
-              <div className="flex flex-col gap-0.5 p-1.5">
-                {tree.map((node) => (
-                  <TreeBranch
-                    key={node.item.key}
-                    node={node}
-                    current={member.key}
-                    onOpen={openMember}
+                  <TeammateAccess
+                    name={profile.name}
+                    access={shownAccess}
+                    onChange={member.revoked ? null : setAccess}
+                    foldWhenFull
                   />
-                ))}
-              </div>
-              <div className="border-t border-border/70 px-3 py-2.5 text-xs text-muted-foreground">
-                {parent ? (
-                  <p>
-                    Set up by {parent.profile.name}
-                    {" · "}
-                    {beyond.length === 0
-                      ? `${parent.profile.name} can set up a helper within its own rights — you'll see it in Needs you.`
-                      : `beyond ${parent.profile.name}'s access: ${beyond.join(", ")}`}
-                  </p>
-                ) : (
-                  <p>Set up by you.</p>
-                )}
-                {member.revoked ? null : confirmRevoke ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-foreground">
-                      Revoke {profile.name}
-                      {descendants.length > 0
-                        ? ` and ${descendants.length} assistant${descendants.length === 1 ? "" : "s"} it set up`
-                        : ""}
-                      ?
-                    </span>
-                    <Button
-                      size="xs"
-                      variant="destructive"
-                      onClick={doRevoke}
-                      data-testid="assistant-profile-revoke-confirm"
+                  {pending?.from === "access" ? (
+                    <div className="border-t border-border/70 p-2">{warning}</div>
+                  ) : null}
+                </Section>
+
+                <Section title="Memory">
+                  <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
+                  <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
+                </Section>
+
+                <Section
+                  title="Team"
+                  testId="assistant-profile-team"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => openNewAssistant()}
+                      className="cursor-pointer text-xs text-primary hover:underline"
+                      data-testid="assistant-profile-new-assistant"
                     >
-                      Revoke
-                    </Button>
-                    <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
-                      Cancel
-                    </Button>
+                      New assistant
+                    </button>
+                  }
+                >
+                  <div className="flex flex-col gap-0.5 p-1.5">
+                    {tree.map((node) => (
+                      <TreeBranch
+                        key={node.item.key}
+                        node={node}
+                        current={member.key}
+                        onOpen={openMember}
+                      />
+                    ))}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRevoke(true)}
-                    className="mt-1.5 inline-flex cursor-pointer items-center gap-1 text-destructive hover:underline"
-                    data-testid="assistant-profile-revoke"
-                  >
-                    <UserRoundXIcon className="size-3.5" />
-                    Revoke access
-                    {descendants.length > 0
-                      ? ` — also revokes ${descendants
-                          .map((key) => team.find((item) => item.key === key)?.profile.name ?? "")
-                          .filter(Boolean)
-                          .join(", ")}`
-                      : ""}
-                  </button>
-                )}
-              </div>
-            </Section>
+                  <div className="border-t border-border/70 px-3 py-2.5 text-xs text-muted-foreground">
+                    {parent ? (
+                      <p>
+                        Set up by {parent.profile.name}
+                        {" · "}
+                        {beyond.length === 0
+                          ? `${parent.profile.name} can set up a helper within its own rights — you'll see it in Needs you.`
+                          : `beyond ${parent.profile.name}'s access: ${beyond.join(", ")}`}
+                      </p>
+                    ) : (
+                      <p>Set up by you.</p>
+                    )}
+                    {member.revoked ? null : confirmRevoke ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-foreground">
+                          Revoke {profile.name}
+                          {descendants.length > 0
+                            ? ` and ${descendants.length} assistant${descendants.length === 1 ? "" : "s"} it set up`
+                            : ""}
+                          ?
+                        </span>
+                        <Button
+                          size="xs"
+                          variant="destructive"
+                          onClick={doRevoke}
+                          data-testid="assistant-profile-revoke-confirm"
+                        >
+                          Revoke
+                        </Button>
+                        <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRevoke(true)}
+                        className="mt-1.5 inline-flex cursor-pointer items-center gap-1 text-destructive hover:underline"
+                        data-testid="assistant-profile-revoke"
+                      >
+                        <UserRoundXIcon className="size-3.5" />
+                        Revoke access
+                        {descendants.length > 0
+                          ? ` — also revokes ${descendants
+                              .map(
+                                (key) => team.find((item) => item.key === key)?.profile.name ?? "",
+                              )
+                              .filter(Boolean)
+                              .join(", ")}`
+                          : ""}
+                      </button>
+                    )}
+                  </div>
+                </Section>
+              </>
+            )}
           </div>
         </div>
       </div>

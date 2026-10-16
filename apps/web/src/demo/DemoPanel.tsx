@@ -166,11 +166,11 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="demo-panel-pill"
-        className="fixed bottom-2.5 left-[16.5rem] z-[90] inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
+        title="Что смотреть — 10 пунктов мока"
+        className="fixed top-1/2 left-[16rem] z-[90] inline-flex translate-x-1 -translate-y-1/2 cursor-pointer flex-row items-center gap-1.5 rounded-full border border-border bg-popover px-1 py-2.5 text-[11px] font-medium text-popover-foreground shadow-lg [writing-mode:vertical-rl] hover:bg-accent"
       >
         <EyeIcon className="size-3.5" />
-        Что смотреть · 10
-        <ChevronUpIcon className="size-3.5 text-muted-foreground" />
+        Что смотреть
       </button>
     );
   }
@@ -181,7 +181,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
       role="dialog"
       aria-label="Что смотреть"
       data-testid="demo-panel"
-      className="fixed bottom-2.5 left-2.5 z-[90] flex max-h-[calc(100vh-1.25rem)] w-[min(25rem,calc(100vw-1.5rem))] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+      className="fixed top-1/2 left-[16.75rem] z-[90] flex max-h-[calc(100vh-1.25rem)] -translate-y-1/2 w-[min(25rem,calc(100vw-1.5rem))] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-1">
         <div className="min-w-0">

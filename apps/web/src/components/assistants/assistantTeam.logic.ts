@@ -230,6 +230,11 @@ export interface AssistantDraft {
   readonly character: string;
   readonly skills: ReadonlyArray<string>;
   readonly access: AssistantAccess;
+  /**
+   * With limited rights: the computer it lives on — the label of one you
+   * have, or null for a new Lite one named `ownComputerName` (decision 16.10).
+   */
+  readonly ownComputer: string | null;
 }
 
 /**
@@ -256,6 +261,7 @@ export function defaultDraft(input: {
     character: "Calm and brief",
     skills: input.forUno ? ["Morning plan", "Reminders"] : [],
     access: input.forUno ? FULL_ACCESS : NEW_TEAMMATE_ACCESS,
+    ownComputer: null,
   };
 }
 
@@ -332,6 +338,14 @@ export function rightsBeyondParent(
  * set up, automatically — each child keeps only what is within its parent.
  * Returns the child as it becomes and, in plain words, what it loses.
  */
+/** The four apps of the Uno account, by provider id, for "Scout will lose: …". */
+const APP_NAME: Readonly<Record<string, string>> = {
+  github: "GitHub",
+  "google-drive": "Google Drive",
+  notion: "Notion",
+  gmail: "Gmail & Calendar",
+};
+
 export function clampToParent(
   parent: Pick<AssistantProfile, "preset" | "projects" | "computers" | "access">,
   child: AssistantProfile,
@@ -358,14 +372,28 @@ export function clampToParent(
   const childAccess = accessOf(child);
   const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
   const browser =
-    rank[childAccess.browser] > rank[parentAccess.browser] ? parentAccess.browser : childAccess.browser;
+    rank[childAccess.browser] > rank[parentAccess.browser]
+      ? parentAccess.browser
+      : childAccess.browser;
   if (browser !== childAccess.browser) lost.push("using the browser freely");
   const access: AssistantAccess = {
     ...childAccess,
     browser,
-    connectors: clampList(parentAccess.connectors, childAccess.connectors, (id) => id.replace(/^mcp:/, "")),
-    logins: clampList(parentAccess.logins, childAccess.logins, (id) => `login ${id.replace(/^cred-/, "")}`),
-    secrets: clampList(parentAccess.secrets, childAccess.secrets, (id) => `key ${id.replace(/^cred-/, "")}`),
+    connectors: clampList(
+      parentAccess.connectors,
+      childAccess.connectors,
+      (id) => APP_NAME[id] ?? id.replace(/^mcp:/, ""),
+    ),
+    logins: clampList(
+      parentAccess.logins,
+      childAccess.logins,
+      (id) => `login ${id.replace(/^cred-/, "")}`,
+    ),
+    secrets: clampList(
+      parentAccess.secrets,
+      childAccess.secrets,
+      (id) => `key ${id.replace(/^cred-/, "")}`,
+    ),
     projectSkills: childAccess.projectSkills && parentAccess.projectSkills,
   };
   if (childAccess.projectSkills && !access.projectSkills) lost.push("project skills");
@@ -397,6 +425,72 @@ export function brainLine(
   }
 }
 
+export interface RightsLoss {
+  readonly key: AssistantKey;
+  readonly name: string;
+  readonly lost: ReadonlyArray<string>;
+}
+
+/**
+ * Applies a change of rights to one assistant and cuts everything it set up
+ * down to the new rights, all the way down. `losses` names who loses what —
+ * the warning before, the Inbox card after.
+ */
+export function cascadeRights(
+  profiles: Readonly<Record<AssistantKey, AssistantProfile>>,
+  key: AssistantKey,
+  patch: Partial<
+    Pick<AssistantProfile, "preset" | "projects" | "computers" | "access" | "ownComputer">
+  >,
+): {
+  readonly profiles: Record<AssistantKey, AssistantProfile>;
+  readonly losses: ReadonlyArray<RightsLoss>;
+} {
+  const next: Record<AssistantKey, AssistantProfile> = { ...profiles };
+  const current = next[key];
+  if (!current) return { profiles: next, losses: [] };
+  next[key] = { ...current, ...patch };
+  const losses: RightsLoss[] = [];
+  const queue: AssistantKey[] = [key];
+  const seen = new Set<AssistantKey>(queue);
+  while (queue.length > 0) {
+    const parentKey = queue.shift()!;
+    const parent = next[parentKey]!;
+    for (const [childKey, child] of Object.entries(next)) {
+      if (child.createdBy !== parentKey || seen.has(childKey) || child.revokedAt !== null) continue;
+      seen.add(childKey);
+      const { child: clamped, lost } = clampToParent(parent, child);
+      next[childKey] = clamped;
+      if (lost.length > 0) losses.push({ key: childKey, name: child.name, lost });
+      queue.push(childKey);
+    }
+  }
+  return { profiles: next, losses };
+}
+
+/** "Scout will lose: Google Drive, login github." */
+export function lossLine(losses: ReadonlyArray<RightsLoss>, future = true): string {
+  return losses
+    .map((loss) => `${loss.name} ${future ? "will lose" : "lost"}: ${loss.lost.join(", ")}`)
+    .join(" · ");
+}
+
+/**
+ * Decision 16.10: limited rights hold only on a computer of its own — on a
+ * shared one any assistant can read the others' files. Uno lives with you.
+ */
+export function needsOwnComputer(
+  profile: Pick<AssistantProfile, "preset" | "ownComputer">,
+  isUno: boolean,
+): boolean {
+  return !isUno && profile.preset !== "full" && !profile.ownComputer;
+}
+
+/** "scout-box" — the name its own computer gets. */
+export function ownComputerName(name: string): string {
+  return `${assistantProjectIdFor(name).replace(/^assistant-/, "")}-box`;
+}
+
 // ── What it did ───────────────────────────────────────────────────────────
 
 /** Kinds the Inbox also gets (decision 16.10): money, deleting, a deploy, a new teammate. */
@@ -421,9 +515,17 @@ export function activityFeed(
   own: ReadonlyArray<AssistantActivityEntry>,
   chats: ReadonlyArray<{ readonly title: string; readonly at: string }>,
 ): ReadonlyArray<AssistantActivityEntry & { readonly important: boolean }> {
-  return [...own, ...chats.map((chat) => ({ at: chat.at, kind: "chat" as const, text: chat.title }))]
+  return [
+    ...own,
+    ...chats.map((chat) => ({ at: chat.at, kind: "chat" as const, text: chat.title })),
+  ]
     .toSorted((a, b) => b.at.localeCompare(a.at))
-    .map((entry) => ({ ...entry, important: IMPORTANT_ACTIVITY.has(entry.kind) }));
+    .map((entry) => ({
+      at: entry.at,
+      kind: entry.kind,
+      text: entry.text,
+      important: IMPORTANT_ACTIVITY.has(entry.kind),
+    }));
 }
 
 // ── Who set up whom ───────────────────────────────────────────────────────

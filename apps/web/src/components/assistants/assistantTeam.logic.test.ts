@@ -2,7 +2,21 @@ import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  type AssistantProfile,
+  FULL_ACCESS,
+  NEW_TEAMMATE_ACCESS,
+  activityFeed,
   assistantActivity,
+  brainLine,
+  cascadeRights,
+  clampToParent,
+  lossLine,
+  needsOwnComputer,
+  ownComputerName,
+  pickedLine,
+  suggestName,
+  togglePicked,
+  toggleRole,
   assistantProjectIdFor,
   buildAssistantTree,
   chatsOfAssistant,
@@ -203,5 +217,132 @@ describe("telegramStartLink", () => {
     expect(telegramStartLink("@uno_team_bot", "ab c")).toBe(
       "https://t.me/uno_team_bot?start=ab%20c",
     );
+  });
+});
+
+const profile = (name: string, extra: Partial<AssistantProfile> = {}): AssistantProfile => ({
+  environmentId: "env-1",
+  projectId: `assistant-${name.toLowerCase()}`,
+  name,
+  emoji: "🙂",
+  tone: "violet",
+  roles: [],
+  character: "",
+  skills: [],
+  preset: "full",
+  brain: "uno",
+  channel: "uno-bot",
+  channelHandle: null,
+  projects: "all",
+  computers: ["env-1"],
+  createdBy: null,
+  createdAt: "2026-10-01T00:00:00Z",
+  setUpAt: null,
+  revokedAt: null,
+  ...extra,
+});
+
+describe("names and roles", () => {
+  it("suggests a name nobody has yet", () => {
+    expect(suggestName(["Ada"])).toBe("Scout");
+  });
+  it("picking a role turns on its first skills; unpicking drops them", () => {
+    const on = toggleRole({ roles: [], skills: [] }, "Developer");
+    expect(on.roles).toEqual(["Developer"]);
+    expect(on.skills.length).toBeGreaterThan(0);
+    const off = toggleRole(on, "Developer");
+    expect(off.roles).toEqual([]);
+  });
+});
+
+describe("picked lists", () => {
+  const all = ["a", "b", "c"];
+  it("unticking one of all keeps the rest", () => {
+    expect(togglePicked("all", "b", all)).toEqual(["a", "c"]);
+  });
+  it("says it plainly", () => {
+    const names = all.map((id) => ({ id, name: id.toUpperCase() }));
+    expect(pickedLine("all", names, { all: "every", none: "none" })).toBe("every (3)");
+    expect(pickedLine([], names, { all: "every", none: "none" })).toBe("none");
+  });
+  it("a new teammate starts with no passwords; Uno with all", () => {
+    expect(NEW_TEAMMATE_ACCESS.secrets).toEqual([]);
+    expect(NEW_TEAMMATE_ACCESS.logins).toEqual([]);
+    expect(FULL_ACCESS.secrets).toBe("all");
+  });
+});
+
+describe("cutting rights down the tree (16.10)", () => {
+  const uno = profile("Uno", { projectId: ASSISTANT_PROJECT_ID });
+  const unoKey = `env-1:${ASSISTANT_PROJECT_ID}`;
+  const scout = profile("Scout", {
+    preset: "helper",
+    createdBy: unoKey,
+    projects: ["landing", "uno-project"],
+    access: { ...NEW_TEAMMATE_ACCESS, connectors: ["google-drive", "github"] },
+  });
+  const helper = profile("Echo", {
+    preset: "observer",
+    createdBy: "env-1:assistant-scout",
+    access: { ...NEW_TEAMMATE_ACCESS, connectors: ["github"] },
+  });
+  const team = { [unoKey]: uno, "env-1:assistant-scout": scout, "env-1:assistant-echo": helper };
+
+  it("clamps a child to its parent and names what it lost", () => {
+    const { child, lost } = clampToParent(
+      { ...uno, preset: "observer", projects: ["landing"] },
+      scout,
+    );
+    expect(child.preset).toBe("observer");
+    expect(child.projects).toEqual(["landing"]);
+    expect(lost).toContain("uno-project");
+  });
+
+  it("goes all the way down and lists who lost what", () => {
+    const { profiles, losses } = cascadeRights(team, unoKey, {
+      access: { ...FULL_ACCESS, connectors: ["google-drive"] },
+    });
+    expect(losses.map((loss) => loss.name)).toEqual(["Scout", "Echo"]);
+    expect(profiles["env-1:assistant-echo"]!.access!.connectors).toEqual([]);
+    expect(lossLine(losses)).toBe("Scout will lose: GitHub · Echo will lose: GitHub");
+  });
+
+  it("losing nothing says nothing", () => {
+    expect(cascadeRights(team, unoKey, { preset: "full" }).losses).toEqual([]);
+  });
+});
+
+describe("its own computer (16.10)", () => {
+  it("limited rights need one; full access and Uno don't", () => {
+    expect(needsOwnComputer({ preset: "helper" }, false)).toBe(true);
+    expect(needsOwnComputer({ preset: "helper", ownComputer: "scout-box" }, false)).toBe(false);
+    expect(needsOwnComputer({ preset: "full" }, false)).toBe(false);
+    expect(needsOwnComputer({ preset: "observer" }, true)).toBe(false);
+  });
+  it("is named after it", () => {
+    expect(ownComputerName("Scout")).toBe("scout-box");
+  });
+});
+
+describe("whose AI it spends", () => {
+  it("says the plan and who shares it", () => {
+    const team = [
+      profile("Uno"),
+      profile("Scout", { brain: "chatgpt" }),
+      profile("Ada", { brain: "chatgpt" }),
+    ];
+    expect(brainLine(team[1]!, team)).toBe("Uses your ChatGPT plan's limits · shared with Ada");
+    expect(brainLine(team[0]!, team)).toBe("Uno AI · from your plan's AI hours");
+  });
+});
+
+describe("activityFeed", () => {
+  it("mixes its own events with chats, newest first, money flagged", () => {
+    const feed = activityFeed(
+      [{ at: "2026-10-15T10:00:00Z", kind: "money", text: "Paid" }],
+      [{ title: "Chat", at: "2026-10-15T11:00:00Z" }],
+    );
+    expect(feed.map((entry) => entry.text)).toEqual(["Chat", "Paid"]);
+    expect(feed.map((entry) => entry.important)).toEqual([false, true]);
   });
 });

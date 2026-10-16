@@ -109,6 +109,8 @@ function Block(props: {
   readonly line: ReactNode;
   readonly control?: ReactNode;
   readonly details?: ReactNode;
+  /** Shown right away, not under Details: the picks a person makes (passwords). */
+  readonly picks?: ReactNode;
   readonly testId?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -127,6 +129,7 @@ function Block(props: {
             {props.control}
           </div>
           <div className="text-xs leading-snug text-muted-foreground">{props.line}</div>
+          {props.picks ? <div className="mt-1 flex flex-col gap-0.5">{props.picks}</div> : null}
           {props.details ? (
             <>
               <button
@@ -185,6 +188,13 @@ function CheckLine(props: {
     </button>
   );
 }
+
+const TechLine = (props: { readonly label: ReactNode; readonly tech: string }) => (
+  <span className="flex gap-2 px-1.5 text-[11px]">
+    <span className="w-28 shrink-0 truncate text-foreground">{props.label}</span>
+    <span className="min-w-0 truncate font-mono text-muted-foreground">{props.tech}</span>
+  </span>
+);
 
 const Note = (props: { readonly children: ReactNode }) => (
   <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-muted-foreground">
@@ -415,20 +425,17 @@ export function TeammateAccess(props: {
             ))}
           </ToggleGroup>
         }
-        details={
-          <>
-            {vault.logins.length === 0 ? (
-              <span className="px-1.5 text-xs text-muted-foreground">
-                Saved logins come from Credentials and the browser’s “Save password”.
-              </span>
-            ) : (
-              vault.logins.map((entry) => (
+        picks={
+          // Decision 16.10: a teammate signs in only where you ticked — the
+          // list is right here, empty for a new one.
+          access.logins !== "all" && access.browser !== "off" && vault.logins.length > 0
+            ? vault.logins.map((entry) => (
                 <CheckLine
                   key={entry.id}
                   checked={pickedOf(access.logins, vault.logins).some(
                     (item) => item.id === entry.id,
                   )}
-                  disabled={readOnly || access.browser === "off"}
+                  disabled={readOnly}
                   onToggle={() =>
                     set({
                       logins: togglePicked(
@@ -444,10 +451,35 @@ export function TeammateAccess(props: {
                       <span className="text-muted-foreground">· {entry.username}</span>
                     </>
                   }
+                />
+              ))
+            : null
+        }
+        details={
+          <>
+            {vault.logins.length === 0 ? (
+              <span className="px-1.5 text-xs text-muted-foreground">
+                Saved logins come from Credentials and the browser’s “Save password”.
+              </span>
+            ) : (
+              vault.logins.map((entry) => (
+                <TechLine
+                  key={entry.id}
+                  label={siteOf(entry.url)}
                   tech={`vault › ${entry.label} · filled by Uno (vault.fill)`}
                 />
               ))
             )}
+            {access.logins === "all" && access.browser !== "off" && vault.logins.length > 0 ? (
+              <button
+                type="button"
+                disabled={readOnly}
+                onClick={() => set({ logins: [] })}
+                className="cursor-pointer self-start px-1.5 text-xs text-primary hover:underline disabled:cursor-default disabled:opacity-50"
+              >
+                Pick sites instead
+              </button>
+            ) : null}
             <Note>Uno types the password into the page itself — the AI never reads it.</Note>
           </>
         }
@@ -484,10 +516,10 @@ export function TeammateAccess(props: {
             />
           ) : null
         }
-        details={
-          vault.secrets.length > 0 ? (
-            <>
-              {vault.secrets.map((entry) => (
+        picks={
+          // Decision 16.10: Uno gets every key; a new teammate only the ticked ones.
+          access.secrets !== "all" && vault.secrets.length > 0
+            ? vault.secrets.map((entry) => (
                 <CheckLine
                   key={entry.id}
                   checked={pickedOf(access.secrets, vault.secrets).some(
@@ -503,6 +535,17 @@ export function TeammateAccess(props: {
                       ),
                     })
                   }
+                  label={entry.label}
+                />
+              ))
+            : null
+        }
+        details={
+          vault.secrets.length > 0 ? (
+            <>
+              {vault.secrets.map((entry) => (
+                <TechLine
+                  key={entry.id}
                   label={entry.label}
                   tech={`vault › ${entry.id}${entry.username ? ` · ${entry.username}` : ""}`}
                 />
