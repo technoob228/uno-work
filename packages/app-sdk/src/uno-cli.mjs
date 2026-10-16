@@ -513,7 +513,13 @@ export function renderStatus(status) {
     );
   }
   for (const disk of status.disks ?? []) {
-    const used = disk.totalGb > 0 ? Math.round((1 - disk.freeGb / disk.totalGb) * 100) : 0;
+    // usedPct comes from Uno Work (as df shows it); older versions don't send it.
+    const used =
+      typeof disk.usedPct === "number"
+        ? disk.usedPct
+        : disk.totalGb > 0
+          ? Math.round((1 - disk.freeGb / disk.totalGb) * 100)
+          : 0;
     lines.push(
       `Disk    ${disk.mount}: ${disk.freeGb} GB free of ${disk.totalGb} GB (${used}% used)`,
     );

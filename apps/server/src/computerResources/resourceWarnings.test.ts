@@ -66,4 +66,17 @@ describe("resourceWarnings", () => {
       resourceWarnings({ memory: { ...memory, swapUsedMb: 900 }, volumes: [disk(5)] }),
     ).toEqual([]);
   });
+
+  it("counts the disk like df: root's reserved blocks are neither used nor free", () => {
+    // 2507 on 16.10: df said 88%, the old formula 84% and no warning.
+    const volume = {
+      label: "Disk",
+      mount: "/home/unowork",
+      totalGb: 39.29,
+      usedGb: 32.5,
+      freeGb: 4.6,
+    };
+    const [note] = resourceWarnings({ memory, volumes: [volume] });
+    expect(note).toContain("(88% used)");
+  });
 });
