@@ -4,6 +4,7 @@ import {
   featureFlagDefault,
   readStoredFeatureFlag,
   resolveFeatureFlag,
+  type FeatureFlagDefinition,
   type FeatureFlagKey,
 } from "../../featureFlags";
 import { useFeatureFlagOverrides, useSetFeatureFlag } from "../../hooks/useFeatureFlags";
@@ -31,7 +32,12 @@ export function LabsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title={stage ? "Feature flags · stage" : "Feature flags"}>
-        {FEATURE_FLAGS.filter((flag) => !RETIRED_FEATURE_FLAGS.has(flag.key)).map((flag) => {
+        {FEATURE_FLAGS.filter(
+          (flag) =>
+            !RETIRED_FEATURE_FLAGS.has(flag.key) &&
+            // Stage-only work (0.0.139 Labs) isn't offered on the release channel.
+            (stage || (flag as FeatureFlagDefinition).stageDefault === undefined),
+        ).map((flag) => {
           const key = flag.key as FeatureFlagKey;
           const value = resolveFeatureFlag(overrides, key, stage);
           const stored = readStoredFeatureFlag(overrides, key);

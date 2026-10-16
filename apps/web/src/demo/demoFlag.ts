@@ -1,6 +1,6 @@
 /**
  * Demo mode of the real web client (w0138 mock, 16.10): `?demo=w0138` in the
- * address — or a static build with VITE_DEMO=w0138 — answers every computer
+ * address of the dev server — or a static build with VITE_DEMO=w0138 — answers every computer
  * inside the page from fixtures (demoBoot.ts) and shows the "what to look at"
  * panel with the variant switches. Without it nothing here is on and nothing
  * of the demo is loaded: this file is the only part the normal app imports.
@@ -12,7 +12,9 @@ import { create } from "zustand";
 
 function readDemo(): boolean {
   if (import.meta.env.VITE_DEMO === "w0138") return true;
-  if (typeof location === "undefined") return false;
+  // `?demo=` only on the dev server: in a real build the link must not swap
+  // the person's saved computers for demo ones (demoBoot clears storage).
+  if (!import.meta.env.DEV || typeof location === "undefined") return false;
   try {
     return new URLSearchParams(location.search).get("demo") === "w0138";
   } catch {

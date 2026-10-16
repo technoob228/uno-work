@@ -8,17 +8,12 @@
 
 ---
 
-## v0.0.139 — stage (not released)
+## v0.0.139 — 2026-10-16
 
-Stage candidate for Misha's stage computer (stage-work, channel `stage`) and the "Uno Work Stage" desktop app. Everything new is behind Labs flags: on by default only on the stage channel, the release behaviour everywhere else.
-
-- Two browsers, two buttons in the panel: your site (first and always the default; on the web — a tab of your browser with the Uno extension) and the agent's browser, where you take control to sign in for it; a card in the chat says when the agent needs you there. Apps always (with an empty state), no Terminal tile (Labs: Panel launcher).
-- Desktop app: Comment and Debug in the panel's browser — notes on parts of a page, the page's console and network, "Send to chat" (Labs: Comment and Debug).
-- A tab on the whole screen: the chat is one compact block that folds into a mini window; answers pop up as a hint (Labs: Compact chat).
-- Panel tabs: pin to the project or to every chat, "All tabs" with the ones open in other chats (Labs: Pinned tabs).
-- Sidebar: pick the view from its title — projects, one list, inbox, by computer — and filter by project; one list and Inbox show each chat's project (Labs: Sidebar view menu).
-- Uno on top of the sidebar unfolds its chats, "+" starts a new one; the first click introduces Uno and picks what it runs on, with full access to the computer (Labs: Uno's chats).
-- ↗ on a file in the panel: open it in your editor or share it with a link (Labs: Share a file).
+- Sharing a file with a password (Files → Share): **Generate** fills in a readable random password, **Copy** copies it, and **Copy link and password** copies both at once.
+- Security: a computer started from a memory snapshot gets its own assistant tokens (old ones stop working), and agent-only routes answer only from inside the computer. On the first start of 0.0.139 every computer renews its assistant tokens once.
+- Wording: the model picker and the chat header say "Uno AI" instead of "Uno gateway"; clearer permission descriptions when connecting tools; your MCP servers show as "name · your MCP server" with the address shortened.
+- For the stage channel only (Misha's stage computer and the "Uno Work Stage" desktop app), behind Labs flags that are off and hidden everywhere else: two browsers in the panel (your site and the agent's browser), Comment and Debug in the desktop browser, a compact chat on a full-screen tab, tab groups like Chrome (This chat → Project → Everywhere, drag to move, click a label to collapse), the sidebar's view menu and a folded project that keeps only the open chat, Uno's chats in the sidebar, and ↗ on a file (open in your editor or share with a link).
 
 ## v0.0.138 — 2026-10-16
 

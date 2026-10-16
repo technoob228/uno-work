@@ -209,6 +209,12 @@ const DESKTOP_FLAVOR = resolveDesktopFlavor({
     }
   })(),
 });
+/**
+ * Labs of 0.0.139 that live in this process (Comment/Debug's page preload and
+ * DevTools link, "Share with a link" via Uno Drive): only in "Uno Work Stage"
+ * for now — the release app's panel browser stays as in 0.0.138.
+ */
+const DESKTOP_STAGE_LABS = DESKTOP_FLAVOR === "stage";
 const DESKTOP_IDENTITY = resolveDesktopIdentity({
   flavor: DESKTOP_FLAVOR,
   isDevelopment,
@@ -2089,32 +2095,33 @@ function registerIpcHandlers(): void {
   // "Share with a link…" for a file on this Mac: a copy to Uno Drive → Shared/
   // with the desktop's own sign-in, then a link to it (driveShareFile.ts).
   ipcMain.removeHandler(UNO_DRIVE_SHARE_FILE_CHANNEL);
-  handleTrustedIpc(UNO_DRIVE_SHARE_FILE_CHANNEL, async (_event, raw: unknown) => {
-    const input = raw as { path?: unknown; expiresInHours?: unknown } | null;
-    if (typeof input?.path !== "string") return { ok: false, error: "No file to share." };
-    try {
-      return await shareLocalFileViaDrive(
-        {
-          consoleUrl: UNO_CONSOLE_URL,
-          homeDir: OS.homedir(),
-          accountRequest: (request) => unoAccount.request(request),
-          inspect: nodeInspectFile,
-          upload: nodeUploadFile,
-        },
-        {
-          path: input.path,
-          ...(typeof input.expiresInHours === "number"
-            ? { expiresInHours: input.expiresInHours }
-            : {}),
-        },
-      );
-    } catch (error) {
-      console.warn("[desktop] sharing a file failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return { ok: false, error: "Sharing didn't work. Check the connection and try again." };
-    }
-  });
+  if (DESKTOP_STAGE_LABS)
+    handleTrustedIpc(UNO_DRIVE_SHARE_FILE_CHANNEL, async (_event, raw: unknown) => {
+      const input = raw as { path?: unknown; expiresInHours?: unknown } | null;
+      if (typeof input?.path !== "string") return { ok: false, error: "No file to share." };
+      try {
+        return await shareLocalFileViaDrive(
+          {
+            consoleUrl: UNO_CONSOLE_URL,
+            homeDir: OS.homedir(),
+            accountRequest: (request) => unoAccount.request(request),
+            inspect: nodeInspectFile,
+            upload: nodeUploadFile,
+          },
+          {
+            path: input.path,
+            ...(typeof input.expiresInHours === "number"
+              ? { expiresInHours: input.expiresInHours }
+              : {}),
+          },
+        );
+      } catch (error) {
+        console.warn("[desktop] sharing a file failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { ok: false, error: "Sharing didn't work. Check the connection and try again." };
+      }
+    });
 
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
   handleTrustedIpc(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
@@ -2772,11 +2779,11 @@ function createWindow(): BrowserWindow {
     // The panel browser (and only it) gets our own page preload for Comment
     // and Debug (pageTools/): never a preload the page or the app asked for.
     // Its first address (checked just above) loads once Debug listens.
-    getPageToolsMain().willAttachWebview(webPreferences, params);
+    if (DESKTOP_STAGE_LABS) getPageToolsMain().willAttachWebview(webPreferences, params);
   });
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
     guardGuestSessionPermissions(guestContents.session);
-    getPageToolsMain().didAttachWebview(guestContents);
+    if (DESKTOP_STAGE_LABS) getPageToolsMain().didAttachWebview(guestContents);
     guestContents.setWindowOpenHandler(({ url }) => {
       const safeUrl = getSafeExternalUrl(url);
       if (safeUrl && !window.isDestroyed()) {
