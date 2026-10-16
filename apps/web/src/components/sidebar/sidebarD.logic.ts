@@ -148,7 +148,10 @@ export interface DStatusSection<T> {
 }
 
 /** Top to bottom: what waits for the person, what broke, what runs, the rest. */
-export const STATUS_SECTIONS: ReadonlyArray<{ readonly id: DStatusSectionId; readonly label: string }> = [
+export const STATUS_SECTIONS: ReadonlyArray<{
+  readonly id: DStatusSectionId;
+  readonly label: string;
+}> = [
   { id: "needs-you", label: "Needs you" },
   { id: "your-turn", label: "Ready" },
   { id: "failed", label: "Failed" },
@@ -225,6 +228,22 @@ export function previewDGroup<T>(input: {
   if (input.expanded) return { visible: input.chats, hiddenCount: 0, canCollapse: true };
   const visible = input.chats.filter((chat, index) => index < limit || input.keepVisible(chat));
   return { visible, hiddenCount: input.chats.length - visible.length, canCollapse: false };
+}
+
+/**
+ * What a folded group (a project, a computer) still lists under its row
+ * (Misha 16.10: "пусть сворачиваются, но остаётся только один"): folded is
+ * always folded — the open chat alone stays when it is in the group, else
+ * nothing. Null when the group is open: it lists its chats as usual.
+ */
+export function foldedGroupChats<T>(input: {
+  readonly chats: ReadonlyArray<T>;
+  readonly folded: boolean;
+  readonly isOpen: (chat: T) => boolean;
+}): ReadonlyArray<T> | null {
+  if (!input.folded) return null;
+  const open = input.chats.find(input.isOpen);
+  return open === undefined ? [] : [open];
 }
 
 /** "3 running", or nothing. */

@@ -88,9 +88,7 @@ import { TasksTabBody, TasksTabName } from "./TasksTabBody";
 import { PanelLauncher } from "./PanelLauncher";
 import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
-import { AllTabsMenu } from "./AllTabsMenu";
 import { useCurrentProjectName } from "./usePanelChats";
-import { DEMO, demoHooks } from "../../demo/demoFlag";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -1746,10 +1744,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
-  const [allTabsOpen, setAllTabsOpen] = useState(false);
-  useEffect(() => {
-    if (DEMO) demoHooks.openAllTabs = () => setAllTabsOpen(true);
-  }, []);
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
   // появиться в лаунчере (Apps) без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
@@ -2014,14 +2008,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </button>
           ) : null}
         </div>
-        {files.length > 0 || currentChatThreadId !== null ? (
-          <AllTabsMenu
-            kindIcon={KIND_ICON}
-            projectName={projectName}
-            open={allTabsOpen}
-            onOpenChange={setAllTabsOpen}
-          />
-        ) : null}
         {/* One full-screen control (D24): the tab over the whole window with the
             chat at the bottom; "leave the chat" lives in its little menu. */}
         <Button

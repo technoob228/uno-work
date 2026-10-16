@@ -25,6 +25,7 @@ import { type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { filesApi } from "../files/filesApi";
+import { PasswordGenerateControls } from "../files/PasswordGenerateControls";
 import { canShareForEditing } from "../files/ShareDialog";
 import { shareUrl, useShareBaseUrl } from "../files/useShareBaseUrl";
 import { Button } from "../ui/button";
@@ -111,7 +112,7 @@ export function FileSharePopover({
   }, [open, path]);
 
   const create = useMutation({
-    mutationFn: async (): Promise<string> => {
+    mutationFn: async (linkPassword: string | null): Promise<string> => {
       if (!environmentId) throw new Error("This computer isn't connected.");
       const api = filesApi(environmentId);
       if (route === "cloud-copy") {
@@ -126,7 +127,7 @@ export function FileSharePopover({
       const share = await api.createShare({
         path,
         expiresInSeconds: hours * 3600,
-        password: withPassword ? password : null,
+        password: linkPassword,
         ...(editable ? { access: canEdit ? "edit" : "view" } : {}),
       });
       const url = shareUrl(base, share.urlPath);
@@ -144,6 +145,8 @@ export function FileSharePopover({
   });
 
   const url = create.data ?? null;
+  // The password the link was made with (what create.mutate was given).
+  const linkPassword = create.variables ?? null;
   const copy = async () => {
     if (!url) return;
     await navigator.clipboard.writeText(url).catch(() => undefined);
@@ -188,6 +191,9 @@ export function FileSharePopover({
                   {copied ? "Copied" : "Copy"}
                 </Button>
               </div>
+              {linkPassword ? (
+                <PasswordGenerateControls password={linkPassword} link={url} size="sm" />
+              ) : null}
               {route === "cloud-copy" ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="min-w-0 flex-1">
@@ -272,13 +278,11 @@ export function FileSharePopover({
                   )}
                 </div>
                 {passwordAvailable && withPassword ? (
-                  <Input
+                  <PasswordGenerateControls
+                    password={password}
+                    onPasswordChange={setPassword}
+                    link={null}
                     size="sm"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="At least 4 characters"
-                    autoComplete="off"
-                    aria-label="Link password"
                   />
                 ) : null}
               </div>
@@ -303,7 +307,7 @@ export function FileSharePopover({
               <Button
                 size="sm"
                 disabled={create.isPending || passwordTooShort}
-                onClick={() => create.mutate()}
+                onClick={() => create.mutate(passwordAvailable && withPassword ? password : null)}
                 data-testid="file-share-create"
               >
                 {create.isPending ? (

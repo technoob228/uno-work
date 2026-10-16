@@ -283,3 +283,40 @@ describe("a chat marked Done or archived takes its panel with it", () => {
     expect(dropChatBuckets(states, []).states).toBe(states);
   });
 });
+
+describe("dragging a tab like in Chrome", () => {
+  const ids = (states: PreviewStates, key: string) =>
+    getPreviewBucketState(states, key).files.map((tab) => tab.id);
+  const draft = file("draft");
+
+  it("reorders inside its group", () => {
+    let states = openTab({}, chatA, "chat", report, "person");
+    states = openTab(states, chatA, "chat", notes, "person");
+    states = openTab(states, chatA, "chat", draft, "person");
+    states = moveTabScope(states, chatA, "draft", "chat", "report");
+    expect(ids(states, chatScopeKey("thread-a"))).toEqual(["draft", "report", "notes"]);
+  });
+
+  it("drops into another group at the spot it was let go", () => {
+    let states = openTab({}, chatA, "chat", report, "person");
+    states = openTab(states, chatA, "chat", notes, "person");
+    states = openTab(states, chatA, "chat", draft, "person");
+    states = moveTabScope(states, chatA, "report", "project");
+    states = moveTabScope(states, chatA, "notes", "project");
+    states = moveTabScope(states, chatA, "draft", "project", "notes");
+    expect(ids(states, projectScopeKey("proj"))).toEqual(["report", "draft", "notes"]);
+    expect(ids(states, chatScopeKey("thread-a"))).toEqual([]);
+  });
+
+  it("dropped at the end of its own group, it goes last; where it was, nothing changes", () => {
+    let states = openTab({}, chatA, "chat", report, "person");
+    states = openTab(states, chatA, "chat", notes, "person");
+    expect(moveTabScope(states, chatA, "report", "chat", "report")).toBe(states);
+    expect(moveTabScope(states, chatA, "report", "chat", "notes")).toBe(states);
+    expect(moveTabScope(states, chatA, "notes", "chat")).toBe(states);
+    expect(ids(moveTabScope(states, chatA, "report", "chat"), chatScopeKey("thread-a"))).toEqual([
+      "notes",
+      "report",
+    ]);
+  });
+});

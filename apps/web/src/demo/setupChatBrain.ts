@@ -217,7 +217,8 @@ const STEPS: ReadonlyArray<Step> = [
       /^make/i.test(answer)
         ? {
             saved: `lives on ${ownComputerName(profile.name)} (Lite)`,
-            reply: "Done — it starts with my first task, in a few seconds: the same teammate image, with my settings and memory attached. Nothing to wait for now.",
+            reply:
+              "Done — it starts with my first task, in a few seconds: the same teammate image, with my settings and memory attached. Nothing to wait for now.",
             patch: { ownComputer: ownComputerName(profile.name), computers: [] },
           }
         : {

@@ -338,7 +338,8 @@ interface PreviewPaneState {
   ) => void;
   updateBrowserTab: (scopeKey: string, id: string, patch: { url?: string; name?: string }) => void;
   /** Перенести вкладку на другой уровень (чат / проект / везде). */
-  setTabScope: (id: string, scope: PreviewTabScope) => void;
+  /** Move a tab to a group, before `beforeId` of that group (or at its end). */
+  setTabScope: (id: string, scope: PreviewTabScope, beforeId?: string | null) => void;
   /** Все бакеты предпросмотра — для постоянно смонтированных webview. */
   statesByScopeKey: Readonly<Record<string, PreviewBucketState>>;
   closeFile: (id: string) => void;
@@ -397,7 +398,9 @@ function initialStates(): Record<string, PreviewBucketState> {
   }
   // Демо (w0138): засеянные вкладки нескольких чатов одного проекта.
   if (DEMO) {
-    const seed = (demoHooks.previewInitialStates as (() => Record<string, PreviewBucketState>) | undefined)?.();
+    const seed = (
+      demoHooks.previewInitialStates as (() => Record<string, PreviewBucketState>) | undefined
+    )?.();
     if (seed) Object.assign(states, seed);
   }
   // Вне чатов панель показывает только закреплённые вкладки — и только если
@@ -626,8 +629,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   );
 
   const setTabScope = useCallback(
-    (id: string, scope: PreviewTabScope) => {
-      transition((prev) => moveTabScope(prev, currentTarget, id, scope));
+    (id: string, scope: PreviewTabScope, beforeId: string | null = null) => {
+      transition((prev) => moveTabScope(prev, currentTarget, id, scope, beforeId));
     },
     [currentTarget, transition],
   );

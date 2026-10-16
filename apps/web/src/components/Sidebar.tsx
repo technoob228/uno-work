@@ -261,6 +261,7 @@ import { isTeamConversation } from "./assistants/assistantTeam.logic";
 import {
   type DRowMark,
   dRowMark,
+  foldedGroupChats,
   foldedProjectMark,
   groupChatsForSidebarD,
   isRunningStatus,
@@ -1034,26 +1035,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
     </Tooltip>
   ) : null;
-  const machineMark = (props.showMachine ?? isRemote) ? (
-    <span className="inline-flex shrink-0 items-center gap-0.5">
-      <MachineChip
-        className={availability.status === "live" ? undefined : "opacity-60"}
-        detail={availability.reason}
-        identity={machineIdentity}
-        size="sm"
-      />
-      {availability.status === "offline" ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={<span aria-label={availability.reason} className="inline-flex items-center" />}
-          >
-            <CloudOffIcon className="block size-3 text-warning" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">{availability.reason}</TooltipPopup>
-        </Tooltip>
-      ) : null}
-    </span>
-  ) : null;
+  const machineMark =
+    (props.showMachine ?? isRemote) ? (
+      <span className="inline-flex shrink-0 items-center gap-0.5">
+        <MachineChip
+          className={availability.status === "live" ? undefined : "opacity-60"}
+          detail={availability.reason}
+          identity={machineIdentity}
+          size="sm"
+        />
+        {availability.status === "offline" ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span aria-label={availability.reason} className="inline-flex items-center" />
+              }
+            >
+              <CloudOffIcon className="block size-3 text-warning" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{availability.reason}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </span>
+    ) : null;
 
   if (variant === "d") {
     const mark = dRowMark(status, yourTurn);
@@ -1899,11 +1903,7 @@ export default function Sidebar() {
     ReadonlyArray<string>,
     ReadonlyArray<string>
   >(SIDEBAR_D_FOLDED_PROJECTS_KEY, [], Schema.Array(Schema.String));
-  const [unoFolded] = useLocalStorage(
-    SIDEBAR_D_UNO_FOLDED_KEY,
-    false,
-    Schema.Boolean,
-  );
+  const [unoFolded] = useLocalStorage(SIDEBAR_D_UNO_FOLDED_KEY, false, Schema.Boolean);
   // Grouping (0.0.138, Misha 16.10): Project / Status / Computer in the order
   // picked, none — one list, newest first. Devices that never chose keep what
   // the older "Inbox sidebar" switch said.
@@ -2075,9 +2075,7 @@ export default function Sidebar() {
   );
   const dProjectName = useCallback(
     (key: string) =>
-      key === HOME_FOLDER_GROUP_KEY
-        ? HOME_FOLDER_GROUP_NAME
-        : (dProjectInfo.get(key)?.name ?? key),
+      key === HOME_FOLDER_GROUP_KEY ? HOME_FOLDER_GROUP_NAME : (dProjectInfo.get(key)?.name ?? key),
     [dProjectInfo],
   );
   const dPickedProjectNames = useMemo(
@@ -2191,13 +2189,6 @@ export default function Sidebar() {
     };
   });
   const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
-  // A folded project with the open chat in it stays open, so the chat is seen.
-  const isProjectFolded = useCallback(
-    (project: { key: string; chats: ReadonlyArray<SidebarThreadSummary> }) =>
-      foldedProjectKeySet.has(project.key) &&
-      !project.chats.some((thread) => threadKeyOf(thread) === routeThreadKey),
-    [foldedProjectKeySet, routeThreadKey],
-  );
   const unoChildrenFolded =
     unoFolded && !dGroups.unoRunning.some((thread) => threadKeyOf(thread) === routeThreadKey);
   // The collapsed rail's chats panel: hides on a click into the page or Esc.
@@ -2253,26 +2244,32 @@ export default function Sidebar() {
       list: dTree === null ? preview("list", dShownChats, SIDEBAR_D_LIST_PREVIEW_LIMIT) : null,
     };
   }, [dExpandedGroupKeys, dLeaves, dShownChats, dTree, routeThreadKey]);
-  // Computers and projects fold; a status is a label.
-  const isNodeFolded = useCallback(
+  // Computers and projects fold; a status is a label. Folded is always
+  // folded: only the open chat, when it is in the group, stays under its row
+  // (null — the group is open).
+  const dFoldedChats = useCallback(
     (node: SidebarDGroupNode<SidebarThreadSummary>) =>
-      node.level !== "status" && isProjectFolded({ key: node.path, chats: node.chats }),
-    [isProjectFolded],
+      foldedGroupChats({
+        chats: node.chats,
+        folded: node.level !== "status" && foldedProjectKeySet.has(node.path),
+        isOpen: (thread) => threadKeyOf(thread) === routeThreadKey,
+      }),
+    [foldedProjectKeySet, routeThreadKey],
   );
   const dVisibleChats = useMemo(() => {
     if (dTree === null) return dPreviews.list?.visible ?? dShownChats;
     const walk = (
       nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
     ): SidebarThreadSummary[] =>
-      nodes.flatMap((node) =>
-        isNodeFolded(node)
-          ? []
-          : node.children
+      nodes.flatMap(
+        (node) =>
+          dFoldedChats(node) ??
+          (node.children
             ? walk(node.children)
-            : [...(dPreviews.leaves.get(node.path)?.visible ?? node.chats)],
+            : [...(dPreviews.leaves.get(node.path)?.visible ?? node.chats)]),
       );
     return walk(dTree);
-  }, [dPreviews, dShownChats, dTree, isNodeFolded]);
+  }, [dFoldedChats, dPreviews, dShownChats, dTree]);
 
   const orderedThreads = useMemo(
     () =>
@@ -3489,12 +3486,11 @@ export default function Sidebar() {
       ) : null}
     </>
   );
-  const dRenderNodes = (
-    nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
-  ): ReactNode =>
+  const dRenderNodes = (nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>): ReactNode =>
     nodes.map((node, index) => {
       const underComputer = node.trail.computer !== undefined;
-      const folded = isNodeFolded(node);
+      const foldedChats = dFoldedChats(node);
+      const folded = foldedChats !== null;
       if (node.level === "computer") {
         const computer = dComputers.find((entry) => entry.key === node.id) ?? {
           environmentId: node.id,
@@ -3516,7 +3512,13 @@ export default function Sidebar() {
                 folded={folded}
                 onToggle={() => toggleProjectFolded(node.path)}
               />
-              {folded ? null : dRenderBelow(node, null)}
+              {foldedChats
+                ? dChatRows(node.path, foldedChats, undefined, {
+                    nested: false,
+                    underComputer: true,
+                    projectComputers: null,
+                  })
+                : dRenderBelow(node, null)}
             </ul>
           </li>
         );
@@ -3550,7 +3552,13 @@ export default function Sidebar() {
               onToggle={() => toggleProjectFolded(node.path)}
               onNewChat={block.newChatProject ? dNewChatIn(block.newChatProject) : null}
             />
-            {folded ? null : dRenderBelow(node, block.computers)}
+            {foldedChats
+              ? dChatRows(node.path, foldedChats, undefined, {
+                  nested: true,
+                  underComputer,
+                  projectComputers: block.computers,
+                })
+              : dRenderBelow(node, block.computers)}
           </ul>
         </li>
       );
@@ -3730,63 +3738,63 @@ export default function Sidebar() {
     return (
       <MachineIdentityProvider identities={machineIdentities}>
         <SidebarDComputersProvider computers={dComputers}>
-        <SidebarDHeader isElectron={isElectron} />
-        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
-          {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
+          <SidebarDHeader isElectron={isElectron} />
+          <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
+            {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
               waits; the chats below with Uno pinned first. Settings and the
               account live in the menu on top. */}
-          <SidebarSetupRow />
-          <SidebarDPlaces />
-        </SidebarGroup>
-        {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
-        {dChatList(false)}
-        <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
-          <SidebarUpdatePill />
-        </SidebarFooter>
-        {showPanel
-          ? createPortal(
-              <div
-                ref={dPanelRef}
-                role="dialog"
-                aria-label="Chats"
-                data-testid="sidebar-chats-panel"
-                onPointerEnter={() => sidebarDPanel.enterPanel()}
-                onPointerLeave={() => sidebarDPanel.leave()}
-                className={cn(
-                  // Opaque like the expanded sidebar (bg-card): the page header
-                  // must not show through.
-                  "fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-card text-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150",
-                  isElectron && "pt-[44px] fullscreen:pt-0",
-                )}
-                style={{ left: SIDEBAR_D_RAIL_WIDTH }}
-              >
-                <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">
-                  <span className="flex-1 text-sm font-semibold">Chats</span>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label="Keep the sidebar open"
-                          data-testid="sidebar-panel-pin"
-                          onClick={() => setOpen(true)}
-                          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                        />
-                      }
-                    >
-                      <PinIcon className="size-4" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="bottom">Keep the sidebar open · ⌘B</TooltipPopup>
-                  </Tooltip>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                  {dChatList(true)}
-                </div>
-              </div>,
-              document.body,
-            )
-          : null}
-        {sharedDialogs}
+            <SidebarSetupRow />
+            <SidebarDPlaces />
+          </SidebarGroup>
+          {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
+          {dChatList(false)}
+          <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
+            <SidebarUpdatePill />
+          </SidebarFooter>
+          {showPanel
+            ? createPortal(
+                <div
+                  ref={dPanelRef}
+                  role="dialog"
+                  aria-label="Chats"
+                  data-testid="sidebar-chats-panel"
+                  onPointerEnter={() => sidebarDPanel.enterPanel()}
+                  onPointerLeave={() => sidebarDPanel.leave()}
+                  className={cn(
+                    // Opaque like the expanded sidebar (bg-card): the page header
+                    // must not show through.
+                    "fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-card text-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150",
+                    isElectron && "pt-[44px] fullscreen:pt-0",
+                  )}
+                  style={{ left: SIDEBAR_D_RAIL_WIDTH }}
+                >
+                  <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">
+                    <span className="flex-1 text-sm font-semibold">Chats</span>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Keep the sidebar open"
+                            data-testid="sidebar-panel-pin"
+                            onClick={() => setOpen(true)}
+                            className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                          />
+                        }
+                      >
+                        <PinIcon className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="bottom">Keep the sidebar open · ⌘B</TooltipPopup>
+                    </Tooltip>
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                    {dChatList(true)}
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
+          {sharedDialogs}
         </SidebarDComputersProvider>
       </MachineIdentityProvider>
     );

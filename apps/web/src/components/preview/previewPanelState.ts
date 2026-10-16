@@ -312,20 +312,29 @@ export function moveTabScope(
   target: PreviewTabTarget,
   id: string,
   scope: PreviewTabScope,
+  /** Put it before this tab of the group (dragged like in Chrome); null/absent — at the end. */
+  beforeId: string | null = null,
 ): PreviewStates {
   const fromKey = findTabScopeKey(states, id, visibleScopeKeys(target));
   if (!fromKey) return states;
   const toKey = scopeKeyForTarget(target, scope);
-  if (fromKey === toKey) return states;
   const from = getPreviewBucketState(states, fromKey);
   const tab = from.files.find((file) => file.id === id);
-  if (!tab) return states;
+  if (!tab || beforeId === id) return states;
   let next: PreviewStates = {
     ...states,
     [fromKey]: { ...from, files: from.files.filter((file) => file.id !== id) },
   };
   const to = getPreviewBucketState(next, toKey);
-  next = { ...next, [toKey]: { ...to, files: [...to.files, tab] } };
+  const at = beforeId === null ? -1 : to.files.findIndex((file) => file.id === beforeId);
+  const files =
+    at === -1 ? [...to.files, tab] : [...to.files.slice(0, at), tab, ...to.files.slice(at)];
+  if (fromKey === toKey) {
+    // Same group: only the order changes — or nothing, when it lands where it was.
+    if (files.every((file, index) => file.id === from.files[index]?.id)) return states;
+    return { ...next, [toKey]: { ...to, files } };
+  }
+  next = { ...next, [toKey]: { ...to, files } };
   return revealTab(next, target, toKey, id, "person");
 }
 
