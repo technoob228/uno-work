@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.142 — 2026-10-17
+
+- The model picker is T3's again: your harnesses in a column on the left — **Uno Hermes** first, then Uno Code, Claude, Codex and the rest — with search and the models on the right. The button shows the harness's icon and the model.
+- Apps look clean: no dots or badges on the icons. Under the name it says Stopped or Didn't start when that's so, and 🌐 when it's on the internet.
+- An app you showed on the internet opens in Uno Work again (it used to stay blank). Its settings now say plainly what "Show on the internet" does: anyone with the address can open it, with no sign-in and no encryption — you don't need it to use the app yourself.
+- A notification from an app on a cloud computer opens the app.
+- Files and the Disk view stay quick on a full disk: measuring folders no longer holds the disk up, and Disk shows the last measurement at once.
+
 ## v0.0.141 — 2026-10-17
 
 - A click on an app opens it, like on a computer. An app with a web page opens in its window inside Uno Work — on a cloud computer, apps that answer only inside it open in the computer's own browser. A Telegram bot opens in Telegram.
