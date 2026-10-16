@@ -141,16 +141,22 @@ export function SetupShell({
   canSkip?: boolean;
   children: ReactNode;
 }) {
-  const { goToStep, skipStep, skipAll } = useSetupNavigation();
+  const { goToStep, goHome, skipStep, skipAll, one } = useSetupNavigation();
   const navigate = useNavigate();
   const index = SETUP_STEPS.indexOf(step);
-  const back = previousStep(step);
+  // On its own (Home's Next step card, `one=1`): no strip, no "Skip setup",
+  // no Back into other steps — Home is the way back.
+  const back = one ? null : previousStep(step);
   return (
     <SetupFrame
       title="Set up your computer"
-      progress={(index + 1) / SETUP_STEPS.length}
+      progress={one ? null : (index + 1) / SETUP_STEPS.length}
       headerAction={
-        step !== "done" ? (
+        one ? (
+          <Button size="xs" variant="ghost" onClick={goHome}>
+            Back to Home
+          </Button>
+        ) : step !== "done" ? (
           <Button size="xs" variant="ghost" onClick={() => void skipAll()}>
             Skip setup
           </Button>
@@ -162,7 +168,7 @@ export function SetupShell({
             <Button size="sm" variant="ghost" onClick={() => goToStep(back)}>
               Back
             </Button>
-          ) : step === "ai" ? (
+          ) : step === "ai" && !one ? (
             <Button
               size="sm"
               variant="ghost"
@@ -179,7 +185,7 @@ export function SetupShell({
           ) : null}
           {canSkip && step !== "done" ? (
             <Button size="sm" variant="ghost" onClick={() => void skipStep(step)}>
-              Skip
+              {one ? "Not now" : "Skip"}
             </Button>
           ) : null}
           <Button
@@ -195,7 +201,7 @@ export function SetupShell({
         </>
       }
     >
-      <StepStrip current={step} />
+      {one ? null : <StepStrip current={step} />}
       <div
         className={cn("mx-auto w-full px-5 pt-8 pb-12 sm:px-8", wide ? "max-w-6xl" : "max-w-3xl")}
       >

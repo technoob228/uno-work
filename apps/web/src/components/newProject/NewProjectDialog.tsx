@@ -279,6 +279,7 @@ interface ProjectStory {
 
 function useFinishNewProject() {
   const afterCreate = useNewProjectStore((state) => state.afterCreate);
+  const onCreated = useNewProjectStore((state) => state.onCreated);
   const { handleNewThread } = useNewThreadHandler();
   const { startTask } = useHomeLaunchers(useActiveMachine().environmentId);
   return useCallback(
@@ -288,6 +289,11 @@ function useFinishNewProject() {
       folder: string,
       story?: ProjectStory,
     ): Promise<void> => {
+      try {
+        onCreated?.({ name, folder, projectRef, ...story });
+      } catch {
+        // a listener's failure never blocks the project's chat
+      }
       if (afterCreate) {
         const done = await afterCreate({ name, folder, projectRef, ...story }).then(
           () => true,
@@ -309,7 +315,7 @@ function useFinishNewProject() {
       }
       await handleNewThread(projectRef, { envMode: "local" });
     },
-    [afterCreate, handleNewThread, startTask],
+    [afterCreate, handleNewThread, onCreated, startTask],
   );
 }
 

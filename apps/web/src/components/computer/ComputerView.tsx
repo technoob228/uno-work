@@ -72,6 +72,8 @@ import { ComputerPill } from "./home/ComputerPill";
 import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
+import { HomeAgentSignIn } from "./home/HomeAgentSignIn";
+import { isWebLite } from "../../lite/webLite";
 import { ResourcesView } from "./resources/ResourcesView";
 import type { ResourceLook } from "./resources/resourceModel";
 import {
@@ -466,30 +468,33 @@ export function ComputerView() {
               }
             />
           ) : thisMachine ? (
-            <HomeStart
-              environmentId={environmentId}
-              layout={layout}
-              computer={homeComputer}
-              notices={notices}
-              builtIns={builtIns}
-              tiles={tiles}
-              machineApps={machineAppsQuery.data?.apps ?? []}
-              appsLoading={machineAppsQuery.isPending}
-              onOpenTile={openTile}
-              onTileDetails={(tile) => {
-                resetTileMutations();
-                setDetailsKey(tile.key);
-              }}
-              hiddenApps={hiddenMachineApps(machineAppsQuery.data?.apps ?? [])}
-              unhidingId={
-                appAction.isPending && appAction.variables?.action === "unhide"
-                  ? appAction.variables.appId
-                  : null
-              }
-              onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
-              onStartTask={launchers.startTask}
-              onAskUno={launchers.askUno}
-            />
+            <>
+              {isWebLite ? null : <HomeAgentSignIn />}
+              <HomeStart
+                environmentId={environmentId}
+                layout={layout}
+                computer={homeComputer}
+                notices={notices}
+                builtIns={builtIns}
+                tiles={tiles}
+                machineApps={machineAppsQuery.data?.apps ?? []}
+                appsLoading={machineAppsQuery.isPending}
+                onOpenTile={openTile}
+                onTileDetails={(tile) => {
+                  resetTileMutations();
+                  setDetailsKey(tile.key);
+                }}
+                hiddenApps={hiddenMachineApps(machineAppsQuery.data?.apps ?? [])}
+                unhidingId={
+                  appAction.isPending && appAction.variables?.action === "unhide"
+                    ? appAction.variables.appId
+                    : null
+                }
+                onUnhide={(appId) => appAction.mutate({ appId, action: "unhide" })}
+                onStartTask={launchers.startTask}
+                onAskUno={launchers.askUno}
+              />
+            </>
           ) : (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
               {stateQuery.isPending ? (

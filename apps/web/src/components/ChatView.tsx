@@ -182,6 +182,7 @@ import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
 import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
+import { wasEverSignedIn } from "./harness/harnessSignInMemory";
 import { refreshEnvironmentProviders } from "~/environments/settings/serverSettings";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
@@ -1781,6 +1782,8 @@ export default function ChatView(props: ChatViewProps) {
             thread: activeThread,
             providerStatuses,
             activeProviderStatus,
+            // Never signed in here: "Sign in to Claude", not "You were signed out".
+            everSignedIn: wasEverSignedIn,
           })
         : null,
     [activeThread, activeProviderStatus, providerStatuses],

@@ -18,6 +18,16 @@ import { useServerConfigReady } from "../../../rpc/serverState";
 import { isWebLite } from "../../../lite/webLite";
 import { accountResumeQuery, nextStepQuery } from "../../myuno/myUnoQueries";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
+import { useAssistantChannels } from "../../../assistant/useAssistantChannels";
+import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import { openNewProject } from "../../../navigation/newProjectStore";
+import {
+  AGENT_FIRST_TASK_PROMPT,
+  AGENT_START_STEP,
+  NEXT_STEP_SETUP_STEP,
+  agentStartDoneHere,
+} from "./agentStart";
+import { openAgentSignIn, useAgentOnComputer } from "./HomeAgentSignIn";
 import { NEXT_STEP, goalState, withAnswer, type GoalId } from "../../setup/goals";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
 import { Button } from "../../ui/button";
@@ -41,6 +51,30 @@ export interface HomeNextStepState {
   readonly developerStep?: NextStepItem | null;
 }
 
+/**
+ * The agent-on-a-server checklist (fishcode `agentOnServerSteps`): the
+ * account's own_agent goal with the steps after the sign-in. An older backend
+ * (own_agent = the agent on the laptop) has no `add_project` — then the card
+ * is what it always was.
+ */
+export function isAgentOnServerPlan(plan: NextStepPlan | null): boolean {
+  return (
+    !isWebLite &&
+    plan?.goal === "own_agent" &&
+    plan.steps.some((entry) => entry.id === AGENT_START_STEP.addProject)
+  );
+}
+
+/** Its steps after the sign-in don't need each other: "Not now" moves on. */
+const AGENT_START_ON_THEIR_OWN: ReadonlySet<string> = new Set([
+  AGENT_START_STEP.addProject,
+  AGENT_START_STEP.addSkills,
+  AGENT_START_STEP.connectTools,
+  AGENT_START_STEP.connectChannel,
+  AGENT_START_STEP.firstTask,
+]);
+const NOTHING: ReadonlySet<string> = new Set();
+
 /** The account's answer (null while loading or when the account can't be read). */
 export function useNextStep(): HomeNextStepState {
   const progress = useSetupProgress();
@@ -52,9 +86,23 @@ export function useNextStep(): HomeNextStepState {
   // flash on Home and then vanish.
   const settingsReady = useServerConfigReady();
   const answers = progress.answers ?? {};
+  // The agent on a server: what this computer already knows is done (the
+  // agent signed in, a setup step finished, Telegram / Slack on).
+  const agentPlan = isAgentOnServerPlan(plan);
+  const agent = useAgentOnComputer(agentPlan);
+  const channels = useAssistantChannels(usePrimaryEnvironmentId(), agentPlan);
+  const doneHere = agentPlan
+    ? agentStartDoneHere({
+        agentSignedIn: agent.anySignedIn,
+        progress,
+        channelOn: channels.telegram === "on" || channels.slack === "on",
+      })
+    : NOTHING;
   const { step, developerStep } = withoutSshFirst(
     plan,
-    settingsReady ? visibleNextStep(plan, answers) : null,
+    settingsReady
+      ? visibleNextStep(plan, answers, doneHere, agentPlan ? AGENT_START_ON_THEIR_OWN : NOTHING)
+      : null,
     answers,
     devMode,
   );
@@ -143,7 +191,42 @@ const WORK_COPY: Readonly<Record<string, { title: string; hint: string; button: 
     hint: "Tell Uno what to run. It sets it up and keeps it running.",
     button: "Start",
   },
+  // The agent on a server (flow-agent 15.10): each opens a screen Work already has.
+  add_project: {
+    title: "Add your project",
+    hint: "A folder, a .zip or a GitHub repo. Your agent works on it here.",
+    button: "Add a project",
+  },
+  add_skills: {
+    title: "Give your AI skills",
+    hint: "Up-to-date docs, Frontend design, Security review and more. One click each.",
+    button: "Pick skills",
+  },
+  connect_tools: {
+    title: "Connect your tools",
+    hint: "Google Drive, GitHub, Notion, Gmail & Calendar.",
+    button: "Connect tools",
+  },
+  connect_channel: {
+    title: "Answer in Telegram or Slack",
+    hint: "Message this computer from your phone or your team's Slack. It does the work here and answers there.",
+    button: "Connect",
+  },
+  first_task: {
+    title: "Give it a first task",
+    hint: "Say what to do. It keeps working on this computer when you close the laptop.",
+    button: "Write the task",
+  },
 };
+
+/** "Sign in to your agent" on a computer: the CLI's own sign-in, here. */
+function agentSignInCopy(label: string) {
+  return {
+    title: `Sign in to ${label}`,
+    hint: `${label} is already on this computer. Sign in with your own subscription — the link comes from ${label} itself — and it keeps working when your laptop is closed.`,
+    button: `Sign in to ${label}`,
+  };
+}
 
 export const AGENT_PUBLISH_ASK = "Publish this folder on Uno and send me the link.";
 
@@ -164,6 +247,8 @@ export function HomeNextStepCard({
   const { plan, step } = state;
   const goal = plan?.goal ?? null;
   const projectPath = goalState(progress).projectPath;
+  const agentPlan = isAgentOnServerPlan(plan);
+  const agent = useAgentOnComputer(agentPlan);
 
   useEffect(() => {
     if (step)
@@ -174,7 +259,9 @@ export function HomeNextStepCard({
   }, [goal, plan?.source, step]);
 
   if (!step) return null;
-  const copy = WORK_COPY[step.id];
+  // The agent on a server: connect_agent is its CLI's sign-in, not "paste a line".
+  const signInHere = step.id === AGENT_START_STEP.connectAgent && agentPlan;
+  const copy = signInHere ? agentSignInCopy(agent.label) : WORK_COPY[step.id];
   const title = copy?.title ?? step.title;
   const hint = copy?.hint ?? step.hint;
 
@@ -194,12 +281,43 @@ export function HomeNextStepCard({
   const sameChatId =
     step.id === "talk_to_uno" && !isWebLite ? null : nextStepChatId(step.id, resume.data);
 
+  // Done here, and the account hears it now (it closes the step for the console).
+  const taken = (id: string) => {
+    mark(nextStepDoneKey(id));
+    trackFunnel("next_step_clicked", { goal, props: { step_id: id } });
+  };
+  // A step opened on its own: the account hears it when it is finished there
+  // (useSetupNavigation, the New project dialog), not on this click.
+  const toldOnFinish =
+    agentPlan && (step.id === AGENT_START_STEP.addProject || step.id in NEXT_STEP_SETUP_STEP);
+
   const act = () => {
-    trackFunnel("next_step_clicked", {
-      goal,
-      props: { step_id: step.id, ...(sameChatId ? { same_chat: "1" } : {}) },
-    });
+    if (!toldOnFinish) {
+      trackFunnel("next_step_clicked", {
+        goal,
+        props: { step_id: step.id, ...(sameChatId ? { same_chat: "1" } : {}) },
+      });
+    }
     if (sameChatId) return void navigate({ to: "/ai", search: { chat: sameChatId } });
+    if (agentPlan) {
+      const setupStep = NEXT_STEP_SETUP_STEP[step.id];
+      if (setupStep) return void navigate({ to: "/setup", search: { step: setupStep, one: true } });
+      switch (step.id) {
+        case AGENT_START_STEP.connectAgent:
+          // Not on this computer yet: Settings → AI installs it (then signs in there).
+          if (agent.provider && !agent.provider.installed) {
+            return void navigate({ to: "/settings/ai" });
+          }
+          return openAgentSignIn(agent.driver);
+        case AGENT_START_STEP.addProject:
+          return openNewProject("choose", {
+            onCreated: () => taken(AGENT_START_STEP.addProject),
+          });
+        case AGENT_START_STEP.firstTask:
+          mark(nextStepDoneKey(step.id));
+          return onAskUno(AGENT_FIRST_TASK_PROMPT);
+      }
+    }
     switch (step.id) {
       case "connect_agent":
         return setup("own_agent", "own_agent");
@@ -273,6 +391,18 @@ export function HomeNextStepCard({
           </button>
         </div>
       )}
+      {signInHere ? (
+        <p className="ps-11 text-xs text-muted-foreground" data-testid="home-next-step-laptop">
+          Your agent is on your laptop?{" "}
+          <button
+            type="button"
+            onClick={() => setup("own_agent", "own_agent")}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Connect it to this computer instead
+          </button>
+        </p>
+      ) : null}
       {state.developerStep ? (
         <p className="ps-11 text-xs text-muted-foreground" data-testid="home-next-step-developers">
           For developers:{" "}

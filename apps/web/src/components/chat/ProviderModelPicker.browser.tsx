@@ -1545,12 +1545,12 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const pane = document.querySelector<HTMLElement>('[data-model-picker-pane="signin"]');
         expect(pane).not.toBeNull();
-        expect(pane?.textContent).toContain("Use your own Claude account, or paste an API key.");
-        expect(pane?.textContent).toContain("Use an API key");
+        expect(pane?.textContent).toContain("Use your own Claude account, or an API key.");
+        expect(pane?.textContent).toContain("Or use an API key");
         expect(getModelPickerListText()).not.toContain("Claude Opus 4.6");
       });
       await expect
-        .element(page.getByRole("button", { name: "Sign in with account" }))
+        .element(page.getByRole("button", { name: "Sign in with your account" }))
         .toBeVisible();
       // No dialog: the controls live in the picker itself.
       expect(document.body.textContent).not.toContain("Sign in to Claude");

@@ -17,6 +17,7 @@ import type { ProviderAuthDriver } from "@t3tools/contracts";
 
 import { cn } from "~/lib/utils";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
+import { inAppBrowserName } from "./inAppBrowser";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -53,6 +54,18 @@ export interface HarnessSignInDialogProps extends HarnessSignInPanelProps {
   readonly onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * The person's own subscription comes first (flow-agent 15.10). The link is
+ * the CLI's own (`claude auth login` / `codex login --device-auth` on that
+ * machine): they sign in on claude.ai / the ChatGPT site themselves.
+ */
+const ACCOUNT_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
+  claudeAgent:
+    "Uses your Claude Pro or Max plan. The link comes from Claude Code on this computer: you sign in on claude.ai yourself and paste the code back here.",
+  codex:
+    "Uses your ChatGPT plan. The link comes from Codex on this computer: you sign in on the ChatGPT site yourself and enter the code there.",
+};
+
 const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
   claudeAgent: "Stored as ANTHROPIC_API_KEY for this agent, in plain text on that machine's disk.",
   codex:
@@ -63,7 +76,7 @@ const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
 export function describeSignInState(label: string, job: AuthJobView | undefined): string {
   return job?.state === "succeeded"
     ? `${label} is signed in on this machine.`
-    : `Use your own ${label} account, or paste an API key.`;
+    : `Use your own ${label} account, or an API key.`;
 }
 
 /**
@@ -88,6 +101,7 @@ export function HarnessSignInPanel({
   const failed = job?.state === "failed";
 
   const [linkCopied, setLinkCopied] = useState(false);
+  const inApp = inAppBrowserName();
   const copyLink = () => {
     if (!job?.verificationUrl) return;
     void navigator.clipboard
@@ -117,6 +131,17 @@ export function HarnessSignInPanel({
             // The link itself is six lines of OAuth parameters: a button to
             // open it and one to copy it, the address stays folded away.
             <div className="flex flex-col gap-1.5" data-testid="harness-sign-in-link">
+              {inApp ? (
+                // Telegram's own browser (sign-in through Telegram opens Work
+                // there): the person is not signed in to Claude / ChatGPT in it.
+                <p
+                  className="text-xs text-muted-foreground"
+                  data-testid="harness-sign-in-in-app-browser"
+                >
+                  You&apos;re in {inApp}&apos;s browser. Copy the link and open it in Safari or
+                  Chrome, where you use your account.
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" onClick={() => openInstallDocs(job.verificationUrl!)}>
                   <ExternalLink className="mr-1 size-3.5" />
@@ -220,8 +245,21 @@ export function HarnessSignInPanel({
       ) : (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium">Sign in with your account</span>
+            <Button
+              size="sm"
+              className="self-start"
+              onClick={() => onStart({ method: "oauth" })}
+              data-testid="harness-sign-in-account"
+            >
+              Sign in with your account
+            </Button>
+            <span className="text-[11px] text-muted-foreground">{ACCOUNT_HINT[driver]}</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
             <label className="text-xs font-medium" htmlFor={`harness-key-${driver}`}>
-              Use an API key
+              Or use an API key
             </label>
             <div className="flex items-center gap-2">
               <Input
@@ -235,6 +273,7 @@ export function HarnessSignInPanel({
               />
               <Button
                 size="sm"
+                variant="outline"
                 disabled={apiKey.trim().length === 0}
                 onClick={() => onStart({ method: "apiKey", apiKey: apiKey.trim() })}
               >
@@ -242,21 +281,6 @@ export function HarnessSignInPanel({
               </Button>
             </div>
             <span className="text-[11px] text-muted-foreground">{API_KEY_HINT[driver]}</span>
-          </div>
-
-          <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
-            <span className="text-xs font-medium">Or sign in with your account</span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="self-start"
-              onClick={() => onStart({ method: "oauth" })}
-            >
-              Sign in with account
-            </Button>
-            <span className="text-[11px] text-muted-foreground">
-              Opens a one-time link you finish in your browser. Uses your existing subscription.
-            </span>
           </div>
         </div>
       )}

@@ -450,6 +450,13 @@ function GoalPicker() {
           return;
         }
         decided.current = true;
+        // The own agent picked on the console (`/start?goal=own_agent&path=
+        // work`, "Put my AI agent on a server") runs HERE, on this computer:
+        // Home leads with its CLI's sign-in and the steps after it
+        // (HomeAgentSignIn, the Next step card) — not the "paste a line into
+        // the agent on your laptop" screen (flow-agent 15.10).
+        const onThisComputer = picked.goal === "own_agent";
+        const via = onThisComputer ? "own_subscription" : picked.via;
         // Right after load the machine's settings channel may not take writes
         // yet (prod 26.09: the goal was lost). Wait for it and retry.
         await persistWithRetry(async () => {
@@ -459,13 +466,13 @@ function GoalPicker() {
           await updateSettings({
             onboardingCompleted: true,
             machineOnboarded: true,
-            setup: withAnswer(
-              withGoal(currentSetupProgress(), picked.goal),
-              GOAL_PATH_KEY,
-              picked.via,
-            ),
+            setup: withAnswer(withGoal(currentSetupProgress(), picked.goal), GOAL_PATH_KEY, via),
           });
         });
+        if (onThisComputer) {
+          goHome();
+          return;
+        }
         void navigate({
           to: "/setup",
           search: { step: "welcome", goal: picked.goal, via: picked.via },

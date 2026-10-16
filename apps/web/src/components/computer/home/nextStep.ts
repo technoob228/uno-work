@@ -112,21 +112,36 @@ export const nextStepSkipKey = (id: string) => `next_skip:${id}`;
  * The backend's `next`, unless it was taken here a moment ago (an idea, before
  * the account catches up — then the next open step after it) or put off with
  * "Not now" (the card hides; it never jumps ahead to a step that needs this one).
+ *
+ * `doneHere` — steps this computer knows are done though the account doesn't
+ * (yet): the agent signed in, a setup step finished (agentStart.ts). `onTheirOwn`
+ * — steps that don't need each other (the agent-on-a-server checklist after the
+ * sign-in): "Not now" on one moves on to the next instead of hiding the card.
  */
 export function visibleNextStep(
   plan: NextStepPlan | null,
   answers: Readonly<Record<string, string>>,
+  doneHere: ReadonlySet<string> = new Set(),
+  onTheirOwn: ReadonlySet<string> = new Set(),
 ): NextStepItem | null {
   if (!plan?.next) return null;
-  let candidate: NextStepItem | null = plan.next;
-  if (answers[nextStepDoneKey(candidate.id)]) {
-    const from = plan.steps.findIndex((entry) => entry.id === plan.next?.id);
-    candidate =
-      plan.steps
-        .slice(from + 1)
-        .find((entry) => !entry.done && !answers[nextStepDoneKey(entry.id)]) ?? null;
+  const from = Math.max(
+    0,
+    plan.steps.findIndex((entry) => entry.id === plan.next?.id),
+  );
+  const ahead = plan.steps.some((entry) => entry.id === plan.next?.id)
+    ? plan.steps.slice(from)
+    : [plan.next];
+  for (const entry of ahead) {
+    if (entry.id !== plan.next.id && entry.done) continue;
+    if (answers[nextStepDoneKey(entry.id)] || doneHere.has(entry.id)) continue;
+    if (answers[nextStepSkipKey(entry.id)]) {
+      if (onTheirOwn.has(entry.id)) continue;
+      return null;
+    }
+    return entry;
   }
-  return candidate && !answers[nextStepSkipKey(candidate.id)] ? candidate : null;
+  return null;
 }
 
 /**

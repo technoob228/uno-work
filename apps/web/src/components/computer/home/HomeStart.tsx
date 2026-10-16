@@ -37,7 +37,7 @@ import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import { goalState } from "../../setup/goals";
 import { useSetupProgress } from "../../setup/useSetupProgress";
 import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
-import { HomeNextStepCard, useNextStep } from "./HomeNextStep";
+import { HomeNextStepCard, isAgentOnServerPlan, useNextStep } from "./HomeNextStep";
 import { isWebLite } from "../../../lite/webLite";
 import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeUnoEntry } from "./HomeUnoEntry";
@@ -492,6 +492,22 @@ export function HomeStart({
       bootstrapped &&
       !layout.editing &&
       !threads.some((thread) => !isAssistantProjectId(thread.projectId));
+    // Came to put their own agent on this computer (flow-agent 15.10): the
+    // first screen leads with its sign-in and the steps after it.
+    const agentStartCard =
+      isAgentOnServerPlan(nextStep.plan) && nextStep.step !== null ? (
+        <HomeNextStepCard
+          state={nextStep}
+          onStartTask={(prompt, folder) =>
+            void onStartTask(prompt, {
+              folder,
+              modelSelection: null,
+              runtimeMode: DEFAULT_RUNTIME_MODE,
+            })
+          }
+          onAskUno={(prompt) => void onAskUno(prompt)}
+        />
+      ) : null;
     const ownAgentLine = (
       <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
         <button
@@ -556,6 +572,7 @@ export function HomeStart({
         >
           {notices}
           {updateNotice}
+          {agentStartCard}
           <h1
             className="mb-2 text-center text-[28px] font-semibold tracking-tight"
             data-testid="home-greeting"

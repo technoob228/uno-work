@@ -31,16 +31,20 @@ const STEP_VIEW: Readonly<Record<SetupStepId, ComponentType>> = {
 };
 
 export function SetupView() {
-  const { step } = useSearch({ from: "/_chat/setup" });
+  const { step, one } = useSearch({ from: "/_chat/setup" });
   const update = useUpdateSetupProgress();
 
   useEffect(() => {
     if (step === "tour-done" || step === "welcome") return;
+    // One step from Home's Next step card: not the eight-step path — opening
+    // it is not "visited" (the card counts a visited step as done, and the
+    // sidebar's "Set up N/8" would appear). Continue records it (completeStep).
+    if (one) return;
     // Any of the eight steps is the AI path, even after the tour.
     void update((current) =>
       markVisited(current.mode === "ai" ? current : { ...current, mode: "ai" }, step),
     );
-  }, [step, update]);
+  }, [one, step, update]);
 
   if (step === "welcome") return <GoalStep />;
   if (step === "tour-done") return <TourDoneStep />;
