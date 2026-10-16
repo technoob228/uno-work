@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderBundle } from "../../scripts/embed-app-sdk.ts";
-import { UNO_CLI_LAUNCHER, installSdkFiles } from "./sdkFiles.ts";
+import { GIT_REMOTE_UNO_LAUNCHER, UNO_CLI_LAUNCHER, installSdkFiles } from "./sdkFiles.ts";
 import { unoCliBinDir, withUnoCliOnPath } from "./unoCliPath.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -50,6 +50,35 @@ describe("installSdkFiles", () => {
         env: { PATH: process.env.PATH ?? "" },
       });
       expect(help).toContain("uno drive put <path...>");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "writes the git-remote-uno helper next to it, and where the daemon keeps its settings",
+    async () => {
+      const home = mkdtempSync(path.join(tmpdir(), "uno-sdk-"));
+      homes.push(home);
+      await installSdkFiles(home, {
+        settingsPath: "/var/lib/uno-work/userdata/settings.json",
+        consoleUrl: "https://console.example",
+      });
+
+      const helper = path.join(unoCliBinDir(home), "git-remote-uno");
+      expect(readFileSync(helper, "utf8")).toBe(GIT_REMOTE_UNO_LAUNCHER);
+      expect(statSync(helper).mode & 0o777).toBe(0o755);
+      expect(JSON.parse(readFileSync(path.join(home, ".uno/sdk/daemon.json"), "utf8"))).toEqual({
+        settingsPath: "/var/lib/uno-work/userdata/settings.json",
+        consoleUrl: "https://console.example",
+      });
+
+      // git would run it as `git-remote-uno <remote> <url>`: a bad name is refused in words.
+      const run = spawnSync(helper, ["origin", "uno::Not Valid"], {
+        encoding: "utf8",
+        input: "",
+        env: { PATH: process.env.PATH ?? "", HOME: home },
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("isn't an Uno project name");
     },
   );
 });

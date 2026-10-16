@@ -7,6 +7,10 @@
  *   ~/.uno/sdk/js/uno-chat.js  (the <uno-chat> web component; also next to uno_app.py)
  *   ~/.uno/sdk/python/uno_app.py
  *   ~/.uno/sdk/bin/uno         (the `uno` shell command → js/uno-cli.mjs; on agents' PATH)
+ *   ~/.uno/sdk/bin/git-remote-uno  (git remotes `uno::<name>` in the person's Uno cloud →
+ *                               js/git-remote-uno.mjs; gitRemoteUno.ts makes git find it anywhere)
+ *   ~/.uno/sdk/daemon.json     (where this daemon's settings.json and console are, for the
+ *                               helper to find the computer's key; no secrets in it)
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -25,6 +29,22 @@ import("../js/uno-cli.mjs").then((cli) => cli.run(process.argv.slice(2)));
 `;
 
 const UNO_CLI_BIN = `${UNO_CLI_BIN_RELATIVE}/uno`;
+
+/** `~/.uno/sdk/bin/git-remote-uno`: git runs it for `uno::<name>` remotes. */
+export const GIT_REMOTE_UNO_LAUNCHER = `#!/usr/bin/env node
+// git-remote-uno — git remotes uno::<name> in the person's Uno cloud. Code: ../js/git-remote-uno.mjs, kept by Uno Work.
+import("../js/git-remote-uno.mjs").then((helper) => helper.main(process.argv.slice(2)));
+`;
+
+export const GIT_REMOTE_UNO_BIN = `${UNO_CLI_BIN_RELATIVE}/git-remote-uno`;
+
+const EXECUTABLES = new Set([UNO_CLI_BIN, GIT_REMOTE_UNO_BIN]);
+
+/** What `~/.uno/sdk/daemon.json` says: where the helpers find this computer's key. */
+export interface SdkDaemonPointer {
+  readonly settingsPath: string;
+  readonly consoleUrl: string;
+}
 
 export const SDK_JS_PACKAGE_JSON = `${JSON.stringify(
   {
@@ -52,14 +72,21 @@ export function sdkFiles(): ReadonlyArray<readonly [string, string]> {
     ["python/uno-chat.js", APP_SDK_BUNDLE.chatComponent],
     ["js/uno-cli.mjs", APP_SDK_BUNDLE.cli],
     [UNO_CLI_BIN, UNO_CLI_LAUNCHER],
+    ["js/git-remote-uno.mjs", APP_SDK_BUNDLE.gitRemote],
+    [GIT_REMOTE_UNO_BIN, GIT_REMOTE_UNO_LAUNCHER],
   ];
 }
 
-export async function installSdkFiles(home: string): Promise<void> {
+export async function installSdkFiles(
+  home: string,
+  daemon?: SdkDaemonPointer | undefined,
+): Promise<void> {
   const root = path.join(home, ".uno", "sdk");
-  for (const [relative, body] of sdkFiles()) {
+  const files: Array<readonly [string, string]> = [...sdkFiles()];
+  if (daemon) files.push(["daemon.json", `${JSON.stringify(daemon, null, 2)}\n`]);
+  for (const [relative, body] of files) {
     const file = path.join(root, relative);
-    const executable = relative === UNO_CLI_BIN;
+    const executable = EXECUTABLES.has(relative);
     const current = await readFile(file, "utf8").catch(() => null);
     if (current !== body) {
       await mkdir(path.dirname(file), { recursive: true });
