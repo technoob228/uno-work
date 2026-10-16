@@ -533,7 +533,12 @@ const SCRIPT = String.raw`
       if (!paused) { ensureHost(); hl.classList.remove("pending"); hl.style.display = "none"; areaBox.style.display = "none"; current = null; }
     },
     drain: QUEUE ? function () { var out = Q; Q = []; return out; } : undefined,
-    setNonce: function (n) { NONCE = n; w[G].nonce = n; },
+    // A new view of the page takes the channel over: what waits in the queue is its now.
+    setNonce: function (n) {
+      var old = NONCE;
+      Q = Q.map(function (line) { return line.indexOf(old) === 0 ? n + line.slice(old.length) : line; });
+      NONCE = n; w[G].nonce = n;
+    },
     hoverAt: function (x, y) {
       if (mode !== "comment" || paused) return;
       showHighlight(targetAt(x, y));
