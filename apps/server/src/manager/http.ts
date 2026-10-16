@@ -47,8 +47,13 @@ import {
 import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { isDirectLocalRequest } from "../auth/loopbackPeer.ts";
 import { ServerAuth, AuthError } from "../auth/Services/ServerAuth.ts";
-import { BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
+import {
+  authorizeLocalBridgeRequest,
+  BrowserBridge,
+  requireBridgeThread,
+} from "../browserBridge.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepository } from "../persistence/Services/ManagerConnectorBindings.ts";
@@ -150,6 +155,14 @@ export const managerMcpRouteLayer = HttpRouter.add(
       return authOutcome.response;
     }
     const caller = authOutcome.caller;
+    // An assistant's own token serves only the agents on this machine
+    // (.mcp.json points them at 127.0.0.1). Every Work machine cloned from
+    // one memory snapshot started with the same assistant token (16.10): over
+    // the machine's public address it opened create_thread/send_turn on
+    // someone else's computer. External tokens (Settings) stay reachable.
+    if (caller.label?.startsWith(assistantTokenLabel("")) && !isDirectLocalRequest(request)) {
+      return yield* respondUnauthorized;
+    }
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
     if (body === null) {
@@ -1406,7 +1419,7 @@ export const channelsNotifyRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return HttpServerResponse.jsonUnsafe(
         { error: thread.error, message: thread.message },

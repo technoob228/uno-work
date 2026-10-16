@@ -61,6 +61,12 @@ export interface ManagerAssistantServiceShape {
   >;
   /** Start-up: newer instructions for every assistant that didn't edit them. */
   readonly syncAllInstructions: () => Effect.Effect<void, ManagerAssistantError>;
+  /**
+   * Fresh capability tokens (and .mcp.json) for every assistant; the old ones
+   * stop working. For memory-snapshot clones (cloneIdentity.ts). Returns how
+   * many assistants got a new token.
+   */
+  readonly rotateAssistantTokens: () => Effect.Effect<number, ManagerAssistantError>;
   /** Idempotently create workspace, token, and project for an assistant. */
   readonly ensureAssistant: (input: {
     readonly projectId: ProjectId;

@@ -16,7 +16,7 @@ import { ASSISTANT_PROJECT_ID, assistantTokenLabel } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { BrowserBridge } from "../browserBridge.ts";
+import { authorizeLocalBridgeRequest, BrowserBridge } from "../browserBridge.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
@@ -62,7 +62,7 @@ const makeRequestContext = Effect.gen(function* () {
   return {
     request,
     handlers,
-    authorization: browserBridge.authorize(request.headers["authorization"]),
+    authorization: authorizeLocalBridgeRequest(browserBridge, request),
   };
 });
 

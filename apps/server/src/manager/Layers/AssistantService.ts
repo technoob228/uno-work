@@ -1673,8 +1673,39 @@ const makeManagerAssistantService = Effect.gen(function* () {
       }
     });
 
+  // A Work machine cloned from a memory snapshot inherits the warm-up VM's
+  // assistant tokens — the same ones on every clone (16.10). Revoke every
+  // active `assistant:*` token; ensureAssistant then issues a fresh one and
+  // rewrites that assistant's .mcp.json (it rotates whenever the token is gone).
+  const rotateAssistantTokens: ManagerAssistantServiceShape["rotateAssistantTokens"] = () =>
+    Effect.gen(function* () {
+      const prefix = assistantTokenLabel("");
+      const tokens = yield* tokenRepository.list();
+      const revokedAt = new Date().toISOString();
+      const projectIds = new Set<string>();
+      for (const token of tokens) {
+        if (token.revokedAt !== null || !token.label.startsWith(prefix)) continue;
+        yield* tokenRepository.revoke({ tokenId: token.tokenId, revokedAt });
+        projectIds.add(token.label.slice(prefix.length));
+      }
+      for (const projectId of projectIds) {
+        yield* ensureAssistant({ projectId: ProjectId.make(projectId), title: "Assistant" });
+      }
+      yield* Effect.logInfo("assistant tokens rotated").pipe(
+        Effect.annotateLogs({ assistants: projectIds.size }),
+      );
+      return projectIds.size;
+    }).pipe(
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
+          ? Effect.fail(cause)
+          : Effect.fail(toAssistantError("Failed to rotate assistant tokens.")(cause)),
+      ),
+    );
+
   return {
     instructionsStatus,
+    rotateAssistantTokens,
     resolveInstructions,
     syncAllInstructions,
     ensureAssistant,
@@ -1699,6 +1730,9 @@ export const ManagerAssistantServiceLive = Layer.effect(
   makeManagerAssistantService,
 );
 
+/** secrets/ marker: this identity's assistant tokens were issued on this machine. */
+const ASSISTANT_TOKENS_ROTATED_MARKER = "assistant-tokens-rotated";
+
 /**
  * Startup: make sure the default assistant exists. Runs in the background so
  * the daemon starts answering HTTP right away.
@@ -1706,6 +1740,35 @@ export const ManagerAssistantServiceLive = Layer.effect(
 export const AssistantBootstrapLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const assistants = yield* ManagerAssistantService;
+    // Once per identity (the marker lives in secrets/, which uno-work-identity
+    // wipes on a clone): machines cloned from a memory snapshot before 16.10
+    // still hold the warm-up VM's assistant tokens, shared by every clone.
+    // The first start of this version gives them their own.
+    const { secretsDir } = yield* ServerConfig;
+    const path = yield* Path.Path;
+    const rotatedMarker = path.join(secretsDir, ASSISTANT_TOKENS_ROTATED_MARKER);
+    const alreadyRotated = yield* Effect.promise(() =>
+      fsp.access(rotatedMarker).then(
+        () => true,
+        () => false,
+      ),
+    );
+    if (!alreadyRotated) {
+      yield* assistants.rotateAssistantTokens().pipe(
+        Effect.flatMap(() =>
+          Effect.tryPromise(() =>
+            fsp
+              .mkdir(secretsDir, { recursive: true, mode: 0o700 })
+              .then(() => fsp.writeFile(rotatedMarker, `${new Date().toISOString()}\n`, { mode: 0o600 })),
+          ),
+        ),
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant token rotation at start failed").pipe(
+            Effect.annotateLogs({ cause }),
+          ),
+        ),
+      );
+    }
     // The assistant and its chat come first, before the harness probes
     // (20+ s on a fresh 2 vCPU box): the chat runs on Hermes whatever the
     // probes say, and until it existed the "Uno" button led to Settings

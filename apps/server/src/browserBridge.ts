@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 
+import { isDirectLocalRequest } from "./auth/loopbackPeer.ts";
 import { ServerConfig } from "./config.ts";
 import { registerKnownSecret } from "./secretRedaction.ts";
 
@@ -482,6 +483,22 @@ export function tokensEqual(a: unknown, b: unknown): boolean {
 
 export function bridgeContextKey(context: BrowserBridgeRequestContext): string {
   return `${context.threadId ?? ""}\u0000${context.cwd ?? ""}`;
+}
+
+/**
+ * Bridge-токен запроса, но только если запрос пришёл изнутри машины
+ * (127.0.0.1, без заголовков прокси). Агенты зовут мост по 127.0.0.1; снаружи —
+ * через край или прокси Work — эти ручки не нужны никому, а совпадение токена
+ * снаружи ничего не доказывает (см. isDirectLocalRequest).
+ */
+export function authorizeLocalBridgeRequest(
+  bridge: { readonly authorize: (authorizationHeader: string | undefined) => BridgeAuthorization | null },
+  request: {
+    readonly headers: Readonly<Record<string, string | undefined>>;
+    readonly source: unknown;
+  },
+): BridgeAuthorization | null {
+  return isDirectLocalRequest(request) ? bridge.authorize(request.headers["authorization"]) : null;
 }
 
 /** Экспорт для тестов: Live/Test-слои строятся из этой фабрики. */

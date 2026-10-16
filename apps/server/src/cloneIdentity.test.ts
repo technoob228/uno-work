@@ -4,6 +4,7 @@ import { Effect, Exit } from "effect";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { rotateCloneIdentity } from "./cloneIdentity.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
 
 it.effect("rotates the signing key and the environment id together", () =>
   Effect.gen(function* () {
@@ -49,6 +50,55 @@ it.effect("rotates the environment id even when the key could not be rotated", (
       ),
     );
     expect(calls).toEqual(["environment-id"]);
+    expect(Exit.isFailure(exit)).toBe(true);
+  }),
+);
+
+it.effect("gives the clone's assistants new tokens (the warm-up VM's are shared)", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* rotateCloneIdentity.pipe(
+      Effect.provideService(SessionCredentialService, {
+        rotateSigningKey: Effect.sync(() => {
+          calls.push("signing-key");
+        }),
+      } as unknown as SessionCredentialService["Service"]),
+      Effect.provideService(ServerEnvironment, {
+        rotateEnvironmentId: Effect.sync(() => {
+          calls.push("environment-id");
+        }),
+      } as unknown as ServerEnvironment["Service"]),
+      Effect.provideService(ManagerAssistantService, {
+        rotateAssistantTokens: () =>
+          Effect.sync(() => {
+            calls.push("assistant-tokens");
+            return 1;
+          }),
+      } as unknown as ManagerAssistantService["Service"]),
+    );
+    expect(calls).toEqual(["signing-key", "environment-id", "assistant-tokens"]);
+  }),
+);
+
+it.effect("rotates the assistant tokens even when the key could not be rotated", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const exit = yield* Effect.exit(
+      rotateCloneIdentity.pipe(
+        Effect.provideService(SessionCredentialService, {
+          rotateSigningKey: Effect.fail(new Error("secrets/ is gone")),
+        } as unknown as SessionCredentialService["Service"]),
+        Effect.provideService(ServerEnvironment, {} as ServerEnvironment["Service"]),
+        Effect.provideService(ManagerAssistantService, {
+          rotateAssistantTokens: () =>
+            Effect.sync(() => {
+              calls.push("assistant-tokens");
+              return 1;
+            }),
+        } as unknown as ManagerAssistantService["Service"]),
+      ),
+    );
+    expect(calls).toEqual(["assistant-tokens"]);
     expect(Exit.isFailure(exit)).toBe(true);
   }),
 );
