@@ -99,8 +99,44 @@ function errorFrom(status: number, body: unknown): Error {
   );
 }
 
+/**
+ * GET /auth/me is asked by five places at once when a fresh computer opens
+ * (account state, setup steps, assistants, default AI): four parallel calls of
+ * 0.4–0.75 s each through the console held Home back (16.10, Create → Home).
+ * One request in flight serves them all; its answer is reused for a moment.
+ */
+const AUTH_ME_REUSE_MS = 2_000;
+let authMeShared: { readonly at: number; readonly answer: Promise<unknown> } | null = null;
+
 /** One call to the console API as the signed-in person. */
 export async function accountRequest(
+  method: Method,
+  path: string,
+  body?: unknown,
+): Promise<unknown> {
+  if (method === "GET" && path === "/auth/me" && body === undefined) {
+    const now = Date.now();
+    if (authMeShared === null || now - authMeShared.at > AUTH_ME_REUSE_MS) {
+      const answer = sendAccountRequest(method, path, body);
+      const entry = { at: now, answer };
+      authMeShared = entry;
+      // A refusal is never reused: the next caller asks again.
+      answer.catch(() => {
+        if (authMeShared === entry) authMeShared = null;
+      });
+    }
+    // Callers read the profile; each gets its own copy to be safe.
+    return authMeShared.answer.then((me) => (me === null ? me : structuredClone(me)));
+  }
+  return sendAccountRequest(method, path, body);
+}
+
+/** Forget the shared /auth/me answer (sign-in changed, tests). */
+export function resetAccountAuthMeCache(): void {
+  authMeShared = null;
+}
+
+async function sendAccountRequest(
   method: Method,
   path: string,
   body?: unknown,
