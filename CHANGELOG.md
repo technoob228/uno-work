@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.141 — 2026-10-17
+
+- A click on an app opens it, like on a computer. An app with a web page opens in its window inside Uno Work — on a cloud computer, apps that answer only inside it open in the computer's own browser. A Telegram bot opens in Telegram.
+- A stopped app starts when you click it: its window says "Starting…" and shows the app when it answers.
+- Settings are behind ⚙ — on the app (when you point at it), on a right-click, and in the app's window: address, show on the internet, start/stop, remove. An app with nothing to open (a script) opens its settings.
+
 ## v0.0.140 — 2026-10-16
 
 - Putting your AI agent on a server: arriving from the console with Claude Code or Codex, its own sign-in opens by itself (subscription first, API key below). Once signed in, new chats start on it.
