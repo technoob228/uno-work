@@ -322,16 +322,54 @@ function parseUserInputQuestions(
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      if (options.length === 0) {
+      const input =
+        question.input && typeof question.input === "object"
+          ? (question.input as Record<string, unknown>)
+          : null;
+      const connect =
+        question.connect && typeof question.connect === "object"
+          ? (question.connect as Record<string, unknown>)
+          : null;
+      const inputKind =
+        input?.kind === "text" ||
+        input?.kind === "email" ||
+        input?.kind === "url" ||
+        input?.kind === "time"
+          ? input.kind
+          : undefined;
+      // A question with a field or a Connect button may come without options.
+      if (options.length === 0 && !input && !connect) {
         return null;
       }
-      return {
+      const parsedQuestion: { -readonly [K in keyof UserInputQuestion]: UserInputQuestion[K] } = {
         id: question.id,
         header: question.header,
         question: question.question,
         options,
         multiSelect: question.multiSelect === true,
       };
+      if (typeof question.detail === "string" && question.detail.trim()) {
+        parsedQuestion.detail = question.detail;
+      }
+      if (input && typeof input.placeholder === "string") {
+        parsedQuestion.input = inputKind
+          ? { placeholder: input.placeholder, kind: inputKind }
+          : { placeholder: input.placeholder };
+      }
+      if (
+        connect &&
+        typeof connect.provider === "string" &&
+        typeof connect.name === "string" &&
+        typeof connect.doneLabel === "string"
+      ) {
+        parsedQuestion.connect = {
+          provider: connect.provider,
+          name: connect.name,
+          doneLabel: connect.doneLabel,
+        };
+      }
+      if (question.skippable === true) parsedQuestion.skippable = true;
+      return parsedQuestion;
     })
     .filter((question): question is UserInputQuestion => question !== null);
   return parsed.length > 0 ? parsed : null;

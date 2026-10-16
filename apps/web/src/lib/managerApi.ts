@@ -256,6 +256,23 @@ export function createAssistantConversation(
   });
 }
 
+/**
+ * The assistant's setup chat (Misha 16.10): after its name and AI are picked,
+ * the assistant opens a conversation and sets itself up by asking — role,
+ * where you talk, access, connectors, first task — one question at a time.
+ * The daemon starts the chat with the assistant's first message and question.
+ */
+export function startAssistantSetupChat(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ readonly threadId: ThreadId }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: `/api/manager/assistants/${encodeURIComponent(input.projectId)}/setup-chat`,
+    method: "POST",
+    body: {},
+  });
+}
+
 /** A one-time code for the bot's deep link; pressing Start there links the chat. */
 export function startTelegramPairing(
   input: EnvironmentScoped & { readonly projectId: string },

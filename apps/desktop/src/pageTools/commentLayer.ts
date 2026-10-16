@@ -342,7 +342,8 @@ export function installCommentLayer(win: Window & typeof globalThis, emit: Emit)
       (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || ""));
     if (typing && event.key !== "Escape") return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-    if (key === "c" || key === "d" || key === "Escape") {
+    // One mode (Comment shows the console too): C toggles it, Esc leaves it.
+    if (key === "c" || key === "Escape") {
       if (mode === "comment") block(event);
       emit({ type: "key", data: { key } });
     }

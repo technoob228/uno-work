@@ -13,7 +13,16 @@ import {
   lossLine,
   needsOwnComputer,
   ownComputerName,
+  connectorsLine,
+  isCustomAccess,
+  normalizeAccess,
   pickedLine,
+  picksMode,
+  presetAccess,
+  presetLabel,
+  setConnectorLevel,
+  setConnectorMode,
+  setPicksMode,
   suggestName,
   togglePicked,
   toggleRole,
@@ -257,6 +266,11 @@ describe("names and roles", () => {
 
 describe("picked lists", () => {
   const all = ["a", "b", "c"];
+  it("All / Pick / None: Pick starts from what it has", () => {
+    expect(picksMode("none")).toBe("none");
+    expect(setPicksMode("all", "pick", all)).toEqual(all);
+    expect(setPicksMode("none", "pick", all)).toEqual([]);
+  });
   it("unticking one of all keeps the rest", () => {
     expect(togglePicked("all", "b", all)).toEqual(["a", "c"]);
   });
@@ -279,12 +293,13 @@ describe("cutting rights down the tree (16.10)", () => {
     preset: "helper",
     createdBy: unoKey,
     projects: ["landing", "uno-project"],
-    access: { ...NEW_TEAMMATE_ACCESS, connectors: ["google-drive", "github"] },
+    access: { ...NEW_TEAMMATE_ACCESS, connectors: { "google-drive": "write", github: "write" } },
   });
   const helper = profile("Echo", {
     preset: "observer",
     createdBy: "env-1:assistant-scout",
-    access: { ...NEW_TEAMMATE_ACCESS, connectors: ["github"] },
+    projects: ["landing"],
+    access: { ...NEW_TEAMMATE_ACCESS, connectors: { github: "read" } },
   });
   const team = { [unoKey]: uno, "env-1:assistant-scout": scout, "env-1:assistant-echo": helper };
 
@@ -300,11 +315,16 @@ describe("cutting rights down the tree (16.10)", () => {
 
   it("goes all the way down and lists who lost what", () => {
     const { profiles, losses } = cascadeRights(team, unoKey, {
-      access: { ...FULL_ACCESS, connectors: ["google-drive"] },
+      access: { ...FULL_ACCESS, connectors: { "google-drive": "write", github: "read" } },
     });
-    expect(losses.map((loss) => loss.name)).toEqual(["Scout", "Echo"]);
-    expect(profiles["env-1:assistant-echo"]!.access!.connectors).toEqual([]);
-    expect(lossLine(losses)).toBe("Scout will lose: GitHub · Echo will lose: GitHub");
+    // Scout could change things in GitHub; Echo only read it — it keeps that.
+    expect(losses.map((loss) => loss.name)).toEqual(["Scout"]);
+    expect(profiles["env-1:assistant-echo"]!.access!.connectors).toMatchObject({ github: "read" });
+    expect(lossLine(losses)).toBe("Scout will lose: changes in GitHub");
+    const none = cascadeRights(team, unoKey, { access: { ...FULL_ACCESS, connectors: "none" } });
+    expect(lossLine(none.losses)).toBe(
+      "Scout will lose: Google Drive, GitHub · Echo will lose: GitHub",
+    );
   });
 
   it("losing nothing says nothing", () => {
@@ -331,7 +351,9 @@ describe("whose AI it spends", () => {
       profile("Scout", { brain: "chatgpt" }),
       profile("Ada", { brain: "chatgpt" }),
     ];
-    expect(brainLine(team[1]!, team)).toBe("Uses your ChatGPT plan's limits · shared with Ada");
+    expect(brainLine(team[1]!, team, "uno-work")).toBe(
+      "Your ChatGPT plan (signed in on uno-work) · one limit with your own chats · shared with Ada",
+    );
     expect(brainLine(team[0]!, team)).toBe("Uno AI · from your plan's AI hours");
   });
 });
@@ -344,5 +366,49 @@ describe("activityFeed", () => {
     );
     expect(feed.map((entry) => entry.text)).toEqual(["Chat", "Paid"]);
     expect(feed.map((entry) => entry.important)).toEqual([false, true]);
+  });
+});
+
+describe("connector levels (critics track 3)", () => {
+  const apps = [
+    { id: "github", name: "GitHub" },
+    { id: "google-drive", name: "Google Drive" },
+  ];
+  it("says each app's level plainly", () => {
+    expect(connectorsLine("read", apps)).toBe("Every connected app — reads only (2).");
+    expect(connectorsLine({ github: "write", "google-drive": "read" }, apps)).toBe(
+      "GitHub — reads and changes · Google Drive — reads only.",
+    );
+    expect(connectorsLine({ github: "none" }, apps)).toBe("No apps.");
+  });
+  it("Pick from All keeps every app at the same level", () => {
+    expect(setConnectorMode("read", "pick", ["github", "google-drive"])).toEqual({
+      github: "read",
+      "google-drive": "read",
+    });
+    expect(setConnectorLevel("write", "github", "none", ["github"])).toEqual({ github: "none" });
+  });
+  it("reads what an older mock saved", () => {
+    const old = { ...NEW_TEAMMATE_ACCESS, connectors: ["github", "mcp:context7"] as never };
+    expect(normalizeAccess(old).connectors).toEqual({ github: "write" });
+  });
+});
+
+describe("presets set the blocks", () => {
+  it("Observer reads only and uses no logins or keys", () => {
+    const access = presetAccess("observer", NEW_TEAMMATE_ACCESS, false);
+    expect(access.connectors).toBe("read");
+    expect(access.browser).toBe("read");
+    expect(access.logins).toBe("none");
+    expect(access.secrets).toBe("none");
+    expect(isCustomAccess("observer", access, false)).toBe(false);
+  });
+  it("a hand edit makes it Custom; picked keys don't", () => {
+    const helper = presetAccess("helper", NEW_TEAMMATE_ACCESS, false);
+    expect(isCustomAccess("helper", { ...helper, secrets: ["cred-x"] }, false)).toBe(false);
+    expect(isCustomAccess("helper", { ...helper, connectors: { github: "read" } }, false)).toBe(
+      true,
+    );
+    expect(presetLabel("helper", true)).toBe("Custom (based on Helper)");
   });
 });

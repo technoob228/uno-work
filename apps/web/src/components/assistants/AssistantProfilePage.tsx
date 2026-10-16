@@ -24,6 +24,8 @@ import {
   FileTextIcon,
   LaptopIcon,
   MessageCircleIcon,
+  PauseIcon,
+  PlayIcon,
   RotateCcwIcon,
   SendIcon,
   SquarePenIcon,
@@ -32,7 +34,7 @@ import {
 import { type ReactNode, useState } from "react";
 
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { useMachineLabels } from "../../hooks/useMachineRows";
+import { useMachineLabels, useMachineRows } from "../../hooks/useMachineRows";
 import { readAssistantFile } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -58,7 +60,10 @@ import {
   brainLine,
   CHANNEL_NAME,
   cascadeRights,
+  isCustomAccess,
   lossLine,
+  presetAccess,
+  presetLabel,
   needsOwnComputer,
   ownComputerName,
   type RightsLoss,
@@ -299,8 +304,9 @@ function RightsWarning(props: {
       ) : null}
       {pending.movesOut && pending.rights.ownComputer ? (
         <p className="text-muted-foreground">
-          {props.name} moves to a computer of its own ({pending.rights.ownComputer}, Lite): on yours
-          it could still read every file, whatever you limit here.
+          {props.name} moves to a computer of its own — {pending.rights.ownComputer}, Lite: from
+          your plan’s quota, at most $5/mo, sleeps when idle. On yours it could still read every
+          file, whatever you limit here.
         </p>
       ) : null}
       {pending.losses.length > 0 ? (
@@ -320,6 +326,7 @@ function RightsWarning(props: {
 
 function OwnComputerLine(props: { readonly member: TeamMember; readonly onMove: () => void }) {
   const { profile } = props.member;
+  const [confirm, setConfirm] = useState(false);
   if (profile.ownComputer) {
     return (
       <div className="flex flex-col gap-0.5">
@@ -342,9 +349,22 @@ function OwnComputerLine(props: { readonly member: TeamMember; readonly onMove: 
         <span className="text-xs text-amber-700 dark:text-amber-400">
           Limited rights hold only on a computer of its own — next to you it could read every file.
         </span>
-        <Button size="xs" variant="outline" onClick={props.onMove}>
-          Move to its own computer
-        </Button>
+        {confirm ? (
+          <span className="flex flex-wrap items-center gap-1.5 text-xs">
+            Make {ownComputerName(profile.name)} — Lite, from your plan’s quota, at most $5/mo,
+            sleeps when idle?
+            <Button size="xs" onClick={props.onMove}>
+              Make it
+            </Button>
+            <Button size="xs" variant="ghost" onClick={() => setConfirm(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button size="xs" variant="outline" onClick={() => setConfirm(true)}>
+            Move to its own computer
+          </Button>
+        )}
       </div>
     );
   }
@@ -364,6 +384,10 @@ const ACTIVITY_ICON: Readonly<Record<string, string>> = {
   teammate: "🧑‍🤝‍🧑",
   access: "🔒",
   note: "📝",
+  connector: "🔌",
+  login: "🔑",
+  key: "🗝️",
+  denied: "⛔",
 };
 
 function ActivityList(props: { readonly feed: ReturnType<typeof activityFeed> }) {
@@ -383,6 +407,11 @@ function ActivityList(props: { readonly feed: ReturnType<typeof activityFeed> })
           <span className="w-5 shrink-0 text-center">{ACTIVITY_ICON[entry.kind] ?? "•"}</span>
           <span className="min-w-0 flex-1">
             {entry.text}
+            {entry.by ? (
+              <span className="ml-2 text-xs text-muted-foreground">
+                {entry.by === "you" ? "you allowed" : "on its own — its rights allow it"}
+              </span>
+            ) : null}
             {entry.important ? (
               <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
                 also in Needs you
@@ -409,6 +438,7 @@ export function AssistantProfilePage(props: {
     ) ?? null;
   const navigate = useNavigate();
   const labels = useMachineLabels();
+  const machines = useMachineRows();
   const { handleNewThread } = useNewThreadHandler();
   const patchProfile = useAssistantTeamStore((store) => store.patch);
   const revoke = useAssistantTeamStore((store) => store.revoke);
@@ -508,12 +538,28 @@ export function AssistantProfilePage(props: {
     }
     setPending({ rights: withComputer, title, losses, movesOut, from });
   };
+  // A preset sets the blocks too (critics track 3); a hand edit makes it Custom.
   const setPreset = (preset: AssistantPreset) =>
-    changeRights({ preset }, `${profile.name}: ${PRESET_NAME[preset]}`, "role");
+    changeRights(
+      { preset, access: presetAccess(preset, accessOf(profile), member.isUno) },
+      `${profile.name}: ${PRESET_NAME[preset]}`,
+      "role",
+    );
   const setAccess = (access: AssistantAccess) =>
     changeRights({ access }, `${profile.name}: access changed`, "access");
   const shownPreset = pending?.rights.preset ?? profile.preset;
   const shownAccess = pending?.rights.access ?? accessOf(profile);
+  const custom = isCustomAccess(shownPreset, shownAccess, member.isUno);
+  const homeMachine = machines.find((machine) => machine.environmentId === member.environmentId);
+  const place = {
+    environmentId: member.environmentId,
+    label: profile.ownComputer ?? member.computerLabel,
+    own: Boolean(profile.ownComputer),
+    mac: !profile.ownComputer && homeMachine?.kind === "computer",
+  };
+  const otherComputers = machines
+    .filter((machine) => machine.environmentId !== null)
+    .map((machine) => machine.label);
   const warning = pending ? (
     <RightsWarning
       pending={pending}
@@ -570,6 +616,8 @@ export function AssistantProfilePage(props: {
                   <h1 className="text-xl font-semibold leading-tight">{profile.name}</h1>
                   {member.revoked ? (
                     <Pill muted>Revoked</Pill>
+                  ) : profile.pausedAt ? (
+                    <Pill muted>Paused</Pill>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                       <span
@@ -587,6 +635,11 @@ export function AssistantProfilePage(props: {
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">{profileLine(profile)}</p>
+                {member.isUno ? (
+                  <p className="text-xs text-muted-foreground">
+                    Your main assistant — always here, sets up the others.
+                  </p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {profile.character ? `${profile.character} · ` : ""}
                   Takes tasks only from you · lives on{" "}
@@ -693,7 +746,7 @@ export function AssistantProfilePage(props: {
                 </div>
 
                 <Section title="Access and role" testId="assistant-profile-access">
-                  <Row label="May">
+                  <Row label="Can do">
                     <div
                       className="flex flex-wrap gap-1"
                       role="radiogroup"
@@ -722,6 +775,26 @@ export function AssistantProfilePage(props: {
                     <p className="mt-1 text-xs text-muted-foreground">
                       {PRESETS.find((preset) => preset.id === shownPreset)?.line}
                     </p>
+                    {custom ? (
+                      <p
+                        className="mt-1 flex flex-wrap items-center gap-1.5 text-xs"
+                        data-testid="assistant-profile-custom"
+                      >
+                        <span className="font-medium">{presetLabel(shownPreset, true)}</span>
+                        <span className="text-muted-foreground">
+                          — you changed what it can use below.
+                        </span>
+                        {member.revoked ? null : (
+                          <button
+                            type="button"
+                            onClick={() => setPreset(shownPreset)}
+                            className="cursor-pointer text-primary hover:underline"
+                          >
+                            Reset to {PRESET_NAME[shownPreset]}
+                          </button>
+                        )}
+                      </p>
+                    ) : null}
                     {pending?.from === "role" ? <div className="mt-2">{warning}</div> : null}
                   </Row>
                   {member.isUno ? null : (
@@ -747,14 +820,40 @@ export function AssistantProfilePage(props: {
                     </div>
                   </Row>
                   <Row label="Computers">
-                    <div className="flex flex-wrap gap-1">
-                      {computers.map((label) => (
-                        <Pill key={label}>
-                          <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
-                          {label}
-                        </Pill>
-                      ))}
-                    </div>
+                    {profile.ownComputer ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Pill>
+                            <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+                            {profile.ownComputer}
+                          </Pill>
+                          {otherComputers.map((label) => (
+                            <span
+                              key={label}
+                              title="Starting chats on your computers needs Full"
+                              className="inline-flex h-6 items-center rounded-md border border-dashed border-border px-2 text-xs text-muted-foreground/60"
+                            >
+                              {label} · needs Full
+                            </span>
+                          ))}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {profile.projects === "all"
+                            ? "Every project is"
+                            : `${profile.projects.join(", ")} ${profile.projects.length === 1 ? "is" : "are"}`}{" "}
+                          copied to {profile.ownComputer}; nothing else of yours is there.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {computers.map((label) => (
+                          <Pill key={label}>
+                            <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+                            {label}
+                          </Pill>
+                        ))}
+                      </div>
+                    )}
                   </Row>
                   <Row label="Role" last={profile.skills.length === 0}>
                     <div className="flex flex-wrap gap-1">
@@ -766,7 +865,7 @@ export function AssistantProfilePage(props: {
                     </div>
                   </Row>
                   {profile.skills.length > 0 ? (
-                    <Row label="Skills" last>
+                    <Row label="Good at" last>
                       <div className="flex flex-wrap gap-1">
                         {profile.skills.map((skill) => (
                           <Pill key={skill} muted>
@@ -803,7 +902,9 @@ export function AssistantProfilePage(props: {
                       />
                     ) : (
                       <div className="px-3 py-2" data-testid="assistant-profile-brain">
-                        <p className="text-sm">{brainLine(profile, live)}</p>
+                        <p className="text-sm">
+                          {brainLine(profile, live, place.label || undefined)}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {profile.brain === "uno"
                             ? "Its own AI, counted in your plan."
@@ -852,6 +953,8 @@ export function AssistantProfilePage(props: {
                     name={profile.name}
                     access={shownAccess}
                     onChange={member.revoked ? null : setAccess}
+                    place={place}
+                    projects={profile.projects}
                     foldWhenFull
                   />
                   {pending?.from === "access" ? (
@@ -900,7 +1003,33 @@ export function AssistantProfilePage(props: {
                     ) : (
                       <p>Set up by you.</p>
                     )}
-                    {member.revoked ? null : confirmRevoke ? (
+                    {member.isUno ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const paused = Boolean(profile.pausedAt);
+                          patchProfile(member.key, {
+                            pausedAt: paused ? null : new Date().toISOString(),
+                          });
+                          toastManager.add({
+                            type: "success",
+                            title: paused ? "Uno is back" : "Uno is paused",
+                            description: paused
+                              ? "Scheduled tasks and the bot run again."
+                              : "Scheduled tasks and the bot wait until you resume. The others keep working.",
+                          });
+                        }}
+                        className="mt-1.5 inline-flex cursor-pointer items-center gap-1 text-foreground hover:underline"
+                        data-testid="assistant-profile-pause"
+                      >
+                        {profile.pausedAt ? (
+                          <PlayIcon className="size-3.5" />
+                        ) : (
+                          <PauseIcon className="size-3.5" />
+                        )}
+                        {profile.pausedAt ? "Resume Uno" : "Pause Uno"}
+                      </button>
+                    ) : member.revoked ? null : confirmRevoke ? (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span className="text-foreground">
                           Revoke {profile.name}

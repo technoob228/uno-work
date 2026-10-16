@@ -165,7 +165,7 @@ export function assistantModelLabel(model: string): string {
   return bare;
 }
 
-/** Short provider label for the chat header: "Uno gateway" / "Your xAI key" / "Your Claude plan". */
+/** Short provider label for the chat header: "Uno AI" / "Your xAI key" / "Your Claude plan". */
 export function assistantProviderLabel(provider: AssistantLlmProvider): string {
   if (provider === "claude" || provider === "chatgpt") {
     return `Your ${AI_PROVIDER_LABELS[provider]} plan`;

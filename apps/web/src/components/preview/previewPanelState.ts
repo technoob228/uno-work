@@ -234,7 +234,7 @@ function revealTab(
 export interface OpenTabOptions {
   /**
    * Помечать вкладки, открытые агентом (`openedBy: "agent"`, значок в ряду
-   * вкладок, флаг `panelTabPins`). Без флага — как в 0.0.137, без пометки.
+   * вкладок, флаг `panelTabGroups`). Без флага — как в 0.0.137, без пометки.
    * Пометка живёт только в памяти: `previewTabPersistence` её не сохраняет.
    */
   readonly markAgentTabs?: boolean;

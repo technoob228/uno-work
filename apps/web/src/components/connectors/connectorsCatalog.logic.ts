@@ -27,22 +27,33 @@ export interface ConnectorItem {
 export const APP_TECH: Readonly<Record<string, { readonly plain: string; readonly tech: string }>> =
   {
     github: {
-      plain: "Repos, issues and pull requests.",
+      plain: "Reads and pushes to all your repos, private ones too; issues and pull requests.",
       tech: "OAuth · scopes repo, read:org · MCP uno-work › github_* (28 tools)",
     },
     "google-drive": {
-      plain: "Reads your files and saves new ones.",
+      plain: "Only files Uno created or you picked for it — not your whole Drive.",
       tech: "OAuth · scope drive.file · MCP uno-work › drive_* (9 tools)",
     },
     notion: {
-      plain: "Pages and databases you share with Uno.",
+      plain: "Only the pages you shared with Uno; reads and edits them.",
       tech: "OAuth · read and update content · MCP uno-work › notion_* (12 tools)",
     },
     gmail: {
-      plain: "Reads mail, drafts replies, sees your day.",
+      plain: "Reads, drafts and sends mail, can move it to Trash; reads your calendar.",
       tech: "OAuth · scopes gmail.modify, calendar.readonly · MCP uno-work › gmail_*, calendar_*",
     },
   };
+
+/** "https://mcp.example.com/…" — the address may carry a token, so only the host shows. */
+export function maskServerUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const rest = `${parsed.pathname}${parsed.search}`;
+    return `${parsed.protocol}//${parsed.host}${rest.length > 1 ? "/…" : ""}`;
+  } catch {
+    return "…";
+  }
+}
 
 export const MCP_ID_PREFIX = "mcp:";
 
@@ -78,8 +89,8 @@ export function connectorItems(input: {
         name: server.name,
         connected: true,
         account: null,
-        plain: "A tool server you added.",
-        tech: `MCP · ${server.url}`,
+        plain: "A tool server you added on this computer.",
+        tech: `MCP · ${maskServerUrl(server.url)} · every chat on this computer`,
       })),
   ];
 }

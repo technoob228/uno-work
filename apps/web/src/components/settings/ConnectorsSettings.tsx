@@ -11,7 +11,7 @@ import { useState } from "react";
 
 import { GitHubIcon } from "../Icons";
 import { AssistantAvatar } from "../assistants/AssistantAvatar";
-import { accessOf, pickedLine } from "../assistants/assistantTeam.logic";
+import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
 import { useAssistantTeam } from "../assistants/useAssistantTeam";
 import { connectedSummary } from "../connectors/connectorsCatalog.logic";
@@ -25,7 +25,9 @@ export function ConnectorsSettings() {
   const team = useAssistantTeam().filter((member) => !member.revoked);
   const [details, setDetails] = useState(false);
   const connected = items.filter((item) => item.connected);
-  const names = connected.map((item) => ({ id: item.id, name: item.name }));
+  const names = connected
+    .filter((item) => item.kind === "app")
+    .map((item) => ({ id: item.id, name: item.name }));
 
   return (
     <SettingsPageContainer>
@@ -37,7 +39,7 @@ export function ConnectorsSettings() {
         </p>
       </div>
 
-      {!loading && connected.length === 0 ? (
+      {!loading && names.length === 0 ? (
         <div
           className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3.5"
           data-testid="settings-connectors-empty"
@@ -98,12 +100,7 @@ export function ConnectorsSettings() {
                   {member.profile.name}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {connected.length === 0
-                    ? "—"
-                    : pickedLine(access.connectors, names, {
-                        all: "Every connected app",
-                        none: "No apps",
-                      })}
+                  {names.length === 0 ? "—" : connectorsLine(access.connectors, names)}
                 </span>
                 <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
               </button>
@@ -125,11 +122,19 @@ export function ConnectorsSettings() {
         {details ? (
           <div className="mt-2 flex flex-col gap-1.5 rounded-xl border border-border px-4 py-3 text-xs">
             <p className="text-muted-foreground">
-              Apps: an OAuth grant kept by your Uno account; agents on every computer of the account
-              get their tools from the built-in MCP server{" "}
-              <code className="font-mono">uno-work</code>. Servers of your own go to{" "}
-              <code className="font-mono">settings.mcpServers</code> and reach every new chat. A
-              teammate gets only what its token allows.
+              Apps belong to your Uno account: the OAuth token stays in the console and never lands
+              on a computer. Agents on every computer of the account get the tools through the
+              built-in MCP server <code className="font-mono">uno-work</code>; for an assistant the
+              computer’s Uno Work checks its level (none / read / read+write) on every call.
+            </p>
+            <p className="text-muted-foreground">
+              Servers you add (<code className="font-mono">settings.mcpServers</code>) live on this
+              computer only and reach every chat on it — they can’t be limited per assistant yet.
+              Addresses show the host only: one may carry a token.
+            </p>
+            <p className="text-muted-foreground">
+              Not covered: a chat can still use the <code className="font-mono">gh</code> CLI or a
+              key from the terminal — that goes by Keys & tokens, not by these levels.
             </p>
             {items.map((item) => (
               <div key={item.id} className="flex gap-2">

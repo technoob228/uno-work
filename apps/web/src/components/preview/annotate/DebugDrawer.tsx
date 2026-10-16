@@ -1,15 +1,17 @@
 /**
- * Errors (D) — the panel at the bottom of a browser tab (w0138), dense like
- * DevTools: the page's Console (errors red, warnings amber) and Network
- * (failed requests red), 22px lines. A line's "Ask agent to fix" shows on
- * hover or when it is open (the error with its stack, or the request with
- * what came back, as a card in the chat's composer); "Ask agent to fix all"
- * sends every problem at once. "Let the agent see these errors" — the agent
- * can read this console when it works in this browser. The top edge drags.
+ * The page's console and network at the bottom of a browser tab while
+ * comment mode is on (w0138; one mode, like Codex — no separate switch, no
+ * settings). Dense like DevTools: Console (errors red, warnings amber) and
+ * Network (failed requests red), 22px lines. A line's "Ask agent to fix"
+ * shows on hover or when it is open (the error with its stack, or the
+ * request with what came back, as a card in the chat's composer); "Ask agent
+ * to fix all" sends every problem at once. The chevron folds it to its
+ * header row; the top edge drags.
  */
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   InfoIcon,
   TrashIcon,
@@ -20,7 +22,6 @@ import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react"
 
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
-import { Switch } from "../../ui/switch";
 import {
   allErrorsPayload,
   type ConsoleEntry,
@@ -38,7 +39,6 @@ const MIN_HEIGHT = 96;
 export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string }) {
   const tab = usePageToolsTab(tabId);
   const store = usePageToolsStore;
-  const agentSeesConsole = usePageToolsStore((state) => state.agentSeesConsole);
   const height = usePageToolsStore((state) => state.debugHeight);
   const sendToChat = useSendToChat();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -47,8 +47,9 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
   const warnings = tab.console.filter((entry) => entry.level === "warn").length;
   const failed = tab.network.filter(isFailedRequest).length;
   const all = allErrorsPayload({ page: pageUrl, console: tab.console, network: tab.network });
-  // The same N as "Errors · N" on the address row.
+  // The same N as the count on the Comment button.
   const problems = errors + failed;
+  const open = tab.debugOpen;
 
   const onResizeDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -74,10 +75,11 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
     <div
       ref={rootRef}
       className="relative flex shrink-0 flex-col border-t border-border bg-card text-xs"
-      style={{ height }}
+      style={open ? { height } : undefined}
       data-testid="browser-debug-drawer"
     >
       <div
+        hidden={!open}
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize"
@@ -87,18 +89,23 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
         onPointerUp={onResizeUp}
         onPointerCancel={onResizeUp}
       />
-      <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
+      <div
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-0.5 px-1.5",
+          open && "border-b border-border",
+        )}
+      >
         <TabButton
-          active={tab.debugTab === "console"}
-          onClick={() => store.getState().patch(tabId, { debugTab: "console" })}
+          active={open && tab.debugTab === "console"}
+          onClick={() => store.getState().patch(tabId, { debugTab: "console", debugOpen: true })}
         >
           Console
           {errors > 0 ? <Count tone="error">{errors}</Count> : null}
           {warnings > 0 ? <Count tone="warn">{warnings}</Count> : null}
         </TabButton>
         <TabButton
-          active={tab.debugTab === "network"}
-          onClick={() => store.getState().patch(tabId, { debugTab: "network" })}
+          active={open && tab.debugTab === "network"}
+          onClick={() => store.getState().patch(tabId, { debugTab: "network", debugOpen: true })}
         >
           Network
           {failed > 0 ? <Count tone="error">{failed}</Count> : null}
@@ -114,18 +121,6 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
           <WrenchIcon />
           Ask agent to fix all{problems > 0 ? ` (${problems})` : ""}
         </Button>
-        <label
-          className="flex cursor-pointer items-center gap-1.5 px-1.5 text-[11px] whitespace-nowrap text-muted-foreground"
-          title="When the agent works in this browser, it reads this console and these requests"
-        >
-          <Switch
-            checked={agentSeesConsole}
-            onCheckedChange={(checked) => store.getState().setAgentSeesConsole(checked)}
-            className="[--thumb-size:--spacing(3)] sm:[--thumb-size:--spacing(3)]"
-            data-testid="browser-agent-sees-console"
-          />
-          Let the agent see these errors
-        </label>
         <Button
           size="icon-xs"
           variant="ghost"
@@ -138,14 +133,15 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
         <Button
           size="icon-xs"
           variant="ghost"
-          onClick={() => store.getState().patch(tabId, { debugOpen: false })}
-          aria-label="Hide"
-          title="Hide (D)"
+          onClick={() => store.getState().patch(tabId, { debugOpen: !open })}
+          aria-label={open ? "Fold" : "Unfold"}
+          title={open ? "Fold" : "Unfold"}
+          data-testid="browser-debug-fold"
         >
-          <ChevronDownIcon />
+          {open ? <ChevronDownIcon /> : <ChevronUpIcon />}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
+      <div hidden={!open} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
         {tab.debugTab === "console" ? (
           tab.console.length === 0 ? (
             <Empty text="Nothing in the console yet." />

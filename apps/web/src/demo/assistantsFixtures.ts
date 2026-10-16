@@ -14,6 +14,15 @@
 import { ASSISTANT_PROJECT_ID, type AssistantLlmStatus } from "@t3tools/contracts";
 import { HttpResponse, http } from "msw";
 
+import { type DemoSwitches, useDemoStore } from "./demoFlag";
+import {
+  type SetupQuestion,
+  type SetupWorld,
+  answerSetupChatTurn,
+  isSetupChatThread,
+  startSetupChat,
+} from "./setupChatBrain";
+
 import type { AssistantProfile } from "../components/assistants/assistantTeam.logic";
 import {
   type RightsCutDetail,
@@ -232,9 +241,22 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
       {
         at: ago(60 * 24 * 3),
         kind: "money",
-        text: "Paid the Hostkey invoice — $347, you said yes",
+        text: "Paid the Hostkey invoice — $347",
+        by: "you",
       },
-      { at: ago(60 * 5), kind: "deploy", text: "Published misha-week-1015.uno4.me" },
+      {
+        at: ago(60 * 24 * 3 + 5),
+        kind: "login",
+        text: "Signed in to my.hostkey.com with your saved login",
+        by: "auto",
+      },
+      { at: ago(60 * 5), kind: "deploy", text: "Published misha-week-1015.uno4.me", by: "auto" },
+      {
+        at: ago(60 * 4),
+        kind: "connector",
+        text: "GitHub: merged PR #412 in uno-work-app",
+        by: "you",
+      },
       { at: ago(60 * 2), kind: "note", text: "Saved the morning plan to NOTES.md" },
     ],
   },
@@ -260,11 +282,39 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     schedule: [{ name: "Nightly test run", when: "every day 03:00" }],
     ownComputer: "builder-box",
     activity: [
-      { at: ago(60 * 20), kind: "deploy", text: "Deployed fishcode feat/kv-service to stage" },
-      { at: ago(60 * 9), kind: "delete", text: "Deleted 3 merged branches in uno-work-app" },
+      {
+        at: ago(60 * 20),
+        kind: "deploy",
+        text: "Deployed fishcode feat/kv-service to stage",
+        by: "you",
+      },
+      {
+        at: ago(60 * 20 + 2),
+        kind: "key",
+        text: "Used Cloudflare API token in `wrangler deploy`",
+        by: "auto",
+      },
+      {
+        at: ago(60 * 12),
+        kind: "connector",
+        text: "GitHub: opened PR #418 in fishcode",
+        by: "auto",
+      },
+      {
+        at: ago(60 * 10),
+        kind: "denied",
+        text: "Wanted to read Gmail — not in its apps; asked you instead",
+      },
+      {
+        at: ago(60 * 9),
+        kind: "delete",
+        text: "Deleted 3 merged branches in uno-work-app",
+        by: "you",
+      },
     ],
     access: {
-      connectors: ["github", "mcp:context7"],
+      // Custom (based on Helper): GitHub reads and changes, Drive reads only.
+      connectors: { github: "write", "google-drive": "read" },
       browser: "safe",
       logins: ["cred-github"],
       secrets: ["cred-cloudflare-token"],
@@ -294,13 +344,25 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     schedule: [{ name: "Competitors digest", when: "Mondays 09:00" }],
     ownComputer: "scout-box",
     activity: [
-      { at: ago(60 * 30), kind: "note", text: "Saved “Competitors — week 41” to Google Drive" },
+      {
+        at: ago(60 * 31),
+        kind: "connector",
+        text: "Google Drive: read “Competitors — week 40”",
+        by: "auto",
+      },
+      {
+        at: ago(60 * 30),
+        kind: "denied",
+        text: "Wanted to save “Competitors — week 41” to Drive — Observer only reads",
+      },
+      { at: ago(60 * 30 - 1), kind: "note", text: "Sent you “Competitors — week 41” in Telegram" },
     ],
     access: {
-      connectors: ["google-drive"],
-      browser: "safe",
-      logins: [],
-      secrets: [],
+      // Exactly Observer: apps and pages read only, no logins or keys.
+      connectors: "read",
+      browser: "read",
+      logins: "none",
+      secrets: "none",
       projectSkills: true,
       personalSkills: ["sales-copy"],
     },
@@ -323,11 +385,21 @@ export function seedAssistantTeam(hooks: { readonly addInbox: (spec: DemoInboxSp
     const saved = useAssistantTeamStore.getState().profiles[key];
     if (!saved) continue;
     const missing: Partial<AssistantProfile> = {
-      ...(profile.access && !saved.access ? { access: profile.access } : {}),
+      // No access yet, or the shape before levels (critics track 3): the team's.
+      ...(profile.access &&
+      (!saved.access ||
+        Array.isArray(saved.access.connectors) ||
+        (saved.access.connectors as unknown) === "all")
+        ? { access: profile.access }
+        : {}),
       ...(profile.ownComputer && saved.ownComputer === undefined
         ? { ownComputer: profile.ownComputer }
         : {}),
-      ...(profile.activity && !saved.activity ? { activity: profile.activity } : {}),
+      // Activity from before "who allowed it" (critics track 3): the team's.
+      ...(profile.activity &&
+      (!saved.activity || !saved.activity.some((entry) => entry.kind === "connector"))
+        ? { activity: profile.activity }
+        : {}),
     };
     if (Object.keys(missing).length > 0) store.patch(key, missing);
   }
@@ -376,14 +448,22 @@ const CONNECTOR_META: ReadonlyArray<{ provider: Provider; name: string; descript
   {
     provider: "google-drive",
     name: "Google Drive",
-    description: "Read your files and save new ones.",
+    description: "Only files Uno created or you picked for it — not your whole Drive.",
   },
-  { provider: "github", name: "GitHub", description: "Repos, issues and pull requests." },
-  { provider: "notion", name: "Notion", description: "Pages and databases you share with Uno." },
+  {
+    provider: "github",
+    name: "GitHub",
+    description: "Reads and pushes to all your repos, private ones too; issues and PRs.",
+  },
+  {
+    provider: "notion",
+    name: "Notion",
+    description: "Only the pages you shared with Uno; reads and edits them.",
+  },
   {
     provider: "gmail",
     name: "Gmail & Calendar",
-    description: "Read mail, draft replies, see your day.",
+    description: "Reads, drafts and sends mail, can move it to Trash; reads your calendar.",
   },
 ];
 const ACCOUNT: Record<Provider, string> = {
@@ -393,12 +473,22 @@ const ACCOUNT: Record<Provider, string> = {
   gmail: "misha@getuno.xyz",
 };
 /** Connected now, or since when a sign-in was started (it lands ~2 s later). */
-const connectors = new Map<Provider, { connectedAt: string | null; startedAt: number | null }>([
-  ["github", { connectedAt: ago(60 * 24 * 20), startedAt: null }],
-  ["google-drive", { connectedAt: ago(60 * 24 * 9), startedAt: null }],
-  ["notion", { connectedAt: null, startedAt: null }],
-  ["gmail", { connectedAt: null, startedAt: null }],
-]);
+const connectors = new Map<Provider, { connectedAt: string | null; startedAt: number | null }>();
+/** p9 switch: GitHub and Drive connected, or nothing yet (to see the empty state). */
+function resetConnectors(state: DemoSwitches["connectors"]) {
+  const on = state === "connected";
+  connectors.set("github", { connectedAt: on ? ago(60 * 24 * 20) : null, startedAt: null });
+  connectors.set("google-drive", { connectedAt: on ? ago(60 * 24 * 9) : null, startedAt: null });
+  connectors.set("notion", { connectedAt: null, startedAt: null });
+  connectors.set("gmail", { connectedAt: null, startedAt: null });
+}
+resetConnectors(useDemoStore.getState().switches.connectors);
+useDemoStore.subscribe((state, previous) => {
+  if (state.switches.connectors === previous.switches.connectors) return;
+  resetConnectors(state.switches.connectors);
+  // The lists ask again on focus; a reload shows it at once.
+  location.reload();
+});
 
 function connectorsState() {
   const now = Date.now();
@@ -600,6 +690,64 @@ const slugOf = (name: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "new";
 
+// ── p7: the assistant sets itself up in a chat (Misha 16.10) ──────────────
+
+interface ChatHooks {
+  readonly create: (
+    machine: DemoMachine,
+    input: { threadId: string; projectId: string; title: string },
+  ) => void;
+  readonly says: (
+    machine: DemoMachine,
+    threadId: string,
+    text: string,
+    question?: Record<string, unknown>,
+  ) => void;
+}
+let chatHooks: ChatHooks | null = null;
+
+function worldOf(machine: DemoMachine): SetupWorld {
+  return {
+    projects: PROJECTS[machine.key]
+      .filter((project) => !project.id.startsWith("assistant-") && project.title !== "Home folder")
+      .map((project) => project.title),
+    connected: (provider) => connectors.get(provider as Provider)?.connectedAt != null,
+    keys: VAULT.filter((entry) => entry.url === "").map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+    })),
+  };
+}
+
+const machineByEnvironment = (environmentId: string) =>
+  (Object.values(MACHINES) as DemoMachine[]).find(
+    (machine) => machine.environmentId === environmentId,
+  ) ?? null;
+
+export const isSetupChat = isSetupChatThread;
+
+/** The person answered a question of a setup chat: the assistant saves it and asks on. */
+export function answerSetupChat(environmentId: string, threadId: string, answer: string) {
+  const machine = machineByEnvironment(environmentId);
+  if (!machine || !chatHooks) return;
+  const next = answerSetupChatTurn(threadId, answer, worldOf(machine));
+  if (!next) return;
+  const hooks = chatHooks;
+  // A short "thinking" beat, like a person typing.
+  setTimeout(
+    () =>
+      hooks.says(
+        machine,
+        threadId,
+        next.text,
+        next.question
+          ? (next.question as SetupQuestion as unknown as Record<string, unknown>)
+          : undefined,
+      ),
+    1100,
+  );
+}
+
 export function assistantHandlers(input: {
   readonly machineForHost: (host: string) => DemoMachine;
   /** Makes the assistant's folder on that computer (and tells the page). */
@@ -607,9 +755,36 @@ export function assistantHandlers(input: {
     machine: DemoMachine,
     project: { id: string; title: string; workspaceRoot: string },
   ) => void;
+  /** p7: the setup chat — a new thread, and the assistant's lines in it. */
+  readonly chat: ChatHooks;
 }) {
+  chatHooks = input.chat;
   const machineOf = (request: Request) => input.machineForHost(new URL(request.url).host);
   return [
+    http.post("*/api/manager/assistants/:projectId/setup-chat", ({ request, params }) => {
+      const machine = machineOf(request);
+      const projectId = String(params.projectId);
+      const key = `${machine.environmentId}:${projectId}`;
+      const name = useAssistantTeamStore.getState().profiles[key]?.name ?? "assistant";
+      const threadId = `setup-${projectId}-${Date.now().toString(36)}`;
+      input.chat.create(machine, { threadId, projectId, title: `Setting up ${name}` });
+      const first = startSetupChat(
+        threadId,
+        { environmentId: machine.environmentId, key },
+        worldOf(machine),
+      );
+      setTimeout(
+        () =>
+          input.chat.says(
+            machine,
+            threadId,
+            first.text,
+            first.question ? (first.question as unknown as Record<string, unknown>) : undefined,
+          ),
+        700,
+      );
+      return HttpResponse.json({ threadId });
+    }),
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
       return HttpResponse.json({

@@ -87,7 +87,7 @@ export const BYOK_PROVIDER_BASE_URLS: Readonly<Record<Exclude<ByokProviderId, "c
   };
 
 export const AI_PROVIDER_LABELS: Readonly<Record<AssistantLlmProvider, string>> = {
-  uno: "Uno gateway",
+  uno: "Uno AI",
   xai: "xAI",
   openrouter: "OpenRouter",
   openai: "OpenAI",

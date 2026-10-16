@@ -39,6 +39,8 @@ import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantCh
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { TeammateChatHeadline } from "../assistants/TeammateChatHeadline";
+import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import {
   ASSISTANT_CHAT_NAME,
   ASSISTANT_VALUE_LINE,
@@ -162,7 +164,10 @@ export const ChatHeader = memo(function ChatHeader({
         (thread) =>
           thread.id === activeThreadId && thread.environmentId === activeThreadEnvironmentId,
       ) ?? null);
-  const isAssistantChat = isMainAssistantChat || assistantConversation !== null;
+  // A teammate's chat (Ada, Builder…) gets its own face, not Uno's (16.10).
+  const teammate = useTeammateOfThread(activeThreadEnvironmentId, activeThreadId);
+  const isAssistantChat =
+    teammate === null && (isMainAssistantChat || assistantConversation !== null);
   const title = isMainAssistantChat
     ? ASSISTANT_CHAT_NAME
     : assistantConversation
@@ -185,7 +190,9 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        {isAssistantChat && !devMode ? (
+        {teammate && !devMode ? (
+          <TeammateChatHeadline member={teammate} title={activeThreadTitle} />
+        ) : isAssistantChat && !devMode ? (
           // Sidebar D: Uno's face, name and where it answers; its settings are
           // the chips on the right (AssistantChatHeaderActions).
           <AssistantChatHeadline environmentId={activeThreadEnvironmentId} title={title} />

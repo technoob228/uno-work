@@ -95,7 +95,7 @@ describe("stage defaults (w0139)", () => {
       "panelLauncherV2",
       "browserPageTools",
       "fullscreenChatDock",
-      "panelTabPins",
+      "panelTabGroups",
       "sidebarViewMenu",
       "assistantChatsInSidebar",
       "fileShareButton",

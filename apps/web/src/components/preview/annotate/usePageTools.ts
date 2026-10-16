@@ -138,13 +138,8 @@ export function usePageTools(input: {
           return;
         }
         case "key": {
-          const tab = store().tabs[tabId];
-          if (message.data.key === "c") actions.toggleCommenting(tabId);
-          else if (message.data.key === "d") actions.toggleDebug(tabId);
-          else if (message.data.key === "Escape") {
-            if (tab?.draft) actions.patch(tabId, { draft: null });
-            else if (tab?.commenting) actions.patch(tabId, { commenting: false });
-          }
+          if (message.data.key === "c") actions.toggleMode(tabId);
+          else if (message.data.key === "Escape") actions.escape(tabId);
           return;
         }
       }

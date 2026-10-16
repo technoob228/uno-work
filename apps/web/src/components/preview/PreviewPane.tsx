@@ -98,7 +98,7 @@ import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
 import { AllTabsMenu } from "./AllTabsMenu";
 import { useCurrentProjectName } from "./usePanelChats";
-import { DEMO, demoHooks, useDemoSwitch } from "../../demo/demoFlag";
+import { DEMO, demoHooks } from "../../demo/demoFlag";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
@@ -156,7 +156,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
 /**
  * Значок уровня вкладки. У вкладок чата значка нет: это уровень по умолчанию, и
  * иконка на каждой вкладке была бы шумом — подсвечиваем только то, что живёт
- * дольше треда. (Ряд вкладок 0.0.137 — без флага `panelTabPins`.)
+ * дольше треда. (Ряд вкладок 0.0.137 — без флага `panelTabGroups`.)
  */
 const SCOPE_ICON: Record<PreviewTabScope, typeof FileIcon | null> = {
   chat: null,
@@ -1776,7 +1776,7 @@ function PathBar({
 /**
  * Контекстное меню вкладки: перенос между уровнями (чат / проект / везде) и
  * закрытие. Уровень определяет, в каких чатах вкладка вообще видна.
- * (Ряд вкладок 0.0.137 — без флага `panelTabPins`.)
+ * (Ряд вкладок 0.0.137 — без флага `panelTabGroups`.)
  */
 async function showTabScopeMenu(input: {
   file: PreviewFile;
@@ -1812,9 +1812,9 @@ async function showTabScopeMenu(input: {
 }
 
 /**
- * Ряд вкладок 0.0.137 (флаг `panelTabPins` выкл.): вкладки подряд, значок
+ * Ряд вкладок 0.0.137 (флаг `panelTabGroups` выкл.): вкладки подряд, значок
  * уровня у проектных и закреплённых, разделитель на смене уровня, правый клик —
- * перенос между уровнями. С флагом — `PanelTabStrip` (закрепы, All tabs).
+ * перенос между уровнями. С флагом — `PanelTabStrip` (группы Everywhere → Project → This chat, All tabs).
  */
 function LegacyTabStrip({
   files,
@@ -1930,13 +1930,11 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     setWidth: setViewWidth,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
-  // w0138 p4: tabs of the chat + pins (A, default) or of the project (B).
-  const tabsLayout = useDemoSwitch("tabs");
   const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
   const [allTabsOpen, setAllTabsOpen] = useState(false);
-  // Labs: pins + "All tabs" (p4) and the full-screen controls (p3); without
+  // Labs: tab groups + "All tabs" (p4) and the full-screen controls (p3); without
   // them the header is the one of 0.0.137.
-  const tabPinsOn = useFeatureFlag("panelTabPins");
+  const tabGroupsOn = useFeatureFlag("panelTabGroups");
   const chatDockOn = useFeatureFlag("fullscreenChatDock");
   useEffect(() => {
     if (DEMO) demoHooks.openAllTabs = () => setAllTabsOpen(true);
@@ -2140,7 +2138,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
         className={cn(
           "relative z-40 flex h-9 shrink-0 items-center border-b border-border bg-card pr-2",
           // "All tabs" folds to an icon in a narrow panel.
-          tabPinsOn && "@container/panelhead",
+          tabGroupsOn && "@container/panelhead",
           isFocusMode && "h-[52px] fullscreen:h-9 wco:h-[env(titlebar-area-height)]",
           isFocusMode &&
             !sidebarVisible &&
@@ -2168,11 +2166,10 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             isFocusMode && !sidebarVisible && "pl-0 fullscreen:pl-2",
           )}
         >
-          {tabPinsOn ? (
+          {tabGroupsOn ? (
             <PanelTabStrip
               files={files}
               activeId={active?.id ?? null}
-              layout={tabsLayout}
               projectName={projectName}
               kindIcon={KIND_ICON}
               kindLabel={KIND_LABEL}
@@ -2221,11 +2218,10 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </button>
           ) : null}
         </div>
-        {tabPinsOn && (files.length > 0 || currentChatThreadId !== null) ? (
+        {tabGroupsOn && (files.length > 0 || currentChatThreadId !== null) ? (
           <AllTabsMenu
             kindIcon={KIND_ICON}
             projectName={projectName}
-            layout={tabsLayout}
             open={allTabsOpen}
             onOpenChange={setAllTabsOpen}
           />

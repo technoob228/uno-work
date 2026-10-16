@@ -38,6 +38,7 @@ import { toastManager } from "../../ui/toast";
 import { GmailMark, GoogleCalendarMark, GoogleDriveMark, NotionMark } from "../brandMarks";
 import { ConnectedBadge, SetupHeading, SetupShell, SoonBadge } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
+import { maskServerUrl } from "../../connectors/connectorsCatalog.logic";
 
 /** A short config name from the server's address: `mcp.context7.com` → `context7`. */
 export function mcpServerNameFromUrl(url: string, taken: ReadonlyArray<string>): string | null {
@@ -84,25 +85,25 @@ export const PROVIDERS: ReadonlyArray<ProviderMeta> = [
   {
     provider: "google-drive",
     name: "Google Drive",
-    description: "Read your files and save new ones.",
+    description: "Only files Uno created or you picked for it — not your whole Drive.",
     logo: <GoogleDriveMark className="size-5" />,
   },
   {
     provider: "github",
     name: "GitHub",
-    description: "Repos, issues and pull requests.",
+    description: "Reads and pushes to all your repos, private ones too; issues and PRs.",
     logo: <GitHubIcon className="size-5" />,
   },
   {
     provider: "notion",
     name: "Notion",
-    description: "Pages and databases you share with Uno.",
+    description: "Only the pages you shared with Uno; reads and edits them.",
     logo: <NotionMark className="size-5 text-foreground" />,
   },
   {
     provider: "gmail",
     name: "Gmail & Calendar",
-    description: "Read mail, draft replies, see your day.",
+    description: "Reads, drafts and sends mail, can move it to Trash; reads your calendar.",
     logo: (
       <>
         <GmailMark className="size-4" />
@@ -371,7 +372,7 @@ function McpServers({
             key={server.name}
             done
             logo={<ServerIcon className="size-5 text-muted-foreground" />}
-            name={servers.length > 1 ? `Your MCP server · ${server.name}` : "Your MCP server"}
+            name={`${server.name} · your MCP server`}
             testId="setup-mcp-server"
             description={
               <span className="flex min-w-0 flex-wrap items-center gap-x-2">
@@ -381,7 +382,7 @@ function McpServers({
                     : "Added · new chats get its tools"}
                 </ConnectedBadge>
                 <span className="truncate font-mono text-xs text-muted-foreground">
-                  {server.url}
+                  {maskServerUrl(server.url)}
                 </span>
               </span>
             }
@@ -404,7 +405,7 @@ function McpServers({
         <div className="min-w-0 flex-1">
           <div className="font-medium">Your own tool (MCP server)</div>
           <div className="mt-0.5 text-sm text-muted-foreground">
-            Paste its address. Your AI gets its tools in every chat.
+            Paste its address. Every chat on this computer gets its tools.
           </div>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <Input

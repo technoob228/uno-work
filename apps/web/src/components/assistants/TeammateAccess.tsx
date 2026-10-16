@@ -1,23 +1,24 @@
 /**
  * What a teammate can use beyond its projects (track 3, Misha 16.10):
- * Connectors, Browser & logins, Passwords (vault), Skills.
+ * Connectors, Browser & logins, Keys & tokens, Skills.
  *
  * Two readers, one screen: each block is one plain line and one control
- * (a switch or three choices); "Details" opens the technical part — the
- * connector's scopes and MCP tools, the vault entries' names, the skills'
- * paths. Uno's default is full access to this computer: that is one line,
- * and the blocks stay behind "Limit…" — the advanced part is clearly advanced.
+ * (All / Pick / None, or a few choices); picks a person makes show right
+ * away; "Details" opens the technical part — scopes and MCP tools, where
+ * the vault lives and who puts a secret in, the skills' paths. Uno's default
+ * is full access to this computer: one line, the blocks behind "Limit…".
  *
- * Sources of truth: Settings → Connectors (the apps and servers of your own),
- * Credentials (the vault), the projects' folders (their skills) and the skill
- * catalog (its own skills). Secrets never reach the AI as text: logins are
- * filled into the page by Uno, keys go into commands by name.
+ * Honest about the boundary (critics track 3): on a computer it shares with
+ * you, these lists say what it uses, not a wall — it can still read any
+ * file and is signed in wherever you are in that browser. A computer of its
+ * own is the wall.
  */
 import type { CredentialMetadata, EnvironmentId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   BlocksIcon,
+  CheckIcon,
   ChevronRightIcon,
   GlobeIcon,
   KeyRoundIcon,
@@ -40,12 +41,24 @@ import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
+  APP_LEVEL_NAME,
+  type AppLevel,
   type AssistantAccess,
   BROWSER_USE,
+  type BrowserUse,
   FULL_ACCESS,
+  type PickMode,
+  type Picks,
+  connectorLevel,
+  connectorMode,
+  connectorsLine,
   isFullAccess,
   pickedLine,
   pickedOf,
+  picksMode,
+  setConnectorLevel,
+  setConnectorMode,
+  setPicksMode,
   togglePicked,
 } from "./assistantTeam.logic";
 
@@ -90,8 +103,10 @@ export function useVaultEntries() {
   };
 }
 
-export function useProjectSkills() {
-  const environmentId = usePrimaryEnvironmentId();
+/** The skills in the projects of the computer it works on (not this window's). */
+export function useProjectSkills(on: string | null) {
+  const primary = usePrimaryEnvironmentId();
+  const environmentId = on ?? primary;
   return useQuery({
     queryKey: ["project-skills", environmentId],
     queryFn: () => listProjectSkills({ environmentId: environmentId as EnvironmentId }),
@@ -196,6 +211,75 @@ const TechLine = (props: { readonly label: ReactNode; readonly tech: string }) =
   </span>
 );
 
+/** All / Pick / None — no "off" that still lets things through (critics track 3). */
+function ModeSwitch(props: {
+  readonly value: PickMode;
+  readonly onChange: (mode: PickMode) => void;
+  readonly disabled: boolean;
+  readonly label: string;
+  readonly testId?: string;
+}) {
+  return (
+    <ToggleGroup
+      variant="outline"
+      size="xs"
+      value={[props.value]}
+      disabled={props.disabled}
+      aria-label={props.label}
+      data-testid={props.testId}
+      onValueChange={(value) => {
+        const next = value[0];
+        if (next === "all" || next === "pick" || next === "none") props.onChange(next);
+      }}
+    >
+      {(["all", "pick", "none"] as const).map((mode) => (
+        <Toggle key={mode} value={mode} className="px-2 text-xs">
+          {mode === "all" ? "All" : mode === "pick" ? "Pick" : "None"}
+        </Toggle>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+/** One app's level: No / Reads / Reads & changes — the daemon checks it on every call. */
+function LevelSwitch(props: {
+  readonly value: AppLevel;
+  readonly onChange: (level: AppLevel) => void;
+  readonly disabled: boolean;
+  readonly label: string;
+}) {
+  return (
+    <ToggleGroup
+      variant="outline"
+      size="xs"
+      value={[props.value]}
+      disabled={props.disabled}
+      aria-label={props.label}
+      onValueChange={(value) => {
+        const next = value[0];
+        if (next === "none" || next === "read" || next === "write") props.onChange(next);
+      }}
+    >
+      {(["none", "read", "write"] as const).map((level) => (
+        <Toggle key={level} value={level} className="px-1.5 text-[11px]">
+          {APP_LEVEL_NAME[level]}
+        </Toggle>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+/** Where it works, for the honest lines: next to you, or on a computer of its own. */
+export interface AccessPlace {
+  /** The computer whose projects and skills it works with. */
+  readonly environmentId: string | null;
+  readonly label: string;
+  /** A computer of its own — the only real wall (decision 16.10). */
+  readonly own: boolean;
+  /** Your own computer (a Mac): it signs in to sites by asking you. */
+  readonly mac: boolean;
+}
+
 const Note = (props: { readonly children: ReactNode }) => (
   <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-muted-foreground">
     <ShieldCheckIcon className="mt-px size-3 shrink-0" />
@@ -211,13 +295,16 @@ export function TeammateAccess(props: {
   readonly onChange: ((access: AssistantAccess) => void) | null;
   /** Full access reads as one line until "Limit…" (Uno's page and setup). */
   readonly foldWhenFull?: boolean;
+  readonly place: AccessPlace;
+  /** Its projects — the skills shown are theirs. */
+  readonly projects: "all" | ReadonlyArray<string>;
   readonly className?: string;
 }) {
-  const { access, onChange, name } = props;
+  const { access, onChange, name, place } = props;
   const navigate = useNavigate();
   const connectors = useConnectorItems();
   const vault = useVaultEntries();
-  const projectSkills = useProjectSkills();
+  const projectSkills = useProjectSkills(place.environmentId);
   const computerBrowser = useSettings((settings) => settings.browserAutomationLevel);
   const [limiting, setLimiting] = useState(false);
   const readOnly = onChange === null;
@@ -235,7 +322,7 @@ export function TeammateAccess(props: {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium">Full access to this computer</div>
           <div className="text-xs text-muted-foreground">
-            Every project, connected app, browser login, password and skill here — like you.
+            Every project, connected app, browser login, key and skill here — like you.
           </div>
         </div>
         {readOnly ? null : (
@@ -252,18 +339,57 @@ export function TeammateAccess(props: {
     );
   }
 
-  const connected = connectors.items.filter((item) => item.connected);
-  const connectorNames = connected.map((item) => ({ id: item.id, name: item.name }));
+  const apps = connectors.items.filter((item) => item.kind === "app" && item.connected);
+  const servers = connectors.items.filter((item) => item.kind === "own");
+  const appNames = apps.map((item) => ({ id: item.id, name: item.name }));
+  const appIds = apps.map((item) => item.id);
   const loginNames = vault.logins.map((entry) => ({ id: entry.id, name: siteOf(entry.url) }));
   const secretNames = vault.secrets.map((entry) => ({ id: entry.id, name: entry.label }));
-  const skills = projectSkills.data?.skills ?? [];
+  const wanted = props.projects === "all" ? null : new Set(props.projects);
+  const skills = (projectSkills.data?.skills ?? []).filter(
+    (skill) => wanted === null || wanted.has(skill.project),
+  );
   const personal = Object.values(SETUP_SKILLS);
+  const mode = connectorMode(access.connectors);
+  const vaultWhere = place.own
+    ? `${place.label}'s own Uno Work`
+    : `the Uno Work on ${place.label || "this computer"}`;
+
+  const picksList = (input: {
+    readonly picks: Picks;
+    readonly entries: ReadonlyArray<CredentialMetadata>;
+    readonly label: (entry: CredentialMetadata) => ReactNode;
+    readonly onChange: (picks: Picks) => void;
+    readonly disabled?: boolean;
+  }) =>
+    picksMode(input.picks) === "pick" && input.entries.length > 0
+      ? input.entries.map((entry) => (
+          <CheckLine
+            key={entry.id}
+            checked={pickedOf(input.picks, input.entries).some((item) => item.id === entry.id)}
+            disabled={readOnly || input.disabled === true}
+            onToggle={() =>
+              input.onChange(
+                togglePicked(
+                  input.picks,
+                  entry.id,
+                  input.entries.map((item) => item.id),
+                ),
+              )
+            }
+            label={input.label(entry)}
+          />
+        ))
+      : null;
 
   return (
     <div className={cn("flex flex-col", props.className)} data-testid="teammate-access">
       {props.foldWhenFull && limiting ? (
-        <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5 text-xs text-muted-foreground">
-          Limit what {name} can use — the rest of this computer stays open to it.
+        <div className="flex items-start justify-between gap-2 border-b border-border/70 px-3 py-1.5 text-xs text-muted-foreground">
+          <span>
+            Limit what {name} uses. It lives on this computer, so it can still read any file here —
+            these lists say what it uses, not a wall.
+          </span>
           <Button
             size="xs"
             variant="ghost"
@@ -285,9 +411,9 @@ export function TeammateAccess(props: {
         line={
           connectors.loading ? (
             "…"
-          ) : connected.length === 0 ? (
+          ) : apps.length === 0 ? (
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              No apps connected on this computer yet.
+              No apps connected yet.
               {readOnly ? null : (
                 <>
                   <Button
@@ -313,61 +439,93 @@ export function TeammateAccess(props: {
               )}
             </span>
           ) : (
-            <>
-              Works in{" "}
-              {pickedLine(access.connectors, connectorNames, {
-                all: "every connected app",
-                none: "no apps",
-              })}
-              .
-            </>
+            connectorsLine(access.connectors, appNames)
           )
         }
         control={
-          connected.length > 0 ? (
-            <Switch
-              aria-label={`${name} can use every connected app`}
-              checked={access.connectors === "all"}
+          apps.length > 0 ? (
+            <ModeSwitch
+              value={mode}
               disabled={readOnly}
-              onCheckedChange={(on) => set({ connectors: on ? "all" : [] })}
+              label={`Which apps ${name} uses`}
+              testId="teammate-access-connectors-mode"
+              onChange={(next) =>
+                set({ connectors: setConnectorMode(access.connectors, next, appIds) })
+              }
             />
+          ) : null
+        }
+        picks={
+          apps.length === 0 ? null : mode === "all" ? (
+            <div className="flex items-center gap-2 px-1.5 text-xs text-muted-foreground">
+              Every app:
+              <ToggleGroup
+                variant="outline"
+                size="xs"
+                value={[access.connectors as string]}
+                disabled={readOnly}
+                onValueChange={(value) => {
+                  const next = value[0];
+                  if (next === "read" || next === "write") set({ connectors: next });
+                }}
+              >
+                <Toggle value="write" className="px-1.5 text-[11px]">
+                  Reads & changes
+                </Toggle>
+                <Toggle value="read" className="px-1.5 text-[11px]">
+                  Reads only
+                </Toggle>
+              </ToggleGroup>
+            </div>
+          ) : mode === "pick" ? (
+            apps.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 px-1.5 py-0.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-foreground">
+                    {item.name}
+                    {item.account ? (
+                      <span className="text-muted-foreground"> · {item.account}</span>
+                    ) : null}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {item.plain}
+                  </span>
+                </span>
+                <LevelSwitch
+                  value={connectorLevel(access.connectors, item.id)}
+                  disabled={readOnly}
+                  label={`${name} in ${item.name}`}
+                  onChange={(level) =>
+                    set({
+                      connectors: setConnectorLevel(access.connectors, item.id, level, appIds),
+                    })
+                  }
+                />
+              </div>
+            ))
           ) : null
         }
         details={
           connectors.items.length > 0 ? (
             <>
               {connectors.items.map((item) => (
-                <CheckLine
+                <TechLine
                   key={item.id}
-                  checked={
-                    item.connected &&
-                    pickedOf(access.connectors, connected).some((c) => c.id === item.id)
-                  }
-                  disabled={readOnly || !item.connected}
-                  onToggle={() =>
-                    set({
-                      connectors: togglePicked(
-                        access.connectors,
-                        item.id,
-                        connected.map((c) => c.id),
-                      ),
-                    })
-                  }
-                  label={
-                    <>
-                      {item.name}
-                      {item.connected ? (
-                        item.account ? (
-                          <span className="text-muted-foreground"> · {item.account}</span>
-                        ) : null
-                      ) : (
-                        <span className="text-muted-foreground"> · not connected</span>
-                      )}
-                    </>
-                  }
+                  label={item.connected ? item.name : `${item.name} · not connected`}
                   tech={item.tech}
                 />
               ))}
+              <Note>
+                A scope is what the whole Uno account allows; the level here is checked by the
+                computer’s Uno Work on every call — “Reads” lets through only tools that change
+                nothing. The app’s token stays in your Uno account, not on the computer.
+              </Note>
+              {servers.length > 0 ? (
+                <Note>
+                  Servers you added ({servers.map((item) => item.name).join(", ")}) reach every chat
+                  on this computer — they can’t be limited per assistant yet.
+                </Note>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void navigate({ to: "/settings/connectors" })}
@@ -390,15 +548,21 @@ export function TeammateAccess(props: {
             "The browser is off for agents on this computer (Settings → Browser)."
           ) : (
             <>
-              {BROWSER_USE.find((option) => option.id === access.browser)?.line}{" "}
-              {access.browser === "off"
-                ? null
-                : vault.logins.length === 0
-                  ? "No saved logins yet."
-                  : `Signs in to ${pickedLine(access.logins, loginNames, {
-                      all: "every saved site",
-                      none: "no sites — it asks you",
-                    })}.`}
+              {BROWSER_USE.find((option) => option.id === access.browser)?.line}
+              {access.browser === "off" ? null : (
+                <>
+                  {" "}
+                  {place.own
+                    ? `Its own browser on ${place.label}, without your sign-ins.`
+                    : "Also sees sites you’re already signed in to in this browser."}{" "}
+                  {vault.logins.length === 0
+                    ? "No saved logins yet."
+                    : `Saved logins: ${pickedLine(access.logins, loginNames, {
+                        all: "every saved site",
+                        none: "none — it asks you",
+                      })}.`}
+                </>
+              )}
             </>
           )
         }
@@ -409,8 +573,8 @@ export function TeammateAccess(props: {
             value={[access.browser]}
             disabled={readOnly}
             onValueChange={(value) => {
-              const next = value[0];
-              if (next === "off" || next === "safe" || next === "full") set({ browser: next });
+              const next = value[0] as BrowserUse | undefined;
+              if (next && BROWSER_USE.some((option) => option.id === next)) set({ browser: next });
             }}
           >
             {BROWSER_USE.map((option) => (
@@ -426,75 +590,74 @@ export function TeammateAccess(props: {
           </ToggleGroup>
         }
         picks={
-          // Decision 16.10: a teammate signs in only where you ticked — the
-          // list is right here, empty for a new one.
-          access.logins !== "all" && access.browser !== "off" && vault.logins.length > 0
-            ? vault.logins.map((entry) => (
-                <CheckLine
-                  key={entry.id}
-                  checked={pickedOf(access.logins, vault.logins).some(
-                    (item) => item.id === entry.id,
-                  )}
+          access.browser === "off" || vault.logins.length === 0 ? null : (
+            <>
+              <div className="flex items-center gap-2 px-1.5 text-xs text-muted-foreground">
+                Saved logins:
+                <ModeSwitch
+                  value={picksMode(access.logins)}
                   disabled={readOnly}
-                  onToggle={() =>
+                  label={`Which saved logins ${name} uses`}
+                  onChange={(next) =>
                     set({
-                      logins: togglePicked(
+                      logins: setPicksMode(
                         access.logins,
-                        entry.id,
-                        vault.logins.map((item) => item.id),
+                        next,
+                        vault.logins.map((entry) => entry.id),
                       ),
                     })
                   }
-                  label={
-                    <>
-                      {siteOf(entry.url)}{" "}
-                      <span className="text-muted-foreground">· {entry.username}</span>
-                    </>
-                  }
                 />
-              ))
-            : null
+              </div>
+              {picksList({
+                picks: access.logins,
+                entries: vault.logins,
+                label: (entry) => (
+                  <>
+                    {siteOf(entry.url)}{" "}
+                    <span className="text-muted-foreground">· {entry.username}</span>
+                  </>
+                ),
+                onChange: (logins) => set({ logins }),
+              })}
+            </>
+          )
         }
         details={
           <>
-            {vault.logins.length === 0 ? (
-              <span className="px-1.5 text-xs text-muted-foreground">
-                Saved logins come from Credentials and the browser’s “Save password”.
-              </span>
-            ) : (
-              vault.logins.map((entry) => (
-                <TechLine
-                  key={entry.id}
-                  label={siteOf(entry.url)}
-                  tech={`vault › ${entry.label} · filled by Uno (vault.fill)`}
-                />
-              ))
-            )}
-            {access.logins === "all" && access.browser !== "off" && vault.logins.length > 0 ? (
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => set({ logins: [] })}
-                className="cursor-pointer self-start px-1.5 text-xs text-primary hover:underline disabled:cursor-default disabled:opacity-50"
-              >
-                Pick sites instead
-              </button>
-            ) : null}
-            <Note>Uno types the password into the page itself — the AI never reads it.</Note>
+            {vault.logins.map((entry) => (
+              <TechLine
+                key={entry.id}
+                label={siteOf(entry.url)}
+                tech={`credential ${entry.id} · browser_command {login: "${siteOf(entry.url)}"}`}
+              />
+            ))}
+            <Note>
+              {place.mac
+                ? "On your Mac it doesn’t type passwords: it asks you to sign in. "
+                : `Uno Work on ${place.label || "this computer"} types the saved password into the page itself; the AI only learns “signed in” or not. `}
+              2FA codes and captchas come to you in Needs you. “Fill” in the panel is yours only.
+            </Note>
+            <Note>
+              Browser profile:{" "}
+              {place.own
+                ? `its own on ${place.label} — none of your cookies.`
+                : "shared with you on this computer (Settings → Browser) — your sign-ins included."}
+            </Note>
           </>
         }
       />
 
-      {/* Passwords (vault) */}
+      {/* Keys & tokens */}
       <Block
         testId="teammate-access-vault"
         icon={<KeyRoundIcon className="size-3.5" />}
-        title="Passwords (vault)"
+        title="Keys & tokens"
         line={
           !vault.enabled ? (
             "Credentials are off on this computer."
           ) : vault.secrets.length === 0 ? (
-            "No keys or tokens saved yet."
+            "No keys saved yet — keys are passwords for programs (API keys, tokens)."
           ) : (
             <>
               Can use{" "}
@@ -502,58 +665,54 @@ export function TeammateAccess(props: {
                 all: "every saved key",
                 none: "none — it asks you when it needs one",
               })}
-              . It never sees them.
+              . The AI doesn’t get the value as text, but a command it runs can use it — tick only
+              keys you’re fine letting it act with.
             </>
           )
         }
         control={
           vault.secrets.length > 0 ? (
-            <Switch
-              aria-label={`${name} can use every saved key`}
-              checked={access.secrets === "all"}
+            <ModeSwitch
+              value={picksMode(access.secrets)}
               disabled={readOnly}
-              onCheckedChange={(on) => set({ secrets: on ? "all" : [] })}
+              label={`Which keys ${name} uses`}
+              testId="teammate-access-vault-mode"
+              onChange={(next) =>
+                set({
+                  secrets: setPicksMode(
+                    access.secrets,
+                    next,
+                    vault.secrets.map((entry) => entry.id),
+                  ),
+                })
+              }
             />
           ) : null
         }
-        picks={
-          // Decision 16.10: Uno gets every key; a new teammate only the ticked ones.
-          access.secrets !== "all" && vault.secrets.length > 0
-            ? vault.secrets.map((entry) => (
-                <CheckLine
-                  key={entry.id}
-                  checked={pickedOf(access.secrets, vault.secrets).some(
-                    (item) => item.id === entry.id,
-                  )}
-                  disabled={readOnly}
-                  onToggle={() =>
-                    set({
-                      secrets: togglePicked(
-                        access.secrets,
-                        entry.id,
-                        vault.secrets.map((item) => item.id),
-                      ),
-                    })
-                  }
-                  label={entry.label}
-                />
-              ))
-            : null
-        }
+        picks={picksList({
+          picks: access.secrets,
+          entries: vault.secrets,
+          label: (entry) => entry.label,
+          onChange: (secrets) => set({ secrets }),
+        })}
         details={
           vault.secrets.length > 0 ? (
             <>
               {vault.secrets.map((entry) => (
-                <TechLine
-                  key={entry.id}
-                  label={entry.label}
-                  tech={`vault › ${entry.id}${entry.username ? ` · ${entry.username}` : ""}`}
-                />
+                <TechLine key={entry.id} label={entry.label} tech={`credential ${entry.id}`} />
               ))}
               <Note>
-                A key goes straight into the command that needs it; the AI sees only its name, and
-                the value is masked in the chat.
+                Kept by {vaultWhere}: names in credentials.json, values in a file only it can read
+                (0600) — not in the cloud unless you turn on Sync in Credentials. It puts the value
+                into the command and scrubs it from the output; a command can still print or send
+                it.
               </Note>
+              {place.own ? (
+                <Note>
+                  On its own computer it has only that computer’s keys — your Mac’s stay there
+                  unless Sync is on.
+                </Note>
+              ) : null}
             </>
           ) : null
         }
@@ -568,9 +727,9 @@ export function TeammateAccess(props: {
           <>
             {access.projectSkills
               ? skills.length > 0
-                ? `Uses the skills in its projects (${skills.length})`
-                : "Uses the skills in its projects (none yet)"
-              : "Doesn't use the skills in its projects"}
+                ? `Follows the skills in its projects (${skills.length})`
+                : "Follows the skills in its projects (none there yet)"
+              : "Ignores the skills in its projects"}
             {access.personalSkills.length > 0
               ? ` + its own: ${access.personalSkills
                   .map((id) => personal.find((skill) => skill.id === id)?.name ?? id)
@@ -581,16 +740,50 @@ export function TeammateAccess(props: {
         }
         control={
           <Switch
-            aria-label={`${name} uses the skills in its projects`}
+            aria-label={`${name} follows the skills in its projects`}
             checked={access.projectSkills}
             disabled={readOnly}
             onCheckedChange={(on) => set({ projectSkills: on })}
           />
         }
+        picks={
+          <div className="flex flex-wrap items-center gap-1 px-1.5">
+            <span className="text-[11px] text-muted-foreground">Its own:</span>
+            {personal.map((skill) => {
+              const on = access.personalSkills.includes(skill.id);
+              return (
+                <Toggle
+                  key={skill.id}
+                  variant="outline"
+                  size="xs"
+                  className={cn(
+                    "px-2 text-xs",
+                    on
+                      ? "border-primary/50 bg-primary/10 text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                  pressed={on}
+                  disabled={readOnly}
+                  title={skill.description}
+                  onPressedChange={(next) =>
+                    set({
+                      personalSkills: next
+                        ? [...access.personalSkills, skill.id]
+                        : access.personalSkills.filter((id) => id !== skill.id),
+                    })
+                  }
+                >
+                  {on ? <CheckIcon className="size-3" /> : null}
+                  {skill.name}
+                </Toggle>
+              );
+            })}
+          </div>
+        }
         details={
           <>
             <span className="px-1.5 text-[11px] font-medium text-muted-foreground">
-              From projects
+              In its projects on {place.label || "this computer"}
             </span>
             {skills.length === 0 ? (
               <span className="px-1.5 text-xs text-muted-foreground">
@@ -603,36 +796,11 @@ export function TeammateAccess(props: {
                     {skill.name} <span className="text-muted-foreground">· {skill.project}</span>
                   </span>
                   <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                    {skill.path}
+                    {place.label || "this computer"}:{skill.project}/{skill.path}
                   </span>
                 </div>
               ))
             )}
-            <span className="mt-1 px-1.5 text-[11px] font-medium text-muted-foreground">
-              Its own
-            </span>
-            <div className="flex flex-wrap gap-1 px-1.5">
-              {personal.map((skill) => (
-                <Toggle
-                  key={skill.id}
-                  variant="outline"
-                  size="xs"
-                  className="px-2 text-xs"
-                  pressed={access.personalSkills.includes(skill.id)}
-                  disabled={readOnly}
-                  title={skill.description}
-                  onPressedChange={(on) =>
-                    set({
-                      personalSkills: on
-                        ? [...access.personalSkills, skill.id]
-                        : access.personalSkills.filter((id) => id !== skill.id),
-                    })
-                  }
-                >
-                  {skill.name}
-                </Toggle>
-              ))}
-            </div>
           </>
         }
       />

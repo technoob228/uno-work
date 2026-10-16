@@ -60,6 +60,7 @@ import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
 import { usePageTools } from "./annotate/usePageTools";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { isTypingTarget } from "./panelLauncher.logic";
+import { useChatBrowser } from "./useChatBrowser";
 import { BrowserSourceChip } from "./BrowserSourceChip";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import {
@@ -362,6 +363,13 @@ function BrowserView({
   } | null>(null);
 
   const currentUrl = tab.url ?? "";
+  // No "Opens in" chip (Misha 16.10, Labs `panelLauncherV2`): Your site and
+  // the agent's browser are two tools, not one browser with a default. Moving
+  // a page over is an explicit action in ⋮, for when the agent should work
+  // with it there. Without the flag — the chip of 0.0.137.
+  const launcherV2 = useFeatureFlag("panelLauncherV2");
+  const { sources: browserSources, openInSource } = useChatBrowser();
+  const canOpenInAgentBrowser = browserSources.includes("computer");
   const origin = browserUrlOrigin(currentUrl);
   const matchedCredentials = useMemo(
     () => matchCredentialsForOrigin({ credentials: credentialsQuery.data, origin }),
@@ -429,7 +437,7 @@ function BrowserView({
     setWebviewNode(view);
   }, []);
 
-  // Comment (C) and Debug (D): the page's half lives in the page.
+  // Comment mode (C): the page's half lives in the page.
   usePageTools({ tabId: tab.id, view: webviewNode, enabled: pageToolsOn });
   const pageTools = usePageToolsTab(tab.id);
   useEffect(() => {
@@ -440,11 +448,8 @@ function BrowserView({
       if (!target || !rootRef.current?.contains(target) || isTypingTarget(target)) return;
       const store = usePageToolsStore.getState();
       const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-      if (key === "c") store.toggleCommenting(tab.id);
-      else if (key === "d") store.toggleDebug(tab.id);
-      else if (key === "Escape" && store.tabs[tab.id]?.commenting) {
-        store.patch(tab.id, { commenting: false, draft: null });
-      } else return;
+      if (key === "c") store.toggleMode(tab.id);
+      else if (key !== "Escape" || !store.escape(tab.id)) return;
       event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
@@ -841,7 +846,7 @@ function BrowserView({
           >
             {loading ? <XIcon className="size-3.5" /> : <RotateCwIcon className="size-3.5" />}
           </button>
-          <BrowserSourceChip source="app" tabId={tab.id} url={currentUrl} />
+          {launcherV2 ? null : <BrowserSourceChip source="app" tabId={tab.id} url={currentUrl} />}
           <form
             className="flex min-w-0 flex-1"
             onSubmit={(event) => {
@@ -918,7 +923,10 @@ function BrowserView({
               const rect = event.currentTarget.getBoundingClientRect();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
-                  // With Comment / Debug in the bar, zoom moves in here.
+                  ...(launcherV2 && canOpenInAgentBrowser
+                    ? [{ id: "agent-browser", label: "Open in agent's browser" }]
+                    : []),
+                  // With Comment in the bar, zoom moves in here.
                   ...(pageToolsOn
                     ? [
                         { id: "zoom-in", label: "Zoom in" },
@@ -941,7 +949,8 @@ function BrowserView({
                 ],
                 { x: rect.left, y: rect.bottom + 4 },
               );
-              if (choice === "zoom-in") applyZoom(zoomFactor + ZOOM_STEP);
+              if (choice === "agent-browser") openInSource("computer", currentUrl);
+              else if (choice === "zoom-in") applyZoom(zoomFactor + ZOOM_STEP);
               else if (choice === "zoom-out") applyZoom(zoomFactor - ZOOM_STEP);
               else if (choice === "zoom-reset") applyZoom(DEFAULT_ZOOM_FACTOR);
               else if (choice === "force-reload") {
@@ -1140,7 +1149,8 @@ function BrowserView({
           <NewTabPlaceholder recentUrls={recentUrls} onOpenUrl={navigate} />
         )}
         {pageToolsOn && mountSrc ? <CommentBar tabId={tab.id} pageUrl={currentUrl} /> : null}
-        {pageToolsOn && mountSrc && pageTools.debugOpen ? (
+        {/* Comment mode shows the page's console and network below (one mode). */}
+        {pageToolsOn && mountSrc && pageTools.commenting ? (
           <DebugDrawer tabId={tab.id} pageUrl={currentUrl} />
         ) : null}
         {loadError ? (

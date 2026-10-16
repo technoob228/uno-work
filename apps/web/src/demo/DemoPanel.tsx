@@ -48,12 +48,17 @@ const POINTS: ReadonlyArray<{
   {
     key: "p1",
     title: "Лаунчер панели",
-    hint: "Две плитки браузера (этот Mac / браузер агента), без Terminal, Apps всегда.",
+    hint: "Две разные кнопки: «Your site» (всегда первая) и «Agent's browser»; без Terminal, Apps всегда.",
   },
   {
     key: "p2",
     title: "Комментарии и отладка в браузере",
-    hint: "C — комментировать элементы и области, D — консоль и сеть, «Ask agent to fix».",
+    hint: "Одна кнопка Comment (C): заметки к элементам и областям + консоль и сеть внизу, «Ask agent to fix».",
+  },
+  {
+    key: "p2b",
+    title: "Браузер агента: войти за агента",
+    hint: "Агент просит войти (логин, капча, 2FA) — Take control, вошёл, Hand back; дальше агент работает с этой сессией.",
   },
   {
     key: "p3",
@@ -64,8 +69,8 @@ const POINTS: ReadonlyArray<{
   {
     key: "p4",
     title: "Вкладки: чат, проект, везде",
-    hint: "Закрепы слева, булавка на вкладке, «All tabs» с вкладками из других чатов.",
-    switches: ["tabs"],
+    hint: "Группы с обводкой: Everywhere → Project → This chat. Перетащи вкладку в другую группу или правый клик «Move to». Перейди в другой чат landing — Everywhere и Project на месте. «All tabs» — вкладки других чатов.",
+    switches: ["tabGroupIcons", "newTabsGo"],
   },
   {
     key: "p5",
@@ -97,7 +102,8 @@ const POINTS: ReadonlyArray<{
   {
     key: "p9",
     title: "Продвинутые настройки тиммейта",
-    hint: "Settings → Connectors; у тиммейта — коннекторы, браузер и логины, пароли, скиллы.",
+    hint: "Settings → Connectors (прямой адрес #/settings/connectors); у тиммейта — коннекторы с уровнями, браузер и логины, ключи, скиллы.",
+    switches: ["connectors"],
   },
 ];
 

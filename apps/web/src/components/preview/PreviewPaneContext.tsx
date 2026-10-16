@@ -426,17 +426,13 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   );
   const [currentChatThreadId, setCurrentChatThreadId] = useState<string | null>(null);
 
-  // Вариант B (w0138 p4, «как в Codex»): то, что открыто в чате, — вкладка
-  // проекта; чат помнит только активную вкладку. По умолчанию — вариант A.
-  const tabsLayout = useDemoSwitch("tabs");
-  // Флаг `panelTabPins`: вкладки агента помечены значком (без флага — как в 0.0.137).
-  const markAgentTabs = useFeatureFlag("panelTabPins");
+  // Куда идёт то, что открыл человек в чате (w0138 p4, Миша 16.10): в группу
+  // Project — вкладка остаётся при переходе по чатам проекта; или в группу чата
+  // (решение Миши — в чат; вне мока всегда так). Открытое агентом живёт в чате всегда.
+  const newTabsGo = useDemoSwitch("newTabsGo");
+  // Флаг `panelTabGroups`: вкладки агента помечены значком (без флага — как в 0.0.137).
+  const markAgentTabs = useFeatureFlag("panelTabGroups");
   const openTabOptions = useMemo(() => ({ markAgentTabs }), [markAgentTabs]);
-  const chatScopeFor = useCallback(
-    (scope: PreviewTabScope): PreviewTabScope =>
-      tabsLayout === "project" && scope === "chat" ? "project" : scope,
-    [tabsLayout],
-  );
   useEffect(() => {
     if (DEMO) demoHooks.setPreviewStates = setStatesByScopeKey;
   }, []);
@@ -528,16 +524,19 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       file: PreviewFile,
       source: PanelOpenSource = "person",
     ) => {
-      transition((prev) =>
-        openTab(prev, target, chatScopeFor(scope), file, source, openTabOptions),
-      );
+      transition((prev) => openTab(prev, target, scope, file, source, openTabOptions));
     },
-    [chatScopeFor, openTabOptions, transition],
+    [openTabOptions, transition],
   );
 
-  // Человек открывает что-то сам: в чате — вкладка чата; вне чата смотреть
-  // можно только закреплённое, поэтому — «везде».
-  const personScope: PreviewTabScope = currentChatThreadId ? "chat" : "global";
+  // Человек открывает что-то сам: в чате — в группу Project (или чата, по
+  // переключателю; чат без проекта — всегда в свою группу); вне чата смотреть
+  // можно только то, что «везде».
+  const personScope: PreviewTabScope = !currentChatThreadId
+    ? "global"
+    : newTabsGo === "project" && currentProjectKey !== NO_PROJECT_KEY
+      ? "project"
+      : "chat";
 
   const openFile = useCallback(
     (file: PreviewFile) => {
@@ -585,7 +584,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         openBrowserTab(
           prev,
           target,
-          chatScopeFor(scope),
+          scope,
           trimmed,
           () => ({
             id: `browser-${++browserTabCounter}`,
@@ -600,7 +599,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
         ),
       );
     },
-    [chatScopeFor, openTabOptions, transition],
+    [openTabOptions, transition],
   );
 
   const openUrl = useCallback(

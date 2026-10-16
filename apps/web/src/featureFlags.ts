@@ -112,7 +112,7 @@ export const FEATURE_FLAGS = [
     key: "browserPageTools",
     label: "Comment and Debug in the browser",
     description:
-      "Desktop app: point at parts of a page and leave notes for the agent, see the page's console and network, and send errors to the chat.",
+      "Desktop app: one Comment button on your site — point at parts of the page and leave notes for the agent; the page's console and network show below, and errors go to the chat.",
     default: false,
     stageDefault: true,
   },
@@ -125,10 +125,10 @@ export const FEATURE_FLAGS = [
     stageDefault: true,
   },
   {
-    key: "panelTabPins",
-    label: "Pinned tabs and All tabs",
+    key: "panelTabGroups",
+    label: "Tab groups and All tabs",
     description:
-      "Pin a panel tab to the project or to every chat, and find tabs open in other chats under “All tabs”.",
+      "Panel tabs in groups, like in Chrome: Everywhere, Project and This chat. Drag a tab to another group or use “Move to”; find tabs open in other chats under “All tabs”.",
     default: false,
     stageDefault: true,
   },
@@ -197,6 +197,8 @@ export const RETIRED_FEATURE_FLAGS: ReadonlySet<FeatureFlagKey> = new Set([
 const LEGACY_FEATURE_FLAG_KEYS: Readonly<Partial<Record<FeatureFlagKey, string>>> = {
   // Was misleadingly called "sidebarInbox"; it never was an inbox.
   allMachinesSidebar: "sidebarInbox",
+  // Stage w0139 before the merge with the mock (16.10): pins became tab groups.
+  panelTabGroups: "panelTabPins",
 };
 
 /**

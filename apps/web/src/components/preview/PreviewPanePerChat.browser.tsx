@@ -219,7 +219,7 @@ describe("Labs flags of the stage (w0139) — off is 0.0.137", () => {
   });
 
   it("flags on: pins + All tabs, the agent's mark, Apps always in the launcher", async () => {
-    forcedFlags.value = { panelLauncherV2: true, panelTabPins: true, fullscreenChatDock: true };
+    forcedFlags.value = { panelLauncherV2: true, panelTabGroups: true, fullscreenChatDock: true };
     const screen = await openLauncherOverATab();
     await expect.element(screen.getByTestId("panel-all-tabs")).toBeVisible();
     await expect.element(screen.getByTestId("panel-launcher-apps")).toBeVisible();

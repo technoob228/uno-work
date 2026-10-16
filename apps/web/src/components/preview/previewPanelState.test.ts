@@ -304,9 +304,9 @@ const browserPage = (id: string, url: string): PreviewFile => ({
   url,
 });
 
-// ── Flag `panelTabPins` on: the agent's tabs carry a mark (w0138 p4) ──────
+// ── Flag `panelTabGroups` on: the agent's tabs carry a mark (w0138 p4) ──────
 
-describe("flag panelTabPins: tabs the agent opened are marked", () => {
+describe("flag panelTabGroups: tabs the agent opened are marked", () => {
   const marked = { markAgentTabs: true } as const;
 
   it("an agent's open_in_panel lands with the mark", () => {

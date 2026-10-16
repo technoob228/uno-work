@@ -238,7 +238,7 @@ export function AssistantModelPicker(props: {
                   </span>
                   <span className="flex-1 truncate">
                     {entry === "uno"
-                      ? "Uno gateway"
+                      ? "Uno AI"
                       : subscription
                         ? `Your ${AI_PROVIDER_LABELS[entry]} plan`
                         : `${AI_PROVIDER_LABELS[entry]} — your key`}

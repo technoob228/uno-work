@@ -1,8 +1,9 @@
 /**
  * The right panel's launcher (plan 22, step 1; w0138): what the panel shows
  * when it is open with nothing in it, and what "+" in the tab strip opens.
- * Tiles — Browser (this device: you click, the agent sees, Comment and
- * Debug), Agent's browser (the chat computer's: watch live, take control),
+ * Tiles — Your site (always first: the person's site in this device's
+ * browser, one Comment button for notes and errors), Agent's browser (the
+ * chat computer's: the agent works there, the person signs in for it),
  * Files, Changes, Apps — each opening the thing that already exists (rules:
  * `panelLauncher.logic.ts`). A letter opens a tile while the launcher has
  * focus, like t3's empty right panel.
@@ -62,7 +63,7 @@ import { useChatBrowser } from "./useChatBrowser";
 import { useLauncherApps } from "./useLauncherApps";
 
 const TILE_ICON: Record<LauncherTileId, typeof GlobeIcon> = {
-  browser: GlobeIcon,
+  site: GlobeIcon,
   agentBrowser: MonitorPlayIcon,
   files: FolderIcon,
   changes: DiffIcon,
@@ -113,7 +114,7 @@ function PanelLauncherV2({
   const pluginsEnabled = useFeatureFlag("plugins");
   const demoDesktop = useDemoDesktop();
   const desktop = isElectron || demoDesktop;
-  const { sources, defaultSource, openInSource } = useChatBrowser();
+  const { sources, openInSource } = useChatBrowser();
   const chatActions = useChatPanelActions(currentChatThreadId);
   const machine = useActiveMachine();
   const machineLabels = useMachineLabels();
@@ -150,17 +151,16 @@ function PanelLauncherV2({
       : "this computer"
     : "your browser";
   const tiles = visibleLauncherTiles({
-    canBrowseHere: sources.includes("app") || browserCompanionEnabled,
-    desktop,
     agentBrowserOn: agentComputer,
-    defaultBrowser: defaultSource,
     hasComputer: environmentId !== null,
     canOpenChanges: chatActions?.openChanges != null,
   });
 
   const open = (id: LauncherTileId): void => {
     switch (id) {
-      case "browser":
+      case "site":
+        // Always this device's browser in the panel — never the agent's, no
+        // matter the chat's computer or any setting (Misha 16.10).
         openInSource("app");
         onOpenedTab();
         return;
@@ -246,10 +246,10 @@ function PanelLauncherV2({
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
               const where =
-                tile.id === "browser"
-                  ? `Runs on ${deviceName}. You click, the agent sees${desktop ? "; comment and see errors" : ""}.`
+                tile.id === "site"
+                  ? `Opens on ${deviceName}${browserCompanionEnabled && !desktop ? " (Uno's browser tab)" : ""}. Turn on Comment to leave notes and see errors.`
                   : tile.id === "agentBrowser"
-                    ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works, you watch; take control to sign in for it (login, captcha, 2FA).`
+                    ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works there; your sign-ins stay on that computer.`
                     : undefined;
               return (
                 <li key={tile.id} className="list-none">
@@ -258,18 +258,16 @@ function PanelLauncherV2({
                     data-testid={`panel-launcher-${tile.id}`}
                     onClick={() => open(tile.id)}
                     title={where}
-                    className="flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground">
                       <Icon className="size-3.5" />
                     </span>
                     <span className="min-w-0 flex-1 leading-tight">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate text-[13px] font-medium text-foreground">
-                          {tile.name}
-                        </span>
+                      <span className="block truncate text-[13px] font-medium text-foreground">
+                        {tile.name}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="line-clamp-2 block text-xs text-muted-foreground">
                         {tile.description}
                       </span>
                     </span>

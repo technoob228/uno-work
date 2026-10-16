@@ -35,6 +35,7 @@ import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { useSidebarEnvironmentLabelResolver } from "../sidebar/useSidebarMachineIdentities";
 import { matchCredentialsForOrigin } from "./BrowserPane";
+import { BrowserHelpCard } from "./BrowserHelpCard";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { BrowserSourceChip } from "./BrowserSourceChip";
 import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
@@ -83,10 +84,16 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   useEffect(() => {
     if (!api || !pageId) return;
     setFrame(null);
-    return api.browserLive.subscribeFrames({ pageId }, setFrame);
+    // Only this page's pictures, whatever else the stream carries.
+    return api.browserLive.subscribeFrames({ pageId }, (next) => {
+      if (next.pageId === pageId) setFrame(next);
+    });
   }, [api, pageId]);
 
   const human = page?.control === "human";
+  // Two browsers (Labs `panelLauncherV2`, w0138 16.10): the help card instead
+  // of the amber strip, no "Opens in" chip. Off — as in 0.0.137.
+  const launcherV2 = useFeatureFlag("panelLauncherV2");
   // "The agent is using this browser" only while its chat is actually working:
   // after the turn the line used to stay forever (flows v2, life-work-full/6).
   const ownerThreadId = page?.context?.threadId ?? null;
@@ -132,9 +139,18 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar environmentId={environmentId} page={page} human={human} tabId={file.id} />
+      <Toolbar
+        environmentId={environmentId}
+        page={page}
+        human={human}
+        tabId={file.id}
+        sourceChip={!launcherV2}
+      />
       <LocationStrip environmentId={environmentId} location={state.location} />
-      {page.help ? (
+      {launcherV2 ? (
+        // Sign-in, captcha, 2FA: the same card as above the chat's composer.
+        <BrowserHelpCard environmentId={environmentId} page={page} where="panel" />
+      ) : page.help ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           <HandIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="min-w-0 flex-1">
@@ -166,6 +182,7 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         onTakeControl={() => void setControl("human")}
       />
       <div
+        hidden={launcherV2 && page.help !== null}
         className={cn(
           "flex items-center gap-2 border-t px-3 py-1.5 text-xs",
           human ? "border-primary/40 bg-primary/5" : "border-border",
@@ -459,11 +476,14 @@ function Toolbar({
   page,
   human,
   tabId,
+  sourceChip,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
   human: boolean;
   tabId: string;
+  /** The "Opens in" chip of 0.0.135–0.0.137 (without Labs `panelLauncherV2`). */
+  sourceChip: boolean;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
   // "Comment · soon" (flag `browserPageTools`): only in the desktop app, where
@@ -597,7 +617,7 @@ function Toolbar({
       >
         <RotateCwIcon />
       </Button>
-      <BrowserSourceChip source="computer" tabId={tabId} url={page.url} />
+      {sourceChip ? <BrowserSourceChip source="computer" tabId={tabId} url={page.url} /> : null}
       <form
         className="min-w-0 flex-1"
         onSubmit={(event) => {

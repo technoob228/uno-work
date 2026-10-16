@@ -1,10 +1,13 @@
 // Point 1 of the w0138 mock: "Показать" puts the interface into the state to look at.
 //
 // The landing chat on uno-product, the panel open and empty: the launcher —
-// Browser (this Mac, Comment and Debug) and Agent's browser (uno-product,
-// marked "default" there), Files, Changes, Apps (always; the list has apps of
-// every computer and the sites).
+// two different tools, two buttons: "Your site" (always first: this Mac's
+// browser, one Comment button) and "Agent's browser" (uno-product: sign in
+// for the agent when it asks); then Files, Changes, Apps (always; the list
+// has apps of every computer and the sites).
 import type { getRouter } from "../../router";
+import { demoResetChatIn } from "../demoBoot";
+import { demoSignInReset } from "../demoBrowser";
 import { demoHooks, demoShow } from "../demoFlag";
 import { ENV_PRODUCT } from "../heavyFixtures";
 
@@ -38,6 +41,9 @@ demoShow.p1 = async () => {
     params: { environmentId: ENV_PRODUCT, threadId: CHAT },
   });
   await waitFor(() => pane()?.currentChatThreadId === CHAT);
+  // After p2b: no sign-in card left over in this chat.
+  demoSignInReset(ENV_PRODUCT, CHAT);
+  demoResetChatIn(ENV_PRODUCT, CHAT);
   pane()?.setOpen(true);
   pane()?.setWidth?.(Math.round(Math.min(600, window.innerWidth * 0.42)));
   await new Promise((resolve) => setTimeout(resolve, 200));
