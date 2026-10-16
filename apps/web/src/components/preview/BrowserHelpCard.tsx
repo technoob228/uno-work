@@ -105,7 +105,11 @@ export function BrowserHelpCard({
         ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {human ? (
-            <Button size="xs" onClick={() => void setControl("agent")} data-testid="browser-help-done">
+            <Button
+              size="xs"
+              onClick={() => void setControl("agent")}
+              data-testid="browser-help-done"
+            >
               <UndoIcon />
               Done — hand back
             </Button>

@@ -206,7 +206,7 @@ const STEPS: ReadonlyArray<Step> = [
             header: "My own computer",
             question: `Limits hold only on a computer of my own — next to you I could still read any file. Make ${ownComputerName(profile.name)}?`,
             detail:
-              "Lite · from your plan's quota, at most $5/mo · sleeps when idle and costs nothing then.",
+              "Lite · from your plan's quota, at most $5/mo · starts with my first task in ~3 s, wakes in under half a second · sleeps when idle and costs nothing then.",
             options: [
               opt(`Make ${ownComputerName(profile.name)}`, "your projects get copied there"),
               opt("Not now", "I stay next to you with Full"),
@@ -217,7 +217,7 @@ const STEPS: ReadonlyArray<Step> = [
       /^make/i.test(answer)
         ? {
             saved: `lives on ${ownComputerName(profile.name)} (Lite)`,
-            reply: "Making it now — about a minute. I'll move in by myself.",
+            reply: "Done — it starts with my first task, in a few seconds: the same teammate image, with my settings and memory attached. Nothing to wait for now.",
             patch: { ownComputer: ownComputerName(profile.name), computers: [] },
           }
         : {

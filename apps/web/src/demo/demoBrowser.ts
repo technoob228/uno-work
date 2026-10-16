@@ -451,9 +451,7 @@ function fieldValue(signIn: SignIn, name: SignInField): string {
 function firstEmptyField(signIn: SignIn): SignInField | null {
   const fields = fieldsOf(signIn);
   return (
-    fields.find((field) => fieldValue(signIn, field.name) === "")?.name ??
-    fields[0]?.name ??
-    null
+    fields.find((field) => fieldValue(signIn, field.name) === "")?.name ?? fields[0]?.name ?? null
   );
 }
 
@@ -662,7 +660,12 @@ export function demoSignInReset(environmentId: string, threadId: string): void {
   const state = liveStateFor(machine);
   const existing = state.pages.find((page) => page.context?.threadId === threadId);
   if (!emit || !existing) return;
-  const fresh = livePage(machine, existing.pageId, threadId, "https://landing-3flows.uno4.me/pricing");
+  const fresh = livePage(
+    machine,
+    existing.pageId,
+    threadId,
+    "https://landing-3flows.uno4.me/pricing",
+  );
   update(
     machine,
     {

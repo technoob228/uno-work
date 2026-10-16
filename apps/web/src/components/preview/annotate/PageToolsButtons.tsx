@@ -39,7 +39,9 @@ export function PageToolsButtons({ tabId, disabled }: { tabId: string; disabled:
               <span
                 className={cn(
                   "ml-0.5 inline-flex items-center gap-0.5 font-medium tabular-nums",
-                  badge.tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400",
+                  badge.tone === "error"
+                    ? "text-destructive"
+                    : "text-amber-600 dark:text-amber-400",
                 )}
                 title={`${badge.count} ${badge.tone === "error" ? "errors" : "warnings"} on the page`}
                 data-testid="browser-debug-badge"

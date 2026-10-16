@@ -48,12 +48,12 @@ const POINTS: ReadonlyArray<{
   {
     key: "p1",
     title: "Лаунчер панели",
-    hint: "Две плитки браузера (этот Mac / браузер агента), без Terminal, Apps всегда.",
+    hint: "Две разные кнопки: «Your site» (всегда первая) и «Agent's browser»; без Terminal, Apps всегда.",
   },
   {
     key: "p2",
     title: "Комментарии и отладка в браузере",
-    hint: "C — комментировать элементы и области, D — консоль и сеть, «Ask agent to fix».",
+    hint: "Одна кнопка Comment (C): заметки к элементам и областям + консоль и сеть внизу, «Ask agent to fix».",
   },
   {
     key: "p2b",

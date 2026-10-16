@@ -60,7 +60,7 @@ demoShow.p2b = async () => {
     demoAgentRepliesIn(
       ENV_PRODUCT,
       CHAT,
-      `Signed in as **${login}** on github.com — continuing.\n\nOpened the pull request **getuno/landing#42 “Pricing by jobs”**. The session stays in my browser on uno-product, so next time I won't need to ask.`,
+      `Signed in as **${login}** on github.com — continuing.\n\nOpened pull request **#42 “Pricing by jobs”**. The session stays in my browser on uno-product, so next time I won't need to ask.`,
     );
   await sleep(1200);
   demoAgentNeedsSignIn(ENV_PRODUCT, CHAT);

@@ -45,7 +45,7 @@ export const DEMO_SWITCH_DEFAULTS: DemoSwitches = {
   platform: "desktop",
   chatDock: "mini",
   tabGroupIcons: "icon",
-  newTabsGo: "project",
+  newTabsGo: "chat",
   sidebarViewSwitch: "header",
   connectors: "connected",
 };
@@ -80,8 +80,8 @@ export const DEMO_SWITCH_OPTIONS: {
   newTabsGo: {
     label: "What you open goes to",
     options: [
-      { id: "project", name: "Project" },
       { id: "chat", name: "This chat" },
+      { id: "project", name: "Project" },
     ],
   },
   sidebarViewSwitch: {
