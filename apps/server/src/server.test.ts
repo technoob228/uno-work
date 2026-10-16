@@ -403,6 +403,7 @@ const buildAppUnderTest = (options?: {
     pluginRegistry?: Partial<PluginRegistryShape>;
     inbox?: Partial<InboxServiceShape>;
     connectorNotify?: Partial<ConnectorNotifyServiceShape>;
+    managerTokenAuth?: Partial<ManagerTokenAuthService["Service"]>;
     serverBrowser?: Partial<ServerBrowserShape>;
     connectors?: Partial<ConnectorsServiceShape>;
     materials?: Partial<MaterialsServiceShape>;
@@ -667,6 +668,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ManagerTokenAuthService)({
             authenticate: () =>
               Effect.fail(new ManagerAuthError({ detail: "No manager tokens in router tests." })),
+            ...options?.layers?.managerTokenAuth,
           }),
           Layer.mock(ManagerCapabilityTokenRepository)({
             getActiveByLabel: () => Effect.succeed(Option.none()),
@@ -1262,6 +1264,45 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         headers: { authorization: "Bearer uwm_not-a-session" },
       });
       assert.equal(tokensWithManagerToken.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves an assistant's manager token only to agents on this machine", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          managerTokenAuth: {
+            authenticate: () =>
+              Effect.succeed({
+                tokenId: "tok-assistant" as never,
+                scopes: ["threads:read"],
+                projectAllowlist: "all",
+                budget: null,
+                autoApprove: true,
+                label: "assistant:assistant-home",
+              }),
+          },
+        },
+      });
+      const toolsList = (headers: Record<string, string>) =>
+        HttpClient.post("/api/manager/mcp", {
+          headers: { authorization: "Bearer uwm_cloned", ...headers },
+          body: HttpBody.text(
+            JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+            "application/json",
+          ),
+        });
+
+      // The edge and the Work proxy always forward the caller's address: a
+      // matching token from the internet (16.10: shared by every snapshot
+      // clone) opens nothing.
+      const fromEdge = yield* toolsList({ "x-forwarded-for": "203.0.113.7" });
+      assert.equal(fromEdge.status, 401);
+      const fromProxy = yield* toolsList({ "x-real-ip": "203.0.113.7" });
+      assert.equal(fromProxy.status, 401);
+
+      const fromThisMachine = yield* toolsList({});
+      assert.equal(fromThisMachine.status, 200);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

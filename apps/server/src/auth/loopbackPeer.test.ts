@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findSocketOwnerUid,
+  isDirectLocalRequest,
   isLoopbackIp,
   parseProcNetAddress,
   readLoopbackPeerUid,
@@ -123,5 +124,32 @@ describe("localPairingRefusal", () => {
     expect(
       localPairingRefusal({ connection: null, forwardedFor: undefined, peerUid: () => 0 }),
     ).not.toBeNull();
+  });
+});
+
+describe("isDirectLocalRequest", () => {
+  const socket = (remoteAddress: string) => ({ socket: { remoteAddress } });
+
+  it("accepts an agent on this machine (loopback, no proxy headers)", () => {
+    expect(isDirectLocalRequest({ headers: {}, source: socket("127.0.0.1") })).toBe(true);
+    expect(isDirectLocalRequest({ headers: {}, source: socket("::ffff:127.0.0.1") })).toBe(true);
+    expect(isDirectLocalRequest({ headers: {}, source: socket("::1") })).toBe(true);
+  });
+
+  it("refuses the edge and the Work proxy (they always add forwarding headers)", () => {
+    for (const header of ["x-forwarded-for", "x-real-ip", "forwarded"]) {
+      expect(
+        isDirectLocalRequest({ headers: { [header]: "203.0.113.7" }, source: socket("127.0.0.1") }),
+      ).toBe(false);
+    }
+  });
+
+  it("refuses a peer on the node network", () => {
+    expect(isDirectLocalRequest({ headers: {}, source: socket("10.31.0.1") })).toBe(false);
+  });
+
+  it("without socket info (Bun dev server) only the headers decide", () => {
+    expect(isDirectLocalRequest({ headers: {}, source: {} })).toBe(true);
+    expect(isDirectLocalRequest({ headers: { "x-real-ip": "1.2.3.4" }, source: {} })).toBe(false);
   });
 });

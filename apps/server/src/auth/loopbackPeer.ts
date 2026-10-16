@@ -167,3 +167,30 @@ function readProcTable(path: string): string | null {
     return null;
   }
 }
+
+/**
+ * A request that came straight from this machine: a loopback socket and no
+ * proxy headers. Bearer endpoints meant for the agents ON the machine (manager
+ * MCP of an assistant, uno-work MCP, threads, browser bridge, secret
+ * requests) are reached by those agents at 127.0.0.1; the edge
+ * (`<box>.app.uno4.dev`) and the Work proxy always add X-Forwarded-For /
+ * X-Real-IP. Every Work machine cloned from one memory snapshot started with
+ * the same assistant token (16.10), so "the token matches" alone must never
+ * open these from the internet. Without socket info (Bun dev server) only the
+ * headers decide.
+ */
+export function isDirectLocalRequest(request: {
+  readonly headers: Readonly<Record<string, string | undefined>>;
+  readonly source: unknown;
+}): boolean {
+  const { headers } = request;
+  if (headers["x-forwarded-for"] || headers["x-real-ip"] || headers["forwarded"]) {
+    return false;
+  }
+  const source = request.source as
+    | { readonly socket?: { readonly remoteAddress?: string | null } }
+    | null
+    | undefined;
+  const remote = source && typeof source === "object" ? source.socket?.remoteAddress : undefined;
+  return remote === undefined || remote === null || isLoopbackIp(remote);
+}

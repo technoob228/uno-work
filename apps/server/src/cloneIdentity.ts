@@ -1,8 +1,9 @@
-import { Cause, Effect, Exit, Layer, Queue } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Queue } from "effect";
 
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig } from "./config.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
 
 /**
  * Clone identity rotation in place — the Uno Work half of the memory-snapshot
@@ -18,7 +19,9 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
  *
  * Now the unit deletes the files and sends SIGUSR2 to the daemon's main
  * process; this layer rotates both in memory and on disk and revokes every
- * session issued under the old key. A daemon without this layer dies on
+ * session issued under the old key. It also replaces the assistants'
+ * capability tokens (and their .mcp.json), which the warm-up VM issued once
+ * for every clone. A daemon without this layer dies on
  * SIGUSR2 (Node's default) and systemd restarts it — the old behaviour, so
  * image and daemon versions can't combine into a clone that keeps the shared
  * key.
@@ -39,8 +42,18 @@ export const rotateCloneIdentity = Effect.gen(function* () {
   if (environment.rotateEnvironmentId) {
     yield* environment.rotateEnvironmentId;
   }
+  // The assistants' capability tokens came from the warm-up VM too — one set
+  // for every clone, and the owner reads them in each assistant's .mcp.json
+  // (16.10: one machine's token opened another's manager MCP). New ones here.
+  const assistants = yield* Effect.serviceOption(ManagerAssistantService);
+  const assistantTokens = Option.isSome(assistants)
+    ? yield* Effect.exit(Effect.asVoid(assistants.value.rotateAssistantTokens()))
+    : Exit.void;
   if (Exit.isFailure(signingKey)) {
     return yield* Effect.failCause(signingKey.cause);
+  }
+  if (Exit.isFailure(assistantTokens)) {
+    return yield* Effect.failCause(assistantTokens.cause);
   }
   yield* Effect.logInfo("clone identity rotated in place (no daemon restart)");
 });
@@ -53,9 +66,13 @@ export const CloneIdentityRotationLive = Layer.effectDiscard(
     }
     const sessions = yield* SessionCredentialService;
     const environment = yield* ServerEnvironment;
+    const assistants = yield* Effect.serviceOption(ManagerAssistantService);
     const rotate = rotateCloneIdentity.pipe(
       Effect.provideService(SessionCredentialService, sessions),
       Effect.provideService(ServerEnvironment, environment),
+      Option.isSome(assistants)
+        ? Effect.provideService(ManagerAssistantService, assistants.value)
+        : (effect) => effect,
       Effect.catchCause((cause) =>
         Effect.logError("clone identity rotation failed").pipe(
           Effect.annotateLogs({ cause: Cause.pretty(cause) }),

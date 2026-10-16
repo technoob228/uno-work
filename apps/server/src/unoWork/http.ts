@@ -29,7 +29,12 @@ import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { requestGatewayImage } from "../assistants/imageGenerate.ts";
-import { BROWSER_BRIDGE_TOKEN_ENV, BrowserBridge, requireBridgeThread } from "../browserBridge.ts";
+import {
+  authorizeLocalBridgeRequest,
+  BROWSER_BRIDGE_TOKEN_ENV,
+  BrowserBridge,
+  requireBridgeThread,
+} from "../browserBridge.ts";
 import { ComputerResourcesService } from "../computerResources/ComputerResourcesService.ts";
 import { FilesService } from "../files/FilesService.ts";
 import { InboxService } from "../inbox/InboxService.ts";
@@ -508,8 +513,7 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const header = request.headers["authorization"];
-    const authorization = browserBridge.authorize(header);
+    const authorization = authorizeLocalBridgeRequest(browserBridge, request);
     const sharedServer = authorization?.kind === "shared-mcp";
     const body = yield* readJson(request);
     // The person's connected tools join the built-in ones (cached; none off a
@@ -523,7 +527,7 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     // and the thread is the one the daemon wrote that session's token for.
     const sessionCaller = sharedServer
       ? sharedServerCaller(body, openCodeSessionEnvDir((yield* ServerConfig).stateDir))
-      : { token: bearerToken(header), isCall: false };
+      : { token: bearerToken(request.headers["authorization"]), isCall: false };
     if (sharedServer && !sessionCaller.isCall && body !== null) {
       // initialize / tools/list / ping / notifications don't act for a thread.
       const outcome = yield* handleMcpMessage(
@@ -581,7 +585,7 @@ export const unoWorkGuideRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const browserBridge = yield* BrowserBridge;
-    const thread = requireBridgeThread(browserBridge.authorize(request.headers["authorization"]));
+    const thread = requireBridgeThread(authorizeLocalBridgeRequest(browserBridge, request));
     if (!thread.ok) {
       return HttpServerResponse.text(thread.message, { status: thread.status });
     }

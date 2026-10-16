@@ -195,6 +195,12 @@ rotated=0
 if [ -e "${key}" ] && [ -f "${stamp}" ]; then
   rm -rf "${STATE}/userdata/secrets" "${STATE}/userdata/environment-id"
   rotated=1
+  # Остальное, что прогрев снимка оставил одинаковым у всех клонов (16.10):
+  # сид systemd (ядро уже пересеяно VMGenID — пишем из него), id движка Docker
+  # и id установки Codex. Токены ассистентов меняет сам демон (cloneIdentity.ts).
+  dd if=/dev/urandom of=/var/lib/systemd/random-seed bs=512 count=1 status=none 2>/dev/null || true
+  rm -f /var/lib/docker/engine-id
+  rm -f "$(getent passwd "${SERVICE_USER}" | cut -d: -f6)/.codex/installation_id"
 fi
 
 printf '%s\n' "${host}" > "${stamp}"
