@@ -108,7 +108,7 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
           size="xs"
           variant="outline"
           disabled={!all}
-          onClick={() => all && sendToChat(all, "Fix these problems on the page.")}
+          onClick={() => all && sendToChat(all, "Fix these errors on the page.")}
           data-testid="browser-send-all-errors"
         >
           <WrenchIcon />

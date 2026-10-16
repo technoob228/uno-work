@@ -45,9 +45,11 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { AssistantAvatar } from "./AssistantAvatar";
+import { TeammateAccess } from "./TeammateAccess";
 import { useAssistantOnboarding } from "./AssistantOnboarding";
 import {
   ACTIVITY_LABEL,
+  accessOf,
   type AssistantPreset,
   type AssistantTreeNode,
   BRAIN_NAME,
@@ -214,22 +216,19 @@ function MemoryFile(props: {
 function TreeBranch(props: {
   readonly node: AssistantTreeNode<TeamMember>;
   readonly current: string;
-  readonly depth: number;
   readonly onOpen: (member: TeamMember) => void;
 }) {
   const { item } = props.node;
   return (
-    <>
+    <div>
       <button
         type="button"
         onClick={() => props.onOpen(item)}
         className={cn(
-          "flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pr-2 text-left text-sm hover:bg-accent/40",
+          "flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent/40",
           item.key === props.current && "bg-accent/60",
         )}
-        style={{ paddingLeft: `${0.5 + props.depth * 1.25}rem` }}
       >
-        {props.depth > 0 ? <span className="text-muted-foreground/50">└</span> : null}
         <AssistantAvatar
           emoji={item.profile.emoji}
           tone={item.profile.tone}
@@ -245,16 +244,20 @@ function TreeBranch(props: {
           {item.revoked ? "revoked" : PRESET_NAME[item.profile.preset]}
         </span>
       </button>
-      {props.node.children.map((child) => (
-        <TreeBranch
-          key={child.item.key}
-          node={child}
-          current={props.current}
-          depth={props.depth + 1}
-          onOpen={props.onOpen}
-        />
-      ))}
-    </>
+      {props.node.children.length > 0 ? (
+        // Who it set up: indented under a line, not ASCII (critics D20).
+        <div className="ml-[1.06rem] border-l border-border pl-2">
+          {props.node.children.map((child) => (
+            <TreeBranch
+              key={child.item.key}
+              node={child}
+              current={props.current}
+              onOpen={props.onOpen}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -274,6 +277,7 @@ export function AssistantProfilePage(props: {
   const revoke = useAssistantTeamStore((store) => store.revoke);
   const restore = useAssistantTeamStore((store) => store.restore);
   const openSetup = useAssistantOnboarding((state) => state.openFor);
+  const openNewAssistant = useAssistantOnboarding((state) => state.openNew);
   const [changingBrain, setChangingBrain] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
 
@@ -360,8 +364,6 @@ export function AssistantProfilePage(props: {
         <header className="flex min-h-12 items-center gap-2 border-b border-border px-3 sm:px-5">
           <SidebarShowButton />
           {back}
-          <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />
-          <span className="truncate text-sm font-medium">{profile.name}</span>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
@@ -444,18 +446,7 @@ export function AssistantProfilePage(props: {
                 ))}
               </Section>
 
-              <Section
-                title={`Chats · ${member.chats.conversations.length}`}
-                action={
-                  <button
-                    type="button"
-                    onClick={newChat}
-                    className="cursor-pointer text-xs text-primary hover:underline"
-                  >
-                    New chat
-                  </button>
-                }
-              >
+              <Section title={`Chats · ${member.chats.conversations.length}`}>
                 {member.chats.conversations.length > 0 ? (
                   member.chats.conversations
                     .slice(0, 6)
@@ -591,19 +582,52 @@ export function AssistantProfilePage(props: {
               </Section>
             </div>
 
+            <Section
+              title="What it can use"
+              testId="assistant-profile-can-use"
+              action={
+                <button
+                  type="button"
+                  onClick={() => void navigate({ to: "/settings/connectors" })}
+                  className="cursor-pointer text-xs text-primary hover:underline"
+                >
+                  Connectors in Settings
+                </button>
+              }
+            >
+              <TeammateAccess
+                name={profile.name}
+                access={accessOf(profile)}
+                onChange={member.revoked ? null : (access) => patchProfile(member.key, { access })}
+                foldWhenFull
+              />
+            </Section>
+
             <Section title="Memory">
               <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
               <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
             </Section>
 
-            <Section title="Team" testId="assistant-profile-team">
+            <Section
+              title="Team"
+              testId="assistant-profile-team"
+              action={
+                <button
+                  type="button"
+                  onClick={() => openNewAssistant()}
+                  className="cursor-pointer text-xs text-primary hover:underline"
+                  data-testid="assistant-profile-new-assistant"
+                >
+                  New assistant
+                </button>
+              }
+            >
               <div className="flex flex-col gap-0.5 p-1.5">
                 {tree.map((node) => (
                   <TreeBranch
                     key={node.item.key}
                     node={node}
                     current={member.key}
-                    depth={0}
                     onOpen={openMember}
                   />
                 ))}
@@ -614,7 +638,7 @@ export function AssistantProfilePage(props: {
                     Set up by {parent.profile.name}
                     {" · "}
                     {beyond.length === 0
-                      ? `within ${parent.profile.name}'s access — checked by the computer, not asked`
+                      ? `${parent.profile.name} can set up a helper within its own rights — you'll see it in Needs you.`
                       : `beyond ${parent.profile.name}'s access: ${beyond.join(", ")}`}
                   </p>
                 ) : (

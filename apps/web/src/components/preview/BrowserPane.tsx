@@ -7,8 +7,6 @@ import {
   KeyRoundIcon,
   Loader2Icon,
   MoreVerticalIcon,
-  MinusIcon,
-  PlusIcon,
   RotateCwIcon,
   XIcon,
   MonitorSmartphoneIcon,
@@ -1076,7 +1074,6 @@ function BrowserView({
             </div>
             <CommentLayer
               tabId={tab.id}
-              pageUrl={currentUrl}
               pageRef={pageElementRef}
               zoom={iframeMode ? 1 : zoomFactor}
             />

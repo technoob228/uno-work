@@ -72,12 +72,10 @@ export function CommentBar({ tabId, pageUrl }: { tabId: string; pageUrl: string 
 
 export function CommentLayer({
   tabId,
-  pageUrl,
   pageRef,
   zoom = 1,
 }: {
   tabId: string;
-  pageUrl: string;
   /** The element the page is drawn in (webview / iframe): the note box is placed against it. */
   pageRef: RefObject<HTMLElement | null>;
   zoom?: number;

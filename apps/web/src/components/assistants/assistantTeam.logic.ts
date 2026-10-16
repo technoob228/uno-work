@@ -204,6 +204,14 @@ export interface AssistantProfile {
    * access to this computer (Uno's default; decision 14.10 (2)).
    */
   readonly access?: AssistantAccess;
+  /**
+   * Decision 16.10 (Misha): limited rights hold only on a computer of its own
+   * (on a shared one every assistant can read the others' files). The label
+   * of that computer; absent = it lives next to you (full access only).
+   */
+  readonly ownComputer?: string | null;
+  /** What it did that its chats don't show (set up a teammate, lost access). */
+  readonly activity?: ReadonlyArray<AssistantActivityEntry>;
   /** Its repeating tasks, as its page lists them (from its schedule). */
   readonly schedule?: ReadonlyArray<{ readonly name: string; readonly when: string }>;
 }
@@ -317,6 +325,105 @@ export function rightsBeyondParent(
   const computers = new Set(parent.computers);
   for (const computer of child.computers) if (!computers.has(computer)) beyond.push(computer);
   return beyond;
+}
+
+/**
+ * Decision 16.10 (Misha): cutting an assistant's rights cuts everything it
+ * set up, automatically — each child keeps only what is within its parent.
+ * Returns the child as it becomes and, in plain words, what it loses.
+ */
+export function clampToParent(
+  parent: Pick<AssistantProfile, "preset" | "projects" | "computers" | "access">,
+  child: AssistantProfile,
+): { readonly child: AssistantProfile; readonly lost: ReadonlyArray<string> } {
+  const lost: string[] = [];
+  let next: AssistantProfile = child;
+  if (PRESET_RANK[child.preset] > PRESET_RANK[parent.preset]) {
+    lost.push(`${PRESET_NAME[child.preset]} → ${PRESET_NAME[parent.preset]}`);
+    next = { ...next, preset: parent.preset };
+  }
+  const clampList = (
+    p: "all" | ReadonlyArray<string>,
+    c: "all" | ReadonlyArray<string>,
+    word: (id: string) => string,
+  ): "all" | ReadonlyArray<string> => {
+    if (p === "all") return c;
+    const kept = c === "all" ? p : c.filter((id) => p.includes(id));
+    const gone = c === "all" ? [] : c.filter((id) => !p.includes(id));
+    for (const id of gone) lost.push(word(id));
+    return kept;
+  };
+  next = { ...next, projects: clampList(parent.projects, child.projects, (id) => id) };
+  const parentAccess = accessOf(parent);
+  const childAccess = accessOf(child);
+  const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
+  const browser =
+    rank[childAccess.browser] > rank[parentAccess.browser] ? parentAccess.browser : childAccess.browser;
+  if (browser !== childAccess.browser) lost.push("using the browser freely");
+  const access: AssistantAccess = {
+    ...childAccess,
+    browser,
+    connectors: clampList(parentAccess.connectors, childAccess.connectors, (id) => id.replace(/^mcp:/, "")),
+    logins: clampList(parentAccess.logins, childAccess.logins, (id) => `login ${id.replace(/^cred-/, "")}`),
+    secrets: clampList(parentAccess.secrets, childAccess.secrets, (id) => `key ${id.replace(/^cred-/, "")}`),
+    projectSkills: childAccess.projectSkills && parentAccess.projectSkills,
+  };
+  if (childAccess.projectSkills && !access.projectSkills) lost.push("project skills");
+  if (child.access !== undefined || !isFullAccess(access)) next = { ...next, access };
+  return { child: next, lost };
+}
+
+/**
+ * "Uses your ChatGPT plan · shared with Uno" / "Uno AI · from your plan's AI
+ * hours" — whose subscription and limit it spends (decision 16.10).
+ */
+export function brainLine(
+  profile: Pick<AssistantProfile, "brain" | "name">,
+  team: ReadonlyArray<Pick<AssistantProfile, "brain" | "name">>,
+): string {
+  const others = team
+    .filter((other) => other.name !== profile.name && other.brain === profile.brain)
+    .map((other) => other.name);
+  const shared = others.length > 0 ? ` · shared with ${others.join(", ")}` : "";
+  switch (profile.brain) {
+    case "uno":
+      return `Uno AI · from your plan's AI hours${shared}`;
+    case "claude":
+      return `Uses your Claude plan's limits${shared}`;
+    case "chatgpt":
+      return `Uses your ChatGPT plan's limits${shared}`;
+    case "key":
+      return `Your own key · billed by its provider${shared}`;
+  }
+}
+
+// ── What it did ───────────────────────────────────────────────────────────
+
+/** Kinds the Inbox also gets (decision 16.10): money, deleting, a deploy, a new teammate. */
+export type ActivityKind = "chat" | "money" | "delete" | "deploy" | "teammate" | "access" | "note";
+
+export interface AssistantActivityEntry {
+  readonly at: string;
+  readonly kind: ActivityKind;
+  readonly text: string;
+}
+
+export const IMPORTANT_ACTIVITY: ReadonlySet<ActivityKind> = new Set([
+  "money",
+  "delete",
+  "deploy",
+  "teammate",
+  "access",
+]);
+
+/** Its own log and the chats it started or talked in, newest first. */
+export function activityFeed(
+  own: ReadonlyArray<AssistantActivityEntry>,
+  chats: ReadonlyArray<{ readonly title: string; readonly at: string }>,
+): ReadonlyArray<AssistantActivityEntry & { readonly important: boolean }> {
+  return [...own, ...chats.map((chat) => ({ at: chat.at, kind: "chat" as const, text: chat.title }))]
+    .toSorted((a, b) => b.at.localeCompare(a.at))
+    .map((entry) => ({ ...entry, important: IMPORTANT_ACTIVITY.has(entry.kind) }));
 }
 
 // ── Who set up whom ───────────────────────────────────────────────────────
