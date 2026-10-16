@@ -92,19 +92,27 @@ function readJsonFile(file) {
   }
 }
 
+/** The daemon's settings.json on a cloud computer, then on a desktop install. */
+export function defaultSettingsFiles(/** @type {string} */ home) {
+  return [
+    "/var/lib/uno-work/userdata/settings.json",
+    path.join(home, ".t3", "userdata", "settings.json"),
+  ];
+}
+
 /**
  * This computer's console key, from the daemon's settings.json: the file the
  * daemon names in ~/.uno/sdk/daemon.json, else the usual places. Null when
  * the computer isn't an Uno cloud computer signed in to Uno.
  * @param {{ home: string }} where
+ * @param {string[]} [fallbacks] where to look when the daemon didn't say
  * @returns {{ token: string, boxId: number | null, consoleUrl: string } | null}
  */
-export function machineCredentials(where) {
+export function machineCredentials(where, fallbacks = defaultSettingsFiles(where.home)) {
   const pointer = readJsonFile(path.join(where.home, DAEMON_POINTER));
   const candidates = [
     typeof pointer?.settingsPath === "string" ? pointer.settingsPath : null,
-    "/var/lib/uno-work/userdata/settings.json",
-    path.join(where.home, ".t3", "userdata", "settings.json"),
+    ...fallbacks,
   ].filter((file) => typeof file === "string" && file.length > 0);
   for (const file of candidates) {
     const uno = readJsonFile(/** @type {string} */ (file))?.uno;
