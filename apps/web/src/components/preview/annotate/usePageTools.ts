@@ -23,7 +23,9 @@ import { useEffect, useRef } from "react";
 import type { ConsoleEntry, NetworkEntry } from "./pageTools.logic";
 import {
   buildPageToolsScript,
+  type PagePick,
   type PagePin,
+  type PageToolsChannel,
   pageToolsCall,
   type PageToolsMessage,
   parsePageToolsMessage,
@@ -37,6 +39,24 @@ export interface PageToolsView {
   removeEventListener(type: string, listener: (event: Event) => void): void;
   /** A real <webview>: a message to its page's preload. */
   send?(channel: string, ...args: unknown[]): void;
+  /** How the page script talks back (the computer's live browser: a queue the view drains). */
+  readonly pageToolsChannel?: PageToolsChannel;
+}
+
+/** A picture of part of the page (viewport CSS pixels) for a comment; null — none. */
+export type PageToolsCapture = (rect: PagePick["rect"]) => Promise<Blob | null>;
+
+/** Room around the picked element in its picture, so the agent sees where it is. */
+export const COMMENT_SHOT_PADDING = 16;
+
+/** The part of the viewport a comment's picture takes: the pick plus some room. */
+export function commentShotRect(rect: PagePick["rect"]): PagePick["rect"] {
+  return {
+    x: Math.max(0, rect.x - COMMENT_SHOT_PADDING),
+    y: Math.max(0, rect.y - COMMENT_SHOT_PADDING),
+    w: rect.w + COMMENT_SHOT_PADDING * 2 + Math.min(0, rect.x - COMMENT_SHOT_PADDING),
+    h: rect.h + COMMENT_SHOT_PADDING * 2 + Math.min(0, rect.y - COMMENT_SHOT_PADDING),
+  };
 }
 
 /** The desktop's page preload serves this view (desktop 0.0.139+, a real <webview>). */
@@ -55,9 +75,13 @@ export function usePageTools(input: {
   readonly view: PageToolsView | null;
   /** Off for pages the tools can't reach (the web build's companion tab). */
   readonly enabled: boolean;
+  /** A picture of the picked element goes with the comment (desktop, the computer's browser). */
+  readonly capture?: PageToolsCapture;
 }): void {
   const { tabId, view, enabled } = input;
   const readyRef = useRef(false);
+  const captureRef = useRef(input.capture);
+  captureRef.current = input.capture;
 
   // The script in, and the page's reports out.
   useEffect(() => {
@@ -110,7 +134,7 @@ export function usePageTools(input: {
         return;
       }
       void view
-        .executeJavaScript(buildPageToolsScript(nonce), false)
+        .executeJavaScript(buildPageToolsScript(nonce, view.pageToolsChannel ?? "console"), false)
         .then(() => {
           readyRef.current = true;
           syncPage();
@@ -129,9 +153,19 @@ export function usePageTools(input: {
         case "network":
           actions.addNetwork(tabId, message.data as NetworkEntry);
           return;
-        case "pick":
-          actions.patch(tabId, { draft: { kind: "new", pick: message.data } });
+        case "pick": {
+          const pick = message.data;
+          actions.patch(tabId, { draft: { kind: "new", pick } });
+          const capture = captureRef.current;
+          if (capture && pick.rect.w > 0 && pick.rect.h > 0) {
+            void capture(commentShotRect(pick.rect))
+              .then((shot) => {
+                if (shot) store().setShot(tabId, pick, shot);
+              })
+              .catch(() => {});
+          }
           return;
+        }
         case "pinClick": {
           const comment = store().tabs[tabId]?.comments.find((c) => c.n === message.data.n);
           if (comment) actions.patch(tabId, { draft: { kind: "edit", commentId: comment.id } });

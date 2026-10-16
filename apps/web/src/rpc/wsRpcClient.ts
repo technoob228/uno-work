@@ -197,6 +197,8 @@ export interface WsRpcClient {
     readonly copySelection: RpcUnaryMethod<typeof WS_METHODS.browserLiveCopySelection>;
     readonly setProxy: RpcUnaryMethod<typeof WS_METHODS.browserLiveSetProxy>;
     readonly setup: RpcUnaryMethod<typeof WS_METHODS.browserLiveSetup>;
+    readonly evaluate: RpcUnaryMethod<typeof WS_METHODS.browserLiveEvaluate>;
+    readonly capture: RpcUnaryMethod<typeof WS_METHODS.browserLiveCapture>;
   };
   /** What wants the person on this computer (agents, apps) — kept by the daemon. */
   readonly inbox: {
@@ -593,6 +595,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       setProxy: (input) =>
         transport.request((client) => client[WS_METHODS.browserLiveSetProxy](input)),
       setup: (input) => transport.request((client) => client[WS_METHODS.browserLiveSetup](input)),
+      evaluate: (input) =>
+        transport.request((client) => client[WS_METHODS.browserLiveEvaluate](input)),
+      capture: (input) =>
+        transport.request((client) => client[WS_METHODS.browserLiveCapture](input)),
     },
     inbox: {
       subscribe: (listener, options) =>

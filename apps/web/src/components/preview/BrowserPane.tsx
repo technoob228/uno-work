@@ -55,6 +55,7 @@ import {
 import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { IframeWebview } from "./annotate/iframeWebview";
+import { base64ToBlob } from "./annotate/liveWebview";
 import { PageToolsButtons } from "./annotate/PageToolsButtons";
 import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
 import { usePageTools } from "./annotate/usePageTools";
@@ -62,7 +63,12 @@ import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { isTypingTarget } from "./panelLauncher.logic";
 import { useChatBrowser } from "./useChatBrowser";
 import { BrowserSourceChip } from "./BrowserSourceChip";
-import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
+import {
+  browserPartitionForScope,
+  browserUrlOrigin,
+  isComputerLocalUrl,
+  normalizeBrowserUrl,
+} from "./browserUrl";
 import {
   isBrowserTab,
   NO_PROJECT_KEY,
@@ -87,7 +93,7 @@ interface ElectronWebviewElement extends HTMLElement {
   reloadIgnoringCache?: () => void;
   stop(): void;
   setZoomFactor?: (factor: number) => void;
-  capturePage?: () => Promise<{
+  capturePage?: (rect?: { x: number; y: number; width: number; height: number }) => Promise<{
     toDataURL: () => string;
     isEmpty?: () => boolean;
     getSize?: () => { width: number; height: number };
@@ -311,7 +317,8 @@ function BrowserView({
   visible: boolean;
   automationActive: boolean;
 }) {
-  const { updateBrowserTab, currentChatThreadId, currentChatProjectCwd } = usePreviewPane();
+  const { updateBrowserTab, currentChatThreadId, currentChatProjectCwd, closeFile } =
+    usePreviewPane();
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
   // The page lives in the panel: the desktop app's <webview>, or — in the demo
   // of the desktop app — a same-origin iframe that talks like one.
@@ -370,6 +377,28 @@ function BrowserView({
   const launcherV2 = useFeatureFlag("panelLauncherV2");
   const { sources: browserSources, openInSource } = useChatBrowser();
   const canOpenInAgentBrowser = browserSources.includes("computer");
+  // The web version (Misha 16.10 p.12): the site being built on a cloud
+  // computer is the computer's own localhost — this device's browser would
+  // open its own. Such a page opens in the computer's browser, in the panel,
+  // with Comment; public addresses stay as they are (a tab of this browser).
+  const openedOnComputerRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pageInPanel || !visible || !pageToolsFlag || !canOpenInAgentBrowser) return;
+    if (!currentUrl || !isComputerLocalUrl(currentUrl)) return;
+    if (openedOnComputerRef.current === currentUrl) return;
+    openedOnComputerRef.current = currentUrl;
+    openInSource("computer", currentUrl);
+    closeFile(tab.id);
+  }, [
+    pageInPanel,
+    visible,
+    pageToolsFlag,
+    canOpenInAgentBrowser,
+    currentUrl,
+    openInSource,
+    closeFile,
+    tab.id,
+  ]);
   const origin = browserUrlOrigin(currentUrl);
   const matchedCredentials = useMemo(
     () => matchCredentialsForOrigin({ credentials: credentialsQuery.data, origin }),
@@ -437,8 +466,33 @@ function BrowserView({
     setWebviewNode(view);
   }, []);
 
-  // Comment mode (C): the page's half lives in the page.
-  usePageTools({ tabId: tab.id, view: webviewNode, enabled: pageToolsOn });
+  // Comment mode (C): the page's half lives in the page. The picked element's
+  // picture goes with the comment (the desktop's <webview>; the demo's iframe has none).
+  const capturePick = useCallback(
+    async (rect: { x: number; y: number; w: number; h: number }): Promise<Blob | null> => {
+      const view = webviewRef.current;
+      if (iframeMode || !view?.capturePage) return null;
+      const bounds = view.getBoundingClientRect();
+      const zoom = zoomFactor;
+      const x = Math.max(0, Math.floor(rect.x * zoom));
+      const y = Math.max(0, Math.floor(rect.y * zoom));
+      const width = Math.min(Math.ceil(rect.w * zoom), Math.floor(bounds.width) - x);
+      const height = Math.min(Math.ceil(rect.h * zoom), Math.floor(bounds.height) - y);
+      if (width < 1 || height < 1) return null;
+      const image = await view.capturePage({ x, y, width, height });
+      const dataUrl = image.toDataURL();
+      if (image.isEmpty?.() === true || isEmptyScreenshot(dataUrl)) return null;
+      const comma = dataUrl.indexOf(",");
+      return comma < 0 ? null : base64ToBlob(dataUrl.slice(comma + 1), "image/png");
+    },
+    [iframeMode, zoomFactor],
+  );
+  usePageTools({
+    tabId: tab.id,
+    view: webviewNode,
+    enabled: pageToolsOn,
+    capture: capturePick,
+  });
   const pageTools = usePageToolsTab(tab.id);
   useEffect(() => {
     if (!visible || !pageToolsOn) return;

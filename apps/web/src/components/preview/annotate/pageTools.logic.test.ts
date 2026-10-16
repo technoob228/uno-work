@@ -163,3 +163,22 @@ describe("helpers", () => {
     expect(formatDuration(null)).toBe("");
   });
 });
+
+describe("commentsPayload with pictures", () => {
+  it("names each comment's picture in the markdown and sends it along", () => {
+    const shot = new Blob(["png"], { type: "image/png" });
+    const payload = commentsPayload({
+      page: "http://localhost:5173/pricing",
+      comments: [comment(1, { shot }), comment(2)],
+    });
+    expect(payload.images).toEqual([{ name: "comment-1-pricing.png", blob: shot }]);
+    expect(payload.markdown).toContain("   Picture: comment-1-pricing.png (attached)");
+    expect(payload.markdown.match(/Picture:/g)).toHaveLength(1);
+  });
+
+  it("has no pictures when the browser took none", () => {
+    const payload = commentsPayload({ page: "https://a.dev/", comments: [comment(1)] });
+    expect(payload.images).toBeUndefined();
+    expect(payload.markdown).not.toContain("Picture:");
+  });
+});

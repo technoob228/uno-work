@@ -212,6 +212,37 @@ export const BrowserLiveCopyResult = Schema.Struct({ text: Schema.String });
 export type BrowserLiveCopyResult = typeof BrowserLiveCopyResult.Type;
 
 /**
+ * Comment on a page of the machine's browser (the person's Comment mode, like
+ * Codex): the app's page script runs in the page's main world and reports
+ * back through this call. Only for pages of the live view; the result is the
+ * expression's value as JSON (null for undefined), capped in size.
+ */
+export const BrowserLiveEvaluateInput = Schema.Struct({
+  pageId: Schema.String,
+  expression: Schema.String,
+});
+export type BrowserLiveEvaluateInput = typeof BrowserLiveEvaluateInput.Type;
+export const BrowserLiveEvaluateResult = Schema.Struct({ json: Schema.NullOr(Schema.String) });
+export type BrowserLiveEvaluateResult = typeof BrowserLiveEvaluateResult.Type;
+
+/** A picture of part of the page (CSS pixels of its viewport), for a comment. */
+export const BrowserLiveCaptureInput = Schema.Struct({
+  pageId: Schema.String,
+  x: Schema.Number,
+  y: Schema.Number,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+export type BrowserLiveCaptureInput = typeof BrowserLiveCaptureInput.Type;
+/** `data` — PNG, base64 without the data: prefix. */
+export const BrowserLiveCaptureResult = Schema.Struct({
+  data: Schema.String,
+  width: NonNegativeInt,
+  height: NonNegativeInt,
+});
+export type BrowserLiveCaptureResult = typeof BrowserLiveCaptureResult.Type;
+
+/**
  * Proxy for the machine's browser: `server` like `http://host:port` or
  * `socks5://host:port`; empty `server` = go out directly. An omitted
  * `password` keeps the saved one. The browser restarts to apply it.

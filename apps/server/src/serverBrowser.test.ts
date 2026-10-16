@@ -13,6 +13,7 @@ import { BROWSER_SETUP_REQUEST_ENV, BROWSER_SETUP_STATUS_ENV } from "./browserSe
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
 import {
+  liveCaptureClip,
   parseTrace,
   proxyConfigProblem,
   SERVER_BROWSER_EXECUTABLE_ENV,
@@ -202,6 +203,24 @@ it.live.skipIf(!hasChromium)(
   120_000,
 );
 
+it("keeps a comment's picture inside the page", () => {
+  const viewport = { width: 800, height: 600 };
+  assert.deepEqual(liveCaptureClip({ x: 10.4, y: 20.6, width: 100, height: 50 }, viewport), {
+    x: 10,
+    y: 20,
+    width: 101,
+    height: 51,
+  });
+  assert.deepEqual(liveCaptureClip({ x: -20, y: 580, width: 100, height: 100 }, viewport), {
+    x: 0,
+    y: 580,
+    width: 80,
+    height: 20,
+  });
+  assert.isNull(liveCaptureClip({ x: 900, y: 0, width: 50, height: 50 }, viewport));
+  assert.isNull(liveCaptureClip({ x: Number.NaN, y: 0, width: 50, height: 50 }, viewport));
+});
+
 it("reads the exit address and country from Cloudflare trace", () => {
   assert.deepEqual(parseTrace("fl=1\nip=203.0.113.7\nloc=NL\n"), {
     ip: "203.0.113.7",
@@ -282,6 +301,23 @@ it.live.skipIf(!hasChromium)(
         context,
       );
       assert.equal(yield* serverBrowser.live.copySelection(page.pageId), "copy me please");
+
+      // Comment (как в Codex): скрипт страницы — без «Take control»; снимок куска.
+      const evaluated = yield* serverBrowser.live.evaluate(
+        page.pageId,
+        "({ text: document.querySelector('#t').textContent, n: 1 + 1 })",
+      );
+      assert.deepEqual(JSON.parse(evaluated.json ?? "null"), { text: "copy me please", n: 2 });
+      assert.isNull((yield* serverBrowser.live.evaluate(page.pageId, "undefined")).json);
+      const shot = yield* serverBrowser.live.capture(page.pageId, {
+        x: -10,
+        y: 0,
+        width: 60,
+        height: 30,
+      });
+      assert.equal(shot.width, 50);
+      assert.equal(shot.height, 30);
+      assert.equal(pngHeight(`data:image/png;base64,${shot.data}`), 30);
       const back = (yield* serverBrowser.live.state).pages.find(
         (candidate) => candidate.pageId === page.pageId,
       )!;

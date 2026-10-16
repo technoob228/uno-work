@@ -71,8 +71,12 @@ import type {
 } from "./server.ts";
 import type {
   BrowserLiveCloseInput,
+  BrowserLiveCaptureInput,
+  BrowserLiveCaptureResult,
   BrowserLiveCopyInput,
   BrowserLiveCopyResult,
+  BrowserLiveEvaluateInput,
+  BrowserLiveEvaluateResult,
   BrowserLiveResizeInput,
   BrowserLiveSetProxyInput,
   BrowserLiveFrame,
@@ -879,6 +883,10 @@ export interface EnvironmentApi {
     setProxy: (input: BrowserLiveSetProxyInput) => Promise<BrowserLiveState>;
     /** Set up the machine's browser now (retry after a failed setup). */
     setup: () => Promise<BrowserLiveState>;
+    /** Comment mode: run the page script's call in the page (its JSON result). */
+    evaluate: (input: BrowserLiveEvaluateInput) => Promise<BrowserLiveEvaluateResult>;
+    /** A PNG of part of the page, for a comment. */
+    capture: (input: BrowserLiveCaptureInput) => Promise<BrowserLiveCaptureResult>;
     listLogins: () => Promise<readonly CredentialMetadata[]>;
     fillLogin: (payload: CredentialFillPayload) => Promise<CredentialFillResult>;
   };

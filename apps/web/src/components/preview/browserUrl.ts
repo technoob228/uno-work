@@ -156,3 +156,24 @@ export function normalizeAgentBrowserUrl(rawUrl: string | undefined): string | n
 
 export const AGENT_PRIVATE_URL_MESSAGE =
   "Opening an address on this computer or its local network needs the user's confirmation; they were asked in the app.";
+
+/**
+ * An address only the computer itself can open: localhost (and *.localhost),
+ * 127.x, 0.0.0.0, [::1]. In the web version such a "Your site" page opens in
+ * the computer's own browser — the person's browser would reach their own
+ * device instead.
+ */
+export function isComputerLocalUrl(rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname === "[::1]" || hostname === "[::]" || hostname === "0.0.0.0") return true;
+  const ip = parseIpv4(hostname);
+  return ip !== null && ip[0] === 127;
+}

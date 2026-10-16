@@ -2414,6 +2414,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.browserLiveSetup, serverBrowser.live.setup, {
             "rpc.aggregate": "browser",
           }),
+        [WS_METHODS.browserLiveEvaluate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveEvaluate,
+            serverBrowser.live.evaluate(input.pageId, input.expression),
+            { "rpc.aggregate": "browser" },
+          ),
+        [WS_METHODS.browserLiveCapture]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserLiveCapture,
+            serverBrowser.live.capture(input.pageId, input),
+            { "rpc.aggregate": "browser" },
+          ),
         [WS_METHODS.browserLiveClose]: (input) =>
           observeRpcEffect(WS_METHODS.browserLiveClose, serverBrowser.live.close(input.pageId), {
             "rpc.aggregate": "browser",

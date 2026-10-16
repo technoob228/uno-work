@@ -518,7 +518,12 @@ export interface ChatComposerHandle {
    * From the right panel (the browser's Comment / Debug, the launcher's app
    * ideas): attach cards and/or put words into the box, then focus it.
    */
-  attachFromPanel?: (input: { files?: ComposerFileAttachment[]; text?: string }) => void;
+  attachFromPanel?: (input: {
+    files?: ComposerFileAttachment[];
+    /** Pictures (a comment's element): images when the model takes them, else files. */
+    images?: File[];
+    text?: string;
+  }) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -2365,6 +2370,12 @@ export const ChatComposer = memo(
       setThreadError(activeThreadId, error);
     };
 
+    // The panel's handle (attachFromPanel) is made once per deps: it reads these fresh.
+    const addComposerImagesRef = useRef(addComposerImages);
+    addComposerImagesRef.current = addComposerImages;
+    const panelImageSupportRef = useRef(imageAttachmentSupport);
+    panelImageSupportRef.current = imageAttachmentSupport;
+
     const removeComposerImage = (imageId: string) => {
       removeComposerImageFromDraft(imageId);
     };
@@ -2719,9 +2730,29 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
-        attachFromPanel: ({ files, text }) => {
+        attachFromPanel: ({ files, images, text }) => {
           if (files && files.length > 0) {
             setComposerFilesState((current) => [...current, ...files]);
+          }
+          if (images && images.length > 0) {
+            if (panelImageSupportRef.current === "supported") {
+              addComposerImagesRef.current(images);
+            } else {
+              // A model without pictures (or not known): the agent opens them as files.
+              setComposerFilesState((current) => [
+                ...current,
+                ...images.map(
+                  (image): ComposerFileAttachment => ({
+                    type: "file",
+                    id: `panel-${randomUUID()}`,
+                    name: image.name,
+                    mimeType: image.type || "image/png",
+                    sizeBytes: image.size,
+                    file: image,
+                  }),
+                ),
+              ]);
+            }
           }
           if (text) {
             const current = promptRef.current.trim();

@@ -17,7 +17,12 @@ import {
 } from "./pageTools.logic";
 
 export type PageCommentDraft =
-  | { readonly kind: "new"; readonly pick: PagePick }
+  | {
+      readonly kind: "new";
+      readonly pick: PagePick;
+      /** The picture of the picked element, when the browser can take one (it comes a moment later). */
+      readonly shot?: Blob;
+    }
   | { readonly kind: "edit"; readonly commentId: string };
 
 export interface PageToolsTab {
@@ -57,6 +62,8 @@ interface PageToolsStore {
   readonly addConsole: (tabId: string, entry: ConsoleEntry) => void;
   readonly addNetwork: (tabId: string, entry: NetworkEntry) => void;
   readonly saveDraft: (tabId: string, note: string) => void;
+  /** The picture of a pick arrived: onto the note being written, or the comment it became. */
+  readonly setShot: (tabId: string, pick: PagePick, shot: Blob) => void;
   readonly removeComment: (tabId: string, commentId: string) => void;
   readonly clearComments: (tabId: string) => void;
   readonly dropTab: (tabId: string) => void;
@@ -107,8 +114,24 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
         text: pick.text,
         note,
         docRect: pick.docRect,
+        ...(draft.shot ? { shot: draft.shot } : {}),
       };
       patch(tabId, { draft: null, comments: [...current.comments, comment] });
+    },
+    setShot: (tabId, pick, shot) => {
+      const current = tab(tabId);
+      const draft = current.draft;
+      if (draft?.kind === "new" && draft.pick === pick) {
+        patch(tabId, { draft: { ...draft, shot } });
+        return;
+      }
+      // Saved before the picture came: the comment keeps the pick's own rect.
+      if (!current.comments.some((comment) => comment.docRect === pick.docRect)) return;
+      patch(tabId, {
+        comments: current.comments.map((comment) =>
+          comment.docRect === pick.docRect ? { ...comment, shot } : comment,
+        ),
+      });
     },
     removeComment: (tabId, commentId) =>
       patch(tabId, {

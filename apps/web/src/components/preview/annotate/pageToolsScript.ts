@@ -19,6 +19,14 @@
  * Installed on each new document (`dom-ready`); what the page logged before
  * that is lost — except resources, which the performance timeline keeps.
  * A desktop preload (upstream's PickPreload) would see the very start too.
+ *
+ * The computer's own browser (the agent's, a live picture in the panel —
+ * liveWebview.ts) has no console channel to the app: there the script runs
+ * with `channel: "queue"` — messages wait in the page until the app drains
+ * them (`drain()`), and the pointer is the app's, not the page's: the
+ * person's moves and clicks over the picture come as `hoverAt` / `pickAt` /
+ * `dragAt` / `areaAt`. The page's own events (the agent's clicks) are never
+ * blocked there.
  */
 
 export const PAGE_TOOLS_GLOBAL = "__unoPageTools";
@@ -71,19 +79,50 @@ export function parsePageToolsMessage(nonce: string, message: unknown): PageTool
   }
 }
 
+/** How the script talks back: console lines (a <webview>, the demo's iframe) or a queue the app drains. */
+export type PageToolsChannel = "console" | "queue";
+
+/** The person's pointer over a live picture, in the page's CSS pixels. */
+export type PageToolsPointerMethod = "hoverAt" | "pickAt" | "dragAt" | "areaAt";
+
+/** A pointer call into the installed script (queue channel); harmless without it. */
+export function pageToolsPointerCall(
+  method: PageToolsPointerMethod,
+  coords: ReadonlyArray<number>,
+): string {
+  const args = coords.map((value) => (Number.isFinite(value) ? Math.round(value) : 0)).join(",");
+  return `(function(t){ if (t && t.${method}) t.${method}(${args}); return true; })(window.${PAGE_TOOLS_GLOBAL})`;
+}
+
+/**
+ * Take what the page queued (queue channel): the lines, or null when the
+ * script isn't in this document (a new page: put it in again).
+ */
+export const PAGE_TOOLS_DRAIN_EXPRESSION = `(function(t){ return t && t.doc === document && t.drain ? t.drain() : null; })(window.${PAGE_TOOLS_GLOBAL})`;
+
 /** A call into the installed script; harmless on a page that doesn't have it (yet). */
 export function pageToolsCall(method: "setMode" | "setPins" | "setPaused", arg: unknown): string {
   return `(function(t){ if (t) t.${method}(${JSON.stringify(arg)}); return true; })(window.${PAGE_TOOLS_GLOBAL})`;
 }
 
 const SCRIPT = String.raw`
-(function (NONCE) {
+(function (NONCE, QUEUE) {
   var w = window;
   var G = "${PAGE_TOOLS_GLOBAL}";
-  if (w[G] && w[G].nonce === NONCE && w[G].doc === document) return "already";
+  if (w[G] && w[G].doc === document) {
+    if (!QUEUE && w[G].nonce === NONCE) return "already";
+    // The queue channel: one script per page whoever drains it (a new view of
+    // the same page just takes the channel over).
+    if (QUEUE && w[G].drain) { w[G].setNonce(NONCE); return "already"; }
+  }
   var origDebug = console.debug.bind(console);
+  var Q = [];
   function emit(type, data) {
-    try { origDebug(NONCE + JSON.stringify({ type: type, data: data })); } catch (e) {}
+    try {
+      var line = NONCE + JSON.stringify({ type: type, data: data });
+      if (QUEUE) { Q.push(line); if (Q.length > 400) Q.splice(0, Q.length - 400); }
+      else origDebug(line);
+    } catch (e) {}
   }
   var seq = 0;
   function nid() { seq += 1; return "p" + seq + "-" + Date.now().toString(36); }
@@ -347,25 +386,35 @@ const SCRIPT = String.raw`
     if (pin) { emit("pinClick", { n: Number(pin.getAttribute("data-n")) }); return; }
     if (e.shiftKey) { ensureHost(); dragging = { x: e.clientX, y: e.clientY, rect: null }; }
   }
+  function pickArea(rect) {
+    if (rect && rect.width > 8 && rect.height > 8) {
+      var inside = [];
+      var all = document.body ? document.body.querySelectorAll("h1,h2,h3,h4,p,a,button,img,input,label,li") : [];
+      for (var i = 0; i < all.length && inside.length < 4; i++) {
+        var b = all[i].getBoundingClientRect();
+        if (b.width && b.left >= rect.left && b.top >= rect.top && b.right <= rect.left + rect.width && b.bottom <= rect.top + rect.height) inside.push(labelOf(all[i]));
+      }
+      paused = true;
+      emit("pick", { kind: "area", selector: null,
+        label: "Area " + Math.round(rect.width) + "×" + Math.round(rect.height),
+        text: inside.length ? inside.join(", ") : null,
+        rect: rectOf(rect), docRect: docRectOf(rect) });
+    } else areaBox.style.display = "none";
+  }
+  function pickElement(el) {
+    var r = el.getBoundingClientRect();
+    paused = true;
+    hl.classList.add("pending");
+    emit("pick", { kind: "element", selector: selectorOf(el), label: labelOf(el), text: textOf(el),
+      rect: rectOf(r), docRect: docRectOf(r) });
+  }
   function onUp(e) {
     if (mode !== "comment") return;
     block(e);
     if (paused) return;
     if (dragging) {
       var d = dragging; dragging = null;
-      if (d.rect && d.rect.width > 8 && d.rect.height > 8) {
-        var inside = [];
-        var all = document.body ? document.body.querySelectorAll("h1,h2,h3,h4,p,a,button,img,input,label,li") : [];
-        for (var i = 0; i < all.length && inside.length < 4; i++) {
-          var b = all[i].getBoundingClientRect();
-          if (b.width && b.left >= d.rect.left && b.top >= d.rect.top && b.right <= d.rect.left + d.rect.width && b.bottom <= d.rect.top + d.rect.height) inside.push(labelOf(all[i]));
-        }
-        paused = true;
-        emit("pick", { kind: "area", selector: null,
-          label: "Area " + Math.round(d.rect.width) + "×" + Math.round(d.rect.height),
-          text: inside.length ? inside.join(", ") : null,
-          rect: rectOf(d.rect), docRect: docRectOf(d.rect) });
-      } else areaBox.style.display = "none";
+      pickArea(d.rect);
       return;
     }
   }
@@ -375,12 +424,11 @@ const SCRIPT = String.raw`
     if (paused || inPin(e)) return;
     var el = current || targetAt(e.clientX, e.clientY);
     if (!el) return;
-    var r = el.getBoundingClientRect();
-    paused = true;
-    hl.classList.add("pending");
-    emit("pick", { kind: "element", selector: selectorOf(el), label: labelOf(el), text: textOf(el),
-      rect: rectOf(r), docRect: docRectOf(r) });
+    pickElement(el);
   }
+  // The queue channel: the pointer is the app's (a picture of the page), and
+  // the page's own events — the agent's clicks — stay the page's.
+  if (!QUEUE) {
   ["pointerdown", "mousedown"].forEach(function (t) { w.addEventListener(t, onDown, true); });
   ["pointerup", "mouseup"].forEach(function (t) { w.addEventListener(t, onUp, true); });
   ["click", "dblclick", "auxclick", "contextmenu"].forEach(function (t) { w.addEventListener(t, onClick, true); });
@@ -396,6 +444,19 @@ const SCRIPT = String.raw`
       emit("key", { key: k });
     }
   }, true);
+  }
+  function boxOf(x0, y0, x1, y1) {
+    return { left: Math.min(x0, x1), top: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
+  }
+  function pinAt(x, y) {
+    if (!pinsLayer) return null;
+    var list = pinsLayer.querySelectorAll(".pin");
+    for (var i = 0; i < list.length; i++) {
+      var b = list[i].getBoundingClientRect();
+      if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return list[i];
+    }
+    return null;
+  }
 
   // The part of an element's box that is really on screen: not off the
   // viewport, not under a sticky header (or anything else drawn on top).
@@ -470,6 +531,32 @@ const SCRIPT = String.raw`
     setPaused: function (on) {
       paused = !!on;
       if (!paused) { ensureHost(); hl.classList.remove("pending"); hl.style.display = "none"; areaBox.style.display = "none"; current = null; }
+    },
+    drain: QUEUE ? function () { var out = Q; Q = []; return out; } : undefined,
+    setNonce: function (n) { NONCE = n; w[G].nonce = n; },
+    hoverAt: function (x, y) {
+      if (mode !== "comment" || paused) return;
+      showHighlight(targetAt(x, y));
+    },
+    pickAt: function (x, y) {
+      if (mode !== "comment" || paused) return;
+      var pin = pinAt(x, y);
+      if (pin) { emit("pinClick", { n: Number(pin.getAttribute("data-n")) }); return; }
+      var el = targetAt(x, y);
+      if (!el) return;
+      showHighlight(el);
+      pickElement(el);
+    },
+    dragAt: function (x0, y0, x1, y1) {
+      if (mode !== "comment" || paused) return;
+      ensureHost();
+      place(areaBox, boxOf(x0, y0, x1, y1));
+      hl.style.display = "none";
+    },
+    areaAt: function (x0, y0, x1, y1) {
+      if (mode !== "comment" || paused) return;
+      ensureHost();
+      pickArea(boxOf(x0, y0, x1, y1));
     }
   };
 
@@ -489,6 +576,6 @@ const SCRIPT = String.raw`
 `;
 
 /** The script with its channel's nonce; `executeJavaScript` it on each `dom-ready`. */
-export function buildPageToolsScript(nonce: string): string {
-  return `${SCRIPT.trim()}(${JSON.stringify(nonce)});`;
+export function buildPageToolsScript(nonce: string, channel: PageToolsChannel = "console"): string {
+  return `${SCRIPT.trim()}(${JSON.stringify(nonce)}, ${channel === "queue" ? "true" : "false"});`;
 }

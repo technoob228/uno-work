@@ -3,7 +3,6 @@ import {
   ArrowRightIcon,
   HandIcon,
   KeyRoundIcon,
-  MessageSquarePlusIcon,
   MonitorIcon,
   RotateCwIcon,
   UndoIcon,
@@ -23,8 +22,6 @@ import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 import { personMachineName } from "@t3tools/shared/machineName";
 import { useQuery } from "@tanstack/react-query";
 
-import { useDemoDesktop } from "../../demo/demoFlag";
-import { isElectron } from "../../env";
 import { readEnvironmentApi } from "../../environmentApi";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { selectThreadByRef, useStore } from "../../store";
@@ -38,6 +35,14 @@ import { matchCredentialsForOrigin } from "./BrowserPane";
 import { BrowserHelpCard } from "./BrowserHelpCard";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { BrowserSourceChip } from "./BrowserSourceChip";
+import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
+import { DebugDrawer } from "./annotate/DebugDrawer";
+import { boxPointToPage, fitFrame } from "./annotate/liveFrame.logic";
+import { LivePageView } from "./annotate/liveWebview";
+import { PageToolsButtons } from "./annotate/PageToolsButtons";
+import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
+import { usePageTools } from "./annotate/usePageTools";
+import { isTypingTarget } from "./panelLauncher.logic";
 import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
 import { useChatBrowser } from "./useChatBrowser";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
@@ -105,6 +110,60 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   );
   const agentBusy = agentUsesBrowser(ownerThreadId, ownerStatus);
 
+  // Comment (flag `browserPageTools`, Misha 16.10 p.12): like "Your site" in
+  // the Mac app, on the desktop and on the web. The page script goes into the
+  // computer's page the first time Comment is turned on here (not into every
+  // page the agent opens), and stays with the tab after that.
+  const tabId = file.id;
+  const pageToolsOn = useFeatureFlag("browserPageTools");
+  const pageTools = usePageToolsTab(tabId);
+  const wantsTools =
+    pageToolsOn &&
+    pageId !== null &&
+    pageId !== BROWSER_LIVE_SETUP_PAGE_ID &&
+    (pageTools.commenting || pageTools.comments.length > 0);
+  const [toolsActivated, setToolsActivated] = useState(false);
+  useEffect(() => {
+    if (wantsTools) setToolsActivated(true);
+  }, [wantsTools]);
+  const [liveView, setLiveView] = useState<LivePageView | null>(null);
+  useEffect(() => {
+    if (!toolsActivated || !pageToolsOn || !api || !pageId) return;
+    if (pageId === BROWSER_LIVE_SETUP_PAGE_ID) return;
+    const view = new LivePageView(api.browserLive, pageId);
+    setLiveView(view);
+    return () => {
+      view.dispose();
+      setLiveView(null);
+    };
+  }, [toolsActivated, pageToolsOn, api, pageId]);
+  const capture = useCallback(
+    (rect: { x: number; y: number; w: number; h: number }) =>
+      liveView ? liveView.capture(rect) : Promise.resolve(null),
+    [liveView],
+  );
+  usePageTools({ tabId, view: liveView, enabled: liveView !== null, capture });
+  useEffect(() => {
+    liveView?.setFast(pageTools.commenting);
+  }, [liveView, pageTools.commenting]);
+  // C and Esc, as in "Your site": while the focus is in this tab, not typing.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!pageToolsOn) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target || !rootRef.current?.contains(target) || isTypingTarget(target)) return;
+      const store = usePageToolsStore.getState();
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      if (key === "c") store.toggleMode(tabId);
+      else if (key !== "Escape" || !store.escape(tabId)) return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pageToolsOn, tabId]);
+
   const setControl = useCallback(
     async (control: "agent" | "human") => {
       if (!api || !pageId) return;
@@ -138,13 +197,14 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       <Toolbar
         environmentId={environmentId}
         page={page}
         human={human}
         tabId={file.id}
         sourceChip={!launcherV2}
+        pageToolsOn={pageToolsOn}
       />
       <LocationStrip environmentId={environmentId} location={state.location} />
       {launcherV2 ? (
@@ -180,7 +240,14 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         human={human}
         agentBusy={agentBusy}
         onTakeControl={() => void setControl("human")}
+        tabId={tabId}
+        tools={pageToolsOn ? liveView : null}
+        commenting={pageToolsOn && pageTools.commenting}
       />
+      {pageToolsOn ? <CommentBar tabId={tabId} pageUrl={page.url} /> : null}
+      {pageToolsOn && pageTools.commenting ? (
+        <DebugDrawer tabId={tabId} pageUrl={page.url} />
+      ) : null}
       <div
         hidden={launcherV2 && page.help !== null}
         className={cn(
@@ -477,6 +544,7 @@ function Toolbar({
   human,
   tabId,
   sourceChip,
+  pageToolsOn,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
@@ -484,12 +552,10 @@ function Toolbar({
   tabId: string;
   /** The "Opens in" chip of 0.0.135–0.0.137 (without Labs `panelLauncherV2`). */
   sourceChip: boolean;
+  /** Comment in the bar (flag `browserPageTools`), on the desktop and on the web. */
+  pageToolsOn: boolean;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
-  // "Comment · soon" (flag `browserPageTools`): only in the desktop app, where
-  // the other browser (this device's) has Comment now.
-  const demoDesktop = useDemoDesktop();
-  const pageToolsOn = useFeatureFlag("browserPageTools") && (isElectron || demoDesktop);
   const [draft, setDraft] = useState(page.url);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -639,21 +705,9 @@ function Toolbar({
           className="h-6 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring read-only:text-muted-foreground"
         />
       </form>
-      {/* Comment here comes later (w0138): the page is a picture of the
-          computer's browser, its elements are not in this app. */}
-      {pageToolsOn ? (
-        <span
-          className="inline-flex h-6 shrink-0 cursor-default items-center gap-1 rounded px-1 text-muted-foreground/60"
-          title="Comments on the agent's browser are coming soon. Use Browser on this device to comment now."
-          data-testid="live-browser-comment-soon"
-        >
-          <MessageSquarePlusIcon className="size-3.5" />
-          <span className="text-xs">Comment</span>
-          <span className="rounded bg-muted px-1 text-[9.5px] font-medium tracking-wide uppercase">
-            soon
-          </span>
-        </span>
-      ) : null}
+      {/* Comment (Misha 16.10 p.12): the same button as in "Your site"; the
+          page script runs in the computer's page (liveWebview.ts). */}
+      {pageToolsOn ? <PageToolsButtons tabId={tabId} disabled={false} /> : null}
       {matched.length > 0 ? (
         <Button
           size="icon-xs"
@@ -700,6 +754,9 @@ function Screen({
   human,
   agentBusy,
   onTakeControl,
+  tabId,
+  tools,
+  commenting,
 }: {
   environmentId: EnvironmentId;
   pageId: string;
@@ -708,9 +765,41 @@ function Screen({
   /** The chat that opened the page is working right now. */
   agentBusy: boolean;
   onTakeControl: () => void;
+  /** The browser tab (Comment's state is by tab). */
+  tabId: string;
+  /** Comment's way into the page; null — Comment is off for this tab. */
+  tools: LivePageView | null;
+  /**
+   * Comment mode: the person's pointer goes to Comment (highlight, pick,
+   * Shift+drag for an area) — with or without "Take control", the agent's
+   * page never gets these clicks.
+   */
+  commenting: boolean;
 }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  // The picture inside the box: Comment's note box is placed against it.
+  const pictureRef = useRef<HTMLDivElement | null>(null);
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const measure = () => {
+      const { width, height } = surface.getBoundingClientRect();
+      setBox((current) =>
+        current && current.width === width && current.height === height
+          ? current
+          : { width, height },
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, []);
+  const drafting = usePageToolsTab(tabId).draft !== null;
+  const commentDragRef = useRef<{ x: number; y: number } | null>(null);
+  const lastCommentMoveRef = useRef(0);
   const lastHoverRef = useRef(0);
   // У pointer-событий detail всегда 0: двойной/тройной клик считаем сами,
   // иначе выделение слова и строки на странице не работает.
@@ -733,17 +822,15 @@ function Screen({
       const image = imageRef.current;
       if (!image || !frame) return null;
       const rect = image.getBoundingClientRect();
-      const scale = Math.min(rect.width / frame.width, rect.height / frame.height);
-      if (!Number.isFinite(scale) || scale <= 0) return null;
-      const offsetX = (rect.width - frame.width * scale) / 2;
-      const offsetY = pinTop ? 0 : (rect.height - frame.height * scale) / 2;
-      const x = (clientX - rect.left - offsetX) / scale;
-      const y = (clientY - rect.top - offsetY) / scale;
-      if (x < 0 || y < 0 || x > frame.width || y > frame.height) return null;
-      return { x: Math.round(x), y: Math.round(y) };
+      const fit = fitFrame(rect, frame, pinTop);
+      if (!fit) return null;
+      return boxPointToPage({ x: clientX - rect.left, y: clientY - rect.top }, fit, frame);
     },
     [frame, pinTop],
   );
+  const fit = frame && box ? fitFrame(box, frame, pinTop) : null;
+  // Comment mode takes the pointer while there's no note being written.
+  const commentPointer = commenting && tools !== null;
 
   // Взял управление — фокус на поверхность, чтобы клавиатура сразу шла в страницу.
   useEffect(() => {
@@ -791,136 +878,192 @@ function Screen({
     IS_MAC && event.key === "Meta" ? "Control" : event.key;
 
   return (
-    <div
-      ref={surfaceRef}
-      tabIndex={0}
-      className={cn(
-        "relative min-h-0 flex-1 select-none overflow-hidden bg-muted/40 outline-none",
-        human && "ring-2 ring-inset ring-primary/60",
-      )}
-      onPointerDown={(event) => {
-        if (!human) {
-          setHint(true);
-          return;
-        }
-        surfaceRef.current?.focus();
-        const point = toPage(event.clientX, event.clientY);
-        if (!point) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        const last = clickRef.current;
-        const now = performance.now();
-        const repeat =
-          now - last.at < 500 && Math.abs(point.x - last.x) < 5 && Math.abs(point.y - last.y) < 5;
-        clickRef.current = { at: now, ...point, count: repeat ? last.count + 1 : 1 };
-        send({
-          type: "mouse",
-          action: "down",
-          ...point,
-          button: buttonOf(event.button),
-          clickCount: clickRef.current.count,
-          modifiers: modifiersOf(event),
-        });
-      }}
-      onPointerUp={(event) => {
-        if (!human) return;
-        const point = toPage(event.clientX, event.clientY);
-        if (!point) return;
-        send({
-          type: "mouse",
-          action: "up",
-          ...point,
-          button: buttonOf(event.button),
-          clickCount: Math.max(1, clickRef.current.count),
-          modifiers: modifiersOf(event),
-        });
-      }}
-      onPointerMove={(event) => {
-        if (!human) return;
-        const dragging = event.buttons !== 0;
-        const now = performance.now();
-        if (!dragging && now - lastHoverRef.current < HOVER_MOVE_INTERVAL_MS) return;
-        lastHoverRef.current = now;
-        const point = toPage(event.clientX, event.clientY);
-        if (!point) return;
-        send({ type: "mouse", action: "move", ...point, modifiers: modifiersOf(event) });
-      }}
-      onWheel={(event) => {
-        if (!human) return;
-        const point = toPage(event.clientX, event.clientY);
-        if (!point) return;
-        send({ type: "wheel", ...point, deltaX: event.deltaX, deltaY: event.deltaY });
-      }}
-      onContextMenu={(event) => {
-        if (human) event.preventDefault();
-      }}
-      onKeyDown={(event) => {
-        if (!human) return;
-        // Вставку отдаёт событие paste — там текст из буфера этого устройства.
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
-        event.preventDefault();
-        const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
-        const letter = event.key.toLowerCase();
-        if (shortcut && letter === "x") {
-          // Вырезание убирает выделение — сначала забираем текст, потом жмём.
-          const key = keyFor(event);
-          swallowKeyUpRef.current = key;
-          void copyToClipboard().finally(() => {
-            send({ type: "key", action: "down", key, code: event.code });
-            send({ type: "key", action: "up", key, code: event.code });
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={surfaceRef}
+        tabIndex={0}
+        data-testid="live-browser-screen"
+        className={cn(
+          "relative min-h-0 flex-1 select-none overflow-hidden bg-muted/40 outline-none",
+          human && "ring-2 ring-inset ring-primary/60",
+          commentPointer && !drafting && "cursor-crosshair",
+        )}
+        onPointerDown={(event) => {
+          if (commentPointer) {
+            surfaceRef.current?.focus();
+            if (drafting || event.button !== 0) return;
+            const point = toPage(event.clientX, event.clientY);
+            if (!point) return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            commentDragRef.current = event.shiftKey ? point : null;
+            return;
+          }
+          if (!human) {
+            setHint(true);
+            return;
+          }
+          surfaceRef.current?.focus();
+          const point = toPage(event.clientX, event.clientY);
+          if (!point) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          const last = clickRef.current;
+          const now = performance.now();
+          const repeat =
+            now - last.at < 500 && Math.abs(point.x - last.x) < 5 && Math.abs(point.y - last.y) < 5;
+          clickRef.current = { at: now, ...point, count: repeat ? last.count + 1 : 1 };
+          send({
+            type: "mouse",
+            action: "down",
+            ...point,
+            button: buttonOf(event.button),
+            clickCount: clickRef.current.count,
+            modifiers: modifiersOf(event),
           });
-          return;
-        }
-        send({ type: "key", action: "down", key: keyFor(event), code: event.code });
-        if (shortcut && letter === "c") void copyToClipboard();
-      }}
-      onKeyUp={(event) => {
-        if (!human) return;
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
-        event.preventDefault();
-        if (swallowKeyUpRef.current === keyFor(event)) {
-          swallowKeyUpRef.current = null;
-          return;
-        }
-        send({ type: "key", action: "up", key: keyFor(event), code: event.code });
-      }}
-      onPaste={(event) => {
-        if (!human) return;
-        const text = event.clipboardData.getData("text/plain");
-        if (!text) return;
-        event.preventDefault();
-        send({ type: "text", text });
-      }}
-    >
-      {frame ? (
-        <img
-          ref={imageRef}
-          src={`data:image/jpeg;base64,${frame.data}`}
-          alt=""
-          draggable={false}
-          className={cn("pointer-events-none h-full w-full object-contain", pinTop && "object-top")}
-        />
-      ) : (
-        <Placeholder text="Loading the page…" />
-      )}
-      {hint && !human ? (
-        <div className="absolute inset-x-0 bottom-3 flex justify-center">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
-            <span>
-              {agentBusy ? "The agent is using this browser." : "Take control to use this browser."}
-            </span>
-            <Button
-              size="xs"
-              onClick={(event) => {
-                event.stopPropagation();
-                onTakeControl();
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              Take control
-            </Button>
+        }}
+        onPointerUp={(event) => {
+          if (commentPointer) {
+            const start = commentDragRef.current;
+            commentDragRef.current = null;
+            if (drafting || event.button !== 0) return;
+            const point = toPage(event.clientX, event.clientY);
+            if (!point) return;
+            if (start) tools.pointer("areaAt", [start.x, start.y, point.x, point.y]);
+            else tools.pointer("pickAt", [point.x, point.y]);
+            return;
+          }
+          if (!human) return;
+          const point = toPage(event.clientX, event.clientY);
+          if (!point) return;
+          send({
+            type: "mouse",
+            action: "up",
+            ...point,
+            button: buttonOf(event.button),
+            clickCount: Math.max(1, clickRef.current.count),
+            modifiers: modifiersOf(event),
+          });
+        }}
+        onPointerMove={(event) => {
+          if (commentPointer) {
+            if (drafting) return;
+            const now = performance.now();
+            if (now - lastCommentMoveRef.current < HOVER_MOVE_INTERVAL_MS) return;
+            lastCommentMoveRef.current = now;
+            const point = toPage(event.clientX, event.clientY);
+            if (!point) return;
+            const start = commentDragRef.current;
+            if (start) tools.pointer("dragAt", [start.x, start.y, point.x, point.y]);
+            else tools.pointer("hoverAt", [point.x, point.y]);
+            return;
+          }
+          if (!human) return;
+          const dragging = event.buttons !== 0;
+          const now = performance.now();
+          if (!dragging && now - lastHoverRef.current < HOVER_MOVE_INTERVAL_MS) return;
+          lastHoverRef.current = now;
+          const point = toPage(event.clientX, event.clientY);
+          if (!point) return;
+          send({ type: "mouse", action: "move", ...point, modifiers: modifiersOf(event) });
+        }}
+        onWheel={(event) => {
+          // Comment mode without control: the page still scrolls (its pins follow).
+          if (commentPointer && !human) {
+            tools.scrollBy(event.deltaX, event.deltaY);
+            return;
+          }
+          if (!human) return;
+          const point = toPage(event.clientX, event.clientY);
+          if (!point) return;
+          send({ type: "wheel", ...point, deltaX: event.deltaX, deltaY: event.deltaY });
+        }}
+        onContextMenu={(event) => {
+          if (human) event.preventDefault();
+        }}
+        onKeyDown={(event) => {
+          // C and Esc are Comment's while it's on (the tab's handler takes them).
+          if (commenting && (event.key === "Escape" || event.key.toLowerCase() === "c")) return;
+          if (!human) return;
+          // Вставку отдаёт событие paste — там текст из буфера этого устройства.
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
+          event.preventDefault();
+          const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
+          const letter = event.key.toLowerCase();
+          if (shortcut && letter === "x") {
+            // Вырезание убирает выделение — сначала забираем текст, потом жмём.
+            const key = keyFor(event);
+            swallowKeyUpRef.current = key;
+            void copyToClipboard().finally(() => {
+              send({ type: "key", action: "down", key, code: event.code });
+              send({ type: "key", action: "up", key, code: event.code });
+            });
+            return;
+          }
+          send({ type: "key", action: "down", key: keyFor(event), code: event.code });
+          if (shortcut && letter === "c") void copyToClipboard();
+        }}
+        onKeyUp={(event) => {
+          if (!human) return;
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
+          event.preventDefault();
+          if (swallowKeyUpRef.current === keyFor(event)) {
+            swallowKeyUpRef.current = null;
+            return;
+          }
+          send({ type: "key", action: "up", key: keyFor(event), code: event.code });
+        }}
+        onPaste={(event) => {
+          if (!human) return;
+          const text = event.clipboardData.getData("text/plain");
+          if (!text) return;
+          event.preventDefault();
+          send({ type: "text", text });
+        }}
+      >
+        {frame ? (
+          <img
+            ref={imageRef}
+            src={`data:image/jpeg;base64,${frame.data}`}
+            alt=""
+            draggable={false}
+            className={cn(
+              "pointer-events-none h-full w-full object-contain",
+              pinTop && "object-top",
+            )}
+          />
+        ) : (
+          <Placeholder text="Loading the page…" />
+        )}
+        {fit ? (
+          <div
+            ref={pictureRef}
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={{ left: fit.offsetX, top: fit.offsetY, width: fit.width, height: fit.height }}
+          />
+        ) : null}
+        {hint && !human && !commenting ? (
+          <div className="absolute inset-x-0 bottom-3 flex justify-center">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+              <span>
+                {agentBusy
+                  ? "The agent is using this browser."
+                  : "Take control to use this browser."}
+              </span>
+              <Button
+                size="xs"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTakeControl();
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                Take control
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
+      {tools ? <CommentLayer tabId={tabId} pageRef={pictureRef} zoom={fit?.scale ?? 1} /> : null}
     </div>
   );
 }
