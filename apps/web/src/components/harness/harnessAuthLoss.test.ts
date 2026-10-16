@@ -59,6 +59,43 @@ describe("detectHarnessAuthLoss — provider snapshot", () => {
     expect(loss?.title).toBe(`You were signed out of ${label}`);
   });
 
+  it("never signed in here → 'Sign in to …', not 'You were signed out' (flow-agent 15.10)", () => {
+    const status = detectHarnessAuthLoss(
+      input({
+        driver: "claudeAgent",
+        providerStatus: signedOut("claudeAgent"),
+        everSignedIn: false,
+      }),
+    );
+    expect(status?.kind).toBe("signIn");
+    expect(status?.title).toBe("Sign in to Claude");
+    expect(status?.message).toContain("isn't signed in yet");
+    expect(status?.actionLabel).toBe("Sign in");
+    // Claude Code's own reply on a never-signed-in CLI.
+    const reply = detectHarnessAuthLoss(
+      input({
+        driver: "claudeAgent",
+        providerStatus: makeProvider("claudeAgent"),
+        lastReply: "Not logged in · Please run /login",
+        everSignedIn: false,
+      }),
+    );
+    expect(reply?.source).toBe("error");
+    expect(reply?.title).toBe("Sign in to Claude");
+    // Signed in before: the old card.
+    expect(
+      detectHarnessAuthLoss(
+        input({ driver: "codex", providerStatus: signedOut("codex"), everSignedIn: true }),
+      )?.title,
+    ).toBe("You were signed out of Codex");
+    // OpenCode's key card doesn't change.
+    expect(
+      detectHarnessAuthLoss(
+        input({ driver: "opencode", providerStatus: signedOut("opencode"), everSignedIn: false }),
+      )?.title,
+    ).toBe("You were signed out of OpenCode");
+  });
+
   it("uses the instance's display name", () => {
     const loss = detectHarnessAuthLoss(
       input({

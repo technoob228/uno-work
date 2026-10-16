@@ -79,6 +79,13 @@ export interface DetectHarnessAuthLossInput {
   readonly assistantLlmProvider?: AssistantLlmProvider | null | undefined;
   /** A custom (ACP) harness: never a re-auth card. */
   readonly isCustom: boolean;
+  /**
+   * This harness was ever signed in with the person's own account here
+   * (harnessSignInMemory.ts). False: "Sign in to Claude", not "You were
+   * signed out" — someone who never signed in wasn't signed out (flow-agent
+   * 15.10). Absent: as before.
+   */
+  readonly everSignedIn?: boolean | undefined;
 }
 
 export const CURSOR_LOGIN_COMMAND = "agent login";
@@ -91,6 +98,10 @@ export const HARNESS_REAUTH_COPY = {
   signedOutTitle: (label: string) => `You were signed out of ${label}`,
   signInMessage: (label: string) =>
     `${label} can't answer until you sign in again. This chat is kept.`,
+  notSignedInTitle: (label: string) => `Sign in to ${label}`,
+  notSignedInMessage: (label: string) =>
+    `${label} on this computer isn't signed in yet. Sign in with your own account to start. This chat is kept.`,
+  signInFirstAction: "Sign in",
   openCodeMessage: "The API key OpenCode uses stopped working. Paste a new one to continue.",
   cursorMessage:
     "Cursor signs in from a terminal on this computer. Run this command there, then retry.",
@@ -207,10 +218,23 @@ function build(
   driver: string,
   harnessLabel: string,
   source: HarnessAuthLoss["source"],
+  neverSignedIn = false,
 ): HarnessAuthLoss {
   const copy = HARNESS_REAUTH_COPY;
   switch (kind) {
     case "signIn":
+      if (neverSignedIn) {
+        return {
+          kind,
+          driver,
+          harnessLabel,
+          source,
+          title: copy.notSignedInTitle(harnessLabel),
+          message: copy.notSignedInMessage(harnessLabel),
+          actionLabel: copy.signInFirstAction,
+          command: null,
+        };
+      }
       return {
         kind,
         driver,
@@ -312,11 +336,12 @@ export function detectHarnessAuthLoss(input: DetectHarnessAuthLossInput): Harnes
 
   const kind = KIND_BY_DRIVER[driver]!;
   const label = input.providerStatus?.displayName?.trim() || HARNESS_LABELS[driver]!;
+  const never = input.everSignedIn === false;
   if (errorTexts(input).some((text) => isAuthLossErrorText(driver, text))) {
-    return build(kind, driver, label, "error");
+    return build(kind, driver, label, "error", never);
   }
   if (snapshotSignedOut(input.providerStatus)) {
-    return build(kind, driver, label, "status");
+    return build(kind, driver, label, "status", never);
   }
   return null;
 }
@@ -403,6 +428,8 @@ export function resolveThreadHarnessAuthLoss(input: {
   readonly providerStatuses: ReadonlyArray<ServerProvider>;
   /** Snapshot a non-assistant chat runs on, as the chat already resolved it. */
   readonly activeProviderStatus: ServerProvider | null;
+  /** Whether a harness was ever signed in here (absent: assume it was, as before). */
+  readonly everSignedIn?: ((driver: string) => boolean) | undefined;
 }): ThreadHarnessAuthLoss {
   const { thread } = input;
   if (isAssistantConversation(thread)) {
@@ -454,6 +481,7 @@ export function resolveThreadHarnessAuthLoss(input: {
     lastReply: lastShortReply(thread),
     sessionLastErrorClass: thread.session?.lastErrorClass ?? null,
     isCustom: driver === CUSTOM_HARNESS_DRIVER_KIND,
+    ...(input.everSignedIn && driver ? { everSignedIn: input.everSignedIn(driver) } : {}),
   });
   return {
     isAssistant: false,

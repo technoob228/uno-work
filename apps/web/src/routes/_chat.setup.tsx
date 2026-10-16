@@ -16,6 +16,12 @@ export interface SetupRouteSearch {
   readonly goal?: GoalId;
   /** The goal-first start: how the person works (screen 2's answer). */
   readonly via?: ConnectPath;
+  /**
+   * One step on its own (`one=1`): Home's Next step card opened it (the agent
+   * on a server, flow-agent 15.10). Continue / Skip go back to Home instead of
+   * on through the eight steps; no step strip, no "Skip setup".
+   */
+  readonly one?: true;
 }
 
 export const Route = createFileRoute("/_chat/setup")({
@@ -26,6 +32,9 @@ export const Route = createFileRoute("/_chat/setup")({
       step: parseSetupRouteStep(search["step"]) ?? "ai",
       ...(goal ? { goal } : {}),
       ...(via ? { via } : {}),
+      ...(search["one"] === 1 || search["one"] === "1" || search["one"] === true
+        ? { one: true as const }
+        : {}),
     };
   },
   component: SetupView,

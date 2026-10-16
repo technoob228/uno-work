@@ -111,6 +111,55 @@ describe("visibleNextStep", () => {
   it("an idea taken here moves on before the account catches up", () => {
     expect(visibleNextStep(assistant, { [nextStepDoneKey("morning_plan")]: "x" })).toBeNull();
   });
+
+  // The agent on a server (flow-agent 15.10): what this computer knows on top.
+  const agent = parseNextStepPlan({
+    version: 1,
+    goal: "own_agent",
+    goal_source: "console",
+    stage: "start",
+    next: { id: "connect_agent", title: "Sign in", console_path: "/work" },
+    steps: [
+      step("connect_agent"),
+      step("add_project"),
+      step("add_skills"),
+      step("connect_tools"),
+      step("connect_channel"),
+      step("first_task"),
+    ],
+    signals: {},
+  });
+  const onTheirOwn = new Set(["add_project", "add_skills", "connect_tools", "connect_channel"]);
+
+  it("a step done on this computer moves on before the account knows", () => {
+    expect(visibleNextStep(agent, {}, new Set(["connect_agent"]))?.id).toBe("add_project");
+    expect(
+      visibleNextStep(agent, {}, new Set(["connect_agent", "add_project", "add_skills"]))?.id,
+    ).toBe("connect_tools");
+  });
+
+  it("'Not now' on a step that stands on its own moves on to the next one", () => {
+    const answers = { [nextStepSkipKey("add_project")]: "x" };
+    expect(visibleNextStep(agent, answers, new Set(["connect_agent"]), onTheirOwn)?.id).toBe(
+      "add_skills",
+    );
+    // The sign-in is not one of them: "Not now" there still hides the card.
+    expect(
+      visibleNextStep(agent, { [nextStepSkipKey("connect_agent")]: "x" }, new Set(), onTheirOwn),
+    ).toBeNull();
+  });
+
+  it("everything done here — no card", () => {
+    const all = new Set([
+      "connect_agent",
+      "add_project",
+      "add_skills",
+      "connect_tools",
+      "connect_channel",
+      "first_task",
+    ]);
+    expect(visibleNextStep(agent, {}, all, onTheirOwn)).toBeNull();
+  });
 });
 
 describe("nextStepChatId", () => {

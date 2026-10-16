@@ -75,6 +75,9 @@ import { LiteRoot } from "../lite/LiteShell";
 import { EconomyPresenceBootstrap } from "../components/economy/EconomyPresence";
 import { hasUnoAiArrival } from "../unoai/useUnoAiArrivals";
 import { hasWorkIntent } from "../unoai/workIntent";
+// `?agent=claude|codex` from /enter is read when this module loads, before
+// any redirect drops it (Home opens that CLI's sign-in: HomeAgentSignIn).
+import "../unoai/arrivedAgent";
 import { setServerUpdateChannel } from "../unoChannel";
 
 export const Route = createRootRouteWithContext<{

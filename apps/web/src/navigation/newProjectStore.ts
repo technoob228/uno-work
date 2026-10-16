@@ -46,6 +46,11 @@ export interface NewProjectExtras {
    * Throwing falls back to the empty chat.
    */
   readonly afterCreate?: (project: CreatedProject) => Promise<void>;
+  /**
+   * Told once the project exists, before the usual chat opens (it does not
+   * replace it): Home's Next step "Add a project" counts as done then.
+   */
+  readonly onCreated?: (project: CreatedProject) => void;
   readonly wording?: NewProjectWording;
 }
 
@@ -54,6 +59,7 @@ interface NewProjectState {
   readonly step: NewProjectStep;
   readonly files: ReadonlyArray<ProjectUploadFile> | null;
   readonly afterCreate: NewProjectExtras["afterCreate"] | null;
+  readonly onCreated: NewProjectExtras["onCreated"] | null;
   readonly wording: NewProjectWording;
   readonly openNewProject: (step?: NewProjectStep, extras?: NewProjectExtras) => void;
   readonly setStep: (step: NewProjectStep) => void;
@@ -67,6 +73,7 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
   step: "choose",
   files: null,
   afterCreate: null,
+  onCreated: null,
   wording: "project",
   openNewProject: (step = "choose", extras = {}) =>
     set({
@@ -74,6 +81,7 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
       step,
       files: extras.files && extras.files.length > 0 ? extras.files : null,
       afterCreate: extras.afterCreate ?? null,
+      onCreated: extras.onCreated ?? null,
       wording: extras.wording ?? "project",
     }),
   setStep: (step) => set({ step }),
@@ -82,7 +90,7 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
     if (files) set({ files: null });
     return files;
   },
-  close: () => set({ open: false, files: null, afterCreate: null }),
+  close: () => set({ open: false, files: null, afterCreate: null, onCreated: null }),
 }));
 
 export function openNewProject(step?: NewProjectStep, extras?: NewProjectExtras): void {

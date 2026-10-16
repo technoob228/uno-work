@@ -45,7 +45,7 @@ import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { setAssistantDefaultModel } from "../../lib/managerApi";
 import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
-import { ConnectChannelDialog } from "../assistant/ConnectChannelDialog";
+import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "../chat/AssistantEngine";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -59,7 +59,7 @@ import { OpenCodeKeyForm } from "../harness/OpenCodeKeyForm";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { runsOnUnoAi } from "../harness/harnessSetupState";
 import { subscriptionActionLabel, subscriptionRowState } from "./simpleSubscriptionRow.logic";
-import { TelegramMark } from "../setup/brandMarks";
+import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -600,7 +600,7 @@ export function AssistantsPhoneSettings() {
   const devMode = useDevMode();
   const { environmentId } = useActiveMachine();
   const channels = useAssistantChannels(environmentId);
-  const [connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const phoneUrl = isWebApp && !isElectron ? window.location.origin : PHONE_WORK_URL;
   return (
     <SettingsPageContainer>
@@ -633,7 +633,40 @@ export function AssistantsPhoneSettings() {
                 Connected
               </span>
             ) : environmentId ? (
-              <Button size="xs" onClick={() => setConnecting(true)}>
+              <Button size="xs" onClick={() => setConnecting("telegram")}>
+                Connect
+              </Button>
+            ) : null
+          }
+        />
+      </SettingsSection>
+
+      {/* Slack was only in Settings → Full setup (flow-agent 15.10): the same panel, here. */}
+      <SettingsSection title="Slack">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-2">
+              <SlackBrandMark className="size-4" />
+              Slack
+            </span>
+          }
+          description={
+            channels.slack === "on"
+              ? "Your assistant answers in your Slack workspace."
+              : "Mention your assistant in a channel or write to it directly, with your team."
+          }
+          control={
+            channels.slack === "on" ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+                <CheckCircle2Icon className="size-3.5" />
+                Connected
+              </span>
+            ) : environmentId ? (
+              <Button
+                size="xs"
+                onClick={() => setConnecting("slack")}
+                data-testid="settings-connect-slack"
+              >
                 Connect
               </Button>
             ) : null
@@ -668,8 +701,8 @@ export function AssistantsPhoneSettings() {
       {environmentId ? (
         <ConnectChannelDialog
           environmentId={environmentId}
-          channel={connecting ? "telegram" : null}
-          onClose={() => setConnecting(false)}
+          channel={connecting}
+          onClose={() => setConnecting(null)}
         />
       ) : null}
     </SettingsPageContainer>
