@@ -35,7 +35,6 @@ describe("buildSettingsNavGroups", () => {
       "/settings/vault",
       "/settings/workspace",
       "/settings/computer-access",
-      "/settings/security",
       "/settings/extensions",
     ]);
     expect(machine!.entries.map((entry) => entry.to)).toEqual([
@@ -74,7 +73,6 @@ describe("buildSettingsNavGroups", () => {
       "Labs",
       "My machines",
       "Computer access",
-      "Security",
     ]);
   });
 
@@ -111,6 +109,7 @@ describe("simple settings (01.10)", () => {
       "AI",
       "Assistants & phone",
       "Computer",
+      "Security",
       "Developer",
     ]);
   });
@@ -144,6 +143,7 @@ describe("Connectors (mock only, 16.10)", () => {
       "Connectors",
       "Assistants & phone",
       "Computer",
+      "Security",
       "Developer",
     ]);
     expect(simpleNavEntries(false).map((entry) => entry.label)).not.toContain("Connectors");
