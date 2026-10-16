@@ -78,6 +78,7 @@ import { hasWorkIntent } from "../unoai/workIntent";
 // `?agent=claude|codex` from /enter is read when this module loads, before
 // any redirect drops it (Home opens that CLI's sign-in: HomeAgentSignIn).
 import "../unoai/arrivedAgent";
+import { HomeAgentSignIn } from "../components/computer/home/HomeAgentSignIn";
 import { setServerUpdateChannel } from "../unoChannel";
 
 export const Route = createRootRouteWithContext<{
@@ -219,6 +220,8 @@ function RootRouteView() {
         </AppSidebarLayout>
         <NewProjectDialog />
         <WorkIntentBridge />
+        {/* The person's own agent: its CLI's sign-in, opened once by itself (flow-agent 15.10). */}
+        {isWebLite ? null : <HomeAgentSignIn />}
         <SetupTourCoach />
       </CommandPalette>
     </PreviewPaneProvider>

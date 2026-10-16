@@ -9,11 +9,18 @@
  * `q` is read once when this module loads — before the router may drop it on
  * a redirect (/ → /computer) — and removed from the address bar.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import { DEFAULT_RUNTIME_MODE, ProviderInstanceId, type EnvironmentId } from "@t3tools/contracts";
 import { useEffect } from "react";
 
+import { useAccountDefaultAiState } from "../assistant/useAccountDefaultAi";
+import {
+  agentDriverFromAccountDefault,
+  briefStartFor,
+} from "../components/computer/home/agentStart";
 import type { HomeStartOptions } from "../components/computer/home/HomeComposer";
-import { useUpdateSettings } from "../hooks/useSettings";
+import { useSettings, useUpdateSettings } from "../hooks/useSettings";
+import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import { useServerProviders } from "../rpc/serverState";
 import { isWebLite } from "../lite/flag";
 import { aiChatLive } from "./unoAiApi";
 import { handoffPrompt, peekHandoff, takeHandoff } from "./unoAiHandoff";
@@ -48,11 +55,18 @@ export function hasUnoAiArrival(): boolean {
 export function useUnoAiArrivals(
   environmentId: EnvironmentId | null,
   startTask: (prompt: string, options: HomeStartOptions) => Promise<void>,
+  /** The same chat with the prompt typed, not sent. */
+  typeTask?: (prompt: string, options: HomeStartOptions) => Promise<void>,
 ): void {
   const { updateSettings } = useUpdateSettings();
   const uno = useUnoDefaultSelection();
+  // "Do you already use Claude or ChatGPT? — Yes" in the console (default_ai):
+  // the console's first message goes to that agent, not to Uno AI (walk 16.10).
+  const account = useAccountDefaultAiState(!isWebLite && arrivedQ !== null);
+  const providers = useServerProviders();
+  const settings = useSettings();
   useEffect(() => {
-    if (handled || environmentId === null || !uno.ready) return;
+    if (handled || environmentId === null || !uno.ready || !account.ready) return;
     if (arrivedQ === null && !peekHandoff()) return;
     handled = true;
     // The goal is known: don't bring the welcome picker back on the next load.
@@ -61,6 +75,31 @@ export function useUnoAiArrivals(
     arrivedQ = null;
     const send = (prompt: string) => startTask(prompt, uno.startOptions());
     if (q) {
+      const agent = agentDriverFromAccountDefault(account.value);
+      const how = briefStartFor({ accountDefault: agent, providers });
+      const instanceId = agent ? ProviderInstanceId.make(agent) : null;
+      const model =
+        how && instanceId
+          ? resolveAppModelSelectionForInstance(instanceId, settings, providers, null)
+          : null;
+      if (instanceId && model) {
+        const options: HomeStartOptions = {
+          folder: null,
+          modelSelection: { instanceId, model },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+        };
+        // Signed in with their own account: it starts now. Not yet: the brief
+        // waits typed in a chat on that agent, and its sign-in opens
+        // (HomeAgentSignIn) — never a turn on a logged-out CLI or on Uno AI.
+        if (how === "send") {
+          void startTask(q, options);
+          return;
+        }
+        if (typeTask) {
+          void typeTask(q, options);
+          return;
+        }
+      }
       void send(q);
       return;
     }
@@ -77,5 +116,5 @@ export function useUnoAiArrivals(
         // the chat is still in Uno AI; "Continue on this computer" there
       }
     })();
-  }, [environmentId, startTask, updateSettings, uno]);
+  }, [account, environmentId, providers, settings, startTask, typeTask, updateSettings, uno]);
 }

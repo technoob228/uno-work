@@ -156,6 +156,23 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   );
 
   /**
+   * Like `startTask`, but the task stays typed, not sent: the console's first
+   * message for an agent that isn't signed in yet (useUnoAiArrivals) — the
+   * person signs in, then presses Send.
+   */
+  const typeTask = useCallback(
+    async (prompt: string, options: HomeStartOptions) => {
+      const draftId = await openChatWithPrompt(prompt, options.folder);
+      if (!draftId) return;
+      const store = useComposerDraftStore.getState();
+      if (options.modelSelection) store.setModelSelection(draftId, options.modelSelection);
+      store.setRuntimeMode(draftId, options.runtimeMode);
+      store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
+    },
+    [openChatWithPrompt],
+  );
+
+  /**
    * An app's "Set up with Uno" / "Fix with Uno": a new chat in the home folder
    * that sends `prompt` at once, on the chat's own model and permissions. If it
    * can't send, the prompt stays typed there.
@@ -176,5 +193,14 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
     [openChatWithPrompt],
   );
 
-  return { newChat, openTerminal, chatInFolder, askUno, askInFolder, startTask, sendToUno };
+  return {
+    newChat,
+    openTerminal,
+    chatInFolder,
+    askUno,
+    askInFolder,
+    startTask,
+    typeTask,
+    sendToUno,
+  };
 }

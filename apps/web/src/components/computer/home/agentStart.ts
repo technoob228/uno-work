@@ -108,20 +108,20 @@ export function pickAgentDriver(input: {
 
 /**
  * The sign-in opens by itself once — on the first visit after the person
- * picked their agent before Work (`?agent=`, or an own-agent goal with the
- * account's default AI set to Claude or Codex) — and only while that agent
- * is installed here and not signed in yet.
+ * picked their agent before Work (`?agent=`, or the account's default AI set
+ * to Claude or Codex in the console: "Do you already use Claude or ChatGPT?
+ * — Yes", whatever the goal: a bot, a site, their own agent) — and only while
+ * that agent is installed here and not signed in yet.
  */
 export function shouldAutoOpenAgentSignIn(input: {
   readonly lite: boolean;
   readonly arrived: ProviderAuthDriver | null;
-  readonly ownAgentGoal: boolean;
   readonly accountDefault: ProviderAuthDriver | null;
   readonly prompted: boolean;
   readonly provider: ServerProvider | undefined | null;
 }): boolean {
   if (input.lite || input.prompted) return false;
-  if (!input.arrived && !(input.ownAgentGoal && input.accountDefault)) return false;
+  if (!input.arrived && !input.accountDefault) return false;
   // No snapshot yet, or not installed: the install UI owns that.
   if (!input.provider || !input.provider.installed) return false;
   return !signedInWithOwnAccount(input.provider);
@@ -157,3 +157,50 @@ export function agentStartDoneHere(input: {
 /** "Give it a first task": typed into a new chat, not sent — the person makes it theirs. */
 export const AGENT_FIRST_TASK_PROMPT =
   "Look at my project and tell me three things you can do in it while I'm away. Then start on the first one.";
+
+/** settings.setup.answers: the account's default AI was made this computer's start model (once). */
+export const ACCOUNT_AI_APPLIED_KEY = "account_ai_applied";
+
+/** Uno's own engines: a start pick on them is the machine's default, not a choice for Claude. */
+const UNO_ENGINE_DRIVERS: ReadonlySet<string> = new Set(["uno", "hermes"]);
+
+/**
+ * New chats start on the agent the account chose in the console (default_ai
+ * claude | codex — walk 16.10: "Yes, Claude" ended up on Uno AI), once per
+ * computer: only while this browser has no pick of its own other than Uno's
+ * engine (the machine default), and the agent is installed here. A later pick
+ * of Uno AI by the person sticks — this never runs again for the same value.
+ * A fixed "New chats start on" still wins over it (homeStartModel).
+ */
+export function shouldApplyAccountAgent(input: {
+  readonly accountDefault: ProviderAuthDriver | null;
+  readonly applied: string | undefined;
+  readonly stickyActive: string | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}): boolean {
+  const { accountDefault } = input;
+  if (!accountDefault || input.applied === accountDefault) return false;
+  const harness = input.providers.find((entry) => entry.instanceId === accountDefault);
+  if (!harness?.enabled || !harness.installed) return false;
+  if (input.stickyActive === null || input.stickyActive === accountDefault) return true;
+  const sticky = input.providers.find((entry) => entry.instanceId === input.stickyActive);
+  return !sticky || UNO_ENGINE_DRIVERS.has(sticky.driver);
+}
+
+/**
+ * Where the console's first message (`?q=` — the brief) goes when the account
+ * chose its own agent (default_ai claude | codex): "send" — on that agent now
+ * (signed in with the person's own account); "type" — a chat on that agent
+ * with the brief typed, sign-in first (not installed-and-signed-in yet, or
+ * running on the plan's Uno AI credit); null — no such choice or the agent
+ * isn't here: Uno, as before.
+ */
+export function briefStartFor(input: {
+  readonly accountDefault: ProviderAuthDriver | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}): "send" | "type" | null {
+  if (!input.accountDefault) return null;
+  const harness = input.providers.find((entry) => entry.instanceId === input.accountDefault);
+  if (!harness?.enabled || !harness.installed) return null;
+  return signedInWithOwnAccount(harness) ? "send" : "type";
+}

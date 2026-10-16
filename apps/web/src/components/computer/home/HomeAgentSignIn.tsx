@@ -6,8 +6,13 @@
  * in for them (Misha 15.10: anything else risks the person's account).
  *
  * - Opens by itself once, on the first visit after the person picked their
- *   agent before Work (`?agent=claude|codex`, or an own-agent goal with the
- *   account's default AI on Claude / Codex) — `shouldAutoOpenAgentSignIn`.
+ *   agent before Work (`?agent=claude|codex`, or the account's default AI on
+ *   Claude / Codex — any goal) — `shouldAutoOpenAgentSignIn`. Mounted once in
+ *   the app shell, so it opens wherever the first visit lands (Home, the chat
+ *   the console's first message opened).
+ * - The account's default AI on Claude / Codex: new chats start on it, once
+ *   per computer, unless the person already picked something other than Uno's
+ *   engine (`shouldApplyAccountAgent`, walk 16.10).
  * - The Next step card's "Sign in to Claude Code" opens it too
  *   (`openAgentSignIn`).
  * - Signed in: new chats start on that agent (the "last picked" model, like
@@ -40,6 +45,7 @@ import { nextStepQuery } from "../../myuno/myUnoQueries";
 import { parseNextStepPlan } from "./nextStep";
 import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
 import {
+  ACCOUNT_AI_APPLIED_KEY,
   AGENT_LABEL,
   AGENT_PICK_KEY,
   AGENT_SIGNED_IN_MARK,
@@ -48,6 +54,7 @@ import {
   agentDriverFromAccountDefault,
   parseAgentDriver,
   pickAgentDriver,
+  shouldApplyAccountAgent,
   shouldAutoOpenAgentSignIn,
   signedInWithOwnAccount,
 } from "./agentStart";
@@ -112,10 +119,11 @@ export function useOwnAgentGoal(): boolean {
   return plan?.goal === "own_agent" || goalState(progress).goal === "own_agent";
 }
 
-/** Mounted once next to Home (cloud and desktop computers; not lite). */
+/** Mounted once in the app shell (cloud and desktop computers; not lite). */
 export function HomeAgentSignIn() {
   const ownAgentGoal = useOwnAgentGoal();
-  const agent = useAgentOnComputer(ownAgentGoal);
+  // The account's AI counts for every goal, not only "my own agent".
+  const agent = useAgentOnComputer(true);
   const progress = useSetupProgress();
   const update = useUpdateSetupProgress();
   const settingsReady = useServerConfigReady();
@@ -123,9 +131,8 @@ export function HomeAgentSignIn() {
   const settings = useSettings();
   const providers = useServerProviders();
   const setSticky = useComposerDraftStore((store) => store.setStickyModelSelection);
-  const accountDefault = agentDriverFromAccountDefault(
-    useAccountDefaultAi(ownAgentGoal && !isWebLite),
-  );
+  const stickyActive = useComposerDraftStore((store) => store.stickyActiveProvider);
+  const accountDefault = agentDriverFromAccountDefault(useAccountDefaultAi(!isWebLite));
   const openDriver = useAgentSignInStore((state) => state.driver);
   const close = useAgentSignInStore((state) => state.close);
   const answers = progress.answers;
@@ -145,7 +152,6 @@ export function HomeAgentSignIn() {
     shouldAutoOpenAgentSignIn({
       lite: isWebLite,
       arrived,
-      ownAgentGoal,
       accountDefault,
       prompted: answers[AGENT_SIGN_IN_PROMPTED_KEY] !== undefined,
       provider: agent.provider,
@@ -158,6 +164,25 @@ export function HomeAgentSignIn() {
       withAnswer(current, AGENT_SIGN_IN_PROMPTED_KEY, new Date().toISOString()),
     );
   }, [agent.driver, autoOpen, update]);
+
+  // "Yes, Claude" in the console: new chats on this computer start on Claude,
+  // not on Uno AI (once; the person's own later pick wins).
+  const applyAccountAgent =
+    settingsReady &&
+    shouldApplyAccountAgent({
+      accountDefault,
+      applied: answers[ACCOUNT_AI_APPLIED_KEY],
+      stickyActive,
+      providers,
+    });
+  useEffect(() => {
+    if (!applyAccountAgent || !accountDefault) return;
+    const instanceId = ProviderInstanceId.make(accountDefault);
+    const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
+    if (!model) return;
+    setSticky({ instanceId, model });
+    void update((current) => withAnswer(current, ACCOUNT_AI_APPLIED_KEY, accountDefault));
+  }, [accountDefault, applyAccountAgent, providers, setSticky, settings, update]);
 
   // Signed in (here, in Settings or a terminal): the account hears it once —
   // it closes "Sign in to your agent" for the console too.

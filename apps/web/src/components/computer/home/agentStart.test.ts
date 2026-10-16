@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_SETUP_PROGRESS } from "../../setup/setupModel";
 import {
   AGENT_START_STEP,
+  briefStartFor,
+  shouldApplyAccountAgent,
   agentDriverFromAccountDefault,
   agentStartDoneHere,
   nextStepIdForSetupStep,
@@ -84,7 +86,6 @@ describe("shouldAutoOpenAgentSignIn", () => {
   const base = {
     lite: false,
     arrived: "claudeAgent" as const,
-    ownAgentGoal: true,
     accountDefault: null,
     prompted: false,
     provider: provider({ status: "unauthenticated" }),
@@ -92,7 +93,7 @@ describe("shouldAutoOpenAgentSignIn", () => {
 
   it("opens once after the person picked their agent before Work", () => {
     expect(shouldAutoOpenAgentSignIn(base)).toBe(true);
-    // No link, but the own-agent goal with Claude as the account's AI.
+    // No link, but Claude as the account's AI — any goal (walk 16.10: a bot with "Yes, Claude").
     expect(
       shouldAutoOpenAgentSignIn({ ...base, arrived: null, accountDefault: "claudeAgent" }),
     ).toBe(true);
@@ -108,14 +109,7 @@ describe("shouldAutoOpenAgentSignIn", () => {
   it("never twice, never without a pick, never when signed in or not installed", () => {
     expect(shouldAutoOpenAgentSignIn({ ...base, prompted: true })).toBe(false);
     expect(shouldAutoOpenAgentSignIn({ ...base, arrived: null })).toBe(false);
-    expect(
-      shouldAutoOpenAgentSignIn({
-        ...base,
-        arrived: null,
-        ownAgentGoal: false,
-        accountDefault: "claudeAgent",
-      }),
-    ).toBe(false);
+
     expect(
       shouldAutoOpenAgentSignIn({
         ...base,
@@ -168,5 +162,87 @@ describe("agentStartDoneHere", () => {
     expect(nextStepIdForSetupStep("connectors")).toBe("connect_tools");
     expect(nextStepIdForSetupStep("channels")).toBe("connect_channel");
     expect(nextStepIdForSetupStep("project")).toBeNull();
+  });
+});
+
+describe("shouldApplyAccountAgent", () => {
+  const claude = provider({ status: "unauthenticated" });
+  const hermes = provider(
+    { status: "authenticated" },
+    {
+      instanceId: "hermes" as ServerProvider["instanceId"],
+      driver: ProviderDriverKind.make("hermes"),
+    },
+  );
+  const codex = provider(
+    { status: "authenticated", type: "subscription" },
+    {
+      instanceId: "codex" as ServerProvider["instanceId"],
+      driver: ProviderDriverKind.make("codex"),
+    },
+  );
+  const providers = [claude, hermes, codex];
+
+  it("'Yes, Claude' in the console: new chats start on Claude, not Uno AI", () => {
+    const base = { accountDefault: "claudeAgent" as const, applied: undefined, providers };
+    expect(shouldApplyAccountAgent({ ...base, stickyActive: null })).toBe(true);
+    // Uno's engine as the last pick is the machine default (a fresh computer).
+    expect(shouldApplyAccountAgent({ ...base, stickyActive: "hermes" })).toBe(true);
+  });
+
+  it("never over the person's own pick, never twice, never without the harness", () => {
+    const base = { accountDefault: "claudeAgent" as const, providers };
+    expect(shouldApplyAccountAgent({ ...base, applied: undefined, stickyActive: "codex" })).toBe(
+      false,
+    );
+    expect(shouldApplyAccountAgent({ ...base, applied: "claudeAgent", stickyActive: null })).toBe(
+      false,
+    );
+    expect(
+      shouldApplyAccountAgent({
+        ...base,
+        applied: undefined,
+        stickyActive: null,
+        providers: [hermes],
+      }),
+    ).toBe(false);
+    expect(
+      shouldApplyAccountAgent({
+        accountDefault: null,
+        applied: undefined,
+        stickyActive: null,
+        providers,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("briefStartFor", () => {
+  it("the console's brief goes to the account's agent: now when signed in, typed when not", () => {
+    const signed = provider({ status: "authenticated", type: "subscription" });
+    expect(briefStartFor({ accountDefault: "claudeAgent", providers: [signed] })).toBe("send");
+    expect(
+      briefStartFor({
+        accountDefault: "claudeAgent",
+        providers: [provider({ status: "unauthenticated" })],
+      }),
+    ).toBe("type");
+    // On the plan's Uno AI credit: still the person's sign-in first, not Uno AI hours.
+    expect(
+      briefStartFor({
+        accountDefault: "claudeAgent",
+        providers: [provider({ status: "authenticated", type: "unoAi" })],
+      }),
+    ).toBe("type");
+  });
+
+  it("no own agent chosen, or it isn't here: Uno, as before", () => {
+    expect(briefStartFor({ accountDefault: null, providers: [] })).toBeNull();
+    expect(
+      briefStartFor({
+        accountDefault: "codex",
+        providers: [provider({ status: "authenticated" })],
+      }),
+    ).toBeNull();
   });
 });
