@@ -27,6 +27,7 @@ import {
   isJobActive,
   progressLine,
   resolveHarnessStatus,
+  runsOnUnoAi,
   type HarnessStatus,
 } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
@@ -150,9 +151,12 @@ export function AiStep() {
     };
   }, [providers, providersLoaded]);
 
-  // A finished sign-in closes its panel.
+  // A finished sign-in closes its panel. Claude on the plan's Uno AI credit is
+  // "ready" but not signed in: its panel stays (the same rule as Settings → AI).
   useEffect(() => {
-    if (open && statusOf(open).status === "ready") setOpen(null);
+    if (!open) return;
+    const { provider, status } = statusOf(open);
+    if (status === "ready" && !runsOnUnoAi(provider)) setOpen(null);
   }, [open, statusOf]);
 
   const pickedRow = AI_ROWS.find((row) => row.id === picked) ?? AI_ROWS[0]!;
@@ -212,7 +216,24 @@ export function AiStep() {
           const installJob = setup.installJobs[row.id];
           const installing = isJobActive(installJob);
           let side: ReactNode = null;
-          if (status === "ready") {
+          // Works on Uno AI's credit, not the person's plan: Settings → AI says
+          // "Sign in", so this does too, not "Connected" (walk 16.10).
+          const onUnoAi = (row.id === "claudeAgent" || row.id === "codex") && runsOnUnoAi(provider);
+          if (status === "ready" && onUnoAi) {
+            side = (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPicked(row.id);
+                  setOpen(open === row.id ? null : row.id);
+                }}
+              >
+                Sign in
+              </Button>
+            );
+          } else if (status === "ready") {
             side = <ConnectedBadge>{row.id === "uno" ? "Ready" : "Connected"}</ConnectedBadge>;
           } else if (status === "checking") {
             side = <Loader2Icon className="size-4 animate-spin text-muted-foreground" />;
@@ -265,7 +286,8 @@ export function AiStep() {
               </Button>
             );
           }
-          const expanded = open === row.id && status !== "ready" && status !== "notInstalled";
+          const expanded =
+            open === row.id && (status !== "ready" || onUnoAi) && status !== "notInstalled";
           return (
             <div
               key={row.id}

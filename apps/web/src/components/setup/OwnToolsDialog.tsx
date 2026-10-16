@@ -408,8 +408,10 @@ export function SshTab() {
             ) : null}
             {(info.data?.keys.length ?? 0) > 0 && !lastAdded ? (
               <span className="text-xs text-muted-foreground">
-                {info.data!.keys.length} {info.data!.keys.length === 1 ? "key" : "keys"} already
-                work here: {info.data!.keys.map((key) => key.comment || key.fingerprint).join(", ")}
+                {info.data!.keys.length === 1
+                  ? "1 key already works here"
+                  : `${info.data!.keys.length} keys already work here`}
+                : {info.data!.keys.map((key) => key.comment || key.fingerprint).join(", ")}
               </span>
             ) : null}
             <textarea
