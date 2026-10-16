@@ -9,6 +9,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { ServerConfig } from "./config.ts";
 import { ServerSettingsLive, ServerSettingsService } from "./serverSettings.ts";
 
@@ -483,6 +484,45 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  // settings.json holds the computer's token and the Uno AI key (16.10).
+  it.effect("writes settings.json owner-only (0600)", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* serverSettings.updateSettings({ addProjectBaseDirectory: "~/Development" });
+      const info = yield* fileSystem.stat(serverConfig.settingsPath);
+      assert.equal(info.mode & 0o777, 0o600);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("narrows a 0644 settings.json on start and after an outside edit", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      // Left by an older build.
+      yield* fileSystem.writeFileString(serverConfig.settingsPath, "{}\n");
+      yield* fileSystem.chmod(serverConfig.settingsPath, 0o644);
+      yield* serverSettings.start;
+      assert.equal((yield* fileSystem.stat(serverConfig.settingsPath)).mode & 0o777, 0o600);
+      // Rewritten 0644 by someone else while the daemon runs.
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({ uno: { apiKey: "unollm_outside" } }),
+      );
+      yield* fileSystem.chmod(serverConfig.settingsPath, 0o644);
+      let mode = 0o644;
+      for (let i = 0; i < 100 && mode !== 0o600; i++) {
+        // The file event is real I/O; the watcher's 100 ms debounce runs on the test clock.
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 20)));
+        yield* TestClock.adjust("150 millis");
+        mode = (yield* fileSystem.stat(serverConfig.settingsPath)).mode & 0o777;
+      }
+      assert.equal(mode, 0o600);
+    }).pipe(Effect.provide(makeServerSettingsLayer()), Effect.scoped),
   );
 
   it.effect("stores sensitive provider instance environment values outside settings.json", () =>

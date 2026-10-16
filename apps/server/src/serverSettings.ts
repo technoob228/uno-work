@@ -44,7 +44,7 @@ import {
   Cause,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import { writeFileStringAtomically } from "./atomicWrite.ts";
+import { tightenFileMode, writeFileStringAtomically } from "./atomicWrite.ts";
 import { ServerConfig } from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
@@ -497,7 +497,22 @@ const makeServerSettings = Effect.gen(function* () {
       ),
     );
 
-    const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
+    // settings.json carries the computer's token and the Uno AI key: owner-only
+    // (16.10). Our own writes are 0600; this narrows a file left 0644 by an
+    // older build or written by someone else (the console's exec, an editor).
+    const tightenSafely = tightenFileMode(settingsPath).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.tap((changed) =>
+        changed ? Effect.logInfo("settings.json narrowed to owner-only (0600)") : Effect.void,
+      ),
+      Effect.ignoreCause({ log: true }),
+    );
+    yield* tightenSafely;
+
+    const revalidateAndEmitSafely = Effect.andThen(
+      tightenSafely,
+      revalidateAndEmit.pipe(Effect.ignoreCause({ log: true })),
+    );
 
     // Debounce watch events so the file is fully written before we read it.
     // Editors emit multiple events per save (truncate, write, rename) and
