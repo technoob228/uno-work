@@ -264,6 +264,7 @@ import { isTeamConversation } from "./assistants/assistantTeam.logic";
 import {
   type DRowMark,
   dRowMark,
+  foldedGroupChats,
   foldedProjectMark,
   groupChatsForSidebarD,
   isRunningStatus,
@@ -2336,7 +2337,7 @@ export default function Sidebar() {
     };
   });
   const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
-  // A folded project with the open chat in it stays open, so the chat is seen.
+  // Flag off (the 0.0.137 lists): a folded project opens while its chat is open.
   const isProjectFolded = useCallback(
     (project: { key: string; chats: ReadonlyArray<SidebarThreadSummary> }) =>
       foldedProjectKeySet.has(project.key) &&
@@ -2430,11 +2431,17 @@ export default function Sidebar() {
     routeThreadKey,
     sidebarViewMenu,
   ]);
-  // Computers and projects fold; a status is a label.
-  const isNodeFolded = useCallback(
+  // Computers and projects fold; a status is a label. Folded is always
+  // folded: only the open chat, when it is in the group, stays under its row
+  // (null — the group is open).
+  const dFoldedChats = useCallback(
     (node: SidebarDGroupNode<SidebarThreadSummary>) =>
-      node.level !== "status" && isProjectFolded({ key: node.path, chats: node.chats }),
-    [isProjectFolded],
+      foldedGroupChats({
+        chats: node.chats,
+        folded: node.level !== "status" && foldedProjectKeySet.has(node.path),
+        isOpen: (thread) => threadKeyOf(thread) === routeThreadKey,
+      }),
+    [foldedProjectKeySet, routeThreadKey],
   );
   const dVisibleChats = useMemo(() => {
     const legacy = dPreviews.legacy;
@@ -2456,22 +2463,22 @@ export default function Sidebar() {
     const walk = (
       nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
     ): SidebarThreadSummary[] =>
-      nodes.flatMap((node) =>
-        isNodeFolded(node)
-          ? []
-          : node.children
+      nodes.flatMap(
+        (node) =>
+          dFoldedChats(node) ??
+          (node.children
             ? walk(node.children)
-            : [...(dPreviews.leaves.get(node.path)?.visible ?? node.chats)],
+            : [...(dPreviews.leaves.get(node.path)?.visible ?? node.chats)]),
       );
     return walk(dTree);
   }, [
+    dFoldedChats,
     dGroups.projects,
     dLegacyInbox,
     dLegacyStatusSections,
     dPreviews,
     dShownChats,
     dTree,
-    isNodeFolded,
     isProjectFolded,
   ]);
 
@@ -3690,7 +3697,8 @@ export default function Sidebar() {
   const dRenderNodes = (nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>): ReactNode =>
     nodes.map((node, index) => {
       const underComputer = node.trail.computer !== undefined;
-      const folded = isNodeFolded(node);
+      const foldedChats = dFoldedChats(node);
+      const folded = foldedChats !== null;
       if (node.level === "computer") {
         const computer = dComputers.find((entry) => entry.key === node.id) ?? {
           environmentId: node.id,
@@ -3712,7 +3720,13 @@ export default function Sidebar() {
                 folded={folded}
                 onToggle={() => toggleProjectFolded(node.path)}
               />
-              {folded ? null : dRenderBelow(node, null)}
+              {foldedChats
+                ? dChatRows(node.path, foldedChats, undefined, {
+                    nested: false,
+                    underComputer: true,
+                    projectComputers: null,
+                  })
+                : dRenderBelow(node, null)}
             </ul>
           </li>
         );
@@ -3746,7 +3760,13 @@ export default function Sidebar() {
               onToggle={() => toggleProjectFolded(node.path)}
               onNewChat={block.newChatProject ? dNewChatIn(block.newChatProject) : null}
             />
-            {folded ? null : dRenderBelow(node, block.computers)}
+            {foldedChats
+              ? dChatRows(node.path, foldedChats, undefined, {
+                  nested: true,
+                  underComputer,
+                  projectComputers: block.computers,
+                })
+              : dRenderBelow(node, block.computers)}
           </ul>
         </li>
       );

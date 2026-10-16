@@ -1,20 +1,23 @@
 /**
  * The right panel's row of tabs (w0138, point 4; Misha 16.10): up to three
- * outlined groups, like tab groups in Chrome — Everywhere → Project → This
- * chat, left to right. A group carries a small icon (globe / folder / bubble)
- * or only its outline; an empty group isn't drawn. Switching to another chat
+ * outlined groups, like tab groups in Chrome — This chat → Project →
+ * Everywhere, left to right (the wider the group, the further right). Each
+ * group starts with its label — a small icon (bubble / folder / globe) or its
+ * name; a click on the label collapses the group into it, like Chrome (the open
+ * tab stays in view). An empty group isn't drawn. Switching to another chat
  * of the same project keeps Everywhere and Project as they are — only the
  * chat's group changes.
  *
- * A tab moves to another group by dragging it into that outline (while
- * dragging, missing groups show as empty slots) or by right-click → Move to.
+ * Dragging, like Chrome: a tab dragged along its group changes places, into
+ * another outline moves there (a line shows where it lands; while dragging,
+ * missing groups show as empty slots). Right-click → Move to is the fallback.
  * Tabs size like Chrome (`foldedGroups`): 180 → 72 px, then inactive tabs
  * fold into icons — the chat's group first; the active tab keeps its name and
  * stays in view; past that the row scrolls with a fade at the edge. Tabs the
  * agent opened carry a small robot mark.
  */
 import { BotIcon, FolderIcon, GlobeIcon, MessageSquareIcon, XIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useDemoSwitch } from "../../demo/demoFlag";
 import { cn } from "../../lib/utils";
@@ -39,11 +42,14 @@ import {
 import {
   foldedGroups,
   GROUP_LABEL,
+  GROUP_ORDER,
+  groupLabelWidth,
   groupStripTabs,
   moveToLabel,
   scopeHint,
   TAB_MAX_WIDTH,
   TAB_MIN_WIDTH,
+  tabsShownInGroup,
 } from "./panelTabs.logic";
 import type { PreviewTabScope } from "./previewTabScopes";
 import { TasksTabName } from "./TasksTabBody";
@@ -53,7 +59,19 @@ type KindIcon = React.ComponentType<{ className?: string }>;
 const DRAG_TYPE = "application/x-uno-panel-tab";
 /** Room kept after the groups for the "+" button. */
 const TRAILING_RESERVE = 36;
-const GROUP_ORDER: ReadonlyArray<PreviewTabScope> = ["global", "project", "chat"];
+/** Groups the person collapsed (by their label), kept across chats and reloads. */
+const COLLAPSED_KEY = "uno:panel-collapsed-tab-groups";
+
+function readCollapsed(): ReadonlyArray<PreviewTabScope> {
+  try {
+    const value = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as unknown;
+    return Array.isArray(value)
+      ? GROUP_ORDER.filter((scope) => (value as unknown[]).includes(scope))
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 const GROUP_ICON: Record<PreviewTabScope, KindIcon> = {
   global: GlobeIcon,
@@ -66,6 +84,11 @@ const GROUP_TINT: Record<PreviewTabScope, string> = {
   global: "border-sky-500/35",
   project: "border-violet-500/35",
   chat: "border-border",
+};
+const LABEL_TINT: Record<PreviewTabScope, string> = {
+  global: "bg-sky-500/12 text-sky-700 dark:text-sky-300",
+  project: "bg-violet-500/12 text-violet-700 dark:text-violet-300",
+  chat: "bg-muted text-muted-foreground",
 };
 
 function groupTitle(scope: PreviewTabScope, projectName: string | null): string {
@@ -80,6 +103,12 @@ function groupTitle(scope: PreviewTabScope, projectName: string | null): string 
 }
 
 type MenuState = { readonly file: PreviewFile; readonly anchor: Element } | null;
+/** Where a dragged tab would land: before `beforeId` of `scope`, or at its end. */
+type DropSpot = { readonly scope: PreviewTabScope; readonly beforeId: string | null } | null;
+
+function DropLine() {
+  return <span aria-hidden className="h-5 w-0.5 shrink-0 rounded-full bg-primary" />;
+}
 
 function AgentMark({ file }: { file: PreviewFile }) {
   if (file.openedBy !== "agent") return null;
@@ -111,13 +140,27 @@ export function PanelTabStrip({
   const withIcons = useDemoSwitch("tabGroupIcons") === "icon";
   const [menu, setMenu] = useState<MenuState>(null);
   const [dragging, setDragging] = useState<{ id: string; scope: PreviewTabScope } | null>(null);
-  const [dropZone, setDropZone] = useState<PreviewTabScope | null>(null);
+  const [drop, setDrop] = useState<DropSpot>(null);
+  const [collapsed, setCollapsed] = useState<ReadonlyArray<PreviewTabScope>>(readCollapsed);
+  const toggleCollapsed = (scope: PreviewTabScope) => {
+    const next = collapsed.includes(scope)
+      ? collapsed.filter((item) => item !== scope)
+      : [...collapsed, scope];
+    setCollapsed(next);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
+    } catch {
+      // private mode: collapsed for this session only
+    }
+  };
   const inChat = currentChatThreadId !== null;
   const scopeOf = (file: PreviewFile): PreviewTabScope => tabScopeById[file.id] ?? "chat";
   const movable = (file: PreviewFile) => inChat && !isTasksTab(file);
 
   const groups = useMemo(() => groupStripTabs(files, tabScopeById), [files, tabScopeById]);
   const activeScope = activeId ? (tabScopeById[activeId] ?? "chat") : null;
+  const shownIn = (scope: PreviewTabScope, groupFiles: ReadonlyArray<PreviewFile>) =>
+    tabsShownInGroup(groupFiles, collapsed.includes(scope), activeId);
 
   // ── Fit: which groups show inactive tabs as icons ──
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -147,14 +190,18 @@ export function PanelTabStrip({
     () =>
       foldedGroups({
         available,
-        withIcons,
-        groups: groups.map((group) => ({
-          scope: group.scope,
-          count: group.files.length,
-          active: group.scope === activeScope,
-        })),
+        groups: groups.map((group) => {
+          const count = shownIn(group.scope, group.files).length;
+          return {
+            scope: group.scope,
+            count,
+            active: group.scope === activeScope,
+            labelWidth: groupLabelWidth(group.scope, withIcons, group.files.length - count),
+          };
+        }),
       }),
-    [available, withIcons, groups, activeScope],
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- shownIn reads collapsed/activeId
+    [available, withIcons, groups, activeScope, collapsed, activeId],
   );
   // The active tab is always fully in view.
   useEffect(() => {
@@ -166,26 +213,49 @@ export function PanelTabStrip({
     measureEdges();
   }, [activeId, folded, files.length]);
 
-  // ── Moving between groups ──
+  // ── Dragging, like Chrome: along the group to reorder, into another outline to move ──
+  const finishDrag = () => {
+    setDragging(null);
+    setDrop(null);
+  };
+  const aim = (spot: NonNullable<DropSpot>) => {
+    if (drop?.scope !== spot.scope || drop.beforeId !== spot.beforeId) setDrop(spot);
+  };
   const dropTarget = (scope: PreviewTabScope) => ({
     onDragOver: (event: React.DragEvent) => {
-      if (!dragging || dragging.scope === scope) return;
+      if (!dragging) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      if (dropZone !== scope) setDropZone(scope);
+      // Over the outline but not over a tab: the end of the group.
+      if (!(event.target as Element).closest?.("[data-preview-tab]"))
+        aim({ scope, beforeId: null });
     },
     onDragLeave: (event: React.DragEvent) => {
       if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-      setDropZone((current) => (current === scope ? null : current));
+      setDrop((current) => (current?.scope === scope ? null : current));
     },
     onDrop: (event: React.DragEvent) => {
       event.preventDefault();
       const id = event.dataTransfer.getData(DRAG_TYPE);
-      setDropZone(null);
-      setDragging(null);
-      if (id && tabScopeById[id] !== scope) setTabScope(id, scope);
+      const spot = drop ?? { scope, beforeId: null };
+      finishDrag();
+      if (id) setTabScope(id, spot.scope, spot.beforeId);
     },
   });
+  /** Over a tab: before it when on its left half, else before the next one of the group. */
+  const aimAtTab = (
+    event: React.DragEvent,
+    scope: PreviewTabScope,
+    groupFiles: ReadonlyArray<PreviewFile>,
+    file: PreviewFile,
+  ) => {
+    if (!dragging) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const index = groupFiles.findIndex((item) => item.id === file.id);
+    const before =
+      event.clientX < rect.left + rect.width / 2 ? file : (groupFiles[index + 1] ?? null);
+    aim({ scope, beforeId: before?.id ?? null });
+  };
   const dragSource = (file: PreviewFile) =>
     movable(file)
       ? {
@@ -195,10 +265,7 @@ export function PanelTabStrip({
             event.dataTransfer.effectAllowed = "move";
             setDragging({ id: file.id, scope: scopeOf(file) });
           },
-          onDragEnd: () => {
-            setDragging(null);
-            setDropZone(null);
-          },
+          onDragEnd: finishDrag,
         }
       : {};
   const openMenuUnderTab = (file: PreviewFile, from: Element) => {
@@ -210,7 +277,7 @@ export function PanelTabStrip({
     const lines = [`${kindLabel[file.kind]} — ${file.name}`, scopeHint(scopeOf(file), projectName)];
     if (file.openedBy === "agent") lines.push("Opened by the agent");
     if (DUAL_VIEW_KINDS.has(file.kind)) lines.push("Double-click: code ↔ preview");
-    if (movable(file)) lines.push("Drag into another group, or right-click → Move to");
+    if (movable(file)) lines.push("Drag to reorder or into another group · right-click → Move to");
     return lines.join("\n");
   };
 
@@ -237,117 +304,142 @@ export function PanelTabStrip({
         {shown.map(({ scope, files: groupFiles }) => {
           const GroupIcon = GROUP_ICON[scope];
           const fold = folded.includes(scope);
+          const isCollapsed = collapsed.includes(scope) && groupFiles.length > 0;
+          const visible = shownIn(scope, groupFiles);
+          const hidden = groupFiles.length - visible.length;
+          const lineAt = (beforeId: string | null) =>
+            drop?.scope === scope && drop.beforeId === beforeId ? <DropLine /> : null;
           return (
             <div
               key={scope}
               {...dropTarget(scope)}
               data-tab-group={scope}
-              title={withIcons ? undefined : groupTitle(scope, projectName)}
+              data-collapsed={isCollapsed || undefined}
               className={cn(
                 "flex h-7.5 items-center gap-0.5 rounded-lg border p-0.5 transition-colors",
                 GROUP_TINT[scope],
-                groupFiles.length === 0 && "border-dashed px-2",
-                dropZone === scope && "border-primary bg-primary/10",
+                groupFiles.length === 0 && "border-dashed pr-2",
+                drop?.scope === scope && "border-primary bg-primary/5",
               )}
               style={{ flex: "0 1 auto" }}
             >
-              {withIcons ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        aria-label={GROUP_LABEL[scope]}
-                        className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/80"
-                      />
-                    }
-                  >
-                    <GroupIcon className="size-3" />
-                  </TooltipTrigger>
-                  <TooltipPopup side="bottom">{groupTitle(scope, projectName)}</TooltipPopup>
-                </Tooltip>
-              ) : null}
-              {groupFiles.length === 0 ? (
-                <span className="text-[11px] whitespace-nowrap text-muted-foreground">
-                  {scope === "project" && projectName
-                    ? `Project · ${projectName}`
-                    : GROUP_LABEL[scope]}
-                </span>
-              ) : null}
-              {groupFiles.map((file) => {
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={`${GROUP_LABEL[scope]}${isCollapsed ? ` — ${hidden} hidden` : ""}`}
+                      aria-expanded={groupFiles.length > 0 ? !isCollapsed : undefined}
+                      data-testid={`panel-tab-group-label-${scope}`}
+                      disabled={groupFiles.length === 0}
+                      onClick={() => toggleCollapsed(scope)}
+                      className={cn(
+                        "inline-flex h-5 shrink-0 items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default",
+                        withIcons ? "min-w-5 justify-center px-1" : "px-1.5",
+                        groupFiles.length === 0 ? "text-muted-foreground" : LABEL_TINT[scope],
+                        groupFiles.length > 0 && "cursor-pointer hover:brightness-95",
+                      )}
+                    />
+                  }
+                >
+                  {withIcons ? <GroupIcon className="size-3" /> : null}
+                  {!withIcons || groupFiles.length === 0
+                    ? scope === "project" && projectName && groupFiles.length === 0
+                      ? `Project · ${projectName}`
+                      : GROUP_LABEL[scope]
+                    : null}
+                  {isCollapsed && hidden > 0 ? (
+                    <span className="tabular-nums opacity-80">{hidden}</span>
+                  ) : null}
+                </TooltipTrigger>
+                <TooltipPopup side="bottom" className="whitespace-pre-line">
+                  {groupTitle(scope, projectName)}
+                  {groupFiles.length > 0
+                    ? isCollapsed
+                      ? "\nClick to show its tabs"
+                      : "\nClick to collapse"
+                    : ""}
+                </TooltipPopup>
+              </Tooltip>
+              {visible.map((file) => {
                 const Icon = kindIcon[file.kind];
                 const isActive = file.id === activeId;
                 const iconOnly = fold && !isActive;
                 return (
-                  <div
-                    key={file.id}
-                    role="tab"
-                    tabIndex={0}
-                    aria-selected={isActive}
-                    aria-label={file.name}
-                    data-preview-tab={file.id}
-                    data-tab-scope={scope}
-                    {...dragSource(file)}
-                    onClick={() => onSelect(file.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
+                  <Fragment key={file.id}>
+                    {lineAt(file.id)}
+                    <div
+                      role="tab"
+                      tabIndex={0}
+                      aria-selected={isActive}
+                      aria-label={file.name}
+                      data-preview-tab={file.id}
+                      data-tab-scope={scope}
+                      {...dragSource(file)}
+                      onDragOver={(event) => aimAtTab(event, scope, groupFiles, file)}
+                      onClick={() => onSelect(file.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onSelect(file.id);
+                        }
+                      }}
+                      onDoubleClick={() => {
+                        if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
+                      }}
+                      onContextMenu={(event) => {
                         event.preventDefault();
-                        onSelect(file.id);
+                        openMenuUnderTab(file, event.currentTarget);
+                      }}
+                      title={tooltip(file)}
+                      style={
+                        iconOnly
+                          ? undefined
+                          : fold
+                            ? // In a folded group the open tab keeps its whole name.
+                              { flex: "0 0 auto", maxWidth: TAB_MAX_WIDTH }
+                            : // As wide as the name (up to 180), shrinking to 72 when the row is tight.
+                              { flex: "0 1 auto", minWidth: TAB_MIN_WIDTH, maxWidth: TAB_MAX_WIDTH }
                       }
-                    }}
-                    onDoubleClick={() => {
-                      if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
-                    }}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      openMenuUnderTab(file, event.currentTarget);
-                    }}
-                    title={tooltip(file)}
-                    style={
-                      iconOnly
-                        ? undefined
-                        : fold
-                          ? // In a folded group the open tab keeps its whole name.
-                            { flex: "0 0 auto", maxWidth: TAB_MAX_WIDTH }
-                          : // As wide as the name (up to 180), shrinking to 72 when the row is tight.
-                            { flex: "0 1 auto", minWidth: TAB_MIN_WIDTH, maxWidth: TAB_MAX_WIDTH }
-                    }
-                    className={cn(
-                      "group relative inline-flex h-6 cursor-default items-center rounded-md text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
-                      iconOnly ? "w-6 shrink-0 justify-center" : "gap-1.5 pr-1 pl-1.5",
-                      isActive
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent/50",
-                      dragging?.id === file.id && "opacity-40",
-                    )}
-                  >
-                    <span className="relative inline-flex shrink-0">
-                      <Icon className="size-3.5" />
-                      <AgentMark file={file} />
-                    </span>
-                    {iconOnly ? null : (
-                      <>
-                        <span className="min-w-0 flex-1 truncate">
-                          {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label={`Close ${file.name}`}
-                          className={cn(
-                            "size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
-                            isActive ? "inline-flex" : "hidden group-hover:inline-flex",
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            closeFile(file.id);
-                          }}
-                        >
-                          <XIcon className="size-3" />
-                        </button>
-                      </>
-                    )}
-                  </div>
+                      className={cn(
+                        "group relative inline-flex h-6 cursor-default items-center rounded-md text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
+                        iconOnly ? "w-6 shrink-0 justify-center" : "gap-1.5 pr-1 pl-1.5",
+                        isActive
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-accent/50",
+                        dragging?.id === file.id && "opacity-40",
+                      )}
+                    >
+                      <span className="relative inline-flex shrink-0">
+                        <Icon className="size-3.5" />
+                        <AgentMark file={file} />
+                      </span>
+                      {iconOnly ? null : (
+                        <>
+                          <span className="min-w-0 flex-1 truncate">
+                            {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`Close ${file.name}`}
+                            className={cn(
+                              "size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
+                              isActive ? "inline-flex" : "hidden group-hover:inline-flex",
+                            )}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeFile(file.id);
+                            }}
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </Fragment>
                 );
               })}
+              {lineAt(null)}
             </div>
           );
         })}
@@ -410,7 +502,7 @@ function TabMoveMenu({
               value={scope}
               onValueChange={(value) => onMove(value as PreviewTabScope)}
             >
-              {(["chat", "project", "global"] as const).map((choice) => (
+              {GROUP_ORDER.map((choice) => (
                 <MenuRadioItem key={choice} value={choice}>
                   {moveToLabel(choice, projectName)}
                 </MenuRadioItem>

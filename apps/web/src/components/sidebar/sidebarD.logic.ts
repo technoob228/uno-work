@@ -230,6 +230,22 @@ export function previewDGroup<T>(input: {
   return { visible, hiddenCount: input.chats.length - visible.length, canCollapse: false };
 }
 
+/**
+ * What a folded group (a project, a computer) still lists under its row
+ * (Misha 16.10: "пусть сворачиваются, но остаётся только один"): folded is
+ * always folded — the open chat alone stays when it is in the group, else
+ * nothing. Null when the group is open: it lists its chats as usual.
+ */
+export function foldedGroupChats<T>(input: {
+  readonly chats: ReadonlyArray<T>;
+  readonly folded: boolean;
+  readonly isOpen: (chat: T) => boolean;
+}): ReadonlyArray<T> | null {
+  if (!input.folded) return null;
+  const open = input.chats.find(input.isOpen);
+  return open === undefined ? [] : [open];
+}
+
 /** "3 running", or nothing. */
 export function unoRunningLabel(count: number): string | null {
   return count > 0 ? `${count} running` : null;

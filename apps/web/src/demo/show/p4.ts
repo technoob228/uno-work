@@ -1,9 +1,9 @@
 // Point 4 of the w0138 mock: "Показать" puts the interface into the state to look at.
 //
-// The running chat "Landing copy" of the project landing: on the left of the
-// panel's tab row the pins (Pult everywhere, README/pricing of the project),
-// then the chat's own tabs (opened by the agent), and the "All tabs" menu
-// open — with documents of the other landing chats under "In other chats".
+// The running chat "Landing copy" of the project landing: the panel's tab row
+// as groups, left to right — the chat's own tabs (opened by the agent), then
+// Project (README/pricing), then Everywhere (Pult). Drag a tab along a group
+// or into another one; a click on a group's label collapses it.
 import type { getRouter } from "../../router";
 import { demoHooks, demoShow } from "../demoFlag";
 import { ENV_MAC } from "../heavyFixtures";
@@ -48,6 +48,4 @@ export async function openLandingChat(environmentId: string, threadId: string) {
 
 demoShow.p4 = async () => {
   if (!(await openLandingChat(ENV_MAC, SEEDED_CHATS.copy))) return;
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  (demoHooks.openAllTabs as (() => void) | undefined)?.();
 };

@@ -3,18 +3,21 @@
  * the Uno gateway, Uno Code where Hermes can't answer) — what the welcome's
  * "Uno AI" pick sets. Without it a hand-off that skipped the welcome started
  * on whatever the machine's default was (Claude Code on a free trial
- * computer → "403 Premium models come with a paid plan", 28.09).
+ * computer → "403 Premium models come with a paid plan", 28.09; "Not logged
+ * in" when it started before Hermes was checked, 16.10 — see
+ * unoDefaultSelection.logic.ts).
  */
-import { DEFAULT_RUNTIME_MODE, type ModelSelection } from "@t3tools/contracts";
-import { useCallback, useMemo } from "react";
+import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
+import type { ModelSelection } from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
-import { pickUsableDefaultModelSelection } from "../providerModels";
 import { useServerProviders } from "../rpc/serverState";
 import type { HomeStartOptions } from "../components/computer/home/HomeComposer";
+import { UNO_CHECK_CAP_MS, resolveUnoHandoffSelection } from "./unoDefaultSelection.logic";
 
 export function useUnoDefaultSelection(): {
-  /** null while the machine hasn't said which harnesses it has. */
+  /** false while the machine hasn't said which harnesses it has, or Uno's engine is still being checked. */
   readonly ready: boolean;
   readonly selection: ModelSelection | null;
   /** Start options for useHomeLaunchers().startTask on Uno's engine; also makes it the sticky default. */
@@ -22,16 +25,20 @@ export function useUnoDefaultSelection(): {
 } {
   const providers = useServerProviders();
   const setSticky = useComposerDraftStore((store) => store.setStickyModelSelection);
-  const selection = useMemo(
-    () =>
-      pickUsableDefaultModelSelection(
-        providers.filter((p) => p.driver === "hermes" || p.driver === "uno"),
-      ) as ModelSelection | null,
-    [providers],
+  const hasProviders = providers.length > 0;
+  const [capReached, setCapReached] = useState(false);
+  useEffect(() => {
+    if (!hasProviders || capReached) return;
+    const timer = setTimeout(() => setCapReached(true), UNO_CHECK_CAP_MS);
+    return () => clearTimeout(timer);
+  }, [hasProviders, capReached]);
+  const { settled, selection } = useMemo(
+    () => resolveUnoHandoffSelection(providers, capReached),
+    [providers, capReached],
   );
   const startOptions = useCallback((): HomeStartOptions => {
     if (selection) setSticky(selection);
     return { folder: null, modelSelection: selection, runtimeMode: DEFAULT_RUNTIME_MODE };
   }, [selection, setSticky]);
-  return { ready: providers.length > 0, selection, startOptions };
+  return { ready: settled, selection, startOptions };
 }
