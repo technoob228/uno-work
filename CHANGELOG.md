@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.140 — 2026-10-16
+
+- Putting your AI agent on a server: arriving from the console with Claude Code or Codex, its own sign-in opens by itself (subscription first, API key below). Once signed in, new chats start on it.
+- Next step leads you through the rest: a project (folder, .zip or GitHub), skills, tools, Telegram or Slack, then the first task.
+- "Sign in to Claude" instead of a false "You were signed out of Claude" on a computer where you never signed in. In Telegram's in-app browser the sign-in tells you to open the link in Safari or Chrome.
+- Settings → Assistants & phone: Slack is there too.
+
 ## v0.0.139 — 2026-10-16
 
 - Sharing a file with a password (Files → Share): **Generate** fills in a readable random password, **Copy** copies it, and **Copy link and password** copies both at once.
