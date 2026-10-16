@@ -492,7 +492,9 @@ export function bridgeContextKey(context: BrowserBridgeRequestContext): string {
  * снаружи ничего не доказывает (см. isDirectLocalRequest).
  */
 export function authorizeLocalBridgeRequest(
-  bridge: { readonly authorize: (authorizationHeader: string | undefined) => BridgeAuthorization | null },
+  bridge: {
+    readonly authorize: (authorizationHeader: string | undefined) => BridgeAuthorization | null;
+  },
   request: {
     readonly headers: Readonly<Record<string, string | undefined>>;
     readonly source: unknown;

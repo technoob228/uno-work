@@ -1761,7 +1761,9 @@ export const AssistantBootstrapLive = Layer.effectDiscard(
           Effect.tryPromise(() =>
             fsp
               .mkdir(secretsDir, { recursive: true, mode: 0o700 })
-              .then(() => fsp.writeFile(rotatedMarker, `${new Date().toISOString()}\n`, { mode: 0o600 })),
+              .then(() =>
+                fsp.writeFile(rotatedMarker, `${new Date().toISOString()}\n`, { mode: 0o600 }),
+              ),
           ),
         ),
         Effect.catch((cause) =>
