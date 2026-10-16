@@ -744,7 +744,7 @@ export function ComputerSettings() {
         <LinkRow
           icon={<LockIcon />}
           title="Security"
-          description="Who got in, and what is open to the internet."
+          description="Cut computers off the internet, the red button, and who got in."
           onClick={() => void navigate({ to: "/settings/security" })}
         />
         <LinkRow
