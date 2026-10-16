@@ -5,6 +5,7 @@ import {
   accountMenuLines,
   type DRowMark,
   dRowMark,
+  foldedGroupChats,
   foldedProjectMark,
   groupChatsByStatusForSidebarD,
   groupChatsForSidebarD,
@@ -304,5 +305,26 @@ describe("sidebar D: a group shows five chats, the rest behind Show more", () =>
   it("opened, shows everything and offers Show less", () => {
     const preview = previewDGroup({ chats: ids(8), expanded: true, keepVisible: () => false });
     expect(preview).toEqual({ visible: ids(8), hiddenCount: 0, canCollapse: true });
+  });
+});
+
+describe("sidebar D: a folded project stays folded (Misha 16.10)", () => {
+  it("keeps only the open chat when it is in the project", () => {
+    const kept = foldedGroupChats({ chats: ids(4), folded: true, isOpen: (chat) => chat === "c2" });
+    expect(kept).toEqual(["c2"]);
+  });
+
+  it("shows no chat when the open chat is in another project", () => {
+    const kept = foldedGroupChats({ chats: ids(4), folded: true, isOpen: (chat) => chat === "x" });
+    expect(kept).toEqual([]);
+  });
+
+  it("open, lists its chats as usual", () => {
+    const kept = foldedGroupChats({
+      chats: ids(4),
+      folded: false,
+      isOpen: (chat) => chat === "c2",
+    });
+    expect(kept).toBeNull();
   });
 });

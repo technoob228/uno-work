@@ -69,13 +69,13 @@ const POINTS: ReadonlyArray<{
   {
     key: "p4",
     title: "Вкладки: чат, проект, везде",
-    hint: "Группы с обводкой: Everywhere → Project → This chat. Перетащи вкладку в другую группу или правый клик «Move to». Перейди в другой чат landing — Everywhere и Project на месте. «All tabs» — вкладки других чатов.",
+    hint: "Группы как в Chrome, слева направо: This chat → Project → Everywhere. Тащи вкладку внутри группы или в другую обводку (линия — куда встанет); клик по метке группы сворачивает её. Перейди в другой чат landing — Project и Everywhere на месте.",
     switches: ["tabGroupIcons", "newTabsGo"],
   },
   {
     key: "p5",
     title: "Верх сайдбара",
-    hint: "Один заголовок говорит, что показано; ✎ New chat крайний справа; компьютеры.",
+    hint: "Один заголовок говорит, что показано; ✎ New chat крайний справа; компьютеры. Сверни проект открытого чата — под ним останется только этот чат.",
     switches: ["sidebarViewSwitch"],
   },
   {
@@ -96,7 +96,7 @@ const POINTS: ReadonlyArray<{
   {
     key: "p8",
     title: "↗ у файла: редактор или ссылка",
-    hint: "На Mac — меню «Open in…» / «Share with a link…», на облаке — сразу Share.",
+    hint: "На Mac — меню «Open in…» / «Share with a link…», на облаке — сразу Share. С паролем — Generate, Copy и «Copy link and password».",
     switches: ["platform"],
   },
   {

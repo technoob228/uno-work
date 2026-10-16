@@ -31,8 +31,8 @@ export interface DemoSwitches {
   readonly platform: "desktop" | "cloud";
   /** p3: a full-screen tab folds the chat into a mini window, or into a narrow column. */
   readonly chatDock: "mini" | "column";
-  /** p4: the tab groups (Everywhere / Project / This chat) carry a small icon, or only an outline. */
-  readonly tabGroupIcons: "icon" | "plain";
+  /** p4: a tab group's label (click collapses the group) is a small icon, or its name. */
+  readonly tabGroupIcons: "plain" | "icon";
   /** p4: what the person opens in a chat lands in the Project group (stays across its chats) or in the chat's. */
   readonly newTabsGo: "project" | "chat";
   /** p5: the sidebar's view is picked from its header (A), or only in Settings (B). */
@@ -44,7 +44,7 @@ export interface DemoSwitches {
 export const DEMO_SWITCH_DEFAULTS: DemoSwitches = {
   platform: "desktop",
   chatDock: "mini",
-  tabGroupIcons: "icon",
+  tabGroupIcons: "plain",
   newTabsGo: "chat",
   sidebarViewSwitch: "header",
   connectors: "connected",
@@ -71,10 +71,10 @@ export const DEMO_SWITCH_OPTIONS: {
     ],
   },
   tabGroupIcons: {
-    label: "Tab groups",
+    label: "Group label",
     options: [
-      { id: "icon", name: "With an icon" },
-      { id: "plain", name: "Outline only" },
+      { id: "plain", name: "Name" },
+      { id: "icon", name: "Icon" },
     ],
   },
   newTabsGo: {

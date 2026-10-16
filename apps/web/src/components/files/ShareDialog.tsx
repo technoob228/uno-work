@@ -41,6 +41,7 @@ import { Label } from "../ui/label";
 import { toastManager } from "../ui/toast";
 import { FILE_KIND_ICON, FILE_KIND_TINT, fileKindOf } from "./fileTypes";
 import { filesApi, filesQueryKeys, filesSharesQueryOptions } from "./filesApi";
+import { PasswordGenerateControls } from "./PasswordGenerateControls";
 import { shareUrl, useShareBaseUrl, type ShareBase } from "./useShareBaseUrl";
 
 /** Formats a link can edit in place (the engine writes them back as they are). */
@@ -338,12 +339,16 @@ export function ShareDialog({
   const [withPassword, setWithPassword] = useState(false);
   const [password, setPassword] = useState("");
   const [access, setAccess] = useState<FilesShareAccess>("view");
+  // The last link made with a password, so both can be copied together —
+  // the password isn't kept anywhere else once the form resets.
+  const [justCreated, setJustCreated] = useState<{ url: string; password: string } | null>(null);
   useEffect(() => {
     if (open) {
       setAccess("view");
       setExpiry(null);
       setWithPassword(false);
       setPassword("");
+      setJustCreated(null);
     }
   }, [open]);
 
@@ -354,14 +359,14 @@ export function ShareDialog({
   const editable = entry !== null && entry.kind !== "directory" && canShareForEditing(entry.name);
   const commentable = entry !== null && editable && canShareForCommenting(entry.name);
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (linkPassword: string | null) =>
       filesApi(environmentId).createShare({
         path: entry!.path,
         expiresInSeconds: expiry,
-        password: withPassword ? password : null,
+        password: linkPassword,
         ...(editable ? { access } : {}),
       }),
-    onSuccess: (share) => {
+    onSuccess: (share, linkPassword) => {
       void queryClient.invalidateQueries({ queryKey: filesQueryKeys.shares(environmentId, null) });
       void queryClient.invalidateQueries({
         queryKey: filesQueryKeys.shares(environmentId, entry!.path),
@@ -369,6 +374,7 @@ export function ShareDialog({
       setPassword("");
       setWithPassword(false);
       const url = shareUrl(base, share.urlPath);
+      setJustCreated(url && linkPassword ? { url, password: linkPassword } : null);
       if (url) void copy(url);
     },
   });
@@ -417,6 +423,22 @@ export function ShareDialog({
                   onRevoke={() => revoke.mutate(share.id)}
                 />
               ))}
+            </section>
+          ) : null}
+
+          {justCreated ? (
+            <section
+              className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3"
+              data-testid="share-new-link-password"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <LockIcon className="size-3.5 text-muted-foreground" />
+                Password for the new link
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Send it along with the link — it isn't shown again after you close this window.
+              </p>
+              <PasswordGenerateControls password={justCreated.password} link={justCreated.url} />
             </section>
           ) : null}
 
@@ -492,13 +514,10 @@ export function ShareDialog({
                 </Label>
               </div>
               {withPassword ? (
-                <Input
-                  type="text"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="At least 4 characters"
-                  autoComplete="off"
-                  aria-label="Link password"
+                <PasswordGenerateControls
+                  password={password}
+                  onPasswordChange={setPassword}
+                  link={null}
                 />
               ) : null}
             </div>
@@ -507,7 +526,7 @@ export function ShareDialog({
                 The link is copied as soon as it's made.
               </span>
               <Button
-                onClick={() => create.mutate()}
+                onClick={() => create.mutate(withPassword ? password : null)}
                 disabled={create.isPending || passwordTooShort}
               >
                 {create.isPending ? <Loader2Icon className="animate-spin" /> : <LinkIcon />}

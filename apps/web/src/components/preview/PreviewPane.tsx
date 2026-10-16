@@ -96,9 +96,7 @@ import { TasksTabBody, TasksTabName } from "./TasksTabBody";
 import { PanelLauncher } from "./PanelLauncher";
 import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
-import { AllTabsMenu } from "./AllTabsMenu";
 import { useCurrentProjectName } from "./usePanelChats";
-import { DEMO, demoHooks } from "../../demo/demoFlag";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
@@ -1931,14 +1929,10 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
-  const [allTabsOpen, setAllTabsOpen] = useState(false);
-  // Labs: tab groups + "All tabs" (p4) and the full-screen controls (p3); without
-  // them the header is the one of 0.0.137.
+  // Labs: tab groups (p4) and the full-screen controls (p3); without them the
+  // header is the one of 0.0.137.
   const tabGroupsOn = useFeatureFlag("panelTabGroups");
   const chatDockOn = useFeatureFlag("fullscreenChatDock");
-  useEffect(() => {
-    if (DEMO) demoHooks.openAllTabs = () => setAllTabsOpen(true);
-  }, []);
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
   // появиться в лаунчере (Apps) без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
@@ -2218,14 +2212,6 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </button>
           ) : null}
         </div>
-        {tabGroupsOn && (files.length > 0 || currentChatThreadId !== null) ? (
-          <AllTabsMenu
-            kindIcon={KIND_ICON}
-            projectName={projectName}
-            open={allTabsOpen}
-            onOpenChange={setAllTabsOpen}
-          />
-        ) : null}
         {chatDockOn ? (
           <>
             {/* One full-screen control (D24): the tab over the whole window with the

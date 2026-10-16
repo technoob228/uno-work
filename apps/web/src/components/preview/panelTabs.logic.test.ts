@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  collectAllTabs,
   foldedGroups,
+  groupLabelWidth,
   groupStripTabs,
   moveToLabel,
-  type PanelChatInfo,
+  tabsShownInGroup,
 } from "./panelTabs.logic";
-import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
+import { GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
 import type { PreviewFile } from "./PreviewPaneContext";
 import { collectVisibleTabs, DEFAULT_PREVIEW_BUCKET_STATE } from "./previewPanelState";
 import { collectPersistableTabs, restoreTabs } from "./previewTabPersistence";
@@ -26,10 +26,9 @@ const pult: PreviewFile = {
 const readme = file("README.md");
 const hero = file("hero.md");
 const pricing = file("pricing.md");
-const research = file("research.docx");
 
 describe("groupStripTabs", () => {
-  it("groups left to right: Everywhere → Project → This chat", () => {
+  it("groups left to right: This chat → Project → Everywhere (wider further right)", () => {
     const scopes = {
       [pult.id]: "global",
       [readme.id]: "project",
@@ -37,9 +36,9 @@ describe("groupStripTabs", () => {
       [hero.id]: "chat",
     } as const;
     expect(groupStripTabs([pult, readme, pricing, hero], scopes)).toEqual([
-      { scope: "global", files: [pult] },
-      { scope: "project", files: [readme, pricing] },
       { scope: "chat", files: [hero] },
+      { scope: "project", files: [readme, pricing] },
+      { scope: "global", files: [pult] },
     ]);
   });
 
@@ -48,104 +47,54 @@ describe("groupStripTabs", () => {
   });
 });
 
-describe("foldedGroups", () => {
-  const groups = [
-    { scope: "global", count: 1, active: false },
-    { scope: "project", count: 2, active: false },
-    { scope: "chat", count: 3, active: true },
-  ] as const;
-
-  it("nothing folds while every tab gets 72 px", () => {
-    // 3 groups × 30 + 6 × 72 + (0 + 1 + 2) × 2 = 528
-    expect(foldedGroups({ available: 528, groups, withIcons: true })).toEqual([]);
-  });
-
-  it("the chat's group folds first, so Everywhere and Project stay as they were", () => {
-    expect(foldedGroups({ available: 500, groups, withIcons: true })).toEqual(["chat"]);
-  });
-
-  it("then Project, then Everywhere", () => {
-    expect(foldedGroups({ available: 360, groups, withIcons: true })).toEqual(["chat", "project"]);
-    expect(foldedGroups({ available: 100, groups, withIcons: true })).toEqual([
-      "chat",
-      "project",
-      "global",
-    ]);
-  });
-
-  it("groups without icons take less room", () => {
-    expect(foldedGroups({ available: 470, groups, withIcons: false })).toEqual([]);
+describe("tabsShownInGroup", () => {
+  it("a collapsed group keeps only the open tab, if it is there", () => {
+    expect(tabsShownInGroup([readme, pricing], false, hero.id)).toEqual([readme, pricing]);
+    expect(tabsShownInGroup([readme, pricing], true, pricing.id)).toEqual([pricing]);
+    expect(tabsShownInGroup([readme, pricing], true, hero.id)).toEqual([]);
   });
 });
 
-describe("collectAllTabs", () => {
-  const chats: Record<string, PanelChatInfo> = {
-    a: { title: "Landing copy", projectKey: "landing", environmentId: "mac" },
-    b: { title: "Hero", projectKey: "landing", environmentId: "mac" },
-    c: { title: "Pricing", projectKey: "landing", environmentId: "cloud" },
-    x: { title: "Bench", projectKey: "model-lab", environmentId: "cloud" },
-  };
-  const states = {
-    [GLOBAL_SCOPE_KEY]: { files: [pult] },
-    [projectScopeKey("landing")]: { files: [readme] },
-    [chatScopeKey("a")]: { files: [hero] },
-    [chatScopeKey("b")]: { files: [file("hero-variants.png"), { ...hero }] },
-    [chatScopeKey("c")]: { files: [research, file("README.md")] },
-    [chatScopeKey("x")]: { files: [file("bench.md")] },
-    [chatScopeKey("gone")]: { files: [file("old.md")] },
-  };
-  const chatInfo = (id: string) => chats[id] ?? null;
-  const target = { projectKey: "landing", threadId: "a" };
+describe("foldedGroups", () => {
+  const groups = [
+    { scope: "chat", count: 3, active: true, labelWidth: 22 },
+    { scope: "project", count: 2, active: false, labelWidth: 22 },
+    { scope: "global", count: 1, active: false, labelWidth: 22 },
+  ] as const;
 
-  it("lists this chat, the project's pins and 'everywhere'", () => {
-    const sections = collectAllTabs({ states, target, chatInfo });
-    expect(sections.thisChat).toEqual([hero]);
-    expect(sections.project).toEqual([readme]);
-    expect(sections.everywhere).toEqual([pult]);
+  it("nothing folds while every tab gets 72 px", () => {
+    // 3 groups × (10 + 22) + 6 × 72 + 6 × 2 = 540
+    expect(foldedGroups({ available: 540, groups })).toEqual([]);
   });
 
-  it("'In other chats' — documents of other chats of this project, not already open here", () => {
-    const { otherChats } = collectAllTabs({ states, target, chatInfo });
-    expect(otherChats.map((entry) => [entry.file.name, entry.chat.title])).toEqual([
-      ["hero-variants.png", "Hero"],
-      ["research.docx", "Pricing"],
-    ]);
+  it("the chat's group folds first, so Everywhere and Project stay as they were", () => {
+    expect(foldedGroups({ available: 520, groups })).toEqual(["chat"]);
   });
 
-  it("outside a chat: only 'everywhere' is here, every chat counts as other", () => {
-    const sections = collectAllTabs({
-      states,
-      target: { projectKey: "landing", threadId: null },
-      chatInfo,
-    });
-    expect(sections.thisChat).toEqual([]);
-    expect(sections.project).toEqual([]);
-    expect(sections.otherChats.map((entry) => entry.file.name)).toContain("bench.md");
+  it("then Project, then Everywhere", () => {
+    expect(foldedGroups({ available: 380, groups })).toEqual(["chat", "project"]);
+    expect(foldedGroups({ available: 100, groups })).toEqual(["chat", "project", "global"]);
   });
 
-  it("search matches the name and the chat's title", () => {
-    const byName = collectAllTabs({ states, target, chatInfo, query: "DOCX" });
-    expect(byName.otherChats.map((entry) => entry.file.name)).toEqual(["research.docx"]);
-    expect(byName.thisChat).toEqual([]);
-    const byChat = collectAllTabs({ states, target, chatInfo, query: "hero" });
-    expect(byChat.thisChat).toEqual([hero]);
-    expect(byChat.otherChats.map((entry) => entry.file.name)).toEqual(["hero-variants.png"]);
-  });
-
-  it("the tasks tab and empty new tabs of another chat are not listed", () => {
-    const sections = collectAllTabs({
-      states: {
-        [chatScopeKey("b")]: {
-          files: [
-            { id: "tasks:b", name: "Tasks", kind: "tasks", content: "" },
-            { id: "browser-1", name: "New tab", kind: "browser", content: "", url: "" },
-          ],
-        },
+  it("a collapsed group takes only its label (and the open tab)", () => {
+    const collapsed = [
+      { scope: "chat", count: 3, active: true, labelWidth: 22 },
+      {
+        scope: "project",
+        count: 0,
+        active: false,
+        labelWidth: groupLabelWidth("project", true, 2),
       },
-      target,
-      chatInfo,
-    });
-    expect(sections.otherChats).toEqual([]);
+      { scope: "global", count: 1, active: false, labelWidth: 22 },
+    ] as const;
+    expect(foldedGroups({ available: 410, groups: collapsed })).toEqual([]);
+  });
+});
+
+describe("groupLabelWidth", () => {
+  it("an icon is narrower than a name; a collapsed group adds its count", () => {
+    expect(groupLabelWidth("global", true)).toBeLessThan(groupLabelWidth("global", false));
+    expect(groupLabelWidth("project", false, 3)).toBeGreaterThan(groupLabelWidth("project", false));
   });
 });
 
@@ -185,8 +134,8 @@ describe("tabs saved by 0.0.137 and earlier", () => {
         group.files.map((tab) => tab.id),
       ]),
     ).toEqual([
-      ["global", ["browser-3"]],
       ["project", ["browser-7"]],
+      ["global", ["browser-3"]],
     ]);
   });
 
