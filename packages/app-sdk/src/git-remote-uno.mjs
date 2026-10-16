@@ -16,14 +16,14 @@
 //                                       bundles (seq zero-padded to 12; the
 //                                       highest is current; last 50 kept)
 //   .uno-git/<name>/bundles/<t>.bundle  git bundles, each on top of earlier ones
-//   .uno-git/<name>/refs.json           the first layout (read, migrated on push)
 //
 // Two computers pushing at once can't lose each other's work: a new state is
 // written only to a log entry that doesn't exist yet (If-None-Match: *), so
 // exactly one of them gets seq N+1; the other re-reads, re-checks
-// fast-forward and tries once more, or answers "fetch first". Bundles are
-// never deleted while a state names them, and unreferenced ones only once
-// they are an hour old (a push in flight may be about to name its bundle).
+// fast-forward and tries once more, or answers "fetch first". Nothing a
+// push uploaded is deleted by that push: bundles no current state names go
+// only once they are an hour old by storage's clock (a push in flight has 30
+// minutes to name its bundle), and so do log entries more than 50 behind.
 //
 // Bytes go straight between this computer and storage through links the Uno
 // console signs, with this computer's own key read from the daemon's
@@ -57,13 +57,20 @@ export const COMPACT_MAX_BUNDLES = 20;
 export const LOG_KEEP = 50;
 /** A bundle no state names is deleted only once it is older than this. */
 export const BUNDLE_GC_AGE_MS = 60 * 60_000;
-/** A push whose bundle went up longer ago than this doesn't name it (GC may come). */
-const COMMIT_DEADLINE_MS = 50 * 60_000;
+/**
+ * A push whose bundle started going up longer ago than this doesn't name it:
+ * well inside BUNDLE_GC_AGE_MS, so clocks that disagree a bit can't matter.
+ */
+export const COMMIT_DEADLINE_MS = 30 * 60_000;
 /** A transfer with no bytes moving for this long is given up. */
 export const STALL_MS = 60_000;
 /** Test-only switch: the "cloud" is this folder. */
 export const FAKE_STORAGE_ENV = "UNO_GIT_FAKE_STORAGE_DIR";
 export const FAKE_STORAGE_DELAY_ENV = "UNO_GIT_FAKE_STORAGE_DELAY_MS";
+/** Test-only: faults of the fake storage ("lost-answer", "readback-fail"). */
+export const FAKE_FAULTS_ENV = "UNO_GIT_FAKE_FAULTS";
+/** Test-only: each fake upload "takes" this many minutes (helperClock). */
+export const FAKE_UPLOAD_MINUTES_ENV = "UNO_GIT_FAKE_UPLOAD_MINUTES";
 export const DEFAULT_CONSOLE_URL = "https://console.uno4.dev";
 /** Where the daemon says its settings.json is (written next to the SDK). */
 export const DAEMON_POINTER = ".uno/sdk/daemon.json";
@@ -100,7 +107,6 @@ export function slugName(/** @type {string} */ raw) {
   return NAME_RE.test(slug) ? slug : null;
 }
 
-const legacyRefsKey = (/** @type {string} */ name) => `${GIT_ROOT}${name}/refs.json`;
 const logPrefix = (/** @type {string} */ name) => `${GIT_ROOT}${name}/log/`;
 export const logKey = (/** @type {string} */ name, /** @type {number} */ seq) =>
   `${logPrefix(name)}${String(seq).padStart(12, "0")}.json`;
@@ -183,17 +189,26 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
 // ── Storage: the Drive bucket through the console, or a folder (tests) ──
 
 /**
+ * @typedef {{ key: string, size: number, lastModified: number | null }} StoredObject
  * @typedef {{
  *   read(key: string): Promise<Buffer | null>,
  *   download(key: string, file: string): Promise<boolean>,
  *   write(key: string, bytes: Buffer, options?: { ifNoneMatch?: boolean }): Promise<boolean>,
  *   upload(key: string, file: string, size: number): Promise<void>,
- *   list(prefix: string): Promise<{ folders: string[], objects: Array<{ key: string, size: number }>, truncated: boolean }>,
+ *   list(prefix: string): Promise<{ folders: string[], objects: StoredObject[], truncated: boolean, now: number | null }>,
  *   remove(key: string): Promise<void>,
  *   who: { boxId: number | null, hostname: string },
  * }} Storage
  *   write: false when `ifNoneMatch` and the key already exists (nothing written).
+ *   list: `lastModified` and `now` are storage's own clock (ms), null when it doesn't say.
  */
+
+/**
+ * This process's clock for deadlines. Tests move it forward (a "slow
+ * upload") without waiting.
+ */
+export const helperClock = { skewMs: 0 };
+const now = () => Date.now() + helperClock.skewMs;
 
 /**
  * The storage this process uses: the fake folder in tests, else the Drive.
@@ -202,20 +217,48 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
  */
 export function openStorage(where) {
   const fake = where.env[FAKE_STORAGE_ENV]?.trim();
-  if (fake) return folderStorage(fake, Number(where.env[FAKE_STORAGE_DELAY_ENV]) || 0);
+  if (fake) {
+    const faults = new Set((where.env[FAKE_FAULTS_ENV] ?? "").split(",").filter(Boolean));
+    return folderStorage(fake, {
+      delayMs: Number(where.env[FAKE_STORAGE_DELAY_ENV]) || 0,
+      lostAnswer: faults.has("lost-answer"),
+      failReadBack: faults.has("readback-fail"),
+      uploadMinutes: Number(where.env[FAKE_UPLOAD_MINUTES_ENV]) || 0,
+    });
+  }
   const creds = machineCredentials(where);
   if (!creds) throw new UnoGitError(NOT_CLOUD);
   return consoleStorage(creds);
 }
 
 /**
+ * @typedef {{
+ *   delayMs?: number,
+ *   lostAnswer?: boolean,
+ *   failReadBack?: boolean,
+ *   uploadMinutes?: number,
+ *   beforeConditionalWrite?: (key: string) => Promise<void>,
+ *   truncateAfter?: number,
+ *   nowMs?: () => number,
+ * }} FakeStorageOptions
+ *   delayMs: wait up to this long before each conditional write (races).
+ *   lostAnswer: a conditional write lands but answers "exists" (an answer lost, a retry refused).
+ *   failReadBack: reading the key just written conditionally fails.
+ *   uploadMinutes: each upload moves helperClock this far (a slow upload).
+ *   beforeConditionalWrite: runs right before a conditional write (another computer).
+ *   truncateAfter: listings stop after this many keys (lowest first), truncated.
+ *   nowMs: storage's clock in listings (default: the real one).
+ */
+
+/**
  * A folder standing in for the cloud (tests). Conditional writes are atomic
- * (a hard link fails when the name exists), like If-None-Match on storage.
+ * (a hard link fails when the name exists), like If-None-Match on storage;
+ * the options inject the faults the helper must survive.
  * @param {string} root
- * @param {number} [delayMs] wait up to this long before each conditional write
+ * @param {FakeStorageOptions} [options]
  * @returns {Storage}
  */
-export function folderStorage(root, delayMs = 0) {
+export function folderStorage(root, options = {}) {
   const fileOf = (/** @type {string} */ key) => {
     const file = path.resolve(root, key);
     if (!file.startsWith(path.resolve(root) + path.sep)) throw new UnoGitError(`Bad key ${key}`);
@@ -244,36 +287,63 @@ export function folderStorage(root, delayMs = 0) {
       await fsp.rm(tmp, { force: true });
     }
   };
+  /** @type {string | null} */
+  let justWritten = null;
   return {
     who: { boxId: null, hostname: os.hostname() },
-    read: (key) => fsp.readFile(fileOf(key)).catch(() => null),
+    read: async (key) => {
+      if (options.failReadBack && key === justWritten) {
+        throw new UnoGitError("Couldn't reach Uno cloud storage.");
+      }
+      return fsp.readFile(fileOf(key)).catch(() => null);
+    },
     download: (key, file) =>
       fsp.copyFile(fileOf(key), file).then(
         () => true,
         () => false,
       ),
-    write: async (key, bytes, options = {}) => {
-      if (options.ifNoneMatch && delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, Math.random() * delayMs));
+    write: async (key, bytes, writeOptions = {}) => {
+      if (!writeOptions.ifNoneMatch) {
+        return place(key, (tmp) => fsp.writeFile(tmp, bytes));
       }
-      return place(key, (tmp) => fsp.writeFile(tmp, bytes), options.ifNoneMatch === true);
+      if (options.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * (options.delayMs ?? 0)));
+      }
+      await options.beforeConditionalWrite?.(key);
+      const landed = await place(key, (tmp) => fsp.writeFile(tmp, bytes), true);
+      justWritten = key;
+      return options.lostAnswer ? false : landed;
     },
     upload: async (key, file) => {
       await place(key, (tmp) => fsp.copyFile(file, tmp));
+      helperClock.skewMs += (options.uploadMinutes ?? 0) * 60_000;
     },
     list: async (prefix) => {
       const dir = path.join(root, prefix);
       const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
       const folders = [];
+      /** @type {StoredObject[]} */
       const objects = [];
-      for (const entry of entries) {
+      for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
         if (entry.isDirectory()) folders.push(`${prefix}${entry.name}/`);
         else if (!entry.name.endsWith(".tmp")) {
           const stats = await fsp.stat(path.join(dir, entry.name)).catch(() => null);
-          if (stats) objects.push({ key: `${prefix}${entry.name}`, size: stats.size });
+          if (stats) {
+            objects.push({
+              key: `${prefix}${entry.name}`,
+              size: stats.size,
+              lastModified: stats.mtimeMs,
+            });
+          }
         }
       }
-      return { folders, objects, truncated: false };
+      const limit = options.truncateAfter ?? Infinity;
+      return {
+        folders,
+        objects: objects.slice(0, limit),
+        truncated: objects.length > limit,
+        now: options.nowMs?.() ?? Date.now(),
+      };
     },
     remove: (key) => fsp.rm(fileOf(key), { recursive: true, force: true }),
   };
@@ -328,8 +398,11 @@ const kicking = (/** @type {() => void} */ kick) =>
  * @returns {Storage}
  */
 export function consoleStorage(creds, fetchImpl = fetch) {
-  /** @param {string} route @param {RequestInit} [init] */
-  const api = async (route, init = {}) => {
+  /**
+   * One console call: its JSON and the console's clock (the Date header).
+   * @param {string} route @param {RequestInit} [init]
+   */
+  const apiWithDate = async (route, init = {}) => {
     let response;
     try {
       response = await fetchImpl(`${creds.consoleUrl}${route}`, {
@@ -342,12 +415,15 @@ export function consoleStorage(creds, fetchImpl = fetch) {
     }
     const text = await response.text();
     if (!response.ok) throw new UnoGitError(consoleMessage(response.status, text));
+    const date = Date.parse(response.headers.get("date") ?? "");
     try {
-      return JSON.parse(text);
+      return { json: JSON.parse(text), date: Number.isFinite(date) ? date : null };
     } catch {
       throw new UnoGitError("The Uno console answered something unexpected.");
     }
   };
+  /** @param {string} route @param {RequestInit} [init] */
+  const api = async (route, init = {}) => (await apiWithDate(route, init)).json;
   /** @type {Promise<number> | null} */
   let bucket = null;
   const bucketId = () =>
@@ -562,7 +638,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
         length: end - start,
       })),
     list: async (prefix) => {
-      const raw = await api(
+      const { json: raw, date } = await apiWithDate(
         `/api/v1/buckets/${await bucketId()}/objects?prefix=${encodeURIComponent(prefix)}`,
       );
       return {
@@ -572,10 +648,19 @@ export function consoleStorage(creds, fetchImpl = fetch) {
         objects: (Array.isArray(raw?.objects) ? raw.objects : []).flatMap(
           (/** @type {any} */ object) =>
             typeof object?.key === "string"
-              ? [{ key: object.key, size: Number(object.size) || 0 }]
+              ? [
+                  {
+                    key: object.key,
+                    size: Number(object.size) || 0,
+                    lastModified: Number.isFinite(Date.parse(object.last_modified ?? ""))
+                      ? Date.parse(object.last_modified)
+                      : null,
+                  },
+                ]
               : [],
         ),
         truncated: raw?.truncated === true,
+        now: date,
       };
     },
     remove: async (key) => {
@@ -593,9 +678,8 @@ export function consoleStorage(creds, fetchImpl = fetch) {
  *   prerequisites: string[] }} BundleEntry
  * @typedef {{ version: 1, seq: number, refs: Record<string, string>, head: string | null,
  *   bundles: BundleEntry[], updatedAt: string | null, rev: string | null,
- *   updatedBy: { boxId: number | null, hostname: string } | null,
- *   legacy?: boolean }} RemoteState
- *   seq 0: no log yet (an empty project, or one in the first layout: `legacy`).
+ *   updatedBy: { boxId: number | null, hostname: string } | null }} RemoteState
+ *   seq 0: no log yet (an empty project).
  */
 
 /** @returns {RemoteState} */
@@ -681,53 +765,91 @@ function parseState(name, bytes, seq) {
   return checkState(name, parsed, seq);
 }
 
-/** Log entries of a project, by seq. */
-async function logSeqs(/** @type {Storage} */ storage, /** @type {string} */ name) {
+/** Said when storage didn't answer whether our state landed: nothing is deleted. */
+export const OUTCOME_UNKNOWN =
+  "Couldn't tell whether this push reached your Uno cloud (storage didn't answer). Run git fetch uno, then push again.";
+
+/**
+ * Log entries of a project, by seq, and storage's clock. A listing cut
+ * short would hide the newest entries (it keeps the lowest keys): refused.
+ * @param {Storage} storage
+ * @param {string} name
+ */
+async function logEntries(storage, name) {
   const listing = await storage.list(logPrefix(name));
-  return listing.objects
-    .map((object) => /\/(\d{12})\.json$/.exec(object.key)?.[1])
-    .filter((digits) => digits !== undefined)
-    .map(Number)
-    .toSorted((a, b) => a - b);
+  if (listing.truncated) {
+    throw new UnoGitError(
+      `The cloud copy of ${name} has more history entries than can be listed; nothing was changed. Please tell Uno support.`,
+    );
+  }
+  const entries = listing.objects
+    .flatMap((object) => {
+      const digits = /\/(\d{12})\.json$/.exec(object.key)?.[1];
+      return digits === undefined
+        ? []
+        : [{ seq: Number(digits), lastModified: object.lastModified }];
+    })
+    .toSorted((a, b) => a.seq - b.seq);
+  return { entries, now: listing.now ?? Date.now() };
 }
 
 /**
- * The current state: the highest log entry, else the first layout's
- * refs.json, else an empty project.
+ * The current state: the highest log entry, else an empty project (an
+ * empty listing is looked at twice before believing it).
  * @param {Storage} storage
  * @param {string} name
  * @returns {Promise<RemoteState>}
  */
 export async function readRemote(storage, name) {
   for (let attempt = 1; ; attempt += 1) {
-    const seqs = await logSeqs(storage, name);
-    const latest = seqs.at(-1);
+    const latest = (await logEntries(storage, name)).entries.at(-1)?.seq;
     if (latest === undefined) {
-      const legacy = await storage.read(legacyRefsKey(name));
-      if (!legacy) return emptyState();
-      return { ...parseState(name, legacy, 0), legacy: true };
+      if (attempt >= 2) return emptyState();
+      continue;
     }
     const bytes = await storage.read(logKey(name, latest));
     if (bytes) return parseState(name, bytes, latest);
-    // Pruned between the listing and the read: list again, once.
-    if (attempt >= 2) throw new UnoGitError(`Couldn't read the cloud copy of ${name}. Try again.`);
+    // Pruned between the listing and the read: list again.
+    if (attempt >= 3) throw new UnoGitError(`Couldn't read the cloud copy of ${name}. Try again.`);
+  }
+}
+
+/** The `rev` of a log entry; throws OUTCOME_UNKNOWN when it can't be read. */
+async function revOf(/** @type {Storage} */ storage, /** @type {string} */ key) {
+  /** @type {Buffer | null} */
+  let bytes;
+  try {
+    bytes = await storage.read(key);
+  } catch {
+    throw new UnoGitError(OUTCOME_UNKNOWN);
+  }
+  if (bytes === null) return null;
+  try {
+    return String(JSON.parse(bytes.toString("utf8"))?.rev ?? "");
+  } catch {
+    return "";
   }
 }
 
 /**
- * Write `next` as the state after `before` — only if no one else did first.
- * Returns what was written when ours is now the current state, else null.
+ * Write `next` as the state right after `before` — only if no one else did
+ * first. Returns what was written when ours is now the current state; null
+ * when another computer got there first (ours, if it landed at all, is a
+ * stray entry below the newest: readers take the newest, nothing names it).
+ * Throws OUTCOME_UNKNOWN when storage can't say; deletes nothing.
  * @param {Storage} storage
  * @param {string} name
  * @param {RemoteState} before
  * @param {Omit<RemoteState, "seq" | "rev" | "updatedAt" | "updatedBy">} next
  */
-async function commitState(storage, name, before, next) {
+export async function commitState(storage, name, before, next) {
+  // The newest entry must still be `before`: a slow writer must not land in
+  // a slot pruning emptied long ago.
+  if (((await logEntries(storage, name)).entries.at(-1)?.seq ?? 0) !== before.seq) return null;
   const seq = before.seq + 1;
   const rev = randomBytes(8).toString("hex");
-  const { legacy: _legacy, ...rest } = /** @type {RemoteState} */ (next);
   const state = {
-    ...rest,
+    ...next,
     version: 1,
     seq,
     rev,
@@ -738,17 +860,34 @@ async function commitState(storage, name, before, next) {
   const bytes = Buffer.from(`${JSON.stringify(state, null, 2)}\n`);
   if (!(await storage.write(key, bytes, { ifNoneMatch: true }))) {
     // Maybe ours after all (an answer lost on the way, a retry refused): look.
-    const there = await storage.read(key).catch(() => null);
-    let theirs = null;
-    try {
-      theirs = there ? JSON.parse(there.toString("utf8"))?.rev : null;
-    } catch {
-      // not ours
-    }
-    if (theirs !== rev) return null;
+    const there = await revOf(storage, key);
+    if (there === null) throw new UnoGitError(OUTCOME_UNKNOWN);
+    if (there !== rev) return null;
   }
-  if (before.legacy) await storage.remove(legacyRefsKey(name)).catch(() => undefined);
+  // Ours landed; it counts only right after `before` (not in a pruned slot).
+  if (before.seq > 0 && (await revOf(storage, logKey(name, before.seq))) !== before.rev) {
+    return null;
+  }
   return { key, bytes };
+}
+
+/**
+ * Drop log entries more than LOG_KEEP below the newest that are also over
+ * an hour old by storage's clock.
+ * @param {Storage} storage
+ * @param {string} name
+ */
+export async function pruneLog(storage, name) {
+  const { entries, now: storageNow } = await logEntries(storage, name);
+  const newest = entries.at(-1)?.seq ?? 0;
+  let dropped = 0;
+  for (const entry of entries) {
+    if (newest - entry.seq <= LOG_KEEP) continue;
+    if (entry.lastModified === null || storageNow - entry.lastModified < BUNDLE_GC_AGE_MS) continue;
+    await storage.remove(logKey(name, entry.seq));
+    dropped += 1;
+  }
+  return dropped;
 }
 
 /**
@@ -1194,8 +1333,10 @@ export async function pushRefs(input) {
       return errors;
     };
 
-    /** @type {(BundleEntry & { uploadedAt: number }) | null} */
+    /** @type {BundleEntry | null} */
     let entry = null;
+    // One clock reading names the bundle and starts the commit deadline.
+    const madeAt = now();
     const tips = [...new Set(updates.flatMap((update) => (update.id ? [update.id] : [])))];
     if (tips.length > 0) {
       const file = await tempFile(input.tmpDir);
@@ -1211,25 +1352,20 @@ export async function pushRefs(input) {
             return failAll("too big for the Uno cloud (over 2 GB in one push)");
           }
           if (input.progress) input.say(`uno: saving ${megabytes(size)} to your Uno cloud`);
-          const key = `${bundlesPrefix(input.name)}${stamp()}.bundle`;
+          const key = `${bundlesPrefix(input.name)}${stamp(madeAt)}.bundle`;
           const prerequisites = await bundlePrerequisites(file);
           await input.storage.upload(key, file, size);
           entry = {
             key,
-            created: new Date().toISOString(),
+            created: new Date(madeAt).toISOString(),
             size,
             tips: Object.fromEntries(updates.flatMap((u) => (u.id ? [[u.dst, u.id]] : []))),
             prerequisites,
-            uploadedAt: Date.now(),
           };
         }
       } finally {
         await dropTemp(file);
       }
-    }
-    if (entry && Date.now() - entry.uploadedAt > COMMIT_DEADLINE_MS) {
-      await input.storage.remove(entry.key).catch(() => undefined);
-      return failAll("took too long; push again");
     }
 
     const refs = { ...before.refs };
@@ -1237,26 +1373,23 @@ export async function pushRefs(input) {
       if (update.id === null) delete refs[update.dst];
       else refs[update.dst] = update.id;
     }
-    const { uploadedAt: _uploadedAt, ...bundle } = entry ?? { uploadedAt: 0 };
-    // No refs left: no bundles either (the files go with the cleanup below).
+    // No refs left: no bundles either (the files go with collectBundles).
     const bundles =
-      Object.keys(refs).length === 0
-        ? []
-        : [...before.bundles, ...(entry ? [/** @type {BundleEntry} */ (bundle)] : [])];
+      Object.keys(refs).length === 0 ? [] : [...before.bundles, ...(entry ? [entry] : [])];
     const branch = (await git(["symbolic-ref", "--quiet", "HEAD"])).stdout.trim() || null;
     const next = { ...before, refs, bundles, head: chooseHead(refs, before.head, branch) };
+    // Too late to name the bundle: collectBundles may already treat it as stray.
+    if (entry && now() - madeAt > COMMIT_DEADLINE_MS) {
+      return failAll("took too long; push again");
+    }
     const written = await commitState(input.storage, input.name, before, next);
     if (written) {
       await checkStorageRefusesOverwrites(input, written);
-      await housekeeping({ ...input }).catch((error) =>
-        input.say(
-          `uno: couldn't tidy ${input.name} in your Uno cloud (${error.message}); it still works.`,
-        ),
-      );
+      await housekeeping(input);
       return errors;
     }
-    // Another computer saved first: our bundle was never named, drop it.
-    if (entry) await input.storage.remove(entry.key).catch(() => undefined);
+    // Another computer saved first. Our bundle stays: collectBundles drops it
+    // in an hour unless a state names it after all.
     if (attempt >= 2) return failAll("fetch first");
   }
 }
@@ -1282,35 +1415,52 @@ async function checkStorageRefusesOverwrites(input, written) {
 }
 
 /**
- * After a push: pack bundles when due, keep the last LOG_KEEP log entries,
- * delete bundles no current state names once they are an hour old.
- * @param {{ storage: Storage, name: string, tmpDir: string, progress: boolean }} input
+ * After a push, each step on its own (one failing doesn't stop the next):
+ * prune the log, pack bundles when due, delete stray bundles.
+ * @param {{ storage: Storage, name: string, tmpDir: string, progress: boolean,
+ *   say: (line: string) => void }} input
  */
 async function housekeeping(input) {
-  await compact({ ...input, state: await readRemote(input.storage, input.name) });
-  const seqs = await logSeqs(input.storage, input.name);
-  const latest = seqs.at(-1) ?? 0;
-  for (const seq of seqs) {
-    if (seq <= latest - LOG_KEEP) await input.storage.remove(logKey(input.name, seq));
+  const steps = [
+    () => pruneLog(input.storage, input.name),
+    async () => compact({ ...input, state: await readRemote(input.storage, input.name) }),
+    () => collectBundles(input.storage, input.name),
+  ];
+  for (const step of steps) {
+    await step().catch((error) =>
+      input.say(
+        `uno: couldn't tidy ${input.name} in your Uno cloud (${error.message}); it still works.`,
+      ),
+    );
   }
-  await collectBundles(input.storage, input.name);
 }
 
 /**
- * Delete bundle files the current state doesn't name and that are older
- * than BUNDLE_GC_AGE_MS (younger ones may belong to a push in flight).
+ * Delete bundle files the current state doesn't name, once they are over
+ * BUNDLE_GC_AGE_MS old both by the time in their key and by storage's own
+ * clock (younger ones may belong to a push in flight). Nothing is deleted
+ * when the listing was cut short.
  * @param {Storage} storage
  * @param {string} name
- * @param {number} [now]
  */
-export async function collectBundles(storage, name, now = Date.now()) {
+export async function collectBundles(storage, name) {
   const state = await readRemote(storage, name);
   const named = new Set(state.bundles.map((bundle) => bundle.key));
-  const { objects } = await storage.list(bundlesPrefix(name));
+  const listing = await storage.list(bundlesPrefix(name));
+  if (listing.truncated) return 0;
+  const storageNow = listing.now ?? Date.now();
   let deleted = 0;
-  for (const object of objects) {
+  for (const object of listing.objects) {
     const made = bundleTime(object.key);
-    if (named.has(object.key) || made === null || now - made < BUNDLE_GC_AGE_MS) continue;
+    if (
+      named.has(object.key) ||
+      made === null ||
+      object.lastModified === null ||
+      storageNow - made < BUNDLE_GC_AGE_MS ||
+      storageNow - object.lastModified < BUNDLE_GC_AGE_MS
+    ) {
+      continue;
+    }
     await storage.remove(object.key);
     deleted += 1;
   }
@@ -1339,11 +1489,14 @@ export async function compact(input) {
     if (!(await createBundle(file, tips, [], input.progress))) return false;
     const { size } = await fsp.stat(file);
     if (size > MAX_BUNDLE_BYTES) return false;
-    const key = `${bundlesPrefix(input.name)}${stamp()}.bundle`;
+    const madeAt = now();
+    const key = `${bundlesPrefix(input.name)}${stamp(madeAt)}.bundle`;
     await input.storage.upload(key, file, size);
+    // Too late to name it (see COMMIT_DEADLINE_MS): left for collectBundles.
+    if (now() - madeAt > COMMIT_DEADLINE_MS) return false;
     const packed = {
       key,
-      created: new Date().toISOString(),
+      created: new Date(madeAt).toISOString(),
       size,
       tips: { ...state.refs },
       prerequisites: [],
@@ -1351,8 +1504,7 @@ export async function compact(input) {
     if (await commitState(input.storage, input.name, state, { ...state, bundles: [packed] })) {
       return true;
     }
-    // Another push came first: this full bundle was never named.
-    await input.storage.remove(key).catch(() => undefined);
+    // Another push came first: the full bundle stays for collectBundles.
     return false;
   } finally {
     await dropTemp(file);

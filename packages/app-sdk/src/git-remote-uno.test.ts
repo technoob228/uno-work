@@ -13,8 +13,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  FAKE_FAULTS_ENV,
   FAKE_STORAGE_DELAY_ENV,
   FAKE_STORAGE_ENV,
+  FAKE_UPLOAD_MINUTES_ENV,
+  OUTCOME_UNKNOWN,
+  commitState,
+  pruneLog,
   bundleTime,
   collectBundles,
   logKey,
@@ -109,13 +114,16 @@ function gitAsync(cwd: string, ...args: string[]): Promise<{ code: number; out: 
   });
 }
 
-/** Make unnamed bundle files look two hours old (their key carries the time). */
+/** Make unnamed bundle files two hours old: the time in their key and storage's. */
 function ageUnnamedBundles(name: string, named: ReadonlyArray<string>) {
   const dir = path.join(cloud, ".uno-git", name, "bundles");
   const old = new Date(Date.now() - 2 * 3600_000).toISOString().replace(/[:.]/g, "-");
   for (const file of fs.readdirSync(dir)) {
     if (named.some((key) => key.endsWith(`/${file}`))) continue;
-    fs.renameSync(path.join(dir, file), path.join(dir, file.replace(/^[^Z]+Z/, old)));
+    const renamed = path.join(dir, file.replace(/^[^Z]+Z/, old));
+    fs.renameSync(path.join(dir, file), renamed);
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000);
+    fs.utimesSync(renamed, twoHoursAgo, twoHoursAgo);
   }
 }
 
@@ -379,23 +387,6 @@ describe("git-remote-uno", () => {
     }
   });
 
-  it("reads the first layout (refs.json) and moves it to the log on the next push", async () => {
-    const a = newRepo("a", "old");
-    ok(a, "push", "uno", "main");
-    const dir = path.join(cloud, ".uno-git", "old");
-    const first = JSON.parse(fs.readFileSync(path.join(dir, "log", "000000000001.json"), "utf8"));
-    delete first.seq;
-    fs.writeFileSync(path.join(dir, "refs.json"), JSON.stringify(first));
-    fs.rmSync(path.join(dir, "log"), { recursive: true });
-
-    const b = cloneTo("b", "old");
-    commit(b, "next.txt", "next\n", "next");
-    ok(b, "push", "uno", "main");
-    expect(fs.existsSync(path.join(dir, "refs.json"))).toBe(false);
-    expect((await state("old")).seq).toBeGreaterThanOrEqual(1);
-    await expectConsistent("old");
-  });
-
   it("reads the time out of a bundle key", () => {
     expect(bundleTime(".uno-git/x/bundles/2026-10-16T22-13-15-291Z-7886e4.bundle")).toBe(
       Date.parse("2026-10-16T22:13:15.291Z"),
@@ -410,5 +401,130 @@ describe("git-remote-uno", () => {
     const empty = git(root, "clone", "uno::nothing-here", path.join(root, "e"));
     expect(empty.code).toBe(0);
     expect(empty.out).toMatch(/empty repository/);
+  });
+});
+
+/** A bundle-key time `ms` ago. */
+const keyAt = (ms: number) => new Date(Date.now() - ms).toISOString().replace(/[:.]/g, "-");
+
+/** A valid log entry written straight into the fake cloud. */
+function putEntry(name: string, seq: number, rev = `rev${seq}`, ageMs = 0) {
+  const file = path.join(cloud, logKey(name, seq));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ version: 1, seq, rev, refs: {}, head: null, bundles: [], updatedAt: "x" }),
+  );
+  if (ageMs > 0) {
+    const at = new Date(Date.now() - ageMs);
+    fs.utimesSync(file, at, at);
+  }
+}
+
+describe("compare-and-swap of the state", () => {
+  it("storage can't say whether our state landed: the push fails, nothing is deleted, the cloud stays whole", async () => {
+    const a = newRepo("a", "unknown");
+    ok(a, "push", "uno", "main");
+    commit(a, "two.txt", "two\n", "two");
+    const faulty = spawnSync("git", ["push", "uno", "main"], {
+      cwd: a,
+      env: { ...env, [FAKE_FAULTS_ENV]: "lost-answer,readback-fail" },
+      encoding: "utf8",
+    });
+    expect(faulty.status).not.toBe(0);
+    expect(faulty.stderr).toContain("Couldn't tell whether this push reached your Uno cloud");
+    // It did land: the state names the new bundle, and the bundle is there.
+    const current = await expectConsistent("unknown");
+    expect(current.refs["refs/heads/main"]).toBe(ok(a, "rev-parse", "HEAD"));
+    // Pushing again is a no-op.
+    expect(git(a, "push", "uno", "main").out).toMatch(/up-to-date/i);
+  });
+
+  it("a read-back that fails is never taken for someone else's entry", async () => {
+    const storage = folderStorage(cloud, { lostAnswer: true, failReadBack: true });
+    putEntry("p", 1, "r1");
+    const before = await readRemote(folderStorage(cloud), "p");
+    await expect(commitState(storage, "p", before, { ...before })).rejects.toThrow(OUTCOME_UNKNOWN);
+  });
+
+  it("a slow push can't land in a slot pruning emptied", async () => {
+    for (let seq = 1; seq <= 3; seq += 1) putEntry("slow", seq);
+    const before = await readRemote(folderStorage(cloud), "slow");
+    expect(before.seq).toBe(3);
+    // Meanwhile: many pushes, and entries far behind pruned.
+    const storage = folderStorage(cloud, {
+      beforeConditionalWrite: async () => {
+        for (let seq = 1; seq <= 3; seq += 1) fs.rmSync(path.join(cloud, logKey("slow", seq)));
+        for (let seq = 5; seq <= 60; seq += 1) putEntry("slow", seq);
+      },
+    });
+    // Slot 4 was free, so the write lands — but it doesn't follow `before`.
+    expect(await commitState(storage, "slow", before, { ...before })).toBeNull();
+    expect(fs.existsSync(path.join(cloud, logKey("slow", 4)))).toBe(true);
+    expect((await readRemote(folderStorage(cloud), "slow")).seq).toBe(60);
+    // And a writer that is already behind doesn't write at all.
+    expect(await commitState(folderStorage(cloud), "slow", before, { ...before })).toBeNull();
+    expect(fs.existsSync(path.join(cloud, logKey("slow", 61)))).toBe(false);
+  });
+
+  it("prunes only entries more than 50 behind that are also an hour old", async () => {
+    for (let seq = 1; seq <= 60; seq += 1)
+      putEntry("log", seq, `r${seq}`, seq <= 5 ? 2 * 3600_000 : 0);
+    expect(await pruneLog(folderStorage(cloud), "log")).toBe(5);
+    expect(fs.existsSync(path.join(cloud, logKey("log", 6)))).toBe(true);
+    expect((await readRemote(folderStorage(cloud), "log")).seq).toBe(60);
+  });
+
+  it("a cut-short listing is refused, and nothing is collected from it", async () => {
+    for (let seq = 1; seq <= 3; seq += 1) putEntry("many", seq);
+    const short = folderStorage(cloud, { truncateAfter: 2 });
+    await expect(readRemote(short, "many")).rejects.toThrow(
+      "more history entries than can be listed",
+    );
+    await expect(collectBundles(short, "many")).rejects.toThrow();
+    expect((await readRemote(folderStorage(cloud), "many")).seq).toBe(3);
+  });
+});
+
+describe("time", () => {
+  it("a push whose upload took over 30 minutes doesn't name its bundle", async () => {
+    const a = newRepo("a", "late");
+    ok(a, "push", "uno", "main");
+    const before = await state("late");
+    commit(a, "two.txt", "two\n", "two");
+    const late = spawnSync("git", ["push", "uno", "main"], {
+      cwd: a,
+      env: { ...env, [FAKE_UPLOAD_MINUTES_ENV]: "31" },
+      encoding: "utf8",
+    });
+    expect(late.status).not.toBe(0);
+    expect(late.stderr).toContain("took too long");
+    expect((await state("late")).seq).toBe(before.seq);
+    // Its bundle is left for collectBundles, not deleted by the push.
+    expect(bundleFiles("late")).toHaveLength(2);
+  });
+
+  it("collects a stray bundle only when both its key time and storage's clock say an hour", async () => {
+    putEntry("gc", 1);
+    const dir = path.join(cloud, ".uno-git", "gc", "bundles");
+    fs.mkdirSync(dir, { recursive: true });
+    const make = (file: string, mtimeAgoMs: number) => {
+      fs.writeFileSync(path.join(dir, file), "x");
+      const at = new Date(Date.now() - mtimeAgoMs);
+      fs.utimesSync(path.join(dir, file), at, at);
+    };
+    make(`${keyAt(2 * 3600_000)}-aaaaaa.bundle`, 0); // old name, just stored
+    make(`${keyAt(0)}-bbbbbb.bundle`, 2 * 3600_000); // stored long ago, fresh name (clock behind)
+    make(`${keyAt(2 * 3600_000)}-cccccc.bundle`, 2 * 3600_000); // old both ways
+    expect(await collectBundles(folderStorage(cloud), "gc")).toBe(1);
+    expect(
+      fs
+        .readdirSync(dir)
+        .toSorted()
+        .map((file) => file.slice(-13)),
+    ).toEqual(["aaaaaa.bundle", "bbbbbb.bundle"]);
+    // Storage's clock decides, not this computer's: two hours later both go.
+    const later = folderStorage(cloud, { nowMs: () => Date.now() + 3 * 3600_000 });
+    expect(await collectBundles(later, "gc")).toBe(2);
   });
 });
