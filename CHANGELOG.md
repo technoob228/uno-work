@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.143 — 2026-10-17
+
+- The agent knows what its computer has: it warns when the disk or memory is nearly full and says what to do, and it can free space by clearing caches (never your files or the trash).
+- Documents the agent saves to Cloud storage keep their earlier versions.
+- The `uno` command in every agent's terminal: status, cleanup, Cloud storage (put, get, list, link), guide.
+- When memory runs out, the heaviest build is stopped instead of the whole computer.
+
 ## v0.0.142 — 2026-10-17
 
 - The model picker is T3's again: your harnesses in a column on the left — **Uno Hermes** first, then Uno Code, Claude, Codex and the rest — with search and the models on the right. The button shows the harness's icon and the model.
