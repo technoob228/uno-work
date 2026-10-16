@@ -4,8 +4,10 @@ import nodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { ControlPlaneHttpError } from "../workspaceRegistry/unoCloudParse.ts";
 import { fakeCloud } from "./cloudStorage.testkit.ts";
 import {
+  cloudDelete,
   cloudList,
   cloudState,
   copyToCloud,
@@ -161,24 +163,75 @@ describe("saving over a cloud file", () => {
     ]);
   });
 
-  it("doesn't replace a file whose old copy couldn't be kept", async () => {
+  it("replaces the file anyway when its old copy can't be kept, and says why", async () => {
     const cloud = fakeCloud();
     const notes = nodePath.join(home, "notes.md");
     await copyToCloud(cloud.deps, { paths: [notes], bucketId: 7 });
     fs.writeFileSync(notes, "# notes v2");
     const fetchImpl = (async (url: string, init?: RequestInit) =>
       url.includes("/put/") && decodeURIComponent(url).includes("/.versions/")
-        ? new Response("no", { status: 500 })
+        ? new Response("full", { status: 402 })
         : cloud.deps.fetchImpl!(url, init)) as typeof fetch;
-    await expect(
-      copyToCloud({ ...cloud.deps, fetchImpl }, { paths: [notes], bucketId: 7 }),
-    ).rejects.toThrow(/previous version of “notes.md”.*Nothing was replaced/);
-    expect(text(cloud.objects.get("notes.md"))).toBe("# notes");
+    const result = await copyToCloud({ ...cloud.deps, fetchImpl }, { paths: [notes], bucketId: 7 });
+    expect(result.overwritten).toEqual([
+      {
+        key: "notes.md",
+        versionKept: false,
+        reason: "no room in cloud storage for the older copy",
+      },
+    ]);
+    expect(text(cloud.objects.get("notes.md"))).toBe("# notes v2");
+    expect(versionsOf(cloud.objects, "notes.md")).toEqual([]);
+  });
+
+  it("keeps no copy when the same bytes are saved again", async () => {
+    const { deps, objects, gets } = fakeCloud();
+    const notes = nodePath.join(home, "notes.md");
+    await copyToCloud(deps, { paths: [notes], bucketId: 7 });
+    const again = await copyToCloud(deps, { paths: [notes], bucketId: 7 });
+    expect(again.files).toBe(1);
+    expect(again.overwritten).toEqual([
+      { key: "notes.md", versionKept: false, reason: "unchanged" },
+    ]);
+    expect(versionsOf(objects, "notes.md")).toEqual([]);
+    expect(gets.at(-1)!.get("accept-encoding")).toBe("identity");
+  });
+
+  it("keeps a copy when the ETag can't vouch for the content (multipart)", async () => {
+    const cloud = fakeCloud();
+    const notes = nodePath.join(home, "notes.md");
+    await copyToCloud(cloud.deps, { paths: [notes], bucketId: 7 });
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const response = await cloud.deps.fetchImpl!(url, init);
+      if (!url.includes("/get/")) return response;
+      const headers = new Headers(response.headers);
+      headers.set("etag", '"0123456789abcdef0123456789abcdef-2"');
+      return new Response(response.body, { status: response.status, headers });
+    }) as typeof fetch;
+    const again = await copyToCloud({ ...cloud.deps, fetchImpl }, { paths: [notes], bucketId: 7 });
+    expect(again.overwritten).toEqual([{ key: "notes.md", versionKept: true }]);
+  });
+
+  it("deletes a file's older copies with it; a folder takes its own", async () => {
+    const { deps, objects } = fakeCloud();
+    const notes = nodePath.join(home, "notes.md");
+    const now = clock();
+    await copyToCloud(deps, { paths: [notes], bucketId: 7, prefix: "a", now });
+    fs.writeFileSync(notes, "v2");
+    await copyToCloud(deps, { paths: [notes], bucketId: 7, prefix: "a", now });
+    await copyToCloud(deps, { paths: [notes], bucketId: 7, prefix: "b", now });
+    fs.writeFileSync(notes, "v3");
+    await copyToCloud(deps, { paths: [notes], bucketId: 7, prefix: "b", now });
+    expect(versionsOf(objects, "a/notes.md")).toHaveLength(1);
+    expect(await cloudDelete(deps, 7, "a/notes.md")).toBe(1);
+    expect([...objects.keys()].filter((key) => key.startsWith("a/"))).toEqual([]);
+    expect(await cloudDelete(deps, 7, "b/")).toBe(2);
+    expect([...objects.keys()]).toEqual([]);
   });
 });
 
 describe("copying from the cloud onto the computer", () => {
-  it("refuses before the first byte when the disk would be almost full", async () => {
+  it("refuses before the first byte when it wouldn't fit", async () => {
     const { deps } = fakeCloud();
     await copyToCloud(deps, { paths: [nodePath.join(home, "Report")], bucketId: 7 });
     const target = nodePath.join(home, "Downloads");
@@ -190,7 +243,7 @@ describe("copying from the cloud onto the computer", () => {
       destinationDir: target,
       measureDisk: async (path) => {
         measured.push(path);
-        return { freeBytes: 1024 ** 3 + 20, totalBytes: 10 * 1024 ** 3 };
+        return { freeBytes: 20, totalBytes: 10 * 1024 ** 3 };
       },
     }).catch((error) => error);
     expect(refusal).toBeInstanceOf(NotEnoughSpaceError);
@@ -198,5 +251,21 @@ describe("copying from the cloud onto the computer", () => {
     expect(refusal.needBytes).toBe(25);
     expect(measured).toEqual([target]);
     expect(fs.readdirSync(target)).toEqual([]);
+  });
+
+  it("copies anyway when a file's size can't be told", async () => {
+    const cloud = fakeCloud();
+    await copyToCloud(cloud.deps, { paths: [nodePath.join(home, "notes.md")], bucketId: 7 });
+    const fetchJson: typeof cloud.deps.fetchJson = async (token, path, init) => {
+      if (path.includes("/objects?prefix=")) throw new ControlPlaneHttpError(500, "500: down");
+      return cloud.deps.fetchJson!(token, path, init);
+    };
+    const target = nodePath.join(home, "Downloads");
+    fs.mkdirSync(target);
+    const result = await copyToComputer(
+      { ...cloud.deps, fetchJson },
+      { bucketId: 7, keys: ["notes.md"], destinationDir: target },
+    );
+    expect(result.files).toBe(1);
   });
 });

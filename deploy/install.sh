@@ -751,10 +751,19 @@ fi
 # Who goes first — the largest process by the kernel's oom_score, nudged by
 # process name (/proc/PID/comm, 15 chars, regex anchored on both ends):
 #   --avoid  -300: the daemon (comm uno-work-daemon, see the launcher above),
-#            the chat agents (claude, codex, opencode, hermes…), sshd, systemd,
-#            dbus, docker. Soft on purpose: the one that runs away is still
-#            stopped when it is far larger than everything else.
-#   --prefer +300: compilers, linkers, Go build steps, python, java, pytest.
+#            the chat agents, sshd, systemd, dbus, docker. Soft on purpose: the
+#            one that runs away is still stopped when it is far larger than
+#            everything else. Agent names that really show up in comm: native
+#            binaries (claude — the native build, or the npm one, which sets
+#            its title to "claude"; codex, codex-acp; opencode, bun-compiled)
+#            and the hermes Python script (a script's comm is its own name).
+#            Agents started through `#!/usr/bin/env node` (claude-agent-acp,
+#            gemini, cursor-agent) are re-exec'd by env and show as "node":
+#            no name can spare them, so they are not listed.
+#   --prefer +300: compilers, linkers, Go build steps (compile, link), esbuild,
+#            tsgo — build steps only. Not python/java: the person's own bots,
+#            Jupyter kernels and app servers run as those and must not go
+#            before a build.
 # Not by "node"/"bun": the daemon, vite, tsc, jest, webpack all run as `node`.
 # No -g: a child that never left the daemon's process group would take the
 # daemon with it. The daemon's unit keeps running when one of its children is
@@ -771,14 +780,42 @@ elif systemctl is-active --quiet systemd-oomd 2>/dev/null; then
 else
   if ! command -v earlyoom >/dev/null 2>&1; then
     log "Installing earlyoom (stops the heaviest process before memory runs out)"
-    # Golden images ship without apt lists (prepare-image.sh), so a self-update
-    # on such a machine fetches them — and drops them again afterwards.
+    # Golden images ship without apt lists (prepare-image.sh), so on such a
+    # machine this fetches them — and drops them again afterwards.
     eoom_had_lists=0
     compgen -G '/var/lib/apt/lists/*_Packages*' >/dev/null && eoom_had_lists=1
-    eoom_apt() { timeout 300 apt-get -o DPkg::Lock::Timeout=120 "$@" >/dev/null 2>&1; }
-    eoom_apt install -y -qq --no-install-recommends earlyoom \
-      || { eoom_apt update -qq && eoom_apt install -y -qq --no-install-recommends earlyoom; } \
-      || log "  WARNING: could not install earlyoom; a box that runs out of memory may hang"
+    # Time caps, in seconds: lists, download, install. A fresh install can wait.
+    # A self-update (the owner's Update button) must not: the updater rolls
+    # back after `timeout 1200`, so here apt gets 2 min at most (20+50+20+30 s), gives up on a
+    # dead network in 20 s, never waits long for a busy apt, and reads only
+    # Ubuntu's own sources (a broken third-party repository is not our problem).
+    # Network steps are the ones capped hard; dpkg itself installs from the
+    # downloaded file, so a cap never cuts it mid-way on a sane machine.
+    eoom_caps="300 120 120"
+    eoom_opts=(-o DPkg::Lock::Timeout=120)
+    eoom_src=()
+    if [ "${UNO_WORK_SELF_UPDATE:-0}" = "1" ]; then
+      eoom_caps="50 20 30"
+      eoom_opts=(-o DPkg::Lock::Timeout=30 -o Acquire::Retries=0
+        -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+      if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+        eoom_src=(-o Dir::Etc::SourceList=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::SourceParts=-)
+      fi
+    fi
+    read -r eoom_t_update eoom_t_fetch eoom_t_install <<<"${eoom_caps}"
+    eoom_apt() { # seconds apt-get-args...
+      local secs="$1"; shift
+      timeout -k 5 "${secs}" apt-get "${eoom_opts[@]}" "$@" >/dev/null 2>&1
+    }
+    eoom_fetch() {
+      eoom_apt "${eoom_t_fetch}" "${eoom_src[@]}" install -y -qq --download-only --no-install-recommends earlyoom
+    }
+    if eoom_fetch || { eoom_apt "${eoom_t_update}" "${eoom_src[@]}" update -qq && eoom_fetch; }; then
+      eoom_apt "${eoom_t_install}" "${eoom_src[@]}" install -y -qq --no-install-recommends earlyoom \
+        || log "  WARNING: could not install earlyoom; a box that runs out of memory may hang"
+    else
+      log "  WARNING: could not download earlyoom (no network to Ubuntu?); a box that runs out of memory may hang"
+    fi
     if [ "${eoom_had_lists}" = "0" ]; then
       rm -rf /var/lib/apt/lists/* 2>/dev/null || true
       apt-get clean >/dev/null 2>&1 || true
@@ -791,7 +828,7 @@ else
 # $EARLYOOM_ARGS: quotes inside /etc/default/earlyoom reach earlyoom literally.
 [Service]
 ExecStart=
-ExecStart=/usr/bin/earlyoom -m 8,4 -M 524288,262144 -s 100,100 -r 0 --avoid ^(uno-work-daemon|claude|claude-agent-ac|codex|codex-acp|opencode|[.]opencode|cursor-agent|hermes|gemini|sshd|sshd-session|systemd|systemd-.+|[(]sd-pam[)]|dbus-daemon|dbus-broker|dockerd|containerd|containerd-shim|earlyoom|agetty|Xvfb)$$ --prefer ^(cc1|cc1plus|cc1obj|lto1|rustc|ld|ld[.](bfd|gold|lld)|lld|mold|clang|clang-[0-9]+|clang[+][+]|compile|link|go|tsgo|esbuild|java|python|python3|python3[.][0-9]+|pytest)$$
+ExecStart=/usr/bin/earlyoom -m 8,4 -M 524288,262144 -s 100,100 -r 0 --avoid ^(uno-work-daemon|claude|codex|codex-acp|opencode|[.]opencode|hermes|sshd|sshd-session|systemd|systemd-.+|[(]sd-pam[)]|dbus-daemon|dbus-broker|dockerd|containerd|containerd-shim|earlyoom|agetty|Xvfb)$$ --prefer ^(cc1|cc1plus|cc1obj|lto1|rustc|ld|ld[.](bfd|gold|lld)|lld|mold|clang|clang-[0-9]+|clang[+][+]|compile|link|go|tsgo|esbuild)$$
 # Keep earlyoom itself scheduled and alive while the box is under pressure.
 Nice=-10
 OOMScoreAdjust=-900

@@ -36,6 +36,14 @@ die() { printf '\033[1;31m[prepare-image]\033[0m %s\n' "$*" >&2; exit 1; }
 log "Проверяю, что демон и харнесы живые"
 systemctl is-active --quiet uno-work || die "uno-work service is not running"
 curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/health" >/dev/null || die "health probe failed"
+# Имя процесса демона — по нему earlyoom его щадит (install.sh, «Early OOM
+# killer»). Проверяем здесь, пока демон работает (шаг 2 его гасит): клон
+# запустит его тем же юнитом и тем же лаунчером.
+daemon_pid="$(systemctl show -p MainPID --value uno-work 2>/dev/null || true)"
+daemon_comm="$(cat "/proc/${daemon_pid:-0}/comm" 2>/dev/null || true)"
+[ "${daemon_comm}" = "uno-work-daemon" ] \
+  || die "the running daemon (pid ${daemon_pid:-?}) is named '${daemon_comm:-?}', not 'uno-work-daemon': earlyoom would not spare it on clones — rerun install.sh (launcher + node link), then prepare-image.sh"
+log "  демон: pid ${daemon_pid}, имя ${daemon_comm}"
 
 for harness in opencode hermes; do
   if sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" bash -lc "command -v ${harness}" >/dev/null 2>&1; then
@@ -396,8 +404,8 @@ fi
 
 # 12. earlyoom (install.sh, «Early OOM killer»): без него бокс, у которого
 # кончилась память, виснет (бокс 395 01.09, сборка Dax 16.10). Образ снимается
-# со снимком памяти — earlyoom должен уже работать, а демон стартовать через
-# ссылку uno-work-daemon (по этому имени earlyoom его щадит).
+# со снимком памяти — earlyoom должен уже работать. Имя работающего демона
+# проверено в шаге 1; здесь — что ссылка для следующих стартов на месте.
 log "Проверяю earlyoom и имя процесса демона"
 if ! systemctl is-active --quiet systemd-oomd 2>/dev/null; then
   command -v earlyoom >/dev/null 2>&1 || die "earlyoom is not installed — rerun install.sh"

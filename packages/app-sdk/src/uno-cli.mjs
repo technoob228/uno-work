@@ -171,13 +171,19 @@ export function planCommand(argv, where) {
   }
 }
 
+/** First words this command answers itself; any other goes to the Uno API CLI. */
+const OWN_COMMANDS = new Set(["status", "cleanup", "drive", "guide"]);
+
 /** @returns {Plan} */
 function plan(/** @type {string[]} */ argv, /** @type {{ cwd: string, home: string }} */ where) {
   const [command, ...rest] = argv;
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
     return { kind: "help" };
   }
-  if (rest.includes("--help") || rest.includes("-h")) return { kind: "help" };
+  // Help flags inside our own commands only: `uno boxes create --help` is the API CLI's.
+  if (OWN_COMMANDS.has(command) && (rest.includes("--help") || rest.includes("-h"))) {
+    return { kind: "help" };
+  }
   /** @param {Omit<Extract<Plan, { kind: "call" }>, "kind" | "timeoutMs" | "mayAsk"> & { timeoutMs?: number, mayAsk?: boolean }} call */
   const callPlan = (call) => /** @type {Plan} */ ({
     kind: "call",

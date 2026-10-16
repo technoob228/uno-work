@@ -148,6 +148,23 @@ describe("the Uno API CLI's commands", () => {
       argv: ["boxes", "list", "--json"],
     });
     expect(plan("--version")).toEqual({ kind: "delegate", argv: ["--version"] });
+    // Their help flags are theirs; ours only inside our commands or bare.
+    expect(plan("boxes create --help")).toEqual({
+      kind: "delegate",
+      argv: ["boxes", "create", "--help"],
+    });
+    expect(plan("git commit -h")).toEqual({ kind: "delegate", argv: ["git", "commit", "-h"] });
+    for (const line of [
+      "",
+      "help",
+      "--help",
+      "-h",
+      "status -h",
+      "cleanup --help",
+      "guide --help",
+    ]) {
+      expect(plan(line), line).toEqual({ kind: "help" });
+    }
   });
 
   it.skipIf(process.platform === "win32")("finds the next uno on PATH, never itself", () => {

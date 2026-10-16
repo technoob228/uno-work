@@ -9,7 +9,8 @@
  *
  * @module files/cloudStorage
  */
-import { createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 import { Readable } from "node:stream";
@@ -39,6 +40,7 @@ import {
   cloudVersionKey,
   cloudVersionSkipReason,
   cloudVersionsPrefix,
+  isCloudVersionKey,
   staleCloudVersions,
 } from "./cloudVersions.ts";
 import { ensureDiskSpace } from "./diskSpace.ts";
@@ -323,7 +325,7 @@ export async function cloudCreateBucket(deps: CloudDeps, name: string): Promise<
   return bucket;
 }
 
-export async function cloudDelete(deps: CloudDeps, bucketId: number, key: string): Promise<number> {
+async function deleteObjects(deps: CloudDeps, bucketId: number, key: string): Promise<number> {
   const raw = await call(
     deps,
     `/api/v1/buckets/${bucketId}/objects?key=${encodeURIComponent(key)}`,
@@ -332,6 +334,20 @@ export async function cloudDelete(deps: CloudDeps, bucketId: number, key: string
     },
   );
   return num((raw as Record<string, unknown> | null)?.["deleted"]);
+}
+
+/**
+ * Delete one object, or a whole folder (a key ending in "/": the console
+ * deletes everything under it, `.versions/` folders included). A file's
+ * older copies go with it (best effort, once the file itself is gone).
+ * Returns how many objects the console deleted for `key`.
+ */
+export async function cloudDelete(deps: CloudDeps, bucketId: number, key: string): Promise<number> {
+  const deleted = await deleteObjects(deps, bucketId, key);
+  if (!key.endsWith("/") && !isCloudVersionKey(key)) {
+    await deleteObjects(deps, bucketId, cloudVersionsPrefix(key)).catch(() => 0);
+  }
+  return deleted;
 }
 
 /** A presigned download link. Uploads go through `cloudUpload` (any size). */
@@ -366,6 +382,8 @@ export async function cloudUpload(
     readonly contentType?: string | undefined;
     readonly onProgress?: ((uploadedBytes: number, totalBytes: number) => void) | undefined;
     readonly storageMessage?: ((error: CloudUploadError) => string) | undefined;
+    /** Parts in flight (each held in memory when the source is a stream). */
+    readonly concurrency?: number | undefined;
   } = {},
 ): Promise<void> {
   try {
@@ -381,6 +399,7 @@ export async function cloudUpload(
       source,
       contentType: options.contentType,
       onProgress: options.onProgress,
+      concurrency: options.concurrency,
     });
   } catch (cause) {
     if (cause instanceof CloudUploadError) {
@@ -398,51 +417,110 @@ export async function cloudUpload(
 
 // ── Older copies ───────────────────────────────────────────────────────────
 
+/** A plain MD5 ETag (single-part upload), lowercased without quotes; null otherwise. */
+export function plainMd5Etag(etag: string | null): string | null {
+  const match = /^(?:W\/)?"?([0-9a-f]{32})"?$/i.exec(etag?.trim() ?? "");
+  return match ? match[1]!.toLowerCase() : null;
+}
+
+/** MD5 of a file on disk, streamed. */
+async function fileMd5(path: string): Promise<string> {
+  const hash = createHash("md5");
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex");
+}
+
+export type KeepVersionOutcome =
+  | { readonly kind: "kept" }
+  /** The object is gone: nothing is being replaced. */
+  | { readonly kind: "gone" }
+  | { readonly kind: "skipped"; readonly reason: string };
+
 /**
  * Copy the current object `key` to its versions folder (cloudVersions.ts),
- * streamed from storage back into storage — nothing touches the disk. False
- * when there is nothing to keep (the object is gone).
+ * streamed from storage back into storage — nothing touches the disk, one
+ * part in memory at a time. Never throws: a copy that can't be made says why
+ * (`skipped`), and the caller replaces the file anyway. When `replacement`
+ * has the same bytes (same size, and a plain-MD5 ETag equal to its MD5)
+ * there is nothing worth keeping.
  */
 export async function keepCloudVersion(
   deps: CloudDeps,
   input: {
     readonly bucketId: number;
     readonly key: string;
-    /** From the listing; the GET's own length wins when storage sends one. */
-    readonly size: number;
     readonly now: Date;
+    /** The file about to replace it, to skip copies of unchanged content. */
+    readonly replacement?: { readonly path: string; readonly size: number } | undefined;
   },
-): Promise<boolean> {
-  const name = lastSegment(input.key);
-  const url = await cloudPresign(deps, input.bucketId, input.key, "get");
-  const response = await (deps.fetchImpl ?? fetch)(url);
-  if (response.status === 404) {
-    await response.body?.cancel().catch(() => undefined);
-    return false;
-  }
-  if (!response.ok || !response.body) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new CloudError(
-      `Couldn't keep the previous version of “${name}” (storage answered ${response.status}). Nothing was replaced.`,
+): Promise<KeepVersionOutcome> {
+  let body: ReadableStream | null = null;
+  let reader: Readable | null = null;
+  // Stop the download: the upload of it failed, or it isn't needed.
+  const drop = async () => {
+    if (reader) reader.destroy();
+    else await body?.cancel().catch(() => undefined);
+  };
+  try {
+    const url = await cloudPresign(deps, input.bucketId, input.key, "get");
+    // Stored bytes as they are: a decoded body wouldn't match its length.
+    const response = await (deps.fetchImpl ?? fetch)(url, {
+      headers: { "accept-encoding": "identity" },
+    });
+    body = response.body;
+    if (response.status === 404) {
+      await drop();
+      return { kind: "gone" };
+    }
+    if (!response.ok || !body) {
+      await drop();
+      return { kind: "skipped", reason: `couldn't read it (storage answered ${response.status})` };
+    }
+    const encoding = response.headers.get("content-encoding")?.trim().toLowerCase();
+    const size = Number(response.headers.get("content-length") ?? Number.NaN);
+    if ((encoding && encoding !== "identity") || !Number.isSafeInteger(size) || size < 0) {
+      await drop();
+      return { kind: "skipped", reason: "storage didn't say its exact size" };
+    }
+    const etag = plainMd5Etag(response.headers.get("etag"));
+    if (
+      input.replacement &&
+      etag !== null &&
+      input.replacement.size === size &&
+      (await fileMd5(input.replacement.path).catch(() => null)) === etag
+    ) {
+      await drop();
+      return { kind: "skipped", reason: "unchanged" };
+    }
+    const contentType = response.headers.get("content-type") ?? undefined;
+    reader = Readable.fromWeb(body as never);
+    await cloudUpload(
+      deps,
+      input.bucketId,
+      cloudVersionKey(input.key, input.now),
+      streamUploadSource(reader, size),
+      {
+        contentType,
+        concurrency: 1,
+        storageMessage: (error) =>
+          error.status === 402 || error.status === 403
+            ? "no room in cloud storage for the older copy"
+            : `couldn't keep the older copy (${error.message})`,
+      },
     );
+    return { kind: "kept" };
+  } catch (cause) {
+    await drop();
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return {
+      kind: "skipped",
+      reason: /^(no room|couldn't keep)/.test(message)
+        ? message
+        : /Cloud storage is full/.test(message)
+          ? "no room in cloud storage for the older copy"
+          : `couldn't keep the older copy (${message})`,
+    };
   }
-  const declared = Number(response.headers.get("content-length") ?? Number.NaN);
-  const size = Number.isSafeInteger(declared) && declared >= 0 ? declared : input.size;
-  const contentType = response.headers.get("content-type") ?? undefined;
-  await cloudUpload(
-    deps,
-    input.bucketId,
-    cloudVersionKey(input.key, input.now),
-    streamUploadSource(Readable.fromWeb(response.body as never), size),
-    {
-      contentType,
-      storageMessage: (error) =>
-        error.status === 402 || error.status === 403
-          ? `Cloud storage is full: no room to keep the previous version of “${name}”. Nothing was replaced.`
-          : `Couldn't keep the previous version of “${name}” (${error.message}). Nothing was replaced.`,
-    },
-  );
-  return true;
 }
 
 /** Drops all but the newest kept copies of `key` (cloudVersions.ts). */
@@ -454,7 +532,7 @@ export async function pruneCloudVersions(
   const listing = await listObjects(deps, bucketId, cloudVersionsPrefix(key));
   if (!listing) return;
   for (const stale of staleCloudVersions(listing.objects.map((object) => object.key))) {
-    await cloudDelete(deps, bucketId, stale);
+    await deleteObjects(deps, bucketId, stale);
   }
 }
 
@@ -506,8 +584,9 @@ export interface CloudOverwrite {
 /**
  * Upload files/folders (already resolved inside the home) into a bucket
  * folder. A file that replaces one already there keeps the old one as an
- * older copy (see {@link keepCloudVersion}, limits in cloudVersions.ts); if
- * that copy can't be made, the file isn't replaced.
+ * older copy (see {@link keepCloudVersion}, limits in cloudVersions.ts);
+ * if that copy can't be made the file is replaced anyway and `overwritten`
+ * says why no copy was kept.
  */
 export async function copyToCloud(
   deps: CloudDeps,
@@ -528,13 +607,15 @@ export async function copyToCloud(
   const skipped: Array<{ name: string; reason: string }> = [];
   const files: LocalFile[] = [];
   for (const path of input.paths) await collectLocal(path, nodePath.basename(path), files, skipped);
+  // Which files replace one already there; a console that can't tell only
+  // costs those files their older copies.
   const existing =
     files.length > 0
       ? await existingObjectSizes(
           deps,
           input.bucketId,
           files.map((file) => `${prefix}${file.relativeKey}`),
-        )
+        ).catch(() => new Map<string, number>())
       : new Map<string, number>();
   let bytes = 0;
   let versionsKept = 0;
@@ -545,20 +626,23 @@ export async function copyToCloud(
     const existingSize = existing.get(key);
     let versionKept = false;
     if (existingSize !== undefined) {
-      const reason = cloudVersionSkipReason(key, existingSize, versionsKept);
-      if (reason === null) {
-        versionKept = await keepCloudVersion(deps, {
-          bucketId: input.bucketId,
-          key,
-          size: existingSize,
-          now: now(),
-        });
-        if (versionKept) {
-          versionsKept += 1;
-          overwritten.push({ key, versionKept: true });
-        }
-      } else {
-        overwritten.push({ key, versionKept: false, reason });
+      const skip = cloudVersionSkipReason(key, existingSize, versionsKept);
+      const outcome: KeepVersionOutcome =
+        skip === null
+          ? await keepCloudVersion(deps, {
+              bucketId: input.bucketId,
+              key,
+              now: now(),
+              replacement: { path: file.absolutePath, size: file.size },
+            })
+          : { kind: "skipped", reason: skip };
+      if (outcome.kind === "kept") {
+        versionKept = true;
+        versionsKept += 1;
+        overwritten.push({ key, versionKept: true });
+      } else if (outcome.kind === "skipped") {
+        // Never a reason not to save: the file is replaced, the reply says so.
+        overwritten.push({ key, versionKept: false, reason: outcome.reason });
       }
     }
     // Any size: the console answers big files with parts (cloudUpload.ts) and
@@ -595,9 +679,12 @@ export async function copyToComputer(
   const skipped: Array<{ name: string; reason: string }> = [];
   const landed: string[] = [];
   const singleKeys = input.keys.filter((key) => !key.endsWith("/"));
+  // Sizes are for the space check only: one the console can't tell counts as 0.
   const singleSizes =
     singleKeys.length > 0
-      ? await existingObjectSizes(deps, input.bucketId, singleKeys)
+      ? await existingObjectSizes(deps, input.bucketId, singleKeys).catch(
+          () => new Map<string, number>(),
+        )
       : new Map<string, number>();
   const plans: Array<{
     readonly key: string;
