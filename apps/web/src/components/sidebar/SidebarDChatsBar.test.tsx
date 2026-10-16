@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SidebarDChatsBar, newChatTooltipLabel } from "./SidebarDChatsBar";
+import { LegacySidebarDChatsBar, SidebarDChatsBar, newChatTooltipLabel } from "./SidebarDChatsBar";
 
 const base = {
   title: "All chats",
@@ -22,7 +22,38 @@ const base = {
   onAddProject: () => {},
 };
 
-describe("SidebarDChatsBar", () => {
+describe("LegacySidebarDChatsBar (Sidebar view menu off, as in 0.0.137)", () => {
+  it("has New chat right before Add a project", () => {
+    const html = renderToStaticMarkup(
+      <LegacySidebarDChatsBar
+        onNewChat={() => {}}
+        newChatShortcutLabel="⌘N"
+        onAddProject={() => {}}
+      />,
+    );
+    const newChat = html.indexOf('data-testid="sidebar-d-new-chat"');
+    const addProject = html.indexOf('data-testid="sidebar-d-add-project"');
+    expect(newChat).toBeGreaterThan(-1);
+    expect(addProject).toBeGreaterThan(newChat);
+    expect(html).toContain('aria-label="New chat"');
+    expect(html).toContain('aria-label="Add a project"');
+  });
+
+  it("is the quiet Chats label, with no view menu", () => {
+    const html = renderToStaticMarkup(
+      <LegacySidebarDChatsBar
+        onNewChat={() => {}}
+        newChatShortcutLabel={null}
+        onAddProject={() => {}}
+      />,
+    );
+    expect(html).toContain(">Chats<");
+    expect(html).not.toContain("sidebar-d-view-trigger");
+    expect(html.match(/<button/g)?.length).toBe(2);
+  });
+});
+
+describe("SidebarDChatsBar (Sidebar view menu on)", () => {
   it("has the title menu, Add a project, then New chat rightmost — nothing else", () => {
     const html = renderToStaticMarkup(<SidebarDChatsBar {...base} />);
     const trigger = html.indexOf('data-testid="sidebar-d-view-trigger"');

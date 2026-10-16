@@ -230,6 +230,16 @@ function revealTab(
   return next;
 }
 
+/** Как открывать вкладки (флаги Labs). */
+export interface OpenTabOptions {
+  /**
+   * Помечать вкладки, открытые агентом (`openedBy: "agent"`, значок в ряду
+   * вкладок, флаг `panelTabPins`). Без флага — как в 0.0.137, без пометки.
+   * Пометка живёт только в памяти: `previewTabPersistence` её не сохраняет.
+   */
+  readonly markAgentTabs?: boolean;
+}
+
 /**
  * Положить вкладку в бакет её уровня и показать в виде цели. Уже открытая
  * вкладка (тот же id на любом видимом уровне) не дублируется.
@@ -240,6 +250,7 @@ export function openTab(
   scope: PreviewTabScope,
   file: PreviewFile,
   source: PanelOpenSource,
+  options: OpenTabOptions = {},
 ): PreviewStates {
   const existingKey = visibleScopeKeys(target).find((scopeKey) =>
     (states[scopeKey]?.files ?? []).some((candidate) => candidate.id === file.id),
@@ -248,7 +259,8 @@ export function openTab(
   const bucketKey = scopeKeyForTarget(target, scope);
   const bucket = getPreviewBucketState(states, bucketKey);
   // What the agent opened carries a small mark in the tab row (w0138 p4).
-  const tab: PreviewFile = source === "agent" ? { ...file, openedBy: "agent" } : file;
+  const tab: PreviewFile =
+    options.markAgentTabs === true && source === "agent" ? { ...file, openedBy: "agent" } : file;
   const next = { ...states, [bucketKey]: { ...bucket, files: [...bucket.files, tab] } };
   return revealTab(next, target, bucketKey, file.id, source);
 }
@@ -264,6 +276,7 @@ export function openBrowserTab(
   url: string,
   makeTab: () => PreviewFile,
   source: PanelOpenSource,
+  options: OpenTabOptions = {},
 ): PreviewStates {
   if (url) {
     for (const scopeKey of visibleScopeKeys(target)) {
@@ -273,7 +286,7 @@ export function openBrowserTab(
       if (existing) return revealTab(states, target, scopeKey, existing.id, source);
     }
   }
-  return openTab(states, target, scope, makeTab(), source);
+  return openTab(states, target, scope, makeTab(), source, options);
 }
 
 /** Человек открыл/закрыл панель в контексте цели. */

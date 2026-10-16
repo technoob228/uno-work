@@ -109,7 +109,17 @@ import {
 } from "./updateMachine.ts";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
-import { UnoAccountService } from "./unoAccount.ts";
+import { createPageToolsMain } from "./pageTools/pageToolsMain.ts";
+import {
+  DESKTOP_FLAVOR_ENV,
+  isAutoUpdateAllowedForFlavor,
+  resolveDesktopFlavor,
+  resolveDesktopIdentity,
+  resolveFlavorBackendEnv,
+  resolveUserDataPath as resolveFlavorUserDataPath,
+} from "./desktopFlavor.ts";
+import { UNO_CONSOLE_URL, UnoAccountService } from "./unoAccount.ts";
+import { nodeInspectFile, nodeUploadFile, shareLocalFileViaDrive } from "./driveShareFile.ts";
 import {
   decideMainWindowNavigation,
   isAllowedWebviewUrl,
@@ -178,7 +188,34 @@ const UNO_ACCOUNT_STATUS_CHANNEL = "desktop:uno-account-status";
 const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
 const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
 const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".unowork");
+const UNO_DRIVE_SHARE_FILE_CHANNEL = "desktop:uno-drive-share-file";
+const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+// "Uno Work Stage" (16.10) next to the release app: its own data home,
+// Chromium profile and ids (desktopFlavor.ts). Read before anything touches
+// a path. Packaged: the app's own package.json; dev: the repo root's.
+const DESKTOP_FLAVOR = resolveDesktopFlavor({
+  envValue: process.env[DESKTOP_FLAVOR_ENV],
+  packageJsonRaw: (() => {
+    try {
+      return FS.readFileSync(
+        Path.join(
+          app.isPackaged ? app.getAppPath() : Path.resolve(__dirname, "../../.."),
+          "package.json",
+        ),
+        "utf8",
+      );
+    } catch {
+      return null;
+    }
+  })(),
+});
+const DESKTOP_IDENTITY = resolveDesktopIdentity({
+  flavor: DESKTOP_FLAVOR,
+  isDevelopment,
+  homeDir: OS.homedir(),
+  t3codeHome: process.env.T3CODE_HOME,
+});
+const BASE_DIR = DESKTOP_IDENTITY.baseDir;
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
@@ -188,7 +225,6 @@ const BROWSER_CREDENTIALS_PATH = Path.join(STATE_DIR, "browser-credentials.json"
 const UNO_ACCOUNT_PATH = Path.join(STATE_DIR, "uno-account.bin");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
-const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // Dev-only SSH launcher override. Set this to an absolute path on the SSH host
 // for a built server entry, for example:
 // "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs"
@@ -199,13 +235,12 @@ const DEFAULT_DEV_REMOTE_DEBUGGING_PORT = 9223;
 const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
   isDevelopment,
   appVersion: app.getVersion(),
+  flavor: DESKTOP_FLAVOR,
 });
 const APP_DISPLAY_NAME = desktopAppBranding.displayName;
-const APP_USER_MODEL_ID = isDevelopment ? "xyz.getuno.work.dev" : "xyz.getuno.work";
-const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "unowork-dev.desktop" : "unowork.desktop";
-const LINUX_WM_CLASS = isDevelopment ? "unowork-dev" : "unowork";
-const USER_DATA_DIR_NAME = isDevelopment ? "unowork-dev" : "unowork";
-const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APP_USER_MODEL_ID = DESKTOP_IDENTITY.appUserModelId;
+const LINUX_DESKTOP_ENTRY_NAME = DESKTOP_IDENTITY.linuxDesktopEntryName;
+const LINUX_WM_CLASS = DESKTOP_IDENTITY.linuxWmClass;
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -433,6 +468,11 @@ function backendChildEnv(): NodeJS.ProcessEnv {
     env.UNO_MCP_SEARCH_SCRIPT = unoSearchScript;
     env.UNO_MCP_NODE_BIN = process.execPath;
   }
+
+  // Uno Work Stage: its daemon keeps to its own apps / assistants / harness
+  // folders (not the person's ~/.uno/apps, ~/UnoWork/Assistants, ~/.unowork)
+  // and says it is on the stage channel. The release app adds nothing.
+  Object.assign(env, resolveFlavorBackendEnv({ flavor: DESKTOP_FLAVOR, baseDir: BASE_DIR, env }));
 
   return env;
 }
@@ -1110,6 +1150,7 @@ function handleCheckForUpdatesMenuClick(): void {
     platform: process.platform,
     appImage: process.env.APPIMAGE,
     disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    stageBuild: !isAutoUpdateAllowedForFlavor(DESKTOP_FLAVOR),
     hasUpdateFeedConfig,
   });
   if (disabledReason) {
@@ -1282,12 +1323,12 @@ function resolveUserDataPath(): string {
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
-  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
-  if (FS.existsSync(legacyPath)) {
-    return legacyPath;
-  }
-
-  return Path.join(appDataBase, USER_DATA_DIR_NAME);
+  // The stage never adopts the legacy profile (desktopFlavor.ts).
+  return resolveFlavorUserDataPath({
+    appDataBase,
+    identity: DESKTOP_IDENTITY,
+    exists: (path) => FS.existsSync(path),
+  });
 }
 
 function configureAppIdentity(): void {
@@ -1519,6 +1560,7 @@ function shouldEnableAutoUpdates(): boolean {
       platform: process.platform,
       appImage: process.env.APPIMAGE,
       disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      stageBuild: !isAutoUpdateAllowedForFlavor(DESKTOP_FLAVOR),
       hasUpdateFeedConfig,
     }) === null
   );
@@ -2044,6 +2086,36 @@ function registerIpcHandlers(): void {
     });
   });
 
+  // "Share with a link…" for a file on this Mac: a copy to Uno Drive → Shared/
+  // with the desktop's own sign-in, then a link to it (driveShareFile.ts).
+  ipcMain.removeHandler(UNO_DRIVE_SHARE_FILE_CHANNEL);
+  handleTrustedIpc(UNO_DRIVE_SHARE_FILE_CHANNEL, async (_event, raw: unknown) => {
+    const input = raw as { path?: unknown; expiresInHours?: unknown } | null;
+    if (typeof input?.path !== "string") return { ok: false, error: "No file to share." };
+    try {
+      return await shareLocalFileViaDrive(
+        {
+          consoleUrl: UNO_CONSOLE_URL,
+          homeDir: OS.homedir(),
+          accountRequest: (request) => unoAccount.request(request),
+          inspect: nodeInspectFile,
+          upload: nodeUploadFile,
+        },
+        {
+          path: input.path,
+          ...(typeof input.expiresInHours === "number"
+            ? { expiresInHours: input.expiresInHours }
+            : {}),
+        },
+      );
+    } catch (error) {
+      console.warn("[desktop] sharing a file failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, error: "Sharing didn't work. Check the connection and try again." };
+    }
+  });
+
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
   handleTrustedIpc(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
     if (typeof rawSettings !== "object" || rawSettings === null) {
@@ -2561,6 +2633,21 @@ function guardGuestSessionPermissions(guestSession: Electron.Session): void {
   guestSession.setDisplayMediaRequestHandler((_request, callback) => callback({}));
 }
 
+let pageToolsMain: ReturnType<typeof createPageToolsMain> | null = null;
+/** Comment and Debug for the panel browser's pages (pageTools/pageToolsMain.ts). */
+function getPageToolsMain(): ReturnType<typeof createPageToolsMain> {
+  pageToolsMain ??= createPageToolsMain({
+    ipcMain,
+    preloadPath: Path.join(__dirname, "pagePreload.cjs"),
+    sessionFromPartition: (partition) => session.fromPartition(partition),
+    log: {
+      info: (message, details) => console.info(message, details ?? {}),
+      warn: (message, details) => console.warn(message, details ?? {}),
+    },
+  });
+  return pageToolsMain;
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
@@ -2680,10 +2767,16 @@ function createWindow(): BrowserWindow {
     if (params.src && !isAllowedWebviewUrl(params.src)) {
       console.warn("[desktop] refused to attach webview", { src: params.src });
       event.preventDefault();
+      return;
     }
+    // The panel browser (and only it) gets our own page preload for Comment
+    // and Debug (pageTools/): never a preload the page or the app asked for.
+    // Its first address (checked just above) loads once Debug listens.
+    getPageToolsMain().willAttachWebview(webPreferences, params);
   });
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
     guardGuestSessionPermissions(guestContents.session);
+    getPageToolsMain().didAttachWebview(guestContents);
     guestContents.setWindowOpenHandler(({ url }) => {
       const safeUrl = getSafeExternalUrl(url);
       if (safeUrl && !window.isDestroyed()) {

@@ -17,6 +17,7 @@ import { useOpenApp } from "../navigation/useOpenApp";
 import { useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { type InboxEntry, updateInbox } from "./inboxStore";
+import { DEMO } from "../demo/demoFlag";
 
 const OFFICE_KINDS = new Set(["document", "spreadsheet", "presentation"]);
 
@@ -39,7 +40,10 @@ export function joinAppPath(base: string, path: string | null): string {
  */
 export function assistantPageOfUrl(
   url: string,
+  teamPages = DEMO,
 ): { readonly environmentId: string; readonly projectId: string } | null {
+  // The team's pages are mock-only for now (Misha 16.10).
+  if (!teamPages) return null;
   const match = /^uno:\/\/assistant\/([^/]+)\/(assistant-[^/?#]+)$/.exec(url);
   return match ? { environmentId: decodeURIComponent(match[1]!), projectId: match[2]! } : null;
 }

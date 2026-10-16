@@ -23,7 +23,10 @@ import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 import { personMachineName } from "@t3tools/shared/machineName";
 import { useQuery } from "@tanstack/react-query";
 
+import { useDemoDesktop } from "../../demo/demoFlag";
+import { isElectron } from "../../env";
 import { readEnvironmentApi } from "../../environmentApi";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { selectThreadByRef, useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
@@ -257,23 +260,35 @@ function LocationStrip({
   // never the host or image name the daemon happens to run under.
   const resolveEnvironmentLabel = useSidebarEnvironmentLabelResolver();
   const machine = browserMachineName(resolveEnvironmentLabel(environmentId), location.machine);
+  // With the new launcher (`panelLauncherV2`) the line is short: the address
+  // and the proxy go to its tooltip. Without it — as in 0.0.137.
+  const compact = useFeatureFlag("panelLauncherV2");
   return (
     <div className="border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
       <div className="flex items-center gap-1.5">
         <MonitorIcon className="size-3 shrink-0" />
-        {/* The address and the proxy are for the curious: in the tooltip (w0138). */}
-        <span
-          className="min-w-0 flex-1 truncate"
-          title={[
-            address,
-            location.proxy ? `via ${hostOf(location.proxy.server)}` : null,
-            "Keeps working when you close Uno Work",
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        >
-          Runs on {machine}
-        </span>
+        {compact ? (
+          // The address and the proxy are for the curious: in the tooltip (w0138).
+          <span
+            className="min-w-0 flex-1 truncate"
+            title={[
+              address,
+              location.proxy ? `via ${hostOf(location.proxy.server)}` : null,
+              "Keeps working when you close Uno Work",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          >
+            Runs on {machine}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            Runs on {machine}
+            {address ? ` · ${address}` : ""}
+            {location.proxy ? ` · via ${hostOf(location.proxy.server)}` : ""} · keeps working when
+            you close Uno Work
+          </span>
+        )}
         <button
           type="button"
           className="shrink-0 rounded px-1 hover:bg-accent hover:text-foreground"
@@ -451,6 +466,10 @@ function Toolbar({
   tabId: string;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
+  // "Comment · soon" (flag `browserPageTools`): only in the desktop app, where
+  // the other browser (this device's) has Comment now.
+  const demoDesktop = useDemoDesktop();
+  const pageToolsOn = useFeatureFlag("browserPageTools") && (isElectron || demoDesktop);
   const [draft, setDraft] = useState(page.url);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -542,7 +561,12 @@ function Toolbar({
   const navDisabled = !human;
   const navTitle = human ? undefined : "Take control to browse";
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
+    <div
+      className={cn(
+        "flex items-center gap-1 border-b border-border px-2",
+        pageToolsOn ? "h-8 shrink-0" : "py-1",
+      )}
+    >
       <Button
         size="icon-xs"
         variant="ghost"
@@ -597,17 +621,19 @@ function Toolbar({
       </form>
       {/* Comment here comes later (w0138): the page is a picture of the
           computer's browser, its elements are not in this app. */}
-      <span
-        className="inline-flex h-6 shrink-0 cursor-default items-center gap-1 rounded px-1 text-muted-foreground/60"
-        title="Comments on the agent's browser are coming soon. Use Browser on this device to comment now."
-        data-testid="live-browser-comment-soon"
-      >
-        <MessageSquarePlusIcon className="size-3.5" />
-        <span className="text-xs">Comment</span>
-        <span className="rounded bg-muted px-1 text-[9.5px] font-medium tracking-wide uppercase">
-          soon
+      {pageToolsOn ? (
+        <span
+          className="inline-flex h-6 shrink-0 cursor-default items-center gap-1 rounded px-1 text-muted-foreground/60"
+          title="Comments on the agent's browser are coming soon. Use Browser on this device to comment now."
+          data-testid="live-browser-comment-soon"
+        >
+          <MessageSquarePlusIcon className="size-3.5" />
+          <span className="text-xs">Comment</span>
+          <span className="rounded bg-muted px-1 text-[9.5px] font-medium tracking-wide uppercase">
+            soon
+          </span>
         </span>
-      </span>
+      ) : null}
       {matched.length > 0 ? (
         <Button
           size="icon-xs"
@@ -670,6 +696,9 @@ function Screen({
   // иначе выделение слова и строки на странице не работает.
   const clickRef = useRef({ at: 0, x: 0, y: 0, count: 0 });
   const [hint, setHint] = useState(false);
+  // `panelLauncherV2`: the picture sits at the top (no band of empty space
+  // above it); without the flag — centred, as in 0.0.137.
+  const pinTop = useFeatureFlag("panelLauncherV2");
 
   const send = useCallback(
     (event: BrowserLiveInputEvent) => {
@@ -687,14 +716,13 @@ function Screen({
       const scale = Math.min(rect.width / frame.width, rect.height / frame.height);
       if (!Number.isFinite(scale) || scale <= 0) return null;
       const offsetX = (rect.width - frame.width * scale) / 2;
-      // The picture sits at the top (object-top): no band of empty space above it.
-      const offsetY = 0;
+      const offsetY = pinTop ? 0 : (rect.height - frame.height * scale) / 2;
       const x = (clientX - rect.left - offsetX) / scale;
       const y = (clientY - rect.top - offsetY) / scale;
       if (x < 0 || y < 0 || x > frame.width || y > frame.height) return null;
       return { x: Math.round(x), y: Math.round(y) };
     },
-    [frame],
+    [frame, pinTop],
   );
 
   // Взял управление — фокус на поверхность, чтобы клавиатура сразу шла в страницу.
@@ -849,7 +877,7 @@ function Screen({
           src={`data:image/jpeg;base64,${frame.data}`}
           alt=""
           draggable={false}
-          className="pointer-events-none h-full w-full object-contain object-top"
+          className={cn("pointer-events-none h-full w-full object-contain", pinTop && "object-top")}
         />
       ) : (
         <Placeholder text="Loading the page…" />

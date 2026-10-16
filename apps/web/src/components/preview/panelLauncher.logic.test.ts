@@ -5,11 +5,14 @@ import {
   type LauncherAppRow,
   type LauncherContext,
   LAUNCHER_TILES,
+  type LegacyLauncherContext,
   launcherAppState,
   launcherKeyLabel,
   launcherTileForKey,
+  legacyLauncherTileForKey,
   sortLauncherApps,
   visibleLauncherTiles,
+  visibleLegacyLauncherTiles,
 } from "./panelLauncher.logic";
 
 const everything: LauncherContext = {
@@ -174,5 +177,102 @@ describe("isTypingTarget", () => {
     expect(isTypingTarget({ tagName: "textarea" })).toBe(true);
     expect(isTypingTarget({ tagName: "SELECT" })).toBe(true);
     expect(isTypingTarget({ tagName: "DIV", isContentEditable: true })).toBe(true);
+  });
+});
+
+// ── Flag `panelLauncherV2` off: the launcher of 0.0.137, same expectations ──
+
+describe("flag off: the 0.0.137 launcher", () => {
+  const legacyEverything: LegacyLauncherContext = {
+    canBrowse: true,
+    hasComputer: true,
+    canOpenTerminal: true,
+    canOpenChanges: true,
+    openableApps: 2,
+    sites: 1,
+  };
+  const legacyIds = (context: LegacyLauncherContext) =>
+    visibleLegacyLauncherTiles(context).map((tile) => tile.id);
+
+  describe("visibleLegacyLauncherTiles", () => {
+    it("a git project chat with apps and sites: all six, in order", () => {
+      expect(legacyIds(legacyEverything)).toEqual([
+        "browser",
+        "files",
+        "terminal",
+        "changes",
+        "apps",
+        "sites",
+      ]);
+    });
+
+    it("no project: no Terminal, no Changes", () => {
+      expect(
+        legacyIds({ ...legacyEverything, canOpenTerminal: false, canOpenChanges: false }),
+      ).toEqual(["browser", "files", "apps", "sites"]);
+    });
+
+    it("a project that is not git: Terminal, but no Changes", () => {
+      expect(legacyIds({ ...legacyEverything, canOpenChanges: false })).toContain("terminal");
+      expect(legacyIds({ ...legacyEverything, canOpenChanges: false })).not.toContain("changes");
+    });
+
+    it("no browser to open: no Browser tile", () => {
+      expect(legacyIds({ ...legacyEverything, canBrowse: false })).not.toContain("browser");
+    });
+
+    it("Apps shows while its list loads, hides when nothing opens", () => {
+      expect(legacyIds({ ...legacyEverything, openableApps: null })).toContain("apps");
+      expect(legacyIds({ ...legacyEverything, openableApps: 0 })).not.toContain("apps");
+    });
+
+    it("Sites hides with no sites or no Uno Hosting here", () => {
+      expect(legacyIds({ ...legacyEverything, sites: 0 })).not.toContain("sites");
+      expect(legacyIds({ ...legacyEverything, sites: null })).not.toContain("sites");
+    });
+
+    it("no computer: no Files", () => {
+      expect(legacyIds({ ...legacyEverything, hasComputer: false })).not.toContain("files");
+    });
+  });
+
+  describe("legacyLauncherTileForKey", () => {
+    const tiles = visibleLegacyLauncherTiles(legacyEverything);
+    const key = (
+      k: string,
+      mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean }> = {},
+    ) =>
+      legacyLauncherTileForKey(tiles, {
+        key: k,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        ...mods,
+      });
+
+    it("one letter opens its tile, either case", () => {
+      expect(key("b")).toBe("browser");
+      expect(key("F")).toBe("files");
+      expect(key("t")).toBe("terminal");
+      expect(key("c")).toBe("changes");
+      expect(key("a")).toBe("apps");
+      expect(key("s")).toBe("sites");
+    });
+
+    it("a letter of a hidden tile, a shortcut with a modifier, or another key does nothing", () => {
+      const noChanges = visibleLegacyLauncherTiles({ ...legacyEverything, canOpenChanges: false });
+      expect(
+        legacyLauncherTileForKey(noChanges, {
+          key: "c",
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+        }),
+      ).toBeNull();
+      expect(key("b", { metaKey: true })).toBeNull();
+      expect(key("b", { ctrlKey: true })).toBeNull();
+      expect(key("Enter")).toBeNull();
+      expect(key("x")).toBeNull();
+    });
   });
 });

@@ -33,7 +33,8 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { type FileShareRoute, SHARED_COPIES_PREFIX, sharedCopyKey } from "./fileShare.logic";
+import { desktopShareLocalFile } from "./desktopFileShare";
+import { type FileShareRoute, SHARED_COPIES_PREFIX, sharedCopyKeyForPath } from "./fileShare.logic";
 
 const DURATIONS = [
   { id: "1d", label: "1 day", hours: 24 },
@@ -42,19 +43,29 @@ const DURATIONS = [
 ] as const;
 type DurationId = (typeof DURATIONS)[number]["id"];
 
-/** Upload a copy of the file into Cloud storage → Shared/; the key of the copy. */
-async function uploadSharedCopy(environmentId: EnvironmentId, path: string, name: string) {
+/**
+ * Upload a copy of the file into Cloud storage → Shared/ (the person's Uno
+ * Drive bucket, the same `cloudCopyToCloud` the Files page and the agent's
+ * drive_save use); the key of the copy. The daemon names it after the file
+ * on disk, so the key comes from the path, not from the tab's title.
+ */
+async function uploadSharedCopy(environmentId: EnvironmentId, path: string) {
   const api = filesApi(environmentId);
   const drive = await api.driveState();
   if (!drive.available || drive.bucketId === null) {
     throw new Error(drive.message ?? "Cloud storage isn't available on this computer.");
   }
-  await api.cloudCopyToCloud({
+  const result = await api.cloudCopyToCloud({
     paths: [path],
     bucketId: drive.bucketId,
     prefix: SHARED_COPIES_PREFIX,
   });
-  return sharedCopyKey(name);
+  if (result.files === 0) {
+    // Too big, hidden, unreadable… — no copy, so no link to it.
+    const reason = result.skipped[0]?.reason;
+    throw new Error(reason ? `Couldn't upload the copy: ${reason}.` : "Couldn't upload the copy.");
+  }
+  return sharedCopyKeyForPath(path);
 }
 
 function errorText(error: unknown): string {
@@ -116,7 +127,14 @@ export function FileSharePopover({
       const api = filesApi(environmentId);
       if (route === "cloud-copy") {
         setPhase("uploading");
-        const key = await uploadSharedCopy(environmentId, path, name);
+        // Desktop, a file of this Mac: the app uploads it with its own sign-in.
+        const viaDesktop = desktopShareLocalFile(environmentId);
+        if (viaDesktop) {
+          const result = await viaDesktop({ path, expiresInHours: hours });
+          if (!result.ok) throw new Error(result.error);
+          return result.url;
+        }
+        const key = await uploadSharedCopy(environmentId, path);
         setPhase("linking");
         const share = await api.driveShareCreate({ key, expiresInHours: hours });
         if (!share.url) throw new Error("Couldn't make a link.");
@@ -139,7 +157,7 @@ export function FileSharePopover({
   const update = useMutation({
     mutationFn: async () => {
       if (!environmentId) throw new Error("This computer isn't connected.");
-      await uploadSharedCopy(environmentId, path, name);
+      await uploadSharedCopy(environmentId, path);
     },
   });
 
@@ -150,6 +168,8 @@ export function FileSharePopover({
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };
+  // The desktop's copy can't be replaced in place: updating it makes a new copy and link.
+  const copyMadeByDesktop = route === "cloud-copy" && desktopShareLocalFile(environmentId) !== null;
   const passwordTooShort = withPassword && password.length < 4;
   const passwordAvailable = route === "computer-link";
 
@@ -191,13 +211,15 @@ export function FileSharePopover({
               {route === "cloud-copy" ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="min-w-0 flex-1">
-                    A copy as of now. Changed the file? Update the copy — the link stays the same.
+                    {copyMadeByDesktop
+                      ? "A copy as of now. Changed the file? Share it again — you get a new link."
+                      : "A copy as of now. Changed the file? Update the copy — the link stays the same."}
                   </span>
                   <Button
                     size="xs"
                     variant="outline"
                     disabled={update.isPending}
-                    onClick={() => update.mutate()}
+                    onClick={() => (copyMadeByDesktop ? create.mutate() : update.mutate())}
                   >
                     {update.isPending ? (
                       <Loader2Icon className="animate-spin" />
@@ -206,7 +228,7 @@ export function FileSharePopover({
                     ) : (
                       <RefreshCwIcon />
                     )}
-                    {update.isSuccess ? "Updated" : "Update copy"}
+                    {copyMadeByDesktop ? "Share again" : update.isSuccess ? "Updated" : "Update copy"}
                   </Button>
                 </div>
               ) : (

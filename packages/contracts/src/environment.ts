@@ -80,6 +80,11 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   machineKind: Schema.optionalKey(MachineKind),
   /** The box id in the Uno control plane when `machineKind` is `uno_box` and known. */
   unoBoxId: Schema.optionalKey(Schema.Number),
+  /**
+   * The update channel the daemon is on when it is not the release one —
+   * "stage" on Misha's stage computer (0.0.139). Absent: the release.
+   */
+  channel: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

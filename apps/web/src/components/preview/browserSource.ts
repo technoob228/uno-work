@@ -25,17 +25,37 @@ import {
 
 export type BrowserSource = "app" | "computer";
 
-/** Same words as the launcher's two tiles (w0138). */
 export const BROWSER_SOURCE_LABEL: Record<BrowserSource, string> = {
-  app: "Browser",
-  computer: "Agent's browser",
+  app: "This app",
+  computer: "The computer's browser",
 };
 
 /** The line under a source in the chip's menu. */
 export const BROWSER_SOURCE_DESCRIPTION: Record<BrowserSource, string> = {
+  app: "Right here in the panel, with your logins and phone sizes",
+  computer: "Runs on the computer, also when the app is closed. Take control any time",
+};
+
+/** Same words as the launcher's two tiles (w0138, flag `panelLauncherV2`). */
+export const BROWSER_SOURCE_LABEL_V2: Record<BrowserSource, string> = {
+  app: "Browser",
+  computer: "Agent's browser",
+};
+
+export const BROWSER_SOURCE_DESCRIPTION_V2: Record<BrowserSource, string> = {
   app: "On this device: you click, the agent sees. Comment and debug",
   computer: "On the computer: the agent works, you watch live. Take control any time",
 };
+
+/** The chip's words: the launcher's new ones with `panelLauncherV2`, else those of 0.0.137. */
+export function browserSourceCopy(v2: boolean): {
+  readonly label: Record<BrowserSource, string>;
+  readonly description: Record<BrowserSource, string>;
+} {
+  return v2
+    ? { label: BROWSER_SOURCE_LABEL_V2, description: BROWSER_SOURCE_DESCRIPTION_V2 }
+    : { label: BROWSER_SOURCE_LABEL, description: BROWSER_SOURCE_DESCRIPTION };
+}
 
 /** The sources this client actually has, in menu order. */
 export function availableBrowserSources(input: {

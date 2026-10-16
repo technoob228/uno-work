@@ -26,7 +26,6 @@
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import * as nodePath from "node:path";
 
 import {
   OpenCodeSettings,
@@ -85,6 +84,7 @@ import {
   unoUpstreamIsolationEnvironment,
 } from "../unoHarnessIsolation.ts";
 import { currentHarnessBudget } from "../harnessBudget.ts";
+import { resolveUnoHarnessRoot, unoHarnessPaths } from "../unoHarnessDir.ts";
 import {
   UNO_LEGACY_HARNESS_MODEL_IDS,
   curatedModelRank,
@@ -128,25 +128,15 @@ const UNO_RUSSIA_PROVIDER_ID = "uno-russia";
 const UNO_RUSSIA_GATEWAY_BASE_URL = `${UNO_GATEWAY_BASE_URL}/russia`;
 const UNO_IMAGE_GENERATION_AGENT_ID = "uno-image-generation";
 
-const executableName = (name: string) => (process.platform === "win32" ? `${name}.exe` : name);
-// Legacy fork (technoob228/uno-code), installed by the desktop shell.
-const UNO_BINARY_PATH = nodePath.join(
-  homedir(),
-  ".unowork",
-  "uno-code",
-  "bin",
-  executableName("uno-code"),
-);
-// Stock opencode (npm `opencode-ai`), preferred when installed; isolated from
-// the user's own opencode by `unoHarnessIsolation.ts`.
-const UNO_UPSTREAM_BINARY_PATH = nodePath.join(
-  homedir(),
-  ".unowork",
-  "opencode",
-  "bin",
-  executableName("opencode"),
-);
-const UNO_UPSTREAM_HOME = nodePath.join(homedir(), ".unowork", "opencode-home");
+// Legacy fork (technoob228/uno-code), installed by the desktop shell; stock
+// opencode (npm `opencode-ai`), preferred when installed, isolated from the
+// user's own opencode by `unoHarnessIsolation.ts`. Under `~/.unowork`, or
+// `UNO_WORK_HARNESS_DIR` (Uno Work Stage's own daemon): unoHarnessDir.ts.
+const {
+  forkPath: UNO_BINARY_PATH,
+  upstreamPath: UNO_UPSTREAM_BINARY_PATH,
+  upstreamHome: UNO_UPSTREAM_HOME,
+} = unoHarnessPaths(resolveUnoHarnessRoot(homedir()));
 
 export type UnoModelTier = "frontier" | "strong" | "cheap";
 export type UnoModelRoute = "default" | "russia";

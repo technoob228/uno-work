@@ -1,11 +1,13 @@
 import {
   FEATURE_FLAGS,
   RETIRED_FEATURE_FLAGS,
+  featureFlagDefault,
   readStoredFeatureFlag,
   resolveFeatureFlag,
   type FeatureFlagKey,
 } from "../../featureFlags";
 import { useFeatureFlagOverrides, useSetFeatureFlag } from "../../hooks/useFeatureFlags";
+import { useIsStageChannel } from "../../unoChannel";
 import { Switch } from "../ui/switch";
 import {
   SettingResetButton,
@@ -23,15 +25,18 @@ import {
 export function LabsSettingsPanel() {
   const overrides = useFeatureFlagOverrides();
   const setFlag = useSetFeatureFlag();
+  // On the stage channel the new work is on by default (featureFlags.ts).
+  const stage = useIsStageChannel();
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Feature flags">
+      <SettingsSection title={stage ? "Feature flags · stage" : "Feature flags"}>
         {FEATURE_FLAGS.filter((flag) => !RETIRED_FEATURE_FLAGS.has(flag.key)).map((flag) => {
           const key = flag.key as FeatureFlagKey;
-          const value = resolveFeatureFlag(overrides, key);
+          const value = resolveFeatureFlag(overrides, key, stage);
           const stored = readStoredFeatureFlag(overrides, key);
-          const isOverridden = stored !== undefined && stored !== flag.default;
+          const fallback = featureFlagDefault(key, stage);
+          const isOverridden = stored !== undefined && stored !== fallback;
           return (
             <SettingsRow
               key={flag.key}
@@ -41,7 +46,7 @@ export function LabsSettingsPanel() {
                 isOverridden ? (
                   <SettingResetButton
                     label={`${flag.label} flag`}
-                    onClick={() => setFlag(key, flag.default)}
+                    onClick={() => setFlag(key, fallback)}
                   />
                 ) : null
               }

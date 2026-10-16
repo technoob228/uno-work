@@ -49,6 +49,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
+import { resolveAssistantsDir } from "../../assistants/assistantsDir.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
@@ -386,7 +387,8 @@ const makeManagerAssistantService = Effect.gen(function* () {
   const toAssistantError = (detail: string) => (cause: unknown) =>
     new ManagerAssistantError({ detail, cause });
 
-  const assistantsBaseDir = path.join(os.homedir(), "UnoWork", "Assistants");
+  // ~/UnoWork/Assistants, or UNO_WORK_ASSISTANTS_DIR (Uno Work Stage's own daemon).
+  const assistantsBaseDir = resolveAssistantsDir(os.homedir());
   const scanSemaphore = yield* Semaphore.make(1);
 
   /**

@@ -11,6 +11,7 @@ import type { BrowserLivePage, EnvironmentId, ProjectId } from "@t3tools/contrac
 import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import { DEMO, demoHooks, useDemoSwitch } from "../../demo/demoFlag";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { recordFileOpened } from "../files/filesApi";
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
@@ -174,10 +175,10 @@ export function makeAppFile(input: {
   let origin = input.url;
   try {
     const parsed = new URL(input.url);
-    // An app is its address's origin — except pages served by Work itself
-    // (the demo's apps and sites), which share Work's origin.
+    // An app is its address's origin — except, in the demo, pages served by
+    // Work itself (the demo's apps and sites), which share Work's origin.
     origin =
-      typeof window !== "undefined" && parsed.origin === window.location.origin
+      DEMO && typeof window !== "undefined" && parsed.origin === window.location.origin
         ? `${parsed.origin}${parsed.pathname}`
         : parsed.origin;
   } catch {
@@ -397,7 +398,9 @@ function initialStates(): Record<string, PreviewBucketState> {
   }
   // Демо (w0138): засеянные вкладки нескольких чатов одного проекта.
   if (DEMO) {
-    const seed = (demoHooks.previewInitialStates as (() => Record<string, PreviewBucketState>) | undefined)?.();
+    const seed = (
+      demoHooks.previewInitialStates as (() => Record<string, PreviewBucketState>) | undefined
+    )?.();
     if (seed) Object.assign(states, seed);
   }
   // Вне чатов панель показывает только закреплённые вкладки — и только если
@@ -426,6 +429,9 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   // Вариант B (w0138 p4, «как в Codex»): то, что открыто в чате, — вкладка
   // проекта; чат помнит только активную вкладку. По умолчанию — вариант A.
   const tabsLayout = useDemoSwitch("tabs");
+  // Флаг `panelTabPins`: вкладки агента помечены значком (без флага — как в 0.0.137).
+  const markAgentTabs = useFeatureFlag("panelTabPins");
+  const openTabOptions = useMemo(() => ({ markAgentTabs }), [markAgentTabs]);
   const chatScopeFor = useCallback(
     (scope: PreviewTabScope): PreviewTabScope =>
       tabsLayout === "project" && scope === "chat" ? "project" : scope,
@@ -522,9 +528,11 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       file: PreviewFile,
       source: PanelOpenSource = "person",
     ) => {
-      transition((prev) => openTab(prev, target, chatScopeFor(scope), file, source));
+      transition((prev) =>
+        openTab(prev, target, chatScopeFor(scope), file, source, openTabOptions),
+      );
     },
-    [chatScopeFor, transition],
+    [chatScopeFor, openTabOptions, transition],
   );
 
   // Человек открывает что-то сам: в чате — вкладка чата; вне чата смотреть
@@ -588,10 +596,11 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
             projectKey: target.projectKey,
           }),
           source,
+          openTabOptions,
         ),
       );
     },
-    [chatScopeFor, transition],
+    [chatScopeFor, openTabOptions, transition],
   );
 
   const openUrl = useCallback(

@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_ASSISTANTS_DEMO?: string;
   /** "heavy": a static demo build (icp3 09.10) — fixtures in the page, no daemon (src/demo). */
   readonly VITE_DEMO?: string;
+  /** "stage": a bundle for the stage channel — its Labs flags on by default (unoChannel.ts). */
+  readonly VITE_UNO_CHANNEL?: string;
 }
 
 interface ImportMeta {

@@ -329,7 +329,8 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
-export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
+/** "Stage": the "Uno Work Stage" app next to the release one (16.10). */
+export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly" | "Stage";
 
 export interface DesktopAppBranding {
   baseName: string;
@@ -526,9 +527,33 @@ export interface DesktopUnoAccountBridge {
   request: (input: DesktopUnoAccountRequest) => Promise<DesktopUnoAccountResponse>;
 }
 
+/** "Share with a link…" for a file on this computer (desktop, w0139). */
+export interface DesktopUnoDriveShareFileInput {
+  /** Absolute path of a file in the home folder. */
+  path: string;
+  expiresInHours?: number;
+}
+
+export type DesktopUnoDriveShareFileResult =
+  | { ok: true; key: string; url: string; expiresAt: string | null }
+  | { ok: false; error: string };
+
+export interface DesktopUnoDriveBridge {
+  /** Uploads a copy to Uno Drive → Shared/ with the app's Uno sign-in and links to it. */
+  shareLocalFile: (input: DesktopUnoDriveShareFileInput) => Promise<DesktopUnoDriveShareFileResult>;
+}
+
 export interface DesktopBridge {
   /** Absent in desktop builds before 0.0.70. */
   unoAccount?: DesktopUnoAccountBridge;
+  /**
+   * Comment / Debug of the panel browser run in the desktop's page preload
+   * (pageTools.ts wire). Absent before 0.0.139: the app puts its in-page
+   * script in instead.
+   */
+  pageTools?: { readonly version: number };
+  /** Absent before 0.0.139. */
+  unoDrive?: DesktopUnoDriveBridge;
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getClientSettings: () => Promise<ClientSettings | null>;

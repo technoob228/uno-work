@@ -74,6 +74,22 @@ describe("assistant-turn CLI", () => {
     );
   });
 
+  it("looks only in UNO_WORK_ASSISTANTS_DIR when it is set (Uno Work Stage)", async () => {
+    const stageHome = "/Users/misha/.unowork-stage/Assistants/home";
+    const files = {
+      [`${HOME}/.mcp.json`]: mcpJson("uwm_release"),
+      [`${stageHome}/.mcp.json`]: mcpJson("uwm_stage"),
+    };
+    expect(
+      await findAssistantWorkspace(
+        deps(files, undefined, {
+          env: { UNO_WORK_ASSISTANTS_DIR: "/Users/misha/.unowork-stage/Assistants" },
+        }),
+        undefined,
+      ),
+    ).toBe(stageHome);
+  });
+
   it("finds the one assistant, prefers the default one among several", async () => {
     expect(
       await findAssistantWorkspace(deps({ [`${HOME}/.mcp.json`]: mcpJson() }), undefined),

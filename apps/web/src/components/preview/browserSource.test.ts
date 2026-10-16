@@ -5,6 +5,7 @@ import type { BrowserLivePage, BrowserLiveState } from "@t3tools/contracts";
 import {
   afterComputerBrowserOpen,
   availableBrowserSources,
+  browserSourceCopy,
   isDefaultBrowserSource,
   nextBrowserOpenIn,
   resolveBrowserOpenSource,
@@ -140,5 +141,18 @@ describe("Browser on the computer: something visible at once", () => {
     expect(shouldCloseSetupTabOnState("missing", "ready")).toBe(true);
     expect(shouldCloseSetupTabOnState(null, "ready")).toBe(true);
     expect(shouldCloseSetupTabOnState("ready", "installing")).toBe(false);
+  });
+});
+
+describe("browserSourceCopy (the chip's words)", () => {
+  it("flag panelLauncherV2 off: the words of 0.0.137", () => {
+    const copy = browserSourceCopy(false);
+    expect(copy.label).toEqual({ app: "This app", computer: "The computer's browser" });
+    expect(copy.description.app).toBe("Right here in the panel, with your logins and phone sizes");
+  });
+
+  it("flag on: the launcher's two tiles", () => {
+    const copy = browserSourceCopy(true);
+    expect(copy.label).toEqual({ app: "Browser", computer: "Agent's browser" });
   });
 });

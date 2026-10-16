@@ -128,6 +128,20 @@ describe("getAutoUpdateDisabledReason", () => {
       }),
     ).toContain("AppImage");
   });
+
+  it("never updates Uno Work Stage, even with a feed", () => {
+    expect(
+      getAutoUpdateDisabledReason({
+        isDevelopment: false,
+        isPackaged: true,
+        platform: "darwin",
+        appImage: undefined,
+        disabledByEnv: false,
+        hasUpdateFeedConfig: true,
+        stageBuild: true,
+      }),
+    ).toContain("Uno Work Stage");
+  });
 });
 
 describe("nextStatusAfterDownloadFailure", () => {

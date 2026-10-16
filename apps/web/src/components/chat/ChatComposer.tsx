@@ -1082,6 +1082,9 @@ export const ChatComposer = memo(
     // Refs
     // ------------------------------------------------------------------
     const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+    // The one-line box of the full-screen tab's chat block (`inDock`): there is
+    // no rich editor then, so "focus the composer" lands here.
+    const dockPromptInputRef = useRef<HTMLInputElement | null>(null);
     const composerFormRef = useRef<HTMLFormElement>(null);
     const composerSurfaceRef = useRef<HTMLDivElement>(null);
     const imageAttachmentInputRef = useRef<HTMLInputElement>(null);
@@ -2626,7 +2629,15 @@ export const ChatComposer = memo(
       ref,
       () => ({
         focusAtEnd: () => {
-          composerEditorRef.current?.focusAtEnd();
+          if (composerEditorRef.current) {
+            composerEditorRef.current.focusAtEnd();
+            return;
+          }
+          const dockInput = dockPromptInputRef.current;
+          if (dockInput) {
+            dockInput.focus();
+            dockInput.setSelectionRange(dockInput.value.length, dockInput.value.length);
+          }
         },
         focusAt: (cursor: number) => {
           composerEditorRef.current?.focusAt(cursor);
@@ -2764,6 +2775,7 @@ export const ChatComposer = memo(
       const RuntimeModeIcon = runtimeModeOption.icon;
       const focusPromptInput = (
         <input
+          ref={inDock ? dockPromptInputRef : undefined}
           type="text"
           value={prompt}
           className={cn(
@@ -2974,8 +2986,8 @@ export const ChatComposer = memo(
             <button
               type="button"
               className={cn(
-                "ml-1 inline-flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-35",
-                inDock ? "size-7" : "size-10",
+                "inline-flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-35",
+                inDock ? "ml-1 size-7" : "size-10",
               )}
               disabled={collapsedComposerPrimaryActionDisabled}
               aria-label={collapsedComposerPrimaryActionLabel}

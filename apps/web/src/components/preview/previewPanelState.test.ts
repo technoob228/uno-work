@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   closeTab,
@@ -15,7 +15,13 @@ import {
   updatePanelView,
   type PreviewStates,
 } from "./previewPanelState";
-import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
+import {
+  collectPersistableTabs,
+  readPersistedTabs,
+  restoreTabs,
+  writePersistedTabs,
+} from "./previewTabPersistence";
+import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey, scopeOfKey } from "./previewTabScopes";
 import type { PreviewFile } from "./PreviewPaneContext";
 
 const chatA = { projectKey: "proj", threadId: "thread-a" };
@@ -29,8 +35,6 @@ function file(id: string): PreviewFile {
 
 const report = file("report");
 const notes = file("notes");
-/** What the agent opened carries its mark (the robot in the tab row). */
-const byAgent = (tab: PreviewFile): PreviewFile => ({ ...tab, openedBy: "agent" });
 
 describe("tabs opened in a chat live in that chat", () => {
   it("an agent's first open_in_panel opens the panel in its chat", () => {
@@ -39,11 +43,6 @@ describe("tabs opened in a chat live in that chat", () => {
     expect(view.open).toBe(true);
     expect(view.visible).toBe(true);
     expect(view.view.activeFileId).toBe("report");
-    expect(states[chatScopeKey("thread-a")]?.files).toEqual([byAgent(report)]);
-  });
-
-  it("whatever the person opens carries no agent mark", () => {
-    const states = openTab({}, chatA, "chat", report, "person");
     expect(states[chatScopeKey("thread-a")]?.files).toEqual([report]);
   });
 
@@ -209,7 +208,7 @@ describe("pinned everywhere", () => {
 
   it("a legacy agent without a thread does not open an empty panel on Home", () => {
     const states = openTab({}, home, "chat", report, "agent");
-    expect(states[projectScopeKey("proj")]?.files).toEqual([byAgent(report)]);
+    expect(states[projectScopeKey("proj")]?.files).toEqual([report]);
     expect(getPreviewBucketState(states, GLOBAL_SCOPE_KEY).open).toBe(false);
   });
 });
@@ -249,7 +248,7 @@ describe("a chat marked Done or archived takes its panel with it", () => {
 
     expect(result.states[chatScopeKey("thread-a")]).toBeUndefined();
     expect(result.dropped.map((tab) => tab.id)).toEqual(["report"]);
-    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([byAgent(notes)]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([notes]);
     expect(result.states[projectScopeKey("proj")]?.files.map((tab) => tab.id)).toEqual([
       "dashboard",
     ]);
@@ -274,12 +273,201 @@ describe("a chat marked Done or archived takes its panel with it", () => {
     states = openTab(states, chatB, "chat", report, "agent");
     const result = dropChatBuckets(states, ["thread-a"]);
     expect(result.dropped).toEqual([]);
-    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([byAgent(report)]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([report]);
   });
 
   it("nothing to drop keeps the same object (no re-render)", () => {
     const states = openTab({}, chatB, "chat", notes, "agent");
     expect(dropChatBuckets(states, ["thread-a"]).states).toBe(states);
     expect(dropChatBuckets(states, []).states).toBe(states);
+  });
+});
+
+/** What the agent opened carries its mark (the robot in the tab row). */
+const byAgent = (tab: PreviewFile): PreviewFile => ({ ...tab, openedBy: "agent" });
+
+function fakeStorage() {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => void data.set(key, value),
+    removeItem: (key: string) => void data.delete(key),
+  };
+}
+
+const browserPage = (id: string, url: string): PreviewFile => ({
+  id,
+  name: id,
+  kind: "browser",
+  content: "",
+  url,
+});
+
+// ── Flag `panelTabPins` on: the agent's tabs carry a mark (w0138 p4) ──────
+
+describe("flag panelTabPins: tabs the agent opened are marked", () => {
+  const marked = { markAgentTabs: true } as const;
+
+  it("an agent's open_in_panel lands with the mark", () => {
+    const states = openTab({}, chatA, "chat", report, "agent", marked);
+    expect(states[chatScopeKey("thread-a")]?.files).toEqual([byAgent(report)]);
+    expect(resolvePanelView(states, chatA).view.activeFileId).toBe("report");
+  });
+
+  it("whatever the person opens carries no agent mark", () => {
+    const states = openTab({}, chatA, "chat", report, "person", marked);
+    expect(states[chatScopeKey("thread-a")]?.files).toEqual([report]);
+  });
+
+  it("the agent's browser tab is marked too", () => {
+    const states = openBrowserTab(
+      {},
+      chatA,
+      "chat",
+      "https://example.com/",
+      () => ({
+        id: "browser-1",
+        name: "example.com",
+        kind: "browser",
+        content: "",
+        url: "https://example.com/",
+      }),
+      "agent",
+      marked,
+    );
+    expect(states[chatScopeKey("thread-a")]?.files[0]?.openedBy).toBe("agent");
+  });
+
+  it("the mark moves with the tab when it is pinned", () => {
+    let states = openTab({}, chatA, "chat", report, "agent", marked);
+    states = moveTabScope(states, chatA, "report", "project");
+    expect(states[projectScopeKey("proj")]?.files).toEqual([byAgent(report)]);
+  });
+});
+
+// ── Saved tabs: the format of 0.0.137 is untouched (localStorage) ────────
+//
+// Only `global` and `project` browser tabs survive a reload, as
+// `{ [scopeKey]: [{ id, name, url }] }` under localStorage
+// "uno_preview_tabs_v1" (`previewTabPersistence.ts`, same file and key as in
+// 0.0.137). Chat tabs, the agent mark and pins as such are not written: a pin
+// is just the bucket a tab is in.
+
+describe("saved tabs stay readable both ways with 0.0.137", () => {
+  const STORAGE_KEY = "uno_preview_tabs_v1";
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * The reader of 0.0.137 spelled out (`previewTabPersistence.ts` and
+   * `previewTabScopes.ts` have no diff against origin/release/0.0.137, so
+   * `readPersistedTabs` is that reader too): parse, skip chat buckets, keep
+   * entries with string id/name/url — extra keys are not looked at.
+   */
+  function readLike0137(
+    raw: string,
+  ): Record<string, Array<{ id: string; name: string; url: string }>> {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, Array<{ id: string; name: string; url: string }>> = {};
+    for (const [scopeKey, value] of Object.entries(parsed)) {
+      if (!Array.isArray(value)) continue;
+      if (scopeKey !== GLOBAL_SCOPE_KEY && scopeOfKey(scopeKey) === "chat") continue;
+      const tabs = value.filter(
+        (tab): tab is { id: string; name: string; url: string } =>
+          typeof tab === "object" &&
+          tab !== null &&
+          typeof tab.id === "string" &&
+          typeof tab.name === "string" &&
+          typeof tab.url === "string" &&
+          tab.url.length > 0,
+      );
+      if (tabs.length > 0) out[scopeKey] = tabs;
+    }
+    return out;
+  }
+
+  it("(a) what 0.0.137 saved is read by this branch", () => {
+    const storage = fakeStorage();
+    vi.stubGlobal("window", { localStorage: storage });
+    // Written by 0.0.137: a pinned-everywhere page and a project page.
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        [GLOBAL_SCOPE_KEY]: [{ id: "browser-3", name: "Docs", url: "https://docs.example/" }],
+        [projectScopeKey("proj")]: [
+          { id: "browser-7", name: "Staging", url: "https://staging.example/" },
+        ],
+      }),
+    );
+    const restored = restoreTabs(readPersistedTabs());
+    expect(restored[GLOBAL_SCOPE_KEY]).toEqual([
+      { id: "browser-3", name: "Docs", kind: "browser", content: "", url: "https://docs.example/" },
+    ]);
+    expect(restored[projectScopeKey("proj")]?.map((tab) => tab.url)).toEqual([
+      "https://staging.example/",
+    ]);
+  });
+
+  it("(b) what this branch saves — agent tabs, pins — 0.0.137 reads without loss", () => {
+    const storage = fakeStorage();
+    vi.stubGlobal("window", { localStorage: storage });
+    const marked = { markAgentTabs: true } as const;
+    // The agent opens two pages in a chat; the person pins one to the
+    // project and one everywhere (what the tab strip's pin menu does).
+    let states = openTab(
+      {},
+      chatA,
+      "chat",
+      browserPage("browser-1", "https://a.example/"),
+      "agent",
+      marked,
+    );
+    states = openTab(
+      states,
+      chatA,
+      "chat",
+      browserPage("browser-2", "https://b.example/"),
+      "agent",
+      marked,
+    );
+    states = openTab(
+      states,
+      chatA,
+      "chat",
+      browserPage("browser-3", "https://c.example/"),
+      "person",
+      marked,
+    );
+    states = moveTabScope(states, chatA, "browser-1", "project");
+    states = moveTabScope(states, chatA, "browser-2", "global");
+    writePersistedTabs(collectPersistableTabs(states));
+
+    const raw = storage.getItem(STORAGE_KEY)!;
+    // Same shape as 0.0.137 writes: no agent mark, no chat bucket.
+    expect(JSON.parse(raw)).toEqual({
+      [projectScopeKey("proj")]: [
+        { id: "browser-1", name: "browser-1", url: "https://a.example/" },
+      ],
+      [GLOBAL_SCOPE_KEY]: [{ id: "browser-2", name: "browser-2", url: "https://b.example/" }],
+    });
+    expect(raw).not.toContain("openedBy");
+    expect(readLike0137(raw)).toEqual(JSON.parse(raw));
+  });
+
+  it("(b) an extra key on a saved tab is ignored, not a reason to drop it", () => {
+    const storage = fakeStorage();
+    vi.stubGlobal("window", { localStorage: storage });
+    const withExtra = {
+      [GLOBAL_SCOPE_KEY]: [
+        { id: "browser-9", name: "Docs", url: "https://docs.example/", openedBy: "agent" },
+      ],
+    };
+    storage.setItem(STORAGE_KEY, JSON.stringify(withExtra));
+    expect(readLike0137(storage.getItem(STORAGE_KEY)!)[GLOBAL_SCOPE_KEY]?.[0]?.url).toBe(
+      "https://docs.example/",
+    );
+    expect(readPersistedTabs()[GLOBAL_SCOPE_KEY]?.[0]?.id).toBe("browser-9");
   });
 });

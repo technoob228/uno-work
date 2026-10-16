@@ -15,6 +15,7 @@
  *
  * @module featureFlags
  */
+import { isStageChannel } from "./unoChannel";
 
 export interface FeatureFlagDefinition {
   /** Stable storage key. Never rename without a migration. */
@@ -26,6 +27,12 @@ export interface FeatureFlagDefinition {
   /** Value used when the user has not chosen. Defaults are ON so the
    * corresponding feature stays available out of the box. */
   readonly default: boolean;
+  /**
+   * Value on the stage channel (`unoChannel.ts`) when the user has not
+   * chosen: new work waiting for Misha's yes is on there and off for
+   * everybody else. Absent — same as `default`.
+   */
+  readonly stageDefault?: boolean;
 }
 
 export const FEATURE_FLAGS = [
@@ -92,6 +99,63 @@ export const FEATURE_FLAGS = [
       "Other ways to lay out the window: a rail of icons with a panel next to it, or — in the desktop app — tabs on top for open chats, apps and files. Turn on, then pick one in Settings → General → Appearance.",
     default: false,
   },
+  // ── Stage w0139 (16.10): on on the stage channel, off everywhere else ──
+  {
+    key: "panelLauncherV2",
+    label: "Panel launcher: two browsers and Apps",
+    description:
+      "The right panel's launcher offers your browser and the agent's browser as two tiles, always shows Apps (with what's running on each computer) and leaves the terminal to Ctrl+`.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "browserPageTools",
+    label: "Comment and Debug in the browser",
+    description:
+      "Desktop app: point at parts of a page and leave notes for the agent, see the page's console and network, and send errors to the chat.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "fullscreenChatDock",
+    label: "Compact chat on a full-screen tab",
+    description:
+      "With a tab on the whole screen, the chat is one small block at the bottom that folds into a mini window; answers pop up as a hint.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "panelTabPins",
+    label: "Pinned tabs and All tabs",
+    description:
+      "Pin a panel tab to the project or to every chat, and find tabs open in other chats under “All tabs”.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "sidebarViewMenu",
+    label: "Sidebar view menu",
+    description:
+      "Pick how chats are laid out (projects, one list, inbox, by computer) and filter by project right from the sidebar's title. One list and Inbox show each chat's project.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "assistantChatsInSidebar",
+    label: "Uno's chats in the sidebar",
+    description:
+      "Uno on top of the sidebar unfolds its chats; “+” starts a new one. The first click introduces Uno and lets you pick what it runs on.",
+    default: false,
+    stageDefault: true,
+  },
+  {
+    key: "fileShareButton",
+    label: "Share a file from the panel",
+    description:
+      "The ↗ button of a file in the panel opens it in your editor or shares it with a link.",
+    default: false,
+    stageDefault: true,
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];
@@ -99,6 +163,18 @@ export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];
 const FLAG_DEFAULTS: Readonly<Record<FeatureFlagKey, boolean>> = Object.fromEntries(
   FEATURE_FLAGS.map((flag) => [flag.key, flag.default]),
 ) as Record<FeatureFlagKey, boolean>;
+
+const STAGE_DEFAULTS: Readonly<Record<FeatureFlagKey, boolean>> = Object.fromEntries(
+  FEATURE_FLAGS.map((flag) => [
+    flag.key,
+    (flag as FeatureFlagDefinition).stageDefault ?? flag.default,
+  ]),
+) as Record<FeatureFlagKey, boolean>;
+
+/** A flag's value when the person has not chosen: on the stage channel, its stage default. */
+export function featureFlagDefault(key: FeatureFlagKey, stage = isStageChannel()): boolean {
+  return (stage ? STAGE_DEFAULTS : FLAG_DEFAULTS)[key];
+}
 
 /**
  * Unfinished sidebar experiments, switched off for everyone (Misha 13.10):
@@ -131,12 +207,13 @@ const LEGACY_FEATURE_FLAG_KEYS: Readonly<Partial<Record<FeatureFlagKey, string>>
 export function resolveFeatureFlag(
   stored: Readonly<Record<string, boolean>> | undefined,
   key: FeatureFlagKey,
+  stage = isStageChannel(),
 ): boolean {
   const legacyKey = LEGACY_FEATURE_FLAG_KEYS[key];
   return (
     stored?.[key] ??
     (legacyKey !== undefined ? stored?.[legacyKey] : undefined) ??
-    FLAG_DEFAULTS[key]
+    featureFlagDefault(key, stage)
   );
 }
 

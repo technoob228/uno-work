@@ -75,6 +75,7 @@ import { LiteRoot } from "../lite/LiteShell";
 import { EconomyPresenceBootstrap } from "../components/economy/EconomyPresence";
 import { hasUnoAiArrival } from "../unoai/useUnoAiArrivals";
 import { hasWorkIntent } from "../unoai/workIntent";
+import { setServerUpdateChannel } from "../unoChannel";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -384,6 +385,11 @@ function EventRouter() {
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
   const serverConfig = useServerConfig();
+  // The stage computer says so (environment.channel): its Labs defaults follow.
+  const serverChannel = serverConfig?.environment.channel;
+  useEffect(() => {
+    if (serverConfig) setServerUpdateChannel(serverChannel);
+  }, [serverChannel, serverConfig]);
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;

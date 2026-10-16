@@ -11,7 +11,8 @@
  *
  * Which assistant: `--workspace <dir>` when given, else `$UNO_ASSISTANT_WORKSPACE`,
  * else the assistant folders under `~/UnoWork/Assistants` of the current user
- * and of `unowork` — one found is used; several → the default one (`home`).
+ * and of `unowork` (or only `$UNO_WORK_ASSISTANTS_DIR` when set — Uno Work
+ * Stage's daemon) — one found is used; several → the default one (`home`).
  *
  * A user that cannot read the workspace (`uno` on a cloud computer) re-runs
  * the command as `unowork` through `sudo -n` once.
@@ -25,6 +26,7 @@ import * as fsp from "node:fs/promises";
 import os from "node:os";
 import * as nodePath from "node:path";
 
+import { assistantsDirOverride, defaultAssistantsDir } from "./assistantsDir.ts";
 import {
   ASSISTANT_PROJECT_ID,
   ASSISTANT_SCHEDULE_DEFAULT_MINUTES,
@@ -33,7 +35,6 @@ import {
 
 /** The Linux user the Work daemon runs as on a cloud computer. */
 export const WORK_DAEMON_USER = "unowork";
-const ASSISTANTS_SUBDIR = nodePath.join("UnoWork", "Assistants");
 const MARKER_FILE = ".uno-assistant.json";
 const MCP_FILE = ".mcp.json";
 const SUDO_GUARD_ENV = "UNO_ASSISTANT_TURN_AS_DAEMON_USER";
@@ -93,6 +94,12 @@ export interface AssistantTurnCliDeps {
   readonly homes: ReadonlyArray<string>;
 }
 
+/** Folders that hold assistant folders: the override alone, else `~/UnoWork/Assistants` of each home. */
+export function assistantsBaseDirs(deps: Pick<AssistantTurnCliDeps, "env" | "homes">): string[] {
+  const override = assistantsDirOverride(deps.env);
+  return override ? [override] : deps.homes.map(defaultAssistantsDir);
+}
+
 const isPermissionError = (cause: unknown) =>
   typeof cause === "object" &&
   cause !== null &&
@@ -120,8 +127,7 @@ export async function findAssistantWorkspace(
   const candidates: Array<{ readonly dir: string; readonly projectId: string | null }> = [];
   const seen = new Set<string>();
   let denied = false;
-  for (const home of deps.homes) {
-    const base = nodePath.join(home, ASSISTANTS_SUBDIR);
+  for (const base of assistantsBaseDirs(deps)) {
     let names: ReadonlyArray<string> = [];
     try {
       names = await deps.listDirs(base);

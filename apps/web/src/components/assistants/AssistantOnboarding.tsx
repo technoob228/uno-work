@@ -14,7 +14,12 @@
  * Every step comes filled in: "Next" all the way is a working assistant.
  * It takes tasks only from the person — never a public bot.
  */
-import { type EnvironmentId, type ProjectId, isAssistantProjectId } from "@t3tools/contracts";
+import {
+  ASSISTANT_PROJECT_ID,
+  type EnvironmentId,
+  type ProjectId,
+  isAssistantProjectId,
+} from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import { useRouter } from "@tanstack/react-router";
 import {
@@ -38,6 +43,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 
+import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -74,7 +80,7 @@ import {
   uniqueName,
 } from "./assistantTeam.logic";
 import { useAssistantTeamStore } from "./assistantTeamStore";
-import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
+import { TEAM_SHOWN, type TeamMember, useAssistantTeam } from "./useAssistantTeam";
 
 /** Uno's second bot — for assistants (the first one carries notifications). */
 export const UNO_ASSISTANT_BOT = "uno_team_bot";
@@ -911,7 +917,137 @@ function ReadyStep(props: {
 
 // ── The dialog ────────────────────────────────────────────────────────────
 
+/**
+ * The release's setup of Uno (Misha 16.10): only Uno ships, on any AI on the
+ * computer, with the whole computer open to it. The first click on Uno says
+ * who it is, then one screen — what it runs on (the real computer-wide
+ * choice, `AssistantPowerPicker`, in production since 0.0.134) — and the
+ * first chat. The six steps and the team stay in the mock.
+ */
+function UnoIntroDialog() {
+  const { open, step, target, setStep, close } = useAssistantOnboarding();
+  const team = useAssistantTeam();
+  const upsert = useAssistantTeamStore((store) => store.upsert);
+  const { handleNewThread } = useNewThreadHandler();
+  const assistantChat = useAssistantChat();
+  const machines = useMachineRows();
+  const [starting, setStarting] = useState(false);
+
+  if (!open || target.kind !== "existing") return null;
+  const member = team.find(
+    (entry) => entry.environmentId === target.environmentId && entry.projectId === target.projectId,
+  );
+  const name = member?.profile.name ?? target.name;
+  const computer =
+    machines.find((machine) => machine.environmentId === target.environmentId)?.label ??
+    "this computer";
+
+  // Asked once: "Later" and "Start" both remember it (the profile may not be stored yet).
+  const markSetUp = () => {
+    if (member) upsert({ ...member.profile, setUpAt: new Date().toISOString() });
+  };
+  const later = () => {
+    markSetUp();
+    close();
+  };
+  const start = async () => {
+    setStarting(true);
+    try {
+      markSetUp();
+      close();
+      // The first chat with Uno is its main one (Telegram and Slack talk to it).
+      if (
+        target.projectId === ASSISTANT_PROJECT_ID &&
+        assistantChat.environmentId === target.environmentId
+      ) {
+        await assistantChat.open();
+        return;
+      }
+      await handleNewThread(
+        scopeProjectRef(target.environmentId as EnvironmentId, target.projectId as ProjectId),
+        { envMode: "local" },
+      );
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(next) => (next ? undefined : close())}>
+      <DialogPopup
+        className="max-w-[34rem]"
+        showCloseButton={step > 0}
+        data-testid="assistant-setup"
+        data-step={step}
+        data-variant="uno"
+      >
+        <div className="flex max-h-[85vh] flex-col gap-5 p-6">
+          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+            {step === 0 ? (
+              <IntroStep isUno name={name} emoji={null} tone={member?.profile.tone ?? "violet"} />
+            ) : (
+              <div className="flex flex-col gap-4">
+                <StepHeading
+                  title={`What does ${name} run on?`}
+                  line="Any AI on this computer: Uno AI, your Claude or ChatGPT plan, or your own key. Change it any time in Settings → AI."
+                />
+                <AssistantPowerPicker environmentId={target.environmentId as EnvironmentId} />
+                <div
+                  className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 p-3 text-sm"
+                  data-testid="uno-setup-access"
+                >
+                  <ShieldCheckIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span>
+                    <span className="font-medium">Full access to {computer}.</span>{" "}
+                    <span className="text-muted-foreground">
+                      {name} can open your projects, files, apps and browser here, like you. It
+                      takes tasks only from you.
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+          {step === 0 ? (
+            <div className="flex flex-col items-center gap-2">
+              <Button
+                className="w-full max-w-sm"
+                onClick={() => setStep(1)}
+                data-testid="assistant-setup-start"
+              >
+                Set up in a minute
+              </Button>
+              <Button variant="ghost" size="sm" onClick={later}>
+                Later
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setStep(0)}>
+                <ArrowLeftIcon className="size-3.5" /> Back
+              </Button>
+              <Button
+                size="sm"
+                disabled={starting}
+                onClick={() => void start()}
+                data-testid="assistant-setup-create"
+              >
+                Start a chat with {name} <ArrowRightIcon className="size-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/** The setup: the team's six steps in the mock, Uno's short one in the release. */
 export function AssistantOnboardingDialog() {
+  return TEAM_SHOWN ? <TeamOnboardingDialog /> : <UnoIntroDialog />;
+}
+
+function TeamOnboardingDialog() {
   const state = useAssistantOnboarding();
   const { open, step, target, draft, ready, setStep, patch, setDraft, setReady, close } = state;
   const team = useAssistantTeam();

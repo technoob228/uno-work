@@ -34,6 +34,10 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+/** Sidebar D groups chats by these, in this order; none — one list, newest first. */
+export const SidebarGroupLevel = Schema.Literals(["computer", "project", "status"]);
+export type SidebarGroupLevel = typeof SidebarGroupLevel.Type;
+
 /**
  * Which environments the sidebar draws from.
  *
@@ -42,14 +46,11 @@ export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode =
  * grouping so the same repo checked out locally and on a server reads as one
  * project rather than two unrelated ones.
  *
- * The standard sidebar (D) reads it directly since 0.0.138 — Settings →
- * "Chats from all computers". The Labs rail layout still needs the retired
- * `allMachinesSidebar` flag, so it always behaves as `active`.
+ * The standard sidebar (D) reads it directly since 0.0.138 when the Labs
+ * "Sidebar view menu" is on — Settings → "Chats from all computers".
+ * Otherwise (and in the Labs rail layout) only the `allMachinesSidebar` Labs
+ * flag makes it count; without it the sidebar behaves as `active`.
  */
-/** Sidebar D groups chats by these, in this order; none — one list, newest first. */
-export const SidebarGroupLevel = Schema.Literals(["computer", "project", "status"]);
-export type SidebarGroupLevel = typeof SidebarGroupLevel.Type;
-
 export const SidebarEnvironmentScope = Schema.Literals(["active", "all"]);
 export type SidebarEnvironmentScope = typeof SidebarEnvironmentScope.Type;
 export const DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE: SidebarEnvironmentScope = "active";

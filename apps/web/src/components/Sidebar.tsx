@@ -52,7 +52,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  Fragment,
   useMemo,
   useReducer,
   useRef,
@@ -228,7 +227,11 @@ import {
   SidebarDPlaces,
   UnoFace,
 } from "./sidebar/SidebarDParts";
-import { SidebarDChatsBar, type SidebarDPickOption } from "./sidebar/SidebarDChatsBar";
+import {
+  LegacySidebarDChatsBar,
+  SidebarDChatsBar,
+  type SidebarDPickOption,
+} from "./sidebar/SidebarDChatsBar";
 import {
   SidebarDComputerChip,
   SidebarDComputerHeader,
@@ -265,11 +268,13 @@ import {
   groupChatsForSidebarD,
   isRunningStatus,
   previewDGroup,
+  groupChatsByStatusForSidebarD,
   STATUS_SECTIONS,
   statusSectionOf,
   type DGroupPreview,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
   SIDEBAR_D_UNO_FOLDED_KEY,
+  unoRunningLabel,
 } from "./sidebar/sidebarD.logic";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
@@ -531,6 +536,14 @@ function SidebarSectionHeader(props: {
   );
 }
 
+/** Sidebar D: a computer's chip on a row, grey while it sleeps or can't be reached. */
+const dChipFor = (environmentId: string) => (
+  <SidebarDComputerChip key={environmentId} environmentId={environmentId} />
+);
+
+/** Flag off: no other computer is asked for its home folder. */
+const NO_ENVIRONMENT_IDS: ReadonlyArray<EnvironmentId> = [];
+
 /** One list shows this many chats before "Show N more". */
 const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
 
@@ -573,6 +586,65 @@ function SidebarDShowMoreRow(props: {
     </li>
   );
 }
+
+/**
+ * Sidebar D: Uno, pinned first among the chats. A click opens Uno's chat;
+ * "N running" folds open the chats it started and is watching. Labs
+ * "Uno's chats in the sidebar" off (0.0.137); on — SidebarAssistants.
+ */
+const SidebarDUnoRow = memo(function SidebarDUnoRow(props: {
+  runningCount: number;
+  folded: boolean;
+  onToggleFolded: () => void;
+  isActive: boolean;
+}) {
+  const { environmentId, opening, open } = useAssistantChat();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const running = unoRunningLabel(props.runningCount);
+  return (
+    <li className="list-none" data-testid="sidebar-uno-group">
+      <div
+        className={cn(
+          "group/uno flex h-8 w-full items-center rounded-md transition-colors",
+          props.isActive ? "bg-sidebar-row-active" : "hover:bg-sidebar-row-hover",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (isMobile) setOpenMobile(false);
+            sidebarDPanel.closeNow();
+            void open();
+          }}
+          disabled={environmentId === null || opening}
+          aria-current={props.isActive ? "page" : undefined}
+          data-testid="sidebar-uno"
+          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+        >
+          <UnoFace className="size-5" online />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {ASSISTANT_CHAT_NAME}
+          </span>
+        </button>
+        {running ? (
+          <button
+            type="button"
+            onClick={props.onToggleFolded}
+            aria-expanded={!props.folded}
+            data-testid="sidebar-uno-running"
+            className="flex h-full shrink-0 cursor-pointer items-center gap-1 rounded-md pr-2 pl-1 text-xs text-primary outline-hidden hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {running}
+            <ChevronDownIcon
+              aria-hidden
+              className={cn("size-3 transition-transform", props.folded && "-rotate-90")}
+            />
+          </button>
+        ) : null}
+      </div>
+    </li>
+  );
+});
 
 /** Sidebar D: a project — folds its chats away; folded, it shows its most urgent mark. */
 function SidebarDProjectRow(props: {
@@ -688,6 +760,11 @@ interface SidebarThreadRowProps {
   fromUno?: boolean;
   /** Sidebar D: whether the computer's mark shows (default: on any other computer). */
   showMachine?: boolean;
+  /**
+   * Sidebar D, Labs "Sidebar view menu": the computer's mark is its icon
+   * (SidebarDComputerChip); off — the 0.0.137 machine chip.
+   */
+  computerIcon?: boolean;
   /** Sidebar D: the project, muted after the title, when the list is not grouped by it. */
   placeLabel?: string | null;
   section: SidebarSection;
@@ -1034,26 +1111,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
     </Tooltip>
   ) : null;
-  const machineMark = (props.showMachine ?? isRemote) ? (
-    <span className="inline-flex shrink-0 items-center gap-0.5">
-      <MachineChip
-        className={availability.status === "live" ? undefined : "opacity-60"}
-        detail={availability.reason}
-        identity={machineIdentity}
-        size="sm"
-      />
-      {availability.status === "offline" ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={<span aria-label={availability.reason} className="inline-flex items-center" />}
-          >
-            <CloudOffIcon className="block size-3 text-warning" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">{availability.reason}</TooltipPopup>
-        </Tooltip>
-      ) : null}
-    </span>
-  ) : null;
+  const machineMark =
+    (props.showMachine ?? isRemote) ? (
+      <span className="inline-flex shrink-0 items-center gap-0.5">
+        <MachineChip
+          className={availability.status === "live" ? undefined : "opacity-60"}
+          detail={availability.reason}
+          identity={machineIdentity}
+          size="sm"
+        />
+        {availability.status === "offline" ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span aria-label={availability.reason} className="inline-flex items-center" />
+              }
+            >
+              <CloudOffIcon className="block size-3 text-warning" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{availability.reason}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </span>
+    ) : null;
 
   if (variant === "d") {
     const mark = dRowMark(status, yourTurn);
@@ -1114,9 +1194,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.placeLabel}
             </span>
           ) : null}
-          {(props.showMachine ?? isRemote) ? (
-            <SidebarDComputerChip environmentId={thread.environmentId} />
-          ) : null}
+          {props.computerIcon ? (
+            (props.showMachine ?? isRemote) ? (
+              <SidebarDComputerChip environmentId={thread.environmentId} />
+            ) : null
+          ) : (
+            machineMark
+          )}
           <span className="relative ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end">
             <span
               className={cn(
@@ -1573,13 +1657,22 @@ export default function Sidebar() {
     activeEnvironmentId !== null && !activeBootstrapComplete && !chatsLoadGraceOver;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
+  // Labs "Sidebar view menu" (w0138 p5): the title menu, One list / Inbox
+  // with the project on each row, computers. Off — the 0.0.137 sidebar.
+  const sidebarViewMenu = useFeatureFlag("sidebarViewMenu");
+  // Labs "Uno's chats in the sidebar" (w0138 p6–p7): the assistants on top,
+  // each unfolding its chats. Off — the 0.0.137 Uno row.
+  const assistantChatsInSidebar = useFeatureFlag("assistantChatsInSidebar");
   const environmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
   const machineScope = useMemo(
     () =>
       resolveSidebarProjectScope({
-        // Sidebar D (0.0.138) honours the setting itself: every computer in
-        // one sidebar when the person chose "Chats from all computers".
-        scope: allMachinesSidebar || !railLayout ? environmentScopeSetting : "active",
+        // Sidebar D with the view menu honours the setting itself: every
+        // computer in one sidebar when the person chose "Chats from all computers".
+        scope:
+          allMachinesSidebar || (sidebarViewMenu && !railLayout)
+            ? environmentScopeSetting
+            : "active",
         activeEnvironmentId,
         primaryEnvironmentId,
       }),
@@ -1589,6 +1682,7 @@ export default function Sidebar() {
       environmentScopeSetting,
       primaryEnvironmentId,
       railLayout,
+      sidebarViewMenu,
     ],
   );
   const projects = useStore(
@@ -1666,9 +1760,11 @@ export default function Sidebar() {
   // The Uno chat (pinned on top) and the assistant's other chats, which the
   // "Older Uno chats" scope lists when there are any.
   const assistantChatId = useAssistantChat().chat?.id ?? null;
-  // The assistants are back on top of the sidebar (w0138 p6–p7): each one
-  // unfolds its own conversations, so they never show twice in the list.
-  const showAssistantRow = true;
+  // The assistants are back on top of the sidebar (w0138 p6–p7, Labs): each
+  // one unfolds its own conversations, so they never show twice in the list.
+  // Off — as in 0.0.137: the Uno row left the sidebar (01.10), the assistant
+  // lives under Assistants, its conversations are not folded under a row.
+  const showAssistantRow = assistantChatsInSidebar;
   const hasHelperProjects = useMemo(
     () =>
       threads.some(
@@ -1899,7 +1995,7 @@ export default function Sidebar() {
     ReadonlyArray<string>,
     ReadonlyArray<string>
   >(SIDEBAR_D_FOLDED_PROJECTS_KEY, [], Schema.Array(Schema.String));
-  const [unoFolded] = useLocalStorage(
+  const [unoFolded, setUnoFolded] = useLocalStorage(
     SIDEBAR_D_UNO_FOLDED_KEY,
     false,
     Schema.Boolean,
@@ -1950,7 +2046,8 @@ export default function Sidebar() {
       })),
     ];
   }, [dComputerIds, dKnownComputers, resolveEnvironmentLabel]);
-  const dHomePaths = useHomeFolderPaths(dComputerIds);
+  // Only the view menu asks the other computers for their home folders.
+  const dHomePaths = useHomeFolderPaths(sidebarViewMenu ? dComputerIds : NO_ENVIRONMENT_IDS);
   // A computer's home folder: its chats are the "Home folder" group, not a project.
   const dIsHomeProject = useCallback(
     (project: Project) => {
@@ -1999,6 +2096,7 @@ export default function Sidebar() {
     return map;
   }, [dIsHomeProject, projectGroups]);
   const dGroups = useMemo(() => {
+    const legacyHome = dHomeFolderPath?.replace(/\/+$/, "") ?? null;
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
     // Uno's running chats may live in the assistant's own folder, which the
     // main list keeps out: they still show under Uno while they run.
@@ -2015,13 +2113,48 @@ export default function Sidebar() {
       chats: [...activeThreads, ...unoRunningElsewhere],
       isFromUno: (thread) => isFromAssistant(thread, assistantChatId),
       isRunning: (thread) => isRunningStatus(resolveSidebarThreadStatus(thread)),
-      projectOf: dGroupOf,
+      projectOf: sidebarViewMenu
+        ? dGroupOf
+        : (thread) => {
+            // 0.0.137: this computer's home folder is Recents, not a project.
+            const key = projectKeyOf(thread);
+            const project = projectByKey.get(key);
+            if (!project || isAssistantProjectId(project.id)) return null;
+            if (legacyHome !== null && project.cwd.replace(/\/+$/, "") === legacyHome) return null;
+            return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
+          },
       activityMs: (thread) =>
         resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined) ?? 0,
       // Every project the person added keeps its row, live chats or not.
-      allProjects: [...dProjectInfo.entries()].map(([key, info]) => ({ key, name: info.name })),
+      allProjects: sidebarViewMenu
+        ? [...dProjectInfo.entries()].map(([key, info]) => ({ key, name: info.name }))
+        : projects
+            .filter(
+              (project) =>
+                !isAssistantProjectId(project.id) &&
+                !(legacyHome !== null && project.cwd.replace(/\/+$/, "") === legacyHome),
+            )
+            .map((project) => {
+              const key = `${project.environmentId}:${project.id}`;
+              return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
+            }),
     });
-  }, [activeThreads, assistantChatId, dGroupOf, dProjectInfo, pinnedThreads, threads]);
+  }, [
+    activeThreads,
+    assistantChatId,
+    dGroupOf,
+    dHomeFolderPath,
+    dProjectInfo,
+    pinnedThreads,
+    projectByKey,
+    projectDisplayNameByKey,
+    projects,
+    sidebarViewMenu,
+    threads,
+  ]);
+  // Flag off (0.0.137): Classic (projects always in the sidebar) or inbox
+  // (chats by status), as the "Inbox sidebar" setting says.
+  const dLegacyInbox = !sidebarViewMenu && dInboxSetting;
   // Uno's running chats name their computer only when they are not all on one
   // (critics 16.10: "UW" on every row under Uno said nothing).
   const dUnoComputerCount = useMemo(
@@ -2038,6 +2171,14 @@ export default function Sidebar() {
     const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
     return activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread)));
   }, [activeThreads, dGroups.unoRunning]);
+  // Flag off, inbox: the same live chats by status (0.0.137).
+  const dLegacyStatusSections = useMemo(() => {
+    if (!dLegacyInbox) return [];
+    return groupChatsByStatusForSidebarD({
+      chats: dLiveChats,
+      markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+    });
+  }, [dLegacyInbox, dLiveChats, now]);
   // Filters (a choice of this device): some projects, some computers; null — all.
   const [dStoredProjectPicks, setDProjectPicks] = useLocalStorage<
     ReadonlyArray<string> | null,
@@ -2075,9 +2216,7 @@ export default function Sidebar() {
   );
   const dProjectName = useCallback(
     (key: string) =>
-      key === HOME_FOLDER_GROUP_KEY
-        ? HOME_FOLDER_GROUP_NAME
-        : (dProjectInfo.get(key)?.name ?? key),
+      key === HOME_FOLDER_GROUP_KEY ? HOME_FOLDER_GROUP_NAME : (dProjectInfo.get(key)?.name ?? key),
     [dProjectInfo],
   );
   const dPickedProjectNames = useMemo(
@@ -2104,47 +2243,52 @@ export default function Sidebar() {
   // The groups, in the order picked; null — one list, newest first.
   const dTree = useMemo(
     () =>
-      groupSidebarChats({
-        chats: dShownChats,
-        levels: dLevels,
-        keyOf: {
-          computer: (thread) => thread.environmentId,
-          project: (thread) => dGroupOf(thread).key,
-          status: (thread) =>
-            statusSectionOf(dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now))),
-        },
-        orderOf: {
-          computer: dOrderedComputers.map((computer) => computer.key),
-          status: STATUS_SECTIONS.map((section) => section.id),
-        },
-        seedOf: {
-          // Every computer keeps its header, the ones asleep too (grey) —
-          // with a project filter, only the ones that project lives on.
-          computer: () =>
-            dOrderedComputers
-              .filter((computer) =>
-                computer.environmentId === null
-                  ? dComputerPicks === null && dProjectPicks === null
-                  : passes(dComputerPicks, computer.environmentId) &&
-                    (dProjectPicks === null ||
-                      dProjectPicks.some((key) =>
-                        dProjectInfo.get(key)?.computers.includes(computer.environmentId!),
-                      )),
-              )
-              .map((computer) => computer.key),
-          // Every project the person added keeps its row, live chats or not.
-          project: (trail) =>
-            [...dProjectInfo.entries()]
-              .filter(
-                ([key, info]) =>
-                  passes(dProjectPicks, key) &&
-                  (trail.computer === undefined
-                    ? info.computers.some((computer) => passes(dComputerPicks, computer))
-                    : info.computers.includes(trail.computer)),
-              )
-              .map(([key]) => key),
-        },
-      }),
+      // Flag off: the 0.0.137 lists below lay the chats out, not the tree.
+      !sidebarViewMenu
+        ? null
+        : groupSidebarChats({
+            chats: dShownChats,
+            levels: dLevels,
+            keyOf: {
+              computer: (thread) => thread.environmentId,
+              project: (thread) => dGroupOf(thread).key,
+              status: (thread) =>
+                statusSectionOf(
+                  dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                ),
+            },
+            orderOf: {
+              computer: dOrderedComputers.map((computer) => computer.key),
+              status: STATUS_SECTIONS.map((section) => section.id),
+            },
+            seedOf: {
+              // Every computer keeps its header, the ones asleep too (grey) —
+              // with a project filter, only the ones that project lives on.
+              computer: () =>
+                dOrderedComputers
+                  .filter((computer) =>
+                    computer.environmentId === null
+                      ? dComputerPicks === null && dProjectPicks === null
+                      : passes(dComputerPicks, computer.environmentId) &&
+                        (dProjectPicks === null ||
+                          dProjectPicks.some((key) =>
+                            dProjectInfo.get(key)?.computers.includes(computer.environmentId!),
+                          )),
+                  )
+                  .map((computer) => computer.key),
+              // Every project the person added keeps its row, live chats or not.
+              project: (trail) =>
+                [...dProjectInfo.entries()]
+                  .filter(
+                    ([key, info]) =>
+                      passes(dProjectPicks, key) &&
+                      (trail.computer === undefined
+                        ? info.computers.some((computer) => passes(dComputerPicks, computer))
+                        : info.computers.includes(trail.computer)),
+                  )
+                  .map(([key]) => key),
+            },
+          }),
     [
       dComputerPicks,
       dGroupOf,
@@ -2154,6 +2298,7 @@ export default function Sidebar() {
       dProjectPicks,
       dShownChats,
       now,
+      sidebarViewMenu,
     ],
   );
   // What a project row of the tree says and where its "+" starts a chat.
@@ -2247,12 +2392,44 @@ export default function Sidebar() {
         keepVisible: (thread) => threadKeyOf(thread) === routeThreadKey || threadNeedsUser(thread),
         ...(limit !== undefined ? { limit } : {}),
       });
+    if (!sidebarViewMenu) {
+      // Flag off: the 0.0.137 groups — projects, Recents, or status sections.
+      return {
+        leaves: new Map<string, DGroupPreview<SidebarThreadSummary>>(),
+        list: null,
+        legacy: {
+          projects: new Map(
+            dGroups.projects.map((project) => [
+              project.key,
+              preview(`project:${project.key}`, project.chats),
+            ]),
+          ),
+          recents: preview("recents", dGroups.recents),
+          status: new Map(
+            dLegacyStatusSections.map((section) => [
+              section.id,
+              preview(`status:${section.id}`, section.chats),
+            ]),
+          ),
+        },
+      };
+    }
     return {
       leaves: new Map(dLeaves.map((node) => [node.path, preview(node.path, node.chats)])),
       // One list is the whole list: a longer first page than a group's.
       list: dTree === null ? preview("list", dShownChats, SIDEBAR_D_LIST_PREVIEW_LIMIT) : null,
+      legacy: null,
     };
-  }, [dExpandedGroupKeys, dLeaves, dShownChats, dTree, routeThreadKey]);
+  }, [
+    dExpandedGroupKeys,
+    dGroups,
+    dLeaves,
+    dLegacyStatusSections,
+    dShownChats,
+    dTree,
+    routeThreadKey,
+    sidebarViewMenu,
+  ]);
   // Computers and projects fold; a status is a label.
   const isNodeFolded = useCallback(
     (node: SidebarDGroupNode<SidebarThreadSummary>) =>
@@ -2260,6 +2437,21 @@ export default function Sidebar() {
     [isProjectFolded],
   );
   const dVisibleChats = useMemo(() => {
+    const legacy = dPreviews.legacy;
+    if (legacy !== null) {
+      return dLegacyInbox
+        ? dLegacyStatusSections.flatMap(
+            (section) => legacy.status.get(section.id)?.visible ?? section.chats,
+          )
+        : [
+            ...dGroups.projects.flatMap((project) =>
+              isProjectFolded(project)
+                ? []
+                : (legacy.projects.get(project.key)?.visible ?? project.chats),
+            ),
+            ...legacy.recents.visible,
+          ];
+    }
     if (dTree === null) return dPreviews.list?.visible ?? dShownChats;
     const walk = (
       nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
@@ -2272,7 +2464,16 @@ export default function Sidebar() {
             : [...(dPreviews.leaves.get(node.path)?.visible ?? node.chats)],
       );
     return walk(dTree);
-  }, [dPreviews, dShownChats, dTree, isNodeFolded]);
+  }, [
+    dGroups.projects,
+    dLegacyInbox,
+    dLegacyStatusSections,
+    dPreviews,
+    dShownChats,
+    dTree,
+    isNodeFolded,
+    isProjectFolded,
+  ]);
 
   const orderedThreads = useMemo(
     () =>
@@ -3219,10 +3420,11 @@ export default function Sidebar() {
         nested={options?.nested ?? false}
         {...(options?.showMachine !== undefined
           ? { showMachine: options.showMachine }
-          : options?.underUno
+          : options?.underUno && sidebarViewMenu
             ? { showMachine: dUnoShowsComputer(thread) }
             : {})}
         {...(options?.placeLabel ? { placeLabel: options.placeLabel } : {})}
+        computerIcon={sidebarViewMenu}
         fromUno={
           options?.d === true && !options.underUno
             ? isFromAssistant(thread, assistantChatId)
@@ -3427,10 +3629,6 @@ export default function Sidebar() {
     sidebarDPanel.closeNow();
     openNewProject();
   };
-  // A computer's chip on a row, grey while it sleeps or can't be reached.
-  const dChipFor = (environmentId: string) => (
-    <SidebarDComputerChip key={environmentId} environmentId={environmentId} />
-  );
   // What a chat row still says about its place: the project unless grouped by it.
   const dPlace = placeShown(dLevels, dMultiComputer);
   const dRowChips = (computers: ReadonlyArray<string>, underComputer: boolean) => {
@@ -3489,9 +3687,7 @@ export default function Sidebar() {
       ) : null}
     </>
   );
-  const dRenderNodes = (
-    nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
-  ): ReactNode =>
+  const dRenderNodes = (nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>): ReactNode =>
     nodes.map((node, index) => {
       const underComputer = node.trail.computer !== undefined;
       const folded = isNodeFolded(node);
@@ -3592,6 +3788,94 @@ export default function Sidebar() {
             },
           ],
   );
+  // Flag off: the 0.0.137 lists — Projects then Recents, or chats by status.
+  const dLegacyProjectList = (
+    <>
+      {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
+      {dGroups.projects.map((group) => {
+        const folded = isProjectFolded(group);
+        const project = projectByKey.get(group.key) ?? null;
+        const preview = dPreviews.legacy?.projects.get(group.key);
+        return (
+          <li key={group.key} className="list-none">
+            <ul role="list" className="flex flex-col gap-px">
+              <SidebarDProjectRow
+                name={group.name}
+                folded={folded}
+                mark={foldedProjectMark(
+                  group.chats.map((thread) =>
+                    dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                  ),
+                )}
+                onToggle={() => toggleProjectFolded(group.key)}
+                onNewChat={project ? dNewChatIn(project) : null}
+              />
+              {folded ? null : (
+                <>
+                  {(preview?.visible ?? group.chats).map((thread) =>
+                    renderRow(thread, "active", { d: true, nested: true }),
+                  )}
+                  {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+                    <SidebarDShowMoreRow
+                      nested
+                      hiddenCount={preview.hiddenCount}
+                      testId={`sidebar-d-show-more-project-${group.key}`}
+                      onToggle={() => toggleDGroupExpanded(`project:${group.key}`)}
+                    />
+                  ) : null}
+                </>
+              )}
+            </ul>
+          </li>
+        );
+      })}
+      {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
+      {(dPreviews.legacy?.recents.visible ?? []).map((thread) =>
+        renderRow(thread, "active", { d: true }),
+      )}
+      {dPreviews.legacy &&
+      (dPreviews.legacy.recents.hiddenCount > 0 || dPreviews.legacy.recents.canCollapse) ? (
+        <SidebarDShowMoreRow
+          hiddenCount={dPreviews.legacy.recents.hiddenCount}
+          testId="sidebar-d-show-more-recents"
+          onToggle={() => toggleDGroupExpanded("recents")}
+        />
+      ) : null}
+    </>
+  );
+  const dLegacyStatusList = (
+    <>
+      {dLegacyStatusSections.map((section) => {
+        const preview = dPreviews.legacy?.status.get(section.id);
+        return (
+          <li key={section.id} className="list-none" data-testid={`sidebar-d-status-${section.id}`}>
+            <ul role="list" className="flex flex-col gap-px">
+              <SidebarDSectionLabel label={section.label} />
+              {(preview?.visible ?? section.chats).map((thread) =>
+                renderRow(thread, "active", { d: true }),
+              )}
+              {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+                <SidebarDShowMoreRow
+                  hiddenCount={preview.hiddenCount}
+                  testId={`sidebar-d-show-more-status-${section.id}`}
+                  onToggle={() => toggleDGroupExpanded(`status:${section.id}`)}
+                />
+              ) : null}
+            </ul>
+          </li>
+        );
+      })}
+      {snoozedThreads.length > 0 ? (
+        // Snoozed is a status too: in the inbox it sits in the list, not on a shelf.
+        <li className="list-none" data-testid="sidebar-d-status-snoozed">
+          <ul role="list" className="flex flex-col gap-px">
+            <SidebarDSectionLabel label="Snoozed" />
+            {snoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+          </ul>
+        </li>
+      ) : null}
+    </>
+  );
   const dChatList = (inPanel: boolean) => (
     <SidebarContent className="min-h-full gap-0">
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
@@ -3601,44 +3885,70 @@ export default function Sidebar() {
             className="relative flex flex-1 flex-col gap-px"
             data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
           >
-            <SidebarAssistants
-              routeThreadKey={routeThreadKey}
-              unoRunning={dGroups.unoRunning}
-              renderChat={(thread) =>
-                renderRow(thread, "active", { d: true, nested: true, underUno: true })
-              }
-            />
-            <SidebarDChatsBar
-              title={sidebarDTitle({
-                projectNames: dPickedProjectNames,
-                computerNames: dPickedComputerNames,
-              })}
-              groupInHeader={dGroupInHeader}
-              levels={dLevelsChosen}
-              multiComputer={dMultiComputer}
-              onLevelsChange={(levels) =>
-                void updateSidebarSettings({ sidebarGroupLevels: [...levels] })
-              }
-              projects={dProjectOptions}
-              pickedProjects={dProjectPicks}
-              onProjectsChange={setDProjectPicks}
-              computers={dComputerOptions}
-              pickedComputers={dComputerPicks}
-              onComputersChange={setDComputerPicks}
-              onOpenSettings={() => {
-                if (isMobile) setOpenMobile(false);
-                void router.navigate({ to: "/settings" });
-              }}
-              onClearFilters={() => {
-                setDProjectPicks(null);
-                setDComputerPicks(null);
-              }}
-              onNewChat={handleNewThreadClick}
-              newChatShortcutLabel={newChatShortcutLabel}
-              onAddProject={handleAddProject}
-            />
-            {dProjectList}
-            {snoozedThreads.length > 0 ? (
+            {assistantChatsInSidebar ? (
+              <SidebarAssistants
+                routeThreadKey={routeThreadKey}
+                unoRunning={dGroups.unoRunning}
+                renderChat={(thread) =>
+                  renderRow(thread, "active", { d: true, nested: true, underUno: true })
+                }
+              />
+            ) : (
+              <>
+                <SidebarDUnoRow
+                  runningCount={dGroups.unoRunning.length}
+                  folded={unoChildrenFolded}
+                  onToggleFolded={() => setUnoFolded((value) => !value)}
+                  isActive={
+                    assistantChatId !== null && routeThreadRef?.threadId === assistantChatId
+                  }
+                />
+                {unoChildrenFolded
+                  ? null
+                  : dGroups.unoRunning.map((thread) =>
+                      renderRow(thread, "active", { d: true, nested: true, underUno: true }),
+                    )}
+              </>
+            )}
+            {!sidebarViewMenu ? (
+              <LegacySidebarDChatsBar
+                onNewChat={handleNewThreadClick}
+                newChatShortcutLabel={newChatShortcutLabel}
+                onAddProject={handleAddProject}
+              />
+            ) : (
+              <SidebarDChatsBar
+                title={sidebarDTitle({
+                  projectNames: dPickedProjectNames,
+                  computerNames: dPickedComputerNames,
+                })}
+                groupInHeader={dGroupInHeader}
+                levels={dLevelsChosen}
+                multiComputer={dMultiComputer}
+                onLevelsChange={(levels) =>
+                  void updateSidebarSettings({ sidebarGroupLevels: [...levels] })
+                }
+                projects={dProjectOptions}
+                pickedProjects={dProjectPicks}
+                onProjectsChange={setDProjectPicks}
+                computers={dComputerOptions}
+                pickedComputers={dComputerPicks}
+                onComputersChange={setDComputerPicks}
+                onOpenSettings={() => {
+                  if (isMobile) setOpenMobile(false);
+                  void router.navigate({ to: "/settings" });
+                }}
+                onClearFilters={() => {
+                  setDProjectPicks(null);
+                  setDComputerPicks(null);
+                }}
+                onNewChat={handleNewThreadClick}
+                newChatShortcutLabel={newChatShortcutLabel}
+                onAddProject={handleAddProject}
+              />
+            )}
+            {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
+            {!dLegacyInbox && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="snoozed"
                 className="mt-auto pt-2"
@@ -3647,11 +3957,13 @@ export default function Sidebar() {
                 onToggle={() => setSnoozedShelfExpanded((value) => !value)}
               />
             ) : null}
-            {renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
+            {dLegacyInbox
+              ? null
+              : renderedSnoozedThreads.map((thread) => renderRow(thread, "snoozed"))}
             {settledThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="settled"
-                className={cn(snoozedThreads.length === 0 && "mt-auto pt-2")}
+                className={cn((dLegacyInbox || snoozedThreads.length === 0) && "mt-auto pt-2")}
                 label={doneShelfLabel(settledThreads.length, settledShelfExpanded)}
                 expanded={settledShelfExpanded}
                 onToggle={() => setSettledShelfExpanded((value) => !value)}
@@ -3698,7 +4010,7 @@ export default function Sidebar() {
               </Button>
               <span className="text-[11px]">Your folders live in ~/projects</span>
             </div>
-          ) : dLevels.includes("project") ? null : (
+          ) : (sidebarViewMenu ? dLevels.includes("project") : !dInboxSetting) ? null : (
             <SidebarEmptyProjects
               projects={projectGroups.map((group) => ({
                 key: group.projectKey,
@@ -3730,63 +4042,63 @@ export default function Sidebar() {
     return (
       <MachineIdentityProvider identities={machineIdentities}>
         <SidebarDComputersProvider computers={dComputers}>
-        <SidebarDHeader isElectron={isElectron} />
-        <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
-          {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
+          <SidebarDHeader isElectron={isElectron} />
+          <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
+            {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
               waits; the chats below with Uno pinned first. Settings and the
               account live in the menu on top. */}
-          <SidebarSetupRow />
-          <SidebarDPlaces />
-        </SidebarGroup>
-        {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
-        {dChatList(false)}
-        <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
-          <SidebarUpdatePill />
-        </SidebarFooter>
-        {showPanel
-          ? createPortal(
-              <div
-                ref={dPanelRef}
-                role="dialog"
-                aria-label="Chats"
-                data-testid="sidebar-chats-panel"
-                onPointerEnter={() => sidebarDPanel.enterPanel()}
-                onPointerLeave={() => sidebarDPanel.leave()}
-                className={cn(
-                  // Opaque like the expanded sidebar (bg-card): the page header
-                  // must not show through.
-                  "fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-card text-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150",
-                  isElectron && "pt-[44px] fullscreen:pt-0",
-                )}
-                style={{ left: SIDEBAR_D_RAIL_WIDTH }}
-              >
-                <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">
-                  <span className="flex-1 text-sm font-semibold">Chats</span>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label="Keep the sidebar open"
-                          data-testid="sidebar-panel-pin"
-                          onClick={() => setOpen(true)}
-                          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                        />
-                      }
-                    >
-                      <PinIcon className="size-4" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="bottom">Keep the sidebar open · ⌘B</TooltipPopup>
-                  </Tooltip>
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                  {dChatList(true)}
-                </div>
-              </div>,
-              document.body,
-            )
-          : null}
-        {sharedDialogs}
+            <SidebarSetupRow />
+            <SidebarDPlaces />
+          </SidebarGroup>
+          {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
+          {dChatList(false)}
+          <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
+            <SidebarUpdatePill />
+          </SidebarFooter>
+          {showPanel
+            ? createPortal(
+                <div
+                  ref={dPanelRef}
+                  role="dialog"
+                  aria-label="Chats"
+                  data-testid="sidebar-chats-panel"
+                  onPointerEnter={() => sidebarDPanel.enterPanel()}
+                  onPointerLeave={() => sidebarDPanel.leave()}
+                  className={cn(
+                    // Opaque like the expanded sidebar (bg-card): the page header
+                    // must not show through.
+                    "fixed inset-y-0 z-40 flex w-72 flex-col border-r border-border bg-card text-foreground shadow-xl animate-in slide-in-from-left-2 fade-in-0 duration-150",
+                    isElectron && "pt-[44px] fullscreen:pt-0",
+                  )}
+                  style={{ left: SIDEBAR_D_RAIL_WIDTH }}
+                >
+                  <div className="flex h-11 shrink-0 items-center gap-2 px-4 pt-1">
+                    <span className="flex-1 text-sm font-semibold">Chats</span>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Keep the sidebar open"
+                            data-testid="sidebar-panel-pin"
+                            onClick={() => setOpen(true)}
+                            className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                          />
+                        }
+                      >
+                        <PinIcon className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="bottom">Keep the sidebar open · ⌘B</TooltipPopup>
+                    </Tooltip>
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                    {dChatList(true)}
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
+          {sharedDialogs}
         </SidebarDComputersProvider>
       </MachineIdentityProvider>
     );

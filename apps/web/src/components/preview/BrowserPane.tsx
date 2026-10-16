@@ -7,6 +7,8 @@ import {
   KeyRoundIcon,
   Loader2Icon,
   MoreVerticalIcon,
+  MinusIcon,
+  PlusIcon,
   RotateCwIcon,
   XIcon,
   MonitorSmartphoneIcon,
@@ -40,6 +42,7 @@ import {
 } from "../../browserExtensionBridge";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -314,6 +317,11 @@ function BrowserView({
   const demoDesktop = useDemoDesktop();
   const pageInPanel = isElectron || demoDesktop;
   const iframeMode = !isElectron && demoDesktop;
+  // Comment / Debug (flag `browserPageTools`): only where the page is in the
+  // panel (the desktop app, its demo). The web build's page is a companion
+  // tab in the person's own browser — no tools there, flag or not.
+  const pageToolsFlag = useFeatureFlag("browserPageTools");
+  const pageToolsOn = pageToolsFlag && pageInPanel;
   const pageElementRef = useRef<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
@@ -422,10 +430,10 @@ function BrowserView({
   }, []);
 
   // Comment (C) and Debug (D): the page's half lives in the page.
-  usePageTools({ tabId: tab.id, view: webviewNode, enabled: pageInPanel });
+  usePageTools({ tabId: tab.id, view: webviewNode, enabled: pageToolsOn });
   const pageTools = usePageToolsTab(tab.id);
   useEffect(() => {
-    if (!visible || !pageInPanel) return;
+    if (!visible || !pageToolsOn) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -441,7 +449,7 @@ function BrowserView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [visible, pageInPanel, tab.id]);
+  }, [visible, pageToolsOn, tab.id]);
 
   useEffect(() => {
     const view = webviewNode;
@@ -859,22 +867,68 @@ function BrowserView({
               spellCheck={false}
               autoCorrect="off"
               autoCapitalize="off"
-              className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+              className={cn(
+                "h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-foreground outline-none placeholder:text-muted-foreground focus:border-ring",
+                pageToolsOn ? "text-xs" : "font-mono text-[11px]",
+              )}
             />
           </form>
           {loading ? (
             <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
           ) : null}
-          {pageInPanel ? <PageToolsButtons tabId={tab.id} disabled={!mountSrc} /> : null}
+          {pageToolsOn ? (
+            <PageToolsButtons tabId={tab.id} disabled={!mountSrc} />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => applyZoom(zoomFactor - ZOOM_STEP)}
+                disabled={!mountSrc}
+                aria-label="Zoom out"
+                title="Zoom out"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <MinusIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => applyZoom(DEFAULT_ZOOM_FACTOR)}
+                disabled={!mountSrc}
+                aria-label="Reset zoom"
+                title="Reset zoom"
+                className="inline-flex h-6 min-w-8 shrink-0 items-center justify-center rounded px-1 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {Math.round(zoomFactor * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() => applyZoom(zoomFactor + ZOOM_STEP)}
+                disabled={!mountSrc}
+                aria-label="Zoom in"
+                title="Zoom in"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <PlusIcon className="size-3.5" />
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={async (event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
-                  { id: "zoom-in", label: "Zoom in" },
-                  { id: "zoom-out", label: "Zoom out" },
-                  { id: "zoom-reset", label: `Actual size (now ${Math.round(zoomFactor * 100)}%)` },
+                  // With Comment / Debug in the bar, zoom moves in here.
+                  ...(pageToolsOn
+                    ? [
+                        { id: "zoom-in", label: "Zoom in" },
+                        { id: "zoom-out", label: "Zoom out" },
+                        {
+                          id: "zoom-reset",
+                          label: `Actual size (now ${Math.round(zoomFactor * 100)}%)`,
+                        },
+                      ]
+                    : []),
                   { id: "force-reload", label: "Reload without cache" },
                   { id: "screenshot", label: "Take a screenshot" },
                   { id: "responsive", label: "Responsive" },
@@ -922,13 +976,15 @@ function BrowserView({
           {/* Кнопка есть в обеих оболочках: пароль подставляет сервер, поэтому
               заполнение работает и в браузерной версии (через companion), и в
               десктопе, и в headless-браузере бокса. */}
-          {matchedCredentials.length > 0 ? (
+          {/* With Comment / Debug in the bar, the key shows only when it has a login. */}
+          {!pageToolsOn || matchedCredentials.length > 0 ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
                     onClick={handleAutofillClick}
+                    disabled={matchedCredentials.length === 0}
                     aria-label={
                       matchedCredentials.length > 0
                         ? "Fill in saved login"
@@ -1072,17 +1128,19 @@ function BrowserView({
                 />
               )}
             </div>
-            <CommentLayer
-              tabId={tab.id}
-              pageRef={pageElementRef}
-              zoom={iframeMode ? 1 : zoomFactor}
-            />
+            {pageToolsOn ? (
+              <CommentLayer
+                tabId={tab.id}
+                pageRef={pageElementRef}
+                zoom={iframeMode ? 1 : zoomFactor}
+              />
+            ) : null}
           </div>
         ) : (
           <NewTabPlaceholder recentUrls={recentUrls} onOpenUrl={navigate} />
         )}
-        {pageInPanel && mountSrc ? <CommentBar tabId={tab.id} pageUrl={currentUrl} /> : null}
-        {pageInPanel && mountSrc && pageTools.debugOpen ? (
+        {pageToolsOn && mountSrc ? <CommentBar tabId={tab.id} pageUrl={currentUrl} /> : null}
+        {pageToolsOn && mountSrc && pageTools.debugOpen ? (
           <DebugDrawer tabId={tab.id} pageUrl={currentUrl} />
         ) : null}
         {loadError ? (

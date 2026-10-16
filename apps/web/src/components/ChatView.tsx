@@ -222,9 +222,10 @@ import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSend
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
 import { ChatMiniWindow } from "./chat/ChatMiniWindow";
-import { FullscreenChatDockHeader } from "./chat/FullscreenChatDock";
+import { FullscreenChatDockHeader, LegacyFocusChatPreview } from "./chat/FullscreenChatDock";
 import { chatDockStatus, type ChatDockMode } from "./chat/chatDock.logic";
 import { useDemoSwitch } from "~/demo/demoFlag";
+import { useFeatureFlag } from "~/hooks/useFeatureFlags";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
@@ -684,11 +685,14 @@ export default function ChatView(props: ChatViewProps) {
   // Встроенный чат сам живёт внутри правой панели — фокус-режим к нему не
   // применяется (иначе композер уехал бы в fixed-оверлей поверх приложения).
   const isPreviewFocusMode = previewLayoutMode === "focus" && !isEmbedded;
-  // Full-screen tab: the chat is a dense block at the bottom (peek / expanded)
-  // or folded into a mini window — or a narrow column (demo switch, w0138 p3).
+  // Labs `fullscreenChatDock` (w0138 p3). On: the chat is a dense block at the
+  // bottom (peek / expanded) or folded into a mini window — or a narrow column
+  // (demo switch). Off: the 0.0.137 "Latest step" pill above the composer.
+  const fullscreenChatDock = useFeatureFlag("fullscreenChatDock");
+  const isChatDockMode = isPreviewFocusMode && fullscreenChatDock;
   const [focusChatPanelMode, setFocusChatPanelMode] = useState<ChatDockMode>("peek");
   const chatDockVariant = useDemoSwitch("chatDock");
-  const isFocusChatMinimized = isPreviewFocusMode && focusChatPanelMode === "minimized";
+  const isFocusChatMinimized = isChatDockMode && focusChatPanelMode === "minimized";
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -3966,8 +3970,8 @@ export default function ChatView(props: ChatViewProps) {
     const messages = activeThread?.messages ?? [];
     return messages
       .filter((message) => message.role === "user" || message.role === "assistant")
-      .slice(-8);
-  }, [activeThread?.messages]);
+      .slice(fullscreenChatDock ? -8 : -2);
+  }, [activeThread?.messages, fullscreenChatDock]);
   const latestFocusPreviewMessage = focusPreviewMessages[focusPreviewMessages.length - 1];
   const focusChatStatus = chatDockStatus({
     isWorking,
@@ -3976,13 +3980,18 @@ export default function ChatView(props: ChatViewProps) {
   });
   // The dense block holds the one-line composer; an approval or a question
   // brings the full composer back, and the step row then sits right above it.
-  const focusChatComposerIsStrip =
-    activePendingApproval === null && pendingUserInputs.length === 0;
+  const focusChatComposerIsStrip = activePendingApproval === null && pendingUserInputs.length === 0;
 
-  // Leaving full screen brings the chat back unfolded.
+  // Leaving full screen brings the chat back unfolded (dock only; 0.0.137 kept the mode).
   useEffect(() => {
-    if (!isPreviewFocusMode) setFocusChatPanelMode("peek");
-  }, [isPreviewFocusMode]);
+    if (!isPreviewFocusMode && fullscreenChatDock) setFocusChatPanelMode("peek");
+  }, [fullscreenChatDock, isPreviewFocusMode]);
+  // The legacy preview knows no "minimized": a flag turned off mid-fold shows the pill.
+  useEffect(() => {
+    if (!fullscreenChatDock) {
+      setFocusChatPanelMode((mode) => (mode === "minimized" ? "peek" : mode));
+    }
+  }, [fullscreenChatDock]);
   const restoreFocusChat = useCallback(() => setFocusChatPanelMode("peek"), []);
   const replyFromFocusChat = useCallback(() => {
     setFocusChatPanelMode("peek");
@@ -4150,6 +4159,8 @@ export default function ChatView(props: ChatViewProps) {
 
           {isFocusChatMinimized ? (
             <ChatMiniWindow
+              // Another chat opened while folded starts from what it has on screen.
+              key={activeThread.id}
               variant={chatDockVariant}
               title={activeThread.title}
               status={focusChatStatus}
@@ -4163,6 +4174,14 @@ export default function ChatView(props: ChatViewProps) {
               onRestore={restoreFocusChat}
               onReply={replyFromFocusChat}
               onOpenChat={openChatFromFocus}
+            />
+          ) : null}
+          {isPreviewFocusMode && !fullscreenChatDock ? (
+            <LegacyFocusChatPreview
+              mode={focusChatPanelMode === "expanded" ? "expanded" : "peek"}
+              onModeChange={setFocusChatPanelMode}
+              messages={focusPreviewMessages}
+              sidebarVisible={sidebarVisible}
             />
           ) : null}
 
@@ -4179,7 +4198,6 @@ export default function ChatView(props: ChatViewProps) {
                   "pointer-events-none fixed bottom-2 right-0 z-[70] border-0 bg-transparent px-4 pb-0 pt-0 sm:bottom-3 sm:px-6",
                 // Folded into the mini window: the composer keeps its draft, out of sight.
                 isFocusChatMinimized && "hidden",
-                // The demo's "what to look at" pill holds the bottom-right corner.
               )}
               style={
                 isPreviewFocusMode
@@ -4190,16 +4208,17 @@ export default function ChatView(props: ChatViewProps) {
               <div
                 className={cn(
                   "relative isolate",
+                  isPreviewFocusMode && "pointer-events-auto",
                   // ~800px in the middle, like the full composer (max-w-208).
-                  isPreviewFocusMode && "pointer-events-auto mx-auto w-full max-w-208",
+                  isChatDockMode && "mx-auto w-full max-w-208",
                   // One dense block: the latest step is the top edge of the composer.
-                  isPreviewFocusMode &&
+                  isChatDockMode &&
                     focusChatComposerIsStrip &&
                     "rounded-2xl border border-border/70 bg-card/95 shadow-xl shadow-black/10 backdrop-blur-xl",
                 )}
-                data-chat-dock={isPreviewFocusMode ? "true" : undefined}
+                data-chat-dock={isChatDockMode ? "true" : undefined}
               >
-                {isPreviewFocusMode ? (
+                {isChatDockMode ? (
                   <FullscreenChatDockHeader
                     status={focusChatStatus}
                     latestStep={latestFocusPreviewMessage?.text ?? ""}
@@ -4274,7 +4293,7 @@ export default function ChatView(props: ChatViewProps) {
                     isServerThread={isServerThread}
                     isLocalDraftThread={isLocalDraftThread}
                     forceCompact={isPreviewFocusMode}
-                    inDock={isPreviewFocusMode}
+                    inDock={isChatDockMode}
                     hideRuntimeModeControl={isEmbedded}
                     phase={phase}
                     isConnecting={isConnecting}

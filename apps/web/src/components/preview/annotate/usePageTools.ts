@@ -4,7 +4,20 @@
  * picks, keys) into the tab's state, and keeps the page's mode and pins in
  * step with that state. Works with anything that talks like Electron's
  * <webview>: the desktop app's own, or the demo's iframe (iframeWebview.ts).
+ *
+ * Desktop 0.0.139+ (w0139): the desktop's page preload already lives in every
+ * page of the panel browser (before the page's scripts, in its isolated
+ * world; console and network from the page's DevTools protocol in the app's
+ * main process) — then nothing is put into the page: the same messages come
+ * as the <webview>'s `ipc-message`, the calls go as `<webview>.send`
+ * (contracts pageTools.ts). Older desktop apps and the demo: the script.
  */
+import {
+  PAGE_TOOLS_COMMAND_CHANNEL,
+  PAGE_TOOLS_HOST_CHANNEL,
+  PAGE_TOOLS_PRELOAD_VERSION,
+  type PageToolsWireCommand,
+} from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
 import type { ConsoleEntry, NetworkEntry } from "./pageTools.logic";
@@ -12,6 +25,7 @@ import {
   buildPageToolsScript,
   type PagePin,
   pageToolsCall,
+  type PageToolsMessage,
   parsePageToolsMessage,
 } from "./pageToolsScript";
 import { usePageToolsStore } from "./pageToolsStore";
@@ -21,6 +35,19 @@ export interface PageToolsView {
   executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
   addEventListener(type: string, listener: (event: Event) => void): void;
   removeEventListener(type: string, listener: (event: Event) => void): void;
+  /** A real <webview>: a message to its page's preload. */
+  send?(channel: string, ...args: unknown[]): void;
+}
+
+/** The desktop's page preload serves this view (desktop 0.0.139+, a real <webview>). */
+export function pageToolsPreloadServes(
+  view: PageToolsView,
+  bridge: { readonly pageTools?: { readonly version: number } } | undefined,
+): boolean {
+  return (
+    typeof view.send === "function" &&
+    (bridge?.pageTools?.version ?? 0) >= PAGE_TOOLS_PRELOAD_VERSION
+  );
 }
 
 export function usePageTools(input: {
@@ -37,6 +64,10 @@ export function usePageTools(input: {
     if (!view || !enabled) return;
     const nonce = `uno-page-tools:${crypto.randomUUID()}:`;
     const store = usePageToolsStore.getState;
+    const viaPreload = pageToolsPreloadServes(
+      view,
+      typeof window === "undefined" ? undefined : window.desktopBridge,
+    );
     readyRef.current = false;
 
     const syncPage = () => {
@@ -47,6 +78,19 @@ export function usePageTools(input: {
         selector: comment.selector,
         docRect: comment.docRect,
       }));
+      if (viaPreload) {
+        const commands: PageToolsWireCommand[] = [
+          { method: "setMode", arg: tab?.commenting ? "comment" : "off" },
+          { method: "setPins", arg: pins },
+          { method: "setPaused", arg: tab?.draft != null },
+        ];
+        try {
+          for (const command of commands) view.send?.(PAGE_TOOLS_COMMAND_CHANNEL, command);
+        } catch {
+          // the page isn't attached yet: dom-ready syncs it
+        }
+        return;
+      }
       void view
         .executeJavaScript(
           [
@@ -59,6 +103,12 @@ export function usePageTools(input: {
         .catch(() => {});
     };
     const install = () => {
+      if (viaPreload) {
+        // The preload is already in the page: just tell it the tab's state.
+        readyRef.current = true;
+        syncPage();
+        return;
+      }
       void view
         .executeJavaScript(buildPageToolsScript(nonce), false)
         .then(() => {
@@ -67,14 +117,7 @@ export function usePageTools(input: {
         })
         .catch(() => {});
     };
-    const onConsoleMessage = (event: Event) => {
-      const message = parsePageToolsMessage(
-        nonce,
-        (event as Event & { message?: unknown }).message,
-      );
-      if (!message) return;
-      // Ours: not the page's own console line.
-      event.preventDefault();
+    const handle = (message: PageToolsMessage) => {
       const actions = store();
       switch (message.type) {
         case "ready":
@@ -106,8 +149,27 @@ export function usePageTools(input: {
         }
       }
     };
+    const onConsoleMessage = (event: Event) => {
+      const message = parsePageToolsMessage(
+        nonce,
+        (event as Event & { message?: unknown }).message,
+      );
+      if (!message) return;
+      // Ours: not the page's own console line.
+      event.preventDefault();
+      handle(message);
+    };
+    const onIpcMessage = (event: Event) => {
+      const { channel, args } = event as Event & { channel?: unknown; args?: unknown };
+      if (channel !== PAGE_TOOLS_HOST_CHANNEL || !Array.isArray(args)) return;
+      const message = args[0] as PageToolsMessage | undefined;
+      if (message && typeof message === "object" && typeof message.type === "string") {
+        handle(message);
+      }
+    };
     view.addEventListener("dom-ready", install);
-    view.addEventListener("console-message", onConsoleMessage);
+    if (viaPreload) view.addEventListener("ipc-message", onIpcMessage);
+    else view.addEventListener("console-message", onConsoleMessage);
     // A page that was already up when the tools came.
     install();
     const unsubscribe = usePageToolsStore.subscribe((next, previous) => {
@@ -122,6 +184,7 @@ export function usePageTools(input: {
     });
     return () => {
       view.removeEventListener("dom-ready", install);
+      view.removeEventListener("ipc-message", onIpcMessage);
       view.removeEventListener("console-message", onConsoleMessage);
       unsubscribe();
     };

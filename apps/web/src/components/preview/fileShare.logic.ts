@@ -36,3 +36,16 @@ export const SHARED_COPIES_PREFIX = "Shared/";
 export function sharedCopyKey(name: string): string {
   return `${SHARED_COPIES_PREFIX}${name}`;
 }
+
+/**
+ * The key of the copy `cloudCopyToCloud` makes of one file: the prefix plus
+ * the file's name on disk (the daemon's `copyToCloud` uses the basename).
+ */
+export function sharedCopyKeyForPath(path: string): string {
+  const name =
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() ?? path;
+  return sharedCopyKey(name);
+}

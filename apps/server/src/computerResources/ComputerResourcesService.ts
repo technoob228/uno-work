@@ -53,6 +53,7 @@ import { Context, Duration, Effect, Layer, Schedule } from "effect";
 
 import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { parseDockerPs } from "../machineApps/discoveryParsers.ts";
+import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import type { ScannedApp } from "../machineApps/machineAppsScan.ts";
 import { UnoCloudFetchError } from "../workspaceRegistry/UnoCloudService.ts";
 import {
@@ -257,7 +258,7 @@ export const CLEAN_TARGETS: ReadonlyArray<CleanTarget> = [
     label: "Old logs",
     description: "npm's error logs and the output logs of apps registered in ~/.uno/apps.",
     mode: "logs",
-    paths: (home) => [path.join(home, ".npm", "_logs"), path.join(home, ".uno", "apps")],
+    paths: (home) => [path.join(home, ".npm", "_logs"), resolveManifestDir(home)],
   },
   {
     id: "docker-unused",
@@ -828,7 +829,7 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
       } catch {
         // None.
       }
-      const appsDir = path.join(home, ".uno", "apps");
+      const appsDir = resolveManifestDir(home);
       try {
         for (const name of await readdir(appsDir)) {
           if (name.endsWith(".log")) files.push(path.join(appsDir, name));

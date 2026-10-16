@@ -158,3 +158,22 @@ export function chatDockLatestReply<T extends { readonly role: string }>(
   }
   return null;
 }
+
+/**
+ * The reply that counts as already seen when the chat folds: the latest one on
+ * screen — unless it is still being written, then the one before it, so the
+ * finished reply still pops up as a hint.
+ */
+export function chatDockInitialSeenReplyId(
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly streaming: boolean;
+  }>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "assistant" && !message.streaming) return message.id;
+  }
+  return null;
+}

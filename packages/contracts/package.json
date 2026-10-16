@@ -15,6 +15,11 @@
       "import": "./src/settings.ts",
       "require": "./src/settings.ts"
     },
+    "./pageTools": {
+      "types": "./src/pageTools.ts",
+      "import": "./src/pageTools.ts",
+      "require": "./src/pageTools.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopBridge } from "@t3tools/contracts";
+import { PAGE_TOOLS_PRELOAD_VERSION } from "@t3tools/contracts/pageTools";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -27,6 +28,7 @@ const UNO_ACCOUNT_STATUS_CHANNEL = "desktop:uno-account-status";
 const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
 const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
 const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
+const UNO_DRIVE_SHARE_FILE_CHANNEL = "desktop:uno-drive-share-file";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
 const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-registry";
@@ -77,6 +79,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     signIn: () => ipcRenderer.invoke(UNO_ACCOUNT_SIGN_IN_CHANNEL),
     signOut: () => ipcRenderer.invoke(UNO_ACCOUNT_SIGN_OUT_CHANNEL),
     request: (input) => ipcRenderer.invoke(UNO_ACCOUNT_REQUEST_CHANNEL, input),
+  },
+  // Comment / Debug in the panel browser come from our page preload (w0139).
+  pageTools: { version: PAGE_TOOLS_PRELOAD_VERSION },
+  unoDrive: {
+    shareLocalFile: (input) => ipcRenderer.invoke(UNO_DRIVE_SHARE_FILE_CHANNEL, input),
   },
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(GET_APP_BRANDING_CHANNEL);

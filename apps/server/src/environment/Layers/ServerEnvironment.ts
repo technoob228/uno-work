@@ -9,6 +9,7 @@ import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/Serv
 import packageJson from "../../../package.json" with { type: "json" };
 import { resolveMachineKind } from "../machineKind.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
+import { resolveUpdateChannel } from "../updateChannel.ts";
 
 function platformOs(): ExecutionEnvironmentDescriptor["platform"]["os"] {
   switch (process.platform) {
@@ -96,7 +97,9 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     return label;
   });
 
+  const channel = resolveUpdateChannel();
   const base = {
+    ...(channel ? { channel } : {}),
     platform: {
       os: platformOs(),
       arch: platformArch(),

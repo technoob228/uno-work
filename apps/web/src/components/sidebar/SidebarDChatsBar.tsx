@@ -1,5 +1,6 @@
 /**
- * Sidebar D: the one line over the chats (Misha 16.10, w0138 point 5). It used
+ * Sidebar D: the one line over the chats (Misha 16.10, w0138 point 5; Labs
+ * "Sidebar view menu" — off, LegacySidebarDChatsBar below as in 0.0.137). It used
  * to be two quiet labels, "Chats" and "Projects", that nobody could place.
  * Now the title is a button that says which chats are shown — "All chats",
  * "Chats · landing" — and on the right sit Add a project and New chat, New
@@ -98,6 +99,45 @@ function BarButton(props: {
       </TooltipTrigger>
       <TooltipPopup side="top">{props.tooltip}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/**
+ * Labs "Sidebar view menu" off — the 0.0.137 line: a quiet "Chats" label,
+ * New chat, then Add a project. How the chats are laid out (classic or
+ * inbox) is the Settings switch, not a control here (Misha 11.10).
+ */
+export function LegacySidebarDChatsBar(props: {
+  onNewChat: (event: ReactMouseEvent) => void;
+  /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
+  newChatShortcutLabel: string | null;
+  onAddProject: () => void;
+}) {
+  return (
+    <li
+      className="mt-2 flex h-7 list-none items-center gap-0.5 pr-1 pl-2.5"
+      data-testid="sidebar-d-chats-bar"
+    >
+      <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
+        Chats
+      </span>
+      <BarButton
+        label="New chat"
+        tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
+        testId="sidebar-d-new-chat"
+        onClick={props.onNewChat}
+      >
+        <SquarePenIcon className="size-3.5" />
+      </BarButton>
+      <BarButton
+        label="Add a project"
+        tooltip="Add a project"
+        testId="sidebar-d-add-project"
+        onClick={() => props.onAddProject()}
+      >
+        <FolderPlusIcon className="size-3.5" />
+      </BarButton>
+    </li>
   );
 }
 

@@ -21,6 +21,21 @@ describe("resolveDesktopAppStageLabel", () => {
     ).toBe("Nightly");
   });
 
+  it("uses Stage for Uno Work Stage, packaged or dev", () => {
+    for (const isDevelopment of [false, true]) {
+      expect(
+        resolveDesktopAppStageLabel({ isDevelopment, appVersion: "0.0.139", flavor: "stage" }),
+      ).toBe("Stage");
+    }
+    expect(
+      resolveDesktopAppStageLabel({
+        isDevelopment: false,
+        appVersion: "0.0.139",
+        flavor: "release",
+      }),
+    ).toBe("Alpha");
+  });
+
   it("uses Alpha for packaged stable builds", () => {
     expect(
       resolveDesktopAppStageLabel({

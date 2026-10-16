@@ -35,7 +35,12 @@ export function getAutoUpdateDisabledReason(args: {
   appImage?: string | undefined;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
+  /** Uno Work Stage (desktopFlavor.ts): never updates itself, whatever its feed says. */
+  stageBuild?: boolean;
 }): string | null {
+  if (args.stageBuild) {
+    return "Uno Work Stage doesn't update itself: install a new stage build by hand.";
+  }
   if (!args.hasUpdateFeedConfig) {
     return "Automatic updates are not available because no update feed is configured.";
   }

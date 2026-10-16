@@ -85,6 +85,11 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("PUT", "/api/v1/account/goal")).toBe(true);
     expect(isAllowedAccountRequest("DELETE", "/api/v1/account/goal")).toBe(false);
     expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
+    // Uno Drive: share a copy of a file on this Mac (w0139) — not buckets' raw presign.
+    expect(isAllowedAccountRequest("GET", "/api/v1/drive")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/drive/upload-link")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/drive/shares")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/buckets/3/presign")).toBe(false);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/metrics")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12/applogs?source=auto&tail=200")).toBe(
       true,

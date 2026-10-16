@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import type { ComponentType } from "react";
 
+import { DEMO } from "../../demo/demoFlag";
 import type { FeatureFlagKey } from "../../featureFlags";
 import {
   appSettingsPath,
@@ -155,19 +156,30 @@ export const SIMPLE_SETTINGS_PATHS = {
   developer: "/settings/developer",
 } as const;
 
-export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
-  { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
-  { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
-  // 16.10: the apps the AI works in — one place, teammates pick from it.
-  { label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon },
-  { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
-  { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
-  { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
-];
+/**
+ * The simple entries. Connectors (16.10: the apps the AI works in — one
+ * place, teammates pick from it) is only in the mock for now (Misha 16.10:
+ * the team and its access ship later); the release keeps the five.
+ */
+export function simpleNavEntries(withConnectors = DEMO): ReadonlyArray<SettingsNavEntry> {
+  return [
+    { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
+    { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
+    ...(withConnectors
+      ? [{ label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon }]
+      : []),
+    { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
+    { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+    { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
+  ];
+}
+
+export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = simpleNavEntries();
 
 export const SIMPLE_NAV_GROUP_HEADING = "Settings";
 
-export function isSimpleSettingsPath(pathname: string): boolean {
+export function isSimpleSettingsPath(pathname: string, withConnectors = DEMO): boolean {
+  if (pathname === SIMPLE_SETTINGS_PATHS.connectors) return withConnectors;
   return (Object.values(SIMPLE_SETTINGS_PATHS) as ReadonlyArray<string>).includes(pathname);
 }
 

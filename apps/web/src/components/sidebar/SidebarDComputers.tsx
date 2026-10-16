@@ -36,7 +36,16 @@ export function useSidebarDComputers(): ReadonlyArray<SidebarDComputer> {
   );
 }
 
-/** Each computer's home folder (its chats there are the "Home folder"). */
+/** A computer not connected yet answers no home folder: ask again after this. */
+const HOME_FOLDER_RETRY_MS = 30_000;
+
+/**
+ * Each computer's home folder (its chats there are the "Home folder"), asked
+ * of the computer's daemon (filesystem.browse "~"). A computer that isn't
+ * connected (yet) answers null without a request; that answer goes stale so
+ * the next focus asks again, while the sidebar falls back to the project's
+ * "Home folder" name in the meantime.
+ */
 export function useHomeFolderPaths(
   environmentIds: ReadonlyArray<EnvironmentId>,
 ): ReadonlyMap<string, string> {
@@ -44,7 +53,8 @@ export function useHomeFolderPaths(
     queries: environmentIds.map((environmentId) => ({
       queryKey: ["uno-computer", "home-folder", environmentId],
       queryFn: () => resolveHomeFolder(environmentId),
-      staleTime: Number.POSITIVE_INFINITY,
+      staleTime: (query: { state: { data: string | null | undefined } }) =>
+        query.state.data ? Number.POSITIVE_INFINITY : HOME_FOLDER_RETRY_MS,
     })),
     combine: (results) => {
       const paths = new Map<string, string>();

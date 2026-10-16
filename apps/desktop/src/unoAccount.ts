@@ -106,6 +106,10 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "GET", pattern: /^\/api\/v1\/ai\/meter$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/verify-email$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/computer\/trial$/ },
+  // Uno Drive (w0139): "Share with a link…" for a file on this Mac uploads a
+  // copy through a one-time upload address and links to it (driveShareFile.ts).
+  { method: "GET", pattern: /^\/api\/v1\/drive$/ },
+  { method: "POST", pattern: /^\/api\/v1\/drive\/(upload-link|shares)$/ },
   {
     method: "GET",
     pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,

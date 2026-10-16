@@ -23,6 +23,7 @@ import {
   CHAT_DOCK_HINT_MS,
   CHAT_DOCK_STATUS_LABEL,
   chatDockApprovalPhrase,
+  chatDockInitialSeenReplyId,
   chatDockLatestReply,
   nextChatDockNotice,
   type ChatDockNotice,
@@ -62,9 +63,10 @@ const COLUMN_VAR = "--chat-dock-column-width";
 
 function useDockNotice(props: ChatMiniWindowProps) {
   const isWorking = props.status === "working";
-  // What was on screen when the chat was hidden counts as seen.
-  const [seenReplyId, setSeenReplyId] = useState<string | null>(
-    () => chatDockLatestReply(props.messages)?.id ?? null,
+  // What was on screen when the chat was hidden counts as seen (a reply still
+  // being written doesn't: it pops up once it's done).
+  const [seenReplyId, setSeenReplyId] = useState<string | null>(() =>
+    chatDockInitialSeenReplyId(props.messages),
   );
   const [hint, setHint] = useState<ChatDockNotice | null>(null);
   const [unread, setUnread] = useState(false);

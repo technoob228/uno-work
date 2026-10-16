@@ -12,6 +12,7 @@ import { ASSISTANT_PROJECT_ID, isAssistantProjectId } from "@t3tools/contracts";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { DEMO } from "../../demo/demoFlag";
 import { useMachineLabels } from "../../hooks/useMachineRows";
 import { toSortableTimestamp } from "../../lib/threadSort";
 import {
@@ -88,8 +89,14 @@ function fallbackProfile(
 
 const ORDER = (member: TeamMember) => (member.isUno ? 0 : 1);
 
-/** Every assistant, Uno first, then in the order they were set up. */
-export function useAssistantTeam(): ReadonlyArray<TeamMember> {
+/**
+ * Whether the team of assistants (Builder, Scout, "New assistant", their pages,
+ * access and Activity) is shown: only in the mock for now (Misha 16.10).
+ */
+export const TEAM_SHOWN: boolean = DEMO;
+
+/** Every assistant, Uno first, then in the order they were set up. Without the team — Uno only. */
+export function useAssistantTeam(teamShown: boolean = TEAM_SHOWN): ReadonlyArray<TeamMember> {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const profiles = useAssistantTeamStore((state) => state.profiles);
@@ -99,6 +106,10 @@ export function useAssistantTeam(): ReadonlyArray<TeamMember> {
     const members: TeamMember[] = [];
     for (const project of projects) {
       if (!isAssistantProjectId(project.id)) continue;
+      // The release has Uno alone (Misha 16.10): other assistant folders —
+      // "New assistant" from 0.0.106 — stay under Settings → Assistants.
+      // The team is the mock's (?demo=w0138).
+      if (!teamShown && project.id !== ASSISTANT_PROJECT_ID) continue;
       const key = assistantKeyOf(project.environmentId, project.id);
       const profile =
         profiles[key] ?? fallbackProfile(project.environmentId, project.id, project.name);
@@ -114,7 +125,13 @@ export function useAssistantTeam(): ReadonlyArray<TeamMember> {
         isUno: project.id === ASSISTANT_PROJECT_ID,
         profile,
         createdBy: profile.createdBy,
-        configured: profile.setUpAt !== null || chats.conversations.length > 0,
+        // The daemon makes Uno's main chat by itself on a fresh computer: in
+        // the release "set up" means the person has written to it once.
+        configured:
+          profile.setUpAt !== null ||
+          (teamShown
+            ? chats.conversations.length > 0
+            : chats.conversations.some((thread) => thread.latestUserMessageAt !== null)),
         revoked: profile.revokedAt !== null,
         computerLabel: labels.get(project.environmentId) ?? "",
         chats,
@@ -138,7 +155,7 @@ export function useAssistantTeam(): ReadonlyArray<TeamMember> {
           a.profile.createdAt.localeCompare(b.profile.createdAt) ||
           a.key.localeCompare(b.key),
       );
-  }, [labels, profiles, projects, threads]);
+  }, [labels, profiles, projects, teamShown, threads]);
 }
 
 export function useTeamMember(environmentId: string, projectId: string): TeamMember | null {

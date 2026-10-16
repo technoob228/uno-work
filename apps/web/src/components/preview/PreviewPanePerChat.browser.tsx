@@ -1,10 +1,32 @@
 import "../../index.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { page } from "vitest/browser";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+
+/**
+ * Labs flags as the test wants them: the real value unless a test forces one
+ * (the stage's w0139 flags are off by default, as in a release build).
+ */
+const forcedFlags = vi.hoisted(() => ({ value: {} as Record<string, boolean> }));
+vi.mock("../../hooks/useFeatureFlags", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useFeatureFlags")>();
+  return {
+    ...actual,
+    useFeatureFlag: (key: Parameters<typeof actual.useFeatureFlag>[0]) => {
+      const real = actual.useFeatureFlag(key);
+      return key in forcedFlags.value ? forcedFlags.value[key]! : real;
+    },
+  };
+});
 
 import { SidebarProvider } from "../ui/sidebar";
 import { PreviewPane } from "./PreviewPane";
@@ -80,7 +102,18 @@ function Controls({ screen, setScreen }: { screen: Screen; setScreen: (s: Screen
   );
 }
 
+/** PreviewPane reads the route (useOpenApp → useMatch): a router around the harness. */
 function App() {
+  const [router] = useState(() =>
+    createRouter({
+      routeTree: createRootRoute({ component: Harness }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    }),
+  );
+  return <RouterProvider router={router} />;
+}
+
+function Harness() {
   const [screen, setScreen] = useState<Screen>("chat-a");
   const threadId = threadOf(screen);
   const [queryClient] = useState(() => new QueryClient());
@@ -150,5 +183,50 @@ describe("right panel lives in the chat", () => {
     const screen = await render(<App />);
     await screen.getByRole("button", { name: "go home" }).click();
     expect(paneVisible()).toBe(false);
+  });
+});
+
+describe("Labs flags of the stage (w0139) — off is 0.0.137", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    forcedFlags.value = {};
+  });
+
+  async function openLauncherOverATab() {
+    const screen = await render(<App />);
+    await screen.getByRole("button", { name: "agent opens in chat A" }).click();
+    await expect.poll(paneVisible).toBe(true);
+    await screen.getByTestId("panel-launcher-open").click();
+    return screen;
+  }
+
+  it("flags off: the tab row, header and launcher of 0.0.137", async () => {
+    const screen = await openLauncherOverATab();
+    // The plain tab row (right-click menu), no pins, no "All tabs".
+    await expect.poll(() => document.querySelectorAll("[data-preview-tab]").length).toBe(1);
+    expect(document.querySelector('[data-testid="panel-pinned-tabs"]')).toBeNull();
+    expect(document.querySelector('[data-testid="panel-all-tabs"]')).toBeNull();
+    // "Focus preview" as before, not the new full-screen pair.
+    await expect.element(screen.getByRole("button", { name: "Focus preview" })).toBeVisible();
+    // The 0.0.137 launcher: no Apps tile when no app opens, no agent's browser.
+    await expect.element(screen.getByText("Open in the panel")).toBeVisible();
+    expect(document.querySelector('[data-testid="panel-launcher-apps"]')).toBeNull();
+    expect(document.querySelector('[data-testid="panel-launcher-list"]')).toBeNull();
+    // The agent's tab carries no mark.
+    expect(document.querySelector('[aria-label="Opened by the agent"]')).toBeNull();
+  });
+
+  it("flags on: pins + All tabs, the agent's mark, Apps always in the launcher", async () => {
+    forcedFlags.value = { panelLauncherV2: true, panelTabPins: true, fullscreenChatDock: true };
+    const screen = await openLauncherOverATab();
+    await expect.element(screen.getByTestId("panel-all-tabs")).toBeVisible();
+    await expect.element(screen.getByTestId("panel-launcher-apps")).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: "Full screen" })).toBeVisible();
+    expect(document.querySelector('[aria-label="Opened by the agent"]')).not.toBeNull();
+    await screen.getByTestId("panel-launcher-apps").click();
+    // Nothing runs anywhere here: the empty state says how to get an app.
+    await expect.element(screen.getByTestId("panel-launcher-apps-empty")).toBeVisible();
   });
 });

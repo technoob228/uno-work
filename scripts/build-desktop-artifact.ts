@@ -27,6 +27,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
+/**
+ * "stage": the "Uno Work Stage" app (16.10) — its own bundle id, name and
+ * data folders (apps/desktop/src/desktopFlavor.ts), never an update feed.
+ */
+const BuildFlavor = Schema.Literals(["release", "stage"]);
+export type DesktopBuildFlavor = typeof BuildFlavor.Type;
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
@@ -76,6 +82,7 @@ interface BuildCliInput {
   readonly verbose: Option.Option<boolean>;
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
+  readonly flavor?: Option.Option<DesktopBuildFlavor>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -207,6 +214,7 @@ interface ResolvedBuildOptions {
   readonly verbose: boolean;
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
+  readonly flavor: DesktopBuildFlavor;
 }
 
 interface StagePackageJson {
@@ -224,6 +232,8 @@ interface StagePackageJson {
     readonly electron: string;
   };
   readonly overrides: Record<string, unknown>;
+  /** Read by the app at start (apps/desktop/src/desktopFlavor.ts); absent for the release. */
+  readonly unoWorkFlavor?: "stage";
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -252,6 +262,7 @@ const BuildEnvConfig = Config.all({
   verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  flavor: Config.schema(BuildFlavor, "T3CODE_DESKTOP_FLAVOR").pipe(Config.option),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -312,6 +323,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   const verbose = resolveBooleanFlag(input.verbose, env.verbose);
 
   const mockUpdates = resolveBooleanFlag(input.mockUpdates, env.mockUpdates);
+  const flavor = mergeOptions(input.flavor ?? Option.none(), env.flavor, "release" as const);
   const mockUpdateServerPort =
     Option.getOrUndefined(input.mockUpdateServerPort) ??
     (yield* resolveMockUpdateServerPort(Option.getOrUndefined(env.mockUpdateServerPort)).pipe(
@@ -336,6 +348,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     verbose,
     mockUpdates,
     mockUpdateServerPort,
+    flavor,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -533,8 +546,12 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
-  if (resolveDesktopUpdateChannel(version) === "nightly") {
+export function resolveDesktopBuildIconAssets(
+  version: string,
+  flavor: DesktopBuildFlavor = "release",
+): DesktopBuildIconAssets {
+  // The stage wears the nightly artwork: told apart from the release in the Dock.
+  if (flavor === "stage" || resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
@@ -553,35 +570,52 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
   return `http://localhost:${mockUpdateServerPort ?? 3000}`;
 }
 
-export function resolveDesktopProductName(version: string): string {
+export function resolveDesktopProductName(
+  version: string,
+  flavor: DesktopBuildFlavor = "release",
+): string {
+  if (flavor === "stage") return "Uno Work Stage";
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "Uno Work (Nightly)"
     : (desktopPackageJson.productName ?? "Uno Work");
+}
+
+/** Bundle id / Windows app id: the stage is a different app for the OS (Keychain, TCC, Dock). */
+export function resolveDesktopAppId(flavor: DesktopBuildFlavor = "release"): string {
+  return flavor === "stage" ? "com.unotools.work.stage" : "com.unotools.work";
+}
+
+export function resolveDesktopArtifactName(flavor: DesktopBuildFlavor = "release"): string {
+  return flavor === "stage" ? "Uno-Work-Stage.${ext}" : "Uno-Work.${ext}";
 }
 
 export function resolveMacSigningIdentity(signed: boolean): string | undefined {
   return signed ? undefined : "-";
 }
 
-const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
   version: string,
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: number | undefined,
+  flavor: DesktopBuildFlavor = "release",
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.unotools.work",
-    productName: resolveDesktopProductName(version),
-    artifactName: "Uno-Work.${ext}",
+    appId: resolveDesktopAppId(flavor),
+    productName: resolveDesktopProductName(version, flavor),
+    artifactName: resolveDesktopArtifactName(flavor),
     directories: {
       buildResources: "apps/desktop/resources",
     },
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = resolveGitHubPublishConfig(updateChannel);
-  if (publishConfig) {
+  if (flavor === "stage") {
+    // No feed at all: no app-update.yml in the bundle, even with
+    // GITHUB_REPOSITORY set (CI) — a stage build never pulls the release.
+  } else if (publishConfig) {
     buildConfig.publish = [publishConfig];
   } else if (mockUpdates) {
     buildConfig.publish = [
@@ -772,7 +806,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
-  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const iconAssets = resolveDesktopBuildIconAssets(appVersion, options.flavor);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -868,7 +902,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
+      options.flavor,
     ),
+    ...(options.flavor === "stage" ? { unoWorkFlavor: "stage" as const } : {}),
     dependencies: {
       ...resolvedServerDependencies,
       ...resolvedDesktopRuntimeDependencies,
@@ -1017,6 +1053,12 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   mockUpdateServerPort: Flag.integer("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
+    Flag.optional,
+  ),
+  flavor: Flag.choice("flavor", BuildFlavor.literals).pipe(
+    Flag.withDescription(
+      'release (default) or stage: "Uno Work Stage", its own bundle id and data, no update feed (env: T3CODE_DESKTOP_FLAVOR).',
+    ),
     Flag.optional,
   ),
 }).pipe(

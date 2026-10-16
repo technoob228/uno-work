@@ -10,6 +10,11 @@
  * - "+" on hover starts a new chat with it; its face opens its page.
  * - "New assistant" at the end starts the setup (`AssistantOnboarding.tsx`)
  *   while Uno is alone; with a team it moves to the Team block of the pages.
+ *
+ * The release (0.0.139, Misha 16.10) has Uno alone: no "New assistant", the
+ * face opens Uno's page under Assistants, the first click introduces Uno
+ * (`TEAM_SHOWN` in useAssistantTeam.ts — the team is the mock's). The whole
+ * block is behind Labs "Uno's chats in the sidebar" (Sidebar.tsx).
  */
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -18,6 +23,7 @@ import { ChevronRightIcon, PlusIcon, SquarePenIcon } from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
 import { create } from "zustand";
 
+import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -32,7 +38,7 @@ import {
   latestConversation,
   previewChats,
 } from "../assistants/assistantTeam.logic";
-import { type TeamMember, useAssistantTeam } from "../assistants/useAssistantTeam";
+import { TEAM_SHOWN, type TeamMember, useAssistantTeam } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -118,6 +124,8 @@ const AssistantRow = memo(function AssistantRow(props: {
   const { member } = props;
   const navigate = useNavigate();
   const { handleNewThread } = useNewThreadHandler();
+  // Uno's main chat (the one Telegram and Slack talk to) is made by the daemon.
+  const assistantChat = useAssistantChat();
   const openSetup = useAssistantOnboarding((state) => state.openFor);
   const { isMobile, setOpenMobile } = useSidebar();
   const [showAll, setShowAll] = useState(false);
@@ -148,6 +156,12 @@ const AssistantRow = memo(function AssistantRow(props: {
       return;
     }
     if (latest === null) {
+      // The very first chat with Uno is its main one, as before 0.0.139.
+      if (member.isUno && assistantChat.environmentId === member.environmentId) {
+        leave();
+        void assistantChat.open();
+        return;
+      }
       newChat();
       return;
     }
@@ -162,10 +176,15 @@ const AssistantRow = memo(function AssistantRow(props: {
   };
   const openPage = () => {
     leave();
-    void navigate({
-      to: "/assistants",
-      search: { view: "profile", env: member.environmentId, project: member.projectId },
-    });
+    // The team's page is the mock's; the release opens Uno's page under Assistants.
+    void navigate(
+      TEAM_SHOWN
+        ? {
+            to: "/assistants",
+            search: { view: "profile", env: member.environmentId, project: member.projectId },
+          }
+        : { to: "/assistants" },
+    );
   };
   const name = member.profile.name;
   const status = ACTIVITY_LABEL[member.activity];
@@ -269,6 +288,35 @@ const AssistantRow = memo(function AssistantRow(props: {
   );
 });
 
+/**
+ * Before this computer has Uno's folder (a fresh computer, an older daemon):
+ * one row that opens Uno's chat the way 0.0.137 did — the daemon makes it.
+ */
+function UnoFallbackRow() {
+  const { environmentId, opening, open } = useAssistantChat();
+  const { isMobile, setOpenMobile } = useSidebar();
+  return (
+    <li className="list-none" data-testid="sidebar-assistant" data-assistant="uno-fallback">
+      <button
+        type="button"
+        onClick={() => {
+          if (isMobile) setOpenMobile(false);
+          sidebarDPanel.closeNow();
+          void open();
+        }}
+        disabled={environmentId === null || opening}
+        data-testid="sidebar-uno"
+        className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+      >
+        <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center">
+          <AssistantAvatar emoji={null} tone="violet" activity={null} />
+        </span>
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">Uno</span>
+      </button>
+    </li>
+  );
+}
+
 export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly routeThreadKey: string | null;
   /** Uno's work chats that are still running (the sidebar keeps them under Uno). */
@@ -298,7 +346,8 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
         {/* Critics 16.10: the top of the sidebar is short. "New assistant" has
             its own row only before there is a team; with one, it is in the
             Team block of every assistant's page. */}
-        {live.length > 1 ? null : (
+        {live.length === 0 ? <UnoFallbackRow /> : null}
+        {!TEAM_SHOWN || live.length > 1 ? null : (
           <li className="list-none">
             <button
               type="button"

@@ -4,7 +4,13 @@
  * floating pills. The chevron shows the last messages right above the
  * composer; the fold button sends the chat to a mini window (ChatMiniWindow).
  */
-import { ChevronDownIcon, ChevronUpIcon, PanelBottomCloseIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  MessageSquareTextIcon,
+  PanelBottomCloseIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -165,6 +171,140 @@ export function FullscreenChatDockHeader({
           <ChatDockMessages messages={messages} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const LEGACY_FOCUS_CHAT_PREVIEW_BOTTOM = "5.75rem";
+
+function formatLegacyFocusPreviewMessageText(message: ChatMessage | undefined): string {
+  const text = message?.text.trim() ?? "";
+  if (!text) return "No messages yet";
+  return text.replace(/\s+/g, " ").slice(0, 240);
+}
+
+/**
+ * The chat over a full-screen panel tab as in 0.0.137 (flag `fullscreenChatDock`
+ * off): a "Latest step" pill floating above the composer, which opens the
+ * "Latest conversation" card with the last two messages.
+ */
+export function LegacyFocusChatPreview({
+  mode,
+  onModeChange,
+  messages,
+  sidebarVisible,
+}: {
+  mode: "peek" | "expanded";
+  onModeChange: (mode: "peek" | "expanded") => void;
+  messages: ReadonlyArray<ChatMessage>;
+  sidebarVisible: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const latestMessage = messages[messages.length - 1];
+
+  useEffect(() => {
+    if (mode !== "expanded") {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const scrollElement = scrollRef.current;
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, messages]);
+
+  return (
+    <div
+      className="pointer-events-none fixed right-0 z-[69] px-4 sm:px-6"
+      style={{
+        left: sidebarVisible ? "var(--sidebar-width)" : "0px",
+        bottom: LEGACY_FOCUS_CHAT_PREVIEW_BOTTOM,
+      }}
+      data-focus-chat-preview="true"
+    >
+      <div className="pointer-events-auto mx-auto w-full max-w-[76rem]">
+        {mode === "expanded" ? (
+          <div
+            className="max-h-[min(18rem,32vh)] overflow-hidden rounded-2xl border border-border/70 bg-card/92 shadow-2xl shadow-black/12 backdrop-blur-xl"
+            data-focus-chat-preview-panel="expanded"
+          >
+            <div className="flex h-10 items-center gap-2 border-b border-border/60 px-4">
+              <MessageSquareTextIcon className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                Latest conversation
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                type="button"
+                onClick={() => onModeChange("peek")}
+                aria-label="Collapse chat preview"
+              >
+                <ChevronDownIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                type="button"
+                onClick={() => onModeChange("peek")}
+                aria-label="Hide expanded chat preview"
+              >
+                <XIcon />
+              </Button>
+            </div>
+            <div
+              ref={scrollRef}
+              className="max-h-[calc(min(18rem,32vh)-2.5rem)] overflow-y-auto px-4 py-3"
+            >
+              {messages.length > 0 ? (
+                <div className="flex min-h-full flex-col justify-end gap-3">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={cn(
+                        "max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-5",
+                        message.role === "user"
+                          ? "ml-auto bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground",
+                      )}
+                    >
+                      <div className="mb-1 text-[11px] font-medium opacity-65">
+                        {message.role === "user" ? "You" : "Assistant"}
+                      </div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {message.text.trim() || "(empty)"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-muted-foreground text-sm">
+                  No messages yet
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onModeChange("expanded")}
+            className="flex h-9 w-full items-center gap-2 rounded-full border border-border/65 bg-card/86 px-3.5 text-left text-sm shadow-xl shadow-black/8 backdrop-blur-xl hover:bg-card"
+            aria-label="Expand chat preview"
+            data-focus-chat-preview-panel="peek"
+          >
+            <MessageSquareTextIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="shrink-0 text-muted-foreground text-xs">Latest step</span>
+            <span className="min-w-0 flex-1 truncate text-foreground/80">
+              {formatLegacyFocusPreviewMessageText(latestMessage)}
+            </span>
+            <ChevronUpIcon className="size-4 shrink-0 text-muted-foreground" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

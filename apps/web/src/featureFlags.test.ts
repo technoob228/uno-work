@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FEATURE_FLAGS,
   SIDEBAR_RESET_MARKER,
+  featureFlagDefault,
   resetOldSidebarsOnce,
   migrateFeatureFlagOverrides,
   readStoredFeatureFlag,
@@ -80,5 +82,40 @@ describe("resetOldSidebarsOnce", () => {
       "active",
     );
     expect(settings.sidebarEnvironmentScope).toBe("all");
+  });
+});
+
+describe("stage defaults (w0139)", () => {
+  const stageKeys = FEATURE_FLAGS.filter(
+    (flag) => "stageDefault" in flag && flag.stageDefault === true,
+  ).map((flag) => flag.key);
+
+  it("keeps the release behaviour off the stage channel", () => {
+    expect(stageKeys).toEqual([
+      "panelLauncherV2",
+      "browserPageTools",
+      "fullscreenChatDock",
+      "panelTabPins",
+      "sidebarViewMenu",
+      "assistantChatsInSidebar",
+      "fileShareButton",
+    ]);
+    for (const key of stageKeys) {
+      expect(resolveFeatureFlag({}, key, false)).toBe(false);
+      expect(featureFlagDefault(key, false)).toBe(false);
+    }
+  });
+
+  it("turns the new work on on the stage channel until the person chooses", () => {
+    for (const key of stageKeys) {
+      expect(resolveFeatureFlag({}, key, true)).toBe(true);
+      expect(resolveFeatureFlag({ [key]: false }, key, true)).toBe(false);
+      expect(resolveFeatureFlag({ [key]: true }, key, false)).toBe(true);
+    }
+  });
+
+  it("leaves the other flags as they were on the stage", () => {
+    expect(resolveFeatureFlag({}, "navLayouts", true)).toBe(false);
+    expect(resolveFeatureFlag({}, "vault", true)).toBe(true);
   });
 });

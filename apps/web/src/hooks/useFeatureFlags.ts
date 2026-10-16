@@ -13,12 +13,15 @@ import {
   migrateFeatureFlagOverrides,
   resolveFeatureFlag,
 } from "../featureFlags";
+import { useIsStageChannel } from "../unoChannel";
 import { useSettings, useUpdateSettings } from "./useSettings";
 
-/** Read a single flag's effective value (stored override, else default). */
+/** Read a single flag's effective value (stored override, else default — the stage's on the stage channel). */
 export function useFeatureFlag(key: FeatureFlagKey): boolean {
+  const stage = useIsStageChannel();
   return useSettings(
-    (settings) => !RETIRED_FEATURE_FLAGS.has(key) && resolveFeatureFlag(settings.featureFlags, key),
+    (settings) =>
+      !RETIRED_FEATURE_FLAGS.has(key) && resolveFeatureFlag(settings.featureFlags, key, stage),
   );
 }
 

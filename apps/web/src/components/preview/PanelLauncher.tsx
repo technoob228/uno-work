@@ -11,6 +11,9 @@
  * computer and the person's sites; a pick opens as a tab beside the chat,
  * everything else about them stays on Apps & sites. With no apps the list
  * says how to get one.
+ *
+ * Behind the Labs flag `panelLauncherV2`; without it the panel shows the
+ * launcher of 0.0.137 (`LegacyPanelLauncher.tsx`).
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -43,6 +46,7 @@ import { useWorkSites } from "../sites/useWorkSites";
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { useChatPanelActions } from "./chatPanelActions";
+import { LegacyPanelLauncher } from "./LegacyPanelLauncher";
 import {
   APP_IDEAS,
   APP_STATE_LABEL,
@@ -68,7 +72,14 @@ const TILE_ICON: Record<LauncherTileId, typeof GlobeIcon> = {
 
 type LauncherView = "tiles" | "apps";
 
-export function PanelLauncher({
+type PanelLauncherProps = Parameters<typeof LegacyPanelLauncher>[0];
+
+export function PanelLauncher(props: PanelLauncherProps) {
+  const v2 = useFeatureFlag("panelLauncherV2");
+  return v2 ? <PanelLauncherV2 {...props} /> : <LegacyPanelLauncher {...props} />;
+}
+
+function PanelLauncherV2({
   panels,
   takeFocus,
   onFocusTaken,
@@ -205,7 +216,10 @@ export function PanelLauncher({
       composer?.focusAtEnd();
     }
   };
-  const noApps = !apps.loading && apps.rows.length === 0 && panelList.length === 0;
+  const nothingListed = !apps.loading && apps.rows.length === 0 && panelList.length === 0;
+  // Couldn't ask any computer: say so rather than "no apps yet".
+  const appsFailed = nothingListed && apps.failed;
+  const noApps = nothingListed && !apps.failed;
 
   return (
     <div
@@ -289,7 +303,14 @@ export function PanelLauncher({
             All
           </button>
           <SectionTitle>Apps</SectionTitle>
-          {noApps ? (
+          {appsFailed ? (
+            <p
+              className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground"
+              data-testid="panel-launcher-apps-failed"
+            >
+              Couldn't load the apps right now. They're on Apps &amp; sites.
+            </p>
+          ) : noApps ? (
             <div
               className="rounded-lg border border-dashed border-border px-3 py-3"
               data-testid="panel-launcher-apps-empty"

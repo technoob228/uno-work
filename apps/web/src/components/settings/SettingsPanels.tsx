@@ -17,6 +17,7 @@ import {
 } from "../../components/desktopUpdate.logic";
 import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
@@ -549,6 +550,9 @@ export function GeneralSettingsPanel({
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const sidebarLevels = resolveGroupLevels(settings.sidebarGroupLevels, settings.sidebarInboxMode);
+  // Labs "Sidebar view menu": Sidebar view / Chats from all computers / Group
+  // by computer; off — the 0.0.137 "Inbox sidebar" switch.
+  const sidebarViewMenu = useFeatureFlag("sidebarViewMenu");
   const { updateSettings } = useUpdateSettings();
   const navigate = useNavigate();
   const showWebLogout = isWebApp && !isLoopbackHostname(window.location.hostname);
@@ -638,97 +642,129 @@ export function GeneralSettingsPanel({
           }
         />
 
-        <SettingsRow
-          title="Sidebar view"
-          description="How chats are laid out in the sidebar: Projects — folders with their chats; One list — newest first; Inbox — by status, what needs you first."
-          resetAction={
-            settings.sidebarGroupLevels !== null ? (
-              <SettingResetButton
-                label="sidebar view"
-                onClick={() => updateSettings({ sidebarGroupLevels: null, sidebarInboxMode: false })}
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={presetOf(sidebarLevels) ?? "custom"}
-              onValueChange={(value) => {
-                if (value === "projects" || value === "list" || value === "inbox") {
-                  updateSettings({
-                    sidebarGroupLevels: levelsForPreset(value, sidebarLevels[0] === "computer"),
-                  });
-                }
-              }}
-            >
-              <SelectTrigger
-                className="w-full sm:w-40"
-                aria-label="Sidebar view"
-                data-testid="settings-sidebar-view"
-              >
-                <SelectValue>
-                  {SIDEBAR_D_PRESETS.find((option) => option.id === presetOf(sidebarLevels))
-                    ?.label ?? levelsLabel(sidebarLevels)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {SIDEBAR_D_PRESETS.map((option) => (
-                  <SelectItem hideIndicator key={option.id} value={option.id}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          title="Chats from all computers"
-          description="Show the chats of every computer you use in one sidebar. A project on another computer gets its computer's badge."
-          resetAction={
-            settings.sidebarEnvironmentScope !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope ? (
-              <SettingResetButton
-                label="computers in the sidebar"
-                onClick={() =>
-                  updateSettings({
-                    sidebarEnvironmentScope: DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.sidebarEnvironmentScope === "all"}
-              onCheckedChange={(checked) =>
-                updateSettings({ sidebarEnvironmentScope: checked ? "all" : "active" })
+        {sidebarViewMenu ? (
+          <>
+            <SettingsRow
+              title="Sidebar view"
+              description="How chats are laid out in the sidebar: Projects — folders with their chats; One list — newest first; Inbox — by status, what needs you first."
+              resetAction={
+                settings.sidebarGroupLevels !== null ? (
+                  <SettingResetButton
+                    label="sidebar view"
+                    onClick={() =>
+                      updateSettings({ sidebarGroupLevels: null, sidebarInboxMode: false })
+                    }
+                  />
+                ) : null
               }
-              aria-label="Chats from all computers"
-              data-testid="settings-sidebar-all-computers"
+              control={
+                <Select
+                  value={presetOf(sidebarLevels) ?? "custom"}
+                  onValueChange={(value) => {
+                    if (value === "projects" || value === "list" || value === "inbox") {
+                      updateSettings({
+                        sidebarGroupLevels: levelsForPreset(value, sidebarLevels[0] === "computer"),
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full sm:w-40"
+                    aria-label="Sidebar view"
+                    data-testid="settings-sidebar-view"
+                  >
+                    <SelectValue>
+                      {SIDEBAR_D_PRESETS.find((option) => option.id === presetOf(sidebarLevels))
+                        ?.label ?? levelsLabel(sidebarLevels)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {SIDEBAR_D_PRESETS.map((option) => (
+                      <SelectItem hideIndicator key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
             />
-          }
-        />
 
-        {settings.sidebarEnvironmentScope === "all" ? (
+            <SettingsRow
+              title="Chats from all computers"
+              description="Show the chats of every computer you use in one sidebar. A project on another computer gets its computer's badge."
+              resetAction={
+                settings.sidebarEnvironmentScope !==
+                DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope ? (
+                  <SettingResetButton
+                    label="computers in the sidebar"
+                    onClick={() =>
+                      updateSettings({
+                        sidebarEnvironmentScope: DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope,
+                      })
+                    }
+                  />
+                ) : null
+              }
+              control={
+                <Switch
+                  checked={settings.sidebarEnvironmentScope === "all"}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ sidebarEnvironmentScope: checked ? "all" : "active" })
+                  }
+                  aria-label="Chats from all computers"
+                  data-testid="settings-sidebar-all-computers"
+                />
+              }
+            />
+
+            {settings.sidebarEnvironmentScope === "all" ? (
+              <SettingsRow
+                title="Group by computer"
+                description="Each computer gets its own heading in the sidebar, with its chats inside."
+                control={
+                  <Switch
+                    checked={sidebarLevels[0] === "computer"}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        sidebarGroupLevels: checked
+                          ? ["computer", ...sidebarLevels.filter((level) => level !== "computer")]
+                          : sidebarLevels.filter((level) => level !== "computer"),
+                      })
+                    }
+                    aria-label="Group by computer"
+                    data-testid="settings-sidebar-group-by-computer"
+                  />
+                }
+              />
+            ) : null}
+          </>
+        ) : (
+          // Labs "Sidebar view menu" off — the 0.0.137 switch.
           <SettingsRow
-            title="Group by computer"
-            description="Each computer gets its own heading in the sidebar, with its chats inside."
+            title="Inbox sidebar"
+            description="On: chats in the sidebar are grouped by status — Needs you, Ready, Working, Snoozed. Off (classic): your projects are always in the sidebar, with their chats."
+            resetAction={
+              settings.sidebarInboxMode !== DEFAULT_UNIFIED_SETTINGS.sidebarInboxMode ? (
+                <SettingResetButton
+                  label="sidebar mode"
+                  onClick={() =>
+                    updateSettings({ sidebarInboxMode: DEFAULT_UNIFIED_SETTINGS.sidebarInboxMode })
+                  }
+                />
+              ) : null
+            }
             control={
               <Switch
-                checked={sidebarLevels[0] === "computer"}
+                checked={settings.sidebarInboxMode}
                 onCheckedChange={(checked) =>
-                  updateSettings({
-                    sidebarGroupLevels: checked
-                      ? ["computer", ...sidebarLevels.filter((level) => level !== "computer")]
-                      : sidebarLevels.filter((level) => level !== "computer"),
-                  })
+                  updateSettings({ sidebarInboxMode: Boolean(checked) })
                 }
-                aria-label="Group by computer"
-                data-testid="settings-sidebar-group-by-computer"
+                aria-label="Inbox sidebar"
+                data-testid="settings-sidebar-inbox"
               />
             }
           />
-        ) : null}
+        )}
 
         <SettingsRow
           title="Time format"

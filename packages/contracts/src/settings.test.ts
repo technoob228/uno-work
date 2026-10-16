@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
@@ -90,5 +97,44 @@ describe("ServerSettingsPatch.providerInstances", () => {
     });
     const ollamaId = ProviderInstanceId.make("ollama_local");
     expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+  });
+});
+
+describe("ClientSettingsSchema.sidebarGroupLevels (0.0.138, additive)", () => {
+  const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+  // 0.0.137's schema: the same struct without the new key.
+  const { sidebarGroupLevels: _added, ...fields0137 } = ClientSettingsSchema.fields;
+  const decodeClientSettings0137 = Schema.decodeUnknownSync(Schema.Struct(fields0137));
+
+  it("reads settings saved before the key existed as null (not chosen yet)", () => {
+    const decoded = decodeClientSettings({ sidebarInboxMode: true });
+    expect(decoded.sidebarGroupLevels).toBeNull();
+    expect(decoded.sidebarInboxMode).toBe(true);
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarGroupLevels).toBeNull();
+  });
+
+  it("round-trips a chosen grouping, one list included", () => {
+    expect(
+      decodeClientSettings({ sidebarGroupLevels: ["computer", "status"] }).sidebarGroupLevels,
+    ).toEqual(["computer", "status"]);
+    expect(decodeClientSettings({ sidebarGroupLevels: [] }).sidebarGroupLevels).toEqual([]);
+  });
+
+  it("lets 0.0.137 read settings written by 0.0.138 (the extra key is dropped)", () => {
+    const written = Schema.encodeSync(ClientSettingsSchema)(
+      decodeClientSettings({ sidebarInboxMode: true, sidebarGroupLevels: ["status"] }),
+    );
+    expect(written).toHaveProperty("sidebarGroupLevels", ["status"]);
+    const read = decodeClientSettings0137(written);
+    expect(read.sidebarInboxMode).toBe(true);
+    expect(read).not.toHaveProperty("sidebarGroupLevels");
+  });
+
+  it("patches accept the key, null to reset", () => {
+    const decodePatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+    expect(decodePatch({ sidebarGroupLevels: null })).toEqual({ sidebarGroupLevels: null });
+    expect(decodePatch({ sidebarGroupLevels: ["project"] })).toEqual({
+      sidebarGroupLevels: ["project"],
+    });
   });
 });

@@ -7,6 +7,7 @@
  */
 import { ChevronDownIcon } from "lucide-react";
 
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import {
@@ -21,9 +22,8 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import {
-  BROWSER_SOURCE_DESCRIPTION,
-  BROWSER_SOURCE_LABEL,
   type BrowserSource,
+  browserSourceCopy,
   isDefaultBrowserSource,
   nextBrowserOpenIn,
   showBrowserSourceChip,
@@ -46,9 +46,10 @@ export function BrowserSourceChip({
   const { closeFile } = usePreviewPane();
   const browserOpenIn = useSettings((settings) => settings.browserOpenIn);
   const { updateSettings } = useUpdateSettings();
+  const copy = browserSourceCopy(useFeatureFlag("panelLauncherV2"));
   if (!showBrowserSourceChip(sources)) return null;
 
-  const label = BROWSER_SOURCE_LABEL[source];
+  const label = copy.label[source];
   return (
     <Menu>
       <MenuTrigger
@@ -83,9 +84,9 @@ export function BrowserSourceChip({
             {sources.map((candidate) => (
               <MenuRadioItem key={candidate} value={candidate}>
                 <span className="flex min-w-0 flex-col py-0.5">
-                  <span>{BROWSER_SOURCE_LABEL[candidate]}</span>
+                  <span>{copy.label[candidate]}</span>
                   <span className="text-xs text-muted-foreground">
-                    {BROWSER_SOURCE_DESCRIPTION[candidate]}
+                    {copy.description[candidate]}
                   </span>
                 </span>
               </MenuRadioItem>
