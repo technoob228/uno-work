@@ -13,6 +13,7 @@ import {
   PUBLISH_NOT_A_COMPUTER,
   appEnvironment,
   makeMachineAppsService,
+  parseAppLinks,
 } from "./MachineAppsService.ts";
 import type { MachineProbe } from "./machineAppsScan.ts";
 
@@ -694,4 +695,17 @@ it.effect("Hide takes a found program off Home and remembers it; Show brings it 
       assert.strictEqual(shown.apps.find((a) => a.id === "port:3000")?.hidden, false);
     }).pipe(Effect.provide(layer()));
   }).pipe(Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true }))));
+});
+
+it("parseAppLinks keeps ready https addresses by port, ignores the rest", () => {
+  const links = parseAppLinks({
+    links: [
+      { app_id: "pult", port: 8660, url: "https://pult-box.app.uno4.dev", gated: true },
+      { app_id: "pg", port: 5432, url: null, reason: "no_address" },
+      { app_id: "odd", port: 9000, url: "http://plain.example" },
+    ],
+  });
+  assert.deepStrictEqual([...links.entries()], [[8660, "https://pult-box.app.uno4.dev"]]);
+  assert.strictEqual(parseAppLinks(null).size, 0);
+  assert.strictEqual(parseAppLinks({ links: "nope" }).size, 0);
 });

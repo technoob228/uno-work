@@ -637,6 +637,14 @@ export function ProgramDialog({
               ) : null}
 
               {app?.url ? <AddressRow label="Its address" url={app.url} /> : null}
+              {app?.privateUrl && !app.url ? (
+                <>
+                  <AddressRow label="Your address" url={app.privateUrl} />
+                  <p className="-mt-1 text-xs text-muted-foreground">
+                    Only you get in — after signing in with your Uno account. Works from any device.
+                  </p>
+                </>
+              ) : null}
               {storeUrl ? (
                 <AddressRow
                   label="On the internet"
