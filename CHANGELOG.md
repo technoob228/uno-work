@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.138 — 2026-10-16
+
+- A chat you move from Uno AI to your new computer (or with Continue on this computer) now waits for Uno's engine and starts on Uno, instead of opening on Claude Code that is not signed in («Not logged in»). The Continue button waits until Uno is ready.
+
 ## v0.0.137 — 2026-10-15
 
 - Attach any file to a chat — documents, spreadsheets, slides, archives, code — by the paperclip, paste or drag & drop, in a chat or on Home. The file goes straight to ~/Uploads/<year-month> on your computer (never made executable), and the model is told where it is. Pictures work as before.
