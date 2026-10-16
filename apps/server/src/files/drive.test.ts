@@ -5,6 +5,7 @@ import type { CloudDeps } from "./cloudStorage.ts";
 import {
   describeDriveError,
   driveBotConnect,
+  driveRecent,
   driveSearch,
   driveShareCreate,
   driveShareRevoke,
@@ -28,6 +29,19 @@ function fakeConsole(routes: Record<string, (init?: RequestInit) => unknown>) {
 }
 
 describe("Uno Drive client", () => {
+  it("leaves older copies (.versions) out of recent files and search", async () => {
+    const { deps } = fakeConsole({
+      "GET /api/v1/drive/recent?limit=30": () => ({
+        files: [
+          { key: "Reports/q3.pdf", size: 10 },
+          { key: "Reports/.versions/q3.pdf/2026-10-16T09-00-00-000Z.pdf", size: 9 },
+        ],
+      }),
+    });
+    const recent = await driveRecent(deps, {});
+    expect(recent.files.map((file) => file.key)).toEqual(["Reports/q3.pdf"]);
+  });
+
   it("reads the console's state", async () => {
     const { deps } = fakeConsole({
       "GET /api/v1/drive": () => ({

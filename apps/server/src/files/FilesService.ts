@@ -526,8 +526,17 @@ export const makeFilesService = (
             );
           }
         }
-        yield* Effect.logInfo("files.cloud.upload", { files: result.files, bytes: result.bytes });
-        return { files: result.files, bytes: result.bytes, skipped: result.skipped };
+        yield* Effect.logInfo("files.cloud.upload", {
+          files: result.files,
+          bytes: result.bytes,
+          replaced: result.overwritten.length,
+        });
+        return {
+          files: result.files,
+          bytes: result.bytes,
+          skipped: result.skipped,
+          ...(result.overwritten.length > 0 ? { overwritten: result.overwritten } : {}),
+        };
       });
 
     const cloudCopyToComputerEffect: FilesServiceShape["cloudCopyToComputer"] = (input) =>

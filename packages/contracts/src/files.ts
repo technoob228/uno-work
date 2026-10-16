@@ -374,6 +374,19 @@ export const FilesCloudTransferResult = Schema.Struct({
    * new folder for a folder key), absolute paths. Absent for uploads.
    */
   paths: Schema.optional(Schema.Array(Schema.String)),
+  /**
+   * Copy to the cloud: files that replaced one already there. `versionKept`:
+   * the old one is kept under `<folder>/.versions/<name>/`; else `reason`.
+   */
+  overwritten: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        key: Schema.String,
+        versionKept: Schema.Boolean,
+        reason: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
 });
 export type FilesCloudTransferResult = typeof FilesCloudTransferResult.Type;
 

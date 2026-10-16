@@ -23,13 +23,15 @@ describe("Uno Work environment brief", () => {
     expect(readFileSync(path.join(root, TARGET), "utf8")).toBe(renderBrief(markdown));
   });
 
-  it("stays under ~1.7k tokens", () => {
+  it("stays under ~1.8k tokens", () => {
     // ~4 characters per token for English prose. 1.5k until 05.10.2026; +100
     // for "Their assistant" (a Plus computer's Uno spent 20 minutes writing a
     // bot of its own instead of pointing at the built-in assistant); +100
     // for "token first" (model bench 05.10: no model asked for the token
-    // first, because the brief opened with "computer_status first").
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1700);
+    // first, because the brief opened with "computer_status first"); +100
+    // for "its plan sets memory, cores and disk" (Misha's prod walk 16.10:
+    // agents filled disks and memory; the long rules are uno_guide("computer")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1800);
   });
 
   it("a Telegram bot or an assistant: the token is asked before looking at the machine", () => {

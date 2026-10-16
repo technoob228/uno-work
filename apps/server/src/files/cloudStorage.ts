@@ -31,12 +31,20 @@ import {
   CloudUploadError,
   type UploadSource,
   fileUploadSource,
+  streamUploadSource,
   uploadToBucket,
 } from "./cloudUpload.ts";
+import {
+  CLOUD_VERSIONS_FOLDER,
+  cloudVersionKey,
+  cloudVersionSkipReason,
+  cloudVersionsPrefix,
+  staleCloudVersions,
+} from "./cloudVersions.ts";
+import { ensureDiskSpace } from "./diskSpace.ts";
 import { FilesPathError, uniqueDestination } from "./filesPaths.ts";
 
-/** Where Office keeps older copies of a Cloud document (see cloudOffice.ts). */
-export const CLOUD_VERSIONS_FOLDER = ".versions";
+export { CLOUD_VERSIONS_FOLDER };
 
 const PRESIGN_TTL_SECONDS = 3600;
 const TRANSFER_MAX_FILES = 2000;
@@ -186,27 +194,102 @@ export async function cloudList(
 ): Promise<FilesCloudListResult> {
   const prefix = normalizeCloudPrefix(input.prefix);
   const bucket = await findBucket(deps, input.bucketId);
+  const listing = await listObjects(deps, bucket.id, prefix);
+  return listing
+    ? { bucket, prefix, ...listing, listingSupported: true }
+    : { bucket, prefix, folders: [], objects: [], truncated: false, listingSupported: false };
+}
+
+/** One folder of a bucket (prefix already normalized); null on a console that can't list. */
+async function listObjects(
+  deps: CloudDeps,
+  bucketId: number,
+  prefix: string,
+): Promise<ReturnType<typeof parseListing> | null> {
   try {
     const raw = await (deps.fetchJson ?? fetchControlPlaneJson)(
       deps.token,
-      `/api/v1/buckets/${bucket.id}/objects?prefix=${encodeURIComponent(prefix)}`,
+      `/api/v1/buckets/${bucketId}/objects?prefix=${encodeURIComponent(prefix)}`,
     );
-    return { bucket, prefix, ...parseListing(raw, prefix), listingSupported: true };
+    return parseListing(raw, prefix);
   } catch (cause) {
     // Consoles older than the objects route answer 404/405 for the path.
     const status = controlPlaneErrorStatus(cause);
-    if (status === 404 || status === 405) {
-      return {
-        bucket,
-        prefix,
-        folders: [],
-        objects: [],
-        truncated: false,
-        listingSupported: false,
-      };
-    }
+    if (status === 404 || status === 405) return null;
     throw new CloudError(describeCloudError(cause));
   }
+}
+
+/** `a/b/c.txt` → `a/b/`, `a/b/` → `a/`, `c.txt` → "". */
+function parentPrefix(key: string): string {
+  const trimmed = key.endsWith("/") ? key.slice(0, -1) : key;
+  return trimmed.slice(0, trimmed.lastIndexOf("/") + 1);
+}
+
+/**
+ * The size of one object, from a ranged GET (for when a listing can't tell);
+ * null when it doesn't exist or storage won't say.
+ */
+async function probeObjectSize(
+  deps: CloudDeps,
+  bucketId: number,
+  key: string,
+): Promise<number | null> {
+  const url = await cloudPresign(deps, bucketId, key, "get");
+  const response = await (deps.fetchImpl ?? fetch)(url, { headers: { range: "bytes=0-0" } }).catch(
+    () => null,
+  );
+  if (!response) return null;
+  await response.body?.cancel().catch(() => undefined);
+  if (!response.ok) return null;
+  const total = /\/(\d+)\s*$/.exec(response.headers.get("content-range") ?? "")?.[1];
+  const size = Number(total ?? response.headers.get("content-length") ?? Number.NaN);
+  return Number.isSafeInteger(size) && size >= 0 ? size : null;
+}
+
+/**
+ * Which of `keys` exist in the bucket, with their sizes. Lists each folder
+ * once and skips folders their parent says aren't there (a fresh folder
+ * upload costs one listing); a key a listing can't vouch for (a console
+ * without listing, a truncated folder) is probed on its own.
+ */
+export async function existingObjectSizes(
+  deps: CloudDeps,
+  bucketId: number,
+  keys: ReadonlyArray<string>,
+): Promise<Map<string, number>> {
+  const listings = new Map<string, Promise<ReturnType<typeof parseListing> | null>>();
+  const list = (prefix: string) => {
+    let listing = listings.get(prefix);
+    if (!listing) {
+      listing = listObjects(deps, bucketId, prefix);
+      listings.set(prefix, listing);
+    }
+    return listing;
+  };
+  const folderMayExist = async (prefix: string): Promise<boolean> => {
+    if (prefix === "") return true;
+    const parent = parentPrefix(prefix);
+    if (!(await folderMayExist(parent))) return false;
+    const listing = await list(parent);
+    if (listing === null || listing.truncated) return true;
+    return listing.folders.some((folder) => folder.prefix === prefix);
+  };
+  const sizes = new Map<string, number>();
+  for (const key of keys) {
+    const folder = parentPrefix(key);
+    if (!(await folderMayExist(folder))) continue;
+    const listing = await list(folder);
+    const listed = listing?.objects.find((object) => object.key === key);
+    if (listed) {
+      sizes.set(key, listed.size);
+      continue;
+    }
+    if (listing !== null && !listing.truncated) continue;
+    const probed = await probeObjectSize(deps, bucketId, key);
+    if (probed !== null) sizes.set(key, probed);
+  }
+  return sizes;
 }
 
 /** Every object key under a folder prefix, walking sub-folders. */
@@ -313,6 +396,68 @@ export async function cloudUpload(
   }
 }
 
+// ── Older copies ───────────────────────────────────────────────────────────
+
+/**
+ * Copy the current object `key` to its versions folder (cloudVersions.ts),
+ * streamed from storage back into storage — nothing touches the disk. False
+ * when there is nothing to keep (the object is gone).
+ */
+export async function keepCloudVersion(
+  deps: CloudDeps,
+  input: {
+    readonly bucketId: number;
+    readonly key: string;
+    /** From the listing; the GET's own length wins when storage sends one. */
+    readonly size: number;
+    readonly now: Date;
+  },
+): Promise<boolean> {
+  const name = lastSegment(input.key);
+  const url = await cloudPresign(deps, input.bucketId, input.key, "get");
+  const response = await (deps.fetchImpl ?? fetch)(url);
+  if (response.status === 404) {
+    await response.body?.cancel().catch(() => undefined);
+    return false;
+  }
+  if (!response.ok || !response.body) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new CloudError(
+      `Couldn't keep the previous version of “${name}” (storage answered ${response.status}). Nothing was replaced.`,
+    );
+  }
+  const declared = Number(response.headers.get("content-length") ?? Number.NaN);
+  const size = Number.isSafeInteger(declared) && declared >= 0 ? declared : input.size;
+  const contentType = response.headers.get("content-type") ?? undefined;
+  await cloudUpload(
+    deps,
+    input.bucketId,
+    cloudVersionKey(input.key, input.now),
+    streamUploadSource(Readable.fromWeb(response.body as never), size),
+    {
+      contentType,
+      storageMessage: (error) =>
+        error.status === 402 || error.status === 403
+          ? `Cloud storage is full: no room to keep the previous version of “${name}”. Nothing was replaced.`
+          : `Couldn't keep the previous version of “${name}” (${error.message}). Nothing was replaced.`,
+    },
+  );
+  return true;
+}
+
+/** Drops all but the newest kept copies of `key` (cloudVersions.ts). */
+export async function pruneCloudVersions(
+  deps: CloudDeps,
+  bucketId: number,
+  key: string,
+): Promise<void> {
+  const listing = await listObjects(deps, bucketId, cloudVersionsPrefix(key));
+  if (!listing) return;
+  for (const stale of staleCloudVersions(listing.objects.map((object) => object.key))) {
+    await cloudDelete(deps, bucketId, stale);
+  }
+}
+
 // ── Transfers ──────────────────────────────────────────────────────────────
 
 interface LocalFile {
@@ -351,59 +496,133 @@ async function collectLocal(
   }
 }
 
-/** Upload files/folders (already resolved inside the home) into a bucket folder. */
+/** A file that replaced one already in the cloud, and whether the old one was kept. */
+export interface CloudOverwrite {
+  readonly key: string;
+  readonly versionKept: boolean;
+  readonly reason?: string;
+}
+
+/**
+ * Upload files/folders (already resolved inside the home) into a bucket
+ * folder. A file that replaces one already there keeps the old one as an
+ * older copy (see {@link keepCloudVersion}, limits in cloudVersions.ts); if
+ * that copy can't be made, the file isn't replaced.
+ */
 export async function copyToCloud(
   deps: CloudDeps,
   input: {
     readonly paths: ReadonlyArray<string>;
     readonly bucketId: number;
     readonly prefix?: string | undefined;
+    readonly now?: (() => Date) | undefined;
   },
-): Promise<FilesCloudTransferResult & { readonly uploadedPaths: ReadonlyArray<string> }> {
+): Promise<
+  FilesCloudTransferResult & {
+    readonly uploadedPaths: ReadonlyArray<string>;
+    readonly overwritten: ReadonlyArray<CloudOverwrite>;
+  }
+> {
   const prefix = normalizeCloudPrefix(input.prefix);
+  const now = input.now ?? (() => new Date());
   const skipped: Array<{ name: string; reason: string }> = [];
   const files: LocalFile[] = [];
   for (const path of input.paths) await collectLocal(path, nodePath.basename(path), files, skipped);
+  const existing =
+    files.length > 0
+      ? await existingObjectSizes(
+          deps,
+          input.bucketId,
+          files.map((file) => `${prefix}${file.relativeKey}`),
+        )
+      : new Map<string, number>();
   let bytes = 0;
+  let versionsKept = 0;
   const uploadedPaths: string[] = [];
+  const overwritten: CloudOverwrite[] = [];
   for (const file of files) {
+    const key = `${prefix}${file.relativeKey}`;
+    const existingSize = existing.get(key);
+    let versionKept = false;
+    if (existingSize !== undefined) {
+      const reason = cloudVersionSkipReason(key, existingSize, versionsKept);
+      if (reason === null) {
+        versionKept = await keepCloudVersion(deps, {
+          bucketId: input.bucketId,
+          key,
+          size: existingSize,
+          now: now(),
+        });
+        if (versionKept) {
+          versionsKept += 1;
+          overwritten.push({ key, versionKept: true });
+        }
+      } else {
+        overwritten.push({ key, versionKept: false, reason });
+      }
+    }
     // Any size: the console answers big files with parts (cloudUpload.ts) and
     // refuses with 402 what doesn't fit the plan.
-    await cloudUpload(
-      deps,
-      input.bucketId,
-      `${prefix}${file.relativeKey}`,
-      fileUploadSource(file.absolutePath, file.size),
-      {
-        storageMessage: (error) => `Uploading “${file.relativeKey}” failed (${error.message}).`,
-      },
-    );
+    await cloudUpload(deps, input.bucketId, key, fileUploadSource(file.absolutePath, file.size), {
+      storageMessage: (error) => `Uploading “${file.relativeKey}” failed (${error.message}).`,
+    });
+    if (versionKept) {
+      // Best effort: an extra old copy is better than a failed save.
+      await pruneCloudVersions(deps, input.bucketId, key).catch(() => undefined);
+    }
     bytes += file.size;
     uploadedPaths.push(file.absolutePath);
   }
-  return { files: uploadedPaths.length, bytes, skipped, uploadedPaths };
+  return { files: uploadedPaths.length, bytes, skipped, uploadedPaths, overwritten };
 }
 
-/** Download objects (or whole folders, keys ending in "/") into a folder on the computer. */
+/**
+ * Download objects (or whole folders, keys ending in "/") into a folder on
+ * the computer. Everything is listed first: a copy that would leave the disk
+ * almost full is refused before the first byte (diskSpace.ts).
+ */
 export async function copyToComputer(
   deps: CloudDeps,
   input: {
     readonly bucketId: number;
     readonly keys: ReadonlyArray<string>;
     readonly destinationDir: string;
+    /** Tests: the destination volume's space. */
+    readonly measureDisk?: Parameters<typeof ensureDiskSpace>[2];
   },
 ): Promise<FilesCloudTransferResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const skipped: Array<{ name: string; reason: string }> = [];
   const landed: string[] = [];
+  const singleKeys = input.keys.filter((key) => !key.endsWith("/"));
+  const singleSizes =
+    singleKeys.length > 0
+      ? await existingObjectSizes(deps, input.bucketId, singleKeys)
+      : new Map<string, number>();
+  const plans: Array<{
+    readonly key: string;
+    readonly isFolder: boolean;
+    readonly objects: ReadonlyArray<{ key: string; size: number }>;
+  }> = [];
+  for (const key of input.keys) {
+    const isFolder = key.endsWith("/");
+    plans.push({
+      key,
+      isFolder,
+      objects: isFolder
+        ? await listRecursive(deps, input.bucketId, normalizeCloudPrefix(key))
+        : [{ key, size: singleSizes.get(key) ?? 0 }],
+    });
+  }
+  const needBytes = plans.reduce(
+    (sum, plan) => sum + plan.objects.reduce((part, object) => part + object.size, 0),
+    0,
+  );
+  await ensureDiskSpace(input.destinationDir, needBytes, input.measureDisk);
   let files = 0;
   let bytes = 0;
-  for (const key of input.keys) {
+  for (const { key, isFolder, objects } of plans) {
     const filesBefore = files;
-    const isFolder = key.endsWith("/");
-    const objects = isFolder
-      ? await listRecursive(deps, input.bucketId, normalizeCloudPrefix(key))
-      : [{ key, size: 0 }];
     // A folder lands as a new folder next to what's there (keep both).
     const root = isFolder
       ? await uniqueDestination(input.destinationDir, lastSegment(key))
