@@ -33,7 +33,7 @@ export interface LauncherTileCopy {
   readonly description: string;
 }
 
-/** Display order: Your site is always first. */
+/** Display order: Your site is always first, the agent's browser last. */
 export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
   {
     id: "site",
@@ -41,15 +41,17 @@ export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
     key: "S",
     description: "Open your site or app — comment and debug right on the page",
   },
+  { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
+  { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
+  { id: "apps", name: "Apps", key: "A", description: "Your apps and sites" },
+  // Secondary (Misha 16.10, 21:15): your browser is the default; the agent's
+  // browser comes last and quieter.
   {
     id: "agentBrowser",
     name: "Agent's browser",
     key: "B",
     description: "The browser on the agent's computer — sign in for it when it asks",
   },
-  { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
-  { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
-  { id: "apps", name: "Apps", key: "A", description: "Your apps and sites" },
 ];
 
 /** What the tile's key chip says. */

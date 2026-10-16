@@ -2,7 +2,8 @@
  * Panel → chat: what Comment and Debug send lands in the chat's composer as
  * one attachment card (the composer's own file attachments — on send the
  * markdown goes to the computer like any attached file, and the agent reads
- * it). Nothing is sent by itself: the person adds words and presses Send.
+ * it), plus a picture per comment when the browser took one (Codex-like).
+ * Nothing is sent by itself: the person adds words and presses Send.
  */
 import { useCallback } from "react";
 
@@ -38,8 +39,13 @@ export function useSendToChat(): (payload: PanelContextPayload, text?: string) =
         });
         return false;
       }
+      // The comments' pictures go as pictures of the message, next to the card.
+      const images = (payload.images ?? []).map(
+        (image) => new File([image.blob], image.name, { type: image.blob.type || "image/png" }),
+      );
       composer.attachFromPanel({
         files: [makePanelContextFile(payload)],
+        ...(images.length > 0 ? { images } : {}),
         ...(text ? { text } : {}),
       });
       return true;

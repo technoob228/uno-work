@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
+import { userImagePanelTab } from "./userImageTab";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
@@ -406,22 +407,11 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                         className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                       >
                         {image.previewUrl ? (
-                          <button
-                            type="button"
-                            className="h-full w-full cursor-zoom-in"
-                            aria-label={`Preview ${image.name}`}
-                            onClick={() => {
-                              const preview = buildExpandedImagePreview(userImages, image.id);
-                              if (!preview) return;
-                              ctx.onImageExpand(preview);
-                            }}
-                          >
-                            <img
-                              src={image.previewUrl}
-                              alt={image.name}
-                              className="block h-auto max-h-[220px] w-full object-cover"
-                            />
-                          </button>
+                          <UserImageThumb
+                            image={image}
+                            previewUrl={image.previewUrl}
+                            images={userImages}
+                          />
                         ) : (
                           <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
                             {image.name}
@@ -1154,6 +1144,43 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   }
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
+
+/**
+ * A picture the person attached: its copy in ~/Uploads opens beside the chat
+ * (Misha 16.10 p.7); one with no copy on the computer opens full screen.
+ */
+const UserImageThumb = memo(function UserImageThumb(props: {
+  image: ChatImageAttachment;
+  previewUrl: string;
+  images: ReadonlyArray<ChatImageAttachment>;
+}) {
+  const { image, previewUrl, images } = props;
+  const { activeThreadEnvironmentId, onImageExpand } = use(TimelineRowCtx);
+  const { openFile } = usePreviewPane();
+  return (
+    <button
+      type="button"
+      className="h-full w-full cursor-zoom-in"
+      aria-label={`Preview ${image.name}`}
+      onClick={() => {
+        const tab = userImagePanelTab(image, activeThreadEnvironmentId);
+        if (tab) {
+          openFile(tab);
+          return;
+        }
+        const preview = buildExpandedImagePreview(images, image.id);
+        if (!preview) return;
+        onImageExpand(preview);
+      }}
+    >
+      <img
+        src={previewUrl}
+        alt={image.name}
+        className="block h-auto max-h-[220px] w-full object-cover"
+      />
+    </button>
+  );
+});
 
 /** A non-image file the person attached: opens from ~/Uploads in the side panel. */
 const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {

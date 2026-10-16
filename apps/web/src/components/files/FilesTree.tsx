@@ -28,7 +28,7 @@ import {
   UploadIcon,
 } from "lucide-react";
 import * as Schema from "effect/Schema";
-import { memo, useEffect, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { cn } from "../../lib/utils";
@@ -39,6 +39,8 @@ import { Skeleton } from "../ui/skeleton";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { FILE_KIND_ICON, FILE_KIND_TINT, dirname, fileKindOf, joinPath } from "./fileTypes";
 import { filesListQueryOptions, filesQueryKeys } from "./filesApi";
+import { prefetchFileForView } from "./filesPrefetch";
+import { useProgressiveRows } from "./useProgressiveRows";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
 import { FilesNavButtons, type FilesHistory } from "./filesHistory";
 import { RecentFilesList } from "./RecentFilesList";
@@ -180,6 +182,8 @@ interface TreeContext {
   readonly toggle: (path: string, open?: boolean) => void;
   readonly onOpenFile: (entry: FilesEntry) => void;
   readonly onSelectFolder: (path: string) => void;
+  /** A press on a file row, before the click: start reading it. */
+  readonly onPressFile?: (entry: FilesEntry) => void;
 }
 
 export const FilesTree = memo(function FilesTree(props: {
@@ -233,16 +237,36 @@ export const FilesTree = memo(function FilesTree(props: {
       return next ? [...current, path] : current.filter((entry) => entry !== path);
     });
 
-  const context: TreeContext = {
-    environmentId,
-    showHidden,
-    open,
-    selectedFile,
-    currentFolder,
-    toggle,
-    onOpenFile: props.onOpenFile,
-    onSelectFolder: props.onSelectFolder,
-  };
+  const onPressFile = useCallback(
+    (entry: FilesEntry) => prefetchFileForView(queryClient, environmentId, entry),
+    [queryClient, environmentId],
+  );
+  // Stable between renders, so a folder of thousands of rows (memo) doesn't
+  // re-render every row when something else in Files changes.
+  const context: TreeContext = useMemo(
+    () => ({
+      environmentId,
+      showHidden,
+      open,
+      selectedFile,
+      currentFolder,
+      toggle,
+      onOpenFile: props.onOpenFile,
+      onSelectFolder: props.onSelectFolder,
+      onPressFile,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      environmentId,
+      showHidden,
+      open,
+      selectedFile,
+      currentFolder,
+      props.onOpenFile,
+      props.onSelectFolder,
+      onPressFile,
+    ],
+  );
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="files-tree">
@@ -381,6 +405,7 @@ function TreeLevel({
   context: TreeContext;
 }) {
   const sorted = useMemo(() => sortEntries(entries), [entries]);
+  const shown = useProgressiveRows(sorted.length);
   if (sorted.length === 0) {
     return (
       <p
@@ -393,14 +418,19 @@ function TreeLevel({
   }
   return (
     <ul className="flex flex-col gap-px" role={depth === 0 ? undefined : "group"}>
-      {sorted.map((entry) => (
+      {(shown < sorted.length ? sorted.slice(0, shown) : sorted).map((entry) => (
         <TreeRow key={entry.path} entry={entry} depth={depth} context={context} />
       ))}
     </ul>
   );
 }
 
-function TreeRow({
+const TREE_FILE_ROW_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 28px",
+} as const;
+
+const TreeRow = memo(function TreeRow({
   entry,
   depth,
   context,
@@ -411,10 +441,6 @@ function TreeRow({
 }) {
   const isFolder = entry.kind === "directory";
   const expanded = isFolder && context.open.has(entry.path);
-  const children = useQuery({
-    ...filesListQueryOptions(context.environmentId, entry.path, context.showHidden),
-    enabled: context.environmentId !== null && expanded,
-  });
   const kind = fileKindOf(entry.name, isFolder);
   const Icon = FILE_KIND_ICON[kind];
   const active = !isFolder && context.selectedFile === entry.path;
@@ -435,6 +461,8 @@ function TreeRow({
       role="treeitem"
       aria-expanded={isFolder ? expanded : undefined}
       aria-selected={active}
+      // Rows off screen skip layout and paint (a folder of thousands); same look.
+      style={isFolder ? undefined : TREE_FILE_ROW_STYLE}
     >
       <div
         className={cn(
@@ -465,6 +493,7 @@ function TreeRow({
         <button
           type="button"
           onClick={activate}
+          onPointerDown={isFolder ? undefined : () => context.onPressFile?.(entry)}
           onKeyDown={(event) => {
             if (!isFolder) return;
             if (event.key === "ArrowRight" && !expanded) {
@@ -485,22 +514,40 @@ function TreeRow({
           </span>
         </button>
       </div>
-      {expanded ? (
-        children.isPending ? (
-          <div className="py-1" style={{ paddingLeft: `${(depth + 1) * 14 + 30}px` }}>
-            <Skeleton className="h-4 w-24 rounded" />
-          </div>
-        ) : children.data ? (
-          <TreeLevel entries={children.data.entries} depth={depth + 1} context={context} />
-        ) : (
-          <p
-            className="py-1 text-[11px] text-muted-foreground/60"
-            style={{ paddingLeft: `${(depth + 1) * 14 + 30}px` }}
-          >
-            Can't be read
-          </p>
-        )
-      ) : null}
+      {expanded ? <TreeChildren entry={entry} depth={depth} context={context} /> : null}
     </li>
+  );
+});
+
+/**
+ * An open folder's contents. Its own component so only open folders hold a
+ * query — a folder of 5,000 files used to mount 5,000 (disabled) queries.
+ */
+function TreeChildren({
+  entry,
+  depth,
+  context,
+}: {
+  entry: FilesEntry;
+  depth: number;
+  context: TreeContext;
+}) {
+  const children = useQuery({
+    ...filesListQueryOptions(context.environmentId, entry.path, context.showHidden),
+    enabled: context.environmentId !== null,
+  });
+  return children.isPending ? (
+    <div className="py-1" style={{ paddingLeft: `${(depth + 1) * 14 + 30}px` }}>
+      <Skeleton className="h-4 w-24 rounded" />
+    </div>
+  ) : children.data ? (
+    <TreeLevel entries={children.data.entries} depth={depth + 1} context={context} />
+  ) : (
+    <p
+      className="py-1 text-[11px] text-muted-foreground/60"
+      style={{ paddingLeft: `${(depth + 1) * 14 + 30}px` }}
+    >
+      Can't be read
+    </p>
   );
 }

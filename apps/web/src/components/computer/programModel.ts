@@ -217,6 +217,8 @@ export function machineAppOpenUrl(
 ): string | null {
   if (app.url) return app.url;
   if (app.status !== "running") return null;
+  // Its own https address with Uno sign-in: opens instantly, from anywhere.
+  if (app.privateUrl && app.http) return app.privateUrl;
   // An http public address can't show in an https Work: the app opens on the
   // computer instead (its localhost, in the computer's browser).
   if (app.publication?.url && app.http && canShowInPage(app.publication.url, pageProtocol))

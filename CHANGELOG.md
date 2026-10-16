@@ -8,6 +8,17 @@
 
 ---
 
+## v0.0.144 — 2026-10-17
+
+- **Comment everywhere, like Codex.** In the agent's browser too, on the Mac and on the web: point at a part of the page, click, write a note. It goes to the chat with the element and a screenshot. On the web, your site at the computer's own address (localhost) opens in the computer's browser in the panel, so you can comment on it there.
+- Your browser comes first in the panel; the agent's browser is last and quieter. The web version no longer asks you to install an extension: a site opens in a new tab of your browser.
+- Tabs: drag a tab into any group, including an empty one. Each tab shows its group (chat, project, everywhere), and hovering says where it stays pinned.
+- Files with the panel open: a click opens the file on the right as a tab, and the empty middle column is gone. In a chat, files and pictures open on the right and the chat stays where it is.
+- A new document opens right away as "Untitled 1, 2…": click its name to rename it. "Copy path" in a file's actions.
+- Share: "Copy link and password" appears once the link is made.
+- Files and previews open faster, and big folders show at once.
+- Apps can open by their own private https address with Uno sign-in, where your account has it: instantly and from any device, only you get in.
+
 ## v0.0.143 — 2026-10-17
 
 - The agent knows what its computer has: it warns when the disk or memory is nearly full and says what to do, and it can free space by clearing caches (never your files or the trash).

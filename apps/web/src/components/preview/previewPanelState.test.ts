@@ -496,6 +496,41 @@ describe("dragging a tab like in Chrome", () => {
     expect(ids(states, chatScopeKey("thread-a"))).toEqual([]);
   });
 
+  it("moves across every pair of groups, into empty ones too (Misha 16.10, point 3)", () => {
+    const chatKey = chatScopeKey("thread-a");
+    const projectKey = projectScopeKey("proj");
+    let states = openTab({}, chatA, "global", report, "person");
+    states = openTab(states, chatA, "chat", notes, "person");
+    // Everywhere → empty Project, at the end (beforeId null).
+    states = moveTabScope(states, chatA, "report", "project", null);
+    expect(ids(states, GLOBAL_SCOPE_KEY)).toEqual([]);
+    expect(ids(states, projectKey)).toEqual(["report"]);
+    // This chat → Project, before a real tab.
+    states = moveTabScope(states, chatA, "notes", "project", "report");
+    expect(ids(states, projectKey)).toEqual(["notes", "report"]);
+    expect(ids(states, chatKey)).toEqual([]);
+    // Project → empty Everywhere, then → empty This chat.
+    states = moveTabScope(states, chatA, "report", "global", null);
+    expect(ids(states, GLOBAL_SCOPE_KEY)).toEqual(["report"]);
+    states = moveTabScope(states, chatA, "notes", "chat", null);
+    expect(ids(states, chatKey)).toEqual(["notes"]);
+    // Everywhere → This chat, before a real tab; the moved tab is the open one.
+    states = moveTabScope(states, chatA, "report", "chat", "notes");
+    expect(ids(states, chatKey)).toEqual(["report", "notes"]);
+    expect(ids(states, GLOBAL_SCOPE_KEY)).toEqual([]);
+    expect(resolvePanelView(states, chatA).view.activeFileId).toBe("report");
+    // This chat → Everywhere: seen outside chats too.
+    states = moveTabScope(states, chatA, "notes", "global", null);
+    expect(resolvePanelView(states, home).files.map((tab) => tab.id)).toEqual(["notes"]);
+  });
+
+  it("a beforeId that isn't in the target group puts the tab at its end", () => {
+    let states = openTab({}, chatA, "chat", report, "person");
+    states = openTab(states, chatA, "global", notes, "person");
+    states = moveTabScope(states, chatA, "report", "global", "gone");
+    expect(ids(states, GLOBAL_SCOPE_KEY)).toEqual(["notes", "report"]);
+  });
+
   it("dropped at the end of its own group, it goes last; where it was, nothing changes", () => {
     let states = openTab({}, chatA, "chat", report, "person");
     states = openTab(states, chatA, "chat", notes, "person");

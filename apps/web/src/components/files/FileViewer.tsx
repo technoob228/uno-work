@@ -7,6 +7,7 @@ import type { EnvironmentId, FilesEntry } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
+  CopyIcon,
   DownloadIcon,
   EllipsisIcon,
   FolderInputIcon,
@@ -57,6 +58,7 @@ import {
 } from "./fileTypes";
 import { downloadFile, filesStatQueryOptions, recordFileOpened } from "./filesApi";
 import { makeFileSource } from "./fileSource";
+import { statFromListings } from "./filesPrefetch";
 import { ViewerLoading, ViewerMessage } from "./openers/common";
 import type { useFilesUploads } from "./FilesUploads";
 
@@ -73,6 +75,8 @@ export function FileViewer({
   editInline = false,
   viewSwitch,
   onUnsavedChange,
+  startEditing = false,
+  onCopyPath,
 }: {
   environmentId: EnvironmentId;
   path: string;
@@ -93,13 +97,23 @@ export function FileViewer({
   viewSwitch?: ReactNode;
   /** True while the editor holds changes that are not saved yet. */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** A document just created: straight into its editor (Misha 16.10 p.9). */
+  startEditing?: boolean;
+  /** "Copy path" in the file's actions (Misha 16.10 p.10). */
+  onCopyPath?: (path: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const stat = useQuery(filesStatQueryOptions(environmentId, path));
+  // Start from the folder listing's entry (no round trip before the file
+  // shows); the stat checks it again in the background.
+  const listed = statFromListings(queryClient, environmentId, path);
+  const stat = useQuery({
+    ...filesStatQueryOptions(environmentId, path),
+    ...(listed ? { initialData: listed.entry, initialDataUpdatedAt: listed.updatedAt } : {}),
+  });
   const entry = stat.data ?? null;
   // null = the default: the editor right away for text-like files beside the
   // tree (`editInline`), the viewer otherwise; true/false = the person chose.
-  const [editChoice, setEditChoice] = useState<boolean | null>(null);
+  const [editChoice, setEditChoice] = useState<boolean | null>(startEditing ? true : null);
   const [dirty, setDirty] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState<null | (() => void)>(null);
   useSyncExternalStore(subscribeFileOpeners, fileOpenersVersion);
@@ -216,7 +230,19 @@ export function FileViewer({
         )}
         <Icon className={cn("size-5 shrink-0", FILE_KIND_TINT[kind])} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{entry?.name ?? path.split("/").pop()}</div>
+          {entry ? (
+            // The name is a click to rename it (a new "Untitled N" says so).
+            <button
+              type="button"
+              title="Rename"
+              className="block max-w-full cursor-text truncate text-left text-sm font-medium hover:underline"
+              onClick={() => guard(() => onRename(entry))}
+            >
+              {entry.name}
+            </button>
+          ) : (
+            <div className="truncate text-sm font-medium">{path.split("/").pop()}</div>
+          )}
           {entry ? (
             <div className="truncate text-xs text-muted-foreground">
               {FILE_KIND_LABEL[kind]} · {formatFileSize(entry.size)} · Updated{" "}
@@ -270,6 +296,12 @@ export function FileViewer({
                   <TextCursorInputIcon />
                   Rename
                 </MenuItem>
+                {onCopyPath ? (
+                  <MenuItem onClick={() => onCopyPath(entry.path)}>
+                    <CopyIcon />
+                    Copy path
+                  </MenuItem>
+                ) : null}
                 <MenuItem onClick={() => guard(() => onMove(entry))}>
                   <FolderInputIcon />
                   Move

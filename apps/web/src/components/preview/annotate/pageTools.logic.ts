@@ -27,6 +27,8 @@ export interface PageComment {
   readonly note: string;
   /** Where it was, in page coordinates (areas are drawn from it; elements fall back to it). */
   readonly docRect: PageRect;
+  /** A picture of it (PNG), when the browser could take one: goes to the chat with the note. */
+  readonly shot?: Blob;
 }
 
 export type ConsoleLevel = "error" | "warn" | "info" | "log";
@@ -137,6 +139,8 @@ export interface PanelContextPayload {
   readonly card: PanelContextCard;
   readonly fileName: string;
   readonly markdown: string;
+  /** Pictures that go with it (one per comment that has one), named as the markdown says. */
+  readonly images?: ReadonlyArray<{ readonly name: string; readonly blob: Blob }>;
 }
 
 function slug(text: string): string {
@@ -166,12 +170,17 @@ export function commentsPayload(input: {
     "Left in the browser of Uno Work. Each comment points to an element (CSS selector) or to an area of the page (in page pixels).",
     "",
   ];
+  const images: Array<{ name: string; blob: Blob }> = [];
   for (const comment of input.comments) {
+    const shotName = comment.shot ? `comment-${comment.n}-${slug(path)}.png` : null;
+    if (comment.shot && shotName) images.push({ name: shotName, blob: comment.shot });
     const where =
       comment.kind === "element"
         ? `\`${comment.selector ?? comment.label}\`${comment.text ? ` — “${comment.text}”` : ""}`
         : `Area ${Math.round(comment.docRect.w)}×${Math.round(comment.docRect.h)} at (${Math.round(comment.docRect.x)}, ${Math.round(comment.docRect.y)})${comment.text ? ` — contains ${comment.text}` : ""}`;
-    lines.push(`${comment.n}. ${where}`, `   ${comment.note.trim().replace(/\n/g, "\n   ")}`, "");
+    lines.push(`${comment.n}. ${where}`, `   ${comment.note.trim().replace(/\n/g, "\n   ")}`);
+    if (shotName) lines.push(`   Picture: ${shotName} (attached)`);
+    lines.push("");
   }
   return {
     card: {
@@ -188,6 +197,7 @@ export function commentsPayload(input: {
     },
     fileName: `comments-${slug(path)}.md`,
     markdown: lines.join("\n"),
+    ...(images.length > 0 ? { images } : {}),
   };
 }
 

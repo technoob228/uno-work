@@ -638,6 +638,14 @@ export const UnoMachineApp = Schema.Struct({
   /** `http://localhost:<port>/` — only useful when the browser runs on this machine. */
   localUrl: Schema.NullOr(Schema.String),
   publication: Schema.NullOr(UnoMachineAppPublication),
+  /**
+   * Its own https address behind Uno sign-in — only the owner gets in
+   * (`https://<app>-<computer>.app.uno4.dev`, Misha 16.10: "open instantly and
+   * safely"). Opens in Uno Work's window from anywhere; nothing is opened to
+   * the internet. Null/absent while the account doesn't have it or it isn't
+   * ready yet.
+   */
+  privateUrl: Schema.optional(Schema.NullOr(Schema.String)),
   canStart: Schema.Boolean,
   canStop: Schema.Boolean,
   /**

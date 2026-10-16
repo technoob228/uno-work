@@ -294,15 +294,39 @@ function displayInHome(dir: string, home: string): string {
   return dir === home ? "~" : displayManifestDir(dir, home);
 }
 
+/**
+ * The control plane's `GET /boxes/{id}/app-links`: each web app's private
+ * https address (Uno sign-in, owner only), keyed by its port. Only ready
+ * addresses (`url` set); anything else — an older control plane, the account
+ * without the flag — is an empty map.
+ */
+export function parseAppLinks(value: unknown): ReadonlyMap<number, string> {
+  const links = new Map<number, string>();
+  const list =
+    value && typeof value === "object" ? (value as { links?: unknown }).links : undefined;
+  if (!Array.isArray(list)) return links;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const { port, url } = item as { port?: unknown; url?: unknown };
+    if (typeof port === "number" && typeof url === "string" && url.startsWith("https://")) {
+      links.set(port, url);
+    }
+  }
+  return links;
+}
+
 function toPublic(
   app: KnownApp,
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
+  privateLinks: ReadonlyMap<number, string> = new Map(),
 ): UnoMachineApp {
   const { control: _control, manifest: _manifest, code, botTokenReady: _token, ...rest } = app;
+  const privateUrl = app.http && app.port !== null ? (privateLinks.get(app.port) ?? null) : null;
   return {
     ...rest,
     publication: publicationFor(app, forwards, hostname),
+    ...(privateUrl ? { privateUrl } : {}),
     ...(app.source === "manifest"
       ? {
           codeDir: code?.display ?? null,
@@ -328,6 +352,8 @@ interface CloudView {
   readonly boxId: number | null;
   readonly apiKey: string;
   readonly forwards: ReadonlyArray<PortForward>;
+  /** Private https addresses of web apps, by port (see parseAppLinks). */
+  readonly privateLinks?: ReadonlyMap<number, string>;
   readonly hostname: string | null;
   readonly blockedReason: string | null;
 }
@@ -554,9 +580,10 @@ export const makeMachineAppsService = (
           return cloudCache.view;
         }
         const view = yield* Effect.promise(async (): Promise<CloudView> => {
-          const [boxResult, portsResult] = await Promise.allSettled([
+          const [boxResult, portsResult, linksResult] = await Promise.allSettled([
             fetchJson(apiKey, `/api/v1/boxes/${boxId}`),
             fetchJson(apiKey, `/api/v1/boxes/${boxId}/ports`),
+            fetchJson(apiKey, `/api/v1/boxes/${boxId}/app-links`),
           ]);
           const box =
             boxResult.status === "fulfilled" && typeof boxResult.value === "object"
@@ -573,6 +600,8 @@ export const makeMachineAppsService = (
             apiKey,
             forwards:
               portsResult.status === "fulfilled" ? parsePortForwards(portsResult.value) : [],
+            privateLinks:
+              linksResult.status === "fulfilled" ? parseAppLinks(linksResult.value) : new Map(),
             hostname,
             blockedReason: null,
           };
@@ -585,7 +614,9 @@ export const makeMachineAppsService = (
       scanned: { apps: KnownApp[]; warnings: string[] },
       cloud: CloudView,
     ): UnoMachineApps => ({
-      apps: scanned.apps.map((app) => toPublic(app, cloud.forwards, cloud.hostname)),
+      apps: scanned.apps.map((app) =>
+        toPublic(app, cloud.forwards, cloud.hostname, cloud.privateLinks),
+      ),
       manifestDir: displayManifestDir(manifestDir, home),
       scannedAt: new Date().toISOString(),
       publishBlockedReason: cloud.blockedReason,

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dropBeforeId,
   foldedGroups,
   groupLabelWidth,
+  groupsForDrag,
   groupStripTabs,
   moveToLabel,
+  scopeHint,
   tabsShownInGroup,
 } from "./panelTabs.logic";
 import { GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
@@ -44,6 +47,55 @@ describe("groupStripTabs", () => {
 
   it("an empty group is not drawn; a tab of unknown level is the chat's", () => {
     expect(groupStripTabs([hero], {})).toEqual([{ scope: "chat", files: [hero] }]);
+  });
+});
+
+describe("groupsForDrag", () => {
+  it("while dragging, all three groups show — a missing one as an empty slot to drop into", () => {
+    const groups = groupStripTabs([pult, hero], { [pult.id]: "global", [hero.id]: "chat" });
+    expect(groupsForDrag(groups, true)).toEqual([
+      { scope: "chat", files: [hero] },
+      { scope: "project", files: [] },
+      { scope: "global", files: [pult] },
+    ]);
+  });
+
+  it("only Everywhere has tabs: This chat and Project come as slots", () => {
+    const groups = groupStripTabs([pult], { [pult.id]: "global" });
+    expect(groupsForDrag(groups, true).map((group) => group.scope)).toEqual([
+      "chat",
+      "project",
+      "global",
+    ]);
+  });
+
+  it("not dragging: the groups as they are", () => {
+    const groups = groupStripTabs([hero], {});
+    expect(groupsForDrag(groups, false)).toBe(groups);
+  });
+});
+
+describe("dropBeforeId", () => {
+  const group = [readme, hero, pricing];
+  it("left half of a tab: before it", () => {
+    expect(dropBeforeId(group, hero.id, true)).toBe(hero.id);
+  });
+  it("right half: before the next tab, or the group's end after the last one", () => {
+    expect(dropBeforeId(group, hero.id, false)).toBe(pricing.id);
+    expect(dropBeforeId(group, pricing.id, false)).toBeNull();
+  });
+  it("a tab not in the group: the end", () => {
+    expect(dropBeforeId(group, pult.id, true)).toBeNull();
+  });
+});
+
+describe("scopeHint", () => {
+  it("says where the tab stays pinned", () => {
+    expect(scopeHint("chat", "uno")).toBe("Pinned while you're in this chat");
+    expect(scopeHint("project", "uno-site")).toBe("Pinned while you're in uno-site");
+    expect(scopeHint("project", null)).toBe("Pinned while you're in this project");
+    expect(scopeHint("project", "  ")).toBe("Pinned while you're in this project");
+    expect(scopeHint("global", null)).toBe("Always pinned — in every chat and screen");
   });
 });
 

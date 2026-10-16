@@ -236,6 +236,9 @@ const LIVE_METHODS = new Set<string>([
   WS_METHODS.browserLiveSetup,
   WS_METHODS.browserLiveSetProxy,
   WS_METHODS.browserLiveCopySelection,
+  // Comment in the agent's browser: the demo's computer has no real page.
+  WS_METHODS.browserLiveEvaluate,
+  WS_METHODS.browserLiveCapture,
 ]);
 
 /** Cloud computers have the agent's browser; this Mac has none (its browser is the app's own). */

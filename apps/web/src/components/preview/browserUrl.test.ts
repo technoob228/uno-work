@@ -5,6 +5,7 @@ import {
   browserTabNameForUrl,
   browserUrlOrigin,
   normalizeBrowserUrl,
+  isComputerLocalUrl,
   isPrivateNetworkUrl,
   normalizeAgentBrowserUrl,
 } from "./browserUrl";
@@ -116,5 +117,25 @@ describe("normalizeAgentBrowserUrl", () => {
     ]) {
       expect(normalizeAgentBrowserUrl(url)).toBeNull();
     }
+  });
+});
+
+describe("isComputerLocalUrl", () => {
+  it("knows the computer's own addresses (open them in its browser on the web)", () => {
+    expect(isComputerLocalUrl("http://localhost:5173/")).toBe(true);
+    expect(isComputerLocalUrl("http://app.localhost:3000/x")).toBe(true);
+    expect(isComputerLocalUrl("http://127.0.0.1:8081")).toBe(true);
+    expect(isComputerLocalUrl("http://127.1.2.3/")).toBe(true);
+    expect(isComputerLocalUrl("http://0.0.0.0:4000/")).toBe(true);
+    expect(isComputerLocalUrl("http://[::1]:3000/")).toBe(true);
+  });
+
+  it("leaves public and local-network addresses alone", () => {
+    expect(isComputerLocalUrl("https://getuno.xyz/")).toBe(false);
+    expect(isComputerLocalUrl("https://my-site.uno4.me/")).toBe(false);
+    expect(isComputerLocalUrl("http://192.168.1.10:3000/")).toBe(false);
+    expect(isComputerLocalUrl("http://localhost.example.com/")).toBe(false);
+    expect(isComputerLocalUrl("file:///etc/hosts")).toBe(false);
+    expect(isComputerLocalUrl("not a url")).toBe(false);
   });
 });

@@ -104,6 +104,28 @@ export interface ServerBrowserLiveShape {
   ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
   /** Поставить браузер машины сейчас (кнопка «Try again»). */
   readonly setup: Effect.Effect<BrowserLiveState, BrowserLiveError>;
+  /**
+   * Comment в браузере машины (как в Codex): скрипт страницы приложения
+   * (pageToolsScript) работает в главном мире страницы, его вызовы и очередь
+   * сообщений идут сюда. Ответ — JSON значения, с потолком размера.
+   */
+  readonly evaluate: (
+    pageId: string,
+    expression: string,
+  ) => Effect.Effect<{ readonly json: string | null }, BrowserLiveError>;
+  /** PNG части страницы (CSS-пиксели вьюпорта) — картинка к комментарию. */
+  readonly capture: (
+    pageId: string,
+    rect: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    },
+  ) => Effect.Effect<
+    { readonly data: string; readonly width: number; readonly height: number },
+    BrowserLiveError
+  >;
 }
 
 export interface ServerBrowserShape {
@@ -137,6 +159,29 @@ const SELECTION_SCRIPT = `(() => {
   }
   return String(window.getSelection() ?? "");
 })()`;
+
+/** Comment: потолок ответа скрипта страницы и время на него (alert на странице вешает evaluate). */
+export const LIVE_EVALUATE_MAX_CHARS = 512 * 1024;
+const LIVE_EVALUATE_TIMEOUT_MS = 5_000;
+const LIVE_EXPRESSION_MAX_CHARS = 256 * 1024;
+
+/**
+ * Кусок вьюпорта для снимка комментария: внутри страницы, целые пиксели, не
+ * меньше 1×1; null — прямоугольник целиком вне экрана.
+ */
+export function liveCaptureClip(
+  rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  viewport: { readonly width: number; readonly height: number },
+): { x: number; y: number; width: number; height: number } | null {
+  const values = [rect.x, rect.y, rect.width, rect.height];
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  const left = Math.max(0, Math.floor(rect.x));
+  const top = Math.max(0, Math.floor(rect.y));
+  const right = Math.min(viewport.width, Math.ceil(rect.x + rect.width));
+  const bottom = Math.min(viewport.height, Math.ceil(rect.y + rect.height));
+  if (right - left < 1 || bottom - top < 1) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 
 const CHROMIUM_MISSING_ERROR =
   "Server-side browser unavailable: Chromium executable not found. " +
@@ -1231,6 +1276,43 @@ export const makeServerBrowser = Effect.gen(function* () {
         const text = yield* livePromise(() => entry.page.evaluate(SELECTION_SCRIPT));
         return typeof text === "string" ? text : "";
       }),
+    evaluate: (pageId, expression) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        if (expression.length > LIVE_EXPRESSION_MAX_CHARS) {
+          return yield* liveError("The script is too long.");
+        }
+        const json = yield* livePromise(async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("The page didn't answer.")),
+              LIVE_EVALUATE_TIMEOUT_MS,
+            );
+          });
+          try {
+            const value = await Promise.race([entry.page.evaluate(expression), timeout]);
+            return value === undefined ? null : JSON.stringify(value);
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+        if (json !== null && json.length > LIVE_EVALUATE_MAX_CHARS) {
+          return yield* liveError("The page's answer is too big.");
+        }
+        return { json: json ?? null };
+      }),
+    capture: (pageId, rect) =>
+      Effect.gen(function* () {
+        const entry = yield* requirePage(pageId);
+        const viewport = entry.page.viewportSize() ?? entry.viewport;
+        const clip = liveCaptureClip(rect, viewport);
+        if (!clip) return yield* liveError("That part of the page isn't on screen.");
+        const image = yield* livePromise(() =>
+          entry.page.screenshot({ clip, type: "png", timeout: LIVE_EVALUATE_TIMEOUT_MS }),
+        );
+        return { data: image.toString("base64"), width: clip.width, height: clip.height };
+      }),
     setup: Effect.gen(function* () {
       if (setup) {
         yield* Effect.tryPromise({
@@ -1334,6 +1416,8 @@ export const unavailableServerBrowserLive: ServerBrowserLiveShape = {
   copySelection: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   setProxy: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
   setup: Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  evaluate: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
+  capture: () => Effect.fail(new BrowserLiveError({ detail: "No browser in tests." })),
 };
 
 /** Стаб для тестов: серверного браузера нет, любая команда — ошибка. */

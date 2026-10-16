@@ -14,6 +14,7 @@ import {
   ArrowUpIcon,
   ChevronRightIcon,
   CloudIcon,
+  CopyIcon,
   DownloadIcon,
   EllipsisIcon,
   EyeIcon,
@@ -90,16 +91,26 @@ import {
   createFile,
   downloadFile,
   filesApi,
+  recordFileOpened,
   filesListQueryOptions,
   filesQueryKeys,
   filesSearchQueryOptions,
   filesSharesQueryOptions,
 } from "./filesApi";
+import { prefetchFileForView } from "./filesPrefetch";
+import { useProgressiveRows } from "./useProgressiveRows";
 import { registerBuiltInFileOpeners } from "./openers";
+import { activePanelFilePath, filesOpenTarget, filesPanelBeside } from "./filesPanel";
+import { computerFileTab } from "../../navigation/useOpenComputerFile";
+import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
 import { PinPathButton } from "./PinPathButton";
 import { useFolderChats } from "../../hooks/useFolderChats";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
-import { blankExtensionFor, blankOfficeFile } from "../office/officeBlank";
+import { blankOfficeFile } from "../office/officeBlank";
+import { isOfficeFile, officeDocumentType } from "../office/officeFormats";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { isElectron } from "../../env";
+import { untitledFileName } from "./untitledName";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
@@ -140,52 +151,49 @@ function sortEntries(
 }
 
 /**
- * "New → …". Word, Excel and PowerPoint get real blank files; the file type
- * follows the extension actually typed (see `newFileContents`).
+ * "New → …". Word, Excel and PowerPoint get real blank files. The document is
+ * created at once under a free name — "Untitled 1.docx", … (untitledName.ts,
+ * Misha 16.10 p.9) — and opens for editing; it can be renamed any time.
  */
 const NEW_FILE_TEMPLATES = {
   word: {
     name: "Untitled.docx",
-    title: "New Word document",
     contents: (): Promise<string | Uint8Array> => blankOfficeFile("docx"),
   },
   spreadsheet: {
     name: "Untitled.xlsx",
-    title: "New spreadsheet",
     contents: (): Promise<string | Uint8Array> => blankOfficeFile("xlsx"),
   },
   presentation: {
     name: "Untitled.pptx",
-    title: "New presentation",
     contents: (): Promise<string | Uint8Array> => blankOfficeFile("pptx"),
   },
   document: {
     name: "Untitled.md",
-    title: "New text document",
     contents: async (): Promise<string | Uint8Array> => "# Untitled\n\n",
   },
   page: {
     name: "index.html",
-    title: "New web page",
     contents: async (): Promise<string | Uint8Array> =>
       '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width,initial-scale=1">\n  <title>My page</title>\n</head>\n<body>\n  <h1>Hello!</h1>\n  <p>Edit this page, then share it or publish it as a website.</p>\n</body>\n</html>\n',
   },
 } as const;
 
-/**
- * Whatever template was picked, a name ending in .docx/.xlsx/.pptx gets a
- * real blank document of that kind — never text with an office extension.
- */
-function newFileContents(kind: NewFileKind, name: string): Promise<string | Uint8Array> {
-  const blank = blankExtensionFor(name);
-  return blank ? blankOfficeFile(blank) : NEW_FILE_TEMPLATES[kind].contents();
-}
 type NewFileKind = keyof typeof NEW_FILE_TEMPLATES;
+
+/** "Copy path" in a file's actions (Misha 16.10 p.10): the full path, a short "Path copied". */
+function copyPath(path: string) {
+  if (!navigator.clipboard?.writeText) return;
+  void navigator.clipboard.writeText(path).then(
+    () => toastManager.add({ type: "success", title: "Path copied", description: path }),
+    (error: unknown) =>
+      toastManager.add({ type: "error", title: "Couldn't copy", description: errorText(error) }),
+  );
+}
 
 type DialogState =
   | { type: "none" }
   | { type: "newFolder" }
-  | { type: "newFile"; kind: NewFileKind }
   | { type: "rename"; entry: FilesEntry }
   | { type: "move"; entries: FilesEntry[] }
   | { type: "delete"; entries: FilesEntry[] }
@@ -216,6 +224,15 @@ export function FilesView() {
   );
   const [viewerUnsaved, setViewerUnsaved] = useState(false);
   const [pendingOpen, setPendingOpen] = useState<null | (() => void)>(null);
+  // The right panel on screen (Misha 16.10 p.6): files open there, in the
+  // Everywhere group, and the middle column steps aside (filesPanel.ts).
+  const preview = usePreviewPane();
+  const panelBeside = filesPanelBeside({
+    isMobile,
+    panelOpen: preview.open,
+    panelTabCount: preview.files.length,
+    inChat: preview.currentChatThreadId !== null,
+  });
 
   // Documents are opened from here: get the office engine into the browser's
   // cache in the background so the first one opens fast (officePrewarm.ts).
@@ -236,17 +253,52 @@ export function FilesView() {
       void navigate({ search: { path: dirname(entry.path), file: entry.path } }),
     [navigate],
   );
+  // A file the person picks (tree, list, Recent, shared links): beside an open
+  // panel — a tab of its Everywhere group, made active; otherwise in Files.
+  const { openFileForTarget, currentProjectKey, currentChatThreadId } = preview;
+  const pickFile = useCallback(
+    (entry: Pick<FilesEntry, "path">) => {
+      const target = filesOpenTarget({
+        panelBeside,
+        previewKind: detectFileKind(entry.path.split("/").pop() ?? entry.path),
+        hasEnvironment: environmentId !== null,
+      });
+      if (target === "files" || !environmentId) {
+        openFile(entry);
+        return;
+      }
+      openFileForTarget(
+        { projectKey: currentProjectKey, threadId: currentChatThreadId },
+        "global",
+        computerFileTab(entry.path, environmentId),
+      );
+      recordFileOpened(environmentId, entry.path);
+      // One place to look at a file: the middle column lets go of its file.
+      if (search.file) void navigate({ search: search.path ? { path: search.path } : {} });
+    },
+    [
+      currentChatThreadId,
+      currentProjectKey,
+      environmentId,
+      navigate,
+      openFile,
+      openFileForTarget,
+      panelBeside,
+      search.file,
+      search.path,
+    ],
+  );
 
   // Another file from the tree while this one has unsaved edits: ask first.
   const openFileGuarded = useCallback(
     (entry: Pick<FilesEntry, "path">) => {
       if (viewerUnsaved && entry.path !== search.file) {
-        setPendingOpen(() => () => openFile(entry));
+        setPendingOpen(() => () => pickFile(entry));
         return;
       }
-      openFile(entry);
+      pickFile(entry);
     },
-    [openFile, search.file, viewerUnsaved],
+    [pickFile, search.file, viewerUnsaved],
   );
   const selectFolder = useCallback(
     (path: string) =>
@@ -300,6 +352,57 @@ export function FilesView() {
   const listing = useQuery(filesListQueryOptions(environmentId, search.path ?? null, false));
   const rootPath = listing.data?.rootPath ?? null;
   const currentPath = listing.data?.path ?? search.path ?? null;
+
+  // New → document: created at once as the first free "Untitled N", opened for
+  // editing (Word/Excel/PowerPoint in Office), its name a click to rename.
+  const [justCreated, setJustCreated] = useState<string | null>(null);
+  // Office's own header renames by its name only for Word with the Docs shell.
+  const officeRenamesByName = useFeatureFlag("officeDocsShell");
+  // The viewer reads it once, when it opens the new file.
+  useEffect(() => {
+    if (justCreated && search.file === justCreated) setJustCreated(null);
+  }, [justCreated, search.file]);
+  const createUntitled = async (kind: NewFileKind) => {
+    if (!currentPath || !environmentId) return;
+    try {
+      const folder = await queryClient.fetchQuery(
+        filesListQueryOptions(environmentId, currentPath, true),
+      );
+      const name = untitledFileName(
+        NEW_FILE_TEMPLATES[kind].name,
+        folder.entries.map((entry) => entry.name),
+      );
+      const created = await createFile(
+        environmentId,
+        currentPath,
+        name,
+        await NEW_FILE_TEMPLATES[kind].contents(),
+      );
+      await refreshAll();
+      const inOffice = !isElectron && isOfficeFile(created.path);
+      if (inOffice) {
+        void navigate({ to: "/office", search: { path: created.path } });
+      } else {
+        setJustCreated(created.path);
+        openFile(created);
+      }
+      const renamesByName =
+        !inOffice || (officeRenamesByName && officeDocumentType(created.path) === "word");
+      toastManager.add({
+        type: "success",
+        title: `Created “${created.name}”`,
+        description: renamesByName
+          ? "Click its name to rename it."
+          : "You can rename it in Files any time.",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't create it",
+        description: errorText(error),
+      });
+    }
+  };
   useEffect(() => setViewerUnsaved(false), [search.file]);
 
   const fileViewer =
@@ -312,6 +415,8 @@ export function FilesView() {
         embedded={splitView}
         editInline={splitView}
         onUnsavedChange={setViewerUnsaved}
+        startEditing={search.file === justCreated}
+        onCopyPath={copyPath}
         viewSwitch={
           viewMode === "list" && !isMobile ? (
             <FilesViewSwitch mode={viewMode} onChange={setViewMode} />
@@ -334,7 +439,12 @@ export function FilesView() {
     viewMode === "tree" || viewMode === "recent" ? (
       <FilesTree
         environmentId={environmentId}
-        selectedFile={search.file}
+        selectedFile={
+          search.file ??
+          (panelBeside
+            ? activePanelFilePath(preview.files, preview.activeFileId, environmentId)
+            : undefined)
+        }
         currentFolder={search.path}
         onOpenFile={openFileGuarded}
         onSelectFolder={selectFolder}
@@ -345,7 +455,7 @@ export function FilesView() {
         onOpenHome={() => openFolder(undefined)}
         onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
         onCreate={(kind) =>
-          setDialog(kind === "folder" ? { type: "newFolder" } : { type: "newFile", kind })
+          kind === "folder" ? setDialog({ type: "newFolder" }) : void createUntitled(kind)
         }
         onUpload={(files) => {
           if (currentPath) void uploads.start({ targetDir: currentPath, files });
@@ -375,15 +485,22 @@ export function FilesView() {
           />
         ) : splitView ? (
           <div className="flex min-h-0 flex-1" data-testid="files-tree-layout">
-            <div className="w-72 shrink-0 border-r border-border lg:w-80">{filesTree}</div>
-            <div className="min-w-0 flex-1">
-              {fileViewer ?? (
-                <TreeEmptyState
-                  folder={viewMode === "recent" ? null : currentPath}
-                  recent={viewMode === "recent"}
-                />
-              )}
-            </div>
+            {panelBeside && !fileViewer ? (
+              // The panel shows the files: no middle column, the tree takes its place.
+              <div className="min-w-0 flex-1">{filesTree}</div>
+            ) : (
+              <>
+                <div className="w-72 shrink-0 border-r border-border lg:w-80">{filesTree}</div>
+                <div className="min-w-0 flex-1">
+                  {fileViewer ?? (
+                    <TreeEmptyState
+                      folder={viewMode === "recent" ? null : currentPath}
+                      recent={viewMode === "recent"}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
         ) : viewMode === "recent" ? (
           (fileViewer ?? filesTree)
@@ -398,9 +515,10 @@ export function FilesView() {
               <FilesViewSwitch mode={viewMode} onChange={setViewMode} compact={isMobile} />
             }
             onOpenFolder={openFolder}
-            onOpenFile={openFile}
+            onOpenFile={pickFile}
             uploads={uploads}
             onDialog={setDialog}
+            onCreateFile={(kind) => void createUntitled(kind)}
             onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
             onMoveInto={(entries, destination) =>
               moveEntries(entries, destination).catch((error: unknown) =>
@@ -455,25 +573,6 @@ export function FilesView() {
         }}
       />
       <NameDialog
-        open={dialog.type === "newFile"}
-        title={dialog.type === "newFile" ? NEW_FILE_TEMPLATES[dialog.kind].title : ""}
-        initialName={dialog.type === "newFile" ? NEW_FILE_TEMPLATES[dialog.kind].name : ""}
-        selectBaseName
-        confirmLabel="Create"
-        onOpenChange={(open) => !open && closeDialog()}
-        onSubmit={async (name) => {
-          if (!currentPath || dialog.type !== "newFile" || !environmentId) return;
-          const created = await createFile(
-            environmentId,
-            currentPath,
-            name,
-            await newFileContents(dialog.kind, name),
-          );
-          await refreshAll();
-          openFile(created);
-        }}
-      />
-      <NameDialog
         open={dialog.type === "rename"}
         title="Rename"
         initialName={dialog.type === "rename" ? dialog.entry.name : ""}
@@ -524,7 +623,7 @@ export function FilesView() {
         environmentId={environmentId}
         onOpenChange={(open) => !open && closeDialog()}
         onOpenItem={(share: FilesShare) =>
-          share.kind === "folder" ? openFolder(share.path) : openFile(share)
+          share.kind === "folder" ? openFolder(share.path) : pickFile(share)
         }
       />
     </SidebarInset>
@@ -540,6 +639,7 @@ function FolderBrowser({
   onOpenFile,
   uploads,
   onDialog,
+  onCreateFile,
   onMoveInto,
   onOpenCloud,
 }: {
@@ -551,6 +651,8 @@ function FolderBrowser({
   onOpenFile: (entry: FilesEntry) => void;
   uploads: ReturnType<typeof useFilesUploads>;
   onDialog: (dialog: DialogState) => void;
+  /** New → document: created at once as "Untitled N" and opened. */
+  onCreateFile: (kind: NewFileKind) => void;
   onMoveInto: (entries: FilesEntry[], destination: string) => void;
   onOpenCloud: () => void;
 }) {
@@ -620,6 +722,7 @@ function FolderBrowser({
     return sortEntries(source, sort.key, sort.ascending);
   }, [data?.entries, searchResults.data?.entries, sort, trimmedQuery]);
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
+  const shownRows = useProgressiveRows(entries.length);
 
   const upload = (files: Parameters<typeof uploads.start>[0]["files"], targetDir = currentPath) => {
     if (!targetDir) return;
@@ -673,7 +776,7 @@ function FolderBrowser({
     void readDroppedUploadFiles(event.dataTransfer).then((files) => upload(files, destination));
   };
 
-  const createNew = (kind: NewFileKind) => onDialog({ type: "newFile", kind });
+  const createNew = onCreateFile;
 
   return (
     <div
@@ -988,10 +1091,15 @@ function FolderBrowser({
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {(shownRows < entries.length ? entries.slice(0, shownRows) : entries).map((entry) => (
                 <FileRow
                   key={entry.path}
                   entry={entry}
+                  onPress={
+                    entry.kind === "directory"
+                      ? undefined
+                      : () => prefetchFileForView(queryClient, environmentId, entry)
+                  }
                   shared={sharedPaths.has(entry.path)}
                   tag={entry.kind === "directory" ? folderTagOf(tags, entry.path) : null}
                   selected={selected.has(entry.path)}
@@ -1031,6 +1139,7 @@ function FolderBrowser({
                   onShare={() => onDialog({ type: "share", entry })}
                   onDownload={() => onDownload(entry)}
                   onRename={() => onDialog({ type: "rename", entry })}
+                  onCopyPath={() => copyPath(entry.path)}
                   onMove={() => onDialog({ type: "move", entries: [entry] })}
                   onDelete={() => onDialog({ type: "delete", entries: [entry] })}
                   onCopyToCloud={() => onDialog({ type: "toCloud", entries: [entry] })}
@@ -1123,6 +1232,7 @@ function FileRow({
   locationHint,
   onToggle,
   onOpen,
+  onPress,
   onDragStart,
   onDragOverFolder,
   onDragLeave,
@@ -1130,6 +1240,7 @@ function FileRow({
   onShare,
   onDownload,
   onRename,
+  onCopyPath,
   onMove,
   onDelete,
   onCopyToCloud,
@@ -1144,6 +1255,8 @@ function FileRow({
   locationHint: string | null;
   onToggle: (value: boolean) => void;
   onOpen: () => void;
+  /** A press on the row, before the click: start reading the file. */
+  onPress?: (() => void) | undefined;
   onDragStart: (event: React.DragEvent) => void;
   onDragOverFolder: (event: React.DragEvent) => void;
   onDragLeave: () => void;
@@ -1151,6 +1264,7 @@ function FileRow({
   onShare: () => void;
   onDownload: () => void;
   onRename: () => void;
+  onCopyPath: () => void;
   onMove: () => void;
   onDelete: () => void;
   onCopyToCloud: () => void;
@@ -1185,6 +1299,7 @@ function FileRow({
         <button
           type="button"
           onClick={onOpen}
+          onPointerDown={onPress}
           className="flex w-full min-w-0 items-center gap-3 text-left"
         >
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
@@ -1287,6 +1402,10 @@ function FileRow({
               <MenuItem onClick={onRename}>
                 <TextCursorInputIcon />
                 Rename
+              </MenuItem>
+              <MenuItem onClick={onCopyPath}>
+                <CopyIcon />
+                Copy path
               </MenuItem>
               <MenuItem onClick={onMove}>
                 <FolderInputIcon />

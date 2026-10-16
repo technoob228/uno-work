@@ -276,9 +276,13 @@ import {
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   BrowserLiveCloseInput,
+  BrowserLiveCaptureInput,
+  BrowserLiveCaptureResult,
   BrowserLiveCopyInput,
   BrowserLiveCopyResult,
   BrowserLiveError,
+  BrowserLiveEvaluateInput,
+  BrowserLiveEvaluateResult,
   BrowserLiveFrame,
   BrowserLiveFramesInput,
   BrowserLiveInputPayload,
@@ -561,6 +565,8 @@ export const WS_METHODS = {
   browserLiveCopySelection: "browserLive.copySelection",
   browserLiveSetProxy: "browserLive.setProxy",
   browserLiveSetup: "browserLive.setup",
+  browserLiveEvaluate: "browserLive.evaluate",
+  browserLiveCapture: "browserLive.capture",
   subscribePlugins: "subscribePlugins",
   subscribeInbox: "subscribeInbox",
 
@@ -1241,6 +1247,20 @@ export const WsBrowserLiveSetProxyRpc = Rpc.make(WS_METHODS.browserLiveSetProxy,
 export const WsBrowserLiveSetupRpc = Rpc.make(WS_METHODS.browserLiveSetup, {
   payload: Schema.Struct({}),
   success: BrowserLiveState,
+  error: BrowserLiveError,
+});
+
+/** Comment mode in the machine's browser: the page script's calls and its messages back. */
+export const WsBrowserLiveEvaluateRpc = Rpc.make(WS_METHODS.browserLiveEvaluate, {
+  payload: BrowserLiveEvaluateInput,
+  success: BrowserLiveEvaluateResult,
+  error: BrowserLiveError,
+});
+
+/** A PNG of part of a page of the machine's browser (the picture of a comment). */
+export const WsBrowserLiveCaptureRpc = Rpc.make(WS_METHODS.browserLiveCapture, {
+  payload: BrowserLiveCaptureInput,
+  success: BrowserLiveCaptureResult,
   error: BrowserLiveError,
 });
 
@@ -2215,6 +2235,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserLiveCopySelectionRpc,
   WsBrowserLiveSetProxyRpc,
   WsBrowserLiveSetupRpc,
+  WsBrowserLiveEvaluateRpc,
+  WsBrowserLiveCaptureRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

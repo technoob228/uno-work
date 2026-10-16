@@ -74,6 +74,17 @@ describe("opening a program", () => {
     // From an https Work the http address would stay blank (mixed content).
     expect(machineAppOpenUrl(published, false, "https:")).toBeNull();
     expect(machineAppOpenUrl(app({}), true)).toBe("http://localhost:3000/");
+    // Its private https address (Uno sign-in) comes before a public http one.
+    expect(
+      machineAppOpenUrl(
+        app({
+          privateUrl: "https://notes-box.app.uno4.dev",
+          publication: pub(43000, "http://h:43000/"),
+        }),
+        false,
+        "http:",
+      ),
+    ).toBe("https://notes-box.app.uno4.dev");
     // From a remote browser, localhost would be the viewer's own laptop.
     expect(machineAppOpenUrl(app({}), false)).toBeNull();
   });
