@@ -99,46 +99,43 @@ export const FEATURE_FLAGS = [
       "Other ways to lay out the window: a rail of icons with a panel next to it, or — in the desktop app — tabs on top for open chats, apps and files. Turn on, then pick one in Settings → General → Appearance.",
     default: false,
   },
-  // ── Stage w0139 (16.10): on on the stage channel, off everywhere else ──
+  // ── w0139 (16.10): on for everyone since 0.0.141 (Misha 16.10 17:15 "ship
+  // everything"); each can be switched off here. Uno's chats in the sidebar
+  // (assistants) stay on the stage channel only. ──
   {
     key: "panelLauncherV2",
     label: "Panel launcher: two browsers and Apps",
     description:
       "Two browsers, two buttons: your site (first, always the default) and the agent's browser, where you take control to sign in for it — a card in the chat says when the agent needs you there. Apps is always in the launcher; the terminal stays on Ctrl+`.",
-    default: false,
-    stageDefault: true,
+    default: true,
   },
   {
     key: "browserPageTools",
     label: "Comment and Debug in the browser",
     description:
       "Desktop app: one Comment button on your site — point at parts of the page and leave notes for the agent; the page's console and network show below, and errors go to the chat.",
-    default: false,
-    stageDefault: true,
+    default: true,
   },
   {
     key: "fullscreenChatDock",
     label: "Compact chat on a full-screen tab",
     description:
       "With a tab on the whole screen, the chat is one small block at the bottom that folds into a mini window; answers pop up as a hint.",
-    default: false,
-    stageDefault: true,
+    default: true,
   },
   {
     key: "panelTabGroups",
-    label: "Tab groups and All tabs",
+    label: "Tab groups",
     description:
-      "Panel tabs in groups, like in Chrome: Everywhere, Project and This chat. Drag a tab to another group or use “Move to”; find tabs open in other chats under “All tabs”.",
-    default: false,
-    stageDefault: true,
+      "Panel tabs in groups, like in Chrome: This chat, Project and Everywhere. Drag a tab within a group or into another one; click a group's label to fold it.",
+    default: true,
   },
   {
     key: "sidebarViewMenu",
     label: "Sidebar view menu",
     description:
       "Pick how chats are laid out (projects, one list, inbox, by computer) and filter by project right from the sidebar's title. One list and Inbox show each chat's project.",
-    default: false,
-    stageDefault: true,
+    default: true,
   },
   {
     key: "assistantChatsInSidebar",
@@ -153,8 +150,7 @@ export const FEATURE_FLAGS = [
     label: "Share a file from the panel",
     description:
       "The ↗ button of a file in the panel opens it in your editor or shares it with a link.",
-    default: false,
-    stageDefault: true,
+    default: true,
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

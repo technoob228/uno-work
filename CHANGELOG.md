@@ -13,6 +13,13 @@
 - A click on an app opens it, like on a computer. An app with a web page opens in its window inside Uno Work — on a cloud computer, apps that answer only inside it open in the computer's own browser. A Telegram bot opens in Telegram.
 - A stopped app starts when you click it: its window says "Starting…" and shows the app when it answers.
 - Settings are behind ⚙ — on the app (when you point at it), on a right-click, and in the app's window: address, show on the internet, start/stop, remove. An app with nothing to open (a script) opens its settings.
+- On for everyone now (each can be switched off in Settings → Labs):
+  - Two browsers in the panel: **Your site** (first, the default) and the **Agent's browser**, where you take control to sign in for it; a card in the chat says when the agent needs you there. Apps is always in the launcher; the terminal stays on Ctrl+`.
+  - Desktop app: **Comment** on your site — point at parts of the page and leave notes for the agent; the page's console and network show below, and errors go to the chat.
+  - A tab on the whole screen keeps the chat as one compact block that folds into a mini window; answers pop up as a hint.
+  - Tab groups like in Chrome: This chat → Project → Everywhere. Drag a tab within a group or into another one; click a group's label to fold it. New tabs go to the chat's group.
+  - The sidebar's title picks the view (projects, one list, inbox, by computer) and filters by project; a folded project keeps only the chat you're in.
+  - ↗ on a file in the panel: open it in your editor, or share it with a link.
 
 ## v0.0.140 — 2026-10-16
 

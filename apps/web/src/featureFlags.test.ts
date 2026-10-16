@@ -90,16 +90,8 @@ describe("stage defaults (w0139)", () => {
     (flag) => "stageDefault" in flag && flag.stageDefault === true,
   ).map((flag) => flag.key);
 
-  it("keeps the release behaviour off the stage channel", () => {
-    expect(stageKeys).toEqual([
-      "panelLauncherV2",
-      "browserPageTools",
-      "fullscreenChatDock",
-      "panelTabGroups",
-      "sidebarViewMenu",
-      "assistantChatsInSidebar",
-      "fileShareButton",
-    ]);
+  it("keeps only the assistants (Uno's chats) to the stage channel", () => {
+    expect(stageKeys).toEqual(["assistantChatsInSidebar"]);
     for (const key of stageKeys) {
       expect(resolveFeatureFlag({}, key, false)).toBe(false);
       expect(featureFlagDefault(key, false)).toBe(false);
@@ -111,6 +103,20 @@ describe("stage defaults (w0139)", () => {
       expect(resolveFeatureFlag({}, key, true)).toBe(true);
       expect(resolveFeatureFlag({ [key]: false }, key, true)).toBe(false);
       expect(resolveFeatureFlag({ [key]: true }, key, false)).toBe(true);
+    }
+  });
+
+  it("has the rest of w0139 on for everyone since 0.0.141 (each can be turned off)", () => {
+    for (const key of [
+      "panelLauncherV2",
+      "browserPageTools",
+      "fullscreenChatDock",
+      "panelTabGroups",
+      "sidebarViewMenu",
+      "fileShareButton",
+    ] as const) {
+      expect(featureFlagDefault(key, false)).toBe(true);
+      expect(resolveFeatureFlag({ [key]: false }, key, false)).toBe(false);
     }
   });
 
