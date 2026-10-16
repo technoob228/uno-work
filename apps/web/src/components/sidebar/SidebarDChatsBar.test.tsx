@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SidebarDChatsBar, newChatTooltipLabel } from "./SidebarDChatsBar";
 
 const base = {
-  title: "All projects",
+  title: "All chats",
   groupInHeader: true,
   levels: [],
   multiComputer: false,
@@ -15,7 +15,7 @@ const base = {
   computers: [],
   pickedComputers: null,
   onComputersChange: () => {},
-  filterChip: null,
+  onOpenSettings: () => {},
   onClearFilters: () => {},
   onNewChat: () => {},
   newChatShortcutLabel: "⌘N",
@@ -32,17 +32,18 @@ describe("SidebarDChatsBar", () => {
     expect(addProject).toBeGreaterThan(trigger);
     expect(newChat).toBeGreaterThan(addProject);
     expect(html.match(/<button/g)?.length).toBe(3);
+    expect(html).toContain("All chats");
   });
 
-  it("shows one filter chip only while a filter is on", () => {
+  it("says the filter in the title only, with × to clear it", () => {
     expect(renderToStaticMarkup(<SidebarDChatsBar {...base} />)).not.toContain(
-      "sidebar-d-filter-chip",
+      "sidebar-d-clear-filter",
     );
     const html = renderToStaticMarkup(
-      <SidebarDChatsBar {...base} title="landing" filterChip="landing · MacBook" />,
+      <SidebarDChatsBar {...base} title="Chats · landing" pickedProjects={["landing"]} />,
     );
-    expect(html).toContain('data-testid="sidebar-d-filter-chip"');
-    expect(html).toContain("landing · MacBook");
+    expect(html).toContain('data-testid="sidebar-d-clear-filter"');
+    expect(html.split(">Chats · landing<").length - 1).toBe(1);
   });
 
   it("names the shortcut in the tooltip only when one is bound", () => {

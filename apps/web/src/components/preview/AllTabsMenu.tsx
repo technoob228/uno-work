@@ -141,7 +141,7 @@ export function AllTabsMenu({
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
             />
           </label>
-          <div className="max-h-[min(26rem,var(--available-height))] overflow-y-auto py-1">
+          <div className="max-h-[min(26rem,var(--available-height))] overflow-y-auto pt-1 pb-5 [mask-image:linear-gradient(to_bottom,black_calc(100%-20px),transparent)]">
             {sections ? (
               <>
                 <Section
@@ -184,7 +184,7 @@ export function AllTabsMenu({
                     ))}
                   </Section>
                 ) : null}
-                <Section title="Everywhere" empty={null}>
+                <Section title="In every chat" empty={null}>
                   {sections.everywhere.map((file) => (
                     <Row
                       key={file.id}
@@ -283,19 +283,21 @@ function Row({
         detail ? "py-1" : "h-8",
       )}
     >
-      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="relative inline-flex shrink-0">
+        <Icon className="size-3.5 text-muted-foreground" />
+        {file.openedBy === "agent" ? (
+          <BotIcon
+            aria-label="Opened by the agent"
+            className="absolute -right-1 -bottom-1 size-2.5 rounded-full bg-popover text-muted-foreground"
+          />
+        ) : null}
+      </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{isTasksTab(file) ? "Tasks" : file.name}</span>
         {detail ? (
           <span className="truncate text-[11px] leading-tight text-muted-foreground">{detail}</span>
         ) : null}
       </span>
-      {file.openedBy === "agent" ? (
-        <BotIcon
-          className="size-3 shrink-0 text-muted-foreground/70"
-          aria-label="Opened by the agent"
-        />
-      ) : null}
       {action}
     </div>
   );

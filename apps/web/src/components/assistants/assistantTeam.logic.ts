@@ -30,21 +30,26 @@ export const PRESETS: ReadonlyArray<{
   readonly id: AssistantPreset;
   readonly name: string;
   readonly line: string;
+  /** Two or three things it would do, so the preset reads concretely (critics 16.10). */
+  readonly examples: string;
 }> = [
   {
     id: "full",
     name: "Full",
     line: "Does everything by itself, except spending money and deleting.",
+    examples: "Starts chats in your projects, pushes a fix, sends the morning plan.",
   },
   {
     id: "helper",
     name: "Helper",
-    line: "Starts chats and works in them. Asks you first before deploys, payments, deleting, emails out or a new assistant.",
+    line: "Works in chats, but asks you first before deploys, payments, deleting, emails out or a new assistant.",
+    examples: "Writes the fix and opens a PR — asks before merging it.",
   },
   {
     id: "observer",
     name: "Observer",
     line: "Reads your chats and sends you summaries. Changes nothing.",
+    examples: "“What moved today” every evening; never writes anywhere.",
   },
 ];
 
@@ -166,6 +171,12 @@ export interface AssistantProfile {
   /** The setup was finished (or skipped with "Later"). */
   readonly setUpAt: string | null;
   readonly revokedAt: string | null;
+  /**
+   * What it can use beyond projects and computers (track 3, Misha 16.10):
+   * connectors, the browser and its logins, the vault, skills. Absent = full
+   * access to this computer (Uno's default; decision 14.10 (2)).
+   */
+  readonly access?: AssistantAccess;
   /** Its repeating tasks, as its page lists them (from its schedule). */
   readonly schedule?: ReadonlyArray<{ readonly name: string; readonly when: string }>;
 }
@@ -183,6 +194,7 @@ export interface AssistantDraft {
   readonly roles: ReadonlyArray<string>;
   readonly character: string;
   readonly skills: ReadonlyArray<string>;
+  readonly access: AssistantAccess;
 }
 
 /**
@@ -208,6 +220,7 @@ export function defaultDraft(input: {
     roles: input.forUno ? ["Personal assistant"] : [],
     character: "Calm and brief",
     skills: input.forUno ? ["Morning plan", "Reminders"] : [],
+    access: input.forUno ? FULL_ACCESS : NEW_TEAMMATE_ACCESS,
   };
 }
 
@@ -361,7 +374,7 @@ export type AssistantActivity = "working" | "waiting" | "idle";
 export const ACTIVITY_LABEL: Readonly<Record<AssistantActivity, string>> = {
   working: "Working",
   waiting: "Waiting for you",
-  idle: "Free",
+  idle: "Idle",
 };
 
 export interface TeamChats<T> {
@@ -445,4 +458,127 @@ export function latestConversation<T>(chats: TeamChats<T>): T | null {
 /** `t.me/<bot>?start=<code>` — the one-tap link of Uno's assistant bot. */
 export function telegramStartLink(bot: string, code: string): string {
   return `https://t.me/${bot.replace(/^@/, "")}?start=${encodeURIComponent(code)}`;
+}
+
+// ── What it can use: connectors, browser, vault, skills (track 3) ─────────
+
+/** "off": never opens pages; "safe": reads, asks before Buy / Send / Delete; "full": like you. */
+export type BrowserUse = "off" | "safe" | "full";
+
+export interface AssistantAccess {
+  /** Connector ids — a provider ("github") or a server of your own ("mcp:context7"). */
+  readonly connectors: "all" | ReadonlyArray<string>;
+  readonly browser: BrowserUse;
+  /** Saved logins (vault entries with a site) it may sign in with. */
+  readonly logins: "all" | ReadonlyArray<string>;
+  /** Vault entries it may use in commands (keys, tokens). */
+  readonly secrets: "all" | ReadonlyArray<string>;
+  /** The skills that live in its projects' folders. */
+  readonly projectSkills: boolean;
+  /** Skills of its own (catalog ids). */
+  readonly personalSkills: ReadonlyArray<string>;
+}
+
+export const FULL_ACCESS: AssistantAccess = {
+  connectors: "all",
+  browser: "full",
+  logins: "all",
+  secrets: "all",
+  projectSkills: true,
+  personalSkills: [],
+};
+
+/** A new teammate: what you pick, nothing secret until you say so. */
+export const NEW_TEAMMATE_ACCESS: AssistantAccess = {
+  connectors: "all",
+  browser: "safe",
+  logins: [],
+  secrets: [],
+  projectSkills: true,
+  personalSkills: [],
+};
+
+export function accessOf(profile: Pick<AssistantProfile, "access">): AssistantAccess {
+  return profile.access ?? FULL_ACCESS;
+}
+
+/** Uno's default — "Full access to this computer", nothing to read further. */
+export function isFullAccess(access: AssistantAccess): boolean {
+  return (
+    access.connectors === "all" &&
+    access.browser === "full" &&
+    access.logins === "all" &&
+    access.secrets === "all" &&
+    access.projectSkills
+  );
+}
+
+export const BROWSER_USE: ReadonlyArray<{
+  readonly id: BrowserUse;
+  readonly name: string;
+  readonly line: string;
+}> = [
+  { id: "full", name: "Like you", line: "Opens pages, clicks and fills forms by itself." },
+  {
+    id: "safe",
+    name: "Careful",
+    line: "Opens and reads pages; asks you before Buy, Send or Delete.",
+  },
+  { id: "off", name: "Off", line: "Doesn't use the browser." },
+];
+
+/** "all" / a picked list, read against what exists now. */
+export function pickedOf<T extends { readonly id: string }>(
+  picked: "all" | ReadonlyArray<string>,
+  items: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  if (picked === "all") return items;
+  const ids = new Set(picked);
+  return items.filter((item) => ids.has(item.id));
+}
+
+/** Toggles one id in a picked list ("all" turns into "all but this one"). */
+export function togglePicked(
+  picked: "all" | ReadonlyArray<string>,
+  id: string,
+  allIds: ReadonlyArray<string>,
+): "all" | ReadonlyArray<string> {
+  const current = picked === "all" ? allIds : picked;
+  const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+  return allIds.length > 0 && allIds.every((item) => next.includes(item)) ? "all" : next;
+}
+
+/** One plain line for a picked list: "Everything (3)", "GitHub, Notion", "Nothing yet". */
+export function pickedLine(
+  picked: "all" | ReadonlyArray<string>,
+  names: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+  words: { readonly all: string; readonly none: string },
+): string {
+  const items = pickedOf(picked, names);
+  if (names.length === 0) return words.none;
+  if (picked === "all") return `${words.all} (${names.length})`;
+  if (items.length === 0) return words.none;
+  const shown = items.slice(0, 3).map((item) => item.name);
+  return items.length > 3 ? `${shown.join(", ")} +${items.length - 3}` : shown.join(", ");
+}
+
+/** What a child would get beyond its parent's access (decision 14.10 (3)). */
+export function accessBeyondParent(parent: AssistantAccess, child: AssistantAccess): ReadonlyArray<string> {
+  const beyond: string[] = [];
+  const rank: Readonly<Record<BrowserUse, number>> = { off: 0, safe: 1, full: 2 };
+  if (rank[child.browser] > rank[parent.browser]) beyond.push("the browser");
+  const listBeyond = (
+    p: "all" | ReadonlyArray<string>,
+    c: "all" | ReadonlyArray<string>,
+    word: string,
+  ) => {
+    if (p === "all") return;
+    if (c === "all") beyond.push(`all ${word}`);
+    else for (const id of c) if (!p.includes(id)) beyond.push(id);
+  };
+  listBeyond(parent.connectors, child.connectors, "connectors");
+  listBeyond(parent.logins, child.logins, "logins");
+  listBeyond(parent.secrets, child.secrets, "passwords");
+  if (child.projectSkills && !parent.projectSkills) beyond.push("project skills");
+  return beyond;
 }

@@ -6,7 +6,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, LinkIcon, Loader2Icon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -27,14 +27,11 @@ export function DriveShareDialog({
   environmentId,
   target,
   onOpenChange,
-  note,
 }: {
   environmentId: EnvironmentId | null;
   /** The file (key inside Drive); null = closed. */
   target: { key: string; name: string } | null;
   onOpenChange: (open: boolean) => void;
-  /** A line about where the file came from (e.g. "a copy of the file on your Mac"). */
-  note?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [hours, setHours] = useState(24 * 7);
@@ -77,7 +74,6 @@ export function DriveShareDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-4">
-          {note}
           {url ? (
             <div className="flex flex-col items-center gap-3">
               <div className="flex w-full items-center gap-2">

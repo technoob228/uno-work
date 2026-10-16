@@ -4190,7 +4190,8 @@ export default function ChatView(props: ChatViewProps) {
               <div
                 className={cn(
                   "relative isolate",
-                  isPreviewFocusMode && "pointer-events-auto mx-auto w-full max-w-[76rem]",
+                  // ~800px in the middle, like the full composer (max-w-208).
+                  isPreviewFocusMode && "pointer-events-auto mx-auto w-full max-w-208",
                   // One dense block: the latest step is the top edge of the composer.
                   isPreviewFocusMode &&
                     focusChatComposerIsStrip &&

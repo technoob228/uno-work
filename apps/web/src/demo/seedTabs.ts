@@ -72,6 +72,19 @@ function pultApp(): PreviewFile {
   return { id: "app:demo-pult", name: "Pult", kind: "app", content: "", url };
 }
 
+/** The landing's pricing page on the local test site (points 1/2) — a browser tab. */
+function pricingPage(): PreviewFile {
+  const url = `${location.origin}${import.meta.env.BASE_URL}demo-site/pricing.html`;
+  return {
+    id: "browser-901",
+    name: "Pricing — landing",
+    kind: "browser",
+    content: "",
+    url,
+    projectKey: LANDING_PROJECT_KEY,
+  };
+}
+
 const bucket = (files: ReadonlyArray<PreviewFile>): PreviewBucketState => ({
   ...DEFAULT_PREVIEW_BUCKET_STATE,
   files,
@@ -90,7 +103,7 @@ export function seedPreviewStates(
 ): Record<string, PreviewBucketState> {
   const pinned = [mac("README.md"), mac("pricing.md")];
   const chats: Record<string, PreviewFile[]> = {
-    [SEEDED_CHATS.copy]: [mac("hero.md", "agent"), mac("flow-2.md", "agent")],
+    [SEEDED_CHATS.copy]: [mac("hero.md", "agent"), mac("flow-2.md", "agent"), pricingPage()],
     [SEEDED_CHATS.hero]: [mac("assets/hero-variants.png", "agent"), mac("brand-guide.pdf")],
     [SEEDED_CHATS.pricing]: [product("pricing-research.docx", "agent"), product("competitors.md")],
   };

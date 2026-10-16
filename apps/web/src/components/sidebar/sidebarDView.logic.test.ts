@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   chatRowShowsComputer,
   effectiveLevels,
-  filterChipLabel,
+  headerPresetOf,
   groupSidebarChats,
   levelsForPreset,
   levelsLabel,
   livePicks,
   moveLevel,
   orderComputers,
+  placeShown,
   presetOf,
   projectRowComputers,
   resolveGroupLevels,
@@ -63,29 +64,28 @@ describe("filters", () => {
   });
 });
 
-describe("title and chip", () => {
-  it("say what the list shows", () => {
-    expect(sidebarDTitle({ levels: [], projectNames: null })).toBe("All projects");
-    expect(sidebarDTitle({ levels: ["project"], projectNames: null })).toBe("Projects");
-    expect(sidebarDTitle({ levels: ["project"], projectNames: ["landing"] })).toBe("landing");
-    expect(sidebarDTitle({ levels: ["status"], projectNames: ["a", "b"] })).toBe(
-      "2 projects · by status",
+describe("title, presets, place", () => {
+  it("the title says which chats are shown", () => {
+    expect(sidebarDTitle({ projectNames: null, computerNames: null })).toBe("All chats");
+    expect(sidebarDTitle({ projectNames: ["landing"], computerNames: null })).toBe(
+      "Chats · landing",
     );
-    expect(sidebarDTitle({ levels: ["computer", "project"], projectNames: null })).toBe(
-      "Projects · by computer",
-    );
-    expect(sidebarDTitle({ levels: ["status"], projectNames: null })).toBe(
-      "All projects · by status",
+    expect(sidebarDTitle({ projectNames: ["a", "b"], computerNames: ["MacBook"] })).toBe(
+      "Chats · 2 projects · MacBook",
     );
   });
-  it("the chip names the filter, or is not there", () => {
-    expect(filterChipLabel({ projectNames: null, computerNames: null })).toBeNull();
-    expect(filterChipLabel({ projectNames: ["landing"], computerNames: ["MacBook"] })).toBe(
-      "landing · MacBook",
-    );
-    expect(filterChipLabel({ projectNames: ["a", "b", "c"], computerNames: null })).toBe(
-      "3 projects",
-    );
+  it("knows the four ready ways, anything else is custom", () => {
+    expect(headerPresetOf([])).toBe("list");
+    expect(headerPresetOf(["computer", "project"])).toBe("computer");
+    expect(headerPresetOf(["project", "computer"])).toBeNull();
+  });
+  it("a row names its project unless grouped by project, its computer unless by computer", () => {
+    expect(placeShown([], true)).toEqual({ project: true, computer: true });
+    expect(placeShown(["status"], false)).toEqual({ project: true, computer: false });
+    expect(placeShown(["computer", "project"], true)).toEqual({
+      project: false,
+      computer: false,
+    });
   });
 });
 

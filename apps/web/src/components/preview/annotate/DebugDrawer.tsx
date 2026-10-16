@@ -1,10 +1,11 @@
 /**
- * Debug (D) — the drawer at the bottom of a browser tab (w0138): the page's
- * Console (errors red, warnings amber) and Network (failed requests red).
- * Each problem has "Ask agent to fix" (the error with its stack, or the
- * request with what came back, as a card in the chat's composer); "Send all
- * errors" sends every one at once. "Agent sees the console" — the agent can
- * read this console when it works in this browser.
+ * Errors (D) — the panel at the bottom of a browser tab (w0138), dense like
+ * DevTools: the page's Console (errors red, warnings amber) and Network
+ * (failed requests red), 22px lines. A line's "Ask agent to fix" shows on
+ * hover or when it is open (the error with its stack, or the request with
+ * what came back, as a card in the chat's composer); "Ask agent to fix all"
+ * sends every problem at once. "Let the agent see these errors" — the agent
+ * can read this console when it works in this browser. The top edge drags.
  */
 import {
   ChevronDownIcon,
@@ -15,9 +16,10 @@ import {
   TriangleAlertIcon,
   WrenchIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { cn } from "../../../lib/utils";
+import { Button } from "../../ui/button";
 import { Switch } from "../../ui/switch";
 import {
   allErrorsPayload,
@@ -31,21 +33,59 @@ import {
 import { usePageToolsStore, usePageToolsTab } from "./pageToolsStore";
 import { useSendToChat } from "./sendToChat";
 
+const MIN_HEIGHT = 96;
+
 export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string }) {
   const tab = usePageToolsTab(tabId);
   const store = usePageToolsStore;
   const agentSeesConsole = usePageToolsStore((state) => state.agentSeesConsole);
+  const height = usePageToolsStore((state) => state.debugHeight);
   const sendToChat = useSendToChat();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ startY: number; startHeight: number; max: number } | null>(null);
   const errors = tab.console.filter((entry) => entry.level === "error").length;
   const warnings = tab.console.filter((entry) => entry.level === "warn").length;
   const failed = tab.network.filter(isFailedRequest).length;
   const all = allErrorsPayload({ page: pageUrl, console: tab.console, network: tab.network });
+  const problems = errors + warnings + failed;
+
+  const onResizeDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const column = rootRef.current?.parentElement?.getBoundingClientRect().height ?? 600;
+    dragRef.current = { startY: event.clientY, startHeight: height, max: column * 0.75 };
+  };
+  const onResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const next = drag.startHeight + (drag.startY - event.clientY);
+    store.getState().setDebugHeight(Math.min(drag.max, Math.max(MIN_HEIGHT, next)));
+  };
+  const onResizeUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
 
   return (
     <div
-      className="flex h-[38%] min-h-40 shrink-0 flex-col border-t border-border bg-card text-xs"
+      ref={rootRef}
+      className="relative flex shrink-0 flex-col border-t border-border bg-card text-xs"
+      style={{ height }}
       data-testid="browser-debug-drawer"
     >
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize"
+        className="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize hover:bg-primary/20"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onPointerCancel={onResizeUp}
+      />
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
         <TabButton
           active={tab.debugTab === "console"}
@@ -62,9 +102,20 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
           Network
           {failed > 0 ? <Count tone="error">{failed}</Count> : null}
         </TabButton>
+        <span className="ml-auto" />
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={!all}
+          onClick={() => all && sendToChat(all, "Fix these problems on the page.")}
+          data-testid="browser-send-all-errors"
+        >
+          <WrenchIcon />
+          Ask agent to fix all{problems > 0 ? ` (${problems})` : ""}
+        </Button>
         <label
-          className="ml-auto flex cursor-pointer items-center gap-1.5 px-1.5 text-[11px] whitespace-nowrap text-muted-foreground"
-          title="When the agent works in this browser, it can read this console"
+          className="flex cursor-pointer items-center gap-1.5 px-1.5 text-[11px] whitespace-nowrap text-muted-foreground"
+          title="When the agent works in this browser, it reads this console and these requests"
         >
           <Switch
             checked={agentSeesConsole}
@@ -72,36 +123,26 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
             className="[--thumb-size:--spacing(3)] sm:[--thumb-size:--spacing(3)]"
             data-testid="browser-agent-sees-console"
           />
-          Agent sees the console
+          Let the agent see these errors
         </label>
-        <button
-          type="button"
-          disabled={!all}
-          onClick={() => all && sendToChat(all, "Fix these problems on the page.")}
-          className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:cursor-default disabled:opacity-40"
-          data-testid="browser-send-all-errors"
-        >
-          <WrenchIcon className="size-3" />
-          Send all errors
-        </button>
-        <button
-          type="button"
+        <Button
+          size="icon-xs"
+          variant="ghost"
           onClick={() => store.getState().resetLogs(tabId)}
           aria-label="Clear"
           title="Clear"
-          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <TrashIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
+          <TrashIcon />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="ghost"
           onClick={() => store.getState().patch(tabId, { debugOpen: false })}
           aria-label="Hide"
           title="Hide (D)"
-          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <ChevronDownIcon className="size-3.5" />
-        </button>
+          <ChevronDownIcon />
+        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
         {tab.debugTab === "console" ? (
@@ -125,13 +166,12 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
           <Empty text="No requests yet. Reload the page to see them all." />
         ) : (
           <>
-            <div className="sticky top-0 flex h-6 items-center gap-2 border-b border-border bg-card px-2.5 font-sans text-[10.5px] text-muted-foreground">
+            <div className="sticky top-0 z-[1] flex h-[22px] items-center gap-2 border-b border-border bg-card px-2.5 font-sans text-[10.5px] text-muted-foreground">
               <span className="w-10 shrink-0">Method</span>
               <span className="min-w-0 flex-1">Address</span>
               <span className="w-10 shrink-0 text-right">Status</span>
               <span className="w-12 shrink-0">Type</span>
               <span className="w-12 shrink-0 text-right">Time</span>
-              <span className="w-[6.5rem] shrink-0" />
             </div>
             {tab.network.map((entry) => (
               <NetworkRow
@@ -174,38 +214,47 @@ function TabButton({
   );
 }
 
+/** "ⓧ 3", "⚠ 1" — colour on the icon and the number, no fill. */
 function Count({ tone, children }: { tone: "error" | "warn"; children: React.ReactNode }) {
+  const Icon = tone === "error" ? CircleAlertIcon : TriangleAlertIcon;
   return (
     <span
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
-        tone === "error"
-          ? "bg-destructive/12 text-destructive"
-          : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+        "inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums",
+        tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400",
       )}
     >
+      <Icon className="size-3" />
       {children}
     </span>
   );
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="px-3 py-4 font-sans text-xs text-muted-foreground">{text}</div>;
+  return <div className="px-3 py-3 font-sans text-xs text-muted-foreground">{text}</div>;
 }
 
-function FixButton({ onClick }: { onClick: () => void }) {
+/** On hover of its line, or while the line is open. */
+function FixButton({ onClick, shown }: { onClick: () => void; shown: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      className="inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded border border-border bg-background px-1.5 font-sans text-[10.5px] font-medium text-foreground opacity-80 hover:bg-accent hover:opacity-100 group-hover:opacity-100"
+    <span
+      className={cn(
+        "absolute top-0 right-1 flex h-[22px] items-center bg-gradient-to-l from-card from-75% pl-4",
+        shown ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+      )}
     >
-      <WrenchIcon className="size-2.5" />
-      Ask agent to fix
-    </button>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        className="inline-flex h-[18px] cursor-pointer items-center gap-1 rounded border border-border bg-background px-1.5 font-sans text-[10.5px] font-medium text-foreground hover:bg-accent"
+      >
+        <WrenchIcon className="size-2.5" />
+        Ask agent to fix
+      </button>
+    </span>
   );
 }
 
@@ -218,42 +267,34 @@ function ConsoleRow({ entry, onFix }: { entry: ConsoleEntry; onFix: () => void }
       : entry.level === "warn"
         ? TriangleAlertIcon
         : InfoIcon;
-  const hasMore = Boolean(entry.stack);
+  const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
     <div
       className={cn(
-        "group border-b border-border/60",
-        entry.level === "error" && "bg-destructive/[0.06] text-destructive",
-        entry.level === "warn" && "bg-amber-500/[0.08] text-amber-800 dark:text-amber-300",
+        "group relative border-b border-border/60",
+        entry.level === "error" && "bg-destructive/[0.05] text-destructive",
+        entry.level === "warn" && "bg-amber-500/[0.07] text-amber-800 dark:text-amber-300",
         !problem && "text-foreground/85",
       )}
       data-level={entry.level}
     >
       <div
-        className={cn("flex min-h-6 items-start gap-1.5 px-2 py-1", hasMore && "cursor-pointer")}
-        onClick={() => hasMore && setOpen((value) => !value)}
+        className="flex h-[22px] cursor-pointer items-center gap-1.5 px-2"
+        onClick={() => setOpen((value) => !value)}
       >
-        {hasMore ? (
-          open ? (
-            <ChevronDownIcon className="mt-0.5 size-3 shrink-0 opacity-60" />
-          ) : (
-            <ChevronRightIcon className="mt-0.5 size-3 shrink-0 opacity-60" />
-          )
-        ) : (
-          <span className="w-3 shrink-0" />
-        )}
-        <Icon className="mt-0.5 size-3 shrink-0" />
-        <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{entry.message}</span>
+        <Chevron className="size-3 shrink-0 opacity-50" />
+        <Icon className="size-3 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{entry.message}</span>
         {entry.source ? (
-          <span className="shrink-0 text-[10.5px] text-muted-foreground underline-offset-2">
-            {entry.source}
-          </span>
+          <span className="shrink-0 text-[10.5px] text-muted-foreground">{entry.source}</span>
         ) : null}
-        {problem ? <FixButton onClick={onFix} /> : null}
       </div>
-      {open && entry.stack ? (
-        <pre className="overflow-x-auto px-9 pb-1.5 text-[10.5px] leading-relaxed whitespace-pre opacity-80">
-          {entry.stack}
+      {problem ? <FixButton onClick={onFix} shown={open} /> : null}
+      {open ? (
+        <pre className="overflow-x-auto px-9 pb-1.5 text-[10.5px] leading-relaxed whitespace-pre-wrap opacity-85">
+          {entry.stack && !entry.stack.includes(entry.message)
+            ? `${entry.message}\n${entry.stack}`
+            : (entry.stack ?? entry.message)}
         </pre>
       ) : null}
     </div>
@@ -276,12 +317,12 @@ function NetworkRow({ entry, onFix }: { entry: NetworkEntry; onFix: () => void }
   return (
     <div
       className={cn(
-        "group border-b border-border/60",
-        failed ? "bg-destructive/[0.06] text-destructive" : "text-foreground/85",
+        "group relative border-b border-border/60",
+        failed ? "bg-destructive/[0.05] text-destructive" : "text-foreground/85",
       )}
     >
       <div
-        className={cn("flex h-6 items-center gap-2 px-2.5", hasMore && "cursor-pointer")}
+        className={cn("flex h-[22px] items-center gap-2 px-2.5", hasMore && "cursor-pointer")}
         onClick={() => hasMore && setOpen((value) => !value)}
         title={entry.url}
       >
@@ -294,10 +335,8 @@ function NetworkRow({ entry, onFix }: { entry: NetworkEntry; onFix: () => void }
         <span className="w-12 shrink-0 text-right text-muted-foreground tabular-nums">
           {formatDuration(entry.durationMs)}
         </span>
-        <span className="flex w-[6.5rem] shrink-0 justify-end">
-          {failed ? <FixButton onClick={onFix} /> : null}
-        </span>
       </div>
+      {failed ? <FixButton onClick={onFix} shown={open} /> : null}
       {open ? (
         <div className="space-y-1 px-2.5 pb-2 text-[10.5px]">
           {entry.requestBody ? (

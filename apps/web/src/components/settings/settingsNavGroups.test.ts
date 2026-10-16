@@ -97,7 +97,7 @@ describe("buildSettingsNavGroups", () => {
 });
 
 describe("simple settings (01.10)", () => {
-  it("shows five entries without Dev mode", () => {
+  it("shows six entries without Dev mode", () => {
     const groups = buildSettingsNavGroups({
       isWebApp: true,
       isFlagEnabled: allFlagsOn,
@@ -108,6 +108,7 @@ describe("simple settings (01.10)", () => {
     expect(groups[0]!.entries.map((entry) => entry.label)).toEqual([
       "Account & plan",
       "AI",
+      "Connectors",
       "Assistants & phone",
       "Computer",
       "Developer",
@@ -128,6 +129,7 @@ describe("simple settings (01.10)", () => {
 
   it("knows its pages", () => {
     expect(isSimpleSettingsPath("/settings/ai")).toBe(true);
+    expect(isSimpleSettingsPath("/settings/connectors")).toBe(true);
     expect(isSimpleSettingsPath("/settings/app/general")).toBe(false);
   });
 });

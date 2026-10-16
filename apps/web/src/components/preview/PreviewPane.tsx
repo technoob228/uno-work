@@ -16,6 +16,7 @@ import {
   ImageIcon,
   MonitorIcon,
   Loader2Icon,
+  ChevronDownIcon,
   ExpandIcon,
   Maximize2Icon,
   Minimize2Icon,
@@ -51,6 +52,7 @@ import {
   type MarkdownDocumentEditorHandle,
 } from "../files/openers/MarkdownDocumentEditor";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { ScrollArea } from "../ui/scroll-area";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -2024,29 +2026,48 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             onOpenChange={setAllTabsOpen}
           />
         ) : null}
-        {fullScreenTarget ? (
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            onClick={openFullScreen}
-            aria-label="Open full screen"
-            title="Open full screen — leave the chat and give this the whole window"
-            data-testid="preview-open-full-screen"
-            className="relative shrink-0"
-          >
-            <ExpandIcon />
-          </Button>
-        ) : null}
+        {/* One full-screen control (D24): the tab over the whole window with the
+            chat at the bottom; "leave the chat" lives in its little menu. */}
         <Button
           size="icon-xs"
           variant="ghost"
           onClick={togglePreviewLayoutMode}
-          aria-label={isFocusMode ? "Show sidebar" : "Focus preview"}
-          title={isFocusMode ? "Show sidebar" : "Focus preview"}
+          aria-label={isFocusMode ? "Exit full screen" : "Full screen"}
+          title={isFocusMode ? "Exit full screen" : "Full screen — the chat stays at the bottom"}
           className="relative shrink-0"
         >
           {isFocusMode ? <Minimize2Icon /> : <Maximize2Icon />}
         </Button>
+        {fullScreenTarget ? (
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="More ways to open"
+                  title="More ways to open"
+                  data-testid="preview-open-full-screen-menu"
+                  className="relative -ml-1 w-4 shrink-0 sm:w-4"
+                />
+              }
+            >
+              <ChevronDownIcon className="size-3" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem onClick={togglePreviewLayoutMode}>
+                {isFocusMode ? <Minimize2Icon /> : <Maximize2Icon />}
+                {isFocusMode ? "Exit full screen" : "Full screen with the chat"}
+              </MenuItem>
+              <MenuItem onClick={openFullScreen} data-testid="preview-open-full-screen">
+                <ExpandIcon />
+                {fullScreenTarget.type === "app"
+                  ? "Open as an app — leave the chat"
+                  : "Open in Files — leave the chat"}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        ) : null}
         <Button
           size="icon-xs"
           variant="ghost"

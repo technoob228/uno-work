@@ -113,6 +113,8 @@ describe("comments", () => {
       ],
     });
     expect(payload.card.title).toBe("2 comments on /pricing");
+    expect(payload.card.chip).toBe("2 comments · /pricing");
+    expect(payload.card.preview).toBe("Make it full width on phones");
     expect(payload.card.items).toHaveLength(2);
     expect(payload.fileName).toBe("comments-pricing.md");
     expect(payload.markdown).toContain("`button.cta` — “Start free trial”");

@@ -53,6 +53,9 @@ interface PageToolsStore {
   readonly tabs: Readonly<Record<string, PageToolsTab>>;
   /** The agent can read the console of the panel's browser (on by default). */
   readonly agentSeesConsole: boolean;
+  /** The errors panel's height (px), dragged by its top edge; one for all tabs. */
+  readonly debugHeight: number;
+  readonly setDebugHeight: (height: number) => void;
   readonly patch: (tabId: string, patch: Partial<PageToolsTab>) => void;
   readonly setAgentSeesConsole: (on: boolean) => void;
   readonly toggleCommenting: (tabId: string) => void;
@@ -76,6 +79,8 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
   return {
     tabs: {},
     agentSeesConsole: readAgentSeesConsole(),
+    debugHeight: 180,
+    setDebugHeight: (height) => set({ debugHeight: Math.round(height) }),
     patch,
     setAgentSeesConsole: (on) => {
       try {

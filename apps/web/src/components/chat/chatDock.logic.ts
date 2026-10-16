@@ -60,40 +60,101 @@ export function chatDockFirstLine(text: string, max = 160): string {
   return `${line.slice(0, max - 1).trimEnd()}…`;
 }
 
+/** The latest step in the dock's top row: short; the full text is one chevron away. */
+export const CHAT_DOCK_STEP_CHARS = 60;
+
+export function chatDockStepPreview(text: string): string {
+  return chatDockFirstLine(text, CHAT_DOCK_STEP_CHARS);
+}
+
+type ApprovalKind = "command" | "file-read" | "file-change" | "other";
+
+const APPROVAL_PHRASE: Readonly<Record<ApprovalKind, string>> = {
+  command: "The agent wants to run a command.",
+  "file-change": "The agent wants to change files.",
+  "file-read": "The agent wants to read files.",
+  other: "The agent asks for your OK to go on.",
+};
+
+/**
+ * The human line of an approval: what the agent said right before asking
+ * (its last message after the person's last one), else a plain phrase by the
+ * kind of request. The command itself goes under "Show command".
+ */
+export function chatDockApprovalPhrase(input: {
+  readonly requestKind: ApprovalKind;
+  readonly messages: ReadonlyArray<{ readonly role: string; readonly text: string }>;
+}): string {
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    const message = input.messages[index]!;
+    if (message.role === "user") break;
+    if (message.role === "assistant") {
+      const line = chatDockFirstLine(message.text, 140);
+      if (line) return line;
+    }
+  }
+  return APPROVAL_PHRASE[input.requestKind];
+}
+
 /** What pops up over the mini window. */
 export type ChatDockNotice =
-  | { readonly kind: "approval"; readonly id: string; readonly text: string }
+  | {
+      readonly kind: "approval";
+      readonly id: string;
+      /** The human line. */
+      readonly text: string;
+      /** The whole command (or path), shown on demand. */
+      readonly command: string | null;
+    }
   | { readonly kind: "reply"; readonly id: string; readonly text: string };
 
 /**
  * While the chat is folded: an approval the agent waits for always shows (and
- * stays); otherwise a new finished reply of the agent — one the person hasn't
- * seen yet — shows once.
+ * stays); otherwise, once the agent has handed the turn back, its last reply —
+ * if the person hasn't seen it yet — shows once. Messages in the middle of a
+ * turn ("running the tests…") don't pop up.
  */
 export function nextChatDockNotice(input: {
   readonly pendingApproval: {
     readonly requestId: string;
+    readonly requestKind: ApprovalKind;
     readonly detail?: string | undefined;
   } | null;
-  readonly latestReply: {
+  readonly messages: ReadonlyArray<{
     readonly id: string;
+    readonly role: string;
     readonly text: string;
     readonly streaming: boolean;
-  } | null;
+  }>;
+  readonly isWorking: boolean;
   /** The latest reply the person has already seen (or got as a hint). */
   readonly seenReplyId: string | null;
 }): ChatDockNotice | null {
   if (input.pendingApproval) {
-    const detail = input.pendingApproval.detail?.trim();
+    const command = input.pendingApproval.detail?.trim() || null;
     return {
       kind: "approval",
       id: input.pendingApproval.requestId,
-      text: detail ? chatDockFirstLine(detail) : "The agent asks for your OK to go on.",
+      text: chatDockApprovalPhrase({
+        requestKind: input.pendingApproval.requestKind,
+        messages: input.messages,
+      }),
+      command,
     };
   }
-  const reply = input.latestReply;
+  if (input.isWorking) return null;
+  const reply = chatDockLatestReply(input.messages);
   if (!reply || reply.streaming || reply.id === input.seenReplyId) return null;
   const text = chatDockFirstLine(reply.text);
   if (!text) return null;
   return { kind: "reply", id: reply.id, text };
+}
+
+export function chatDockLatestReply<T extends { readonly role: string }>(
+  messages: ReadonlyArray<T>,
+): T | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]!.role === "assistant") return messages[index]!;
+  }
+  return null;
 }

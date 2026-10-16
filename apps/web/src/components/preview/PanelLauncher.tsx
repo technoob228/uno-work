@@ -40,6 +40,7 @@ import { cn } from "../../lib/utils";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { siteRows } from "../sites/sitesModel";
 import { useWorkSites } from "../sites/useWorkSites";
+import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { useChatPanelActions } from "./chatPanelActions";
 import {
@@ -48,6 +49,7 @@ import {
   type LauncherAppRow,
   type LauncherTileId,
   isTypingTarget,
+  launcherKeyLabel,
   launcherTileForKey,
   visibleLauncherTiles,
 } from "./panelLauncher.logic";
@@ -132,14 +134,13 @@ export function PanelLauncher({
     sources.includes("computer") && currentChatEnvironmentId
       ? (machineLabels.get(currentChatEnvironmentId) ?? "the chat's computer")
       : null;
+  const deviceName = desktop
+    ? primaryDescriptor?.platform.os === "darwin"
+      ? "this Mac"
+      : "this computer"
+    : "your browser";
   const tiles = visibleLauncherTiles({
     canBrowseHere: sources.includes("app") || browserCompanionEnabled,
-    browserHasTools: desktop,
-    deviceName: desktop
-      ? primaryDescriptor?.platform.os === "darwin"
-        ? "this Mac"
-        : "this computer"
-      : "your browser",
     agentBrowserOn: agentComputer,
     defaultBrowser: defaultSource,
     hasComputer: environmentId !== null,
@@ -227,45 +228,55 @@ export function PanelLauncher({
             <h3 className="text-[13px] font-semibold text-foreground">Open in the panel</h3>
             <p className="text-xs text-muted-foreground">Press a letter to open.</p>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(max(11.5rem,calc(50%-0.25rem)),1fr))] gap-2">
+          <ul className="flex flex-col gap-px" data-testid="panel-launcher-list">
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
+              const where =
+                tile.id === "browser"
+                  ? `Runs on ${deviceName}. You click, the agent sees${desktop ? "; comment and see errors" : ""}.`
+                  : tile.id === "agentBrowser"
+                    ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works, you watch and can take control.`
+                    : undefined;
               return (
-                <button
-                  key={tile.id}
-                  type="button"
-                  data-testid={`panel-launcher-${tile.id}`}
-                  onClick={() => open(tile.id)}
-                  className="flex min-h-[4.75rem] cursor-pointer flex-col gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-left outline-none transition-colors hover:border-primary/45 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
+                <li key={tile.id} className="list-none">
+                  <button
+                    type="button"
+                    data-testid={`panel-launcher-${tile.id}`}
+                    onClick={() => open(tile.id)}
+                    title={where}
+                    className="flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground">
                       <Icon className="size-3.5" />
                     </span>
-                    <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
-                      {tile.name}
-                    </span>
-
-                    <kbd className="ml-auto shrink-0 rounded border border-border px-1.5 font-sans text-[10.5px] text-muted-foreground">
-                      {tile.key}
-                    </kbd>
-                  </span>
-                  <span className="text-xs leading-snug text-muted-foreground">
-                    {tile.description}
-                    {tile.isDefault ? (
-                      <span
-                        className="ml-1.5 inline-block rounded-full bg-primary/10 px-1.5 py-px align-[1px] text-[10px] leading-tight font-medium text-primary"
-                        title="Browser and links open here. Change it with the chip in the address bar"
-                        data-testid={`panel-launcher-${tile.id}-default`}
-                      >
-                        default
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[13px] font-medium text-foreground">
+                          {tile.name}
+                        </span>
+                        {tile.isDefault ? (
+                          <Badge
+                            variant="info"
+                            size="sm"
+                            title="Browser and links open here. Change it with the chip in the address bar"
+                            data-testid={`panel-launcher-${tile.id}-default`}
+                          >
+                            default
+                          </Badge>
+                        ) : null}
                       </span>
-                    ) : null}
-                  </span>
-                </button>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {tile.description}
+                      </span>
+                    </span>
+                    <kbd className="shrink-0 rounded border border-border px-1.5 font-sans text-[10.5px] text-muted-foreground">
+                      {launcherKeyLabel(tile)}
+                    </kbd>
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </>
       ) : (
         <>
@@ -324,7 +335,7 @@ export function PanelLauncher({
                   }
                   title={row.name}
                   subtitle={row.computer}
-                  trailing={<AppState state={row.state} />}
+                  afterTitle={<AppState state={row.state} />}
                   muted={row.url === null}
                   onClick={() => openApp(row)}
                 />
@@ -357,7 +368,7 @@ export function PanelLauncher({
                     }
                     title={site.host}
                     subtitle={site.madeIn ? `Made in “${site.madeIn.title}”` : "On Uno Hosting"}
-                    trailing={
+                    afterTitle={
                       site.hasPassword ? (
                         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                           <LockIcon className="size-3" />
@@ -395,12 +406,7 @@ export function PanelLauncher({
 
 function SectionTitle({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <h3
-      className={cn(
-        "mb-1 px-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
-        className,
-      )}
-    >
+    <h3 className={cn("mb-1 px-1.5 text-xs font-medium text-muted-foreground", className)}>
       {children}
     </h3>
   );
@@ -425,14 +431,15 @@ function ListRow({
   icon,
   title,
   subtitle,
-  trailing,
+  afterTitle,
   muted = false,
   onClick,
 }: {
   icon: ReactNode;
   title: string;
   subtitle: string | null;
-  trailing?: ReactNode;
+  /** Right after the name: the status ("Running", "Password"). */
+  afterTitle?: ReactNode;
   muted?: boolean;
   onClick: () => void;
 }) {
@@ -448,12 +455,14 @@ function ListRow({
       >
         <span className="flex size-6 shrink-0 items-center justify-center">{icon}</span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-[13px] text-foreground">{title}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[13px] text-foreground">{title}</span>
+            {afterTitle}
+          </span>
           {subtitle ? (
             <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
           ) : null}
         </span>
-        {trailing}
       </button>
     </li>
   );

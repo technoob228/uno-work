@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectAllTabs,
+  fitStripTabs,
+  pinLabel,
   scopeChoiceLabel,
   scopeForDrop,
   splitStripTabs,
@@ -9,6 +11,8 @@ import {
 } from "./panelTabs.logic";
 import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
 import type { PreviewFile } from "./PreviewPaneContext";
+import { collectVisibleTabs, DEFAULT_PREVIEW_BUCKET_STATE } from "./previewPanelState";
+import { collectPersistableTabs, restoreTabs } from "./previewTabPersistence";
 
 function file(name: string, path = `/p/${name}`): PreviewFile {
   return { id: path, name, kind: "md", content: "", path };
@@ -142,6 +146,70 @@ describe("scopeChoiceLabel", () => {
   it("names the project", () => {
     expect(scopeChoiceLabel("project", "landing", "pins")).toBe("Pin to project landing");
     expect(scopeChoiceLabel("chat", "landing", "pins")).toBe("Keep in this chat");
-    expect(scopeChoiceLabel("global", "landing", "pins")).toBe("Pin everywhere");
+    expect(scopeChoiceLabel("global", "landing", "pins")).toBe("Show in every chat");
+  });
+});
+
+describe("fitStripTabs", () => {
+  it("keeps names while every tab gets at least 72 px", () => {
+    expect(fitStripTabs(300, 4)).toBe("names"); // 4×72 + 3×4 = 300
+    expect(fitStripTabs(299, 4)).toBe("icons");
+  });
+  it("a single tab always keeps its name", () => {
+    expect(fitStripTabs(40, 1)).toBe("names");
+  });
+});
+
+describe("pinLabel", () => {
+  it("drops the extension of files, keeps app and page names", () => {
+    expect(pinLabel({ name: "README.md", kind: "md" })).toBe("README");
+    expect(pinLabel({ name: ".env", kind: "text" })).toBe(".env");
+    expect(pinLabel({ name: "Pult", kind: "app" })).toBe("Pult");
+  });
+});
+
+describe("tabs saved by 0.0.137 and earlier", () => {
+  // `uno_preview_tabs_v1` as older versions wrote it: browser tabs of the
+  // long levels only. The pins read it as is — no new format, no migration.
+  const saved = {
+    [GLOBAL_SCOPE_KEY]: [{ id: "browser-3", name: "Pult", url: "https://pult.example/" }],
+    [projectScopeKey("landing")]: [
+      { id: "browser-7", name: "Stage", url: "https://stage.example/" },
+    ],
+  };
+
+  it("come back as pins: every chat first, then the project", () => {
+    const restored = restoreTabs(saved);
+    const states = Object.fromEntries(
+      Object.entries(restored).map(([key, files]) => [
+        key,
+        { ...DEFAULT_PREVIEW_BUCKET_STATE, files },
+      ]),
+    );
+    const { files, tabScopeById } = collectVisibleTabs(states, {
+      projectKey: "landing",
+      threadId: "t1",
+    });
+    const strip = splitStripTabs(files, tabScopeById, "pins");
+    expect(strip.pinned.map((tab) => tab.id)).toEqual(["browser-3", "browser-7"]);
+    expect(strip.named).toEqual([]);
+  });
+
+  it("the agent mark is not written into the saved format", () => {
+    const saving = collectPersistableTabs({
+      [GLOBAL_SCOPE_KEY]: {
+        files: [
+          {
+            id: "browser-3",
+            name: "Pult",
+            kind: "browser",
+            content: "",
+            url: "https://pult.example/",
+            openedBy: "agent",
+          },
+        ],
+      },
+    });
+    expect(saving).toEqual({ [GLOBAL_SCOPE_KEY]: [saved[GLOBAL_SCOPE_KEY]![0]] });
   });
 });

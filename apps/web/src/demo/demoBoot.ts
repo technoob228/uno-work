@@ -30,6 +30,7 @@ import {
   SLEEPING_BOX,
   ago,
   buildInboxItem,
+  buildThread,
   chatById,
   descriptorFor,
   machineByEnv,
@@ -40,7 +41,7 @@ import {
   type DemoMachine,
   type WireThread,
 } from "./heavyFixtures";
-import { assistantHandlers, seedAssistantTeam } from "./assistantsFixtures";
+import { answerTeamRpc, assistantHandlers, seedAssistantTeam } from "./assistantsFixtures";
 
 const SEED_VERSION = "w0138-1";
 
@@ -181,6 +182,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
   const fileAnswer = answerFileRpc(machine, body);
   if (fileAnswer !== undefined) return fileAnswer;
+  // p9: the vault's entries for the teammate's access (assistantsFixtures.ts).
+  const teamAnswer = answerTeamRpc(String(body._tag));
+  if (teamAnswer !== undefined) return teamAnswer;
   // p1/p2: the agent's browser on the cloud computers (demoBrowser.ts).
   const live = demoBrowserLiveUnary(machine, body, (method, value) =>
     harnesses.get(machine.environmentId)?.emitStreamValue(method, value),
@@ -707,14 +711,38 @@ export function retryChatIn(environmentId: string, threadId: string, text: strin
   publishInbox(machine);
 }
 
+/**
+ * p3: the chat goes back to its fixture state, so "Показать" can be pressed
+ * again without the agent's replies piling up.
+ */
+export function demoResetChatIn(environmentId: string, threadId: string) {
+  const machine = machineByEnv(environmentId);
+  const spec = chatById(threadId);
+  if (!machine || !spec) return;
+  const model = modelFor(machine);
+  const index = model.threads.findIndex((t) => t.id === threadId);
+  if (index === -1) return;
+  model.threads[index] = { ...buildThread(spec), deletedAt: null } as Model["threads"][number];
+  touch(model);
+  publishThread(machine, threadId);
+}
+
 /** p3: the agent of a running chat finishes its turn with `text` (a reply arrives). */
 export function demoAgentRepliesIn(environmentId: string, threadId: string, text: string) {
   const machine = machineByEnv(environmentId);
   if (machine) finishTurn(machine, threadId, text);
 }
 
-/** p3: the agent of a chat stops and asks for an OK to run `command` (an approval). */
-export function demoAgentAsksApprovalIn(environmentId: string, threadId: string, command: string) {
+/**
+ * p3: the agent of a chat says why (`explanation`) and stops for an OK to run
+ * `command` (an approval) — the same events a real agent sends.
+ */
+export function demoAgentAsksApprovalIn(
+  environmentId: string,
+  threadId: string,
+  command: string,
+  explanation?: string,
+) {
   const machine = machineByEnv(environmentId);
   if (!machine) return;
   const model = modelFor(machine);
@@ -726,6 +754,17 @@ export function demoAgentAsksApprovalIn(environmentId: string, threadId: string,
   const stamp = Date.now();
   // The agent is mid-turn while it waits: a running turn that asks.
   const turnId = `turn-${threadId}-ask-${stamp}`;
+  if (explanation) {
+    (target.messages as unknown[]).push({
+      id: `${threadId}-explain-${stamp}`,
+      role: "assistant",
+      text: explanation,
+      turnId,
+      streaming: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
   (target.activities as Array<Record<string, unknown>>).push({
     id: `${threadId}-approval-${stamp}`,
     tone: "approval",

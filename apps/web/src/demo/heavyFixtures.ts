@@ -173,7 +173,12 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,
     },
-    settings: { ...DEFAULT_SERVER_SETTINGS, ...DEFAULT_CLIENT_SETTINGS },
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      ...DEFAULT_CLIENT_SETTINGS,
+      // p9: a tool server of Misha's own in Settings → Connectors.
+      mcpServers: [{ name: "context7", url: "https://mcp.context7.com/mcp", enabled: true }],
+    },
   } as unknown as ServerConfig;
 }
 

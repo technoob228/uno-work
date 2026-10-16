@@ -7,7 +7,7 @@
 // (the hint stays with Approve / Deny).
 import type { getRouter } from "../../router";
 import type { PreviewFile } from "../../components/preview/PreviewPaneContext";
-import { demoAgentAsksApprovalIn, demoAgentRepliesIn } from "../demoBoot";
+import { demoAgentAsksApprovalIn, demoAgentRepliesIn, demoResetChatIn } from "../demoBoot";
 import { demoHooks, demoShow } from "../demoFlag";
 import { ENV_WORK } from "../heavyFixtures";
 
@@ -63,6 +63,8 @@ demoShow.p3 = async () => {
   const router = demoHooks.router as ReturnType<typeof getRouter> | undefined;
   if (!router) return;
   pane()?.setPreviewLayoutMode("sidebar");
+  // Pressed again: the chat starts over (running, no demo replies yet).
+  demoResetChatIn(ENV_WORK, CHAT);
   await router.navigate({
     to: "/$environmentId/$threadId",
     params: { environmentId: ENV_WORK, threadId: CHAT },
@@ -73,6 +75,7 @@ demoShow.p3 = async () => {
     name: "train-1010-plan.md",
     kind: "md",
     content: PLAN_MD,
+    path: "/home/uno/projects/uno-project/reports/train-1010-plan.md",
     environmentId: ENV_WORK,
   });
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -93,6 +96,11 @@ demoShow.p3 = async () => {
   );
   // …and then waits for an OK (the hint stays until Approve / Deny).
   later(14_000, () =>
-    demoAgentAsksApprovalIn(ENV_WORK, CHAT, "./scripts/release.sh promote train/1010 --to prod"),
+    demoAgentAsksApprovalIn(
+      ENV_WORK,
+      CHAT,
+      "./scripts/release.sh promote train/1010 --to prod --canary 2534 --wait-healthy 120s --notify coordinator",
+      "Release train/1010 to everyone? Rollback is one command.",
+    ),
   );
 };

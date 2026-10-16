@@ -162,60 +162,76 @@ export function passes(picked: ReadonlyArray<string> | null, id: string): boolea
   return picked === null || picked.includes(id);
 }
 
-// ── What the title and the chip say ──────────────────────────────────────
-
-const LEVEL_WORD: Readonly<Record<SidebarGroupLevel, string>> = {
-  project: "project",
-  status: "status",
-  computer: "computer",
-};
+// ── What the title says ──────────────────────────────────────────────────
 
 /**
- * The title over the list says what it shows: "All projects", "Projects"
- * (grouped by project), "landing", "2 projects · by status", "Projects · by
- * computer".
+ * The title over the list says which chats it shows (critics 16.10: it is a
+ * button, and "All projects" lied — it lists chats): "All chats", "Chats ·
+ * landing", "Chats · 2 projects", "Chats · landing · MacBook". The grouping
+ * is seen in the list itself; the filter is said here only (no second chip).
  */
 export function sidebarDTitle(input: {
-  readonly levels: ReadonlyArray<SidebarGroupLevel>;
   /** Names of the picked projects; null = all. */
   readonly projectNames: ReadonlyArray<string> | null;
-}): string {
-  const { levels, projectNames } = input;
-  const byProject = levels.includes("project");
-  const head =
-    projectNames === null
-      ? byProject
-        ? "Projects"
-        : "All projects"
-      : projectNames.length === 1
-        ? projectNames[0]!
-        : `${projectNames.length} projects`;
-  // "Projects" already says "by project"; one project needs no project level.
-  const dropProject = (projectNames === null && byProject) || projectNames?.length === 1;
-  const said = levels.filter((level) => !(level === "project" && dropProject));
-  return said.length === 0
-    ? head
-    : `${head} · by ${said.map((level) => LEVEL_WORD[level]).join(" → ")}`;
-}
-
-/** The one small chip under the title while a filter is on: "landing · MacBook". */
-export function filterChipLabel(input: {
-  readonly projectNames: ReadonlyArray<string> | null;
+  /** Names of the picked computers; null = all. */
   readonly computerNames: ReadonlyArray<string> | null;
-}): string | null {
+}): string {
   const parts: string[] = [];
   const { projectNames, computerNames } = input;
   if (projectNames !== null) {
-    parts.push(
-      projectNames.length <= 2 ? projectNames.join(", ") : `${projectNames.length} projects`,
-    );
+    parts.push(projectNames.length === 1 ? projectNames[0]! : `${projectNames.length} projects`);
   }
   if (computerNames !== null) {
     parts.push(
-      computerNames.length <= 2 ? computerNames.join(", ") : `${computerNames.length} computers`,
+      computerNames.length === 1 ? computerNames[0]! : `${computerNames.length} computers`,
     );
   }
-  return parts.length === 0 ? null : parts.join(" · ");
+  return parts.length === 0 ? "All chats" : `Chats · ${parts.join(" · ")}`;
+}
+
+/**
+ * The four ready ways the title menu offers (critics 16.10); any other order
+ * of levels is the person's own ("Customize…", Misha's Group by with order).
+ */
+export type SidebarDHeaderPreset = "list" | "project" | "status" | "computer";
+
+export const SIDEBAR_D_HEADER_PRESETS: ReadonlyArray<{
+  readonly id: SidebarDHeaderPreset;
+  readonly label: string;
+  readonly levels: ReadonlyArray<SidebarGroupLevel>;
+}> = [
+  { id: "list", label: "One list", levels: [] },
+  { id: "project", label: "By project", levels: ["project"] },
+  { id: "status", label: "By status", levels: ["status"] },
+  { id: "computer", label: "By computer", levels: ["computer", "project"] },
+];
+
+export function headerPresetOf(
+  levels: ReadonlyArray<SidebarGroupLevel>,
+): SidebarDHeaderPreset | null {
+  return (
+    SIDEBAR_D_HEADER_PRESETS.find(
+      (preset) =>
+        preset.levels.length === levels.length &&
+        preset.levels.every((level, index) => levels[index] === level),
+    )?.id ?? null
+  );
+}
+
+/**
+ * What a chat row still has to say about its place (Misha 16.10: "в режиме
+ * без сортинга надо показывать плашку… и в инбоксе"): the project when the
+ * list is not grouped by project, the computer when several are in view and
+ * the list is not grouped by computer.
+ */
+export function placeShown(
+  levels: ReadonlyArray<SidebarGroupLevel>,
+  multiComputer: boolean,
+): { readonly project: boolean; readonly computer: boolean } {
+  return {
+    project: !levels.includes("project"),
+    computer: multiComputer && !levels.includes("computer"),
+  };
 }
 
 // ── Computers ────────────────────────────────────────────────────────────
@@ -263,6 +279,8 @@ export interface SidebarDComputer {
   readonly key: string;
   readonly label: string;
   readonly status: SidebarDComputerStatus;
+  /** A cloud computer (an Uno box) or one of the person's own (a laptop). */
+  readonly cloud?: boolean;
 }
 
 export function isComputerDimmed(computer: SidebarDComputer): boolean {

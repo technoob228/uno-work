@@ -118,6 +118,10 @@ function shortUrl(url: string): string {
 export interface PanelContextCard {
   readonly kind: "comments" | "error" | "request" | "errors";
   readonly title: string;
+  /** The one-line chip: "2 comments · /pricing". */
+  readonly chip: string;
+  /** What the first item says (the first note, the error), muted after the chip. */
+  readonly preview: string | null;
   /** The page's address. */
   readonly page: string;
   readonly items: ReadonlyArray<{
@@ -173,6 +177,8 @@ export function commentsPayload(input: {
     card: {
       kind: "comments",
       title,
+      chip: `${input.comments.length === 1 ? "1 comment" : `${input.comments.length} comments`} · ${path}`,
+      preview: input.comments[0]?.note.trim() || null,
       page: input.page,
       items: input.comments.map((comment) => ({
         marker: String(comment.n),
@@ -212,6 +218,8 @@ export function consolePayload(input: {
     card: {
       kind: "error",
       title: `${word} on ${path}`,
+      chip: `${word} · ${path}`,
+      preview: input.entry.message,
       page: input.page,
       items: [
         {
@@ -244,6 +252,8 @@ export function requestPayload(input: {
     card: {
       kind: "request",
       title: `${input.entry.method} ${path} · ${status}`,
+      chip: `${input.entry.method} ${path} · ${status}`,
+      preview: input.entry.responseBody ? input.entry.responseBody.slice(0, 160) : null,
       page: input.page,
       items: [
         {
@@ -292,6 +302,10 @@ export function allErrorsPayload(input: {
     card: {
       kind: "errors",
       title,
+      chip: `${count} ${count === 1 ? "problem" : "problems"} · ${path}`,
+      preview:
+        problems[0]?.message ??
+        (failed[0] ? `${failed[0].method} ${shortUrl(failed[0].url)}` : null),
       page: input.page,
       items: [
         ...problems.map((entry) => ({

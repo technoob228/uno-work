@@ -1,12 +1,13 @@
 // Point 5 of the w0138 mock: "Показать" puts the interface into the state to look at.
 //
-// p5 — the line over the chats with its title menu open (variant A): Group by,
-// Projects, Computers; Add a project and New chat on the right.
+// p5 — the line over the chats with its title menu open, in the variant picked
+// in the panel (A: the ways to group; B: "Change in Settings"), Projects,
+// Computers; Add a project and New chat on the right.
 // p5b — "Filter and grouping": grouped Computer → Project, only landing (one
 // project on the MacBook and uno-product), the menu open.
 import { useSidebarDViewMenu } from "../../components/sidebar/SidebarDChatsBar";
 import type { SidebarGroupLevel } from "../../components/sidebar/sidebarDView.logic";
-import { demoHooks, demoShow, useDemoStore } from "../demoFlag";
+import { demoHooks, demoShow } from "../demoFlag";
 import { waitFor } from "./p4";
 
 interface SidebarDHandle {
@@ -21,7 +22,6 @@ const handle = () => demoHooks.sidebarD as SidebarDHandle | undefined;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openMenu() {
-  useDemoStore.getState().setSwitch("sidebarViewSwitch", "header");
   if (!(await waitFor(() => document.querySelector(TRIGGER) !== null && handle() !== undefined))) {
     return false;
   }

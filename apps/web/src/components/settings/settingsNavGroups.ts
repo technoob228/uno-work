@@ -15,6 +15,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import {
   ShieldCheckIcon,
   ArchiveIcon,
+  BlocksIcon,
   BotIcon,
   CircleUserIcon,
   CodeIcon,
@@ -148,6 +149,7 @@ export const APP_NAV_GROUP_HEADING = "This app";
 export const SIMPLE_SETTINGS_PATHS = {
   account: "/settings/account",
   ai: "/settings/ai",
+  connectors: "/settings/connectors",
   assistants: "/settings/assistants-phone",
   computer: "/settings/computer",
   developer: "/settings/developer",
@@ -156,6 +158,8 @@ export const SIMPLE_SETTINGS_PATHS = {
 export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
   { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
   { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
+  // 16.10: the apps the AI works in — one place, teammates pick from it.
+  { label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon },
   { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
   { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
   { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },

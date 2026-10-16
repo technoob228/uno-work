@@ -261,11 +261,18 @@ function LocationStrip({
     <div className="border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
       <div className="flex items-center gap-1.5">
         <MonitorIcon className="size-3 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">
+        {/* The address and the proxy are for the curious: in the tooltip (w0138). */}
+        <span
+          className="min-w-0 flex-1 truncate"
+          title={[
+            address,
+            location.proxy ? `via ${hostOf(location.proxy.server)}` : null,
+            "Keeps working when you close Uno Work",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        >
           Runs on {machine}
-          {address ? ` · ${address}` : ""}
-          {location.proxy ? ` · via ${hostOf(location.proxy.server)}` : ""} · keeps working when you
-          close Uno Work
         </span>
         <button
           type="button"
@@ -535,7 +542,7 @@ function Toolbar({
   const navDisabled = !human;
   const navTitle = human ? undefined : "Take control to browse";
   return (
-    <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
       <Button
         size="icon-xs"
         variant="ghost"
@@ -596,6 +603,7 @@ function Toolbar({
         data-testid="live-browser-comment-soon"
       >
         <MessageSquarePlusIcon className="size-3.5" />
+        <span className="text-xs">Comment</span>
         <span className="rounded bg-muted px-1 text-[9.5px] font-medium tracking-wide uppercase">
           soon
         </span>
@@ -679,7 +687,8 @@ function Screen({
       const scale = Math.min(rect.width / frame.width, rect.height / frame.height);
       if (!Number.isFinite(scale) || scale <= 0) return null;
       const offsetX = (rect.width - frame.width * scale) / 2;
-      const offsetY = (rect.height - frame.height * scale) / 2;
+      // The picture sits at the top (object-top): no band of empty space above it.
+      const offsetY = 0;
       const x = (clientX - rect.left - offsetX) / scale;
       const y = (clientY - rect.top - offsetY) / scale;
       if (x < 0 || y < 0 || x > frame.width || y > frame.height) return null;
@@ -840,7 +849,7 @@ function Screen({
           src={`data:image/jpeg;base64,${frame.data}`}
           alt=""
           draggable={false}
-          className="pointer-events-none h-full w-full object-contain"
+          className="pointer-events-none h-full w-full object-contain object-top"
         />
       ) : (
         <Placeholder text="Loading the page…" />

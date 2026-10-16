@@ -30,6 +30,7 @@ export class IframeWebview extends EventTarget {
   private index = -1;
   private pendingIndex: number | null = null;
   private disposeWindow: (() => void) | null = null;
+  private zoom = 1;
 
   constructor(readonly iframe: HTMLIFrameElement) {
     super();
@@ -73,6 +74,7 @@ export class IframeWebview extends EventTarget {
       this.index = this.entries.length - 1;
     }
     this.watchWindow();
+    this.applyZoom();
     this.emit("did-navigate", { url, isMainFrame: true });
     let title = "";
     try {
@@ -184,6 +186,21 @@ export class IframeWebview extends EventTarget {
       this.win()?.location.reload();
     } catch {
       this.iframe.src = this.readUrl();
+    }
+  }
+
+  /** Like the webview's page zoom (CSS zoom of the page; kept across pages). */
+  setZoomFactor(factor: number): void {
+    this.zoom = factor;
+    this.applyZoom();
+  }
+
+  private applyZoom(): void {
+    try {
+      const root = this.win()?.document.documentElement;
+      if (root) root.style.setProperty("zoom", this.zoom === 1 ? "" : String(this.zoom));
+    } catch {
+      // another origin
     }
   }
 

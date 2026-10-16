@@ -4,12 +4,18 @@
  * floating pills. The chevron shows the last messages right above the
  * composer; the fold button sends the chat to a mini window (ChatMiniWindow).
  */
-import { ChevronDownIcon, ChevronUpIcon, Minimize2Icon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, PanelBottomCloseIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { cn } from "~/lib/utils";
 import type { ChatMessage } from "../../types";
-import { CHAT_DOCK_STATUS_DOT, chatDockFirstLine, type ChatDockStatus } from "./chatDock.logic";
+import { Button } from "../ui/button";
+import {
+  CHAT_DOCK_STATUS_DOT,
+  CHAT_DOCK_STATUS_LABEL,
+  chatDockStepPreview,
+  type ChatDockStatus,
+} from "./chatDock.logic";
 
 export function ChatDockStatusDot({
   status,
@@ -104,7 +110,8 @@ export function FullscreenChatDockHeader({
     return () => window.cancelAnimationFrame(frame);
   }, [expanded, messages]);
 
-  const step = chatDockFirstLine(latestStep, 240) || "No messages yet";
+  const step = chatDockStepPreview(latestStep) || "No messages yet";
+  const toggleLabel = expanded ? "Hide recent messages" : "Show recent messages";
   return (
     <div
       data-chat-dock-header="true"
@@ -114,43 +121,41 @@ export function FullscreenChatDockHeader({
           "mx-auto mb-1.5 w-full max-w-208 overflow-hidden rounded-xl border border-border/70 bg-card/95 shadow-lg shadow-black/8 backdrop-blur-xl",
       )}
     >
-      <div className="flex h-6.5 items-center gap-2 pt-0.5 pl-3.5 pr-1.5 text-muted-foreground text-xs">
+      <div className="flex h-7 items-center gap-1.5 pt-0.5 pl-3.5 pr-1 text-muted-foreground text-xs">
         <ChatDockStatusDot status={status} />
         <button
           type="button"
           onClick={onToggleExpanded}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left hover:text-foreground"
           aria-expanded={expanded}
-          aria-label={expanded ? "Hide recent messages" : "Show recent messages"}
+          aria-label={toggleLabel}
+          title={CHAT_DOCK_STATUS_LABEL[status]}
         >
           <span className="shrink-0 font-medium text-muted-foreground/80">
             {status === "working" ? "Working" : status === "your-turn" ? "Latest" : "Needs you"}
           </span>
-          <span className="min-w-0 flex-1 truncate text-foreground/70">{step}</span>
+          <span className="min-w-0 truncate text-foreground/70">{step}</span>
         </button>
-        <button
-          type="button"
+        <Button
+          size="icon-xs"
+          variant="ghost"
           onClick={onToggleExpanded}
-          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
-          aria-label={expanded ? "Hide recent messages" : "Show recent messages"}
-          title={expanded ? "Hide recent messages" : "Show recent messages"}
+          aria-label={toggleLabel}
+          title={toggleLabel}
         >
-          {expanded ? (
-            <ChevronDownIcon className="size-3.5" />
-          ) : (
-            <ChevronUpIcon className="size-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
+          {expanded ? <ChevronDownIcon /> : <ChevronUpIcon />}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
           onClick={onMinimize}
-          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
-          aria-label="Minimize chat"
-          title="Minimize chat"
+          title="Hide the chat while you look at the tab — it stays in the corner"
+          className="text-muted-foreground"
           data-chat-dock-minimize="true"
         >
-          <Minimize2Icon className="size-3.5" />
-        </button>
+          <PanelBottomCloseIcon />
+          Hide chat
+        </Button>
       </div>
       {expanded ? (
         <div

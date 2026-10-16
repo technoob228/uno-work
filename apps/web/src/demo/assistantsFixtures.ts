@@ -240,6 +240,14 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     setUpAt: ago(60 * 24 * 6),
     revokedAt: null,
     schedule: [{ name: "Nightly test run", when: "every day 03:00" }],
+    access: {
+      connectors: ["github", "mcp:context7"],
+      browser: "safe",
+      logins: ["cred-github"],
+      secrets: ["cred-cloudflare-token"],
+      projectSkills: true,
+      personalSkills: ["code-security-review", "up-to-date-docs"],
+    },
   },
   {
     environmentId: MACHINES.work.environmentId,
@@ -261,13 +269,98 @@ const TEAM: ReadonlyArray<AssistantProfile> = [
     setUpAt: ago(60 * 26),
     revokedAt: null,
     schedule: [{ name: "Competitors digest", when: "Mondays 09:00" }],
+    access: {
+      connectors: ["google-drive"],
+      browser: "safe",
+      logins: [],
+      secrets: [],
+      projectSkills: true,
+      personalSkills: ["sales-copy"],
+    },
   },
 ];
 
 /** The team's profiles, unless the person changed them in this browser already. */
 export function seedAssistantTeam() {
-  useAssistantTeamStore.getState().seed(TEAM);
+  const store = useAssistantTeamStore.getState();
+  store.seed(TEAM);
+  // Profiles saved by an earlier mock (before p9) get the team's access.
+  for (const profile of TEAM) {
+    const key = `${profile.environmentId}:${profile.projectId}`;
+    if (profile.access && !store.profiles[key]?.access) store.patch(key, { access: profile.access });
+  }
 }
+
+// ── p9: Connectors, the vault, the projects' skills ───────────────────────
+
+type Provider = "github" | "google-drive" | "notion" | "gmail";
+const CONNECTOR_META: ReadonlyArray<{ provider: Provider; name: string; description: string }> = [
+  { provider: "google-drive", name: "Google Drive", description: "Read your files and save new ones." },
+  { provider: "github", name: "GitHub", description: "Repos, issues and pull requests." },
+  { provider: "notion", name: "Notion", description: "Pages and databases you share with Uno." },
+  { provider: "gmail", name: "Gmail & Calendar", description: "Read mail, draft replies, see your day." },
+];
+const ACCOUNT: Record<Provider, string> = {
+  github: "technoob228",
+  "google-drive": "misha@getuno.xyz",
+  notion: "Uno workspace",
+  gmail: "misha@getuno.xyz",
+};
+/** Connected now, or since when a sign-in was started (it lands ~2 s later). */
+const connectors = new Map<Provider, { connectedAt: string | null; startedAt: number | null }>([
+  ["github", { connectedAt: ago(60 * 24 * 20), startedAt: null }],
+  ["google-drive", { connectedAt: ago(60 * 24 * 9), startedAt: null }],
+  ["notion", { connectedAt: null, startedAt: null }],
+  ["gmail", { connectedAt: null, startedAt: null }],
+]);
+
+function connectorsState() {
+  const now = Date.now();
+  return {
+    available: true,
+    reason: null,
+    connectors: CONNECTOR_META.map((meta) => {
+      const state = connectors.get(meta.provider)!;
+      if (state.connectedAt === null && state.startedAt !== null && now - state.startedAt > 1_800) {
+        state.connectedAt = new Date().toISOString();
+        state.startedAt = null;
+      }
+      return {
+        ...meta,
+        available: true,
+        connected: state.connectedAt !== null,
+        account: state.connectedAt !== null ? ACCOUNT[meta.provider] : null,
+        connectedAt: state.connectedAt,
+        toolCount: state.connectedAt !== null ? 12 : 0,
+      };
+    }),
+  };
+}
+
+const VAULT = [
+  { id: "cred-github", label: "GitHub", url: "https://github.com/login", username: "technoob228" },
+  { id: "cred-hostkey", label: "Hostkey", url: "https://my.hostkey.com", username: "misha@getuno.xyz" },
+  { id: "cred-stripe", label: "Stripe dashboard", url: "https://dashboard.stripe.com", username: "misha@getuno.xyz" },
+  { id: "cred-cloudflare", label: "Cloudflare", url: "https://dash.cloudflare.com", username: "shubaduba4th@gmail.com" },
+  { id: "cred-cloudflare-token", label: "Cloudflare API token", url: "", username: "" },
+  { id: "cred-openai", label: "OpenAI API key", url: "", username: "" },
+  { id: "cred-hostkey-api", label: "Hostkey API key", url: "", username: "" },
+].map((entry, index) => ({ ...entry, updatedAt: Date.now() - index * 86_400_000 }));
+
+/** WebSocket RPC answers the team needs (the vault lives on the computer). */
+export function answerTeamRpc(tag: string): unknown {
+  if (tag === "vault.list") return VAULT;
+  return undefined;
+}
+
+const PROJECT_SKILLS = [
+  { name: "release-train", project: "fishcode", path: ".claude/skills/release-train/SKILL.md", description: "How a release goes out." },
+  { name: "go-migrations", project: "fishcode", path: ".claude/skills/go-migrations/SKILL.md", description: "Writing a migration safely." },
+  { name: "electron-release", project: "uno-work-app", path: ".claude/skills/electron-release/SKILL.md", description: "Building and notarizing the Mac app." },
+  { name: "browser-tests", project: "uno-work-app", path: ".claude/skills/browser-tests/SKILL.md", description: "Running the browser tests." },
+  { name: "landing-copy", project: "landing", path: ".claude/skills/landing-copy/SKILL.md", description: "Our words on the landing." },
+  { name: "pult-post", project: "uno-project", path: ".claude/skills/pult-post/SKILL.md", description: "Posting to the Pult." },
+];
 
 // ── What each computer's daemon answers ───────────────────────────────────
 
@@ -456,6 +549,24 @@ export function assistantHandlers(input: {
       aiOf(machineOf(request)).signInStartedAt = null;
       return HttpResponse.json({ ok: true });
     }),
+    http.get("*/api/manager/connectors", () => HttpResponse.json(connectorsState())),
+    http.post("*/api/manager/connectors/:provider/start", ({ params }) => {
+      const provider = String(params.provider) as Provider;
+      const state = connectors.get(provider);
+      if (state) state.startedAt = Date.now();
+      return HttpResponse.json({
+        authorizeUrl: `${location.origin}${import.meta.env.BASE_URL}demo-oauth/?provider=${provider}`,
+      });
+    }),
+    http.delete("*/api/manager/connectors/:provider", ({ params }) => {
+      const state = connectors.get(String(params.provider) as Provider);
+      if (state) Object.assign(state, { connectedAt: null, startedAt: null });
+      return HttpResponse.json({ ok: true });
+    }),
+    http.post("*/api/manager/mcp/probe", () =>
+      HttpResponse.json({ ok: true, toolCount: 7, needsAuth: false, error: null }),
+    ),
+    http.get("*/api/manager/project-skills", () => HttpResponse.json({ skills: PROJECT_SKILLS })),
     http.get("*/api/manager/assistant/file", ({ request }) => {
       const url = new URL(request.url);
       const project = url.searchParams.get("projectId") ?? ASSISTANT_PROJECT_ID;

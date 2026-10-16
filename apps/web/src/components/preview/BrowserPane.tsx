@@ -51,7 +51,7 @@ import {
   setBrowserAutomationHandler,
   setBrowserTabAutomationHandler,
 } from "./BrowserAutomationRegistry";
-import { CommentLayer } from "./annotate/CommentLayer";
+import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { IframeWebview } from "./annotate/iframeWebview";
 import { PageToolsButtons } from "./annotate/PageToolsButtons";
@@ -861,7 +861,7 @@ function BrowserView({
               spellCheck={false}
               autoCorrect="off"
               autoCapitalize="off"
-              className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+              className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
             />
           </form>
           {loading ? (
@@ -870,40 +870,13 @@ function BrowserView({
           {pageInPanel ? <PageToolsButtons tabId={tab.id} disabled={!mountSrc} /> : null}
           <button
             type="button"
-            onClick={() => applyZoom(zoomFactor - ZOOM_STEP)}
-            disabled={!mountSrc}
-            aria-label="Zoom out"
-            title="Zoom out"
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <MinusIcon className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => applyZoom(DEFAULT_ZOOM_FACTOR)}
-            disabled={!mountSrc}
-            aria-label="Reset zoom"
-            title="Reset zoom"
-            className="inline-flex h-6 min-w-8 shrink-0 items-center justify-center rounded px-1 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {Math.round(zoomFactor * 100)}%
-          </button>
-          <button
-            type="button"
-            onClick={() => applyZoom(zoomFactor + ZOOM_STEP)}
-            disabled={!mountSrc}
-            aria-label="Zoom in"
-            title="Zoom in"
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <PlusIcon className="size-3.5" />
-          </button>
-          <button
-            type="button"
             onClick={async (event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               const choice = await readLocalApi()?.contextMenu.show(
                 [
+                  { id: "zoom-in", label: "Zoom in" },
+                  { id: "zoom-out", label: "Zoom out" },
+                  { id: "zoom-reset", label: `Actual size (now ${Math.round(zoomFactor * 100)}%)` },
                   { id: "force-reload", label: "Reload without cache" },
                   { id: "screenshot", label: "Take a screenshot" },
                   { id: "responsive", label: "Responsive" },
@@ -916,7 +889,10 @@ function BrowserView({
                 ],
                 { x: rect.left, y: rect.bottom + 4 },
               );
-              if (choice === "force-reload") {
+              if (choice === "zoom-in") applyZoom(zoomFactor + ZOOM_STEP);
+              else if (choice === "zoom-out") applyZoom(zoomFactor - ZOOM_STEP);
+              else if (choice === "zoom-reset") applyZoom(DEFAULT_ZOOM_FACTOR);
+              else if (choice === "force-reload") {
                 if (webviewRef.current?.reloadIgnoringCache) {
                   webviewRef.current.reloadIgnoringCache();
                 } else webviewRef.current?.reload();
@@ -948,32 +924,33 @@ function BrowserView({
           {/* Кнопка есть в обеих оболочках: пароль подставляет сервер, поэтому
               заполнение работает и в браузерной версии (через companion), и в
               десктопе, и в headless-браузере бокса. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={handleAutofillClick}
-                  disabled={matchedCredentials.length === 0}
-                  aria-label={
-                    matchedCredentials.length > 0
-                      ? "Fill in saved login"
-                      : "No saved logins for this site"
-                  }
-                  className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
-                >
-                  <KeyRoundIcon className="size-3.5" />
-                </button>
-              }
-            />
-            <TooltipPopup side="bottom">
-              {matchedCredentials.length > 0
-                ? "Fill in login and password"
-                : origin
-                  ? `No saved logins for ${origin}`
-                  : "Open a site to find a saved login"}
-            </TooltipPopup>
-          </Tooltip>
+          {matchedCredentials.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={handleAutofillClick}
+                    aria-label={
+                      matchedCredentials.length > 0
+                        ? "Fill in saved login"
+                        : "No saved logins for this site"
+                    }
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <KeyRoundIcon className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipPopup side="bottom">
+                {matchedCredentials.length > 0
+                  ? "Fill in login and password"
+                  : origin
+                    ? `No saved logins for ${origin}`
+                    : "Open a site to find a saved login"}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1101,12 +1078,13 @@ function BrowserView({
               tabId={tab.id}
               pageUrl={currentUrl}
               pageRef={pageElementRef}
-              zoom={zoomFactor}
+              zoom={iframeMode ? 1 : zoomFactor}
             />
           </div>
         ) : (
           <NewTabPlaceholder recentUrls={recentUrls} onOpenUrl={navigate} />
         )}
+        {pageInPanel && mountSrc ? <CommentBar tabId={tab.id} pageUrl={currentUrl} /> : null}
         {pageInPanel && mountSrc && pageTools.debugOpen ? (
           <DebugDrawer tabId={tab.id} pageUrl={currentUrl} />
         ) : null}

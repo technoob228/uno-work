@@ -2762,6 +2762,32 @@ export const ChatComposer = memo(
     if (showFocusPreviewCompactComposer) {
       const runtimeModeOption = runtimeModeConfig[runtimeMode];
       const RuntimeModeIcon = runtimeModeOption.icon;
+      const focusPromptInput = (
+        <input
+          type="text"
+          value={prompt}
+          className={cn(
+            "min-w-0 flex-1 bg-transparent px-1 outline-none",
+            inDock ? "text-[13px]" : "text-sm",
+            prompt.trim() ? "text-foreground" : "text-muted-foreground/45",
+          )}
+          onChange={(event) => {
+            const nextPrompt = event.currentTarget.value;
+            onPromptChange(nextPrompt, nextPrompt.length, nextPrompt.length, false, []);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submitComposer();
+            }
+          }}
+          placeholder={
+            inDock ? "Ask anything…" : "Ask anything, attach files, @tag files/folders, or use /"
+          }
+          aria-label="Message"
+          disabled={isConnecting || environmentUnavailable !== null}
+        />
+      );
 
       return (
         <form
@@ -2835,28 +2861,7 @@ export const ChatComposer = memo(
               </Tooltip>
             ) : null}
 
-            <input
-              type="text"
-              value={prompt}
-              className={cn(
-                "min-w-0 flex-1 bg-transparent px-1 outline-none",
-                inDock ? "text-[13px]" : "text-sm",
-                prompt.trim() ? "text-foreground" : "text-muted-foreground/45",
-              )}
-              onChange={(event) => {
-                const nextPrompt = event.currentTarget.value;
-                onPromptChange(nextPrompt, nextPrompt.length, nextPrompt.length, false, []);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submitComposer();
-                }
-              }}
-              placeholder="Ask anything, attach files, @tag files/folders, or use /"
-              aria-label="Message"
-              disabled={isConnecting || environmentUnavailable !== null}
-            />
+            {inDock ? null : focusPromptInput}
 
             <div className="hidden min-w-0 shrink-0 items-center gap-1 md:flex">
               {assistantEngine ? (
@@ -2962,6 +2967,9 @@ export const ChatComposer = memo(
                 onRuntimeModeChange={handleRuntimeModeChange}
               />
             </div>
+
+            {/* In the dock the chips sit right after the mic, the text takes the rest. */}
+            {inDock ? focusPromptInput : null}
 
             <button
               type="button"

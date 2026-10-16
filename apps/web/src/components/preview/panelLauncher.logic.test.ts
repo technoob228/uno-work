@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   isTypingTarget,
-  LAUNCHER_TILES,
   type LauncherAppRow,
   type LauncherContext,
+  LAUNCHER_TILES,
   launcherAppState,
+  launcherKeyLabel,
   launcherTileForKey,
   sortLauncherApps,
   visibleLauncherTiles,
@@ -13,8 +14,6 @@ import {
 
 const everything: LauncherContext = {
   canBrowseHere: true,
-  browserHasTools: true,
-  deviceName: "this Mac",
   agentBrowserOn: "uno-product",
   defaultBrowser: "app",
   hasComputer: true,
@@ -44,13 +43,19 @@ describe("visibleLauncherTiles", () => {
     expect(tile(onlyHere, "browser")?.isDefault).toBeUndefined();
   });
 
-  it("says where each browser runs", () => {
-    expect(tile(everything, "browser")?.description).toContain("this Mac");
-    expect(tile(everything, "browser")?.description).toContain("Comment and debug");
-    expect(tile(everything, "agentBrowser")?.description).toContain("uno-product");
-    expect(tile({ ...everything, browserHasTools: false }, "browser")?.description).not.toContain(
-      "Comment",
-    );
+  it("the default browser goes first", () => {
+    expect(ids({ ...everything, defaultBrowser: "computer" })).toEqual([
+      "agentBrowser",
+      "browser",
+      "files",
+      "changes",
+      "apps",
+    ]);
+  });
+
+  it("says what each browser is for, in plain words", () => {
+    expect(tile(everything, "browser")?.description).toBe("Open the site here — you click");
+    expect(tile(everything, "agentBrowser")?.description).toBe("Watch the agent in its browser");
   });
 
   it("a chat on this Mac: no Agent's browser", () => {
@@ -83,9 +88,10 @@ describe("visibleLauncherTiles", () => {
     expect(ids({ ...everything, canOpenChanges: false })).not.toContain("changes");
   });
 
-  it("every tile has its own letter", () => {
-    const keys = LAUNCHER_TILES.map((candidate) => candidate.key);
+  it("every tile has its own key; the agent's browser is ⇧B", () => {
+    const keys = LAUNCHER_TILES.map(launcherKeyLabel);
     expect(new Set(keys).size).toBe(keys.length);
+    expect(launcherKeyLabel(tile(everything, "agentBrowser")!)).toBe("⇧B");
   });
 });
 
@@ -93,13 +99,20 @@ describe("launcherTileForKey", () => {
   const tiles = visibleLauncherTiles(everything);
   const key = (
     k: string,
-    mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean }> = {},
+    mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }> = {},
   ) =>
-    launcherTileForKey(tiles, { key: k, metaKey: false, ctrlKey: false, altKey: false, ...mods });
+    launcherTileForKey(tiles, {
+      key: k,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      ...mods,
+    });
 
   it("one letter opens its tile, either case", () => {
     expect(key("b")).toBe("browser");
-    expect(key("W")).toBe("agentBrowser");
+    expect(key("B", { shiftKey: true })).toBe("agentBrowser");
     expect(key("F")).toBe("files");
     expect(key("c")).toBe("changes");
     expect(key("a")).toBe("apps");
@@ -114,6 +127,7 @@ describe("launcherTileForKey", () => {
     expect(key("b", { ctrlKey: true })).toBeNull();
     expect(key("Enter")).toBeNull();
     expect(key("t")).toBeNull();
+    expect(key("F", { shiftKey: true })).toBeNull();
   });
 });
 

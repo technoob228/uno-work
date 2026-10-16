@@ -430,7 +430,7 @@ export function AssistantProfilePage(props: {
                       <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
                     ))
                 ) : (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">Free — nothing running.</p>
+                  <p className="px-3 py-2 text-sm text-muted-foreground">Idle — nothing running.</p>
                 )}
                 {(profile.schedule ?? []).map((task) => (
                   <div

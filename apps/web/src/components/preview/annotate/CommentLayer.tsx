@@ -15,6 +15,61 @@ import { useSendToChat } from "./sendToChat";
 
 const NOTE_WIDTH = 272;
 
+/**
+ * The browser's bottom strip while commenting: what to do, how many notes,
+ * Clear and Send to chat. A strip of the browser, not a card over the page.
+ */
+export function CommentBar({ tabId, pageUrl }: { tabId: string; pageUrl: string }) {
+  const tab = usePageToolsTab(tabId);
+  const store = usePageToolsStore;
+  const sendToChat = useSendToChat();
+  if (!tab.commenting && tab.comments.length === 0) return null;
+  const send = () => {
+    if (tab.comments.length === 0) return;
+    const ok = sendToChat(commentsPayload({ page: pageUrl, comments: tab.comments }));
+    if (ok) store.getState().patch(tabId, { comments: [], commenting: false, draft: null });
+  };
+  const count = tab.comments.length;
+  return (
+    <div
+      className="flex h-8 shrink-0 items-center gap-1.5 border-t border-border bg-card pr-1 pl-2.5 text-xs"
+      data-testid="browser-comment-bar"
+    >
+      <MessageSquarePlusIcon className="size-3.5 shrink-0 text-primary" />
+      {count > 0 ? (
+        <span className="shrink-0 font-medium" data-testid="browser-comments-count">
+          {count === 1 ? "1 comment" : `${count} comments`}
+        </span>
+      ) : null}
+      {tab.commenting ? (
+        <span className="min-w-0 truncate text-muted-foreground">
+          {count > 0 ? "· " : ""}Click anything to leave a note · Shift+drag for an area
+        </span>
+      ) : null}
+      <span className="ml-auto" />
+      {count > 0 ? (
+        <>
+          <Button size="xs" variant="ghost" onClick={() => store.getState().clearComments(tabId)}>
+            Clear
+          </Button>
+          <Button size="xs" onClick={send} data-testid="browser-comments-send">
+            Send to chat
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => store.getState().patch(tabId, { commenting: false, draft: null })}
+        >
+          Done
+          <kbd className="font-sans text-[10px] text-muted-foreground">Esc</kbd>
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function CommentLayer({
   tabId,
   pageUrl,
@@ -29,7 +84,6 @@ export function CommentLayer({
 }) {
   const tab = usePageToolsTab(tabId);
   const store = usePageToolsStore;
-  const sendToChat = useSendToChat();
   const layerRef = useRef<HTMLDivElement | null>(null);
   const draft = tab.draft;
   const editing =
@@ -58,83 +112,26 @@ export function CommentLayer({
     setPosition({ left, top });
   }, [draft, pageRef, zoom]);
 
-  const send = () => {
-    if (tab.comments.length === 0) return;
-    const ok = sendToChat(commentsPayload({ page: pageUrl, comments: tab.comments }));
-    if (ok) store.getState().patch(tabId, { comments: [], commenting: false, draft: null });
-  };
-
-  if (!tab.commenting && tab.comments.length === 0 && !draft) return null;
+  if (!draft) return null;
 
   return (
     <div ref={layerRef} className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
-      {draft ? (
-        <NoteBox
-          key={
-            draft.kind === "edit" ? draft.commentId : `${draft.pick.rect.x}:${draft.pick.rect.y}`
-          }
-          style={
-            draft.kind === "new" && position
-              ? { left: position.left, top: position.top }
-              : { left: "50%", bottom: 52, transform: "translateX(-50%)" }
-          }
-          title={
-            editing ? `Comment ${editing.n}` : draft.kind === "new" ? draft.pick.label : "Comment"
-          }
-          detail={editing ? editing.label : draft.kind === "new" ? draft.pick.text : null}
-          initial={editing?.note ?? ""}
-          onSave={(note) => store.getState().saveDraft(tabId, note)}
-          onCancel={() => store.getState().patch(tabId, { draft: null })}
-          {...(editing
-            ? { onDelete: () => store.getState().removeComment(tabId, editing.id) }
-            : {})}
-        />
-      ) : null}
-      <div className="pointer-events-auto absolute bottom-3 left-1/2 flex h-9 max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-1 rounded-xl border border-border bg-popover py-1 pr-1 pl-2.5 text-xs text-popover-foreground shadow-lg">
-        {tab.comments.length === 0 ? (
-          <>
-            <MessageSquarePlusIcon className="size-3.5 shrink-0 text-primary" />
-            <span className="truncate">
-              Click anything to comment
-              <span className="text-muted-foreground"> · Shift+drag for an area</span>
-            </span>
-            <Button
-              size="xs"
-              variant="ghost"
-              className="ml-1 shrink-0"
-              onClick={() => store.getState().patch(tabId, { commenting: false, draft: null })}
-            >
-              Done
-              <kbd className="font-sans text-[10px] text-muted-foreground">Esc</kbd>
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
-              {tab.comments.length}
-            </span>
-            <span className="truncate font-medium" data-testid="browser-comments-count">
-              {tab.comments.length === 1 ? "1 comment" : `${tab.comments.length} comments`}
-            </span>
-            <Button
-              size="xs"
-              variant="ghost"
-              className="ml-1 shrink-0"
-              onClick={() => store.getState().clearComments(tabId)}
-            >
-              Clear
-            </Button>
-            <Button
-              size="xs"
-              className="shrink-0"
-              onClick={send}
-              data-testid="browser-comments-send"
-            >
-              Send to chat
-            </Button>
-          </>
-        )}
-      </div>
+      <NoteBox
+        key={draft.kind === "edit" ? draft.commentId : `${draft.pick.rect.x}:${draft.pick.rect.y}`}
+        style={
+          draft.kind === "new" && position
+            ? { left: position.left, top: position.top }
+            : { left: "50%", bottom: 12, transform: "translateX(-50%)" }
+        }
+        title={
+          editing ? `Comment ${editing.n}` : draft.kind === "new" ? draft.pick.label : "Comment"
+        }
+        detail={editing ? editing.label : draft.kind === "new" ? draft.pick.text : null}
+        initial={editing?.note ?? ""}
+        onSave={(note) => store.getState().saveDraft(tabId, note)}
+        onCancel={() => store.getState().patch(tabId, { draft: null })}
+        {...(editing ? { onDelete: () => store.getState().removeComment(tabId, editing.id) } : {})}
+      />
     </div>
   );
 }

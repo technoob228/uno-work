@@ -397,25 +397,52 @@ const SCRIPT = String.raw`
     }
   }, true);
 
+  // The part of an element's box that is really on screen: not off the
+  // viewport, not under a sticky header (or anything else drawn on top).
+  function visibleRect(el, r) {
+    var top = Math.max(r.top, 0), bottom = Math.min(r.bottom, w.innerHeight);
+    if (bottom - top < 4 || r.right < 0 || r.left > w.innerWidth) return null;
+    var x = Math.min(Math.max(r.left + r.width / 2, 1), w.innerWidth - 1);
+    for (var guard = 0; guard < 4; guard++) {
+      var hit = document.elementFromPoint(x, top + 1);
+      if (!hit || hit === el || el.contains(hit) || hit.contains(el) || hit === host) break;
+      var cover = hit.getBoundingClientRect();
+      if (cover.bottom >= bottom - 2) return null;
+      top = Math.max(top, cover.bottom);
+    }
+    return { left: r.left, top: top, width: r.width, height: bottom - top };
+  }
   function drawPins() {
     if (!pinsLayer) return;
     pinsLayer.innerHTML = "";
+    pinsLayer.style.display = "none";
+    var shown = [];
     for (var i = 0; i < pins.length; i++) {
-      var p = pins[i], r = null;
+      var p = pins[i], r = null, el = null;
       if (p.kind === "element" && p.selector) {
-        try { var el = document.querySelector(p.selector); if (el) r = el.getBoundingClientRect(); } catch (e) {}
+        try { el = document.querySelector(p.selector); } catch (e) {}
       }
-      if (!r) r = { left: p.docRect.x - w.scrollX, top: p.docRect.y - w.scrollY, width: p.docRect.w, height: p.docRect.h };
+      if (el) r = visibleRect(el, el.getBoundingClientRect());
+      else {
+        var a = { left: p.docRect.x - w.scrollX, top: p.docRect.y - w.scrollY, width: p.docRect.w, height: p.docRect.h };
+        var top = Math.max(a.top, 0), bottom = Math.min(a.top + a.height, w.innerHeight);
+        r = bottom - top >= 4 ? { left: a.left, top: top, width: a.width, height: bottom - top } : null;
+      }
+      if (r) shown.push({ p: p, r: r });
+    }
+    pinsLayer.style.display = "";
+    for (var j = 0; j < shown.length; j++) {
+      var item = shown[j];
       var mark = document.createElement("div");
-      mark.className = p.kind === "area" ? "mark area" : "mark";
-      place(mark, r);
+      mark.className = item.p.kind === "area" ? "mark area" : "mark";
+      place(mark, item.r);
       pinsLayer.appendChild(mark);
       var pin = document.createElement("div");
       pin.className = "pin";
-      pin.setAttribute("data-n", String(p.n));
-      pin.textContent = String(p.n);
-      pin.style.left = Math.min(Math.max(r.left + r.width, 12), w.innerWidth - 12) + "px";
-      pin.style.top = Math.min(Math.max(r.top, 12), w.innerHeight - 12) + "px";
+      pin.setAttribute("data-n", String(item.p.n));
+      pin.textContent = String(item.p.n);
+      pin.style.left = Math.min(Math.max(item.r.left + item.r.width, 12), w.innerWidth - 12) + "px";
+      pin.style.top = Math.min(Math.max(item.r.top, 12), w.innerHeight - 12) + "px";
       pinsLayer.appendChild(pin);
     }
   }

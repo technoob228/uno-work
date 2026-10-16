@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- w0138 mock: the provider's consent page, imitated (~2 s, then back to Uno Work). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Authorize Uno Work</title>
+    <style>
+      body { font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f6f8fa; color: #1f2328; }
+      .card { width: 360px; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; padding: 24px; text-align: center; }
+      .logos { font-size: 28px; margin-bottom: 8px; }
+      h1 { font-size: 18px; margin: 4px 0 6px; }
+      p { color: #59636e; margin: 0 0 14px; }
+      ul { text-align: left; color: #59636e; padding-left: 18px; margin: 0 0 16px; }
+      button { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #1f883d; color: #fff; font-weight: 600; font-size: 14px; }
+      .bar { height: 3px; background: #eaeef2; border-radius: 2px; overflow: hidden; margin-top: 14px; }
+      .bar i { display: block; height: 100%; width: 0; background: #1f883d; animation: fill 1.9s linear forwards; }
+      @keyframes fill { to { width: 100%; } }
+      small { display: block; margin-top: 8px; color: #8c959f; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logos"><span id="logo">🔗</span> ⟷ 🙂</div>
+      <h1>Authorize Uno Work</h1>
+      <p>on <b id="name">your account</b> as <b>misha</b></p>
+      <ul id="scopes"></ul>
+      <button id="allow">Authorize</button>
+      <div class="bar"><i></i></div>
+      <small>Demo: this window approves by itself in 2 seconds.</small>
+    </div>
+    <script>
+      const provider = new URLSearchParams(location.search).get("provider") || "github";
+      const meta = {
+        github: ["🐙", "GitHub", ["Repositories (read and write)", "Organizations (read)"]],
+        "google-drive": ["📁", "Google Drive", ["Files you open or create with Uno"]],
+        notion: ["📝", "Notion", ["Pages you share with Uno"]],
+        gmail: ["✉️", "Google", ["Read and draft mail", "See your calendar"]],
+      }[provider] || ["🔗", provider, []];
+      document.getElementById("logo").textContent = meta[0];
+      document.getElementById("name").textContent = meta[1];
+      document.getElementById("scopes").innerHTML = meta[2].map((s) => "<li>" + s + "</li>").join("");
+      const done = () => {
+        try { window.opener && window.opener.postMessage({ type: "uno-connector", ok: true, provider }, location.origin); } catch {}
+        window.close();
+      };
+      document.getElementById("allow").onclick = done;
+      setTimeout(done, 2000);
+    </script>
+  </body>
+</html>

@@ -1,18 +1,20 @@
 /**
- * The chat folded while a panel tab has the whole window (w0138 p3).
+ * The chat hidden while a panel tab has the whole window (w0138 p3).
  *
  * - "mini": a small pill in the corner — status dot, chat name, "Working…" /
- *   "Your turn". A reply of the agent pops up over it as a hint (first line +
- *   Reply / Open chat) and hides itself after a few seconds, leaving an unread
- *   dot; an approval the agent waits for stays up with Approve / Deny.
+ *   "Your turn". When the agent hands the turn back, its reply pops up over the
+ *   pill as a hint (first line + Reply / Open chat) and hides itself after a
+ *   few seconds, leaving an unread dot; an approval the agent waits for stays
+ *   up with Approve / Deny.
  * - "column": the same chat as a narrow column on the right (to compare): the
  *   tab gives it room, the messages and an approval are always in view.
  *
- * A click on the pill (or ⤢ in the column) brings the chat back to the bottom.
+ * Everything here reads the chat's own events (messages, pending approvals,
+ * the turn state) — the same in the demo and with a real agent.
  */
 import type { ApprovalRequestId, ProviderApprovalDecision } from "@t3tools/contracts";
-import { Maximize2Icon, MessageSquareIcon, XIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MessageSquareIcon, PanelBottomOpenIcon, XIcon } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import type { ChatMessage } from "../../types";
@@ -20,6 +22,8 @@ import { Button } from "../ui/button";
 import {
   CHAT_DOCK_HINT_MS,
   CHAT_DOCK_STATUS_LABEL,
+  chatDockApprovalPhrase,
+  chatDockLatestReply,
   nextChatDockNotice,
   type ChatDockNotice,
   type ChatDockStatus,
@@ -34,7 +38,11 @@ export interface ChatMiniWindowProps {
   status: ChatDockStatus;
   /** The last messages of the chat (oldest first). */
   messages: ReadonlyArray<DockMessage>;
-  pendingApproval: { requestId: ApprovalRequestId; detail?: string | undefined } | null;
+  pendingApproval: {
+    requestId: ApprovalRequestId;
+    requestKind: "command" | "file-read" | "file-change" | "other";
+    detail?: string | undefined;
+  } | null;
   approvalResponding: boolean;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -53,38 +61,39 @@ export const CHAT_DOCK_COLUMN_WIDTH = "20rem";
 const COLUMN_VAR = "--chat-dock-column-width";
 
 function useDockNotice(props: ChatMiniWindowProps) {
-  const latestReply = useMemo(() => {
-    for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-      const message = props.messages[index]!;
-      if (message.role === "assistant") return message;
-    }
-    return null;
-  }, [props.messages]);
-  // What was on screen when the chat folded counts as seen.
-  const [seenReplyId, setSeenReplyId] = useState<string | null>(() => latestReply?.id ?? null);
+  const isWorking = props.status === "working";
+  // What was on screen when the chat was hidden counts as seen.
+  const [seenReplyId, setSeenReplyId] = useState<string | null>(
+    () => chatDockLatestReply(props.messages)?.id ?? null,
+  );
   const [hint, setHint] = useState<ChatDockNotice | null>(null);
   const [unread, setUnread] = useState(false);
 
   const notice = nextChatDockNotice({
     pendingApproval: props.pendingApproval,
-    latestReply,
+    messages: props.messages,
+    isWorking,
     seenReplyId,
   });
+  // Re-run only when what the hint says changes, not on every new array.
+  const noticeKey = notice ? `${notice.kind}:${notice.id}:${notice.text}` : "";
+  const latestReplyId = chatDockLatestReply(props.messages)?.id ?? null;
+  const noticeRef = useRef(notice);
+  noticeRef.current = notice;
 
-  const noticeKind = notice?.kind ?? null;
-  const noticeId = notice?.id ?? null;
-  const noticeText = notice?.text ?? "";
   useEffect(() => {
-    if (noticeKind === null || noticeId === null) {
+    const next = noticeRef.current;
+    if (!next) {
       // The approval was answered (here or elsewhere): its hint goes away.
       setHint((current) => (current?.kind === "approval" ? null : current));
       return;
     }
-    const next: ChatDockNotice = { kind: noticeKind, id: noticeId, text: noticeText };
-    setHint((current) => (current?.id === next.id && current.text === next.text ? current : next));
+    setHint(next);
     setUnread(true);
-    if (next.kind === "reply") setSeenReplyId(next.id);
-  }, [noticeKind, noticeId, noticeText]);
+    // The agent's words before an approval are part of the approval hint:
+    // they don't pop up again as a reply after the answer.
+    setSeenReplyId(next.kind === "reply" ? next.id : latestReplyId);
+  }, [noticeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hint || hint.kind !== "reply") return;
@@ -101,21 +110,61 @@ function useDockNotice(props: ChatMiniWindowProps) {
   };
 }
 
+/** The command of an approval, whole: behind "Show command", three lines, then "Show all". */
+function ApprovalCommand({ command }: { command: string | null }) {
+  const [shown, setShown] = useState(false);
+  const [all, setAll] = useState(false);
+  if (!command) return null;
+  const long = command.length > 140 || command.split("\n").length > 3;
+  if (!shown) {
+    return (
+      <Button
+        size="xs"
+        variant="link"
+        className="-ml-2 h-6 text-muted-foreground"
+        onClick={() => setShown(true)}
+      >
+        Show command
+      </Button>
+    );
+  }
+  return (
+    <div className="mt-1.5">
+      <pre
+        className={cn(
+          "whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1 font-mono text-xs leading-4",
+          !all && "line-clamp-3",
+        )}
+      >
+        {command}
+      </pre>
+      {long ? (
+        <Button
+          size="xs"
+          variant="link"
+          className="-ml-2 h-6 text-muted-foreground"
+          onClick={() => setAll((value) => !value)}
+        >
+          {all ? "Show less" : "Show all"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function ApprovalButtons({
   requestId,
   responding,
   onRespond,
-  size = "xs",
 }: {
   requestId: ApprovalRequestId;
   responding: boolean;
   onRespond: ChatMiniWindowProps["onRespondToApproval"];
-  size?: "xs" | "sm";
 }) {
   return (
     <>
       <Button
-        size={size}
+        size="xs"
         variant="outline"
         disabled={responding}
         onClick={() => void onRespond(requestId, "decline")}
@@ -123,7 +172,7 @@ function ApprovalButtons({
         Deny
       </Button>
       <Button
-        size={size}
+        size="xs"
         variant="default"
         disabled={responding}
         onClick={() => void onRespond(requestId, "accept")}
@@ -143,9 +192,7 @@ function MiniWindow(props: ChatMiniWindowProps) {
   const label = CHAT_DOCK_STATUS_LABEL[props.status];
   return (
     <div
-      className="pointer-events-none fixed right-4 z-[70] flex flex-col items-end gap-2"
-      // In the demo the "what to look at" pill sits in the same corner.
-      style={{ bottom: "1rem" }}
+      className="pointer-events-none fixed right-4 bottom-4 z-[70] flex flex-col items-end gap-2"
       data-chat-mini-window="true"
     >
       {hint ? (
@@ -159,30 +206,20 @@ function MiniWindow(props: ChatMiniWindowProps) {
             <ChatDockStatusDot status={props.status} />
             <span className="min-w-0 flex-1 truncate">{props.title}</span>
             {hint.kind === "reply" ? (
-              <button
-                type="button"
+              <Button
+                size="icon-xs"
+                variant="ghost"
                 onClick={dismissHint}
                 aria-label="Hide"
-                className="-mr-1 inline-flex size-5 cursor-pointer items-center justify-center rounded hover:bg-accent hover:text-foreground"
+                className="-my-1 -mr-1"
               >
-                <XIcon className="size-3.5" />
-              </button>
+                <XIcon />
+              </Button>
             ) : null}
           </div>
-          {hint.kind === "approval" ? (
-            <>
-              <div className="mt-1.5 font-medium text-sm">Wants to run</div>
-              <div
-                className="mt-1 truncate rounded-md bg-muted px-2 py-1 font-mono text-xs"
-                title={hint.text}
-              >
-                {hint.text}
-              </div>
-            </>
-          ) : (
-            <div className="mt-1 line-clamp-2 text-sm leading-5">{hint.text}</div>
-          )}
-          <div className="mt-2.5 flex items-center justify-end gap-1.5">
+          <div className="mt-1 line-clamp-2 text-sm leading-5">{hint.text}</div>
+          {hint.kind === "approval" ? <ApprovalCommand command={hint.command} /> : null}
+          <div className="mt-2 flex items-center justify-end gap-1.5">
             {hint.kind === "approval" && props.pendingApproval ? (
               <>
                 <Button size="xs" variant="ghost" className="mr-auto" onClick={props.onOpenChat}>
@@ -210,8 +247,8 @@ function MiniWindow(props: ChatMiniWindowProps) {
       <button
         type="button"
         onClick={props.onRestore}
-        title="Show the chat"
-        aria-label={`Show the chat: ${props.title} · ${label}${unread ? " · new reply" : ""}`}
+        title="Show chat"
+        aria-label={`Show chat: ${props.title} · ${label}${unread ? " · new reply" : ""}`}
         data-chat-mini-pill="true"
         className="pointer-events-auto flex h-9 max-w-[22rem] cursor-pointer items-center gap-2 rounded-full border border-border/70 bg-card/95 pl-3 pr-2.5 shadow-lg shadow-black/10 backdrop-blur-xl hover:bg-card"
       >
@@ -219,7 +256,7 @@ function MiniWindow(props: ChatMiniWindowProps) {
         <span className="min-w-0 truncate font-medium text-[13px]">{props.title}</span>
         <span className="shrink-0 text-muted-foreground text-xs">{label}</span>
         {unread ? <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" /> : null}
-        <Maximize2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        <PanelBottomOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
       </button>
     </div>
   );
@@ -247,11 +284,12 @@ function ColumnWindow(props: ChatMiniWindowProps) {
       aria-label={`Chat: ${props.title}`}
       data-chat-dock-column="true"
     >
-      <div className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b pl-3.5 pr-2 fullscreen:h-9">
+      {/* Same height as the full-screen tab row next to it. */}
+      <div className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b bg-card pl-3.5 pr-2 fullscreen:h-9 wco:h-[env(titlebar-area-height)]">
         <ChatDockStatusDot status={props.status} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-[13px] leading-4">{props.title}</div>
-          <div className="truncate text-muted-foreground text-[11px] leading-4">{label}</div>
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="truncate font-medium text-[13px]">{props.title}</span>
+          <span className="shrink-0 text-muted-foreground text-xs">{label}</span>
         </div>
         <Button
           size="icon-xs"
@@ -269,7 +307,7 @@ function ColumnWindow(props: ChatMiniWindowProps) {
           aria-label="Chat back to the bottom"
           title="Chat back to the bottom"
         >
-          <Maximize2Icon />
+          <PanelBottomOpenIcon />
         </Button>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
@@ -280,10 +318,14 @@ function ColumnWindow(props: ChatMiniWindowProps) {
           className="shrink-0 border-border border-t bg-amber-500/5 px-3.5 py-2.5"
           data-chat-mini-hint="approval"
         >
-          <div className="font-medium text-[13px]">Wants to run</div>
-          <div className="mt-1 truncate rounded-md bg-muted px-2 py-1 font-mono text-xs">
-            {props.pendingApproval.detail ?? "A step that needs your OK"}
+          <div className="text-[13px] leading-5">
+            {chatDockApprovalPhrase({
+              requestKind: props.pendingApproval.requestKind,
+              // The agent's own words are right above in the column.
+              messages: [],
+            })}
           </div>
+          <ApprovalCommand command={props.pendingApproval.detail?.trim() || null} />
           <div className="mt-2 flex justify-end gap-1.5">
             <ApprovalButtons
               requestId={props.pendingApproval.requestId}

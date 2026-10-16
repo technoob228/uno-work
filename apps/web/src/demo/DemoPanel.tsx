@@ -94,6 +94,11 @@ const POINTS: ReadonlyArray<{
     hint: "На Mac — меню «Open in…» / «Share with a link…», на облаке — сразу Share.",
     switches: ["platform"],
   },
+  {
+    key: "p9",
+    title: "Продвинутые настройки тиммейта",
+    hint: "Settings → Connectors; у тиммейта — коннекторы, браузер и логины, пароли, скиллы.",
+  },
 ];
 
 function SwitchRow({ name }: { name: keyof DemoSwitches }) {
@@ -161,10 +166,10 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="demo-panel-pill"
-        className="fixed bottom-2.5 left-2.5 z-[90] inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
+        className="fixed bottom-2.5 left-[16.5rem] z-[90] inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
       >
         <EyeIcon className="size-3.5" />
-        Что смотреть · 9
+        Что смотреть · 10
         <ChevronUpIcon className="size-3.5 text-muted-foreground" />
       </button>
     );

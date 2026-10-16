@@ -165,7 +165,7 @@ export function scopeChoiceLabel(
         ? `In every chat of ${projectName ?? "the project"}`
         : `Pin to project ${projectName ?? ""}`.trim();
     case "global":
-      return "Pin everywhere";
+      return "Show in every chat";
   }
 }
 
@@ -177,6 +177,31 @@ export function scopeHint(scope: PreviewTabScope, projectName: string | null): s
     case "project":
       return `Pinned to project ${projectName ?? ""}`.trim();
     case "global":
-      return "Pinned everywhere — in every chat and screen";
+      return "Shown in every chat";
   }
+}
+
+/**
+ * Widths of the named tabs, like Chrome: each tab shrinks from 180 to 72 px;
+ * when even that doesn't fit, the inactive tabs fold into icons and only the
+ * active one keeps its name (it is always fully in view). Past that the row
+ * scrolls, with a fade on the side that has more.
+ */
+export const TAB_MAX_WIDTH = 180;
+export const TAB_MIN_WIDTH = 72;
+export const TAB_ICON_WIDTH = 28;
+export const TAB_GAP = 4;
+
+export type StripFit = "names" | "icons";
+
+export function fitStripTabs(available: number, count: number): StripFit {
+  if (count <= 1) return "names";
+  return count * TAB_MIN_WIDTH + (count - 1) * TAB_GAP <= available ? "names" : "icons";
+}
+
+/** Short label of a pinned tab: the name without its extension ("README", "pricing"). */
+export function pinLabel(file: Pick<PreviewFile, "name" | "kind">): string {
+  if (file.kind === "app" || file.kind === "browser") return file.name;
+  const dot = file.name.lastIndexOf(".");
+  return dot > 0 ? file.name.slice(0, dot) : file.name;
 }

@@ -8,7 +8,8 @@
  * - The chevron unfolds its chats, newest first: 3, then "Show N more".
  *   Before this, a second chat with Uno could only be found in Settings.
  * - "+" on hover starts a new chat with it; its face opens its page.
- * - "New assistant" at the end starts the setup (`AssistantOnboarding.tsx`).
+ * - "New assistant" at the end starts the setup (`AssistantOnboarding.tsx`)
+ *   while Uno is alone; with a team it moves to the Team block of the pages.
  */
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -33,6 +34,7 @@ import {
 } from "../assistants/assistantTeam.logic";
 import { type TeamMember, useAssistantTeam } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { sidebarDPanel } from "./sidebarDState";
 
@@ -85,13 +87,14 @@ function HoverButton(props: {
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
             aria-label={props.label}
             onClick={props.onClick}
             data-testid={props.testId}
             className={cn(
-              "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100",
+              "text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100",
               props.visible ? "opacity-100" : "opacity-0 group-hover/assistant:opacity-100",
             )}
           />
@@ -175,7 +178,7 @@ const AssistantRow = memo(function AssistantRow(props: {
     >
       <div
         className={cn(
-          "flex h-8 w-full items-center rounded-md transition-colors",
+          "flex h-7 w-full items-center rounded-md transition-colors",
           rowActive ? "bg-sidebar-row-active" : "hover:bg-sidebar-row-hover",
         )}
       >
@@ -187,7 +190,7 @@ const AssistantRow = memo(function AssistantRow(props: {
                 onClick={openPage}
                 aria-label={`${name}'s page`}
                 data-testid="sidebar-assistant-face"
-                className="ml-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                className="ml-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
           >
@@ -209,10 +212,9 @@ const AssistantRow = memo(function AssistantRow(props: {
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          {/* One signal for "waits for you": the dot (the Inbox counts it too). */}
           {!member.configured ? (
             <span className="shrink-0 text-xs text-primary">Set up</span>
-          ) : member.activity === "waiting" && !unfolded ? (
-            <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">needs you</span>
           ) : null}
         </button>
         {chats.length > 0 ? (
@@ -293,14 +295,18 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             renderChat={props.renderChat}
           />
         ))}
+        {/* Critics 16.10: the top of the sidebar is short. "New assistant" has
+            its own row only before there is a team; with one, it is in the
+            Team block of every assistant's page. */}
+        {live.length > 1 ? null : (
         <li className="list-none">
           <button
             type="button"
             onClick={() => openNew()}
             data-testid="sidebar-new-assistant"
-            className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="inline-flex size-7 shrink-0 items-center justify-center">
+            <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center">
               <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/40">
                 <PlusIcon className="size-3" />
               </span>
@@ -308,6 +314,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             New assistant
           </button>
         </li>
+        )}
       </ul>
       <AssistantOnboardingDialog />
     </li>

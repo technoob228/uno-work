@@ -72,7 +72,7 @@ export function mcpProbeProblem(result: McpProbeResult): string {
   return "It didn't answer like a tool server.";
 }
 
-interface ProviderMeta {
+export interface ProviderMeta {
   readonly provider: ConnectorProvider;
   readonly name: string;
   readonly description: string;
@@ -80,7 +80,7 @@ interface ProviderMeta {
 }
 
 /** The mockup's order and words; the console's list fills in the state. */
-const PROVIDERS: ReadonlyArray<ProviderMeta> = [
+export const PROVIDERS: ReadonlyArray<ProviderMeta> = [
   {
     provider: "google-drive",
     name: "Google Drive",
@@ -158,9 +158,9 @@ function Row({
   );
 }
 
-const CONNECTORS_KEY = ["uno-setup", "connectors"] as const;
+export const CONNECTORS_KEY = ["uno-setup", "connectors"] as const;
 
-function useConnectors(environmentId: ReturnType<typeof usePrimaryEnvironmentId>) {
+export function useConnectors(environmentId: ReturnType<typeof usePrimaryEnvironmentId>) {
   return useQuery({
     queryKey: [...CONNECTORS_KEY, environmentId],
     queryFn: async () => {
@@ -457,11 +457,14 @@ function McpServers({
   );
 }
 
-export function ConnectorsStep() {
-  const { completeStep } = useSetupNavigation();
-  const environmentId = usePrimaryEnvironmentId();
+/**
+ * Connect / Disconnect of the four apps: the provider's consent in a small
+ * window, then the list is looked at until the grant lands. Shared by the
+ * list and by the places that offer "Connect GitHub" inline (the teammate's
+ * setup when nothing is connected yet).
+ */
+export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryEnvironmentId>) {
   const queryClient = useQueryClient();
-  const servers = useSettings((settings) => settings.mcpServers);
   const connectors = useConnectors(environmentId);
   const [pending, setPending] = useState<{
     provider: ConnectorProvider;
@@ -470,7 +473,6 @@ export function ConnectorsStep() {
   const byProvider = new Map(
     (connectors.data?.connectors ?? []).map((connector) => [connector.provider, connector]),
   );
-  const connectedCount = [...byProvider.values()].filter((connector) => connector.connected).length;
 
   // While a consent window is open, look for the grant every two seconds: the
   // desktop app opens it in the system browser, which can't message back.
@@ -522,9 +524,54 @@ export function ConnectorsStep() {
     }
   };
 
+  return { connectors, byProvider, pending, connect, disconnect };
+}
+
+/**
+ * The list itself — the four apps in one click and servers of your own. Used
+ * by this step and by Settings → Connectors (the place to manage them since
+ * 16.10), so both show the same thing.
+ */
+export function ConnectorsList(props: { readonly className?: string } = {}) {
+  const environmentId = usePrimaryEnvironmentId();
+  const { connectors, byProvider, pending, connect, disconnect } =
+    useConnectorActions(environmentId);
   const githubConnector = byProvider.get("github");
   const githubViaMachine = connectors.isFetched && githubConnector?.available !== true;
 
+  return (
+    <div
+      className={cn("overflow-hidden rounded-2xl border border-border", props.className)}
+      data-testid="setup-connectors"
+    >
+      {PROVIDERS.map((meta, index) =>
+        meta.provider === "github" && githubViaMachine ? (
+          <GitHubMachineRow key={meta.provider} first={index === 0} />
+        ) : (
+          <ProviderRow
+            key={meta.provider}
+            meta={meta}
+            connector={byProvider.get(meta.provider)}
+            first={index === 0}
+            pending={pending?.provider === meta.provider ? pending.action : null}
+            onConnect={() => void connect(meta.provider)}
+            onDisconnect={() => void disconnect(meta.provider)}
+          />
+        ),
+      )}
+      <McpServers environmentId={environmentId} />
+    </div>
+  );
+}
+
+export function ConnectorsStep() {
+  const { completeStep } = useSetupNavigation();
+  const environmentId = usePrimaryEnvironmentId();
+  const servers = useSettings((settings) => settings.mcpServers);
+  const connectors = useConnectors(environmentId);
+  const connectedCount = (connectors.data?.connectors ?? []).filter(
+    (connector) => connector.connected,
+  ).length;
   return (
     <SetupShell
       step="connectors"
@@ -537,27 +584,7 @@ export function ConnectorsStep() {
         title="Connect your tools"
         lead="Let your AI read and work where your stuff already is. You approve each one, and can disconnect any time."
       />
-      <div
-        className="overflow-hidden rounded-2xl border border-border"
-        data-testid="setup-connectors"
-      >
-        {PROVIDERS.map((meta, index) =>
-          meta.provider === "github" && githubViaMachine ? (
-            <GitHubMachineRow key={meta.provider} first={index === 0} />
-          ) : (
-            <ProviderRow
-              key={meta.provider}
-              meta={meta}
-              connector={byProvider.get(meta.provider)}
-              first={index === 0}
-              pending={pending?.provider === meta.provider ? pending.action : null}
-              onConnect={() => void connect(meta.provider)}
-              onDisconnect={() => void disconnect(meta.provider)}
-            />
-          ),
-        )}
-        <McpServers environmentId={environmentId} />
-      </div>
+      <ConnectorsList />
     </SetupShell>
   );
 }

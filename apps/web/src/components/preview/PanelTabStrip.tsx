@@ -2,19 +2,23 @@
  * The right panel's row of tabs (w0138, point 4): shows which tabs live in
  * this chat and which are kept longer, and lets the person move them.
  *
- * Layout A (default, "pins"): pinned tabs on the left, icon only — first
- * "everywhere", then "project"; a thin divider; then this chat's tabs with
- * their names. On hover a tab shows a pin; the pin and a right-click open the
- * same menu: Keep in this chat / Pin to project <name> / Pin everywhere.
+ * Layout A (default, "pins"): pinned tabs on the left — icons with a tooltip
+ * (the open one shows its short name), first "every chat", then "project";
+ * a divider; then this chat's tabs. On
+ * hover a tab shows a pin; the pin and a right-click open the same menu under
+ * the tab: Keep in this chat / Pin to project <name> / Show in every chat.
  * Dragging a tab across the divider pins it to the project (or back).
  *
  * Layout B ("project", like Codex): what is opened belongs to the project;
- * only "everywhere" tabs are icon pins.
+ * only "every chat" tabs are pins.
  *
- * Tabs the agent opened carry a small robot mark.
+ * Named tabs size like Chrome (`fitStripTabs`): 180 → 72 px, then inactive
+ * tabs fold into icons and the active one stays named and in view; past that
+ * the row scrolls with a fade at the edge. Tabs the agent opened carry a
+ * small robot mark.
  */
 import { BotIcon, PinIcon, XIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import {
@@ -27,6 +31,7 @@ import {
   MenuRadioItem,
   MenuSeparator,
 } from "../ui/menu";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
   DUAL_VIEW_KINDS,
   isTasksTab,
@@ -35,11 +40,16 @@ import {
   usePreviewPane,
 } from "./PreviewPaneContext";
 import {
+  fitStripTabs,
+  pinLabel,
   scopeChoiceLabel,
   scopeForDrop,
   scopeHint,
   splitStripTabs,
+  TAB_MAX_WIDTH,
+  TAB_MIN_WIDTH,
   type PanelTabsLayout,
+  type StripFit,
 } from "./panelTabs.logic";
 import { PREVIEW_TAB_SCOPES, type PreviewTabScope } from "./previewTabScopes";
 import { TasksTabName } from "./TasksTabBody";
@@ -47,18 +57,66 @@ import { TasksTabName } from "./TasksTabBody";
 type KindIcon = React.ComponentType<{ className?: string }>;
 
 const DRAG_TYPE = "application/x-uno-panel-tab";
+/** Room kept after the tabs for the "+" (and the "New tab" chip while it shows). */
+const TRAILING_RESERVE = 36;
 
-/** A point on the screen as an anchor for the menu (right-click). */
-function pointAnchor(x: number, y: number) {
-  return {
-    getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height: 0 }),
-  };
+type MenuState = { readonly file: PreviewFile; readonly anchor: Element } | null;
+
+function AgentMark({ file }: { file: PreviewFile }) {
+  if (file.openedBy !== "agent") return null;
+  return (
+    <BotIcon
+      aria-label="Opened by the agent"
+      className="absolute -right-1 -bottom-1 size-2.5 rounded-full bg-card text-muted-foreground"
+    />
+  );
 }
 
-type MenuState = {
-  readonly file: PreviewFile;
-  readonly anchor: Element | ReturnType<typeof pointAnchor>;
-} | null;
+/** Space for the named tabs and whether the row is scrolled away from either edge. */
+function useStripLayout(count: number, activeId: string | null) {
+  const pinnedRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [fit, setFit] = useState<StripFit>("names");
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const measureEdges = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  };
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    // The row's own box (PreviewPane's strip): its width is what the header
+    // leaves, whatever the tabs need.
+    const row = scroller?.parentElement;
+    if (!scroller || !row) return;
+    const measure = () => {
+      const pinned = pinnedRef.current?.offsetWidth ?? 0;
+      const available = row.clientWidth - pinned - TRAILING_RESERVE;
+      setFit(fitStripTabs(available, count));
+      measureEdges();
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    if (pinnedRef.current) observer.observe(pinnedRef.current);
+    return () => observer.disconnect();
+  }, [count]);
+
+  // The active tab is always fully in view.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !activeId) return;
+    const el = scroller.querySelector(`[data-preview-tab="${CSS.escape(activeId)}"]`);
+    el?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    measureEdges();
+  }, [activeId, fit, count]);
+
+  return { pinnedRef, scrollRef, fit, edges, measureEdges };
+}
 
 export function PanelTabStrip({
   files,
@@ -84,6 +142,7 @@ export function PanelTabStrip({
   const [dropZone, setDropZone] = useState<"pinned" | "named" | null>(null);
 
   const { pinned, named } = splitStripTabs(files, tabScopeById, layout);
+  const { pinnedRef, scrollRef, fit, edges, measureEdges } = useStripLayout(named.length, activeId);
   const inChat = currentChatThreadId !== null;
   const scopeOf = (file: PreviewFile): PreviewTabScope => tabScopeById[file.id] ?? "chat";
   const movable = (file: PreviewFile) => inChat && !isTasksTab(file);
@@ -127,9 +186,10 @@ export function PanelTabStrip({
         }
       : {};
 
-  const openMenuAtPointer = (file: PreviewFile) => (event: React.MouseEvent) => {
-    event.preventDefault();
-    setMenu({ file, anchor: pointAnchor(event.clientX, event.clientY) });
+  /** Menus open under the tab, not over the row. */
+  const openMenuUnderTab = (file: PreviewFile, from: Element) => {
+    const tab = from.closest("[data-preview-tab]") ?? from;
+    setMenu({ file, anchor: tab });
   };
 
   const tooltip = (file: PreviewFile) => {
@@ -137,29 +197,21 @@ export function PanelTabStrip({
     const lines = [`${kindLabel[file.kind]} — ${file.name}`, scopeHint(scopeOf(file), projectName)];
     if (file.openedBy === "agent") lines.push("Opened by the agent");
     if (DUAL_VIEW_KINDS.has(file.kind)) lines.push("Double-click: code ↔ preview");
-    if (movable(file)) lines.push("Right-click to pin or move");
     return lines.join("\n");
   };
 
-  const agentMark = (file: PreviewFile) =>
-    file.openedBy === "agent" ? (
-      <BotIcon
-        aria-label="Opened by the agent"
-        className="absolute -right-1 -bottom-1 size-2.5 rounded-full bg-card text-muted-foreground"
-      />
-    ) : null;
-
-  // Pins sit before the divider; while a chat tab is dragged and there are no
-  // pins yet, an empty slot shows where to drop it.
+  // While a chat tab is dragged and there are no pins yet, an empty slot shows where to drop it.
   const showPinSlot =
     layout === "pins" && pinned.length === 0 && dragging !== null && dragging.scope === "chat";
-  const showDivider = (pinned.length > 0 || showPinSlot) && named.length > 0;
+  const showPins = pinned.length > 0 || showPinSlot;
+  const fade = `linear-gradient(to right, ${edges.left ? "transparent, black 24px" : "black"}, ${
+    edges.right ? "black calc(100% - 24px), transparent" : "black"
+  })`;
 
   return (
-    <>
-      {/* Pins stay in view while the chat's tabs scroll under them, like a browser. */}
-      {pinned.length > 0 || showPinSlot ? (
-        <div className="sticky left-0 z-10 -ml-2 flex shrink-0 items-center bg-card pl-2">
+    <TooltipProvider delay={300} closeDelay={0}>
+      {showPins ? (
+        <div ref={pinnedRef} className="flex shrink-0 items-center">
           <div
             {...dropTarget("pinned")}
             data-testid="panel-pinned-tabs"
@@ -175,34 +227,47 @@ export function PanelTabStrip({
               const groupBreak = index > 0 && scopeOf(pinned[index - 1]!) !== scope;
               return (
                 <Fragment key={file.id}>
-                  {groupBreak ? (
-                    <span aria-hidden className="mx-px h-2.5 w-px bg-border/70" />
-                  ) : null}
-                  <button
-                    type="button"
-                    data-preview-tab={file.id}
-                    data-tab-scope={scope}
-                    {...dragSource(file)}
-                    onClick={() => onSelect(file.id)}
-                    onDoubleClick={() => {
-                      if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
-                    }}
-                    onContextMenu={openMenuAtPointer(file)}
-                    aria-label={`${file.name} (${scopeHint(scope, projectName)})`}
-                    title={tooltip(file)}
-                    className={cn(
-                      "relative inline-flex size-7 shrink-0 items-center justify-center rounded-md",
-                      isActive
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                      dragging?.id === file.id && "opacity-40",
-                    )}
-                  >
-                    <span className="relative inline-flex">
-                      <Icon className="size-3.5" />
-                      {agentMark(file)}
-                    </span>
-                  </button>
+                  {groupBreak ? <span aria-hidden className="mx-0.5 h-3 w-px bg-border" /> : null}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          data-preview-tab={file.id}
+                          data-tab-scope={scope}
+                          {...dragSource(file)}
+                          onClick={() => onSelect(file.id)}
+                          onDoubleClick={() => {
+                            if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            openMenuUnderTab(file, event.currentTarget);
+                          }}
+                          aria-label={`${file.name} (${scopeHint(scope, projectName)})`}
+                          className={cn(
+                            "relative inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11px]",
+                            isActive
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                            dragging?.id === file.id && "opacity-40",
+                          )}
+                        />
+                      }
+                    >
+                      <span className="relative inline-flex shrink-0">
+                        <Icon className="size-3.5" />
+                        <AgentMark file={file} />
+                      </span>
+                      {/* Pins are icons with a tooltip; the open one says its short name. */}
+                      {isActive ? (
+                        <span className="max-w-[4.5rem] truncate">{pinLabel(file)}</span>
+                      ) : null}
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom" className="whitespace-pre-line">
+                      {tooltip(file)}
+                    </TooltipPopup>
+                  </Tooltip>
                 </Fragment>
               );
             })}
@@ -213,19 +278,22 @@ export function PanelTabStrip({
               </span>
             ) : null}
           </div>
-          {showDivider ? (
+          {named.length > 0 ? (
             <span
               aria-hidden
-              className="mx-1 h-4 w-px shrink-0 bg-border"
+              className="mx-1.5 h-5 w-px shrink-0 bg-foreground/25"
               data-testid="panel-tabs-divider"
             />
           ) : null}
         </div>
       ) : null}
       <div
+        ref={scrollRef}
         {...dropTarget("named")}
+        onScroll={measureEdges}
+        style={edges.left || edges.right ? { maskImage: fade, WebkitMaskImage: fade } : undefined}
         className={cn(
-          "flex min-w-0 shrink-0 items-center gap-1 rounded-md transition-colors",
+          "scrollbar-hide flex min-w-0 shrink items-center gap-1 overflow-x-auto rounded-md transition-colors",
           dropZone === "named" && "bg-accent/60",
         )}
       >
@@ -234,12 +302,14 @@ export function PanelTabStrip({
           const scope = scopeOf(file);
           const isActive = file.id === activeId;
           const canPin = layout === "pins" && movable(file);
+          const folded = fit === "icons" && !isActive;
           return (
             <div
               key={file.id}
               role="tab"
               tabIndex={0}
               aria-selected={isActive}
+              aria-label={file.name}
               data-preview-tab={file.id}
               data-tab-scope={scope}
               {...dragSource(file)}
@@ -253,10 +323,22 @@ export function PanelTabStrip({
               onDoubleClick={() => {
                 if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
               }}
-              onContextMenu={openMenuAtPointer(file)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openMenuUnderTab(file, event.currentTarget);
+              }}
               title={tooltip(file)}
+              style={
+                folded
+                  ? undefined
+                  : fit === "icons"
+                    ? // Folded row: the open tab keeps its whole name (up to the max).
+                      { flex: "0 0 auto", maxWidth: TAB_MAX_WIDTH }
+                    : { flex: `0 1 ${TAB_MAX_WIDTH}px`, minWidth: TAB_MIN_WIDTH }
+              }
               className={cn(
-                "group relative inline-flex h-7 shrink-0 cursor-default items-center gap-1.5 rounded-md pr-1 pl-2 text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
+                "group relative inline-flex h-7 cursor-default items-center rounded-md text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
+                folded ? "w-7 shrink-0 justify-center" : "gap-1.5 pr-1 pl-2",
                 isActive
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50",
@@ -265,40 +347,51 @@ export function PanelTabStrip({
             >
               <span className="relative inline-flex shrink-0">
                 <Icon className="size-3.5" />
-                {agentMark(file)}
+                <AgentMark file={file} />
               </span>
-              <span className="max-w-[8rem] truncate">
-                {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
-              </span>
-              {canPin ? (
-                <button
-                  type="button"
-                  aria-label="Pin this tab"
-                  title="Pin: keep it for the project or everywhere"
-                  data-testid="panel-tab-pin"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setMenu({ file, anchor: event.currentTarget });
-                  }}
-                  className={cn(
-                    "-mr-0.5 inline-flex size-4 items-center justify-center rounded opacity-0 hover:bg-background/60 hover:opacity-100 group-hover:opacity-60 focus-visible:opacity-100",
-                    menu?.file.id === file.id && "opacity-100",
-                  )}
-                >
-                  <PinIcon className="size-3" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                aria-label={`Close ${file.name}`}
-                className="inline-flex size-4 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeFile(file.id);
-                }}
-              >
-                <XIcon className="size-3" />
-              </button>
+              {folded ? null : (
+                <>
+                  <span className="min-w-0 flex-1 truncate">
+                    {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
+                  </span>
+                  {canPin ? (
+                    <button
+                      type="button"
+                      aria-label="Pin this tab"
+                      title={
+                        "Pin: keep it for the project or show it in every chat.\nOr drag the tab left of the line."
+                      }
+                      data-testid="panel-tab-pin"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openMenuUnderTab(file, event.currentTarget);
+                      }}
+                      className={cn(
+                        "-mr-0.5 size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
+                        menu?.file.id === file.id
+                          ? "inline-flex"
+                          : "hidden group-hover:inline-flex",
+                      )}
+                    >
+                      <PinIcon className="size-3" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    aria-label={`Close ${file.name}`}
+                    className={cn(
+                      "size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
+                      isActive ? "inline-flex" : "hidden group-hover:inline-flex",
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeFile(file.id);
+                    }}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </>
+              )}
             </div>
           );
         })}
@@ -319,7 +412,7 @@ export function PanelTabStrip({
           setMenu(null);
         }}
       />
-    </>
+    </TooltipProvider>
   );
 }
 
@@ -342,7 +435,7 @@ function TabScopeMenu({
   onScope: (scope: PreviewTabScope) => void;
   onCloseTab: () => void;
 }) {
-  // Order of the choices: from "only here" to "everywhere".
+  // Order of the choices: from "only here" to "every chat".
   const choices = PREVIEW_TAB_SCOPES.toReversed();
   return (
     <Menu
@@ -355,7 +448,8 @@ function TabScopeMenu({
         anchor={menu?.anchor}
         side="bottom"
         align="start"
-        className="w-60"
+        sideOffset={6}
+        className="w-56"
         data-testid="panel-tab-scope-menu"
       >
         <MenuGroup>
@@ -375,11 +469,6 @@ function TabScopeMenu({
         </MenuGroup>
         {movable ? <MenuSeparator /> : null}
         <MenuItem onClick={onCloseTab}>Close tab</MenuItem>
-        {movable && layout === "pins" ? (
-          <div className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
-            Tip: drag a tab left of the line to pin it to the project.
-          </div>
-        ) : null}
       </MenuPopup>
     </Menu>
   );

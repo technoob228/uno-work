@@ -232,6 +232,8 @@ import { SidebarDChatsBar, type SidebarDPickOption } from "./sidebar/SidebarDCha
 import {
   SidebarDComputerChip,
   SidebarDComputerHeader,
+  SidebarDComputerIcon,
+  SidebarDComputersProvider,
   useHomeFolderPaths,
   useSidebarDComputers,
 } from "./sidebar/SidebarDComputers";
@@ -240,7 +242,7 @@ import {
   HOME_FOLDER_GROUP_NAME,
   chatRowShowsComputer,
   effectiveLevels,
-  filterChipLabel,
+  placeShown,
   groupSidebarChats,
   isComputerDimmed,
   livePicks,
@@ -684,8 +686,10 @@ interface SidebarThreadRowProps {
   nested?: boolean;
   /** Sidebar D: started by Uno — its small face before the title. */
   fromUno?: boolean;
-  /** Sidebar D: whether the computer's chip shows (default: on any other computer). */
+  /** Sidebar D: whether the computer's mark shows (default: on any other computer). */
   showMachine?: boolean;
+  /** Sidebar D: the project, muted after the title, when the list is not grouped by it. */
+  placeLabel?: string | null;
   section: SidebarSection;
   isActive: boolean;
   jumpLabel: string | null;
@@ -1087,7 +1091,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <span
               data-testid={`thread-title-${thread.id}`}
               className={cn(
-                "min-w-0 flex-1 truncate text-sm",
+                "min-w-0 truncate text-sm",
+                // A place label after the title gives way first (Misha 16.10).
+                props.placeLabel ? "min-w-[45%] shrink" : "flex-1",
                 props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
                   ? "text-foreground"
                   : shouldRecede
@@ -1100,7 +1106,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </span>
           )}
           {pinIndicator}
-          {machineMark}
+          {props.placeLabel ? (
+            <span
+              className="max-w-[45%] min-w-[2.75rem] shrink-[6] truncate rounded-[4px] bg-muted/70 px-1 py-px text-[10.5px] leading-none text-muted-foreground"
+              data-testid="sidebar-row-place"
+            >
+              {props.placeLabel}
+            </span>
+          ) : null}
+          {(props.showMachine ?? isRemote) ? (
+            <SidebarDComputerChip environmentId={thread.environmentId} />
+          ) : null}
           <span className="relative ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end">
             <span
               className={cn(
@@ -1934,15 +1950,6 @@ export default function Sidebar() {
       })),
     ];
   }, [dComputerIds, dKnownComputers, resolveEnvironmentLabel]);
-  const dDimmedComputers = useMemo(
-    () =>
-      new Set(
-        dKnownComputers
-          .filter((computer) => computer.status === "sleeping" || computer.status === "offline")
-          .flatMap((computer) => (computer.environmentId === null ? [] : [computer.environmentId])),
-      ),
-    [dKnownComputers],
-  );
   const dHomePaths = useHomeFolderPaths(dComputerIds);
   // A computer's home folder: its chats are the "Home folder" group, not a project.
   const dIsHomeProject = useCallback(
@@ -2015,6 +2022,17 @@ export default function Sidebar() {
       allProjects: [...dProjectInfo.entries()].map(([key, info]) => ({ key, name: info.name })),
     });
   }, [activeThreads, assistantChatId, dGroupOf, dProjectInfo, pinnedThreads, threads]);
+  // Uno's running chats name their computer only when they are not all on one
+  // (critics 16.10: "UW" on every row under Uno said nothing).
+  const dUnoComputerCount = useMemo(
+    () => new Set(dGroups.unoRunning.map((thread) => thread.environmentId)).size,
+    [dGroups.unoRunning],
+  );
+  const dUnoShowsComputer = useCallback(
+    (thread: SidebarThreadSummary) =>
+      dMultiComputer && dUnoComputerCount > 1 && thread.environmentId !== dThisComputer,
+    [dMultiComputer, dThisComputer, dUnoComputerCount],
+  );
   // The live chats outside Uno's row: what the views below lay out.
   const dLiveChats = useMemo(() => {
     const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
@@ -3182,8 +3200,10 @@ export default function Sidebar() {
       readonly d?: boolean;
       readonly nested?: boolean;
       readonly underUno?: boolean;
-      /** Sidebar D: the computer's chip (see chatRowShowsComputer). */
+      /** Sidebar D: the computer's mark (see chatRowShowsComputer). */
       readonly showMachine?: boolean;
+      /** Sidebar D: the project after the title (see placeShown). */
+      readonly placeLabel?: string | null;
     },
   ) => {
     const threadKey = threadKeyOf(thread);
@@ -3197,7 +3217,12 @@ export default function Sidebar() {
         thread={thread}
         variant={variant}
         nested={options?.nested ?? false}
-        {...(options?.showMachine !== undefined ? { showMachine: options.showMachine } : {})}
+        {...(options?.showMachine !== undefined
+          ? { showMachine: options.showMachine }
+          : options?.underUno
+            ? { showMachine: dUnoShowsComputer(thread) }
+            : {})}
+        {...(options?.placeLabel ? { placeLabel: options.placeLabel } : {})}
         fromUno={
           options?.d === true && !options.underUno
             ? isFromAssistant(thread, assistantChatId)
@@ -3404,12 +3429,10 @@ export default function Sidebar() {
   };
   // A computer's chip on a row, grey while it sleeps or can't be reached.
   const dChipFor = (environmentId: string) => (
-    <SidebarDComputerChip
-      key={environmentId}
-      environmentId={environmentId as EnvironmentId}
-      dimmed={dDimmedComputers.has(environmentId)}
-    />
+    <SidebarDComputerChip key={environmentId} environmentId={environmentId} />
   );
+  // What a chat row still says about its place: the project unless grouped by it.
+  const dPlace = placeShown(dLevels, dMultiComputer);
   const dRowChips = (computers: ReadonlyArray<string>, underComputer: boolean) => {
     const shown = projectRowComputers({
       computers,
@@ -3453,6 +3476,7 @@ export default function Sidebar() {
           d: true,
           nested: place.nested,
           showMachine: dChatChip(thread, place.underComputer, place.projectComputers),
+          placeLabel: dPlace.project ? dGroupOf(thread).name : null,
         }),
       )}
       {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
@@ -3564,8 +3588,7 @@ export default function Sidebar() {
             {
               key: computer.environmentId,
               label: computer.label,
-              icon: dChipFor(computer.environmentId),
-              dimmed: isComputerDimmed(computer),
+              icon: <SidebarDComputerIcon computer={computer} />,
             },
           ],
   );
@@ -3586,7 +3609,10 @@ export default function Sidebar() {
               }
             />
             <SidebarDChatsBar
-              title={sidebarDTitle({ levels: dLevels, projectNames: dPickedProjectNames })}
+              title={sidebarDTitle({
+                projectNames: dPickedProjectNames,
+                computerNames: dPickedComputerNames,
+              })}
               groupInHeader={dGroupInHeader}
               levels={dLevelsChosen}
               multiComputer={dMultiComputer}
@@ -3599,10 +3625,10 @@ export default function Sidebar() {
               computers={dComputerOptions}
               pickedComputers={dComputerPicks}
               onComputersChange={setDComputerPicks}
-              filterChip={filterChipLabel({
-                projectNames: dPickedProjectNames,
-                computerNames: dPickedComputerNames,
-              })}
+              onOpenSettings={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({ to: "/settings" });
+              }}
               onClearFilters={() => {
                 setDProjectPicks(null);
                 setDComputerPicks(null);
@@ -3703,6 +3729,7 @@ export default function Sidebar() {
     const showPanel = dRailShown && dPanelOpen && typeof document !== "undefined";
     return (
       <MachineIdentityProvider identities={machineIdentities}>
+        <SidebarDComputersProvider computers={dComputers}>
         <SidebarDHeader isElectron={isElectron} />
         <SidebarGroup className="shrink-0 px-[var(--sidebar-content-inset)] pt-0.5 pb-1">
           {/* Sidebar D (0.0.105): Files, Apps & sites, Needs you when something
@@ -3760,6 +3787,7 @@ export default function Sidebar() {
             )
           : null}
         {sharedDialogs}
+        </SidebarDComputersProvider>
       </MachineIdentityProvider>
     );
   }
