@@ -92,12 +92,23 @@ function notEnabled(error: unknown): boolean {
   return error instanceof AccountHttpError && error.status === 404;
 }
 
-export function ProtectionSection() {
-  const queryClient = useQueryClient();
-  const query = useQuery({
+export function useProtection() {
+  return useQuery({
     queryKey: protectionKey,
     queryFn: async () => (await accountRequest("GET", protectionPath)) as Protection,
+    retry: (count, error) => !notEnabled(error) && count < 2,
   });
+}
+
+/** Protection is off for this account (the server said 404): the page stays as before. */
+export function useProtectionOff(): boolean {
+  const query = useProtection();
+  return query.isError && notEnabled(query.error);
+}
+
+export function ProtectionSection() {
+  const queryClient = useQueryClient();
+  const query = useProtection();
   const setIsolation = useMutation({
     mutationFn: async (body: IsolationBody) =>
       (await accountRequest("PUT", isolationPath, body)) as Protection,
