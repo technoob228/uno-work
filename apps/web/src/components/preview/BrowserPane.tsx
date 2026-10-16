@@ -1068,6 +1068,9 @@ function BrowserView({
                 <iframe
                   ref={attachIframe}
                   src={mountSrc}
+                  // Same origin on purpose (Comment / Debug reach the page);
+                  // no top navigation, so a page can't take Work away.
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
                   title={tab.name || "Browser"}
                   className={cn(
                     "border-0 bg-white",

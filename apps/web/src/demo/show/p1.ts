@@ -14,6 +14,7 @@ interface PaneHandle {
   readonly currentChatThreadId: string | null;
   readonly files: ReadonlyArray<unknown>;
   readonly setOpen: (open: boolean) => void;
+  readonly setWidth?: (width: number) => void;
   readonly setPreviewLayoutMode: (mode: "sidebar" | "focus") => void;
 }
 
@@ -38,6 +39,7 @@ demoShow.p1 = async () => {
   });
   await waitFor(() => pane()?.currentChatThreadId === CHAT);
   pane()?.setOpen(true);
+  pane()?.setWidth?.(Math.round(Math.min(600, window.innerWidth * 0.42)));
   await new Promise((resolve) => setTimeout(resolve, 200));
   // Tabs already open in this chat: "+" shows the launcher over them.
   if ((pane()?.files.length ?? 0) > 0) {

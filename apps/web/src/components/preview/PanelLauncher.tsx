@@ -227,7 +227,7 @@ export function PanelLauncher({
             <h3 className="text-[13px] font-semibold text-foreground">Open in the panel</h3>
             <p className="text-xs text-muted-foreground">Press a letter to open.</p>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(9.75rem,1fr))] gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(max(11.5rem,calc(50%-0.25rem)),1fr))] gap-2">
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
               return (
