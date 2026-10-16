@@ -33,5 +33,6 @@ export function useContinueOnComputer() {
     [launchers, uno],
   );
 
-  return { available: environmentId !== null, run };
+  /** ready: Uno's engine has been checked — before that a hand-off would start on no model. */
+  return { available: environmentId !== null, ready: uno.ready, run };
 }

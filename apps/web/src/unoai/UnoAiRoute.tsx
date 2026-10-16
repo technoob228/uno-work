@@ -38,7 +38,7 @@ export function UnoAiRoute({ search }: { search: UnoAiSearch }) {
 }
 
 function ContinueHere({ chatId }: { chatId: string }) {
-  const { available, run } = useContinueOnComputer();
+  const { available, ready, run } = useContinueOnComputer();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!available) return null;
@@ -47,7 +47,7 @@ function ContinueHere({ chatId }: { chatId: string }) {
       <Button
         size="xs"
         variant="outline"
-        disabled={busy}
+        disabled={busy || !ready}
         onClick={async () => {
           setBusy(true);
           setErr(null);
@@ -62,7 +62,7 @@ function ContinueHere({ chatId }: { chatId: string }) {
         data-testid="uno-ai-continue-here"
         title={err ?? "Uno on this computer takes the conversation over"}
       >
-        {busy ? <LoaderIcon className="animate-spin" /> : <MonitorUpIcon />}
+        {busy || !ready ? <LoaderIcon className="animate-spin" /> : <MonitorUpIcon />}
         Continue on this computer
       </Button>
     </>
