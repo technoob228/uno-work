@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { homedir } from "node:os";
 
 import type {
   BridgeSecretRequestEvent,
@@ -11,6 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context, Deferred, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 
+import { withUnoCliOnPath } from "./appSdk/unoCliPath.ts";
 import { isDirectLocalRequest } from "./auth/loopbackPeer.ts";
 import { ServerConfig } from "./config.ts";
 import { registerKnownSecret } from "./secretRedaction.ts";
@@ -569,7 +571,11 @@ export const makeBrowserBridge = (input: {
       baseUrl,
       applyEnvironment: (base, context) => {
         const overlay = scopedEnvironment(context);
-        const next: NodeJS.ProcessEnv = { ...base, ...overlay };
+        // With the bridge comes its shell client: `uno` (~/.uno/sdk/bin, sdkFiles.ts).
+        const next: NodeJS.ProcessEnv = {
+          ...(baseUrl ? withUnoCliOnPath(base, homedir()) : base),
+          ...overlay,
+        };
         if (overlay[BROWSER_BRIDGE_TOKEN_ENV] === undefined) {
           delete next[BROWSER_BRIDGE_TOKEN_ENV];
         }

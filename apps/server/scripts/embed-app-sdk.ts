@@ -16,6 +16,8 @@ export const SOURCES = {
   jsTypes: "packages/app-sdk/src/uno-app.d.ts",
   chatComponent: "packages/app-sdk/src/uno-chat.js",
   python: "sdk/python/uno_app.py",
+  /** The `uno` shell command (~/.uno/sdk/bin/uno runs it). */
+  cli: "packages/app-sdk/src/uno-cli.mjs",
 } as const;
 export const TARGET = "apps/server/src/appSdk/sdkBundle.generated.ts";
 
