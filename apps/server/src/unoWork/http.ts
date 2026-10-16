@@ -308,6 +308,10 @@ const makeDeps = (input: {
         }),
       machineApps: { list: machineApps.list, action: machineApps.action },
       resources: computerResources.snapshot,
+      disk: {
+        usage: computerResources.diskUsage({}),
+        clean: (input) => computerResources.clean(input),
+      },
       computerState: unoComputer.getState(),
       files: {
         list: (args) => files.list(args),

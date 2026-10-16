@@ -373,6 +373,14 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Checked this computer",
     "Couldn't check this computer",
   ],
+  computer_cleanup: [
+    "Looking for space to free…",
+    (c) => {
+      const freed = text(c.result, "freed");
+      return freed ? `Freed ${freed} of disk space` : "Checked what fills the disk";
+    },
+    "Couldn't free disk space",
+  ],
   apps_list: ["Looking at your apps…", (c) => countOf(c, "apps", "apps"), "Couldn't read the apps"],
   app_start: [
     "Starting the app…",

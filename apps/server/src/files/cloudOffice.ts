@@ -10,8 +10,9 @@
  *   the current object again and compares versions. Someone else saved
  *   meanwhile (another computer, another tab, an upload in Files) → conflict,
  *   nothing is overwritten. Otherwise the current object is kept as a version
- *   under `<folder>/.versions/<name>/` (last {@link CLOUD_OFFICE_KEEP_VERSIONS})
- *   and the new bytes replace it.
+ *   under `<folder>/.versions/<name>/` (last {@link CLOUD_OFFICE_KEEP_VERSIONS},
+ *   the scheme every cloud overwrite uses — cloudVersions.ts) and the new
+ *   bytes replace it.
  *
  * The version is our own content hash, not the S3 ETag: a presigned GET is
  * the one thing every console gives us, and hashing what we download can't
@@ -24,15 +25,14 @@ import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
 import {
-  CLOUD_VERSIONS_FOLDER,
   CloudError,
-  cloudDelete,
-  cloudList,
   cloudPresign,
   cloudUpload,
+  pruneCloudVersions,
   type CloudDeps,
 } from "./cloudStorage.ts";
 import { bytesUploadSource } from "./cloudUpload.ts";
+import { CLOUD_KEEP_VERSIONS, cloudVersionKey, isCloudVersionKey } from "./cloudVersions.ts";
 import {
   contentVersion,
   looksLikeOfficeArchive,
@@ -41,7 +41,7 @@ import {
 } from "./shareOffice.ts";
 
 /** Older copies kept next to a Cloud document (they count toward the quota). */
-export const CLOUD_OFFICE_KEEP_VERSIONS = 10;
+export const CLOUD_OFFICE_KEEP_VERSIONS = CLOUD_KEEP_VERSIONS;
 /** Hidden folder in the home where bytes wait between the page and the cloud. */
 export const CLOUD_OFFICE_STAGING_DIR = ".uno-office-cloud";
 
@@ -62,20 +62,12 @@ function nameOf(key: string): string {
   return key.slice(key.lastIndexOf("/") + 1);
 }
 
-/** Where the older copies of `key` live: `<folder>/.versions/<name>/`. */
-export function cloudVersionsPrefix(key: string): string {
-  const slash = key.lastIndexOf("/");
-  return `${key.slice(0, slash + 1)}${CLOUD_VERSIONS_FOLDER}/${key.slice(slash + 1)}/`;
-}
-
-function versionStamp(date: Date): string {
-  return date.toISOString().replace(/[:.]/g, "-");
-}
+export { cloudVersionsPrefix } from "./cloudVersions.ts";
 
 function checkKey(key: string) {
   const info = officeShareInfo(nameOf(key));
   if (!info || key.endsWith("/")) throw new CloudError("Office can't open this file.");
-  if (key.split("/").includes(CLOUD_VERSIONS_FOLDER)) {
+  if (isCloudVersionKey(key)) {
     throw new CloudError("This is an older copy. Download it, or copy it to this computer.");
   }
   return info;
@@ -166,16 +158,6 @@ async function withKeyLock<T>(key: string, task: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Drops all but the newest {@link CLOUD_OFFICE_KEEP_VERSIONS} older copies. Best effort. */
-async function pruneVersions(deps: CloudDeps, bucketId: number, key: string) {
-  const listing = await cloudList(deps, { bucketId, prefix: cloudVersionsPrefix(key) });
-  if (!listing.listingSupported) return;
-  const keys = listing.objects.map((object) => object.key).toSorted();
-  for (const stale of keys.slice(0, Math.max(0, keys.length - CLOUD_OFFICE_KEEP_VERSIONS))) {
-    await cloudDelete(deps, bucketId, stale);
-  }
-}
-
 /**
  * Put `bytes` in place of the Cloud document `key`, keeping the current
  * content as an older copy. `baseVersion` is what the page opened; a
@@ -212,17 +194,15 @@ export async function saveCloudOffice(
     }
     const newVersion = contentVersion(input.bytes);
     if (current !== null && currentVersion !== newVersion) {
-      const ext = info.extension;
-      const stamp = versionStamp(input.now ?? new Date());
       await upload(
         deps,
         input.bucketId,
-        `${cloudVersionsPrefix(input.key)}${stamp}.${ext}`,
+        cloudVersionKey(input.key, input.now ?? new Date(), info.extension),
         current,
       );
     }
     await upload(deps, input.bucketId, input.key, input.bytes);
-    await pruneVersions(deps, input.bucketId, input.key).catch(() => undefined);
+    await pruneCloudVersions(deps, input.bucketId, input.key).catch(() => undefined);
     return { kind: "saved", version: newVersion } as const;
   });
 }

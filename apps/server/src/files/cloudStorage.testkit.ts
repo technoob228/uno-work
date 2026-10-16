@@ -3,13 +3,21 @@
  *
  * @module files/cloudStorage.testkit
  */
+import { createHash } from "node:crypto";
+
 import { ControlPlaneHttpError } from "../workspaceRegistry/unoCloudParse.ts";
 import type { CloudDeps } from "./cloudStorage.ts";
 
-/** A fake console + S3: buckets, a key/value object store, presigned URLs. */
+/**
+ * A fake console + S3: buckets, a key/value object store, presigned URLs.
+ * GETs answer with Content-Length and a plain-MD5 ETag, like R2 for a
+ * single-part upload; deleting a key ending in "/" deletes the whole folder.
+ */
 export function fakeCloud(options: { listing?: boolean } = {}) {
   const objects = new Map<string, Uint8Array>();
   const calls: string[] = [];
+  /** Request headers of every storage GET. */
+  const gets: Array<Headers> = [];
   const bucket = { id: 7, name: "docs", used_bytes: 1234 };
   const fetchJson = async (token: string, path: string, init?: RequestInit) => {
     calls.push(`${init?.method ?? "GET"} ${path}`);
@@ -38,7 +46,10 @@ export function fakeCloud(options: { listing?: boolean } = {}) {
     const deleteMatch = /^\/api\/v1\/buckets\/7\/objects\?key=(.*)$/.exec(path);
     if (deleteMatch && init?.method === "DELETE") {
       const key = decodeURIComponent(deleteMatch[1]!);
-      return { deleted: objects.delete(key) ? 1 : 0 };
+      if (!key.endsWith("/")) return { deleted: objects.delete(key) ? 1 : 0 };
+      const gone = [...objects.keys()].filter((candidate) => candidate.startsWith(key));
+      for (const candidate of gone) objects.delete(candidate);
+      return { deleted: gone.length };
     }
     if (path === "/api/v1/buckets/7/presign") {
       const body = JSON.parse(String(init?.body)) as { key: string; method: string };
@@ -59,9 +70,17 @@ export function fakeCloud(options: { listing?: boolean } = {}) {
       );
       return new Response(null, { status: 200 });
     }
+    gets.push(new Headers(init?.headers));
     const bytes = objects.get(key);
-    return bytes ? new Response(bytes) : new Response("missing", { status: 404 });
+    return bytes
+      ? new Response(bytes, {
+          headers: {
+            "content-length": String(bytes.length),
+            etag: `"${createHash("md5").update(bytes).digest("hex")}"`,
+          },
+        })
+      : new Response("missing", { status: 404 });
   }) as typeof fetch;
   const deps: CloudDeps = { token: "machine-token", fetchJson, fetchImpl };
-  return { deps, objects, calls };
+  return { deps, objects, calls, gets };
 }

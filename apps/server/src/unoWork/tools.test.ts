@@ -555,6 +555,54 @@ describe("approval gate", () => {
     expect(calls[1]!.destinationPath).toBe(path.join(home, "Documents"));
   });
 
+  it("drive_get points the agent at computer_cleanup when the disk is too full", async () => {
+    const { deps } = makeDeps();
+    const withDrive: UnoWorkToolDeps = {
+      ...deps,
+      files: {
+        ...deps.files,
+        driveState: Effect.succeed({ available: true, bucketId: 9 } as never),
+        cloudCopyToComputer: () =>
+          Effect.fail({
+            message:
+              "Not enough space on this computer: needs 3.0 GB, 2.0 GB free. Free up space or pick fewer files.",
+          }),
+      },
+    };
+    const result = await run("drive_get", withDrive, { keys: ["big.zip"] });
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") return;
+    expect(result.failure.message).toBe(
+      "Not enough space on this computer: needs 3.0 GB, 2.0 GB free. Free space with computer_cleanup or pick fewer files.",
+    );
+  });
+
+  it("drive_save says which files replaced one and kept the old as a version", async () => {
+    const { deps } = makeDeps();
+    const withDrive: UnoWorkToolDeps = {
+      ...deps,
+      files: {
+        ...deps.files,
+        driveState: Effect.succeed({ available: true, bucketId: 9 } as never),
+        cloudCopyToCloud: () =>
+          Effect.succeed({
+            files: 1,
+            bytes: 3,
+            skipped: [],
+            overwritten: [{ key: "Reports/q3.pdf", versionKept: true }],
+          }),
+      },
+    };
+    const result = await run("drive_save", withDrive, { paths: ["~/q3.pdf"], folder: "Reports" });
+    expect(result._tag).toBe("Success");
+    if (result._tag !== "Success") return;
+    expect(result.success).toMatchObject({
+      ok: true,
+      folder: "Reports/",
+      overwritten: [{ key: "Reports/q3.pdf", versionKept: true }],
+    });
+  });
+
   it("request_secret: wait false asks the bridge not to hold the turn", async () => {
     const { deps, recorded } = makeDeps();
     await run("request_secret", deps, { name: "TELEGRAM_BOT_TOKEN", wait: false });
@@ -1628,5 +1676,104 @@ describe("assistant_connect: the built-in assistant, in a bot of its own", () =>
     const { deps } = makeDeps();
     const result = await run("assistant_connect", deps, {});
     expect(result._tag).toBe("Failure");
+  });
+});
+
+describe("computer_cleanup", () => {
+  const usage = (home: string) => ({
+    home,
+    path: home,
+    scanning: false,
+    scannedAt: null,
+    totalBytes: 9 * 1024 ** 3,
+    entries: [
+      { name: "projects", path: path.join(home, "projects"), bytes: 6 * 1024 ** 3, isDir: true },
+    ],
+    unreadable: 0,
+    volumes: [{ label: "Disk", mount: home, totalGb: 20, usedGb: 18, freeGb: 2 }],
+    cleanables: [
+      {
+        id: "go-cache",
+        label: "Go build cache",
+        description: "",
+        bytes: 3 * 1024 ** 3,
+        canClean: true,
+        blockedReason: null,
+      },
+      {
+        id: "trash",
+        label: "Trash",
+        description: "",
+        bytes: 1024 ** 3,
+        canClean: true,
+        blockedReason: null,
+      },
+      {
+        id: "npm-cache",
+        label: "npm download cache",
+        description: "",
+        bytes: 200 * 1024 ** 2,
+        canClean: true,
+        blockedReason: null,
+      },
+    ],
+    docker: {
+      access: "not-running" as const,
+      imagesBytes: null,
+      containersBytes: null,
+      volumesBytes: null,
+      buildCacheBytes: null,
+      reclaimableBytes: null,
+    },
+    outsideHomeBytes: null,
+    error: null,
+  });
+
+  const withDisk = (options: Parameters<typeof makeDeps>[0] = {}) => {
+    const made = makeDeps(options);
+    const cleaned: string[] = [];
+    const deps: UnoWorkToolDeps = {
+      ...made.deps,
+      disk: {
+        usage: Effect.succeed(usage(made.home)),
+        clean: ({ id }) =>
+          Effect.sync(() => {
+            cleaned.push(id);
+            return { freedBytes: id === "go-cache" ? 3 * 1024 ** 3 : 200 * 1024 ** 2, message: "" };
+          }),
+      },
+    };
+    return { ...made, deps, cleaned };
+  };
+
+  it("looks without asking and never offers the Trash", async () => {
+    const { deps, recorded, cleaned } = withDisk({ runtimeMode: "approval-required" });
+    const result = await run("computer_cleanup", deps, {});
+    expect(result._tag).toBe("Success");
+    if (result._tag !== "Success") return;
+    const answer = result.success as {
+      cleanable: Array<{ id: string; size: string }>;
+      biggestInHome: unknown[];
+    };
+    expect(answer.cleanable.map((item) => item.id)).toEqual(["go-cache", "npm-cache"]);
+    expect(answer.cleanable[0]?.size).toBe("3.0 GB");
+    expect(answer.biggestInHome).toEqual([{ path: "~/projects", size: "6.0 GB" }]);
+    expect(recorded.approvals).toEqual([]);
+    expect(cleaned).toEqual([]);
+  });
+
+  it("apply empties the caches (asking in Ask mode) and keeps the Trash", async () => {
+    const { deps, recorded, cleaned } = withDisk({ runtimeMode: "approval-required" });
+    const result = await run("computer_cleanup", deps, { apply: true });
+    expect(result._tag).toBe("Success");
+    expect(cleaned).toEqual(["go-cache", "npm-cache"]);
+    expect(recorded.approvals).toHaveLength(1);
+    if (result._tag === "Success") expect(result.success).toMatchObject({ freed: "3.2 GB" });
+  });
+
+  it("apply with only cleans just those", async () => {
+    const { deps, cleaned } = withDisk();
+    await run("computer_cleanup", deps, { apply: true, only: ["npm-cache", "trash"] });
+    expect(cleaned).toEqual(["npm-cache"]);
   });
 });

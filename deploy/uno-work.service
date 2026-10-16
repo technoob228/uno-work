@@ -37,6 +37,19 @@ RestartSec=2
 TimeoutStopSec=20
 KillSignal=SIGTERM
 
+# Low memory (box 395 hung on 01.09, Dax's build OOM'd a 2 GB box on 16.10).
+# Agents and their builds live in this unit's cgroup. systemd's default
+# OOMPolicy=stop tears down the WHOLE unit — the daemon and every chat's agent —
+# when the kernel OOM-kills any one of them; with `continue` only the killed
+# build dies. earlyoom (install.sh, "Early OOM killer") stops the heaviest
+# process before the kernel has to; it spares this daemon by its process name
+# (uno-work-daemon, see the launcher in install.sh).
+# No OOMScoreAdjust here: oom_score_adj is inherited at fork, so a negative
+# value would shield every agent and build the daemon starts as well — the
+# kernel would then pick the person's own programs, ssh sessions and
+# containers first.
+OOMPolicy=continue
+
 # The agent legitimately writes all over the user's home, so the sandbox is
 # deliberately narrow: protect the OS, not the workspace.
 NoNewPrivileges=true

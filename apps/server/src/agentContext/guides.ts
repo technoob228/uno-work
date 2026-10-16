@@ -17,6 +17,7 @@ import { UNO_WORK_BRIEF_MARKDOWN } from "./unoWorkBrief.generated.ts";
 
 export const UNO_WORK_GUIDE_TOPICS = [
   "overview",
+  "computer",
   "apps",
   "app-sdk",
   "widgets",
@@ -60,6 +61,36 @@ function section(markdown: string, headingPrefix: string): string {
   );
 }
 
+/**
+ * How an AI works within this computer: its plan's memory, disk and cores, the
+ * cloud for what the person keeps, git for versions. Misha 16.10 (prod walk,
+ * item 5): agents must know what they have, not kill memory or disk, and use
+ * the cloud and git seamlessly across computers.
+ */
+const COMPUTER_GUIDE = `## Working within this computer
+
+This computer has what its plan gives: \`computer_status\` shows memory, cores and disk (\`unoCloudComputer\`: ramMb, vcpu, diskGb), what is used now and warnings in \`notes\`. Small plans are small (2 GB of memory, a 20 GB disk is common): a careless install or build stops everything, your own chat included.
+
+### Before heavy work
+Check \`computer_status\` before installs, builds, test runs, docker images, datasets, models or big downloads.
+- **Disk.** A warning in \`notes\`, or less free than the job needs plus ~2 GB: run \`computer_cleanup\` (look, then \`apply: true\`; it empties only caches that refill themselves). Still short: move big files the person keeps to Uno Drive (\`drive_save\`), and ask before deleting any of their files. If the work really needs more, say what is short in numbers; the person can add disk in Uno Work → This computer.
+- **Memory.** One heavy job at a time. Build and test with as many workers as cores, not more (\`make -j<vcpu>\`, \`--maxWorkers=<vcpu>\`); don't load a model or dataset bigger than half the free memory. When memory runs out, the biggest job is stopped to save the computer.
+- **Temporary files** go to \`$TMPDIR\` (on the disk), never \`/tmp\`: on a cloud computer \`/tmp\` lives in memory. Delete what you made once the job is done.
+- **Stop what you started.** Dev servers, watchers and background jobs you no longer need keep memory: stop them when the task is done (an app the person keeps is registered with \`app_register\` instead).
+
+### Where things go
+- **The person's files and results** (documents, reports, PDFs, images, recordings, exports, archives, datasets, backups): Uno Drive — \`drive_save\` from here, \`drive_get\` back, \`drive_share_link\` to send. It is roomy and the same on every computer of the account; this disk is a working disk. Saving over a file in the Drive keeps the old one as a version.
+- **Code**: \`~/projects/<name>\`, one folder per project. One working copy per task: don't clone or copy a project again "to be safe", and don't make extra git worktrees; each has its own \`node_modules\`/\`.venv\` (hundreds of MB).
+- **Never on the disk**: a second copy of what is already in the Drive, big downloads you only need once (stream them or delete after), media inside a git repository.
+- In a shell or a script the same is one command: \`uno status\`, \`uno cleanup [--apply]\`, \`uno drive ls|put|get|link\`, \`uno guide <topic>\`.
+
+### Versions with git
+- Every project folder is a git repository: \`git init\` if it isn't; commit after each finished step with a message a person understands. That history is how work comes back after a mistake.
+- First \`.gitignore\`, then the first commit: \`.env\`, keys, \`node_modules/\`, \`.venv/\`, \`dist/\`, \`build/\`, caches, and big binaries (videos, archives, datasets, models: they belong in the Drive). Check \`git status\` before every commit; never \`git add\` a secret.
+- Git needs an author: if a commit says "Please tell me who you are", set \`git config --global user.name\` and \`user.email\` once for this computer — the person's name and email if you know them, else \`Uno Work\` and \`work@noreply.uno.place\`.
+- **GitHub**: cloning a public repository just works. A private one or a push needs the person's access: ask them to connect GitHub, or to add this computer's SSH key (show \`~/.ssh/id_ed25519.pub\`, make it with \`ssh-keygen -t ed25519\` if missing) at github.com/settings/keys. Never ask for a GitHub password or token in the chat (a token goes through \`request_secret\`). \`gh\` isn't installed: for issues, pull requests and files use the connected GitHub tools.
+- **Another computer of the same person**: hand work over through the project's git remote (push here, pull there) or the Drive for documents; never copy whole folders with \`node_modules\` around.`;
+
 const HTTP_FALLBACK_NOTE =
   "Prefer the `uno-work` tools named above. The raw HTTP API below is what they call; use it only when the tools are not available in your session.";
 
@@ -78,6 +109,8 @@ export function buildUnoWorkGuide(
   switch (topic) {
     case "overview":
       return UNO_WORK_BRIEF_MARKDOWN;
+    case "computer":
+      return COMPUTER_GUIDE;
     case "apps":
       return [
         "Register with the `app_register` tool (it writes and validates the manifest below); `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_remove` manage it afterwards.",

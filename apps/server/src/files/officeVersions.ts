@@ -14,7 +14,7 @@
 import fsPromises from "node:fs/promises";
 import nodePath from "node:path";
 
-import { cloudVersionsPrefix } from "./cloudOffice.ts";
+import { cloudVersionsPrefix } from "./cloudVersions.ts";
 import { cloudList, type CloudDeps } from "./cloudStorage.ts";
 
 export interface OfficeVersion {

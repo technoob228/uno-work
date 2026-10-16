@@ -37,6 +37,8 @@ import type {
   UnoCloudState,
   UnoComputerResizeOptions,
   UnoComputerResources,
+  UnoDiskCleanResult,
+  UnoDiskUsage,
   UnoComputerState,
   UnoMachineApp,
   UnoMachineAppActionInput,
@@ -52,6 +54,7 @@ import {
   type GeneratedImage,
 } from "../assistants/imageGenerate.ts";
 import { uploadsMonthDir } from "../files/chatUploads.ts";
+import { agentDiskSpaceMessage } from "../files/diskSpace.ts";
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import {
   APP_TYPE_TELEGRAM_BOT,
@@ -60,6 +63,8 @@ import {
 } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
+import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
+import { resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ToolApprovalOutcome } from "../browserBridge.ts";
@@ -157,6 +162,13 @@ export interface UnoWorkToolDeps {
     ) => Effect.Effect<UnoMachineApps, { readonly message: string }>;
   };
   readonly resources: Effect.Effect<UnoComputerResources>;
+  /** What fills the home disk and the caches that can be emptied (Computer → Disk). */
+  readonly disk?: {
+    readonly usage: Effect.Effect<UnoDiskUsage, { readonly message: string }>;
+    readonly clean: (input: {
+      readonly id: string;
+    }) => Effect.Effect<UnoDiskCleanResult, { readonly message: string }>;
+  };
   readonly computerState: Effect.Effect<UnoComputerState>;
   readonly files: {
     readonly list: (input: {
@@ -449,6 +461,29 @@ const num = (args: Record<string, unknown>, key: string): number | undefined =>
   typeof args[key] === "number" ? (args[key] as number) : undefined;
 const bool = (args: Record<string, unknown>, key: string): boolean | undefined =>
   typeof args[key] === "boolean" ? (args[key] as boolean) : undefined;
+const strArray = (args: Record<string, unknown>, key: string): string[] | undefined =>
+  Array.isArray(args[key])
+    ? (args[key] as unknown[]).filter((item): item is string => typeof item === "string")
+    : undefined;
+
+/** Clean-up targets an agent never empties: Trash holds files the person deleted. */
+const CLEANUP_NEVER: ReadonlySet<string> = new Set(["trash"]);
+
+/**
+ * The home disk answer, waiting up to ~20 s for the first measurement (the
+ * daemon measures in the background and answers "scanning" meanwhile).
+ */
+const readDiskUsage = (
+  usage: Effect.Effect<UnoDiskUsage, { readonly message: string }>,
+): Effect.Effect<UnoDiskUsage, UnoWorkToolError> =>
+  Effect.gen(function* () {
+    let answer = yield* asToolError(usage);
+    for (let attempt = 0; answer.scanning && attempt < 8; attempt++) {
+      yield* Effect.sleep("2500 millis");
+      answer = yield* asToolError(usage);
+    }
+    return answer;
+  });
 
 /** `~/x`, `/abs` or a path relative to the chat's folder (then home). */
 export function resolveUserPath(raw: string, deps: Pick<UnoWorkToolDeps, "home" | "caller">) {
@@ -988,6 +1023,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             total: resources.memory.totalMb,
             used: resources.memory.usedMb,
             available: resources.memory.availableMb,
+            swapTotal: resources.memory.swapTotalMb,
+            swapUsed: resources.memory.swapUsedMb,
           },
           disks: resources.volumes.map((volume) => ({
             mount: volume.mount,
@@ -1010,7 +1047,86 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ...(apps.publishBlockedReason
             ? { showOnInternetUnavailable: apps.publishBlockedReason }
             : {}),
-          notes: resources.notes,
+          notes: [
+            ...resourceWarnings({ memory: resources.memory, volumes: resources.volumes }),
+            ...resources.notes,
+          ],
+        };
+      }),
+  },
+  {
+    name: "computer_cleanup",
+    group: "computer",
+    description:
+      "Free disk space on this computer. Without apply: what fills the home folder (biggest folders) and the caches that can be emptied safely, with sizes — npm/Bun/pip/uv/Yarn/Go caches, old logs, unused Docker images and build cache; they refill themselves when needed. With apply: empties those caches (or only the ids you name) and says how much was freed. The person's files and Trash are never touched: big files they keep belong in Uno Drive (drive_save), and deleting their files needs their yes. Use it when computer_status warns the disk is almost full, and before big installs, builds, docker images or downloads.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        apply: { type: "boolean", description: "Empty the caches. Default false: only look." },
+        only: {
+          type: "array",
+          items: { type: "string", minLength: 1, maxLength: 64 },
+          maxItems: 20,
+          description: 'Clean only these ids from the look answer, e.g. ["go-cache"].',
+        },
+      },
+      additionalProperties: false,
+    },
+    level: (args) => (bool(args, "apply") === true ? "change" : "safe"),
+    approvalTitle: () => "Empty build and package caches",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const disk = deps.disk;
+        if (!disk)
+          return yield* toolError("Disk clean-up isn't available in this Uno Work version.");
+        const usage = yield* readDiskUsage(disk.usage);
+        const cleanable = usage.cleanables.filter(
+          (item) => !CLEANUP_NEVER.has(item.id) && (item.bytes === null || item.bytes >= 1024 ** 2),
+        );
+        const free = (volumes: UnoDiskUsage["volumes"]) =>
+          volumes.map((v) => ({
+            mount: displayPath(v.mount, deps.home),
+            freeGb: v.freeGb,
+            totalGb: v.totalGb,
+          }));
+        if (bool(args, "apply") !== true) {
+          return {
+            disk: free(usage.volumes),
+            cleanable: cleanable.map((item) => ({
+              id: item.id,
+              what: item.label,
+              size: item.bytes === null ? "measuring" : formatBytes(item.bytes),
+              ...(item.canClean ? {} : { cannotClean: item.blockedReason }),
+            })),
+            biggestInHome: usage.entries.slice(0, 8).map((entry) => ({
+              path: displayPath(entry.path, deps.home),
+              size: formatBytes(entry.bytes),
+            })),
+            ...(usage.scanning ? { stillMeasuring: true } : {}),
+            next: "computer_cleanup with apply: true empties the caches. Folders in biggestInHome are the person's or projects': move what they keep to Uno Drive (drive_save) and ask before deleting; node_modules, .venv, dist, build and target folders of finished projects can be rebuilt.",
+          };
+        }
+        const wanted = strArray(args, "only");
+        const targets = cleanable.filter(
+          (item) => item.canClean && (wanted === undefined || wanted.includes(item.id)),
+        );
+        const cleaned: Array<{ id: string; freed: string } | { id: string; error: string }> = [];
+        let freedBytes = 0;
+        for (const item of targets) {
+          const outcome = yield* disk.clean({ id: item.id }).pipe(Effect.result);
+          if (outcome._tag === "Success") {
+            freedBytes += outcome.success.freedBytes;
+            cleaned.push({ id: item.id, freed: formatBytes(outcome.success.freedBytes) });
+          } else {
+            cleaned.push({ id: item.id, error: outcome.failure.message });
+          }
+        }
+        const after = yield* deps.resources;
+        return {
+          freed: formatBytes(freedBytes),
+          cleaned,
+          disk: free(after.volumes),
+          ...(targets.length === 0 ? { note: "Nothing to clean: the caches are empty." } : {}),
         };
       }),
   },
@@ -1589,7 +1705,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "drive_save",
     group: "files",
     description:
-      'Copy files or folders from this computer into the person\'s Uno Drive (cloud storage), into folder (e.g. "Reports/"; default the Drive root). Files of any size; a file over the plan\'s free cloud space fails with "Cloud storage is full". The originals stay on the computer.',
+      'Copy files or folders from this computer into the person\'s Uno Drive (cloud storage), into folder (e.g. "Reports/"; default the Drive root). Files of any size; a file over the plan\'s free cloud space fails with "Cloud storage is full". The originals stay on the computer. Saving over a file keeps the old one as an older copy in the hidden .versions folder next to it (last 10, files up to 200 MB; for Word/Excel/PowerPoint the person sees them in Office → Versions); overwritten lists each replaced file and versionKept.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1635,7 +1751,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "drive_get",
     group: "files",
     description:
-      'Copy Uno Drive files onto this computer so you can open them (keys from drive_find; a key ending in "/" is a whole folder). Into folder (an existing folder, e.g. ~/Documents); default ~/Uploads/YYYY-MM, where chat attachments are saved too. Nothing is overwritten: a taken name gets " (2)". Returns where each one landed.',
+      'Copy Uno Drive files onto this computer so you can open them (keys from drive_find; a key ending in "/" is a whole folder). Into folder (an existing folder, e.g. ~/Documents); default ~/Uploads/YYYY-MM, where chat attachments are saved too. Nothing is overwritten: a taken name gets " (2)". Refused before copying if it would leave this computer\'s disk almost full (under 1 GB or 5% free). Returns where each one landed.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1675,13 +1791,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             fsp.mkdir(destination, { recursive: true }).catch(() => undefined),
           );
         }
-        const result = yield* asToolError(
-          drive.cloudCopyToComputer({
+        // Files lists everything first and refuses a copy that would leave
+        // the disk almost full; the agent has a tool to free space.
+        const result = yield* drive
+          .cloudCopyToComputer({
             bucketId: state.bucketId,
             keys,
             destinationPath: destination,
-          }),
-        );
+          })
+          .pipe(Effect.mapError((cause) => toolError(agentDiskSpaceMessage(cause.message))));
         return {
           ok: true,
           folder: displayPath(destination, deps.home),

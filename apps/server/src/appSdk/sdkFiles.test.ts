@@ -1,9 +1,13 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { renderBundle } from "../../scripts/embed-app-sdk.ts";
+import { UNO_CLI_LAUNCHER, installSdkFiles } from "./sdkFiles.ts";
+import { unoCliBinDir, withUnoCliOnPath } from "./unoCliPath.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -15,5 +19,48 @@ describe("embedded App SDK", () => {
       "utf8",
     );
     expect(actual).toBe(expected);
+  });
+});
+
+describe("installSdkFiles", () => {
+  const homes: string[] = [];
+  afterEach(() => {
+    for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "writes the `uno` command executable, and it runs from the bin folder",
+    async () => {
+      const home = mkdtempSync(path.join(tmpdir(), "uno-sdk-"));
+      homes.push(home);
+      await installSdkFiles(home);
+
+      const bin = path.join(unoCliBinDir(home), "uno");
+      expect(readFileSync(bin, "utf8")).toBe(UNO_CLI_LAUNCHER);
+      expect(statSync(bin).mode & 0o777).toBe(0o755);
+      expect(statSync(path.join(home, ".uno/sdk/js/uno-app.mjs")).mode & 0o111).toBe(0);
+
+      // An older copy without the exec bit gets it back on the next start.
+      chmodSync(bin, 0o644);
+      await installSdkFiles(home);
+      expect(statSync(bin).mode & 0o777).toBe(0o755);
+
+      const help = execFileSync(bin, ["help"], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "" },
+      });
+      expect(help).toContain("uno drive put <path...>");
+    },
+  );
+});
+
+describe("withUnoCliOnPath", () => {
+  it("puts ~/.uno/sdk/bin first once, and leaves Windows and a missing PATH alone", () => {
+    const bin = unoCliBinDir("/home/me");
+    const next = withUnoCliOnPath({ PATH: "/usr/bin" }, "/home/me", "linux");
+    expect(next.PATH).toBe(`${bin}${path.delimiter}/usr/bin`);
+    expect(withUnoCliOnPath(next, "/home/me", "linux")).toBe(next);
+    expect(withUnoCliOnPath({ PATH: "/usr/bin" }, "/home/me", "win32").PATH).toBe("/usr/bin");
+    expect(withUnoCliOnPath({}, "/home/me", "linux").PATH).toBeUndefined();
   });
 });

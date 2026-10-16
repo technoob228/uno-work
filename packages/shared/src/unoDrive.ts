@@ -43,10 +43,20 @@ export function parseDriveFile(raw: unknown): FilesDriveFile | null {
   };
 }
 
+/**
+ * Older copies of replaced files live in `<folder>/.versions/<name>/` (the
+ * server's files/cloudVersions.ts); search and "recent" leave them out.
+ */
+function isOlderCopy(key: string): boolean {
+  return key.split("/").includes(".versions");
+}
+
 export function parseDriveFiles(raw: unknown): FilesDriveFile[] {
   const list = rec(raw)["files"];
   return Array.isArray(list)
-    ? list.map(parseDriveFile).filter((file): file is FilesDriveFile => file !== null)
+    ? list
+        .map(parseDriveFile)
+        .filter((file): file is FilesDriveFile => file !== null && !isOlderCopy(file.key))
     : [];
 }
 

@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { delimiter } from "node:path";
+
 import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -15,6 +18,7 @@ import {
   BROWSER_BRIDGE_URL_ENV,
   tokensEqual,
 } from "./browserBridge.ts";
+import { unoCliBinDir } from "./appSdk/unoCliPath.ts";
 
 it("tokensEqual compares in constant time and never throws on odd input", () => {
   assert.isTrue(tokensEqual("abc123", "abc123"));
@@ -164,7 +168,11 @@ it.effect("keeps the machine-wide token out of harness environments", () =>
       undefined,
     );
     assert.isUndefined(merged[BROWSER_BRIDGE_TOKEN_ENV]);
-    assert.equal(merged["PATH"], "/usr/bin");
+    // The bridge's shell client `uno` comes first on PATH.
+    const expectedPath =
+      process.platform === "win32" ? "/usr/bin" : `${unoCliBinDir(homedir())}${delimiter}/usr/bin`;
+    assert.equal(merged["PATH"], expectedPath);
+    assert.equal(bridge.applyEnvironment(merged, undefined)["PATH"], expectedPath);
 
     // Сессия треда токен получает.
     const sessionEnvironment = bridge.applyEnvironment(
