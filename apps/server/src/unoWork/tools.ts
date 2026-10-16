@@ -755,6 +755,16 @@ const consoleOk = (
           "This computer already created as many computers and databases today as it may. Tell the person; they can create more from the Uno console.",
         ),
       );
+    case code === "DISK_QUOTA_EXCEEDED" ||
+      code === "PEAK_EXCEEDED" ||
+      code === "SHAPE_TOO_LARGE":
+      // A plan limit, not a glitch (walk 16.10: db_create was retried three
+      // times, each asking for Allow, with no reason shown).
+      return Effect.fail(
+        toolError(
+          `Couldn't ${what}: ${detail || "the plan has no room for it"}. This is the plan's limit: tell the person this reason and what they can do (the upgrade link is in account_overview). Don't try again with another size or name: each try asks them to Allow.`,
+        ),
+      );
     case reply.status === 403 || reply.status === 404:
       return Effect.fail(
         toolError(

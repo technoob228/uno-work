@@ -37,7 +37,8 @@ export interface AppServerToolKit {
 }
 
 export const APP_SERVER_GUIDE = [
-  "Early access: only when app_servers_list says enabled: true do bots and backends go on an app server (not on this computer, not in the right panel); otherwise run them here as an app.",
+  "Early access: only when app_servers_list says enabled: true does a one-process bot or webhook go on an app server (not on this computer, not in the right panel); otherwise run it here as an app.",
+  "Never a whole project: several services, a docker-compose file or a web app with its database run on this computer with docker compose.",
   "A Telegram bot must use a webhook, not polling: listen on $PORT (8080), handle POST /telegram,",
   "check the header X-Telegram-Bot-Api-Secret-Token equals $UNO_TELEGRAM_SECRET, read the token from",
   "$TELEGRAM_BOT_TOKEN. Uno sets the webhook itself once the person adds the token in the console.",
@@ -66,6 +67,30 @@ const EXCLUDES = [
   "./.uno",
   "./.DS_Store",
 ];
+
+/** Compose files at the top of a project folder. */
+const COMPOSE_FILES = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"];
+
+/**
+ * A project with a compose file is several services (walk 16.10: the voting
+ * app went 1 of 4 services onto an app server, the rest "won't fit"). An app
+ * server runs one process: such a project runs on this computer with docker
+ * compose instead. Returns the file name found, or null.
+ */
+export async function composeFileIn(dir: string): Promise<string | null> {
+  for (const name of COMPOSE_FILES) {
+    try {
+      const st = await fsp.stat(path.join(dir, name));
+      if (st.isFile()) return name;
+    } catch {
+      /* not there */
+    }
+  }
+  return null;
+}
+
+export const COMPOSE_ON_APP_SERVER_MESSAGE = (file: string) =>
+  `this project has ${file}: it is several services, and an app server runs one process. Don't split it. Run all of it on this computer with docker compose (docker compose up -d --build, restart: unless-stopped, its database as a compose container), then app_show_on_internet for each web port. If it doesn't fit this computer, tell the person what is short and the options from account_overview.`;
 
 async function packProject(dir: string): Promise<Packed> {
   const stat = await fsp.stat(dir);
@@ -180,7 +205,14 @@ export function appServerTools(kit: AppServerToolKit): ReadonlyArray<UnoWorkTool
       level: "change",
       approvalTitle: (args: Record<string, unknown>) =>
         `Send ${String(args.path)} to the app server “${String(args.server)}”`,
-      approvalDetail: () => "It goes live only after you press Allow in the Uno console.",
+      approvalDetail: () => "It goes live only after you press Allow once more, in Apps & sites (Allow in Uno).",
+      // A compose project is refused before the card (no Allow for a call that can't work).
+      prepare: (deps: Deps, args: Record<string, unknown>) =>
+        Effect.gen(function* () {
+          const dir = kit.resolvePath(String(args.path), deps);
+          const compose = yield* Effect.promise(() => composeFileIn(dir));
+          if (compose) return yield* kit.fail(COMPOSE_ON_APP_SERVER_MESSAGE(compose));
+        }),
       run: (deps: Deps, args: Record<string, unknown>) =>
         Effect.gen(function* () {
           const name = String(args.server);
@@ -234,13 +266,17 @@ export function appServerTools(kit: AppServerToolKit): ReadonlyArray<UnoWorkTool
               "finish the upload",
             );
             const d = (done.deploy ?? deploy) as Record<string, unknown>;
+            // The console has no "App servers" menu item (walk 16.10, step 17):
+            // the backend gives the page with the Allow button (approve_url).
+            const allowAt = typeof done.approve_url === "string" ? done.approve_url : null;
             return {
               server: { id, name, url: server.url ?? null, created },
               version: d.version,
               status: d.status,
+              allowAt,
               next:
                 d.status === "pending_approval"
-                  ? "Ask the person to press Allow for this version in the Uno console (App servers). Bot tokens are added there too — never ask for them in the chat."
+                  ? `Ask the person to press Allow for this version: in Uno Work, Apps & sites → Allow in Uno${allowAt ? `, or at ${allowAt}` : ""}. Bot tokens are added on that page too — never ask for them in the chat.`
                   : "It is going live now; check app_servers_list in a minute.",
             };
           } finally {

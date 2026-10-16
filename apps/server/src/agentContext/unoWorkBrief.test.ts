@@ -29,7 +29,9 @@ describe("Uno Work environment brief", () => {
     // bot of its own instead of pointing at the built-in assistant); +100
     // for "token first" (model bench 05.10: no model asked for the token
     // first, because the brief opened with "computer_status first").
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1700);
+    // +200 for "Deploying a project" (walk 16.10: a compose repo went 1 of 4
+    // services onto an app server, and the database was retried three times).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1900);
   });
 
   it("a Telegram bot or an assistant: the token is asked before looking at the machine", () => {

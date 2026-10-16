@@ -1362,6 +1362,25 @@ describe("databases", () => {
     expect(declined.recorded.console).toEqual([]);
   });
 
+  it("a plan-disk refusal reaches the agent with its reason and a do-not-retry", async () => {
+    // Walk 16.10: "The database wasn't created" with no reason, three Allows.
+    const { deps } = makeDeps({
+      console: () => ({
+        status: 409,
+        body: {
+          error: "DISK_QUOTA_EXCEEDED",
+          message: "Your plan's disk is full: 40 of 40 GB are taken by your computers, and this needs 10 GB.",
+        },
+      }),
+    });
+    const result = await run("db_create", deps, { name: "voting" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain("40 of 40 GB");
+      expect(result.failure.message).toContain("Don't try again");
+    }
+  });
+
   it("respects agent access off", async () => {
     const { deps, recorded } = makeDeps({ console: dbConsole, agentAccess: "off" });
     expect((await run("db_list", deps))._tag).toBe("Failure");
@@ -1628,5 +1647,57 @@ describe("assistant_connect: the built-in assistant, in a bot of its own", () =>
     const { deps } = makeDeps();
     const result = await run("assistant_connect", deps, {});
     expect(result._tag).toBe("Failure");
+  });
+});
+
+describe("app servers", () => {
+  it("app_deploy refuses a compose project before asking the person", async () => {
+    // Walk 16.10: the voting app (compose, 4 services) went 1 of 4 onto an app server.
+    const { deps, recorded, home } = makeDeps();
+    const dir = path.join(home, "projects", "voting");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "docker-compose.yml"), "services:\n  vote: {}\n  db: {}\n");
+    const result = await run("app_deploy", deps, { path: "~/projects/voting", server: "voting" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain("docker-compose.yml");
+      expect(result.failure.message).toContain("docker compose");
+    }
+    expect(recorded.approvals).toEqual([]);
+    expect(recorded.console).toEqual([]);
+  });
+
+  it("app_deploy tells where the Allow button is", async () => {
+    const { deps, home } = makeDeps({
+      console: (request) => {
+        if (request.method === "GET") return { status: 200, body: { servers: [{ id: 5, name: "bot" }] } };
+        if (request.path.endsWith("/deploys"))
+          return { status: 200, body: { deploy: { id: 9 }, upload_url: "http://127.0.0.1:9/never" } };
+        return {
+          status: 200,
+          body: {
+            deploy: { id: 9, version: 1, status: "pending_approval" },
+            approve_url: "https://console.uno.place/app-servers",
+          },
+        };
+      },
+    });
+    const dir = path.join(home, "projects", "bot");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "bot.py"), "print('hi')\n");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+    try {
+      const result = await run("app_deploy", deps, { path: "~/projects/bot", server: "bot" });
+      expect(result._tag).toBe("Success");
+      if (result._tag === "Success") {
+        const out = result.success as Record<string, unknown>;
+        expect(out.allowAt).toBe("https://console.uno.place/app-servers");
+        expect(String(out.next)).toContain("Apps & sites");
+        expect(String(out.next)).not.toContain("console (App servers)");
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
