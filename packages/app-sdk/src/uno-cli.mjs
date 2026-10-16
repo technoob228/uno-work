@@ -18,11 +18,22 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
+import { mkdir, readdir } from "node:fs/promises";
 import * as http from "node:http";
 import * as https from "node:https";
 import { constants as osConstants, homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  UnoGitError,
+  git,
+  listProjects,
+  openStorage,
+  projectNameOf,
+  readRemote,
+  slugName,
+} from "./git-remote-uno.mjs";
 
 export const MCP_PATH = "/api/uno-work/mcp";
 export const GUIDE_PATH = "/api/uno-work/guide";
@@ -43,6 +54,9 @@ export const USAGE = `uno — Uno Work from the shell (this computer and Uno Dri
   uno drive put <path...> [--to Folder/] Copy files or folders from this computer to Uno Drive
   uno drive get <key...> [--to ~/dir]    Copy Uno Drive files here (default ~/Uploads/YYYY-MM)
   uno drive link <key> [--days N]        A download link anyone can open (default 7 days, max 90)
+  uno project sync [dir] [--name N]      Save this git project to the Uno cloud (then: git push uno)
+  uno project get <name> [dir]           Get it on this computer (~/projects/<name>); again = pull
+  uno project ls [--json]                Projects in the Uno cloud
   uno guide [topic]                      How-to for Uno Work (storage, apps, app-sdk, ...)
   uno help
 
@@ -153,6 +167,9 @@ function positiveInt(/** @type {string | true | undefined} */ raw, /** @type {st
  *       render: Render, timeoutMs: number, mayAsk: boolean }
  *   | { kind: "drive-ls", folder: string, json: boolean }
  *   | { kind: "guide", topic: string }
+ *   | { kind: "project-ls", json: boolean }
+ *   | { kind: "project-sync", dir: string, name: string | null }
+ *   | { kind: "project-get", name: string, dir: string }
  *   | { kind: "delegate", argv: string[] }} Plan
  */
 
@@ -172,7 +189,7 @@ export function planCommand(argv, where) {
 }
 
 /** First words this command answers itself; any other goes to the Uno API CLI. */
-const OWN_COMMANDS = new Set(["status", "cleanup", "drive", "guide"]);
+const OWN_COMMANDS = new Set(["status", "cleanup", "drive", "guide", "project"]);
 
 /** @returns {Plan} */
 function plan(/** @type {string[]} */ argv, /** @type {{ cwd: string, home: string }} */ where) {
@@ -216,6 +233,8 @@ function plan(/** @type {string[]} */ argv, /** @type {{ cwd: string, home: stri
     }
     case "drive":
       return planDrive(rest, where, callPlan);
+    case "project":
+      return planProject(rest, where);
     default:
       // Not ours: the Uno API CLI's (`uno boxes list`, `uno git ...`), if installed.
       return { kind: "delegate", argv: [...argv] };
@@ -318,6 +337,62 @@ function planDrive(argv, where, callPlan) {
     default:
       throw new UsageError(`Unknown command "drive ${sub}". Run: uno help`);
   }
+}
+
+/**
+ * `uno project ...`: git projects in the person's Uno cloud (git-remote-uno.mjs).
+ * @param {string[]} argv
+ * @param {{ cwd: string, home: string }} where
+ * @returns {Plan}
+ */
+function planProject(argv, where) {
+  const [sub, ...rest] = argv;
+  switch (sub) {
+    case "ls":
+    case "list": {
+      const { positionals, flags } = splitArgs(rest, [JSON_FLAG]);
+      noPositionals(positionals, "uno project ls");
+      return { kind: "project-ls", json: !!flags.json };
+    }
+    case "sync":
+    case "save": {
+      const { positionals, flags } = splitArgs(rest, [{ name: "name", value: true }]);
+      if (positionals.length > 1) throw new UsageError("Usage: uno project sync [dir] [--name N]");
+      const name = typeof flags.name === "string" ? projectName(flags.name) : null;
+      return {
+        kind: "project-sync",
+        dir: absolutePath(positionals[0] ?? ".", where),
+        name,
+      };
+    }
+    case "get":
+    case "clone": {
+      const { positionals } = splitArgs(rest, []);
+      if (positionals.length < 1 || positionals.length > 2) {
+        throw new UsageError("Usage: uno project get <name> [dir]");
+      }
+      const name = projectName(/** @type {string} */ (positionals[0]));
+      return {
+        kind: "project-get",
+        name,
+        dir: absolutePath(positionals[1] ?? path.join(where.home, "projects", name), where),
+      };
+    }
+    case undefined:
+      throw new UsageError("Usage: uno project sync|get|ls ... (uno help)");
+    default:
+      throw new UsageError(`Unknown command "project ${sub}". Run: uno help`);
+  }
+}
+
+function projectName(/** @type {string} */ raw) {
+  const name = projectNameOf(raw);
+  if (!name) {
+    throw new UsageError(
+      `"${raw}" can't be a project name: use a-z, 0-9, ".", "_", "-" (up to 64, starting with a letter or digit).`,
+    );
+  }
+  return name;
 }
 
 function noPositionals(/** @type {string[]} */ positionals, /** @type {string} */ usage) {
@@ -675,6 +750,217 @@ export function runOtherUno(file, argv, env) {
   });
 }
 
+// ── Projects: git in the person's Uno cloud ─────────────────────────────
+
+/** Where git-remote-uno sits next to us (~/.uno/sdk/bin), or null (a checkout). */
+function helperBinDir() {
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin");
+  try {
+    accessSync(path.join(dir, "git-remote-uno"), fsConstants.X_OK);
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
+/** The environment git runs with: our helper findable even off agents' PATH. */
+export function projectGitEnv(/** @type {NodeJS.ProcessEnv} */ env) {
+  const dir = helperBinDir();
+  const entries = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  if (!dir || entries.includes(dir)) return env;
+  return { ...env, PATH: [dir, ...entries].join(path.delimiter) };
+}
+
+/**
+ * git with the terminal: its own progress and messages go straight to the person.
+ * @param {string[]} args
+ * @param {{ cwd: string, env: NodeJS.ProcessEnv }} options
+ * @returns {Promise<number>}
+ */
+function gitAloud(args, options) {
+  return new Promise((resolve) => {
+    const child = spawn("git", args, { cwd: options.cwd, env: options.env, stdio: "inherit" });
+    child.on("error", () => resolve(127));
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+/** @param {string | null} iso */
+function when(iso) {
+  return iso ? iso.replace("T", " ").slice(0, 16) : "?";
+}
+
+/**
+ * True when the cloud's history shares a commit with HEAD here. Tips not
+ * here yet are fetched into a scratch namespace first, dropped after.
+ * @param {string} name
+ * @param {string[]} tips
+ * @param {{ cwd: string, env: NodeJS.ProcessEnv }} at
+ */
+async function sharesHistory(name, tips, at) {
+  const run = (/** @type {string[]} */ args, input = "") => git(args, { ...at, input });
+  const checked = await run(["cat-file", "--batch-check"], `${tips.join("\n")}\n`);
+  let candidates = checked.stdout
+    .split("\n")
+    .filter((line) => line && !line.endsWith(" missing"))
+    .map((line) => line.split(" ")[0] ?? "");
+  let scratch = [];
+  if (candidates.length === 0) {
+    const fetched = await run([
+      "fetch",
+      "--no-tags",
+      "-q",
+      `uno::${name}`,
+      "+refs/*:refs/uno-check/*",
+    ]);
+    if (fetched.code !== 0) {
+      throw new UnoGitError(
+        `Couldn't read "${name}" from your Uno cloud: ${fetched.stderr.trim()}`,
+      );
+    }
+    scratch = (await run(["for-each-ref", "--format=%(refname)", "refs/uno-check/"])).stdout
+      .split("\n")
+      .filter(Boolean);
+    candidates = scratch;
+  }
+  try {
+    for (const candidate of candidates) {
+      if ((await run(["merge-base", "HEAD", candidate])).code === 0) return true;
+    }
+    return false;
+  } finally {
+    if (scratch.length > 0) {
+      await run(["update-ref", "--stdin"], scratch.map((ref) => `delete ${ref}\n`).join(""));
+    }
+  }
+}
+
+/**
+ * @param {Extract<Plan, { kind: "project-sync" }>} planned
+ * @param {{ env: NodeJS.ProcessEnv, home: string }} ctx
+ */
+async function projectSync(planned, ctx) {
+  const env = projectGitEnv(ctx.env);
+  const top = await git(["rev-parse", "--show-toplevel"], { cwd: planned.dir, env });
+  if (top.code !== 0) {
+    throw new UnoCliError(
+      `${planned.dir} isn't a git project yet. Start one there: git init && git add -A && git commit -m "First version"`,
+    );
+  }
+  const at = { cwd: top.stdout.trim(), env };
+  const remote = await git(["remote", "get-url", "uno"], at);
+  const hasRemote = remote.code === 0;
+  /** @type {string | null} */
+  let name;
+  if (hasRemote) {
+    const url = remote.stdout.trim();
+    name = url.startsWith("uno::") ? projectNameOf(url) : null;
+    if (!name)
+      throw new UnoCliError(`The git remote "uno" here points to ${url}, not to the Uno cloud.`);
+    if (planned.name && planned.name !== name) {
+      throw new UnoCliError(
+        `This project already syncs as "${name}". To rename it: git remote set-url uno uno::${planned.name}`,
+      );
+    }
+  } else {
+    name = planned.name ?? slugName(path.basename(at.cwd));
+    if (!name) throw new UnoCliError("Pick a name for it: uno project sync --name <name>");
+  }
+  if ((await git(["rev-parse", "--verify", "--quiet", "HEAD"], at)).code !== 0) {
+    throw new UnoCliError(
+      'Nothing to save yet: commit first (git add -A && git commit -m "First version").',
+    );
+  }
+  const branch = (await git(["symbolic-ref", "--quiet", "--short", "HEAD"], at)).stdout.trim();
+  if (!branch) throw new UnoCliError("Switch to a branch first (git switch -c main).");
+  if (!hasRemote) {
+    const state = await readRemote(openStorage({ home: ctx.home, env: ctx.env }), name);
+    const tips = [...new Set(Object.values(state.refs))];
+    if (tips.length > 0 && !(await sharesHistory(name, tips, at))) {
+      throw new UnoCliError(
+        `"${name}" in the Uno cloud is a different project. Save this one under another name: uno project sync --name ${name}-2`,
+      );
+    }
+    const added = await git(["remote", "add", "uno", `uno::${name}`], at);
+    if (added.code !== 0) throw new UnoCliError(`git remote add failed: ${added.stderr.trim()}`);
+  }
+  if ((await gitAloud(["push", "-u", "uno", branch], at)) !== 0) {
+    throw new UnoCliError(
+      `Not saved. If git says "rejected", the Uno cloud has newer changes (from another computer): git pull uno ${branch}, then uno project sync again.`,
+    );
+  }
+  if ((await git(["tag", "--list"], at)).stdout.trim()) {
+    if ((await gitAloud(["push", "uno", "--tags"], at)) !== 0) {
+      throw new UnoCliError("The branch is saved, but some tags weren't (see above).");
+    }
+  }
+  return `Saved to your Uno cloud as ${name}. On another computer: uno project get ${name}`;
+}
+
+/**
+ * @param {Extract<Plan, { kind: "project-get" }>} planned
+ * @param {{ env: NodeJS.ProcessEnv, home: string }} ctx
+ */
+async function projectGet(planned, ctx) {
+  const env = projectGitEnv(ctx.env);
+  const { name, dir } = planned;
+  const entries = await readdir(dir).catch(() => null);
+  if (entries !== null) {
+    const top = await git(["rev-parse", "--show-toplevel"], { cwd: dir, env });
+    const remotes = top.code === 0 ? await git(["remote", "-v"], { cwd: dir, env }) : null;
+    const ours = remotes?.stdout
+      .split("\n")
+      .map((line) => line.split(/\s+/))
+      .find(([, url]) => url?.startsWith("uno::") && projectNameOf(url) === name)?.[0];
+    if (ours) {
+      if ((await gitAloud(["pull", "--ff-only", ours], { cwd: dir, env })) !== 0) {
+        throw new UnoCliError(
+          `Couldn't bring ${dir} up to date (see above). Commit or put aside local changes, then try again.`,
+        );
+      }
+      return `${dir} is up to date with your Uno cloud.`;
+    }
+    if (entries.length > 0) {
+      throw new UnoCliError(
+        `${dir} already exists and isn't the project "${name}". Pick another folder: uno project get ${name} <folder>`,
+      );
+    }
+  }
+  const state = await readRemote(openStorage({ home: ctx.home, env: ctx.env }), name);
+  if (Object.keys(state.refs).length === 0) {
+    throw new UnoCliError(
+      `There's no project "${name}" in your Uno cloud. See them: uno project ls`,
+    );
+  }
+  const parent = path.dirname(dir);
+  await mkdir(parent, { recursive: true });
+  if ((await gitAloud(["clone", "-o", "uno", `uno::${name}`, dir], { cwd: parent, env })) !== 0) {
+    throw new UnoCliError(`Couldn't get "${name}" (see above).`);
+  }
+  return `Ready in ${dir}. Save changes back from there with: uno project sync`;
+}
+
+/**
+ * @param {Extract<Plan, { kind: "project-ls" }>} planned
+ * @param {{ env: NodeJS.ProcessEnv, home: string }} ctx
+ */
+async function projectList(planned, ctx) {
+  const projects = await listProjects(openStorage({ home: ctx.home, env: ctx.env }));
+  if (planned.json) return JSON.stringify(projects, null, 2);
+  if (projects.length === 0) return "(no projects yet: run uno project sync in a git project)";
+  return projects
+    .map((project) =>
+      [
+        project.name,
+        `saved ${when(project.updatedAt)}`,
+        project.updatedBy?.hostname ? `from ${project.updatedBy.hostname}` : "",
+      ]
+        .filter(Boolean)
+        .join("  "),
+    )
+    .join("\n");
+}
+
 // ── Run ─────────────────────────────────────────────────────────────────
 
 /**
@@ -716,6 +1002,27 @@ export async function run(argv, options = {}) {
       return;
     }
     process.exitCode = await runOtherUno(other, planned.argv, env);
+    return;
+  }
+  if (
+    planned.kind === "project-ls" ||
+    planned.kind === "project-sync" ||
+    planned.kind === "project-get"
+  ) {
+    const ctx = { env, home: options.home ?? homedir() };
+    try {
+      const out =
+        planned.kind === "project-ls"
+          ? await projectList(planned, ctx)
+          : planned.kind === "project-sync"
+            ? await projectSync(planned, ctx)
+            : await projectGet(planned, ctx);
+      process.stdout.write(`${out}\n`);
+    } catch (error) {
+      if (!(error instanceof UnoCliError || error instanceof UnoGitError)) throw error;
+      process.stderr.write(`uno: ${error.message}\n`);
+      process.exitCode = 1;
+    }
     return;
   }
   /** @type {ReturnType<typeof setTimeout> | undefined} */
