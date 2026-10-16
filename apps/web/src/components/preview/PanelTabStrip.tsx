@@ -66,6 +66,9 @@ import { TasksTabName } from "./TasksTabBody";
 type KindIcon = React.ComponentType<{ className?: string }>;
 
 const DRAG_TYPE = "application/x-uno-panel-tab";
+/** Px from a scrolling row's edge where a drag scrolls it, and by how much per dragover. */
+const EDGE_SCROLL_ZONE = 28;
+const EDGE_SCROLL_STEP = 14;
 /** Room kept after the groups for the "+" button. */
 const TRAILING_RESERVE = 36;
 /** Groups the person collapsed (by their label), kept across chats and reloads. */
@@ -324,6 +327,31 @@ export function PanelTabStrip({
 
   // While a tab is dragged in a chat, every group it could go to shows — empty ones as slots.
   const shown = groupsForDrag(groups, dragging !== null && inChat);
+  // The empty slots appear at the row's ends, which a narrow panel scrolls out
+  // of view (Misha 16.10 p.3: "dragging into another group does nothing" — the
+  // Everywhere slot was past the right edge). Bring them into view.
+  const emptyLeft = shown[0]?.files.length === 0;
+  const emptyRight = shown.length > 0 && shown[shown.length - 1]!.files.length === 0;
+  useEffect(() => {
+    if (dragging === null) return;
+    const el = scrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (emptyRight && !emptyLeft) el.scrollTo({ left: el.scrollWidth });
+      else if (emptyLeft && !emptyRight) el.scrollTo({ left: 0 });
+      measureEdges();
+    });
+    return () => window.cancelAnimationFrame(frame);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- measureEdges is stable in effect
+  }, [dragging, emptyLeft, emptyRight]);
+  /** Dragging near an edge of a row that scrolls: scroll it, like Chrome's tab strip. */
+  const scrollWhileDragging = (event: React.DragEvent) => {
+    const el = scrollRef.current;
+    if (!el || !draggingRef.current || el.scrollWidth <= el.clientWidth) return;
+    const rect = el.getBoundingClientRect();
+    if (event.clientX < rect.left + EDGE_SCROLL_ZONE) el.scrollLeft -= EDGE_SCROLL_STEP;
+    else if (event.clientX > rect.right - EDGE_SCROLL_ZONE) el.scrollLeft += EDGE_SCROLL_STEP;
+  };
   const fade = `linear-gradient(to right, ${edges.left ? "transparent, black 24px" : "black"}, ${
     edges.right ? "black calc(100% - 24px), transparent" : "black"
   })`;
@@ -333,6 +361,7 @@ export function PanelTabStrip({
       <div
         ref={scrollRef}
         onScroll={measureEdges}
+        onDragOver={scrollWhileDragging}
         style={edges.left || edges.right ? { maskImage: fade, WebkitMaskImage: fade } : undefined}
         className="scrollbar-hide flex min-w-0 shrink items-center gap-1.5 overflow-x-auto"
         data-testid="panel-tab-groups"
