@@ -58,6 +58,7 @@ import {
 } from "./fileTypes";
 import { downloadFile, filesStatQueryOptions, recordFileOpened } from "./filesApi";
 import { makeFileSource } from "./fileSource";
+import { statFromListings } from "./filesPrefetch";
 import { ViewerLoading, ViewerMessage } from "./openers/common";
 import type { useFilesUploads } from "./FilesUploads";
 
@@ -102,7 +103,13 @@ export function FileViewer({
   onCopyPath?: (path: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const stat = useQuery(filesStatQueryOptions(environmentId, path));
+  // Start from the folder listing's entry (no round trip before the file
+  // shows); the stat checks it again in the background.
+  const listed = statFromListings(queryClient, environmentId, path);
+  const stat = useQuery({
+    ...filesStatQueryOptions(environmentId, path),
+    ...(listed ? { initialData: listed.entry, initialDataUpdatedAt: listed.updatedAt } : {}),
+  });
   const entry = stat.data ?? null;
   // null = the default: the editor right away for text-like files beside the
   // tree (`editInline`), the viewer otherwise; true/false = the person chose.

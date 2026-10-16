@@ -97,6 +97,8 @@ import {
   filesSearchQueryOptions,
   filesSharesQueryOptions,
 } from "./filesApi";
+import { prefetchFileForView } from "./filesPrefetch";
+import { useProgressiveRows } from "./useProgressiveRows";
 import { registerBuiltInFileOpeners } from "./openers";
 import { activePanelFilePath, filesOpenTarget, filesPanelBeside } from "./filesPanel";
 import { computerFileTab } from "../../navigation/useOpenComputerFile";
@@ -720,6 +722,7 @@ function FolderBrowser({
     return sortEntries(source, sort.key, sort.ascending);
   }, [data?.entries, searchResults.data?.entries, sort, trimmedQuery]);
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
+  const shownRows = useProgressiveRows(entries.length);
 
   const upload = (files: Parameters<typeof uploads.start>[0]["files"], targetDir = currentPath) => {
     if (!targetDir) return;
@@ -1088,10 +1091,15 @@ function FolderBrowser({
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {(shownRows < entries.length ? entries.slice(0, shownRows) : entries).map((entry) => (
                 <FileRow
                   key={entry.path}
                   entry={entry}
+                  onPress={
+                    entry.kind === "directory"
+                      ? undefined
+                      : () => prefetchFileForView(queryClient, environmentId, entry)
+                  }
                   shared={sharedPaths.has(entry.path)}
                   tag={entry.kind === "directory" ? folderTagOf(tags, entry.path) : null}
                   selected={selected.has(entry.path)}
@@ -1224,6 +1232,7 @@ function FileRow({
   locationHint,
   onToggle,
   onOpen,
+  onPress,
   onDragStart,
   onDragOverFolder,
   onDragLeave,
@@ -1246,6 +1255,8 @@ function FileRow({
   locationHint: string | null;
   onToggle: (value: boolean) => void;
   onOpen: () => void;
+  /** A press on the row, before the click: start reading the file. */
+  onPress?: (() => void) | undefined;
   onDragStart: (event: React.DragEvent) => void;
   onDragOverFolder: (event: React.DragEvent) => void;
   onDragLeave: () => void;
@@ -1288,6 +1299,7 @@ function FileRow({
         <button
           type="button"
           onClick={onOpen}
+          onPointerDown={onPress}
           className="flex w-full min-w-0 items-center gap-3 text-left"
         >
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
