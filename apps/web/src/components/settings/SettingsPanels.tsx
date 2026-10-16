@@ -38,7 +38,13 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { SIDEBAR_D_VIEW_OPTIONS, resolveSidebarDView } from "../sidebar/sidebarDView.logic";
+import {
+  SIDEBAR_D_PRESETS,
+  levelsForPreset,
+  levelsLabel,
+  presetOf,
+  resolveGroupLevels,
+} from "../sidebar/sidebarDView.logic";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppearanceLayoutSection } from "./AppearanceLayoutSection";
@@ -542,6 +548,7 @@ export function GeneralSettingsPanel({
 } = {}) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
+  const sidebarLevels = resolveGroupLevels(settings.sidebarGroupLevels, settings.sidebarInboxMode);
   const { updateSettings } = useUpdateSettings();
   const navigate = useNavigate();
   const showWebLogout = isWebApp && !isLoopbackHostname(window.location.hostname);
@@ -633,21 +640,23 @@ export function GeneralSettingsPanel({
 
         <SettingsRow
           title="Sidebar view"
-          description="How chats are laid out in the sidebar: Projects — folders with their chats; One list — newest first, filter by project; Inbox — by status, what needs you first."
+          description="How chats are laid out in the sidebar: Projects — folders with their chats; One list — newest first; Inbox — by status, what needs you first."
           resetAction={
-            settings.sidebarView !== null ? (
+            settings.sidebarGroupLevels !== null ? (
               <SettingResetButton
                 label="sidebar view"
-                onClick={() => updateSettings({ sidebarView: null, sidebarInboxMode: false })}
+                onClick={() => updateSettings({ sidebarGroupLevels: null, sidebarInboxMode: false })}
               />
             ) : null
           }
           control={
             <Select
-              value={resolveSidebarDView(settings.sidebarView, settings.sidebarInboxMode)}
+              value={presetOf(sidebarLevels) ?? "custom"}
               onValueChange={(value) => {
                 if (value === "projects" || value === "list" || value === "inbox") {
-                  updateSettings({ sidebarView: value });
+                  updateSettings({
+                    sidebarGroupLevels: levelsForPreset(value, sidebarLevels[0] === "computer"),
+                  });
                 }
               }}
             >
@@ -657,15 +666,12 @@ export function GeneralSettingsPanel({
                 data-testid="settings-sidebar-view"
               >
                 <SelectValue>
-                  {SIDEBAR_D_VIEW_OPTIONS.find(
-                    (option) =>
-                      option.id ===
-                      resolveSidebarDView(settings.sidebarView, settings.sidebarInboxMode),
-                  )?.label ?? "Projects"}
+                  {SIDEBAR_D_PRESETS.find((option) => option.id === presetOf(sidebarLevels))
+                    ?.label ?? levelsLabel(sidebarLevels)}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                {SIDEBAR_D_VIEW_OPTIONS.map((option) => (
+                {SIDEBAR_D_PRESETS.map((option) => (
                   <SelectItem hideIndicator key={option.id} value={option.id}>
                     {option.label}
                   </SelectItem>
@@ -706,20 +712,16 @@ export function GeneralSettingsPanel({
         {settings.sidebarEnvironmentScope === "all" ? (
           <SettingsRow
             title="Group by computer"
-            description="Each computer gets its own heading in the sidebar, with its projects inside. Not used in Inbox."
-            resetAction={
-              settings.sidebarGroupByComputer ? (
-                <SettingResetButton
-                  label="group by computer"
-                  onClick={() => updateSettings({ sidebarGroupByComputer: false })}
-                />
-              ) : null
-            }
+            description="Each computer gets its own heading in the sidebar, with its chats inside."
             control={
               <Switch
-                checked={settings.sidebarGroupByComputer}
+                checked={sidebarLevels[0] === "computer"}
                 onCheckedChange={(checked) =>
-                  updateSettings({ sidebarGroupByComputer: Boolean(checked) })
+                  updateSettings({
+                    sidebarGroupLevels: checked
+                      ? ["computer", ...sidebarLevels.filter((level) => level !== "computer")]
+                      : sidebarLevels.filter((level) => level !== "computer"),
+                  })
                 }
                 aria-label="Group by computer"
                 data-testid="settings-sidebar-group-by-computer"

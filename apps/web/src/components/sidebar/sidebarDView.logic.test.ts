@@ -1,51 +1,99 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  canGroupByComputer,
   chatRowShowsComputer,
-  filterChatsByProject,
-  groupChatsByComputer,
+  effectiveLevels,
+  filterChipLabel,
+  groupSidebarChats,
+  levelsForPreset,
+  levelsLabel,
+  livePicks,
+  moveLevel,
+  orderComputers,
+  presetOf,
   projectRowComputers,
-  resolveSidebarDView,
-  sidebarDViewTitle,
+  resolveGroupLevels,
+  sidebarDTitle,
+  toggleFilter,
+  toggleLevel,
 } from "./sidebarDView.logic";
 
-describe("resolveSidebarDView", () => {
-  it("keeps the stored choice", () => {
-    expect(resolveSidebarDView("list", true)).toBe("list");
-    expect(resolveSidebarDView("projects", true)).toBe("projects");
+describe("group levels", () => {
+  it("falls back to the old Inbox switch until chosen", () => {
+    expect(resolveGroupLevels(null, true)).toEqual(["status"]);
+    expect(resolveGroupLevels(null, false)).toEqual(["project"]);
+    expect(resolveGroupLevels([], true)).toEqual([]);
   });
-  it("falls back to the old Inbox switch", () => {
-    expect(resolveSidebarDView(null, true)).toBe("inbox");
-    expect(resolveSidebarDView(null, false)).toBe("projects");
+  it("drops Computer with one computer in view, and repeats", () => {
+    expect(effectiveLevels(["computer", "project"], 1)).toEqual(["project"]);
+    expect(effectiveLevels(["computer", "project", "computer"], 3)).toEqual([
+      "computer",
+      "project",
+    ]);
+  });
+  it("toggles a level to the end, moves it, names the order", () => {
+    expect(toggleLevel(["project"], "computer")).toEqual(["project", "computer"]);
+    expect(toggleLevel(["project", "computer"], "project")).toEqual(["computer"]);
+    expect(moveLevel(["project", "computer"], "computer", -1)).toEqual(["computer", "project"]);
+    expect(moveLevel(["project", "computer"], "project", -1)).toEqual(["project", "computer"]);
+    expect(levelsLabel(["computer", "project"])).toBe("Computer → Project");
+    expect(levelsLabel([])).toBe("One list, newest first");
+  });
+  it("maps the Settings presets both ways, keeping Computer", () => {
+    expect(presetOf([])).toBe("list");
+    expect(presetOf(["computer", "project"])).toBe("projects");
+    expect(presetOf(["status"])).toBe("inbox");
+    expect(presetOf(["status", "project"])).toBeNull();
+    expect(levelsForPreset("inbox", true)).toEqual(["computer", "status"]);
+    expect(levelsForPreset("list", false)).toEqual([]);
   });
 });
 
-describe("sidebarDViewTitle", () => {
-  it("says what is shown", () => {
-    expect(sidebarDViewTitle("projects", "fishcode")).toBe("Projects");
-    expect(sidebarDViewTitle("list", null)).toBe("All projects");
-    expect(sidebarDViewTitle("list", "fishcode")).toBe("fishcode");
-    expect(sidebarDViewTitle("inbox", null)).toBe("Inbox");
+describe("filters", () => {
+  const all = ["landing", "fishcode", "home-folder"];
+  it("the first pick narrows to it; none or all again is all", () => {
+    expect(toggleFilter(null, "landing", all)).toEqual(["landing"]);
+    expect(toggleFilter(["landing"], "fishcode", all)).toEqual(["landing", "fishcode"]);
+    expect(toggleFilter(["landing"], "landing", all)).toBeNull();
+    expect(toggleFilter(["landing", "fishcode"], "home-folder", all)).toBeNull();
+  });
+  it("forgets picks that are gone", () => {
+    expect(livePicks(["gone"], all)).toBeNull();
+    expect(livePicks(["gone", "landing"], all)).toEqual(["landing"]);
   });
 });
 
-describe("canGroupByComputer", () => {
-  it("needs several computers and a view by place", () => {
-    expect(canGroupByComputer("projects", true)).toBe(true);
-    expect(canGroupByComputer("list", true)).toBe(true);
-    expect(canGroupByComputer("inbox", true)).toBe(false);
-    expect(canGroupByComputer("projects", false)).toBe(false);
+describe("title and chip", () => {
+  it("say what the list shows", () => {
+    expect(sidebarDTitle({ levels: [], projectNames: null })).toBe("All projects");
+    expect(sidebarDTitle({ levels: ["project"], projectNames: null })).toBe("Projects");
+    expect(sidebarDTitle({ levels: ["project"], projectNames: ["landing"] })).toBe("landing");
+    expect(sidebarDTitle({ levels: ["status"], projectNames: ["a", "b"] })).toBe(
+      "2 projects · by status",
+    );
+    expect(sidebarDTitle({ levels: ["computer", "project"], projectNames: null })).toBe(
+      "Projects · by computer",
+    );
+    expect(sidebarDTitle({ levels: ["status"], projectNames: null })).toBe(
+      "All projects · by status",
+    );
+  });
+  it("the chip names the filter, or is not there", () => {
+    expect(filterChipLabel({ projectNames: null, computerNames: null })).toBeNull();
+    expect(filterChipLabel({ projectNames: ["landing"], computerNames: ["MacBook"] })).toBe(
+      "landing · MacBook",
+    );
+    expect(filterChipLabel({ projectNames: ["a", "b", "c"], computerNames: null })).toBe(
+      "3 projects",
+    );
   });
 });
 
-describe("projectRowComputers", () => {
-  it("names nothing with one computer", () => {
+describe("computers", () => {
+  it("a project row names computers only when it lives elsewhere", () => {
     expect(
       projectRowComputers({ computers: ["work"], thisComputer: "mac", multiComputer: false }),
     ).toEqual([]);
-  });
-  it("names nothing when the project lives here", () => {
     expect(
       projectRowComputers({
         computers: ["mac", "product"],
@@ -53,8 +101,6 @@ describe("projectRowComputers", () => {
         multiComputer: true,
       }),
     ).toEqual([]);
-  });
-  it("names the computers of a project that lives elsewhere", () => {
     expect(
       projectRowComputers({
         computers: ["product", "product"],
@@ -63,43 +109,14 @@ describe("projectRowComputers", () => {
       }),
     ).toEqual(["product"]);
   });
-});
-
-describe("chatRowShowsComputer", () => {
-  const base = {
-    thisComputer: "mac",
-    multiComputer: true,
-    underComputerHeader: false,
-  } as const;
-  it("never with one computer or under a computer header", () => {
-    expect(
-      chatRowShowsComputer({
-        ...base,
-        multiComputer: false,
-        chatComputer: "work",
-        projectComputers: null,
-      }),
-    ).toBe(false);
-    expect(
-      chatRowShowsComputer({
-        ...base,
-        underComputerHeader: true,
-        chatComputer: "work",
-        projectComputers: null,
-      }),
-    ).toBe(false);
-  });
-  it("never for a chat on this computer", () => {
+  it("a chat row carries its computer when it is not said above", () => {
+    const base = { thisComputer: "mac", multiComputer: true, underComputerHeader: false } as const;
     expect(chatRowShowsComputer({ ...base, chatComputer: "mac", projectComputers: null })).toBe(
       false,
     );
-  });
-  it("in one list: every chat from another computer", () => {
     expect(chatRowShowsComputer({ ...base, chatComputer: "work", projectComputers: null })).toBe(
       true,
     );
-  });
-  it("in a project: only when the project spans several computers", () => {
     expect(
       chatRowShowsComputer({ ...base, chatComputer: "work", projectComputers: ["work"] }),
     ).toBe(false);
@@ -110,63 +127,64 @@ describe("chatRowShowsComputer", () => {
         projectComputers: ["mac", "product"],
       }),
     ).toBe(true);
-  });
-});
-
-describe("groupChatsByComputer", () => {
-  const computers = [
-    { environmentId: null, key: "box-2611", label: "spark-lab", status: "sleeping" as const },
-    { environmentId: "work", key: "work", label: "uno-work", status: "online" as const },
-    { environmentId: "mac", key: "mac", label: "MacBook", status: "online" as const },
-    { environmentId: "product", key: "product", label: "uno-product", status: "online" as const },
-  ];
-  it("this computer first, asleep last, every computer keeps its header", () => {
-    const sections = groupChatsByComputer({
-      chats: [
-        { id: 1, env: "work" },
-        { id: 2, env: "mac" },
-        { id: 3, env: "work" },
-      ],
-      computerOf: (chat) => chat.env,
-      computers,
-      thisComputer: "mac",
-    });
-    expect(sections.map((section) => section.computer.label)).toEqual([
-      "MacBook",
-      "uno-work",
-      "uno-product",
-      "spark-lab",
-    ]);
-    expect(sections[0]!.isThis).toBe(true);
-    expect(sections[1]!.chats.map((chat) => chat.id)).toEqual([1, 3]);
-    expect(sections[2]!.chats).toEqual([]);
-    expect(sections[3]!.dimmed).toBe(true);
-  });
-});
-
-describe("filterChatsByProject", () => {
-  const chats = [
-    { id: 1, group: "fishcode" },
-    { id: 2, group: "home-folder" },
-  ];
-  it("keeps one project's chats", () => {
     expect(
-      filterChatsByProject({
-        chats,
-        filterKey: "home-folder",
-        knownKeys: new Set(["fishcode", "home-folder"]),
-        groupKeyOf: (chat) => chat.group,
-      }).map((chat) => chat.id),
-    ).toEqual([2]);
-  });
-  it("shows all for no filter or a project that is gone", () => {
-    expect(
-      filterChatsByProject({
-        chats,
-        filterKey: "landing",
-        knownKeys: new Set(["fishcode"]),
-        groupKeyOf: (chat) => chat.group,
+      chatRowShowsComputer({
+        ...base,
+        underComputerHeader: true,
+        chatComputer: "work",
+        projectComputers: null,
       }),
-    ).toHaveLength(2);
+    ).toBe(false);
+  });
+  it("orders this computer first and the sleeping ones last", () => {
+    const order = orderComputers(
+      [
+        { environmentId: null, key: "box", label: "spark-lab", status: "sleeping" },
+        { environmentId: "work", key: "work", label: "uno-work", status: "online" },
+        { environmentId: "mac", key: "mac", label: "MacBook", status: "online" },
+      ],
+      "mac",
+    );
+    expect(order.map((computer) => computer.label)).toEqual(["MacBook", "uno-work", "spark-lab"]);
+  });
+});
+
+describe("groupSidebarChats", () => {
+  const chats = [
+    { id: 1, env: "mac", project: "landing", status: "working" },
+    { id: 2, env: "product", project: "landing", status: "needs-you" },
+    { id: 3, env: "mac", project: "fishcode", status: "idle" },
+  ];
+  const keyOf = {
+    computer: (chat: (typeof chats)[number]) => chat.env,
+    project: (chat: (typeof chats)[number]) => chat.project,
+    status: (chat: (typeof chats)[number]) => chat.status,
+  };
+  it("no level is one list", () => {
+    expect(groupSidebarChats({ chats, levels: [], keyOf })).toBeNull();
+  });
+  it("groups computer → project, seeding the ones without chats", () => {
+    const tree = groupSidebarChats({
+      chats,
+      levels: ["computer", "project"],
+      keyOf,
+      orderOf: { computer: ["mac", "product", "spark"] },
+      seedOf: { computer: () => ["spark"] },
+    })!;
+    expect(tree.map((node) => node.id)).toEqual(["mac", "product", "spark"]);
+    expect(tree[0]!.children!.map((node) => node.id)).toEqual(["landing", "fishcode"]);
+    expect(tree[0]!.children![0]!.path).toBe("computer:mac/project:landing");
+    expect(tree[2]!.chats).toEqual([]);
+  });
+  it("orders statuses as given and seeds nothing under a status", () => {
+    const tree = groupSidebarChats({
+      chats,
+      levels: ["status", "project"],
+      keyOf,
+      orderOf: { status: ["needs-you", "working", "idle"] },
+      seedOf: { project: () => ["empty"] },
+    })!;
+    expect(tree.map((node) => node.id)).toEqual(["needs-you", "working", "idle"]);
+    expect(tree[0]!.children!.map((node) => node.id)).toEqual(["landing"]);
   });
 });

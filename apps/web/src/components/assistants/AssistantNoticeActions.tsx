@@ -14,6 +14,8 @@ export function AssistantNoticeActions(props: {
   readonly environmentId: string;
   readonly projectId: string;
   readonly onOpen: () => void;
+  /** Next to the row's own Open / Done / Snooze. */
+  readonly revokeOnly?: boolean;
 }) {
   const navigate = useNavigate();
   const key = assistantKeyOf(props.environmentId, props.projectId);
@@ -23,10 +25,12 @@ export function AssistantNoticeActions(props: {
   if (!profile) return null;
   const revoked = profile.revokedAt !== null;
   return (
-    <div className="flex flex-wrap items-center gap-1" data-testid="inbox-assistant-actions">
-      <Button size="xs" variant="outline" onClick={props.onOpen}>
-        Open {profile.name}
-      </Button>
+    <div className="contents" data-testid="inbox-assistant-actions">
+      {props.revokeOnly ? null : (
+        <Button size="xs" variant="outline" onClick={props.onOpen}>
+          Open {profile.name}
+        </Button>
+      )}
       {revoked ? (
         <>
           <span className="px-1 text-xs text-muted-foreground">Revoked</span>

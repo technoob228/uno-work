@@ -85,8 +85,7 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
       }
       set({ agentSeesConsole: on });
     },
-    toggleCommenting: (tabId) =>
-      patch(tabId, { commenting: !tab(tabId).commenting, draft: null }),
+    toggleCommenting: (tabId) => patch(tabId, { commenting: !tab(tabId).commenting, draft: null }),
     toggleDebug: (tabId) => patch(tabId, { debugOpen: !tab(tabId).debugOpen }),
     resetLogs: (tabId) => patch(tabId, { console: [], network: [] }),
     addConsole: (tabId, entry) => patch(tabId, { console: pushCapped(tab(tabId).console, entry) }),

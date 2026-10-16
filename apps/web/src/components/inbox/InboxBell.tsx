@@ -22,7 +22,8 @@ import {
   setSystemNotifications,
   useSystemNotificationsState,
 } from "../../inbox/systemNotifications";
-import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
+import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
+import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -206,6 +207,8 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
+  // "Uno set up assistant Scout": revoke right here (w0138 p7).
+  const assistantNotice = item.open?.kind === "url" ? assistantPageOfUrl(item.open.url) : null;
   const open = () => {
     onNavigate();
     void openItem(item);
@@ -265,6 +268,14 @@ const BellItem = memo(function BellItem({
                 />
               )}
             </WithInboxItemActions>
+            {assistantNotice ? (
+              <AssistantNoticeActions
+                environmentId={assistantNotice.environmentId}
+                projectId={assistantNotice.projectId}
+                onOpen={open}
+                revokeOnly
+              />
+            ) : null}
           </div>
         </div>
       </div>

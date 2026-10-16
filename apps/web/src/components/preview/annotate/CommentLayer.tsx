@@ -70,18 +70,16 @@ export function CommentLayer({
     <div ref={layerRef} className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
       {draft ? (
         <NoteBox
-          key={draft.kind === "edit" ? draft.commentId : `${draft.pick.rect.x}:${draft.pick.rect.y}`}
+          key={
+            draft.kind === "edit" ? draft.commentId : `${draft.pick.rect.x}:${draft.pick.rect.y}`
+          }
           style={
             draft.kind === "new" && position
               ? { left: position.left, top: position.top }
               : { left: "50%", bottom: 52, transform: "translateX(-50%)" }
           }
           title={
-            editing
-              ? `Comment ${editing.n}`
-              : draft.kind === "new"
-                ? draft.pick.label
-                : "Comment"
+            editing ? `Comment ${editing.n}` : draft.kind === "new" ? draft.pick.label : "Comment"
           }
           detail={editing ? editing.label : draft.kind === "new" ? draft.pick.text : null}
           initial={editing?.note ?? ""}

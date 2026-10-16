@@ -271,7 +271,9 @@ export function allErrorsPayload(input: {
   readonly console: ReadonlyArray<ConsoleEntry>;
   readonly network: ReadonlyArray<NetworkEntry>;
 }): PanelContextPayload | null {
-  const problems = input.console.filter((entry) => entry.level === "error" || entry.level === "warn");
+  const problems = input.console.filter(
+    (entry) => entry.level === "error" || entry.level === "warn",
+  );
   const failed = input.network.filter(isFailedRequest);
   const count = problems.length + failed.length;
   if (count === 0) return null;

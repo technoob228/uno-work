@@ -5,8 +5,8 @@
  * revoking one revokes everything it set up.
  *
  * Opened from its face in the sidebar, from the Inbox card "Uno set up
- * Scout", and from the team tree. Memory and models in full stay on the
- * older page (`LocalAssistantPage.tsx`, "Memory & models").
+ * Scout", and from the team tree. Memory rows unfold the file here; editing
+ * it and the models table stay on `LocalAssistantPage.tsx` ("Memory & models").
  */
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import type {
@@ -144,9 +144,9 @@ function MemoryFile(props: {
   readonly member: TeamMember;
   readonly name: AssistantEditableFileName;
   readonly what: string;
-  readonly onOpen: () => void;
   readonly last?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const file = useQuery({
     queryKey: [
       "assistant-file-preview",
@@ -167,11 +167,12 @@ function MemoryFile(props: {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .slice(0, 3);
+    .slice(0, open ? undefined : 3);
   return (
     <button
       type="button"
-      onClick={props.onOpen}
+      aria-expanded={open}
+      onClick={() => setOpen((value) => !value)}
       className={cn(
         "flex w-full cursor-pointer items-start gap-2.5 px-3 py-2 text-left hover:bg-accent/40",
         !props.last && "border-b border-border/70",
@@ -187,7 +188,10 @@ function MemoryFile(props: {
           <span className="block text-xs text-muted-foreground">…</span>
         ) : lines.length > 0 ? (
           lines.map((line) => (
-            <span key={line} className="block truncate text-xs text-muted-foreground">
+            <span
+              key={line}
+              className={cn("block text-xs text-muted-foreground", !open && "truncate")}
+            >
               {line}
             </span>
           ))
@@ -197,7 +201,12 @@ function MemoryFile(props: {
           </span>
         )}
       </span>
-      <ChevronRightIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <ChevronRightIcon
+        className={cn(
+          "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform",
+          open && "rotate-90",
+        )}
+      />
     </button>
   );
 }
@@ -283,7 +292,7 @@ export function AssistantProfilePage(props: {
           {back}
         </header>
         <p className="p-6 text-sm text-muted-foreground">
-          This assistant isn't here — its computer may be offline. DBG {props.environmentId}/{props.projectId}/{team.map((m) => m.key).join(",")}
+          This assistant isn't here — its computer may be offline.
         </p>
       </SidebarInset>
     );
@@ -308,8 +317,6 @@ export function AssistantProfilePage(props: {
       scopeProjectRef(member.environmentId as EnvironmentId, member.projectId as ProjectId),
       { envMode: "local" },
     );
-  const openMemory = () =>
-    void navigate({ to: "/assistants", search: { view: "local", project: member.projectId } });
 
   const running = [...member.chats.work, ...member.chats.conversations].filter((thread) => {
     const status = resolveSidebarThreadStatus(thread);
@@ -584,31 +591,9 @@ export function AssistantProfilePage(props: {
               </Section>
             </div>
 
-            <Section
-              title="Memory"
-              action={
-                <button
-                  type="button"
-                  onClick={openMemory}
-                  className="cursor-pointer text-xs text-primary hover:underline"
-                >
-                  Memory and models
-                </button>
-              }
-            >
-              <MemoryFile
-                member={member}
-                name="NOTES.md"
-                what="what it has learned"
-                onOpen={openMemory}
-              />
-              <MemoryFile
-                member={member}
-                name="AGENTS.md"
-                what="its instructions"
-                onOpen={openMemory}
-                last
-              />
+            <Section title="Memory">
+              <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
+              <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
             </Section>
 
             <Section title="Team" testId="assistant-profile-team">

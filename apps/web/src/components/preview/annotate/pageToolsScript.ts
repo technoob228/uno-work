@@ -38,7 +38,12 @@ export interface PagePick {
   readonly text: string | null;
   /** In the page's viewport (CSS pixels): where the host puts the note box. */
   readonly rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-  readonly docRect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  readonly docRect: {
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  };
 }
 
 /** A pin the page draws (the host owns the list). */
@@ -46,7 +51,12 @@ export interface PagePin {
   readonly n: number;
   readonly kind: "element" | "area";
   readonly selector: string | null;
-  readonly docRect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  readonly docRect: {
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  };
 }
 
 /** Parse one console line of the page: ours (with this nonce) or null. */
@@ -70,7 +80,7 @@ const SCRIPT = String.raw`
 (function (NONCE) {
   var w = window;
   var G = "${PAGE_TOOLS_GLOBAL}";
-  if (w[G] && w[G].nonce === NONCE) return "already";
+  if (w[G] && w[G].nonce === NONCE && w[G].doc === document) return "already";
   var origDebug = console.debug.bind(console);
   function emit(type, data) {
     try { origDebug(NONCE + JSON.stringify({ type: type, data: data })); } catch (e) {}
@@ -422,6 +432,7 @@ const SCRIPT = String.raw`
 
   w[G] = {
     nonce: NONCE,
+    doc: document,
     setMode: function (m) {
       mode = m === "comment" ? "comment" : "off";
       setCursor(mode === "comment");

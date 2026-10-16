@@ -12,6 +12,14 @@ import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { answerFileRpc } from "./demoFiles";
+import {
+  demoBrowserLiveInitial,
+  demoBrowserLiveUnary,
+  demoMachineApps,
+  demoSiteHandlers,
+  demoWorkSites,
+  loadAgentFrame,
+} from "./demoBrowser";
 import "./seedTabs";
 import {
   CHATS,
@@ -47,9 +55,9 @@ function seedLocalStorage() {
     JSON.stringify({
       ...DEFAULT_CLIENT_SETTINGS,
       onboardingCompleted: true,
-      // p5: every computer in one sidebar, as one list with a project filter.
+      // p5: every computer in one sidebar, one list (no grouping).
       sidebarEnvironmentScope: "all",
-      sidebarView: "list",
+      sidebarGroupLevels: [],
     }),
   );
   const records = [MACHINES.work, MACHINES.product].map((machine) => ({
@@ -173,6 +181,11 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
   const fileAnswer = answerFileRpc(machine, body);
   if (fileAnswer !== undefined) return fileAnswer;
+  // p1/p2: the agent's browser on the cloud computers (demoBrowser.ts).
+  const live = demoBrowserLiveUnary(machine, body, (method, value) =>
+    harnesses.get(machine.environmentId)?.emitStreamValue(method, value),
+  );
+  if (live) return live.value;
   switch (tag) {
     case WS_METHODS.serverGetConfig:
       return serverConfigFor(machine);
@@ -223,13 +236,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
         uptimeS: 86_400 * 2,
       };
     case WS_METHODS.unoComputerMachineApps:
-      return {
-        apps: [],
-        manifestDir: "~/.uno/apps",
-        scannedAt: new Date().toISOString(),
-        publishBlockedReason: null,
-        warnings: [],
-      };
+      return demoMachineApps(machine);
+    case WS_METHODS.workSites:
+      return demoWorkSites();
     case WS_METHODS.unoEconomyPresence:
       return {
         enabled: false,
@@ -259,6 +268,8 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
 }
 
 function initialStream(machine: DemoMachine, request: NormalizedWsRpcRequestBody) {
+  const live = demoBrowserLiveInitial(machine, request);
+  if (live) return live;
   const model = modelFor(machine);
   switch (request._tag) {
     case WS_METHODS.subscribeServerLifecycle:
@@ -863,6 +874,7 @@ function addDemoProject(
 export async function startDemo(): Promise<void> {
   seedLocalStorage();
   seedAssistantTeam();
+  void loadAgentFrame();
   // Touch every fixture once so a typo in them fails loudly at start.
   void CHATS.length;
   void ago(0);
@@ -930,6 +942,8 @@ export async function startDemo(): Promise<void> {
       return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });
     }),
     http.all("*/_account/*", () => HttpResponse.json({}, { status: 404 })),
+    // p2: the test site's backend (/api/order → 500, a missing image).
+    ...demoSiteHandlers,
     // Anything else of a daemon: an empty answer, never the network.
     http.all("*/api/*", () => HttpResponse.json({}, { status: 404 })),
   );

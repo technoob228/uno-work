@@ -68,7 +68,10 @@ export function usePageTools(input: {
         .catch(() => {});
     };
     const onConsoleMessage = (event: Event) => {
-      const message = parsePageToolsMessage(nonce, (event as Event & { message?: unknown }).message);
+      const message = parsePageToolsMessage(
+        nonce,
+        (event as Event & { message?: unknown }).message,
+      );
       if (!message) return;
       // Ours: not the page's own console line.
       event.preventDefault();

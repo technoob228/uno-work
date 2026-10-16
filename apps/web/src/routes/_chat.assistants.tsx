@@ -15,12 +15,11 @@ export const Route = createFileRoute("/_chat/assistants")({
     const project = search["project"];
     const env = search["env"];
     if (view === "profile") {
-      return typeof project === "string" &&
-        project.startsWith("assistant-") &&
-        typeof env === "string" &&
-        env.length > 0
-        ? { view, project, env }
-        : {};
+      // Only the id itself: a hash URL may carry the page's own query after it.
+      const projectId =
+        typeof project === "string" ? /^assistant-[\w-]+/.exec(project)?.[0] : undefined;
+      const environmentId = typeof env === "string" ? /^[\w.:-]+/.exec(env)?.[0] : undefined;
+      return projectId && environmentId ? { view, project: projectId, env: environmentId } : {};
     }
     if (view === "local") {
       return typeof project === "string" && project.startsWith("assistant-")

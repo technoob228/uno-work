@@ -922,7 +922,12 @@ export function AssistantOnboardingDialog() {
 
           <div className="flex-1">
             {step === 0 ? (
-              <IntroStep isUno={isUno || (target.kind === "new" && team.length === 0)} name={draft.name} emoji={draft.emoji} tone={draft.tone} />
+              <IntroStep
+                isUno={isUno || (target.kind === "new" && team.length === 0)}
+                name={draft.name}
+                emoji={draft.emoji}
+                tone={draft.tone}
+              />
             ) : step === 1 ? (
               <ChannelStep draft={draft} patch={patch} />
             ) : step === 2 ? (

@@ -82,8 +82,8 @@ export function PanelContextChip({
       </button>
       {open ? (
         <ol className="max-h-44 overflow-y-auto border-t border-border/70 px-2.5 py-1.5">
-          {card.items.map((item, index) => (
-            <li key={index} className="flex gap-2 py-1 text-[11px] leading-snug">
+          {card.items.map((item) => (
+            <li key={`${item.marker}:${item.label}`} className="flex gap-2 py-1 text-[11px] leading-snug">
               <span
                 className={cn(
                   "mt-px inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold",

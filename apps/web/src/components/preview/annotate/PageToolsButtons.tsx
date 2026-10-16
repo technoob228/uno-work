@@ -29,7 +29,8 @@ export function PageToolsButtons({ tabId, disabled }: { tabId: string; disabled:
               data-testid="browser-comment-button"
               className={cn(
                 "relative inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",
-                tab.commenting && "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground",
+                tab.commenting &&
+                  "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground",
               )}
             >
               <MessageSquarePlusIcon className="size-3.5" />
@@ -53,7 +54,11 @@ export function PageToolsButtons({ tabId, disabled }: { tabId: string; disabled:
               onClick={() => toggleDebug(tabId)}
               disabled={disabled}
               aria-pressed={tab.debugOpen}
-              aria-label={badge ? `Debug, ${badge.count} ${badge.tone === "error" ? "errors" : "warnings"}` : "Debug"}
+              aria-label={
+                badge
+                  ? `Debug, ${badge.count} ${badge.tone === "error" ? "errors" : "warnings"}`
+                  : "Debug"
+              }
               data-testid="browser-debug-button"
               className={cn(
                 "relative inline-flex h-6 shrink-0 cursor-pointer items-center justify-center gap-1 rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",

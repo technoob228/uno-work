@@ -27,9 +27,12 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerHandleContext } from "../../composerHandleContext";
-import { useDemoDesktop } from "../../demo/demoFlag";
+import { demoHooks, useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
-import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../../environments/primary";
+import {
+  usePrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentId,
+} from "../../environments/primary";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useMachineLabels } from "../../hooks/useMachineRows";
@@ -224,7 +227,7 @@ export function PanelLauncher({
             <h3 className="text-[13px] font-semibold text-foreground">Open in the panel</h3>
             <p className="text-xs text-muted-foreground">Press a letter to open.</p>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(9.75rem,1fr))] gap-2">
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
               return (
@@ -242,21 +245,22 @@ export function PanelLauncher({
                     <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
                       {tile.name}
                     </span>
-                    {tile.isDefault ? (
-                      <span
-                        className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary"
-                        title="Browser and links open here. Change it from the chip in the address bar"
-                        data-testid={`panel-launcher-${tile.id}-default`}
-                      >
-                        default
-                      </span>
-                    ) : null}
+
                     <kbd className="ml-auto shrink-0 rounded border border-border px-1.5 font-sans text-[10.5px] text-muted-foreground">
                       {tile.key}
                     </kbd>
                   </span>
                   <span className="text-xs leading-snug text-muted-foreground">
                     {tile.description}
+                    {tile.isDefault ? (
+                      <span
+                        className="ml-1.5 inline-block rounded-full bg-primary/10 px-1.5 py-px align-[1px] text-[10px] leading-tight font-medium text-primary"
+                        title="Browser and links open here. Change it with the chip in the address bar"
+                        data-testid={`panel-launcher-${tile.id}-default`}
+                      >
+                        default
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               );
@@ -364,7 +368,11 @@ export function PanelLauncher({
                       )
                     }
                     onClick={() => {
-                      openAppTab(makeAppFile({ url: site.url, name: site.host }));
+                      // The demo shows its own page for a site (outside it: undefined).
+                      const mapUrl = demoHooks.siteOpenUrl as ((url: string) => string) | undefined;
+                      openAppTab(
+                        makeAppFile({ url: mapUrl?.(site.url) ?? site.url, name: site.host }),
+                      );
                       onOpenedTab();
                     }}
                   />

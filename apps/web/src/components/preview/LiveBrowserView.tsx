@@ -3,6 +3,7 @@ import {
   ArrowRightIcon,
   HandIcon,
   KeyRoundIcon,
+  MessageSquarePlusIcon,
   MonitorIcon,
   RotateCwIcon,
   UndoIcon,
@@ -587,6 +588,18 @@ function Toolbar({
           className="h-6 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring read-only:text-muted-foreground"
         />
       </form>
+      {/* Comment here comes later (w0138): the page is a picture of the
+          computer's browser, its elements are not in this app. */}
+      <span
+        className="inline-flex h-6 shrink-0 cursor-default items-center gap-1 rounded px-1 text-muted-foreground/60"
+        title="Comments on the agent's browser are coming soon. Use Browser on this device to comment now."
+        data-testid="live-browser-comment-soon"
+      >
+        <MessageSquarePlusIcon className="size-3.5" />
+        <span className="rounded bg-muted px-1 text-[9.5px] font-medium tracking-wide uppercase">
+          soon
+        </span>
+      </span>
       {matched.length > 0 ? (
         <Button
           size="icon-xs"

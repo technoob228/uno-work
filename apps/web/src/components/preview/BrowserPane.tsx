@@ -34,7 +34,7 @@ import {
 } from "@t3tools/shared/browserScreenshot";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { DEMO, demoHooks, useDemoDesktop } from "../../demo/demoFlag";
+import { useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
 import {
   isBrowserExtensionConnected,
@@ -247,10 +247,8 @@ export function matchCredentialsForOrigin(input: {
  * харнесса из другого проекта исполняются в их webview, а не в текущем.
  */
 export function BrowserViews({ activeId }: { activeId: string | null }) {
-  const previewPane = usePreviewPane();
-  const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } = previewPane;
-  // The demo's "Показать" opens tabs through the panel (this is always mounted).
-  if (DEMO) demoHooks.previewPane = previewPane;
+  const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } =
+    usePreviewPane();
   const visibleKeys = new Set(
     visibleScopeKeys({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
   );

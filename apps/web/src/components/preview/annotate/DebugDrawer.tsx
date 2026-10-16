@@ -43,7 +43,7 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
 
   return (
     <div
-      className="flex h-[42%] min-h-40 shrink-0 flex-col border-t border-border bg-card text-xs"
+      className="flex h-[38%] min-h-40 shrink-0 flex-col border-t border-border bg-card text-xs"
       data-testid="browser-debug-drawer"
     >
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
@@ -137,7 +137,9 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
               <NetworkRow
                 key={entry.id}
                 entry={entry}
-                onFix={() => sendToChat(requestPayload({ page: pageUrl, entry }), "Fix this request.")}
+                onFix={() =>
+                  sendToChat(requestPayload({ page: pageUrl, entry }), "Fix this request.")
+                }
               />
             ))}
           </>
@@ -162,7 +164,9 @@ function TabButton({
       onClick={onClick}
       className={cn(
         "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs",
-        active ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+        active
+          ? "bg-accent font-medium text-foreground"
+          : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}
@@ -209,7 +213,11 @@ function ConsoleRow({ entry, onFix }: { entry: ConsoleEntry; onFix: () => void }
   const [open, setOpen] = useState(false);
   const problem = entry.level === "error" || entry.level === "warn";
   const Icon =
-    entry.level === "error" ? CircleAlertIcon : entry.level === "warn" ? TriangleAlertIcon : InfoIcon;
+    entry.level === "error"
+      ? CircleAlertIcon
+      : entry.level === "warn"
+        ? TriangleAlertIcon
+        : InfoIcon;
   const hasMore = Boolean(entry.stack);
   return (
     <div

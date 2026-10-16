@@ -37,7 +37,13 @@ const error: ConsoleEntry = {
   source: "site.js:12",
   at: 1,
 };
-const warning: ConsoleEntry = { ...error, id: "w1", level: "warn", message: "No yearly price", stack: null };
+const warning: ConsoleEntry = {
+  ...error,
+  id: "w1",
+  level: "warn",
+  message: "No yearly price",
+  stack: null,
+};
 const failed: NetworkEntry = {
   id: "n1",
   method: "POST",
@@ -50,7 +56,13 @@ const failed: NetworkEntry = {
   responseBody: '{"error":"price id is not set"}',
   at: 2,
 };
-const ok: NetworkEntry = { ...failed, id: "n2", status: 200, statusText: "OK", url: "http://x/app.css" };
+const ok: NetworkEntry = {
+  ...failed,
+  id: "n2",
+  status: 200,
+  statusText: "OK",
+  url: "http://x/app.css",
+};
 
 describe("pagePath", () => {
   it("the path a person recognises", () => {

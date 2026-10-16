@@ -202,7 +202,11 @@ export class IframeWebview extends EventTarget {
 
   executeJavaScript(code: string): Promise<unknown> {
     const win = this.win() as (Window & { eval: (code: string) => unknown }) | null;
-    if (!win) return Promise.reject(new Error("The page isn't loaded."));
+    // Like a <webview> before dom-ready: the iframe's first blank document
+    // is not the page (and its window is reused by the page that comes next).
+    if (!win || this.readUrl() === "about:blank" || this.index < 0) {
+      return Promise.reject(new Error("The page isn't loaded."));
+    }
     try {
       // Indirect eval: runs in the page's global scope, like executeJavaScript.
       return Promise.resolve(win.eval(code));

@@ -1,62 +1,224 @@
 /**
- * Sidebar D, the line over the chats (Misha 16.10, w0138 point 5): one title
- * that says what the list shows, and the rules for computers in it.
+ * Sidebar D, the line over the chats (Misha 16.10, w0138 point 5 and its
+ * follow-up): one title that says what the list shows, a menu behind it that
+ * groups and filters, and the rules for computers in the list.
  *
- * Three views of the same live chats:
- * - "projects" — folders with their chats ("Projects");
- * - "list"     — one list, newest first, with a project filter ("All projects ▾");
- * - "inbox"    — by status ("Inbox").
- * Chats outside any project are the "Home folder" pseudo-project, never a
- * separate section.
+ * Grouping (ported from icp3/sidebar-v2, proto/chatGrouping.ts): any of
+ * Project, Status, Computer in the order the person picks — none is one list,
+ * newest first. Filters: some projects, some computers (null = all). Chats
+ * outside any project folder are the "Home folder" pseudo-project.
  *
- * Computers: with one computer in the sidebar they are never mentioned. With
- * more, a project that does not live on this computer carries the chip of the
- * computer(s) it lives on; a project on several computers stays one project and
- * its chats from other computers carry a small chip. "Group by computer" puts
- * computer headers on top with their projects inside; a sleeping one is grey.
+ * Computers: with one computer in view they are never mentioned. With more, a
+ * project that does not live on this computer carries its computer's chip; a
+ * project on several computers stays one project and its chats from other
+ * computers carry a small chip; a sleeping computer is grey.
  */
 
-export type SidebarDView = "projects" | "list" | "inbox";
+// ── Group levels ─────────────────────────────────────────────────────────
 
-export const SIDEBAR_D_VIEW_OPTIONS: ReadonlyArray<{
-  readonly id: SidebarDView;
-  readonly label: string;
-  readonly hint: string;
+export type SidebarGroupLevel = "computer" | "project" | "status";
+
+export const SIDEBAR_GROUP_LEVELS: ReadonlyArray<{
+  readonly id: SidebarGroupLevel;
+  readonly name: string;
 }> = [
-  { id: "projects", label: "Projects", hint: "Folders with their chats" },
-  { id: "list", label: "One list", hint: "Newest first, filter by project" },
-  { id: "inbox", label: "Inbox", hint: "By status: what needs you first" },
+  { id: "project", name: "Project" },
+  { id: "status", name: "Status" },
+  { id: "computer", name: "Computer" },
 ];
 
+const LEVEL_NAME: Readonly<Record<SidebarGroupLevel, string>> = {
+  project: "Project",
+  status: "Status",
+  computer: "Computer",
+};
+
 /**
- * The view to show: the stored choice, else what the older "Inbox sidebar"
- * switch said (devices from before 0.0.138 keep what they had).
+ * The levels to group by: the stored choice, else what the older "Inbox
+ * sidebar" switch said (devices from before 0.0.138 keep what they had).
  */
-export function resolveSidebarDView(stored: SidebarDView | null, inboxMode: boolean): SidebarDView {
+export function resolveGroupLevels(
+  stored: ReadonlyArray<SidebarGroupLevel> | null,
+  inboxMode: boolean,
+): ReadonlyArray<SidebarGroupLevel> {
   if (stored !== null) return stored;
-  return inboxMode ? "inbox" : "projects";
+  return inboxMode ? ["status"] : ["project"];
 }
+
+/** The levels that apply: each once, in order; Computer only with 2+ computers in view. */
+export function effectiveLevels(
+  levels: ReadonlyArray<SidebarGroupLevel>,
+  computersInView: number,
+): SidebarGroupLevel[] {
+  const out: SidebarGroupLevel[] = [];
+  for (const level of levels) {
+    if (out.includes(level) || !(level in LEVEL_NAME)) continue;
+    if (level === "computer" && computersInView < 2) continue;
+    out.push(level);
+  }
+  return out;
+}
+
+/** Turn a level on (it goes last) or off. */
+export function toggleLevel(
+  levels: ReadonlyArray<SidebarGroupLevel>,
+  level: SidebarGroupLevel,
+): SidebarGroupLevel[] {
+  return levels.includes(level) ? levels.filter((item) => item !== level) : [...levels, level];
+}
+
+/** Move a level one step up (-1) or down (+1); out of range = no change. */
+export function moveLevel(
+  levels: ReadonlyArray<SidebarGroupLevel>,
+  level: SidebarGroupLevel,
+  by: -1 | 1,
+): SidebarGroupLevel[] {
+  const from = levels.indexOf(level);
+  const to = from + by;
+  if (from === -1 || to < 0 || to >= levels.length) return [...levels];
+  const next = [...levels];
+  next[from] = next[to]!;
+  next[to] = level;
+  return next;
+}
+
+/** "Computer → Project", or "One list, newest first" with no level. */
+export function levelsLabel(levels: ReadonlyArray<SidebarGroupLevel>): string {
+  if (levels.length === 0) return "One list, newest first";
+  return levels.map((level) => LEVEL_NAME[level]).join(" → ");
+}
+
+/**
+ * The three simple views Settings offers (variant B): Projects (folders), One
+ * list, Inbox (by status). Computer stays as it is; any other mix is "custom".
+ */
+export type SidebarDPreset = "projects" | "list" | "inbox";
+
+export const SIDEBAR_D_PRESETS: ReadonlyArray<{
+  readonly id: SidebarDPreset;
+  readonly label: string;
+}> = [
+  { id: "projects", label: "Projects" },
+  { id: "list", label: "One list" },
+  { id: "inbox", label: "Inbox" },
+];
+
+export function presetOf(levels: ReadonlyArray<SidebarGroupLevel>): SidebarDPreset | null {
+  const rest = levels.filter((level) => level !== "computer");
+  if (rest.length === 0) return "list";
+  if (rest.length === 1 && rest[0] === "project") return "projects";
+  if (rest.length === 1 && rest[0] === "status") return "inbox";
+  return null;
+}
+
+export function levelsForPreset(
+  preset: SidebarDPreset,
+  byComputer: boolean,
+): SidebarGroupLevel[] {
+  const head: SidebarGroupLevel[] = byComputer ? ["computer"] : [];
+  switch (preset) {
+    case "projects":
+      return [...head, "project"];
+    case "list":
+      return head;
+    case "inbox":
+      return [...head, "status"];
+  }
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────
 
 /** The pseudo-project of chats outside any project folder. */
 export const HOME_FOLDER_GROUP_KEY = "home-folder";
 export const HOME_FOLDER_GROUP_NAME = "Home folder";
 
-/** The title over the list: says what is shown. */
-export function sidebarDViewTitle(view: SidebarDView, filterName: string | null): string {
-  switch (view) {
-    case "projects":
-      return "Projects";
-    case "list":
-      return filterName ?? "All projects";
-    case "inbox":
-      return "Inbox";
-  }
+/**
+ * A multi-pick filter (projects or computers): null = all. Toggling one when
+ * all are shown keeps only it ("show me landing"); toggling the last one off,
+ * or ending with every one on, goes back to all.
+ */
+export function toggleFilter(
+  picked: ReadonlyArray<string> | null,
+  id: string,
+  all: ReadonlyArray<string>,
+): string[] | null {
+  const current = picked === null ? [] : picked.filter((item) => all.includes(item));
+  const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+  if (next.length === 0 || all.every((item) => next.includes(item))) return null;
+  return all.filter((item) => next.includes(item));
 }
 
-/** "Group by computer" only means something with several computers, and not by status. */
-export function canGroupByComputer(view: SidebarDView, multiComputer: boolean): boolean {
-  return multiComputer && view !== "inbox";
+/** The picks that still exist; none left = all. */
+export function livePicks(
+  picked: ReadonlyArray<string> | null,
+  all: ReadonlyArray<string>,
+): ReadonlyArray<string> | null {
+  if (picked === null) return null;
+  const live = picked.filter((item) => all.includes(item));
+  return live.length === 0 ? null : live;
 }
+
+export function passes(picked: ReadonlyArray<string> | null, id: string): boolean {
+  return picked === null || picked.includes(id);
+}
+
+// ── What the title and the chip say ──────────────────────────────────────
+
+const LEVEL_WORD: Readonly<Record<SidebarGroupLevel, string>> = {
+  project: "project",
+  status: "status",
+  computer: "computer",
+};
+
+/**
+ * The title over the list says what it shows: "All projects", "Projects"
+ * (grouped by project), "landing", "2 projects · by status", "Projects · by
+ * computer".
+ */
+export function sidebarDTitle(input: {
+  readonly levels: ReadonlyArray<SidebarGroupLevel>;
+  /** Names of the picked projects; null = all. */
+  readonly projectNames: ReadonlyArray<string> | null;
+}): string {
+  const { levels, projectNames } = input;
+  const byProject = levels.includes("project");
+  const head =
+    projectNames === null
+      ? byProject
+        ? "Projects"
+        : "All projects"
+      : projectNames.length === 1
+        ? projectNames[0]!
+        : `${projectNames.length} projects`;
+  // "Projects" already says "by project"; one project needs no project level.
+  const dropProject = (projectNames === null && byProject) || projectNames?.length === 1;
+  const said = levels.filter((level) => !(level === "project" && dropProject));
+  return said.length === 0
+    ? head
+    : `${head} · by ${said.map((level) => LEVEL_WORD[level]).join(" → ")}`;
+}
+
+/** The one small chip under the title while a filter is on: "landing · MacBook". */
+export function filterChipLabel(input: {
+  readonly projectNames: ReadonlyArray<string> | null;
+  readonly computerNames: ReadonlyArray<string> | null;
+}): string | null {
+  const parts: string[] = [];
+  const { projectNames, computerNames } = input;
+  if (projectNames !== null) {
+    parts.push(
+      projectNames.length <= 2 ? projectNames.join(", ") : `${projectNames.length} projects`,
+    );
+  }
+  if (computerNames !== null) {
+    parts.push(
+      computerNames.length <= 2 ? computerNames.join(", ") : `${computerNames.length} computers`,
+    );
+  }
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+// ── Computers ────────────────────────────────────────────────────────────
 
 /**
  * Computers named on a project row: none with one computer, none when the
@@ -75,10 +237,10 @@ export function projectRowComputers(input: {
 /**
  * Whether a chat row carries its computer's chip.
  * - one computer, or rows already under a computer header: never;
- * - in a project row (`projectComputers`): only when the project spans
- *   several computers and the chat is not on this one (a project on one other
- *   computer already says so on its row);
- * - in one list / inbox (`projectComputers` null): when not on this computer.
+ * - right under a project row (`projectComputers`): only when the project
+ *   spans several computers and the chat is not on this one (a project on one
+ *   other computer already says so on its row);
+ * - otherwise (`projectComputers` null): when not on this computer.
  */
 export function chatRowShowsComputer(input: {
   readonly chatComputer: string;
@@ -103,40 +265,23 @@ export interface SidebarDComputer {
   readonly status: SidebarDComputerStatus;
 }
 
-export interface SidebarDComputerSection<T> {
-  readonly computer: SidebarDComputer;
-  readonly isThis: boolean;
-  /** Grey: asleep or unreachable, nothing to open right now. */
-  readonly dimmed: boolean;
-  readonly chats: ReadonlyArray<T>;
+export function isComputerDimmed(computer: SidebarDComputer): boolean {
+  return computer.status === "sleeping" || computer.status === "offline";
 }
 
-/**
- * "Group by computer": this computer first, then the others in the given
- * order, the ones asleep or unreachable last. Every computer keeps its header,
- * chats or not; chats on a computer the list doesn't know go nowhere.
- */
-export function groupChatsByComputer<T>(input: {
-  readonly chats: ReadonlyArray<T>;
-  readonly computerOf: (chat: T) => string;
-  readonly computers: ReadonlyArray<SidebarDComputer>;
-  readonly thisComputer: string | null;
-}): ReadonlyArray<SidebarDComputerSection<T>> {
-  const byEnvironment = new Map<string, T[]>();
-  for (const chat of input.chats) {
-    const environmentId = input.computerOf(chat);
-    const chats = byEnvironment.get(environmentId);
-    if (chats) chats.push(chat);
-    else byEnvironment.set(environmentId, [chat]);
-  }
+/** This computer first, then the others as given, the ones asleep or unreachable last. */
+export function orderComputers(
+  computers: ReadonlyArray<SidebarDComputer>,
+  thisComputer: string | null,
+): SidebarDComputer[] {
   const rank = (computer: SidebarDComputer) =>
-    computer.environmentId !== null && computer.environmentId === input.thisComputer
+    computer.environmentId !== null && computer.environmentId === thisComputer
       ? 0
-      : computer.status === "online" || computer.status === "unknown"
-        ? 1
-        : 2;
+      : isComputerDimmed(computer)
+        ? 2
+        : 1;
   const seen = new Set<string>();
-  return input.computers
+  return computers
     .filter((computer) => {
       if (seen.has(computer.key)) return false;
       seen.add(computer.key);
@@ -144,25 +289,88 @@ export function groupChatsByComputer<T>(input: {
     })
     .map((computer, index) => ({ computer, index }))
     .toSorted((a, b) => rank(a.computer) - rank(b.computer) || a.index - b.index)
-    .map(({ computer }) => ({
-      computer,
-      isThis: computer.environmentId !== null && computer.environmentId === input.thisComputer,
-      dimmed: computer.status === "sleeping" || computer.status === "offline",
-      chats:
-        computer.environmentId === null ? [] : (byEnvironment.get(computer.environmentId) ?? []),
-    }));
+    .map(({ computer }) => computer);
+}
+
+// ── The tree ─────────────────────────────────────────────────────────────
+
+export interface SidebarDGroupNode<T> {
+  readonly level: SidebarGroupLevel;
+  /** Status id, computer key or project group key. */
+  readonly id: string;
+  /** Unique across the tree — the fold key ("computer:mac/project:landing"). */
+  readonly path: string;
+  readonly depth: number;
+  /** Every chat under this group, in the incoming order (newest first). */
+  readonly chats: ReadonlyArray<T>;
+  /** Null on the last level: the chats are listed under it. */
+  readonly children: ReadonlyArray<SidebarDGroupNode<T>> | null;
+  /** The level values of this group and its parents. */
+  readonly trail: Readonly<Partial<Record<SidebarGroupLevel, string>>>;
+}
+
+type Trail = Readonly<Partial<Record<SidebarGroupLevel, string>>>;
+
+function orderedKeys<T>(
+  chats: ReadonlyArray<T>,
+  keyOf: (chat: T) => string,
+  preferred: ReadonlyArray<string> | undefined,
+  seeded: ReadonlyArray<string>,
+): string[] {
+  const present: string[] = [];
+  for (const chat of chats) {
+    const key = keyOf(chat);
+    if (!present.includes(key)) present.push(key);
+  }
+  for (const key of seeded) if (!present.includes(key)) present.push(key);
+  if (!preferred) return present;
+  const rank = (key: string) => {
+    const index = preferred.indexOf(key);
+    return index === -1 ? preferred.length + present.indexOf(key) : index;
+  };
+  return present.toSorted((a, b) => rank(a) - rank(b));
 }
 
 /**
- * The list view's filter: the chats of one project (its logical key, or the
- * Home folder), or all of them. A filter whose project is gone shows all.
+ * Group chats by the levels in order; null with no level (one flat list).
+ * Groups keep the order of their newest chat unless `orderOf` fixes it;
+ * `seedOf` adds groups without chats (a project with nothing live, a computer
+ * asleep) — never under a status ("Working › landing (empty)" means nothing).
  */
-export function filterChatsByProject<T>(input: {
+export function groupSidebarChats<T>(input: {
   readonly chats: ReadonlyArray<T>;
-  readonly filterKey: string | null;
-  readonly knownKeys: ReadonlySet<string>;
-  readonly groupKeyOf: (chat: T) => string;
-}): ReadonlyArray<T> {
-  if (input.filterKey === null || !input.knownKeys.has(input.filterKey)) return input.chats;
-  return input.chats.filter((chat) => input.groupKeyOf(chat) === input.filterKey);
+  readonly levels: ReadonlyArray<SidebarGroupLevel>;
+  readonly keyOf: Readonly<Record<SidebarGroupLevel, (chat: T) => string>>;
+  readonly orderOf?: Readonly<Partial<Record<SidebarGroupLevel, ReadonlyArray<string>>>>;
+  readonly seedOf?: Readonly<
+    Partial<Record<SidebarGroupLevel, (trail: Trail) => ReadonlyArray<string>>>
+  >;
+}): ReadonlyArray<SidebarDGroupNode<T>> | null {
+  if (input.levels.length === 0) return null;
+  const build = (
+    chats: ReadonlyArray<T>,
+    depth: number,
+    parentPath: string,
+    trail: Trail,
+  ): SidebarDGroupNode<T>[] => {
+    const level = input.levels[depth]!;
+    const keyOf = input.keyOf[level];
+    const seeded = trail.status !== undefined ? [] : (input.seedOf?.[level]?.(trail) ?? []);
+    const last = depth === input.levels.length - 1;
+    return orderedKeys(chats, keyOf, input.orderOf?.[level], seeded).map((id) => {
+      const mine = chats.filter((chat) => keyOf(chat) === id);
+      const path = `${parentPath}${parentPath ? "/" : ""}${level}:${id}`;
+      const nextTrail = { ...trail, [level]: id };
+      return {
+        level,
+        id,
+        path,
+        depth,
+        chats: mine,
+        children: last ? null : build(mine, depth + 1, path, nextTrail),
+        trail: nextTrail,
+      };
+    });
+  };
+  return build(input.chats, 0, "", {});
 }
