@@ -43,7 +43,6 @@ import { cn } from "../../lib/utils";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { siteRows } from "../sites/sitesModel";
 import { useWorkSites } from "../sites/useWorkSites";
-import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { useChatPanelActions } from "./chatPanelActions";
 import { LegacyPanelLauncher } from "./LegacyPanelLauncher";
@@ -152,6 +151,7 @@ function PanelLauncherV2({
     : "your browser";
   const tiles = visibleLauncherTiles({
     canBrowseHere: sources.includes("app") || browserCompanionEnabled,
+    desktop,
     agentBrowserOn: agentComputer,
     defaultBrowser: defaultSource,
     hasComputer: environmentId !== null,
@@ -249,7 +249,7 @@ function PanelLauncherV2({
                 tile.id === "browser"
                   ? `Runs on ${deviceName}. You click, the agent sees${desktop ? "; comment and see errors" : ""}.`
                   : tile.id === "agentBrowser"
-                    ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works, you watch and can take control.`
+                    ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works, you watch; take control to sign in for it (login, captcha, 2FA).`
                     : undefined;
               return (
                 <li key={tile.id} className="list-none">
@@ -268,16 +268,6 @@ function PanelLauncherV2({
                         <span className="truncate text-[13px] font-medium text-foreground">
                           {tile.name}
                         </span>
-                        {tile.isDefault ? (
-                          <Badge
-                            variant="info"
-                            size="sm"
-                            title="Browser and links open here. Change it with the chip in the address bar"
-                            data-testid={`panel-launcher-${tile.id}-default`}
-                          >
-                            default
-                          </Badge>
-                        ) : null}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
                         {tile.description}

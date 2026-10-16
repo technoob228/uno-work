@@ -106,7 +106,11 @@ function SwitchRow({ name }: { name: keyof DemoSwitches }) {
   const setSwitch = useDemoStore((state) => state.setSwitch);
   const spec = DEMO_SWITCH_OPTIONS[name];
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 pl-6" role="radiogroup" aria-label={spec.label}>
+    <div
+      className="mt-1.5 flex items-center gap-1.5 pl-6"
+      role="radiogroup"
+      aria-label={spec.label}
+    >
       {spec.options.map((option) => (
         <button
           key={option.id}
@@ -222,7 +226,9 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
                 Показать
               </button>
             </div>
-            {point.switches?.map((name) => <SwitchRow key={name} name={name} />)}
+            {point.switches?.map((name) => (
+              <SwitchRow key={name} name={name} />
+            ))}
           </li>
         ))}
       </ol>

@@ -36,29 +36,36 @@ describe("visibleLauncherTiles", () => {
     expect(ids(everything)).not.toContain("terminal");
   });
 
-  it("the default browser carries the mark — only when there are two to choose from", () => {
-    expect(tile(everything, "browser")?.isDefault).toBe(true);
-    expect(tile(everything, "agentBrowser")?.isDefault).toBe(false);
-    const computer = { ...everything, defaultBrowser: "computer" as const };
-    expect(tile(computer, "browser")?.isDefault).toBe(false);
-    expect(tile(computer, "agentBrowser")?.isDefault).toBe(true);
-    const onlyHere = { ...everything, agentBrowserOn: null };
-    expect(tile(onlyHere, "browser")?.isDefault).toBeUndefined();
+  it('no "default" mark on either browser (Misha 16.10)', () => {
+    expect(tile(everything, "browser")?.isDefault).toBeUndefined();
+    expect(tile(everything, "agentBrowser")?.isDefault).toBeUndefined();
   });
 
-  it("the default browser goes first", () => {
+  it("your site goes first, whatever the browser setting says", () => {
     expect(ids({ ...everything, defaultBrowser: "computer" })).toEqual([
-      "agentBrowser",
       "browser",
+      "agentBrowser",
       "files",
       "changes",
       "apps",
     ]);
   });
 
-  it("says what each browser is for, in plain words", () => {
-    expect(tile(everything, "browser")?.description).toBe("Open the site here — you click");
-    expect(tile(everything, "agentBrowser")?.description).toBe("Watch the agent in its browser");
+  it("two different browsers, said in plain words", () => {
+    expect(tile(everything, "browser")?.name).toBe("Your site");
+    expect(tile(everything, "browser")?.description).toBe(
+      "Open your site or app here — comment, see errors",
+    );
+    expect(tile(everything, "agentBrowser")?.name).toBe("Agent's browser");
+    expect(tile(everything, "agentBrowser")?.description).toBe(
+      "Watch the agent work; take control to sign in for it",
+    );
+  });
+
+  it("the web build says honestly where your site opens", () => {
+    expect(tile({ ...everything, desktop: false }, "browser")?.description).toBe(
+      "Opens in a tab of this browser, with the Uno extension",
+    );
   });
 
   it("a chat on this Mac: no Agent's browser", () => {

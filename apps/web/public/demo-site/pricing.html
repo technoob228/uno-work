@@ -1,84 +1,116 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pricing — Fieldnote</title>
-<link rel="stylesheet" href="site.css">
-</head>
-<body>
-<header class="site-header">
-  <div class="wrap">
-    <a class="logo" href="index.html"><span class="logo-mark"></span>Fieldnote</a>
-    <nav class="nav">
-      <a href="index.html">Product</a>
-      <a href="pricing.html">Pricing</a>
-      <a href="#">Docs</a>
-      <a href="#">Changelog</a>
-    </nav>
-    <div class="header-cta">
-      <a class="btn" href="#">Sign in</a>
-      <a class="btn btn-primary" href="#trial">Start free</a>
-    </div>
-  </div>
-</header>
-<main class="wrap">
-  <section class="hero" style="padding-bottom:0">
-    <h1 class="pricing-title">Simple pricing for teams of any size</h1>
-    <p class="lead">Start free. Upgrade when your team does. Cancel any time.</p>
-    <div class="toggle" role="group" aria-label="Billing period">
-      <button type="button" class="on" data-period="monthly">Monthly</button>
-      <button type="button" data-period="yearly">Yearly <span class="save">−20%</span></button>
-    </div>
-  </section>
-  <section class="plans">
-    <article class="plan-card" data-plan="free">
-      <div class="plan-name">Free</div>
-      <div class="plan-desc">For trying it out with a few people.</div>
-      <div class="price">$0<small>/month</small></div>
-      <div class="tax">&nbsp;</div>
-      <ul class="plan-features"><li>Up to 3 people</li><li>20 notes a month</li><li>Slack digest</li></ul>
-      <a class="btn plan-cta" href="#trial">Start free</a>
-    </article>
-    <article class="plan-card featured" data-plan="team">
-      <span class="badge">Most popular</span>
-      <div class="plan-name">Team</div>
-      <div class="plan-desc">For teams that meet every day.</div>
-      <div class="price"><span class="amount">$29</span><small>/month</small></div>
-      <div class="tax" id="team-tax">Checking the price with tax…</div>
-      <ul class="plan-features"><li>Up to 25 people</li><li>Unlimited notes</li><li>Owners and dates</li><li>Notion and email</li></ul>
-      <button type="button" class="btn btn-brand plan-cta" data-start="team">Start free trial</button>
-    </article>
-    <article class="plan-card" data-plan="business">
-      <div class="plan-name">Business</div>
-      <div class="plan-desc">For companies with many teams and SSO.</div>
-      <div class="price"><span class="amount">$79</span><small>/month</small></div>
-      <div class="tax">&nbsp;</div>
-      <ul class="plan-features"><li>Unlimited people</li><li>SSO and audit log</li><li>Priority support</li></ul>
-      <a class="btn plan-cta" href="#trial">Talk to us</a>
-    </article>
-  </section>
-  <figure class="quote">
-    <img src="img/ana-lumen.jpg" alt="Ana from Lumen" width="48" height="48">
-    <div><p>“We stopped asking who owns what. Fieldnote just tells us.”</p><cite>Ana Petrova, Head of Ops at Lumen</cite></div>
-  </figure>
-  <section class="trial" id="trial">
-    <div>
-      <h2>Start your 14-day trial</h2>
-      <p>No card needed. We set up your first workspace with you.</p>
-    </div>
-    <form class="trial-form" id="trial-form">
-      <div class="form-row">
-        <div><label for="email">Work email</label><input id="email" name="email" type="email" placeholder="you@company.com" value="misha@uno.place"></div>
-        <div><label for="company">Company</label><input id="company" name="company" placeholder="Company name" value="Uno"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pricing — Fieldnote</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="index.html"><span class="logo-mark"></span>Fieldnote</a>
+        <nav class="nav">
+          <a href="index.html">Product</a>
+          <a href="pricing.html">Pricing</a>
+          <a href="#">Docs</a>
+          <a href="#">Changelog</a>
+        </nav>
+        <div class="header-cta">
+          <a class="btn" href="#">Sign in</a>
+          <a class="btn btn-primary" href="#trial">Start free</a>
+        </div>
       </div>
-      <button type="submit" class="btn btn-brand">Start free trial</button>
-      <div class="form-msg" id="form-msg"></div>
-    </form>
-  </section>
-</main>
-<footer><div class="wrap">© 2026 Fieldnote · <a href="index.html">Product</a> · Privacy</div></footer>
-<script src="site.js"></script>
-<script src="pricing.js"></script>
-</body>
+    </header>
+    <main class="wrap">
+      <section class="hero" style="padding-bottom: 0">
+        <h1 class="pricing-title">Simple pricing for teams of any size</h1>
+        <p class="lead">Start free. Upgrade when your team does. Cancel any time.</p>
+        <div class="toggle" role="group" aria-label="Billing period">
+          <button type="button" class="on" data-period="monthly">Monthly</button>
+          <button type="button" data-period="yearly">Yearly <span class="save">−20%</span></button>
+        </div>
+      </section>
+      <section class="plans">
+        <article class="plan-card" data-plan="free">
+          <div class="plan-name">Free</div>
+          <div class="plan-desc">For trying it out with a few people.</div>
+          <div class="price">$0<small>/month</small></div>
+          <div class="tax">&nbsp;</div>
+          <ul class="plan-features">
+            <li>Up to 3 people</li>
+            <li>20 notes a month</li>
+            <li>Slack digest</li>
+          </ul>
+          <a class="btn plan-cta" href="#trial">Start free</a>
+        </article>
+        <article class="plan-card featured" data-plan="team">
+          <span class="badge">Most popular</span>
+          <div class="plan-name">Team</div>
+          <div class="plan-desc">For teams that meet every day.</div>
+          <div class="price"><span class="amount">$29</span><small>/month</small></div>
+          <div class="tax" id="team-tax">Checking the price with tax…</div>
+          <ul class="plan-features">
+            <li>Up to 25 people</li>
+            <li>Unlimited notes</li>
+            <li>Owners and dates</li>
+            <li>Notion and email</li>
+          </ul>
+          <button type="button" class="btn btn-brand plan-cta" data-start="team">
+            Start free trial
+          </button>
+        </article>
+        <article class="plan-card" data-plan="business">
+          <div class="plan-name">Business</div>
+          <div class="plan-desc">For companies with many teams and SSO.</div>
+          <div class="price"><span class="amount">$79</span><small>/month</small></div>
+          <div class="tax">&nbsp;</div>
+          <ul class="plan-features">
+            <li>Unlimited people</li>
+            <li>SSO and audit log</li>
+            <li>Priority support</li>
+          </ul>
+          <a class="btn plan-cta" href="#trial">Talk to us</a>
+        </article>
+      </section>
+      <figure class="quote">
+        <img src="img/ana-lumen.jpg" alt="Ana from Lumen" width="48" height="48" />
+        <div>
+          <p>“We stopped asking who owns what. Fieldnote just tells us.”</p>
+          <cite>Ana Petrova, Head of Ops at Lumen</cite>
+        </div>
+      </figure>
+      <section class="trial" id="trial">
+        <div>
+          <h2>Start your 14-day trial</h2>
+          <p>No card needed. We set up your first workspace with you.</p>
+        </div>
+        <form class="trial-form" id="trial-form">
+          <div class="form-row">
+            <div>
+              <label for="email">Work email</label
+              ><input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@company.com"
+                value="misha@uno.place"
+              />
+            </div>
+            <div>
+              <label for="company">Company</label
+              ><input id="company" name="company" placeholder="Company name" value="Uno" />
+            </div>
+          </div>
+          <button type="submit" class="btn btn-brand">Start free trial</button>
+          <div class="form-msg" id="form-msg"></div>
+        </form>
+      </section>
+    </main>
+    <footer>
+      <div class="wrap">© 2026 Fieldnote · <a href="index.html">Product</a> · Privacy</div>
+    </footer>
+    <script src="site.js"></script>
+    <script src="pricing.js"></script>
+  </body>
 </html>

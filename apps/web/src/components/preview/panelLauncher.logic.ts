@@ -3,12 +3,14 @@
  * panel is open with nothing in it, and from "+" in the tab strip. Each tile
  * opens a thing that already exists. Pure, so the rules are tested directly.
  *
- *   - Browser          — the browser of this device (the desktop app's own,
- *                        right in the panel): you click, the agent sees, and
- *                        it has Comment and Debug.
+ *   - Your site        — the browser of this device (the desktop app's own,
+ *                        right in the panel): you open your site or app, the
+ *                        agent sees, and it has Comment and errors. First and
+ *                        the default, always (Misha 16.10). On the web: a tab
+ *                        of the person's browser (the Uno extension).
  *   - Agent's browser  — the browser on the chat's computer (a cloud one):
- *                        the agent works there, you watch it live and can
- *                        take control.
+ *                        the agent works there, you watch it live and take
+ *                        control to sign in for it (login, captcha, 2FA).
  *   - Files, Changes   — as before.
  *   - Apps             — always: the person's apps on every computer and
  *                        their sites, with an empty state that says how to
@@ -34,15 +36,24 @@ export interface LauncherTileCopy {
   readonly isDefault?: boolean;
 }
 
-/** Display order (the default browser goes first, see below). */
+/**
+ * Display order: your site first, always (Misha 16.10: two different
+ * browsers, two clear buttons — your site is the default whatever
+ * `browserOpenIn` says, on a cloud computer too; no "default" mark).
+ */
 export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
-  { id: "browser", name: "Browser", key: "B", description: "Open the site here — you click" },
+  {
+    id: "browser",
+    name: "Your site",
+    key: "B",
+    description: "Open your site or app here — comment, see errors",
+  },
   {
     id: "agentBrowser",
     name: "Agent's browser",
     key: "B",
     shift: true,
-    description: "Watch the agent in its browser",
+    description: "Watch the agent work; take control to sign in for it",
   },
   { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
   { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
@@ -57,9 +68,15 @@ export function launcherKeyLabel(tile: Pick<LauncherTileCopy, "key" | "shift">):
 export interface LauncherContext {
   /** This device's browser in the panel: the desktop app's own (or the companion's tab on the web). */
   readonly canBrowseHere: boolean;
+  /**
+   * The desktop app (its page is in the panel, with Comment and errors).
+   * Absent — the desktop. On the web the page opens in a tab of the
+   * person's browser (the Uno extension), and the tile says so.
+   */
+  readonly desktop?: boolean;
   /** The chat computer's browser, by its name ("uno-product"); null — this chat has none. */
   readonly agentBrowserOn: string | null;
-  /** Where Browser / "+" open a page now (the person's default, else Uno's rule). */
+  /** Where "+" opens a page now. Not marked on the tiles any more (16.10); kept for callers. */
   readonly defaultBrowser: BrowserSource;
   /** A computer to browse files on. */
   readonly hasComputer: boolean;
@@ -67,18 +84,22 @@ export interface LauncherContext {
   readonly canOpenChanges: boolean;
 }
 
+/** The web build: the site opens in a tab of the person's own browser. */
+const WEB_SITE_DESCRIPTION = "Opens in a tab of this browser, with the Uno extension";
+
 export function visibleLauncherTiles(context: LauncherContext): LauncherTileCopy[] {
-  const both = context.canBrowseHere && context.agentBrowserOn !== null;
   const tiles: LauncherTileCopy[] = [];
   for (const tile of LAUNCHER_TILES) {
     switch (tile.id) {
       case "browser":
         if (!context.canBrowseHere) break;
-        tiles.push(both ? { ...tile, isDefault: context.defaultBrowser === "app" } : tile);
+        tiles.push(
+          context.desktop === false ? { ...tile, description: WEB_SITE_DESCRIPTION } : tile,
+        );
         break;
       case "agentBrowser":
         if (context.agentBrowserOn === null) break;
-        tiles.push(both ? { ...tile, isDefault: context.defaultBrowser === "computer" } : tile);
+        tiles.push(tile);
         break;
       case "files":
         if (context.hasComputer) tiles.push(tile);
@@ -91,12 +112,6 @@ export function visibleLauncherTiles(context: LauncherContext): LauncherTileCopy
         tiles.push(tile);
         break;
     }
-  }
-  // The default browser first: it is the one most people want.
-  const agentIndex = tiles.findIndex((tile) => tile.id === "agentBrowser");
-  if (agentIndex > 0 && tiles[agentIndex]?.isDefault) {
-    const [agent] = tiles.splice(agentIndex, 1);
-    tiles.unshift(agent!);
   }
   return tiles;
 }

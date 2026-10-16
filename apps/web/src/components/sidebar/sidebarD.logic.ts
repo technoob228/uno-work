@@ -148,7 +148,10 @@ export interface DStatusSection<T> {
 }
 
 /** Top to bottom: what waits for the person, what broke, what runs, the rest. */
-export const STATUS_SECTIONS: ReadonlyArray<{ readonly id: DStatusSectionId; readonly label: string }> = [
+export const STATUS_SECTIONS: ReadonlyArray<{
+  readonly id: DStatusSectionId;
+  readonly label: string;
+}> = [
   { id: "needs-you", label: "Needs you" },
   { id: "your-turn", label: "Ready" },
   { id: "failed", label: "Failed" },

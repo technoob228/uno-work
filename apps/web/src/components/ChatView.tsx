@@ -222,6 +222,7 @@ import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSend
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
 import { ChatMiniWindow } from "./chat/ChatMiniWindow";
+import { BrowserHelpCard } from "./preview/BrowserHelpCard";
 import { FullscreenChatDockHeader, LegacyFocusChatPreview } from "./chat/FullscreenChatDock";
 import { chatDockStatus, type ChatDockMode } from "./chat/chatDock.logic";
 import { useDemoSwitch } from "~/demo/demoFlag";
@@ -689,6 +690,8 @@ export default function ChatView(props: ChatViewProps) {
   // bottom (peek / expanded) or folded into a mini window — or a narrow column
   // (demo switch). Off: the 0.0.137 "Latest step" pill above the composer.
   const fullscreenChatDock = useFeatureFlag("fullscreenChatDock");
+  // "The agent needs you in its browser" above the composer (two browsers, 16.10).
+  const browserHelpCardOn = useFeatureFlag("panelLauncherV2");
   const isChatDockMode = isPreviewFocusMode && fullscreenChatDock;
   const [focusChatPanelMode, setFocusChatPanelMode] = useState<ChatDockMode>("peek");
   const chatDockVariant = useDemoSwitch("chatDock");
@@ -4243,6 +4246,13 @@ export default function ChatView(props: ChatViewProps) {
                 ) : null}
                 {activeThread && isAssistantConversation(activeThread) ? (
                   <AssistantEngineBanner environmentId={activeThread.environmentId} />
+                ) : null}
+                {/* The agent waits on the person in the computer's browser (w0139). */}
+                {activeThread && browserHelpCardOn && !isFocusChatMinimized ? (
+                  <BrowserHelpCard
+                    environmentId={activeThread.environmentId}
+                    threadId={activeThread.id}
+                  />
                 ) : null}
                 {harnessAuth?.loss ? (
                   <HarnessReauthCard

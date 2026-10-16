@@ -86,7 +86,14 @@ export function resolveBrowserOpenSource(input: {
   readonly setting: BrowserOpenIn;
   readonly sources: ReadonlyArray<BrowserSource>;
   readonly agentsBrowseOnComputer: boolean;
+  /**
+   * The new launcher (`panelLauncherV2`, Misha 16.10): your site — this
+   * device's browser — is always the default, whatever the setting and on a
+   * cloud computer too; the agent's browser is its own button.
+   */
+  readonly siteFirst?: boolean;
 }): BrowserSource {
+  if (input.siteFirst) return "app";
   if (input.setting !== "auto" && input.sources.includes(input.setting)) return input.setting;
   return input.agentsBrowseOnComputer && input.sources.includes("computer") ? "computer" : "app";
 }

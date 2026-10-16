@@ -46,7 +46,8 @@ export function BrowserSourceChip({
   const { closeFile } = usePreviewPane();
   const browserOpenIn = useSettings((settings) => settings.browserOpenIn);
   const { updateSettings } = useUpdateSettings();
-  const copy = browserSourceCopy(useFeatureFlag("panelLauncherV2"));
+  const launcherV2 = useFeatureFlag("panelLauncherV2");
+  const copy = browserSourceCopy(launcherV2);
   if (!showBrowserSourceChip(sources)) return null;
 
   const label = copy.label[source];
@@ -93,16 +94,22 @@ export function BrowserSourceChip({
             ))}
           </MenuRadioGroup>
         </MenuGroup>
-        <MenuSeparator />
-        <MenuCheckboxItem
-          checked={isDefaultBrowserSource(browserOpenIn, source)}
-          onCheckedChange={(checked) =>
-            void updateSettings({ browserOpenIn: nextBrowserOpenIn(source, checked) })
-          }
-          data-testid="browser-source-default"
-        >
-          Use by default
-        </MenuCheckboxItem>
+        {/* Two browsers, two buttons (Misha 16.10): your site is always the
+            default, so there is nothing to pick here with the new launcher. */}
+        {launcherV2 ? null : (
+          <>
+            <MenuSeparator />
+            <MenuCheckboxItem
+              checked={isDefaultBrowserSource(browserOpenIn, source)}
+              onCheckedChange={(checked) =>
+                void updateSettings({ browserOpenIn: nextBrowserOpenIn(source, checked) })
+              }
+              data-testid="browser-source-default"
+            >
+              Use by default
+            </MenuCheckboxItem>
+          </>
+        )}
       </MenuPopup>
     </Menu>
   );

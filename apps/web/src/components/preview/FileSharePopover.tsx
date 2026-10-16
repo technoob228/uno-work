@@ -228,7 +228,11 @@ export function FileSharePopover({
                     ) : (
                       <RefreshCwIcon />
                     )}
-                    {copyMadeByDesktop ? "Share again" : update.isSuccess ? "Updated" : "Update copy"}
+                    {copyMadeByDesktop
+                      ? "Share again"
+                      : update.isSuccess
+                        ? "Updated"
+                        : "Update copy"}
                   </Button>
                 </div>
               ) : (

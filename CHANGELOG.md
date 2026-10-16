@@ -8,6 +8,18 @@
 
 ---
 
+## v0.0.139 — stage (not released)
+
+Stage candidate for Misha's stage computer (stage-work, channel `stage`) and the "Uno Work Stage" desktop app. Everything new is behind Labs flags: on by default only on the stage channel, the release behaviour everywhere else.
+
+- Two browsers, two buttons in the panel: your site (first and always the default; on the web — a tab of your browser with the Uno extension) and the agent's browser, where you take control to sign in for it; a card in the chat says when the agent needs you there. Apps always (with an empty state), no Terminal tile (Labs: Panel launcher).
+- Desktop app: Comment and Debug in the panel's browser — notes on parts of a page, the page's console and network, "Send to chat" (Labs: Comment and Debug).
+- A tab on the whole screen: the chat is one compact block that folds into a mini window; answers pop up as a hint (Labs: Compact chat).
+- Panel tabs: pin to the project or to every chat, "All tabs" with the ones open in other chats (Labs: Pinned tabs).
+- Sidebar: pick the view from its title — projects, one list, inbox, by computer — and filter by project; one list and Inbox show each chat's project (Labs: Sidebar view menu).
+- Uno on top of the sidebar unfolds its chats, "+" starts a new one; the first click introduces Uno and picks what it runs on, with full access to the computer (Labs: Uno's chats).
+- ↗ on a file in the panel: open it in your editor or share it with a link (Labs: Share a file).
+
 ## v0.0.137 — 2026-10-15
 
 - Attach any file to a chat — documents, spreadsheets, slides, archives, code — by the paperclip, paste or drag & drop, in a chat or on Home. The file goes straight to ~/Uploads/<year-month> on your computer (never made executable), and the model is told where it is. Pictures work as before.

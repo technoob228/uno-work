@@ -44,6 +44,28 @@ describe("showBrowserSourceChip", () => {
 describe("resolveBrowserOpenSource", () => {
   const both = ["app", "computer"] as const;
 
+  it("the new launcher: your site is always the default (Misha 16.10)", () => {
+    for (const setting of ["auto", "app", "computer"] as const) {
+      expect(
+        resolveBrowserOpenSource({
+          setting,
+          sources: both,
+          agentsBrowseOnComputer: true,
+          siteFirst: true,
+        }),
+      ).toBe("app");
+    }
+    // The web build (no webview): the extension's tab, not the computer's browser.
+    expect(
+      resolveBrowserOpenSource({
+        setting: "auto",
+        sources: ["computer"],
+        agentsBrowseOnComputer: true,
+        siteFirst: true,
+      }),
+    ).toBe("app");
+  });
+
   it("auto keeps the old rule: the computer's browser where the agents browse", () => {
     expect(
       resolveBrowserOpenSource({ setting: "auto", sources: both, agentsBrowseOnComputer: true }),

@@ -17,7 +17,9 @@
     Object.keys(PRICES).forEach(function (plan) {
       var price = PRICES[plan][period];
       if (price == null) {
-        console.warn('[pricing] Plan "' + plan + '" has no ' + period + " price, showing the monthly one");
+        console.warn(
+          '[pricing] Plan "' + plan + '" has no ' + period + " price, showing the monthly one",
+        );
         price = PRICES[plan].monthly;
       }
       var el = document.querySelector('[data-plan="' + plan + '"] .amount');
@@ -26,7 +28,9 @@
   }
 
   document.querySelectorAll(".toggle button").forEach(function (b) {
-    b.addEventListener("click", function () { setPeriod(b.getAttribute("data-period")); });
+    b.addEventListener("click", function () {
+      setPeriod(b.getAttribute("data-period"));
+    });
   });
 
   // The price with tax for the featured plan.
@@ -40,7 +44,9 @@
         tax.classList.add("err");
         return;
       }
-      return res.json().then(function (data) { tax.textContent = "$" + data.total + " with tax"; });
+      return res.json().then(function (data) {
+        tax.textContent = "$" + data.total + " with tax";
+      });
     });
   }, 1100);
 
@@ -49,15 +55,17 @@
     msg.textContent = "Starting your trial…";
     msg.className = "form-msg";
     var form = document.getElementById("trial-form");
-    order({ plan: plan, email: form.email.value, company: form.company.value }).then(function (res) {
-      if (!res.ok) {
-        msg.textContent = "Something went wrong. Please try again.";
-        msg.className = "form-msg err";
-        console.error("Trial signup failed: " + res.status);
-        return;
-      }
-      msg.textContent = "Check your email.";
-    });
+    order({ plan: plan, email: form.email.value, company: form.company.value }).then(
+      function (res) {
+        if (!res.ok) {
+          msg.textContent = "Something went wrong. Please try again.";
+          msg.className = "form-msg err";
+          console.error("Trial signup failed: " + res.status);
+          return;
+        }
+        msg.textContent = "Check your email.";
+      },
+    );
   }
 
   document.getElementById("trial-form").addEventListener("submit", function (e) {

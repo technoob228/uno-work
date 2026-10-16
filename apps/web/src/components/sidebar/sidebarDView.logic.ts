@@ -111,10 +111,7 @@ export function presetOf(levels: ReadonlyArray<SidebarGroupLevel>): SidebarDPres
   return null;
 }
 
-export function levelsForPreset(
-  preset: SidebarDPreset,
-  byComputer: boolean,
-): SidebarGroupLevel[] {
+export function levelsForPreset(preset: SidebarDPreset, byComputer: boolean): SidebarGroupLevel[] {
   const head: SidebarGroupLevel[] = byComputer ? ["computer"] : [];
   switch (preset) {
     case "projects":

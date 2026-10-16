@@ -104,7 +104,7 @@ export const FEATURE_FLAGS = [
     key: "panelLauncherV2",
     label: "Panel launcher: two browsers and Apps",
     description:
-      "The right panel's launcher offers your browser and the agent's browser as two tiles, always shows Apps (with what's running on each computer) and leaves the terminal to Ctrl+`.",
+      "Two browsers, two buttons: your site (first, always the default) and the agent's browser, where you take control to sign in for it — a card in the chat says when the agent needs you there. Apps is always in the launcher; the terminal stays on Ctrl+`.",
     default: false,
     stageDefault: true,
   },

@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import { readEnvironmentApi } from "../../environmentApi";
 import { useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
+import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
 import {
@@ -60,10 +61,12 @@ export function useChatBrowser(): {
       }),
     [currentChatEnvironmentId, liveState, demoDesktop],
   );
+  const siteFirst = useFeatureFlag("panelLauncherV2");
   const defaultSource = resolveBrowserOpenSource({
     setting: browserOpenIn,
     sources,
     agentsBrowseOnComputer: browsesOnMachine,
+    siteFirst,
   });
 
   const openOnComputer = useCallback(
