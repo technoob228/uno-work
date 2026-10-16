@@ -20,6 +20,8 @@
 #                              base packages are not touched when they are all there.
 #   UNO_WORK_NO_RESTART=1      install everything but leave the running daemon alone; the
 #                              caller restarts it (the updater does, then checks health).
+#   UNO_WORK_SKIP_EARLYOOM=1   don't install earlyoom (stops the heaviest process when
+#                              memory runs out; see "Early OOM killer" below).
 #
 set -euo pipefail
 
@@ -111,8 +113,16 @@ fi
 mv "${INSTALL_DIR}/app.new" "${INSTALL_DIR}/app"
 rm -rf "${INSTALL_DIR}/app.old"
 
+# The daemon (`serve`) runs node through a link named uno-work-daemon, so its
+# process name (/proc/PID/comm) is "uno-work-daemon", not "node" like the node
+# processes agents and builds start. earlyoom tells them apart by that name
+# (see "Early OOM killer" below). A broken link falls back to plain node.
+ln -sfn "$(command -v node)" "${INSTALL_DIR}/bin/uno-work-daemon"
 cat > "${INSTALL_DIR}/bin/uno-work" <<'LAUNCHER'
 #!/usr/bin/env bash
+if [ "${1:-}" = "serve" ] && [ -x /opt/uno-work/bin/uno-work-daemon ]; then
+  exec /opt/uno-work/bin/uno-work-daemon /opt/uno-work/app/dist/bin.mjs "$@"
+fi
 exec node /opt/uno-work/app/dist/bin.mjs "$@"
 LAUNCHER
 chmod 0755 "${INSTALL_DIR}/bin/uno-work"
@@ -725,6 +735,73 @@ if ! swapon --show --noheadings 2>/dev/null | grep -q .; then
     sysctl -q -w vm.swappiness=20 || true
   else
     log "  fallocate failed — continuing without swap"
+  fi
+fi
+
+# --- Early OOM killer -----------------------------------------------------------
+# Swap alone does not save a box. When RAM runs out, the kernel first thrashes
+# (evicts the code pages of every program, SSH included) and only then, late,
+# kills something — or the host kills the whole VM: the Firecracker process has
+# a memory cap of RAM + max(384 MB, RAM/8). Seen: box 395 on 01.09 (SSH dead,
+# only a reboot helped) and Dax on 16.10 (a build OOM'd a 2 GB box).
+# earlyoom stops the heaviest process while the box still answers: SIGTERM when
+# available RAM drops to 8 % (at most 512 MB), SIGKILL at 4 % (at most 256 MB).
+# Swap is not waited for (-s 100): with swappiness 20 the kernel thrashes the
+# page cache long before swap fills, so "both below" would come too late.
+# Who goes first — the largest process by the kernel's oom_score, nudged by
+# process name (/proc/PID/comm, 15 chars, regex anchored on both ends):
+#   --avoid  -300: the daemon (comm uno-work-daemon, see the launcher above),
+#            the chat agents (claude, codex, opencode, hermes…), sshd, systemd,
+#            dbus, docker. Soft on purpose: the one that runs away is still
+#            stopped when it is far larger than everything else.
+#   --prefer +300: compilers, linkers, Go build steps, python, java, pytest.
+# Not by "node"/"bun": the daemon, vite, tsc, jest, webpack all run as `node`.
+# No -g: a child that never left the daemon's process group would take the
+# daemon with it. The daemon's unit keeps running when one of its children is
+# stopped (OOMPolicy=continue in uno-work.service).
+# The regexes avoid backslashes and spaces (systemd unquoting); "$$" is a
+# literal "$" in ExecStart. Thresholds in % of RAM at earlyoom's start.
+# Opt-out: UNO_WORK_SKIP_EARLYOOM=1. apt failing here never fails the install.
+EARLYOOM_DROPIN_DIR=/etc/systemd/system/earlyoom.service.d
+if [ "${UNO_WORK_SKIP_EARLYOOM:-0}" = "1" ]; then
+  log "Skipping earlyoom (UNO_WORK_SKIP_EARLYOOM=1)"
+elif systemctl is-active --quiet systemd-oomd 2>/dev/null; then
+  # Two OOM daemons would fight; a machine that runs systemd-oomd keeps it.
+  log "systemd-oomd runs on this machine: leaving low memory to it (no earlyoom)"
+else
+  if ! command -v earlyoom >/dev/null 2>&1; then
+    log "Installing earlyoom (stops the heaviest process before memory runs out)"
+    # Golden images ship without apt lists (prepare-image.sh), so a self-update
+    # on such a machine fetches them — and drops them again afterwards.
+    eoom_had_lists=0
+    compgen -G '/var/lib/apt/lists/*_Packages*' >/dev/null && eoom_had_lists=1
+    eoom_apt() { timeout 300 apt-get -o DPkg::Lock::Timeout=120 "$@" >/dev/null 2>&1; }
+    eoom_apt install -y -qq --no-install-recommends earlyoom \
+      || { eoom_apt update -qq && eoom_apt install -y -qq --no-install-recommends earlyoom; } \
+      || log "  WARNING: could not install earlyoom; a box that runs out of memory may hang"
+    if [ "${eoom_had_lists}" = "0" ]; then
+      rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+      apt-get clean >/dev/null 2>&1 || true
+    fi
+  fi
+  if command -v earlyoom >/dev/null 2>&1 && systemctl cat earlyoom.service >/dev/null 2>&1; then
+    install -d -m 0755 "${EARLYOOM_DROPIN_DIR}"
+    cat > "${EARLYOOM_DROPIN_DIR}/uno-work.conf" <<'DROPIN'
+# Written by install.sh — see "Early OOM killer" there. Replaces the package's
+# $EARLYOOM_ARGS: quotes inside /etc/default/earlyoom reach earlyoom literally.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/earlyoom -m 8,4 -M 524288,262144 -s 100,100 -r 0 --avoid ^(uno-work-daemon|claude|claude-agent-ac|codex|codex-acp|opencode|[.]opencode|cursor-agent|hermes|gemini|sshd|sshd-session|systemd|systemd-.+|[(]sd-pam[)]|dbus-daemon|dbus-broker|dockerd|containerd|containerd-shim|earlyoom|agetty|Xvfb)$$ --prefer ^(cc1|cc1plus|cc1obj|lto1|rustc|ld|ld[.](bfd|gold|lld)|lld|mold|clang|clang-[0-9]+|clang[+][+]|compile|link|go|tsgo|esbuild|java|python|python3|python3[.][0-9]+|pytest)$$
+# Keep earlyoom itself scheduled and alive while the box is under pressure.
+Nice=-10
+OOMScoreAdjust=-900
+DROPIN
+    systemctl daemon-reload
+    if systemctl enable earlyoom >/dev/null 2>&1 && systemctl restart earlyoom >/dev/null 2>&1; then
+      log "earlyoom is on"
+    else
+      log "  WARNING: could not start earlyoom; a box that runs out of memory may hang"
+    fi
   fi
 fi
 

@@ -394,6 +394,22 @@ if command -v Xvfb >/dev/null 2>&1; then
   log "  ВНИМАНИЕ: на эталоне стоят Xvfb и либы браузера (~350 МБ) — снимай образ с чистого бокса"
 fi
 
+# 12. earlyoom (install.sh, «Early OOM killer»): без него бокс, у которого
+# кончилась память, виснет (бокс 395 01.09, сборка Dax 16.10). Образ снимается
+# со снимком памяти — earlyoom должен уже работать, а демон стартовать через
+# ссылку uno-work-daemon (по этому имени earlyoom его щадит).
+log "Проверяю earlyoom и имя процесса демона"
+if ! systemctl is-active --quiet systemd-oomd 2>/dev/null; then
+  command -v earlyoom >/dev/null 2>&1 || die "earlyoom is not installed — rerun install.sh"
+  [ -f /etc/systemd/system/earlyoom.service.d/uno-work.conf ] \
+    || die "earlyoom.service.d/uno-work.conf missing — rerun install.sh"
+  systemctl enable earlyoom >/dev/null 2>&1 || die "could not enable earlyoom"
+  systemctl is-active --quiet earlyoom || systemctl start earlyoom >/dev/null 2>&1 \
+    || die "earlyoom does not start: journalctl -u earlyoom -n 20"
+fi
+[ -x /opt/uno-work/bin/uno-work-daemon ] \
+  || die "/opt/uno-work/bin/uno-work-daemon (node link) missing or broken — rerun install.sh"
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 
