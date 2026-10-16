@@ -90,12 +90,16 @@ import {
   createFile,
   downloadFile,
   filesApi,
+  recordFileOpened,
   filesListQueryOptions,
   filesQueryKeys,
   filesSearchQueryOptions,
   filesSharesQueryOptions,
 } from "./filesApi";
 import { registerBuiltInFileOpeners } from "./openers";
+import { activePanelFilePath, filesOpenTarget, filesPanelBeside } from "./filesPanel";
+import { computerFileTab } from "../../navigation/useOpenComputerFile";
+import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
 import { PinPathButton } from "./PinPathButton";
 import { useFolderChats } from "../../hooks/useFolderChats";
 import { ShareDialog, SharedLinksDialog } from "./ShareDialog";
@@ -216,6 +220,15 @@ export function FilesView() {
   );
   const [viewerUnsaved, setViewerUnsaved] = useState(false);
   const [pendingOpen, setPendingOpen] = useState<null | (() => void)>(null);
+  // The right panel on screen (Misha 16.10 p.6): files open there, in the
+  // Everywhere group, and the middle column steps aside (filesPanel.ts).
+  const preview = usePreviewPane();
+  const panelBeside = filesPanelBeside({
+    isMobile,
+    panelOpen: preview.open,
+    panelTabCount: preview.files.length,
+    inChat: preview.currentChatThreadId !== null,
+  });
 
   // Documents are opened from here: get the office engine into the browser's
   // cache in the background so the first one opens fast (officePrewarm.ts).
@@ -236,17 +249,52 @@ export function FilesView() {
       void navigate({ search: { path: dirname(entry.path), file: entry.path } }),
     [navigate],
   );
+  // A file the person picks (tree, list, Recent, shared links): beside an open
+  // panel — a tab of its Everywhere group, made active; otherwise in Files.
+  const { openFileForTarget, currentProjectKey, currentChatThreadId } = preview;
+  const pickFile = useCallback(
+    (entry: Pick<FilesEntry, "path">) => {
+      const target = filesOpenTarget({
+        panelBeside,
+        previewKind: detectFileKind(entry.path.split("/").pop() ?? entry.path),
+        hasEnvironment: environmentId !== null,
+      });
+      if (target === "files" || !environmentId) {
+        openFile(entry);
+        return;
+      }
+      openFileForTarget(
+        { projectKey: currentProjectKey, threadId: currentChatThreadId },
+        "global",
+        computerFileTab(entry.path, environmentId),
+      );
+      recordFileOpened(environmentId, entry.path);
+      // One place to look at a file: the middle column lets go of its file.
+      if (search.file) void navigate({ search: search.path ? { path: search.path } : {} });
+    },
+    [
+      currentChatThreadId,
+      currentProjectKey,
+      environmentId,
+      navigate,
+      openFile,
+      openFileForTarget,
+      panelBeside,
+      search.file,
+      search.path,
+    ],
+  );
 
   // Another file from the tree while this one has unsaved edits: ask first.
   const openFileGuarded = useCallback(
     (entry: Pick<FilesEntry, "path">) => {
       if (viewerUnsaved && entry.path !== search.file) {
-        setPendingOpen(() => () => openFile(entry));
+        setPendingOpen(() => () => pickFile(entry));
         return;
       }
-      openFile(entry);
+      pickFile(entry);
     },
-    [openFile, search.file, viewerUnsaved],
+    [pickFile, search.file, viewerUnsaved],
   );
   const selectFolder = useCallback(
     (path: string) =>
@@ -334,7 +382,12 @@ export function FilesView() {
     viewMode === "tree" || viewMode === "recent" ? (
       <FilesTree
         environmentId={environmentId}
-        selectedFile={search.file}
+        selectedFile={
+          search.file ??
+          (panelBeside
+            ? activePanelFilePath(preview.files, preview.activeFileId, environmentId)
+            : undefined)
+        }
         currentFolder={search.path}
         onOpenFile={openFileGuarded}
         onSelectFolder={selectFolder}
@@ -375,15 +428,22 @@ export function FilesView() {
           />
         ) : splitView ? (
           <div className="flex min-h-0 flex-1" data-testid="files-tree-layout">
-            <div className="w-72 shrink-0 border-r border-border lg:w-80">{filesTree}</div>
-            <div className="min-w-0 flex-1">
-              {fileViewer ?? (
-                <TreeEmptyState
-                  folder={viewMode === "recent" ? null : currentPath}
-                  recent={viewMode === "recent"}
-                />
-              )}
-            </div>
+            {panelBeside && !fileViewer ? (
+              // The panel shows the files: no middle column, the tree takes its place.
+              <div className="min-w-0 flex-1">{filesTree}</div>
+            ) : (
+              <>
+                <div className="w-72 shrink-0 border-r border-border lg:w-80">{filesTree}</div>
+                <div className="min-w-0 flex-1">
+                  {fileViewer ?? (
+                    <TreeEmptyState
+                      folder={viewMode === "recent" ? null : currentPath}
+                      recent={viewMode === "recent"}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
         ) : viewMode === "recent" ? (
           (fileViewer ?? filesTree)
@@ -398,7 +458,7 @@ export function FilesView() {
               <FilesViewSwitch mode={viewMode} onChange={setViewMode} compact={isMobile} />
             }
             onOpenFolder={openFolder}
-            onOpenFile={openFile}
+            onOpenFile={pickFile}
             uploads={uploads}
             onDialog={setDialog}
             onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
@@ -524,7 +584,7 @@ export function FilesView() {
         environmentId={environmentId}
         onOpenChange={(open) => !open && closeDialog()}
         onOpenItem={(share: FilesShare) =>
-          share.kind === "folder" ? openFolder(share.path) : openFile(share)
+          share.kind === "folder" ? openFolder(share.path) : pickFile(share)
         }
       />
     </SidebarInset>
