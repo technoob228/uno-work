@@ -15,6 +15,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "../../unoHarnessLabels";
 
 import { helperCopy } from "./helperCopy";
 
@@ -23,12 +24,13 @@ import { helperCopy } from "./helperCopy";
 // ---------------------------------------------------------------------------
 
 export const HARNESS_OPTIONS: ReadonlyArray<{ readonly value: string; readonly label: string }> = [
+  // Uno Hermes first, then Uno Code (Misha 16.10).
+  { value: "hermes", label: UNO_HERMES_LABEL },
+  { value: "uno", label: UNO_CODE_LABEL },
   { value: "claudeAgent", label: "Claude" },
-  { value: "uno", label: "Uno" },
   { value: "opencode", label: "OpenCode" },
   { value: "codex", label: "Codex" },
   { value: "cursor", label: "Cursor" },
-  { value: "hermes", label: "Hermes" },
 ];
 
 // ---------------------------------------------------------------------------

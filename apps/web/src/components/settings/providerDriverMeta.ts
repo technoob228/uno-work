@@ -16,6 +16,7 @@ import {
   OpenCodeIcon,
   UnoIcon,
 } from "../Icons";
+import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "../../unoHarnessLabels";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -43,9 +44,17 @@ export interface ProviderClientDefinition {
 }
 
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+  // Uno Hermes first, then Uno Code (Misha 16.10).
+  {
+    value: ProviderDriverKind.make("hermes"),
+    label: UNO_HERMES_LABEL,
+    icon: HermesIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: HermesSettings,
+  },
   {
     value: ProviderDriverKind.make("uno"),
-    label: "Uno",
+    label: UNO_CODE_LABEL,
     icon: UnoIcon,
     settingsSchema: OpenCodeSettings,
   },
@@ -67,13 +76,6 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     icon: CursorIcon,
     badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
-  },
-  {
-    value: ProviderDriverKind.make("hermes"),
-    label: "Hermes",
-    icon: HermesIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: HermesSettings,
   },
   {
     value: ProviderDriverKind.make("opencode"),

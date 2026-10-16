@@ -45,8 +45,10 @@ import {
 import { curatedModelRank } from "../Drivers/unoCuratedModels.ts";
 
 const PROVIDER = ProviderDriverKind.make("hermes");
+/** Misha 16.10: the Hermes harness is shown as "Uno Hermes" (web: unoHarnessLabels.ts). */
+export const UNO_HERMES_DISPLAY_NAME = "Uno Hermes";
 const HERMES_PRESENTATION = {
-  displayName: "Hermes",
+  displayName: UNO_HERMES_DISPLAY_NAME,
   badgeLabel: "Early Access",
   // У Hermes нет plan-режима (ACP-режимы — только edit-approval политики),
   // поэтому переключатель build/plan в чате не показываем.

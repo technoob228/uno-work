@@ -12,6 +12,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "./unoHarnessLabels";
 import {
   describeToolActivity,
   unwrapUntrustedToolResult,
@@ -35,9 +36,16 @@ export const PROVIDER_OPTIONS: Array<{
   /** Shown on the model picker sidebar when relevant */
   pickerSidebarBadge?: "new" | "soon";
 }> = [
+  // Uno Hermes first, then Uno Code (Misha 16.10).
+  {
+    value: ProviderDriverKind.make("hermes"),
+    label: UNO_HERMES_LABEL,
+    available: true,
+    pickerSidebarBadge: "new",
+  },
   {
     value: ProviderDriverKind.make("uno"),
-    label: "Uno",
+    label: UNO_CODE_LABEL,
     available: true,
     pickerSidebarBadge: "new",
   },
@@ -52,12 +60,6 @@ export const PROVIDER_OPTIONS: Array<{
   {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-  {
-    value: ProviderDriverKind.make("hermes"),
-    label: "Hermes",
     available: true,
     pickerSidebarBadge: "new",
   },

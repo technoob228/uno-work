@@ -4,7 +4,9 @@ import {
   deriveProviderInstanceEntries,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
+  sortProviderInstanceEntries,
 } from "./providerInstances";
+import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "./unoHarnessLabels";
 
 function provider(input: {
   provider: ProviderDriverKind;
@@ -42,6 +44,48 @@ describe("deriveProviderInstanceEntries", () => {
     expect(entry?.instanceId).toBe("codex_personal");
     expect(entry?.driverKind).toBe("codex");
     expect(entry?.isDefault).toBe(false);
+  });
+
+  it("names the two Uno harnesses Uno Hermes and Uno Code, old daemons too", () => {
+    const hermes = ProviderDriverKind.make("hermes");
+    const uno = ProviderDriverKind.make("uno");
+    const names = deriveProviderInstanceEntries([
+      provider({ provider: hermes, instanceId: "hermes", displayName: "Hermes" }),
+      provider({ provider: uno, instanceId: "uno", displayName: "Uno" }),
+      provider({ provider: hermes, instanceId: "hermes", displayName: UNO_HERMES_LABEL }),
+      provider({ provider: hermes, instanceId: "hermes_work", displayName: "Hermes" }),
+      provider({ provider: hermes, instanceId: "hermes_mine", displayName: "My Hermes" }),
+    ]).map((entry) => entry.displayName);
+
+    expect(names).toEqual([
+      UNO_HERMES_LABEL,
+      UNO_CODE_LABEL,
+      UNO_HERMES_LABEL,
+      "Hermes Work",
+      "My Hermes",
+    ]);
+  });
+});
+
+describe("sortProviderInstanceEntries", () => {
+  it("lists Uno Hermes, then Uno Code, then the rest in the server's order", () => {
+    const entries = deriveProviderInstanceEntries([
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+      provider({ provider: ProviderDriverKind.make("hermes"), instanceId: "hermes_work" }),
+      provider({ provider: ProviderDriverKind.make("opencode"), instanceId: "opencode" }),
+      provider({ provider: ProviderDriverKind.make("uno"), instanceId: "uno" }),
+      provider({ provider: ProviderDriverKind.make("hermes"), instanceId: "hermes" }),
+    ]);
+
+    expect(sortProviderInstanceEntries(entries).map((entry) => entry.instanceId)).toEqual([
+      "hermes",
+      "hermes_work",
+      "uno",
+      "claudeAgent",
+      "codex",
+      "opencode",
+    ]);
   });
 });
 

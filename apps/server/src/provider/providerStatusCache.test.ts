@@ -12,6 +12,7 @@ import { Effect, FileSystem } from "effect";
 import {
   hydrateCachedProvider,
   isCachedProviderCorrelated,
+  orderProviderSnapshots,
   readProviderStatusCache,
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
@@ -233,4 +234,18 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
       fallbackCodex,
     );
   });
+});
+
+it("lists Uno Hermes, then Uno Code, then the rest by name", () => {
+  const ordered = orderProviderSnapshots([
+    makeProvider(OPENCODE_DRIVER, { displayName: "OpenCode" }),
+    makeProvider(ProviderDriverKind.make("uno"), { displayName: "Uno" }),
+    makeProvider(CODEX_DRIVER, { displayName: "Codex" }),
+    makeProvider(ProviderDriverKind.make("hermes"), { displayName: "Uno Hermes" }),
+    makeProvider(CLAUDE_AGENT_DRIVER, { displayName: "Claude" }),
+  ]);
+  assert.deepStrictEqual(
+    ordered.map((provider) => provider.driver),
+    ["hermes", "uno", "claudeAgent", "codex", "opencode"],
+  );
 });

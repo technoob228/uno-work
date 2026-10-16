@@ -4,7 +4,6 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { useRouter } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
@@ -22,11 +21,6 @@ import {
 import { setModelPickerOpen } from "../../modelPickerOpenState";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
-import { runsOnUnoAi } from "../harness/harnessSetupState";
-import { useDevMode } from "../../devMode";
-import { resolveProviderPaneKind } from "./modelPickerProviderPane";
-import { SimpleModelPickerContent } from "./SimpleModelPickerContent";
-import { buildSimpleModelChoices, hasSimpleModelChoices } from "./simpleModelPicker.logic";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -63,27 +57,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   // Lives on the trigger, not the popup, so an install started in the picker
   // keeps being polled while the popup is closed.
   const setup = useHarnessSetup(environmentId);
-  // 01.10: without Dev mode the popup is Smart / Fast / Premium and the
-  // person's subscription; the harness column is for Dev mode. A locked
-  // provider (editing a sent message) or nothing to offer keeps the full one.
-  const devMode = useDevMode();
-  // No router in isolated renders (browser tests): the link then just closes.
-  const router = useRouter({ warn: false }) as ReturnType<typeof useRouter> | undefined;
-  const simpleChoices = useMemo(
-    () =>
-      buildSimpleModelChoices({
-        entries: props.instanceEntries,
-        isReady: (entry) => resolveProviderPaneKind(entry) === "models",
-        // Claude Code on Uno AI is not the person's subscription (its Claude
-        // models are under Premium); it signs in from Settings → AI.
-        isOwnAccount: (entry) => !runsOnUnoAi(entry.snapshot),
-        modelOptionsByInstance: props.modelOptionsByInstance,
-        activeInstanceId: props.activeInstanceId,
-        activeModel: props.model,
-      }),
-    [props.activeInstanceId, props.instanceEntries, props.model, props.modelOptionsByInstance],
-  );
-  const simple = !devMode && props.lockedProvider === null && hasSimpleModelChoices(simpleChoices);
+  // 16.10 (Misha): one picker for everyone, T3's — the harness column on
+  // the left (Uno Hermes first), search and the model list on the right.
+  // The 01.10 Smart / Fast / Premium popup is gone.
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -169,8 +145,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             props.compact ? "max-w-36 sm:pl-1" : undefined,
           )}
         >
-          {activeEntry &&
-          !(simple && (activeEntry.driverKind === "hermes" || activeEntry.driverKind === "uno")) ? (
+          {activeEntry ? (
             <ProviderInstanceIcon
               driverKind={activeEntry.driverKind}
               iconText={activeEntry.iconText}
@@ -214,34 +189,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        {simple ? (
-          <SimpleModelPickerContent
-            choices={simpleChoices}
-            activeInstanceId={activeInstanceId}
-            model={props.model}
-            onPick={handleInstanceModelChange}
-            onConnectSubscription={() => {
-              setIsMenuOpen(false);
-              void router?.navigate({ to: "/settings/ai" });
-            }}
-          />
-        ) : (
-          <ModelPickerContent
-            activeInstanceId={activeInstanceId}
-            model={props.model}
-            lockedProvider={props.lockedProvider}
-            lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-            instanceEntries={props.instanceEntries}
-            {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-            modelOptionsByInstance={props.modelOptionsByInstance}
-            terminalOpen={props.terminalOpen ?? false}
-            allowImageGenerationModels={props.allowImageGenerationModels === true}
-            setup={setup}
-            environmentId={environmentId}
-            onRequestClose={() => setIsMenuOpen(false)}
-            onInstanceModelChange={handleInstanceModelChange}
-          />
-        )}
+        <ModelPickerContent
+          activeInstanceId={activeInstanceId}
+          model={props.model}
+          lockedProvider={props.lockedProvider}
+          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+          instanceEntries={props.instanceEntries}
+          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+          modelOptionsByInstance={props.modelOptionsByInstance}
+          terminalOpen={props.terminalOpen ?? false}
+          allowImageGenerationModels={props.allowImageGenerationModels === true}
+          setup={setup}
+          environmentId={environmentId}
+          onRequestClose={() => setIsMenuOpen(false)}
+          onInstanceModelChange={handleInstanceModelChange}
+        />
       </PopoverPopup>
     </Popover>
   );

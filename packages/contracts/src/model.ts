@@ -308,10 +308,13 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
 
 // ── Provider display names ────────────────────────────────────────────
 
+// The two Uno harnesses (Misha 16.10). The app reads its own copy —
+// `UNO_HERMES_LABEL` / `UNO_CODE_LABEL` in apps/web/src/unoHarnessLabels.ts.
 export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>> = {
+  [HERMES_DRIVER_KIND]: "Uno Hermes",
+  [UNO_DRIVER_KIND]: "Uno Code",
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
-  [UNO_DRIVER_KIND]: "Uno",
 };

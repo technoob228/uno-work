@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { setDevMode } from "../../devMode";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -379,10 +378,6 @@ function getSidebarProviderOrder() {
 
 describe("ProviderModelPicker", () => {
   beforeEach(async () => {
-    // These tests drive the full picker (provider sidebar, search, favorites,
-    // install and sign-in panes). Since the simple picker (Smart / Fast /
-    // Premium) became the default, the full one opens only in Dev mode.
-    setDevMode(true);
     // Reset test environment before each test
     resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
@@ -393,7 +388,6 @@ describe("ProviderModelPicker", () => {
 
   afterEach(async () => {
     document.body.innerHTML = "";
-    setDevMode(false);
     resetModelPickerFilterStoreForTests();
     await __resetLocalApiForTests();
   });

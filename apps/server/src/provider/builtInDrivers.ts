@@ -49,11 +49,14 @@ export type BuiltInDriversEnv =
  * iteration order has no functional effect on instance lookup.
  */
 export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
+  // Uno Hermes, then Uno Code, then the rest (Misha 16.10). The list the
+  // apps show is ordered by `orderProviderSnapshots`, which ranks these two
+  // first as well.
+  HermesDriver,
   UnoDriver,
   CodexDriver,
   ClaudeDriver,
   CursorDriver,
-  HermesDriver,
   OpenCodeDriver,
   // Custom (ACP) harnesses: no default instance — every entry is one the
   // person added in Settings → Harnesses or a ~/.uno/harnesses/<id>.json.

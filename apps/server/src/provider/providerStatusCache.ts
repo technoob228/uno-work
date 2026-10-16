@@ -20,11 +20,20 @@ const mergeProviderModels = (
   return [...fallbackModels, ...cachedModels.filter((model) => !fallbackSlugs.has(model.slug))];
 };
 
+/** Harnesses listed first, in this order (Misha 16.10): Uno Hermes, Uno Code. */
+const LEADING_DRIVERS: ReadonlyArray<string> = ["hermes", "uno"];
+
+const driverRank = (provider: ServerProvider): number => {
+  const index = LEADING_DRIVERS.indexOf(provider.driver);
+  return index === -1 ? LEADING_DRIVERS.length : index;
+};
+
 export const orderProviderSnapshots = (
   providers: ReadonlyArray<ServerProvider>,
 ): ReadonlyArray<ServerProvider> =>
   [...providers].toSorted(
     (left, right) =>
+      driverRank(left) - driverRank(right) ||
       (left.displayName ?? "").localeCompare(right.displayName ?? "") ||
       left.driver.localeCompare(right.driver) ||
       left.instanceId.localeCompare(right.instanceId),

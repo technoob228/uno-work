@@ -15,7 +15,7 @@
 import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
@@ -23,6 +23,7 @@ import {
 } from "@t3tools/contracts";
 
 import { formatProviderDriverKindLabel } from "./providerModels";
+import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "./unoHarnessLabels";
 
 /**
  * UI-facing projection of one configured provider instance. Carries the
@@ -77,9 +78,46 @@ function humanizeInstanceId(instanceId: ProviderInstanceId): string {
     .join(" ");
 }
 
+/** The app's own names for the Uno harnesses win over the shared table. */
+const UNO_HARNESS_LABELS: Partial<Record<ProviderDriverKind, string>> = {
+  [ProviderDriverKind.make("hermes")]: UNO_HERMES_LABEL,
+  [ProviderDriverKind.make("uno")]: UNO_CODE_LABEL,
+};
+
 function driverKindLabel(driverKind: ProviderDriverKind): string {
-  return PROVIDER_DISPLAY_NAMES[driverKind] ?? formatProviderDriverKindLabel(driverKind);
+  return (
+    UNO_HARNESS_LABELS[driverKind] ??
+    PROVIDER_DISPLAY_NAMES[driverKind] ??
+    formatProviderDriverKindLabel(driverKind)
+  );
 }
+
+/**
+ * Names servers stamp on the Uno harnesses that are not the person's own:
+ * "Hermes" / "Uno" (daemons before 16.10, and the `uno` driver still) and
+ * "Uno Hermes". Read as "no name given", so the entry shows the current
+ * label from `unoHarnessLabels.ts`.
+ */
+const STOCK_SNAPSHOT_NAMES: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
+  [ProviderDriverKind.make("hermes")]: ["Hermes", "Uno Hermes"],
+  [ProviderDriverKind.make("uno")]: ["Uno", "Uno Code"],
+};
+
+function isStockSnapshotName(driverKind: ProviderDriverKind, name: string): boolean {
+  return (
+    name === driverKindLabel(driverKind) ||
+    (STOCK_SNAPSHOT_NAMES[driverKind]?.includes(name) ?? false)
+  );
+}
+
+/**
+ * Harnesses listed first, in this order (Misha 16.10): Uno Hermes, then Uno
+ * Code. The rest keep the server's order.
+ */
+const LEADING_DRIVER_KINDS: ReadonlyArray<ProviderDriverKind> = [
+  ProviderDriverKind.make("hermes"),
+  ProviderDriverKind.make("uno"),
+];
 
 export function normalizeProviderAccentColor(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -111,14 +149,14 @@ function resolveInstanceDisplayName(
 ): string {
   const trimmedSnapshotName = snapshot.displayName?.trim();
   const kindLabel = driverKindLabel(driverKind);
-  if (trimmedSnapshotName && trimmedSnapshotName !== kindLabel) {
+  if (trimmedSnapshotName && !isStockSnapshotName(driverKind, trimmedSnapshotName)) {
     return trimmedSnapshotName;
   }
   if (!isDefault) {
     const humanized = humanizeInstanceId(instanceId);
     if (humanized.length > 0) return humanized;
   }
-  return trimmedSnapshotName || kindLabel;
+  return kindLabel;
 }
 
 /**
@@ -157,7 +195,8 @@ export function deriveProviderInstanceEntries(
 
 /**
  * Sort instance entries so the default instance of each driver kind appears
- * before any custom instances of the same kind. Within a kind, custom
+ * before any custom instances of the same kind, Uno Hermes and Uno Code
+ * leading (old servers sort by name and put them last). Within a kind, custom
  * instances keep their settings-author order (which is how the server
  * emits them). Stable across kinds: entries retain the server's
  * cross-driver ordering.
@@ -179,7 +218,12 @@ export function sortProviderInstanceEntries(
     }
   }
   const sorted: ProviderInstanceEntry[] = [];
-  for (const bucket of byKind.values()) {
+  const kinds = [
+    ...LEADING_DRIVER_KINDS.filter((kind) => byKind.has(kind)),
+    ...[...byKind.keys()].filter((kind) => !LEADING_DRIVER_KINDS.includes(kind)),
+  ];
+  for (const kind of kinds) {
+    const bucket = byKind.get(kind) ?? [];
     const defaults = bucket.filter((entry) => entry.isDefault);
     const customs = bucket.filter((entry) => !entry.isDefault);
     sorted.push(...defaults, ...customs);

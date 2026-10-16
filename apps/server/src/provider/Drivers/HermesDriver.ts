@@ -50,6 +50,7 @@ import { makeHermesAdapter } from "../Layers/HermesAdapter.ts";
 import {
   buildInitialHermesProviderSnapshot,
   checkHermesProviderStatus,
+  UNO_HERMES_DISPLAY_NAME,
 } from "../Layers/HermesProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -122,7 +123,7 @@ const makeUnsupportedTextGeneration = (): TextGenerationShape => {
 export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "Hermes",
+    displayName: UNO_HERMES_DISPLAY_NAME,
     supportsMultipleInstances: true,
   },
   configSchema: HermesSettings,
