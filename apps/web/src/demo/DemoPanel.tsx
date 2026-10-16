@@ -74,6 +74,11 @@ const POINTS: ReadonlyArray<{
     switches: ["sidebarViewSwitch"],
   },
   {
+    key: "p5b",
+    title: "Сайдбар: фильтр и группировка",
+    hint: "Всё в меню заголовка: Group by, проекты и компьютеры чипами; активный фильтр — чип с ×.",
+  },
+  {
     key: "p6",
     title: "Чаты ассистента в сайдбаре",
     hint: "Шеврон у ассистента раскрывает его чаты, «+» — новый чат с ним.",
@@ -156,10 +161,10 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="demo-panel-pill"
-        className="fixed right-3 bottom-3 z-[90] inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
+        className="fixed bottom-2.5 left-2.5 z-[90] inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg hover:bg-accent"
       >
         <EyeIcon className="size-3.5" />
-        Что смотреть · 8
+        Что смотреть · 9
         <ChevronUpIcon className="size-3.5 text-muted-foreground" />
       </button>
     );
@@ -171,7 +176,7 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
       role="dialog"
       aria-label="Что смотреть"
       data-testid="demo-panel"
-      className="fixed right-3 bottom-3 z-[90] flex max-h-[calc(100vh-1.5rem)] w-[min(25rem,calc(100vw-1.5rem))] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+      className="fixed bottom-2.5 left-2.5 z-[90] flex max-h-[calc(100vh-1.25rem)] w-[min(25rem,calc(100vw-1.5rem))] flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-1">
         <div className="min-w-0">
@@ -190,11 +195,11 @@ export default function DemoPanel({ router }: { router: DemoRouter }) {
         </button>
       </div>
       <ol className="min-h-0 overflow-y-auto px-2 pb-2">
-        {POINTS.map((point, index) => (
+        {POINTS.map((point) => (
           <li key={point.key} className="rounded-lg px-1.5 py-1.5 hover:bg-accent/40">
             <div className="flex items-start gap-2">
               <span className="mt-px w-4 shrink-0 text-right text-xs font-semibold text-muted-foreground tabular-nums">
-                {index + 1}
+                {point.key.slice(1)}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] leading-tight font-medium">{point.title}</div>

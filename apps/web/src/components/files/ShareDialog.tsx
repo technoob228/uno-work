@@ -23,7 +23,7 @@ import {
   LockIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -326,11 +326,14 @@ export function ShareDialog({
   environmentId,
   entry,
   onOpenChange,
+  note,
 }: {
   open: boolean;
   environmentId: EnvironmentId | null;
   entry: FilesEntry | null;
   onOpenChange: (open: boolean) => void;
+  /** Extra line under the address note (e.g. "wakes up for the link · share a cloud copy"). */
+  note?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const base = useShareBaseUrl(environmentId);
@@ -400,6 +403,7 @@ export function ShareDialog({
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-4">
           <AddressNote base={base} />
+          {note}
           {liveShares.length > 0 ? (
             <section className="flex flex-col gap-2">
               <div className="text-xs font-medium text-muted-foreground">

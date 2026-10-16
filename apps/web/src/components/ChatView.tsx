@@ -116,13 +116,7 @@ import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  MessageSquareTextIcon,
-  WifiOffIcon,
-  XIcon,
-} from "lucide-react";
+import { ChevronDownIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatElapsedAgoLabel } from "../timestampFormat";
@@ -227,6 +221,10 @@ import { retainThreadDetailSubscription } from "../environments/runtime/service"
 import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
+import { ChatMiniWindow } from "./chat/ChatMiniWindow";
+import { FullscreenChatDockHeader } from "./chat/FullscreenChatDock";
+import { chatDockStatus, type ChatDockMode } from "./chat/chatDock.logic";
+import { useDemoSwitch } from "~/demo/demoFlag";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
@@ -368,14 +366,6 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
-
-function formatFocusPreviewMessageText(message: ChatMessage | undefined): string {
-  const text = message?.text.trim() ?? "";
-  if (!text) return "No messages yet";
-  return text.replace(/\s+/g, " ").slice(0, 240);
-}
-
-const FOCUS_CHAT_PREVIEW_BOTTOM = "5.75rem";
 
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -689,12 +679,16 @@ export default function ChatView(props: ChatViewProps) {
     files: previewFiles,
     activeFileId: previewActiveFileId,
     toggleOpen: togglePreviewOpen,
+    setPreviewLayoutMode,
   } = usePreviewPane();
   // Встроенный чат сам живёт внутри правой панели — фокус-режим к нему не
   // применяется (иначе композер уехал бы в fixed-оверлей поверх приложения).
   const isPreviewFocusMode = previewLayoutMode === "focus" && !isEmbedded;
-  const [focusChatPanelMode, setFocusChatPanelMode] = useState<"peek" | "expanded">("peek");
-  const focusChatPreviewScrollRef = useRef<HTMLDivElement | null>(null);
+  // Full-screen tab: the chat is a dense block at the bottom (peek / expanded)
+  // or folded into a mini window — or a narrow column (demo switch, w0138 p3).
+  const [focusChatPanelMode, setFocusChatPanelMode] = useState<ChatDockMode>("peek");
+  const chatDockVariant = useDemoSwitch("chatDock");
+  const isFocusChatMinimized = isPreviewFocusMode && focusChatPanelMode === "minimized";
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -3972,24 +3966,33 @@ export default function ChatView(props: ChatViewProps) {
     const messages = activeThread?.messages ?? [];
     return messages
       .filter((message) => message.role === "user" || message.role === "assistant")
-      .slice(-2);
+      .slice(-8);
   }, [activeThread?.messages]);
   const latestFocusPreviewMessage = focusPreviewMessages[focusPreviewMessages.length - 1];
+  const focusChatStatus = chatDockStatus({
+    isWorking,
+    hasPendingApproval: activePendingApproval !== null,
+    hasPendingUserInput: pendingUserInputs.length > 0,
+  });
+  // The dense block holds the one-line composer; an approval or a question
+  // brings the full composer back, and the step row then sits right above it.
+  const focusChatComposerIsStrip =
+    activePendingApproval === null && pendingUserInputs.length === 0;
 
+  // Leaving full screen brings the chat back unfolded.
   useEffect(() => {
-    if (!isPreviewFocusMode || focusChatPanelMode !== "expanded") {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      const scrollElement = focusChatPreviewScrollRef.current;
-      if (scrollElement) {
-        scrollElement.scrollTop = scrollElement.scrollHeight;
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [focusChatPanelMode, focusPreviewMessages, isPreviewFocusMode]);
+    if (!isPreviewFocusMode) setFocusChatPanelMode("peek");
+  }, [isPreviewFocusMode]);
+  const restoreFocusChat = useCallback(() => setFocusChatPanelMode("peek"), []);
+  const replyFromFocusChat = useCallback(() => {
+    setFocusChatPanelMode("peek");
+    // The composer is shown again on the next render; focus it after that.
+    window.setTimeout(() => focusComposer(), 30);
+  }, [focusComposer]);
+  const openChatFromFocus = useCallback(() => {
+    setFocusChatPanelMode("peek");
+    setPreviewLayoutMode("sidebar");
+  }, [setPreviewLayoutMode]);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -4145,95 +4148,22 @@ export default function ChatView(props: ChatViewProps) {
             )}
           </div>
 
-          {isPreviewFocusMode ? (
-            <div
-              className="pointer-events-none fixed right-0 z-[69] px-4 sm:px-6"
-              style={{
-                left: sidebarVisible ? "var(--sidebar-width)" : "0px",
-                bottom: FOCUS_CHAT_PREVIEW_BOTTOM,
-              }}
-              data-focus-chat-preview="true"
-            >
-              <div className="pointer-events-auto mx-auto w-full max-w-[76rem]">
-                {focusChatPanelMode === "expanded" ? (
-                  <div
-                    className="max-h-[min(18rem,32vh)] overflow-hidden rounded-2xl border border-border/70 bg-card/92 shadow-2xl shadow-black/12 backdrop-blur-xl"
-                    data-focus-chat-preview-panel="expanded"
-                  >
-                    <div className="flex h-10 items-center gap-2 border-b border-border/60 px-4">
-                      <MessageSquareTextIcon className="size-4 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                        Latest conversation
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        type="button"
-                        onClick={() => setFocusChatPanelMode("peek")}
-                        aria-label="Collapse chat preview"
-                      >
-                        <ChevronDownIcon />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        type="button"
-                        onClick={() => setFocusChatPanelMode("peek")}
-                        aria-label="Hide expanded chat preview"
-                      >
-                        <XIcon />
-                      </Button>
-                    </div>
-                    <div
-                      ref={focusChatPreviewScrollRef}
-                      className="max-h-[calc(min(18rem,32vh)-2.5rem)] overflow-y-auto px-4 py-3"
-                    >
-                      {focusPreviewMessages.length > 0 ? (
-                        <div className="flex min-h-full flex-col justify-end gap-3">
-                          {focusPreviewMessages.map((message) => (
-                            <div
-                              key={message.id}
-                              className={cn(
-                                "max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-5",
-                                message.role === "user"
-                                  ? "ml-auto bg-primary text-primary-foreground"
-                                  : "bg-muted text-foreground",
-                              )}
-                            >
-                              <div className="mb-1 text-[11px] font-medium opacity-65">
-                                {message.role === "user" ? "You" : "Assistant"}
-                              </div>
-                              <div className="whitespace-pre-wrap break-words">
-                                {message.text.trim() || "(empty)"}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="py-8 text-center text-muted-foreground text-sm">
-                          No messages yet
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setFocusChatPanelMode("expanded")}
-                    className="flex h-9 w-full items-center gap-2 rounded-full border border-border/65 bg-card/86 px-3.5 text-left text-sm shadow-xl shadow-black/8 backdrop-blur-xl hover:bg-card"
-                    aria-label="Expand chat preview"
-                    data-focus-chat-preview-panel="peek"
-                  >
-                    <MessageSquareTextIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="shrink-0 text-muted-foreground text-xs">Latest step</span>
-                    <span className="min-w-0 flex-1 truncate text-foreground/80">
-                      {formatFocusPreviewMessageText(latestFocusPreviewMessage)}
-                    </span>
-                    <ChevronUpIcon className="size-4 shrink-0 text-muted-foreground" />
-                  </button>
-                )}
-              </div>
-            </div>
+          {isFocusChatMinimized ? (
+            <ChatMiniWindow
+              variant={chatDockVariant}
+              title={activeThread.title}
+              status={focusChatStatus}
+              messages={focusPreviewMessages}
+              pendingApproval={activePendingApproval}
+              approvalResponding={
+                activePendingApproval !== null &&
+                respondingRequestIds.includes(activePendingApproval.requestId)
+              }
+              onRespondToApproval={onRespondToApproval}
+              onRestore={restoreFocusChat}
+              onReply={replyFromFocusChat}
+              onOpenChat={openChatFromFocus}
+            />
           ) : null}
 
           {/* Input bar */}
@@ -4247,6 +4177,9 @@ export default function ChatView(props: ChatViewProps) {
                   : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
                 isPreviewFocusMode &&
                   "pointer-events-none fixed bottom-2 right-0 z-[70] border-0 bg-transparent px-4 pb-0 pt-0 sm:bottom-3 sm:px-6",
+                // Folded into the mini window: the composer keeps its draft, out of sight.
+                isFocusChatMinimized && "hidden",
+                // The demo's "what to look at" pill holds the bottom-right corner.
               )}
               style={
                 isPreviewFocusMode
@@ -4254,7 +4187,30 @@ export default function ChatView(props: ChatViewProps) {
                   : undefined
               }
             >
-              <div className={cn("relative isolate", isPreviewFocusMode && "pointer-events-auto")}>
+              <div
+                className={cn(
+                  "relative isolate",
+                  isPreviewFocusMode && "pointer-events-auto mx-auto w-full max-w-[76rem]",
+                  // One dense block: the latest step is the top edge of the composer.
+                  isPreviewFocusMode &&
+                    focusChatComposerIsStrip &&
+                    "rounded-2xl border border-border/70 bg-card/95 shadow-xl shadow-black/10 backdrop-blur-xl",
+                )}
+                data-chat-dock={isPreviewFocusMode ? "true" : undefined}
+              >
+                {isPreviewFocusMode ? (
+                  <FullscreenChatDockHeader
+                    status={focusChatStatus}
+                    latestStep={latestFocusPreviewMessage?.text ?? ""}
+                    expanded={focusChatPanelMode === "expanded"}
+                    messages={focusPreviewMessages}
+                    onToggleExpanded={() =>
+                      setFocusChatPanelMode((mode) => (mode === "expanded" ? "peek" : "expanded"))
+                    }
+                    onMinimize={() => setFocusChatPanelMode("minimized")}
+                    detached={!focusChatComposerIsStrip}
+                  />
+                ) : null}
                 {isServerThread &&
                 (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
                   <ThreadControlBar
@@ -4317,6 +4273,7 @@ export default function ChatView(props: ChatViewProps) {
                     isServerThread={isServerThread}
                     isLocalDraftThread={isLocalDraftThread}
                     forceCompact={isPreviewFocusMode}
+                    inDock={isPreviewFocusMode}
                     hideRuntimeModeControl={isEmbedded}
                     phase={phase}
                     isConnecting={isConnecting}

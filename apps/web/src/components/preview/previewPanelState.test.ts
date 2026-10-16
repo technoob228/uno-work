@@ -29,6 +29,8 @@ function file(id: string): PreviewFile {
 
 const report = file("report");
 const notes = file("notes");
+/** What the agent opened carries its mark (the robot in the tab row). */
+const byAgent = (tab: PreviewFile): PreviewFile => ({ ...tab, openedBy: "agent" });
 
 describe("tabs opened in a chat live in that chat", () => {
   it("an agent's first open_in_panel opens the panel in its chat", () => {
@@ -37,6 +39,11 @@ describe("tabs opened in a chat live in that chat", () => {
     expect(view.open).toBe(true);
     expect(view.visible).toBe(true);
     expect(view.view.activeFileId).toBe("report");
+    expect(states[chatScopeKey("thread-a")]?.files).toEqual([byAgent(report)]);
+  });
+
+  it("whatever the person opens carries no agent mark", () => {
+    const states = openTab({}, chatA, "chat", report, "person");
     expect(states[chatScopeKey("thread-a")]?.files).toEqual([report]);
   });
 
@@ -202,7 +209,7 @@ describe("pinned everywhere", () => {
 
   it("a legacy agent without a thread does not open an empty panel on Home", () => {
     const states = openTab({}, home, "chat", report, "agent");
-    expect(states[projectScopeKey("proj")]?.files).toEqual([report]);
+    expect(states[projectScopeKey("proj")]?.files).toEqual([byAgent(report)]);
     expect(getPreviewBucketState(states, GLOBAL_SCOPE_KEY).open).toBe(false);
   });
 });
@@ -242,7 +249,7 @@ describe("a chat marked Done or archived takes its panel with it", () => {
 
     expect(result.states[chatScopeKey("thread-a")]).toBeUndefined();
     expect(result.dropped.map((tab) => tab.id)).toEqual(["report"]);
-    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([notes]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([byAgent(notes)]);
     expect(result.states[projectScopeKey("proj")]?.files.map((tab) => tab.id)).toEqual([
       "dashboard",
     ]);
@@ -267,7 +274,7 @@ describe("a chat marked Done or archived takes its panel with it", () => {
     states = openTab(states, chatB, "chat", report, "agent");
     const result = dropChatBuckets(states, ["thread-a"]);
     expect(result.dropped).toEqual([]);
-    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([report]);
+    expect(result.states[chatScopeKey("thread-b")]?.files).toEqual([byAgent(report)]);
   });
 
   it("nothing to drop keeps the same object (no re-render)", () => {

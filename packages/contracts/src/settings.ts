@@ -42,9 +42,14 @@ export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode =
  * grouping so the same repo checked out locally and on a server reads as one
  * project rather than two unrelated ones.
  *
- * Only consulted when the `allMachinesSidebar` Labs flag is on — with the flag off
- * the sidebar always behaves as `active`.
+ * The standard sidebar (D) reads it directly since 0.0.138 — Settings →
+ * "Chats from all computers". The Labs rail layout still needs the retired
+ * `allMachinesSidebar` flag, so it always behaves as `active`.
  */
+/** Sidebar D's view: folders, one list with a project filter, or by status. */
+export const SidebarView = Schema.Literals(["projects", "list", "inbox"]);
+export type SidebarView = typeof SidebarView.Type;
+
 export const SidebarEnvironmentScope = Schema.Literals(["active", "all"]);
 export type SidebarEnvironmentScope = typeof SidebarEnvironmentScope.Type;
 export const DEFAULT_SIDEBAR_ENVIRONMENT_SCOPE: SidebarEnvironmentScope = "active";
@@ -225,6 +230,12 @@ export const ClientSettingsSchema = Schema.Struct({
   // always in the sidebar with their chats, then Recents. On — inbox: the
   // chats by status (Needs you, Your turn, Failed, Working, Idle, Snoozed).
   sidebarInboxMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // The sidebar's view since 0.0.138 (Misha 16.10): folders ("projects"), one
+  // list with a project filter ("list"), or by status ("inbox"). Null — not
+  // chosen yet: `sidebarInboxMode` above decides (inbox or projects).
+  sidebarView: Schema.NullOr(SidebarView).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Several computers in the sidebar: computer headers on top, projects inside.
+  sidebarGroupByComputer: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarGroupBy: SidebarGroupBy.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_GROUP_BY)),
   ),
@@ -954,6 +965,8 @@ export const ClientSettingsPatch = Schema.Struct({
     ),
   ),
   sidebarEnvironmentScope: Schema.optionalKey(SidebarEnvironmentScope),
+  sidebarView: Schema.optionalKey(Schema.NullOr(SidebarView)),
+  sidebarGroupByComputer: Schema.optionalKey(Schema.Boolean),
   sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
   sidebarMachineSortOrder: Schema.optionalKey(SidebarMachineSortOrder),
   sidebarMachineIdentity: Schema.optionalKey(

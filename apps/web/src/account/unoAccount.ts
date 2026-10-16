@@ -39,6 +39,7 @@ import {
   type UnoBoxProvisionClient,
 } from "@t3tools/shared/unoBoxProvision";
 
+import { DEMO } from "../demo/demoFlag";
 import { isWorkProxyHost } from "../hooks/useDirectMachineAddress";
 import { isWebLite } from "../lite/flag";
 
@@ -49,6 +50,8 @@ export type AccountTransport = "work-proxy" | "desktop" | "none";
 export function accountTransport(): AccountTransport {
   if (typeof window === "undefined") return "none";
   if (window.desktopBridge?.unoAccount) return "desktop";
+  // The mock (?demo=w0138) answers /_account in the page (demo/demoBoot.ts).
+  if (DEMO) return "work-proxy";
   if (isWorkProxyHost(window.location.hostname)) return "work-proxy";
   // The lite build is only ever served by the Work proxy itself (same origin as
   // /_account: app.uno4.work or the account's own <label>.uno4.work), whatever

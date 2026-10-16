@@ -33,6 +33,17 @@ export function joinAppPath(base: string, path: string | null): string {
   }
 }
 
+/**
+ * `uno://assistant/<computer>/<assistant>` — an Inbox item about an assistant
+ * (one assistant set up another: decision 14.10, a notice, no confirmation).
+ */
+export function assistantPageOfUrl(
+  url: string,
+): { readonly environmentId: string; readonly projectId: string } | null {
+  const match = /^uno:\/\/assistant\/([^/]+)\/(assistant-[^/?#]+)$/.exec(url);
+  return match ? { environmentId: decodeURIComponent(match[1]!), projectId: match[2]! } : null;
+}
+
 export function useOpenInboxItem() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -49,6 +60,15 @@ export function useOpenInboxItem() {
       const target = item.open;
       if (!target) return;
       if (isMobile) setOpenMobile(false);
+      // "Uno set up assistant Scout" (w0138 p7): its page.
+      const assistant = target.kind === "url" ? assistantPageOfUrl(target.url) : null;
+      if (assistant) {
+        void navigate({
+          to: "/assistants",
+          search: { view: "profile", env: assistant.environmentId, project: assistant.projectId },
+        });
+        return;
+      }
       if (target.kind === "thread") {
         void navigate({
           to: "/$environmentId/$threadId",

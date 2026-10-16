@@ -15,6 +15,10 @@
  * One choice per computer: every assistant chat on it runs on the same AI.
  * An older daemon (no `subscriptions` in its status) gets Uno AI and keys only.
  *
+ * Controlled (`value` + `onChange`, the new-assistant setup, Misha 16.10):
+ * a pick only selects — for the assistant being set up, not the computer —
+ * and a plan that isn't signed in yet is selected once its sign-in lands.
+ *
  * @module components/assistant/AssistantPowerPicker
  */
 import {
@@ -62,7 +66,7 @@ import {
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 
-type PowerCard = "uno" | SubscriptionLlmProvider | "key";
+export type PowerCard = "uno" | SubscriptionLlmProvider | "key";
 
 /** While a sign-in is waiting, look at the computer this often. */
 const SIGN_IN_POLL_MS = 2_500;
@@ -273,8 +277,14 @@ export function AssistantPowerPicker(props: {
   /** Shown above the cards; omit in a settings row that has its own title. */
   readonly heading?: string;
   readonly className?: string;
+  /** Controlled: the card picked for an assistant being set up. */
+  readonly value?: PowerCard;
+  readonly onChange?: (card: PowerCard) => void;
+  /** The line under the cards (controlled); the computer-wide note otherwise. */
+  readonly note?: string;
 }) {
-  const { environmentId } = props;
+  const { environmentId, onChange } = props;
+  const controlled = onChange !== undefined;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const llm = useAssistantLlm(environmentId);
@@ -287,7 +297,7 @@ export function AssistantPowerPicker(props: {
 
   const status = llm.status;
   const subscriptions = status?.subscriptions;
-  const current = cardOf(status?.provider ?? "uno");
+  const current = controlled ? (props.value ?? "uno") : cardOf(status?.provider ?? "uno");
   const firstKey = BYOK_PROVIDER_IDS.find(
     (provider) => status?.keys.find((key) => key.provider === provider)?.configured,
   );
@@ -296,6 +306,10 @@ export function AssistantPowerPicker(props: {
     queryClient.invalidateQueries({ queryKey: assistantLlmQueryKey(environmentId) });
 
   const switchTo = async (card: PowerCard) => {
+    if (controlled) {
+      onChange(card);
+      return;
+    }
     setPicking(card);
     try {
       if (card === "uno" || card === "claude" || card === "chatgpt") {
@@ -410,7 +424,9 @@ export function AssistantPowerPicker(props: {
           line={
             firstKey
               ? `${AI_PROVIDER_LABELS[firstKey]} key on this computer · billed by ${AI_PROVIDER_LABELS[firstKey]}`
-              : "xAI, OpenRouter, OpenAI or any OpenAI-compatible API"
+              : controlled
+                ? "Not added yet · xAI, OpenRouter, OpenAI or any OpenAI-compatible API"
+                : "xAI, OpenRouter, OpenAI or any OpenAI-compatible API"
           }
           selected={current === "key"}
           busy={picking === "key"}
@@ -429,8 +445,9 @@ export function AssistantPowerPicker(props: {
         />
       </div>
       <p className="text-[11px] leading-snug text-muted-foreground">
-        One choice for every assistant chat on this computer. Change the model with the chip in
-        Uno's chat.
+        {controlled
+          ? (props.note ?? "")
+          : "One choice for every assistant chat on this computer. Change the model with the chip in Uno's chat."}
       </p>
 
       {claudeSignInOpen ? (

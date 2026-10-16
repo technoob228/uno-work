@@ -71,6 +71,7 @@ import { AssistantSlackPanel, AssistantTelegramPanel } from "../setup/steps/Chan
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
 import { AssistantPage } from "./AssistantPage";
+import { AssistantProfilePage } from "./AssistantProfilePage";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { NewAssistantFlow } from "./NewAssistantFlow";
@@ -114,11 +115,13 @@ export interface AssistantsRouteSearch {
    * "new" — New assistant; "here" — the two-step setup of this computer's
    * default assistant; "card" — that assistant's card; "assistant" — the
    * page of the assistant on its own computer `box`; "local" — the page of
-   * assistant `project` that lives on this computer.
+   * assistant `project` that lives on this computer; "profile" — the team
+   * page of assistant `project` on computer `env` (w0138 p7).
    */
-  readonly view?: "new" | "here" | "card" | "assistant" | "local";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile";
   readonly box?: number;
   readonly project?: string;
+  readonly env?: string;
 }
 
 const SUMMARY_KEY = ["uno-assistant", "summary"] as const;
@@ -165,7 +168,11 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
  * exactly the 0.0.105 one: this computer's one assistant.
  */
 export function AssistantsView() {
+  const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
+  if (search.view === "profile" && search.env && search.project) {
+    return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
+  }
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;
 }

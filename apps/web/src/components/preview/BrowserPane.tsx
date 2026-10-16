@@ -34,6 +34,7 @@ import {
 } from "@t3tools/shared/browserScreenshot";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { DEMO, demoHooks, useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
 import {
   isBrowserExtensionConnected,
@@ -50,7 +51,14 @@ import {
   setBrowserAutomationHandler,
   setBrowserTabAutomationHandler,
 } from "./BrowserAutomationRegistry";
+import { CommentLayer } from "./annotate/CommentLayer";
+import { DebugDrawer } from "./annotate/DebugDrawer";
+import { IframeWebview } from "./annotate/iframeWebview";
+import { PageToolsButtons } from "./annotate/PageToolsButtons";
+import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
+import { usePageTools } from "./annotate/usePageTools";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
+import { isTypingTarget } from "./panelLauncher.logic";
 import { BrowserSourceChip } from "./BrowserSourceChip";
 import { browserPartitionForScope, browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
 import {
@@ -239,8 +247,10 @@ export function matchCredentialsForOrigin(input: {
  * харнесса из другого проекта исполняются в их webview, а не в текущем.
  */
 export function BrowserViews({ activeId }: { activeId: string | null }) {
-  const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } =
-    usePreviewPane();
+  const previewPane = usePreviewPane();
+  const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } = previewPane;
+  // The demo's "Показать" opens tabs through the panel (this is always mounted).
+  if (DEMO) demoHooks.previewPane = previewPane;
   const visibleKeys = new Set(
     visibleScopeKeys({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
   );
@@ -303,6 +313,13 @@ function BrowserView({
 }) {
   const { updateBrowserTab, currentChatThreadId, currentChatProjectCwd } = usePreviewPane();
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
+  // The page lives in the panel: the desktop app's <webview>, or — in the demo
+  // of the desktop app — a same-origin iframe that talks like one.
+  const demoDesktop = useDemoDesktop();
+  const pageInPanel = isElectron || demoDesktop;
+  const iframeMode = !isElectron && demoDesktop;
+  const pageElementRef = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
   const webviewRef = useRef<ElectronWebviewElement | null>(null);
   const readyRef = useRef(false);
@@ -372,7 +389,7 @@ function BrowserView({
       // Веб-режим: webview нет, страницу открывает companion-расширение во
       // вкладке пользователя. Если расширения нет — панель ниже ведёт по
       // установке, адрес при этом сохранён в tab.url.
-      if (!isElectron) {
+      if (!pageInPanel) {
         if (isBrowserExtensionConnected()) {
           void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => {});
         }
@@ -385,15 +402,50 @@ function BrowserView({
         setMountSrc(url);
       }
     },
-    [scopeKey, tab.id, updateBrowserTab],
+    [scopeKey, tab.id, updateBrowserTab, pageInPanel],
   );
 
   const attachWebview = useCallback((node: HTMLWebViewElement | null) => {
     const view = node as ElectronWebviewElement | null;
     webviewRef.current = view;
+    pageElementRef.current = node;
     if (!view) readyRef.current = false;
     setWebviewNode(view);
   }, []);
+
+  // The demo's iframe, wrapped so everything above treats it as a <webview>.
+  const iframeAdapterRef = useRef<IframeWebview | null>(null);
+  const attachIframe = useCallback((node: HTMLIFrameElement | null) => {
+    iframeAdapterRef.current?.dispose();
+    iframeAdapterRef.current = node ? new IframeWebview(node) : null;
+    const view = iframeAdapterRef.current as unknown as ElectronWebviewElement | null;
+    webviewRef.current = view;
+    pageElementRef.current = node;
+    if (!view) readyRef.current = false;
+    setWebviewNode(view);
+  }, []);
+
+  // Comment (C) and Debug (D): the page's half lives in the page.
+  usePageTools({ tabId: tab.id, view: webviewNode, enabled: pageInPanel });
+  const pageTools = usePageToolsTab(tab.id);
+  useEffect(() => {
+    if (!visible || !pageInPanel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target || !rootRef.current?.contains(target) || isTypingTarget(target)) return;
+      const store = usePageToolsStore.getState();
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      if (key === "c") store.toggleCommenting(tab.id);
+      else if (key === "d") store.toggleDebug(tab.id);
+      else if (key === "Escape" && store.tabs[tab.id]?.commenting) {
+        store.patch(tab.id, { commenting: false, draft: null });
+      } else return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [visible, pageInPanel, tab.id]);
 
   useEffect(() => {
     const view = webviewNode;
@@ -744,6 +796,7 @@ function BrowserView({
 
   return (
     <div
+      ref={rootRef}
       // Невидимые вкладки прячутся через visibility, а не display: в
       // display:none-поддереве Electron не аттачит новые <webview>, и фоновые
       // вкладки (в т.ч. чужих проектов) переставали бы исполнять команды.
@@ -816,6 +869,7 @@ function BrowserView({
           {loading ? (
             <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
           ) : null}
+          {pageInPanel ? <PageToolsButtons tabId={tab.id} disabled={!mountSrc} /> : null}
           <button
             type="button"
             onClick={() => applyZoom(zoomFactor - ZOOM_STEP)}
@@ -1001,32 +1055,60 @@ function BrowserView({
             </button>
           </div>
         ) : null}
-        {!isElectron ? (
+        {!pageInPanel ? (
           <CompanionExtensionPanel url={currentUrl} onOpenExternal={openExternal} />
         ) : mountSrc ? (
-          <div
-            className={cn(
-              "min-h-0 w-full flex-1",
-              viewportSize && "overflow-auto bg-muted/20 p-4",
-              viewportSize && deviceToolbarOpen && "flex justify-center",
-            )}
-          >
-            <webview
-              ref={attachWebview}
-              src={mountSrc}
-              partition={partition}
-              allowpopups
-              className={viewportSize ? "shrink-0 bg-background shadow-lg" : "h-full w-full"}
-              style={
-                viewportSize
-                  ? { display: "flex", width: viewportSize.width, height: viewportSize.height }
-                  : { display: "flex" }
-              }
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "min-h-0 w-full flex-1",
+                viewportSize && "overflow-auto bg-muted/20 p-4",
+                viewportSize && deviceToolbarOpen && "flex justify-center",
+              )}
+            >
+              {iframeMode ? (
+                <iframe
+                  ref={attachIframe}
+                  src={mountSrc}
+                  title={tab.name || "Browser"}
+                  className={cn(
+                    "border-0 bg-white",
+                    viewportSize ? "shrink-0 shadow-lg" : "block h-full w-full",
+                  )}
+                  style={
+                    viewportSize
+                      ? { width: viewportSize.width, height: viewportSize.height }
+                      : undefined
+                  }
+                />
+              ) : (
+                <webview
+                  ref={attachWebview}
+                  src={mountSrc}
+                  partition={partition}
+                  allowpopups
+                  className={viewportSize ? "shrink-0 bg-background shadow-lg" : "h-full w-full"}
+                  style={
+                    viewportSize
+                      ? { display: "flex", width: viewportSize.width, height: viewportSize.height }
+                      : { display: "flex" }
+                  }
+                />
+              )}
+            </div>
+            <CommentLayer
+              tabId={tab.id}
+              pageUrl={currentUrl}
+              pageRef={pageElementRef}
+              zoom={zoomFactor}
             />
           </div>
         ) : (
           <NewTabPlaceholder recentUrls={recentUrls} onOpenUrl={navigate} />
         )}
+        {pageInPanel && mountSrc && pageTools.debugOpen ? (
+          <DebugDrawer tabId={tab.id} pageUrl={currentUrl} />
+        ) : null}
         {loadError ? (
           <div className="absolute inset-x-0 bottom-0 border-t border-border bg-card px-3 py-2 text-xs text-destructive">
             {loadError}

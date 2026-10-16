@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
+import { useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
 import { useSettings } from "../../hooks/useSettings";
 import { toastManager } from "../ui/toast";
@@ -49,13 +50,15 @@ export function useChatBrowser(): {
   const liveState = useBrowserLiveState(currentChatEnvironmentId);
   const browsesOnMachine = liveState?.agentsBrowseHere === true;
   const browserOpenIn = useSettings((settings) => settings.browserOpenIn);
+  // The demo pretends to be the desktop app on the Mac (its page in an iframe).
+  const demoDesktop = useDemoDesktop();
   const sources = useMemo(
     () =>
       availableBrowserSources({
-        desktopApp: isElectron,
+        desktopApp: isElectron || demoDesktop,
         computerBrowser: currentChatEnvironmentId !== null && liveState !== null,
       }),
-    [currentChatEnvironmentId, liveState],
+    [currentChatEnvironmentId, liveState, demoDesktop],
   );
   const defaultSource = resolveBrowserOpenSource({
     setting: browserOpenIn,

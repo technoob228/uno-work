@@ -1,0 +1,147 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  collectAllTabs,
+  scopeChoiceLabel,
+  scopeForDrop,
+  splitStripTabs,
+  type PanelChatInfo,
+} from "./panelTabs.logic";
+import { chatScopeKey, GLOBAL_SCOPE_KEY, projectScopeKey } from "./previewTabScopes";
+import type { PreviewFile } from "./PreviewPaneContext";
+
+function file(name: string, path = `/p/${name}`): PreviewFile {
+  return { id: path, name, kind: "md", content: "", path };
+}
+
+const pult: PreviewFile = {
+  id: "app:pult",
+  name: "Pult",
+  kind: "app",
+  content: "",
+  url: "https://pult",
+};
+const readme = file("README.md");
+const hero = file("hero.md");
+const pricing = file("pricing.md");
+const research = file("research.docx");
+
+describe("splitStripTabs", () => {
+  const scopes = { [pult.id]: "global", [readme.id]: "project", [hero.id]: "chat" } as const;
+  const files = [pult, readme, hero];
+
+  it("A: everything kept longer than the chat is an icon pin, the chat's tabs are named", () => {
+    expect(splitStripTabs(files, scopes, "pins")).toEqual({
+      pinned: [pult, readme],
+      named: [hero],
+    });
+  });
+
+  it("B: project tabs are ordinary named tabs, only 'everywhere' is pinned", () => {
+    expect(splitStripTabs(files, scopes, "project")).toEqual({
+      pinned: [pult],
+      named: [readme, hero],
+    });
+  });
+
+  it("a tab without a known level counts as the chat's", () => {
+    expect(splitStripTabs([hero], {}, "pins").named).toEqual([hero]);
+  });
+});
+
+describe("scopeForDrop", () => {
+  it("A: a chat tab dropped on the pins is pinned to the project", () => {
+    expect(scopeForDrop("pinned", "chat", "pins")).toBe("project");
+  });
+  it("A: a pin dropped among the chat's tabs goes back to the chat", () => {
+    expect(scopeForDrop("named", "project", "pins")).toBe("chat");
+    expect(scopeForDrop("named", "global", "pins")).toBe("chat");
+  });
+  it("A: dropping where it already is does nothing; 'everywhere' stays everywhere", () => {
+    expect(scopeForDrop("named", "chat", "pins")).toBeNull();
+    expect(scopeForDrop("pinned", "global", "pins")).toBeNull();
+  });
+  it("B: the pin zone means 'everywhere', leaving it means the project", () => {
+    expect(scopeForDrop("pinned", "project", "project")).toBe("global");
+    expect(scopeForDrop("named", "global", "project")).toBe("project");
+  });
+});
+
+describe("collectAllTabs", () => {
+  const chats: Record<string, PanelChatInfo> = {
+    a: { title: "Landing copy", projectKey: "landing", environmentId: "mac" },
+    b: { title: "Hero", projectKey: "landing", environmentId: "mac" },
+    c: { title: "Pricing", projectKey: "landing", environmentId: "cloud" },
+    x: { title: "Bench", projectKey: "model-lab", environmentId: "cloud" },
+  };
+  const states = {
+    [GLOBAL_SCOPE_KEY]: { files: [pult] },
+    [projectScopeKey("landing")]: { files: [readme] },
+    [chatScopeKey("a")]: { files: [hero] },
+    [chatScopeKey("b")]: { files: [file("hero-variants.png"), { ...hero }] },
+    [chatScopeKey("c")]: { files: [research, file("README.md")] },
+    [chatScopeKey("x")]: { files: [file("bench.md")] },
+    [chatScopeKey("gone")]: { files: [file("old.md")] },
+  };
+  const chatInfo = (id: string) => chats[id] ?? null;
+  const target = { projectKey: "landing", threadId: "a" };
+
+  it("lists this chat, the project's pins and 'everywhere'", () => {
+    const sections = collectAllTabs({ states, target, chatInfo });
+    expect(sections.thisChat).toEqual([hero]);
+    expect(sections.project).toEqual([readme]);
+    expect(sections.everywhere).toEqual([pult]);
+  });
+
+  it("'In other chats' — documents of other chats of this project, not already open here", () => {
+    const { otherChats } = collectAllTabs({ states, target, chatInfo });
+    expect(otherChats.map((entry) => [entry.file.name, entry.chat.title])).toEqual([
+      ["hero-variants.png", "Hero"],
+      ["research.docx", "Pricing"],
+    ]);
+  });
+
+  it("outside a chat: only 'everywhere' is here, every chat counts as other", () => {
+    const sections = collectAllTabs({
+      states,
+      target: { projectKey: "landing", threadId: null },
+      chatInfo,
+    });
+    expect(sections.thisChat).toEqual([]);
+    expect(sections.project).toEqual([]);
+    expect(sections.otherChats.map((entry) => entry.file.name)).toContain("bench.md");
+  });
+
+  it("search matches the name and the chat's title", () => {
+    const byName = collectAllTabs({ states, target, chatInfo, query: "DOCX" });
+    expect(byName.otherChats.map((entry) => entry.file.name)).toEqual(["research.docx"]);
+    expect(byName.thisChat).toEqual([]);
+    const byChat = collectAllTabs({ states, target, chatInfo, query: "hero" });
+    expect(byChat.thisChat).toEqual([hero]);
+    expect(byChat.otherChats.map((entry) => entry.file.name)).toEqual(["hero-variants.png"]);
+  });
+
+  it("the tasks tab and empty new tabs of another chat are not listed", () => {
+    const sections = collectAllTabs({
+      states: {
+        [chatScopeKey("b")]: {
+          files: [
+            { id: "tasks:b", name: "Tasks", kind: "tasks", content: "" },
+            { id: "browser-1", name: "New tab", kind: "browser", content: "", url: "" },
+          ],
+        },
+      },
+      target,
+      chatInfo,
+    });
+    expect(sections.otherChats).toEqual([]);
+  });
+});
+
+describe("scopeChoiceLabel", () => {
+  it("names the project", () => {
+    expect(scopeChoiceLabel("project", "landing", "pins")).toBe("Pin to project landing");
+    expect(scopeChoiceLabel("chat", "landing", "pins")).toBe("Keep in this chat");
+    expect(scopeChoiceLabel("global", "landing", "pins")).toBe("Pin everywhere");
+  });
+});

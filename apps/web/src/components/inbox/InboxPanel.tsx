@@ -38,7 +38,8 @@ import {
   setSystemNotifications,
   useSystemNotificationsState,
 } from "../../inbox/systemNotifications";
-import { useOpenInboxItem } from "../../inbox/useOpenInboxItem";
+import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
+import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
@@ -283,7 +284,8 @@ function HeaderButton(props: {
 }
 
 export function ItemIcon({ item }: { item: InboxEntry }) {
-  if (item.source.kind === "app" && item.source.icon) {
+  // Apps, and Uno's notices about the team (an assistant's face).
+  if ((item.source.kind === "app" || item.source.kind === "system") && item.source.icon) {
     return (
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[15px] leading-none">
         {item.source.icon}
@@ -326,6 +328,7 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const answerInRow = actions.reason !== "other" && !actions.done;
   const canDismiss = actions.done;
   const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
+  const assistantNotice = item.open?.kind === "url" ? assistantPageOfUrl(item.open.url) : null;
 
   return (
     <li
@@ -382,6 +385,14 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
       {answerInRow ? (
         <div className="flex flex-wrap items-center gap-1 pr-2 pb-2 pl-[3.25rem]">
           <InboxActionButtons item={item} resolved={resolved} onOpen={() => void openItem(item)} />
+        </div>
+      ) : assistantNotice ? (
+        <div className="pr-2 pb-2 pl-[3.25rem]">
+          <AssistantNoticeActions
+            environmentId={assistantNotice.environmentId}
+            projectId={assistantNotice.projectId}
+            onOpen={() => void openItem(item)}
+          />
         </div>
       ) : null}
       {hoverActions ? (

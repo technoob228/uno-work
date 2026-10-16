@@ -6,7 +6,6 @@ import {
   CodeXmlIcon,
   CopyIcon,
   DownloadIcon,
-  ExternalLinkIcon,
   EyeIcon,
   FileCode2Icon,
   FileIcon,
@@ -22,7 +21,6 @@ import {
   Minimize2Icon,
   PanelLeftOpenIcon,
   PencilIcon,
-  PinIcon,
   PlusIcon,
   PuzzleIcon,
   TableIcon,
@@ -30,7 +28,7 @@ import {
   AppWindowIcon,
   ListTodoIcon,
 } from "lucide-react";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -70,12 +68,6 @@ import {
   usePreviewPane,
 } from "./PreviewPaneContext";
 import {
-  PREVIEW_TAB_SCOPES,
-  SCOPE_LABEL,
-  SCOPE_MENU_LABEL,
-  type PreviewTabScope,
-} from "./previewTabScopes";
-import {
   attachPanelPortHost,
   createPanelBridge,
   createPanelSendConfirmer,
@@ -92,6 +84,11 @@ import { AppFrame } from "../apps/AppFrame";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
 import { PanelLauncher } from "./PanelLauncher";
+import { PanelTabStrip } from "./PanelTabStrip";
+import { FileOpenShareButton } from "./FileShareMenu";
+import { AllTabsMenu } from "./AllTabsMenu";
+import { useCurrentProjectName } from "./usePanelChats";
+import { DEMO, demoHooks, useDemoSwitch } from "../../demo/demoFlag";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
 import { CodeFileView } from "./CodeFileView";
@@ -143,17 +140,6 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   app: "App",
   tasks: "Tasks",
   unknown: "File",
-};
-
-/**
- * Значок уровня вкладки. У вкладок чата значка нет: это уровень по умолчанию, и
- * иконка на каждой вкладке была бы шумом — подсвечиваем только то, что живёт
- * дольше треда.
- */
-const SCOPE_ICON: Record<PreviewTabScope, typeof FileIcon | null> = {
-  chat: null,
-  project: FolderIcon,
-  global: PinIcon,
 };
 
 const KIND_EDITABLE: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
@@ -1617,7 +1603,7 @@ function PathBar({
 
   return (
     <div
-      className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-card px-2 text-xs"
+      className="relative z-10 flex h-8 shrink-0 items-center gap-1 border-b border-border bg-card px-2 text-xs"
       title={rawPath}
     >
       <button
@@ -1729,62 +1715,14 @@ function PathBar({
             <TooltipPopup side="bottom">Download</TooltipPopup>
           </Tooltip>
         ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() => file.path && openFileInEditor(file.path)}
-                disabled={!file.path}
-                aria-label="Open file in default editor"
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ExternalLinkIcon className="size-3.5" />
-              </button>
-            }
-          />
-          <TooltipPopup side="bottom">Open file</TooltipPopup>
-        </Tooltip>
+        <FileOpenShareButton
+          file={file}
+          environmentId={currentChatEnvironmentId}
+          onOpenInEditor={openFileInEditor}
+        />
       </TooltipProvider>
     </div>
   );
-}
-
-/**
- * Контекстное меню вкладки: перенос между уровнями (чат / проект / везде) и
- * закрытие. Уровень определяет, в каких чатах вкладка вообще видна.
- */
-async function showTabScopeMenu(input: {
-  file: PreviewFile;
-  scope: PreviewTabScope;
-  /**
-   * Можно ли перенести вкладку на другой уровень. Вне чата видны только
-   * закреплённые вкладки — переносить их там некуда; вкладка задач — всегда
-   * про свой тред. Иначе — только закрыть.
-   */
-  movable: boolean;
-  position: { x: number; y: number };
-  setTabScope: (id: string, scope: PreviewTabScope) => void;
-  closeFile: (id: string) => void;
-}): Promise<void> {
-  const items = [
-    ...(input.movable ? PREVIEW_TAB_SCOPES : [])
-      .filter((scope) => scope !== input.scope)
-      .map((scope) => ({
-        id: `scope:${scope}`,
-        label: SCOPE_MENU_LABEL[scope],
-      })),
-    { id: "close", label: "Close tab" },
-  ];
-  const choice = await readLocalApi()?.contextMenu.show(items, input.position);
-  if (!choice) return;
-  if (choice === "close") {
-    input.closeFile(input.file.id);
-    return;
-  }
-  if (choice.startsWith("scope:")) {
-    input.setTabScope(input.file.id, choice.slice("scope:".length) as PreviewTabScope);
-  }
 }
 
 export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
@@ -1799,14 +1737,19 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     togglePreviewLayoutMode,
     openBrowser,
     currentChatEnvironmentId,
-    toggleSourceView,
-    tabScopeById,
-    setTabScope,
     currentChatThreadId,
+    currentChatProjectId,
     width: viewWidth,
     setWidth: setViewWidth,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  // w0138 p4: tabs of the chat + pins (A, default) or of the project (B).
+  const tabsLayout = useDemoSwitch("tabs");
+  const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
+  const [allTabsOpen, setAllTabsOpen] = useState(false);
+  useEffect(() => {
+    if (DEMO) demoHooks.openAllTabs = () => setAllTabsOpen(true);
+  }, []);
   // Live-список панелей: агент может создать плагин прямо сейчас, и он должен
   // появиться в лаунчере (Apps) без переоткрытия (хвост фазы B).
   const panels = usePluginPanels();
@@ -1983,7 +1926,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       style={
         paneVisible
           ? isFocusMode
-            ? { left: focusLeft }
+            ? // The chat folded into a column (ChatMiniWindow) takes the right edge.
+              { left: focusLeft, right: "var(--chat-dock-column-width, 0px)" }
             : { width: `${clampedWidth}px` }
           : { left: -10000, width: `${clampedWidth}px` }
       }
@@ -2001,7 +1945,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       ) : null}
       <header
         className={cn(
-          "relative z-40 flex h-9 shrink-0 items-center border-b border-border bg-card pr-2",
+          "@container/panelhead relative z-40 flex h-9 shrink-0 items-center border-b border-border bg-card pr-2",
           isFocusMode && "h-[52px] fullscreen:h-9 wco:h-[env(titlebar-area-height)]",
           isFocusMode &&
             !sidebarVisible &&
@@ -2029,89 +1973,18 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             isFocusMode && !sidebarVisible && "pl-0 fullscreen:pl-2",
           )}
         >
-          {files.map((file, index) => {
-            const Icon = KIND_ICON[file.kind];
-            const isActive = file.id === active?.id;
-            const dualView = DUAL_VIEW_KINDS.has(file.kind);
-            const scope = tabScopeById[file.id] ?? "chat";
-            const ScopeIcon = SCOPE_ICON[scope];
-            // Границу групп рисуем один раз на переходе уровня: видно, где
-            // заканчиваются «постоянные» вкладки и начинаются вкладки чата.
-            const previousScope =
-              index > 0 ? (tabScopeById[files[index - 1]!.id] ?? "chat") : scope;
-            const startsGroup = index > 0 && previousScope !== scope;
-            return (
-              <Fragment key={file.id}>
-                {startsGroup ? (
-                  <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
-                ) : null}
-                <button
-                  type="button"
-                  data-preview-tab={file.id}
-                  onClick={() => {
-                    setLauncherRequested(false);
-                    setActiveFile(file.id);
-                  }}
-                  onDoubleClick={() => {
-                    if (dualView) toggleSourceView(file.id);
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    void showTabScopeMenu({
-                      file,
-                      scope,
-                      movable: currentChatThreadId !== null && !isTasksTab(file),
-                      position: { x: event.clientX, y: event.clientY },
-                      setTabScope,
-                      closeFile,
-                    });
-                  }}
-                  className={cn(
-                    "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs",
-                    isActive
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/50",
-                  )}
-                  title={
-                    isTasksTab(file)
-                      ? "Tasks and plan of this chat"
-                      : `${KIND_LABEL[file.kind]} — ${file.name}\nKept in: ${SCOPE_LABEL[scope]} (right-click to change)${dualView ? "\nDouble-click: code ↔ preview" : ""}`
-                  }
-                >
-                  <Icon className="size-3.5 shrink-0" />
-                  {ScopeIcon ? (
-                    <ScopeIcon
-                      className={cn(
-                        "size-3 shrink-0",
-                        scope === "global" ? "text-primary" : "opacity-70",
-                      )}
-                    />
-                  ) : null}
-                  <span className="max-w-[8rem] truncate">
-                    {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="rounded p-0.5 opacity-60 hover:bg-accent hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeFile(file.id);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        closeFile(file.id);
-                      }
-                    }}
-                  >
-                    <XIcon className="size-3" />
-                  </span>
-                </button>
-              </Fragment>
-            );
-          })}
+          <PanelTabStrip
+            files={files}
+            activeId={active?.id ?? null}
+            layout={tabsLayout}
+            projectName={projectName}
+            kindIcon={KIND_ICON}
+            kindLabel={KIND_LABEL}
+            onSelect={(id) => {
+              setLauncherRequested(false);
+              setActiveFile(id);
+            }}
+          />
           {launcherRequested && files.length > 0 ? (
             <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent px-2 text-xs text-accent-foreground">
               <PlusIcon className="size-3.5 shrink-0" />
@@ -2142,6 +2015,15 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </button>
           ) : null}
         </div>
+        {files.length > 0 || currentChatThreadId !== null ? (
+          <AllTabsMenu
+            kindIcon={KIND_ICON}
+            projectName={projectName}
+            layout={tabsLayout}
+            open={allTabsOpen}
+            onOpenChange={setAllTabsOpen}
+          />
+        ) : null}
         {fullScreenTarget ? (
           <Button
             size="icon-xs"

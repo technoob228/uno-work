@@ -136,6 +136,7 @@ import {
   resolveDefaultThreadProvider,
 } from "../../providerModels";
 import { modelCannotRunCodingAgent } from "./modelCapabilities";
+import { PanelContextChip } from "../preview/annotate/PanelContextChip";
 import {
   deriveProviderInstanceEntries,
   resolveProviderDriverKindForInstanceSelection,
@@ -512,6 +513,11 @@ export interface ChatComposerHandle {
   setVideoAttachments: (videos: ComposerVideoAttachment[]) => void;
   /** Non-image files (staged on send); cleared/restored like videos. */
   setFileAttachments: (files: ComposerFileAttachment[]) => void;
+  /**
+   * From the right panel (the browser's Comment / Debug, the launcher's app
+   * ideas): attach cards and/or put words into the box, then focus it.
+   */
+  attachFromPanel?: (input: { files?: ComposerFileAttachment[]; text?: string }) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -551,6 +557,11 @@ export interface ChatComposerProps {
   isServerThread: boolean;
   isLocalDraftThread: boolean;
   forceCompact?: boolean;
+  /**
+   * The compact composer is the bottom of the full-screen tab's chat block
+   * (w0138 p3): no frame of its own, a 40px row with small chips.
+   */
+  inDock?: boolean;
   /**
    * Встроенный чат панели плагина не переключает права треда: плагинная
    * поверхность может права только сузить, но не расширить (`permissionPolicy:
@@ -673,6 +684,7 @@ export const ChatComposer = memo(
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
       forceCompact = false,
+      inDock = false,
       hideRuntimeModeControl = false,
       phase,
       isConnecting,
@@ -2692,6 +2704,17 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
+        attachFromPanel: ({ files, text }) => {
+          if (files && files.length > 0) {
+            setComposerFilesState((current) => [...current, ...files]);
+          }
+          if (text) {
+            const current = promptRef.current.trim();
+            setPromptFromTraits(current ? `${promptRef.current.trimEnd()}\n\n${text}` : text);
+          } else {
+            composerEditorRef.current?.focusAtEnd();
+          }
+        },
         getSendContext: () => ({
           prompt: promptRef.current,
           images: composerImagesRef.current,
@@ -2727,6 +2750,7 @@ export const ChatComposer = memo(
         selectedProviderModels,
         setComposerFilesState,
         setComposerVideosState,
+        setPromptFromTraits,
       ],
     );
 
@@ -2747,7 +2771,14 @@ export const ChatComposer = memo(
           data-chat-composer-form="true"
           data-chat-composer-focus-strip="true"
         >
-          <div className="flex h-[52px] min-w-0 items-center gap-2 rounded-full border border-border/70 bg-card/92 px-3 shadow-2xl shadow-black/12 backdrop-blur-xl">
+          <div
+            className={cn(
+              "flex min-w-0 items-center",
+              inDock
+                ? "h-9 gap-0.5 px-1.5"
+                : "h-[52px] gap-2 rounded-full border border-border/70 bg-card/92 px-3 shadow-2xl shadow-black/12 backdrop-blur-xl",
+            )}
+          >
             <input
               ref={imageAttachmentInputRef}
               type="file"
@@ -2762,9 +2793,12 @@ export const ChatComposer = memo(
                     type="button"
                     aria-label="Attach files"
                     onClick={() => imageAttachmentInputRef.current?.click()}
-                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className={cn(
+                      "inline-flex shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground",
+                      inDock ? "size-7" : "size-9",
+                    )}
                   >
-                    <PaperclipIcon className="size-4" />
+                    <PaperclipIcon className={inDock ? "size-3.5" : "size-4"} />
                   </button>
                 }
               />
@@ -2781,7 +2815,8 @@ export const ChatComposer = memo(
                       disabled={dictation.state === "transcribing"}
                       onClick={toggleDictation}
                       className={cn(
-                        "inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground",
+                        "inline-flex shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground",
+                        inDock ? "size-7" : "size-9",
                         dictation.state === "recording" &&
                           "animate-pulse text-red-500 hover:text-red-500",
                       )}
@@ -2804,7 +2839,8 @@ export const ChatComposer = memo(
               type="text"
               value={prompt}
               className={cn(
-                "min-w-0 flex-1 bg-transparent px-1 text-sm outline-none",
+                "min-w-0 flex-1 bg-transparent px-1 outline-none",
+                inDock ? "text-[13px]" : "text-sm",
                 prompt.trim() ? "text-foreground" : "text-muted-foreground/45",
               )}
               onChange={(event) => {
@@ -2859,7 +2895,10 @@ export const ChatComposer = memo(
                   size="sm"
                   type="button"
                   onClick={toggleInteractionMode}
-                  className="h-9 shrink-0 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                  className={cn(
+                    "shrink-0 rounded-full text-muted-foreground hover:text-foreground",
+                    inDock ? "h-7 px-2 text-xs" : "h-9 px-3",
+                  )}
                   title={interactionModeTitle(interactionMode)}
                 >
                   <InteractionModeIcon className="size-4" />
@@ -2874,11 +2913,14 @@ export const ChatComposer = memo(
                 <SelectTrigger
                   variant="ghost"
                   size="sm"
-                  className="h-9 shrink-0 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                  className={cn(
+                    "shrink-0 rounded-full text-muted-foreground hover:text-foreground",
+                    inDock ? "h-7 px-2 text-xs" : "h-9 px-3",
+                  )}
                   aria-label="Permissions"
                   title={runtimeModeOption.description}
                 >
-                  <RuntimeModeIcon className="size-4" />
+                  <RuntimeModeIcon className={inDock ? "size-3.5" : "size-4"} />
                   <SelectValue>{runtimeModeOption.label}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup alignItemWithTrigger={false}>
@@ -2923,7 +2965,10 @@ export const ChatComposer = memo(
 
             <button
               type="button"
-              className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+              className={cn(
+                "ml-1 inline-flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-35",
+                inDock ? "size-7" : "size-10",
+              )}
               disabled={collapsedComposerPrimaryActionDisabled}
               aria-label={collapsedComposerPrimaryActionLabel}
               onPointerDown={(event) => event.preventDefault()}
@@ -2932,7 +2977,13 @@ export const ChatComposer = memo(
                 submitComposer();
               }}
             >
-              <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <svg
+                width={inDock ? 14 : 17}
+                height={inDock ? 14 : 17}
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M8 3L8 13M8 3L4 7M8 3L12 7"
                   stroke="currentColor"
@@ -3327,7 +3378,14 @@ export const ChatComposer = memo(
                         </Button>
                       </div>
                     ))}
-                    {composerFiles.map((file) => (
+                    {composerFiles.map((file) =>
+                      file.panelContext ? (
+                        <PanelContextChip
+                          key={file.id}
+                          card={file.panelContext}
+                          onRemove={() => removeComposerFile(file.id)}
+                        />
+                      ) : (
                       <div
                         key={file.id}
                         className="relative flex h-16 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-2 pr-7 pl-2.5"
@@ -3353,7 +3411,8 @@ export const ChatComposer = memo(
                           <XIcon />
                         </Button>
                       </div>
-                    ))}
+                      ),
+                    )}
                   </div>
                 )}
 

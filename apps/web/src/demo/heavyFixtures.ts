@@ -125,6 +125,8 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       agentThreads: true,
       threadContinueDirect: true,
       assistantChat: true,
+      // p7: the assistant's AI and sign-ins (assistantsFixtures.ts answers them).
+      assistantLlm: true,
     },
     machineKind: machine.machineKind,
     ...(machine.boxId !== null ? { unoBoxId: machine.boxId } : {}),
@@ -163,7 +165,8 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
         skills: [],
       },
     ],
-    availableEditors: [],
+    // p8: "Open in Cursor" on the MacBook.
+    availableEditors: machine.key === "mac" ? ["cursor", "vscode", "file-manager"] : [],
     observability: {
       logsDirectoryPath: `${machine.home}/.t3/logs`,
       localTracingEnabled: false,
@@ -176,7 +179,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
 
 // ── Projects ──────────────────────────────────────────────────────────────
 
-interface ProjectSpec {
+export interface ProjectSpec {
   readonly id: string;
   readonly title: string;
   readonly root: string;
@@ -193,7 +196,7 @@ const REPO = {
   landing: "github.com/getuno/landing",
 } as const;
 
-const PROJECTS: Record<MachineKey, ProjectSpec[]> = {
+export const PROJECTS: Record<MachineKey, ProjectSpec[]> = {
   work: [
     { id: "p-work-home", title: "Home folder", root: "/home/uno" },
     { id: ASSISTANT_PROJECT_ID, title: "Uno", root: "/home/uno/.uno/assistant" },
@@ -245,6 +248,12 @@ const PROJECTS: Record<MachineKey, ProjectSpec[]> = {
   ],
   mac: [
     { id: "p-mac-home", title: "Home folder", root: "/Users/misha" },
+    {
+      id: "p-mac-landing",
+      title: "landing",
+      root: "/Users/misha/projects/landing",
+      repo: REPO.landing,
+    },
     {
       id: "p-mac-fishcode",
       title: "fishcode",
@@ -440,28 +449,28 @@ export const CHATS: ChatSpec[] = [
     ],
   },
 
-  // ── Validator: checks the 0.0.118 rollout before it goes to everyone ──
+  // ── Validator: checks the 0.0.137 rollout before it goes to everyone ──
   {
     id: "v-0118",
     machine: "product",
     project: "p-product-uno-work",
-    title: "Validate Work 0.0.118 before it goes to everyone",
+    title: "Validate Work 0.0.137 before it goes to everyone",
     minutesAgo: 6,
     state: "needs-you",
     role: "validator",
     ask: {
       kind: "permission",
-      text: "Canary 2534 is green. Promote 0.0.118 to latest (Update for everyone)?",
-      command: "./scripts/release-work.sh promote 0.0.118",
+      text: "Canary 2534 is green. Promote 0.0.137 to latest (Update for everyone)?",
+      command: "./scripts/release-work.sh promote 0.0.137",
     },
     messages: [
       [
         "user",
-        "Validate 0.0.118 on the canary: smoke test, a 1 GB upload to the cloud, rollback ready. Then ask me before latest.",
+        "Validate 0.0.137 on the canary: smoke test, a 1 GB upload to the cloud, rollback ready. Then ask me before latest.",
       ],
       [
         "assistant",
-        "Both checks passed (41/41 smoke steps, 1 GB upload in 38 s). Rollback: release-work.sh rollback 0.0.118. I need your OK to promote to latest.",
+        "Both checks passed (41/41 smoke steps, 1 GB upload in 38 s). Rollback: release-work.sh rollback 0.0.137. I need your OK to promote to latest.",
       ],
     ],
   },
@@ -580,7 +589,7 @@ export const CHATS: ChatSpec[] = [
     parent: "c-icp3",
     ask: {
       kind: "review",
-      text: "PR #412 is green. Merge into release/0.0.119?",
+      text: "PR #412 is green. Merge into release/0.0.138?",
       pr: "#412",
       checks: "tsc ✓ · 1,204 tests ✓ · 3 files",
     },
@@ -588,7 +597,7 @@ export const CHATS: ChatSpec[] = [
       ["user", "From coordinator: Inbox rows should say “project · computer”. Open a PR."],
       [
         "assistant",
-        "PR #412 — every Inbox row says “uno-console · uno-product”. Checks are green. Merge into release/0.0.119?",
+        "PR #412 — every Inbox row says “uno-console · uno-product”. Checks are green. Merge into release/0.0.138?",
       ],
     ],
   },
@@ -731,14 +740,14 @@ export const CHATS: ChatSpec[] = [
     id: "s-macbuild",
     machine: "mac",
     project: "p-mac-uno-work",
-    title: "Build Work.app for macOS (0.0.119)",
+    title: "Build Work.app for macOS (0.0.138)",
     minutesAgo: 1,
     runningFor: 12,
     state: "running",
     role: "solo",
     now: "Signing and notarizing — step 3 of 4",
     messages: [
-      ["user", "Build the macOS app from release/0.0.119 and notarize it."],
+      ["user", "Build the macOS app from release/0.0.138 and notarize it."],
       ["assistant", "Built. Signing and notarizing now (step 3 of 4)."],
     ],
   },
@@ -772,6 +781,46 @@ export const CHATS: ChatSpec[] = [
     messages: [
       ["user", "Let me drag a chat into another project in the sidebar."],
       ["assistant", "Half done: drag works inside one computer…"],
+    ],
+  },
+  // ── landing: one project on the MacBook and uno-product ──
+  {
+    id: "l-copy",
+    machine: "mac",
+    project: "p-mac-landing",
+    title: "Landing copy — three flows",
+    minutesAgo: 2,
+    runningFor: 4,
+    state: "running",
+    role: "solo",
+    now: "Rewriting flow 2: card → server → it works",
+    messages: [
+      [
+        "user",
+        "Rewrite the landing copy for the three flows. Keep it simple: one sentence per step, real screens of Work.",
+      ],
+      [
+        "assistant",
+        "Flow 1 (a site in a minute) is done — see pricing.md and hero.md in the panel. Starting flow 2 now.",
+      ],
+      ["user", "Good. For flow 2 say what the card is for before asking for it."],
+    ],
+  },
+  {
+    id: "l-hero",
+    machine: "mac",
+    project: "p-mac-landing",
+    title: "Hero: “One place to build and deploy with AI”",
+    minutesAgo: 35,
+    state: "unread",
+    role: "solo",
+    now: "3 hero variants ready",
+    messages: [
+      ["user", "Three hero variants for the new tagline, light theme."],
+      [
+        "assistant",
+        "Three variants are in hero-variants.png. V1 is the calmest; V2 is dark, as you asked to compare.",
+      ],
     ],
   },
   {
@@ -876,12 +925,12 @@ export const CHATS: ChatSpec[] = [
     id: "s-0117",
     machine: "product",
     project: "p-product-uno-work",
-    title: "Work 0.0.117: stale UI",
+    title: "Work 0.0.136: stale UI",
     minutesAgo: 60 * 28,
     state: "done",
     role: "solo",
     messages: [
-      ["user", "Ship 0.0.117."],
+      ["user", "Ship 0.0.136."],
       ["assistant", "In prod. Latest 295a8c79."],
     ],
   },
@@ -889,11 +938,11 @@ export const CHATS: ChatSpec[] = [
     id: "a-0116",
     machine: "product",
     project: "p-product-uno-work",
-    title: "Work 0.0.116 release",
+    title: "Work 0.0.135 release",
     minutesAgo: 60 * 40,
     state: "archived",
     role: "solo",
-    messages: [["assistant", "0.0.116 in prod."]],
+    messages: [["assistant", "0.0.135 in prod."]],
   },
   {
     id: "a-bonuses",
@@ -1249,8 +1298,8 @@ export const INBOX: InboxSpec[] = [
     kind: "agent.approval",
     minutesAgo: 6,
     chat: "v-0118",
-    title: "Validate Work 0.0.118 before it goes to everyone",
-    body: "Promote 0.0.118 to latest (Update for everyone)?",
+    title: "Validate Work 0.0.137 before it goes to everyone",
+    body: "Promote 0.0.137 to latest (Update for everyone)?",
   },
   {
     id: "i-qa",
@@ -1277,7 +1326,7 @@ export const INBOX: InboxSpec[] = [
     minutesAgo: 88,
     tag: "merge",
     source: { kind: "app", id: "github", name: "GitHub", icon: "⑂" },
-    title: "PR #409 merged into release/0.0.119",
+    title: "PR #409 merged into release/0.0.138",
     body: "A fresh computer opens broken (stale welcome)",
     open: { kind: "url", url: "https://github.com/getuno/uno-work/pull/409" },
   },
@@ -1301,7 +1350,7 @@ export const INBOX: InboxSpec[] = [
     minutesAgo: 22,
     chat: "h-pr412",
     title: "PR #412: Inbox says which computer",
-    body: "PR #412 is green. Merge into release/0.0.119?",
+    body: "PR #412 is green. Merge into release/0.0.138?",
   },
   {
     id: "i-gotest",

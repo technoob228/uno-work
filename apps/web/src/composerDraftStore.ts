@@ -52,6 +52,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
+import type { PanelContextCard } from "./components/preview/annotate/pageTools.logic";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
@@ -109,6 +110,12 @@ export interface ComposerFileAttachment {
   mimeType: string;
   sizeBytes: number;
   file: File;
+  /**
+   * Comments or console/network lines sent from the panel's browser: the
+   * composer shows them as one card (its list expands); the file is the
+   * markdown the agent reads.
+   */
+  panelContext?: PanelContextCard;
 }
 
 export interface ComposerVideoAttachment {

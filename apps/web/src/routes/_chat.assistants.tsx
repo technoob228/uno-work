@@ -13,6 +13,15 @@ export const Route = createFileRoute("/_chat/assistants")({
       return Number.isInteger(box) && box > 0 ? { view, box } : {};
     }
     const project = search["project"];
+    const env = search["env"];
+    if (view === "profile") {
+      return typeof project === "string" &&
+        project.startsWith("assistant-") &&
+        typeof env === "string" &&
+        env.length > 0
+        ? { view, project, env }
+        : {};
+    }
     if (view === "local") {
       return typeof project === "string" && project.startsWith("assistant-")
         ? { view, project }

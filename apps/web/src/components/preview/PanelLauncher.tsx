@@ -1,39 +1,48 @@
 /**
- * The right panel's launcher (plan 22, step 1): what the panel shows when it
- * is open with nothing in it, and what "+" in the tab strip opens. Big tiles —
- * Browser, Files, Terminal, Changes, Apps, Sites — each opening the thing that
- * already exists (rules: `panelLauncher.logic.ts`). A letter opens a tile
- * while the launcher has focus, like t3's empty right panel.
+ * The right panel's launcher (plan 22, step 1; w0138): what the panel shows
+ * when it is open with nothing in it, and what "+" in the tab strip opens.
+ * Tiles — Browser (this device: you click, the agent sees, Comment and
+ * Debug), Agent's browser (the chat computer's: watch live, take control),
+ * Files, Changes, Apps — each opening the thing that already exists (rules:
+ * `panelLauncher.logic.ts`). A letter opens a tile while the launcher has
+ * focus, like t3's empty right panel.
  *
- * Apps and Sites open a short list right here (← All goes back); a pick opens
- * as a tab beside the chat, everything else about them stays on Apps & sites.
+ * Apps opens a list right here (← All goes back): the apps of every
+ * computer and the person's sites; a pick opens as a tab beside the chat,
+ * everything else about them stays on Apps & sites. With no apps the list
+ * says how to get one.
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
-  AppWindowIcon,
   ArrowLeftIcon,
   DiffIcon,
   FolderIcon,
   GlobeIcon,
   LayoutGridIcon,
-  PanelsTopLeftIcon,
+  LockIcon,
+  MonitorPlayIcon,
   PuzzleIcon,
-  SquareTerminalIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useComposerHandleContext } from "../../composerHandleContext";
+import { useDemoDesktop } from "../../demo/demoFlag";
+import { isElectron } from "../../env";
+import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../../environments/primary";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
-import { appPrimaryAction } from "../computer/appPrimaryAction";
 import { ProgramIcon } from "../computer/ComputerPrograms";
-import { useProgramTiles } from "../computer/useProgramTiles";
 import { siteRows } from "../sites/sitesModel";
 import { useWorkSites } from "../sites/useWorkSites";
 import { Skeleton } from "../ui/skeleton";
 import { useChatPanelActions } from "./chatPanelActions";
 import {
+  APP_IDEAS,
+  APP_STATE_LABEL,
+  type LauncherAppRow,
   type LauncherTileId,
   isTypingTarget,
   launcherTileForKey,
@@ -42,17 +51,17 @@ import {
 import type { PluginPanelDescriptor } from "./PluginPanelChat";
 import { makeAppFile, makePluginPanelFile, usePreviewPane } from "./PreviewPaneContext";
 import { useChatBrowser } from "./useChatBrowser";
+import { useLauncherApps } from "./useLauncherApps";
 
 const TILE_ICON: Record<LauncherTileId, typeof GlobeIcon> = {
   browser: GlobeIcon,
+  agentBrowser: MonitorPlayIcon,
   files: FolderIcon,
-  terminal: SquareTerminalIcon,
   changes: DiffIcon,
   apps: LayoutGridIcon,
-  sites: PanelsTopLeftIcon,
 };
 
-type LauncherView = "tiles" | "apps" | "sites";
+type LauncherView = "tiles" | "apps";
 
 export function PanelLauncher({
   panels,
@@ -69,7 +78,7 @@ export function PanelLauncher({
   onFocusTaken: () => void;
   /** Something opened as a tab of this panel. */
   onOpenedTab: () => void;
-  /** Something opened outside the panel (the terminal drawer, Changes). */
+  /** Something opened outside the panel (Changes). */
   onOpenedElsewhere: () => void;
   /** Escape. */
   onDismiss: () => void;
@@ -84,13 +93,18 @@ export function PanelLauncher({
   } = usePreviewPane();
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   const browserCompanionEnabled = useFeatureFlag("browserCompanion");
   const pluginsEnabled = useFeatureFlag("plugins");
-  const { browsesOnMachine, openChatBrowser } = useChatBrowser();
+  const demoDesktop = useDemoDesktop();
+  const desktop = isElectron || demoDesktop;
+  const { sources, defaultSource, openInSource } = useChatBrowser();
   const chatActions = useChatPanelActions(currentChatThreadId);
   const machine = useActiveMachine();
-  const programs = useProgramTiles();
+  const machineLabels = useMachineLabels();
+  const apps = useLauncherApps();
   const sitesQuery = useWorkSites(machine.environmentId);
+  const composerRef = useComposerHandleContext();
   const [view, setView] = useState<LauncherView>("tiles");
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -106,54 +120,49 @@ export function PanelLauncher({
   }, [takeFocus, onFocusTaken]);
 
   const panelList = pluginsEnabled ? panels : [];
-  const openableApps = useMemo(
-    () =>
-      programs.tiles.flatMap((tile) => {
-        const action = appPrimaryAction(tile);
-        return action.kind === "open" && !action.disabled && action.url
-          ? [{ tile, url: action.url }]
-          : [];
-      }),
-    [programs.tiles],
-  );
   const sites = useMemo(
-    () => (sitesQuery.data?.availability === "ok" ? siteRows(sitesQuery.data.sites) : null),
+    () => (sitesQuery.data?.availability === "ok" ? siteRows(sitesQuery.data.sites) : []),
     [sitesQuery.data],
   );
   const environmentId = currentChatEnvironmentId ?? primaryEnvironmentId;
+  const agentComputer =
+    sources.includes("computer") && currentChatEnvironmentId
+      ? (machineLabels.get(currentChatEnvironmentId) ?? "the chat's computer")
+      : null;
   const tiles = visibleLauncherTiles({
-    canBrowse: browserCompanionEnabled || browsesOnMachine,
+    canBrowseHere: sources.includes("app") || browserCompanionEnabled,
+    browserHasTools: desktop,
+    deviceName: desktop
+      ? primaryDescriptor?.platform.os === "darwin"
+        ? "this Mac"
+        : "this computer"
+      : "your browser",
+    agentBrowserOn: agentComputer,
+    defaultBrowser: defaultSource,
     hasComputer: environmentId !== null,
-    canOpenTerminal: chatActions?.openTerminal != null,
     canOpenChanges: chatActions?.openChanges != null,
-    openableApps:
-      machine.environmentId !== null && programs.loading
-        ? null
-        : openableApps.length + panelList.length,
-    sites: sites?.length ?? null,
   });
 
   const open = (id: LauncherTileId): void => {
     switch (id) {
       case "browser":
-        openChatBrowser();
+        openInSource("app");
+        onOpenedTab();
+        return;
+      case "agentBrowser":
+        openInSource("computer");
         onOpenedTab();
         return;
       case "files":
         // "Browse files" as before: pick a file, it opens as a tab.
         openBrowser({ environmentId, startPath: currentChatProjectCwd ?? null });
         return;
-      case "terminal":
-        chatActions?.openTerminal?.();
-        onOpenedElsewhere();
-        return;
       case "changes":
         chatActions?.openChanges?.();
         onOpenedElsewhere();
         return;
       case "apps":
-      case "sites":
-        setView(id);
+        setView("apps");
         return;
     }
   };
@@ -176,6 +185,24 @@ export function PanelLauncher({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const openApp = (row: LauncherAppRow) => {
+    if (!row.url) {
+      void navigate({ to: "/sites", search: { tab: "apps" } });
+      return;
+    }
+    openAppTab(makeAppFile({ url: row.url, name: row.name, icon: row.icon }));
+    onOpenedTab();
+  };
+  const askForApp = (idea: string) => {
+    const composer = composerRef?.current;
+    if (composer?.attachFromPanel) {
+      composer.attachFromPanel({ text: idea });
+    } else {
+      composer?.focusAtEnd();
+    }
+  };
+  const noApps = !apps.loading && apps.rows.length === 0 && panelList.length === 0;
+
   return (
     <div
       ref={rootRef}
@@ -189,15 +216,15 @@ export function PanelLauncher({
           return;
         }
       }}
-      className="flex h-full min-h-0 flex-col overflow-y-auto px-4 py-5 outline-none"
+      className="flex h-full min-h-0 flex-col overflow-y-auto px-4 py-4 outline-none"
     >
       {view === "tiles" ? (
         <>
-          <div className="mb-4">
-            <h3 className="text-sm font-semibold text-foreground">Open in the panel</h3>
+          <div className="mb-3">
+            <h3 className="text-[13px] font-semibold text-foreground">Open in the panel</h3>
             <p className="text-xs text-muted-foreground">Press a letter to open.</p>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2.5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2">
             {tiles.map((tile) => {
               const Icon = TILE_ICON[tile.id];
               return (
@@ -206,14 +233,25 @@ export function PanelLauncher({
                   type="button"
                   data-testid={`panel-launcher-${tile.id}`}
                   onClick={() => open(tile.id)}
-                  className="flex min-h-26 cursor-pointer flex-col gap-2 rounded-xl border border-border bg-card p-3.5 text-left outline-none transition-colors hover:border-primary/45 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex min-h-[4.75rem] cursor-pointer flex-col gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-left outline-none transition-colors hover:border-primary/45 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="flex items-center gap-2">
-                    <span className="inline-flex size-8 items-center justify-center rounded-lg bg-muted text-foreground">
-                      <Icon className="size-4" />
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
+                      <Icon className="size-3.5" />
                     </span>
-                    <span className="text-sm font-semibold text-foreground">{tile.name}</span>
-                    <kbd className="ml-auto rounded border border-border px-1.5 font-sans text-[10.5px] text-muted-foreground">
+                    <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
+                      {tile.name}
+                    </span>
+                    {tile.isDefault ? (
+                      <span
+                        className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary"
+                        title="Browser and links open here. Change it from the chip in the address bar"
+                        data-testid={`panel-launcher-${tile.id}-default`}
+                      >
+                        default
+                      </span>
+                    ) : null}
+                    <kbd className="ml-auto shrink-0 rounded border border-border px-1.5 font-sans text-[10.5px] text-muted-foreground">
                       {tile.key}
                     </kbd>
                   </span>
@@ -230,75 +268,113 @@ export function PanelLauncher({
           <button
             type="button"
             onClick={() => setView("tiles")}
-            className="mb-3 inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="mb-2 inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <ArrowLeftIcon className="size-3.5" />
             All
           </button>
-          <h3 className="mb-2 text-sm font-semibold text-foreground">
-            {view === "apps" ? "Apps" : "Sites"}
-          </h3>
-          <ul className="flex flex-col gap-px">
-            {view === "apps" ? (
-              <>
-                {programs.loading && openableApps.length === 0 && machine.environmentId !== null
-                  ? [0, 1, 2].map((i) => (
-                      <li key={i} className="list-none">
-                        <Skeleton className="my-0.5 h-8 w-full rounded-md" />
-                      </li>
-                    ))
-                  : null}
-                {openableApps.map(({ tile, url }) => (
-                  <ListRow
-                    key={tile.key}
-                    icon={
-                      <ProgramIcon
-                        name={tile.name}
-                        icon={tile.icon}
-                        iconImage={tile.iconImage}
-                        templateId={tile.templateId ?? null}
-                        className="size-6 rounded-md text-sm shadow-none"
-                      />
-                    }
-                    title={tile.name}
-                    subtitle={tile.product ?? tile.caption}
-                    onClick={() => {
-                      openAppTab(makeAppFile({ url, name: tile.name, icon: tile.icon }));
-                      onOpenedTab();
-                    }}
-                  />
+          <SectionTitle>Apps</SectionTitle>
+          {noApps ? (
+            <div
+              className="rounded-lg border border-dashed border-border px-3 py-3"
+              data-testid="panel-launcher-apps-empty"
+            >
+              <p className="text-[13px] font-medium text-foreground">No apps yet</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Ask the agent to make one. It runs on your computer and opens here.
+              </p>
+              <div className="mt-2 flex flex-col gap-1">
+                {APP_IDEAS.map((idea) => (
+                  <button
+                    key={idea}
+                    type="button"
+                    onClick={() => askForApp(idea)}
+                    className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs text-foreground/85 hover:bg-accent"
+                  >
+                    <SparklesIcon className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{idea}</span>
+                  </button>
                 ))}
-                {panelList.map((panel) => (
-                  <ListRow
-                    key={panel.id}
-                    icon={<PuzzleIcon className="size-4 text-muted-foreground" />}
-                    title={panel.title}
-                    subtitle="Panel"
-                    onClick={() => {
-                      openFile(makePluginPanelFile(panel.id, panel.title));
-                      onOpenedTab();
-                    }}
-                  />
-                ))}
-              </>
-            ) : (
-              (sites ?? []).map((site) => (
+              </div>
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-px" data-testid="panel-launcher-apps-list">
+              {apps.loading
+                ? [0, 1, 2].map((i) => (
+                    <li key={i} className="list-none">
+                      <Skeleton className="my-0.5 h-8 w-full rounded-md" />
+                    </li>
+                  ))
+                : null}
+              {apps.rows.map((row) => (
                 <ListRow
-                  key={site.slug}
-                  icon={<AppWindowIcon className="size-4 text-muted-foreground" />}
-                  title={site.host}
-                  subtitle={site.hasPassword ? "Opens with its password" : null}
+                  key={row.key}
+                  icon={
+                    <ProgramIcon
+                      name={row.name}
+                      icon={row.icon}
+                      iconImage={row.iconImage}
+                      templateId={row.templateId}
+                      className="size-6 rounded-md text-sm shadow-none"
+                    />
+                  }
+                  title={row.name}
+                  subtitle={row.computer}
+                  trailing={<AppState state={row.state} />}
+                  muted={row.url === null}
+                  onClick={() => openApp(row)}
+                />
+              ))}
+              {panelList.map((panel) => (
+                <ListRow
+                  key={panel.id}
+                  icon={<PuzzleIcon className="size-4 text-muted-foreground" />}
+                  title={panel.title}
+                  subtitle="Panel"
                   onClick={() => {
-                    openAppTab(makeAppFile({ url: site.url, name: site.host }));
+                    openFile(makePluginPanelFile(panel.id, panel.title));
                     onOpenedTab();
                   }}
                 />
-              ))
-            )}
-          </ul>
+              ))}
+            </ul>
+          )}
+          {sites.length > 0 ? (
+            <>
+              <SectionTitle className="mt-4">Sites</SectionTitle>
+              <ul className="flex flex-col gap-px" data-testid="panel-launcher-sites-list">
+                {sites.map((site) => (
+                  <ListRow
+                    key={site.slug}
+                    icon={
+                      <span className="inline-flex size-6 items-center justify-center rounded-md bg-muted">
+                        <GlobeIcon className="size-3.5 text-muted-foreground" />
+                      </span>
+                    }
+                    title={site.host}
+                    subtitle={site.madeIn ? `Made in “${site.madeIn.title}”` : "On Uno Hosting"}
+                    trailing={
+                      site.hasPassword ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <LockIcon className="size-3" />
+                          Password
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">Live</span>
+                      )
+                    }
+                    onClick={() => {
+                      openAppTab(makeAppFile({ url: site.url, name: site.host }));
+                      onOpenedTab();
+                    }}
+                  />
+                ))}
+              </ul>
+            </>
+          ) : null}
           <button
             type="button"
-            onClick={() => void navigate({ to: "/sites", search: { tab: view } })}
+            onClick={() => void navigate({ to: "/sites", search: { tab: "apps" } })}
             className="mt-3 w-fit cursor-pointer text-xs text-primary hover:underline"
           >
             All apps &amp; sites
@@ -309,15 +385,47 @@ export function PanelLauncher({
   );
 }
 
+function SectionTitle({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <h3
+      className={cn(
+        "mb-1 px-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
+        className,
+      )}
+    >
+      {children}
+    </h3>
+  );
+}
+
+function AppState({ state }: { state: LauncherAppRow["state"] }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span
+        aria-hidden
+        className={cn(
+          "size-1.5 rounded-full",
+          state === "running" ? "bg-emerald-500" : "bg-muted-foreground/40",
+        )}
+      />
+      {APP_STATE_LABEL[state]}
+    </span>
+  );
+}
+
 function ListRow({
   icon,
   title,
   subtitle,
+  trailing,
+  muted = false,
   onClick,
 }: {
   icon: ReactNode;
   title: string;
   subtitle: string | null;
+  trailing?: ReactNode;
+  muted?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -327,15 +435,17 @@ function ListRow({
         onClick={onClick}
         className={cn(
           "flex h-10 w-full cursor-pointer items-center gap-2.5 rounded-lg px-1.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+          muted && "opacity-70",
         )}
       >
         <span className="flex size-6 shrink-0 items-center justify-center">{icon}</span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-sm text-foreground">{title}</span>
+          <span className="block truncate text-[13px] text-foreground">{title}</span>
           {subtitle ? (
             <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
           ) : null}
         </span>
+        {trailing}
       </button>
     </li>
   );

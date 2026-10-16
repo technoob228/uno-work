@@ -68,6 +68,8 @@ const clientSettings: ClientSettings = {
   sidebarEnvironmentScope: "all",
   sidebarGroupBy: "project_machine",
   sidebarInboxMode: false,
+  sidebarView: null,
+  sidebarGroupByComputer: false,
   sidebarMachineSortOrder: "name",
   sidebarMachineIdentity: {
     "environment-1": { monogram: "R1", colorSlot: 2 },

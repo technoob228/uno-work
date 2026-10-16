@@ -39,6 +39,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  HouseIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PlusIcon,
@@ -51,6 +52,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  Fragment,
   useMemo,
   useReducer,
   useRef,
@@ -99,11 +101,11 @@ import {
 } from "../environments/threadSnoozeSupport";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
-import { useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
+import { HOME_FOLDER_TITLE, useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
-import { useSettings } from "../hooks/useSettings";
+import { useSettings, useUpdateSettings } from "../hooks/useSettings";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useThreadTitle } from "../hooks/useThreadTitle";
 import {
@@ -210,7 +212,6 @@ import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
 import { canOfferChatDone } from "../inbox/openRequests.logic";
 import { RailPanelHeader } from "./sidebar/NavRail";
-import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { SidebarAddMenu } from "./sidebar/SidebarNewButton";
 import {
   ASSISTANT_CHAT_NAME,
@@ -227,8 +228,30 @@ import {
   SidebarDPlaces,
   UnoFace,
 } from "./sidebar/SidebarDParts";
-import { SidebarDChatsBar } from "./sidebar/SidebarDChatsBar";
+import { SidebarDChatsBar, type SidebarDProjectFilterOption } from "./sidebar/SidebarDChatsBar";
+import {
+  SidebarDComputerChip,
+  SidebarDComputerHeader,
+  useHomeFolderPaths,
+  useSidebarDComputers,
+} from "./sidebar/SidebarDComputers";
+import {
+  HOME_FOLDER_GROUP_KEY,
+  HOME_FOLDER_GROUP_NAME,
+  canGroupByComputer,
+  chatRowShowsComputer,
+  filterChatsByProject,
+  groupChatsByComputer,
+  projectRowComputers,
+  resolveSidebarDView,
+  sidebarDViewTitle,
+  type SidebarDComputerSection,
+  type SidebarDView,
+} from "./sidebar/sidebarDView.logic";
+import { useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
+import { SidebarAssistants } from "./sidebar/SidebarAssistants";
+import { isTeamConversation } from "./assistants/assistantTeam.logic";
 import {
   type DRowMark,
   dRowMark,
@@ -239,7 +262,6 @@ import {
   previewDGroup,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
   SIDEBAR_D_UNO_FOLDED_KEY,
-  unoRunningLabel,
 } from "./sidebar/sidebarD.logic";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
@@ -501,6 +523,37 @@ function SidebarSectionHeader(props: {
   );
 }
 
+/** Sidebar D: a project (or the Home folder) in Projects view, with its live chats. */
+interface DProjectBlock {
+  readonly key: string;
+  readonly name: string;
+  readonly isHome: boolean;
+  readonly chats: ReadonlyArray<SidebarThreadSummary>;
+  /** Computers it lives on (the Home folder: the ones its chats are on). */
+  readonly computers: ReadonlyArray<string>;
+  /** Where its "+" starts a chat: the copy on this computer when there is one. */
+  readonly newChatProject: Project | null;
+}
+
+/** Sidebar D: one block of the list — everything, or one computer's part. */
+interface DSection {
+  readonly key: string;
+  readonly computer: SidebarDComputerSection<SidebarThreadSummary> | null;
+  readonly projects: ReadonlyArray<DProjectBlock>;
+  readonly list: ReadonlyArray<SidebarThreadSummary>;
+}
+
+/** Folded projects are remembered per computer when grouped by computer. */
+function dProjectFoldKey(sectionKey: string, projectKey: string): string {
+  return sectionKey === "all" ? projectKey : `${sectionKey}|${projectKey}`;
+}
+
+/** One list shows this many chats before "Show N more". */
+const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
+
+/** One list's project filter, a choice of this device. */
+const SIDEBAR_D_LIST_FILTER_KEY = "uno-work:sidebar:list-filter";
+
 /** Sidebar D: "Projects", "Recents" — quiet labels between the groups. */
 function SidebarDSectionLabel(props: { label: string }) {
   return (
@@ -537,67 +590,13 @@ function SidebarDShowMoreRow(props: {
   );
 }
 
-/**
- * Sidebar D: Uno, pinned first among the chats. A click opens Uno's chat;
- * "N running" folds open the chats it started and is watching.
- */
-const SidebarDUnoRow = memo(function SidebarDUnoRow(props: {
-  runningCount: number;
-  folded: boolean;
-  onToggleFolded: () => void;
-  isActive: boolean;
-}) {
-  const { environmentId, opening, open } = useAssistantChat();
-  const { isMobile, setOpenMobile } = useSidebar();
-  const running = unoRunningLabel(props.runningCount);
-  return (
-    <li className="list-none" data-testid="sidebar-uno-group">
-      <div
-        className={cn(
-          "group/uno flex h-8 w-full items-center rounded-md transition-colors",
-          props.isActive ? "bg-sidebar-row-active" : "hover:bg-sidebar-row-hover",
-        )}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            if (isMobile) setOpenMobile(false);
-            sidebarDPanel.closeNow();
-            void open();
-          }}
-          disabled={environmentId === null || opening}
-          aria-current={props.isActive ? "page" : undefined}
-          data-testid="sidebar-uno"
-          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-        >
-          <UnoFace className="size-5" online />
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {ASSISTANT_CHAT_NAME}
-          </span>
-        </button>
-        {running ? (
-          <button
-            type="button"
-            onClick={props.onToggleFolded}
-            aria-expanded={!props.folded}
-            data-testid="sidebar-uno-running"
-            className="flex h-full shrink-0 cursor-pointer items-center gap-1 rounded-md pr-2 pl-1 text-xs text-primary outline-hidden hover:text-primary/80 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {running}
-            <ChevronDownIcon
-              aria-hidden
-              className={cn("size-3 transition-transform", props.folded && "-rotate-90")}
-            />
-          </button>
-        ) : null}
-      </div>
-    </li>
-  );
-});
-
 /** Sidebar D: a project — folds its chats away; folded, it shows its most urgent mark. */
 function SidebarDProjectRow(props: {
   name: string;
+  /** The Home folder: chats outside any project folder. */
+  home?: boolean;
+  /** Computer chips of a project that lives elsewhere. */
+  computers?: ReactNode;
   folded: boolean;
   mark: DRowMark;
   onToggle: () => void;
@@ -613,7 +612,11 @@ function SidebarDProjectRow(props: {
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-sidebar-foreground/90 outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="relative flex size-4 shrink-0 items-center justify-center">
-            <FolderIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
+            {props.home ? (
+              <HouseIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
+            ) : (
+              <FolderIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
+            )}
             <ChevronRightIcon
               aria-hidden
               className={cn(
@@ -622,7 +625,11 @@ function SidebarDProjectRow(props: {
               )}
             />
           </span>
-          <span className="min-w-0 flex-1 truncate">{props.name}</span>
+          <span className="min-w-0 truncate">{props.name}</span>
+          {props.computers ? (
+            <span className="inline-flex shrink-0 items-center gap-0.5">{props.computers}</span>
+          ) : null}
+          <span className="flex-1" />
           {props.folded ? (
             <span className="mr-1.5 inline-flex shrink-0 items-center">
               <SidebarDMark mark={props.mark} />
@@ -695,6 +702,8 @@ interface SidebarThreadRowProps {
   nested?: boolean;
   /** Sidebar D: started by Uno — its small face before the title. */
   fromUno?: boolean;
+  /** Sidebar D: whether the computer's chip shows (default: on any other computer). */
+  showMachine?: boolean;
   section: SidebarSection;
   isActive: boolean;
   jumpLabel: string | null;
@@ -1039,7 +1048,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
     </Tooltip>
   ) : null;
-  const machineMark = isRemote ? (
+  const machineMark = (props.showMachine ?? isRemote) ? (
     <span className="inline-flex shrink-0 items-center gap-0.5">
       <MachineChip
         className={availability.status === "live" ? undefined : "opacity-60"}
@@ -1570,11 +1579,19 @@ export default function Sidebar() {
   const machineScope = useMemo(
     () =>
       resolveSidebarProjectScope({
-        scope: allMachinesSidebar ? environmentScopeSetting : "active",
+        // Sidebar D (0.0.138) honours the setting itself: every computer in
+        // one sidebar when the person chose "Chats from all computers".
+        scope: allMachinesSidebar || !railLayout ? environmentScopeSetting : "active",
         activeEnvironmentId,
         primaryEnvironmentId,
       }),
-    [activeEnvironmentId, allMachinesSidebar, environmentScopeSetting, primaryEnvironmentId],
+    [
+      activeEnvironmentId,
+      allMachinesSidebar,
+      environmentScopeSetting,
+      primaryEnvironmentId,
+      railLayout,
+    ],
   );
   const projects = useStore(
     useShallow((store) =>
@@ -1651,9 +1668,9 @@ export default function Sidebar() {
   // The Uno chat (pinned on top) and the assistant's other chats, which the
   // "Older Uno chats" scope lists when there are any.
   const assistantChatId = useAssistantChat().chat?.id ?? null;
-  // The Uno row left the sidebar (01.10): the assistant lives under
-  // Assistants, so its conversations are not folded under a row any more.
-  const showAssistantRow = false;
+  // The assistants are back on top of the sidebar (w0138 p6–p7): each one
+  // unfolds its own conversations, so they never show twice in the list.
+  const showAssistantRow = true;
   const hasHelperProjects = useMemo(
     () =>
       threads.some(
@@ -1682,6 +1699,16 @@ export default function Sidebar() {
     }
     return map;
   }, [projectGroups, projects]);
+  // Sidebar D: a project on several computers is one project (its group key).
+  const projectGroupKeyByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of projectGroups) {
+      for (const member of group.memberProjects) {
+        map.set(`${member.environmentId}:${member.id}`, group.projectKey);
+      }
+    }
+    return map;
+  }, [projectGroups]);
 
   // ── Project scope ─────────────────────────────────────────────────────
   const [projectScopeKey, setProjectScopeKey] = useLocalStorage<string | null, string | null>(
@@ -1791,7 +1818,7 @@ export default function Sidebar() {
       if (!isRegularListChat(thread, assistantChatId)) {
         // A conversation with Uno shows under the Uno row (unfolded while
         // it is open), never twice.
-        if (showAssistantRow && isAssistantConversation(thread)) return false;
+        if (showAssistantRow && isTeamConversation(thread)) return false;
         return threadKeyOf(thread) === routeThreadKey;
       }
       // The open chat stays listed even when the scope is another project.
@@ -1874,15 +1901,115 @@ export default function Sidebar() {
     ReadonlyArray<string>,
     ReadonlyArray<string>
   >(SIDEBAR_D_FOLDED_PROJECTS_KEY, [], Schema.Array(Schema.String));
-  const [unoFolded, setUnoFolded] = useLocalStorage(
+  const [unoFolded] = useLocalStorage(
     SIDEBAR_D_UNO_FOLDED_KEY,
     false,
     Schema.Boolean,
   );
-  // Classic (projects always in the sidebar) or inbox (chats by status).
-  const dInboxMode = useSettings((settings) => settings.sidebarInboxMode);
+  // The view (0.0.138, Misha 16.10): Projects (folders), One list (newest
+  // first, filter by project) or Inbox (by status). Devices that never chose
+  // keep what the older "Inbox sidebar" switch said.
+  const dInboxSetting = useSettings((settings) => settings.sidebarInboxMode);
+  const dStoredView = useSettings((settings) => settings.sidebarView);
+  const dView: SidebarDView = resolveSidebarDView(dStoredView, dInboxSetting);
+  const dInboxMode = dView === "inbox";
+  // Where the view is picked: the title's menu (A) or only Settings (B).
+  const dViewInHeader = useDemoSwitch("sidebarViewSwitch") === "header";
+  const { updateSettings: updateSidebarSettings } = useUpdateSettings();
+  // Computers are only spoken of when the sidebar shows more than one.
+  const dThisComputer: string | null = activeEnvironmentId ?? primaryEnvironmentId;
+  const dComputerIds = useMemo(
+    () => [
+      ...new Set(
+        projects
+          .filter((project) => !isAssistantProjectId(project.id))
+          .map((project) => project.environmentId),
+      ),
+    ],
+    [projects],
+  );
+  const dMultiComputer = machineScope.kind === "all-environments" && dComputerIds.length > 1;
+  const dGroupByComputerSetting = useSettings((settings) => settings.sidebarGroupByComputer);
+  const dGroupByComputer = dGroupByComputerSetting && canGroupByComputer(dView, dMultiComputer);
+  const dKnownComputers = useSidebarDComputers();
+  // Group by computer: every computer with projects here, and the ones asleep.
+  const dComputers = useMemo(() => {
+    const listed = dKnownComputers.filter((computer) =>
+      computer.environmentId === null
+        ? computer.status === "sleeping"
+        : dComputerIds.includes(computer.environmentId as EnvironmentId),
+    );
+    const missing = dComputerIds.filter(
+      (environmentId) => !listed.some((computer) => computer.environmentId === environmentId),
+    );
+    return [
+      ...listed,
+      ...missing.map((environmentId) => ({
+        environmentId,
+        key: environmentId,
+        label: resolveEnvironmentLabel(environmentId) ?? "Computer",
+        status: "online" as const,
+      })),
+    ];
+  }, [dComputerIds, dKnownComputers, resolveEnvironmentLabel]);
+  const dDimmedComputers = useMemo(
+    () =>
+      new Set(
+        dKnownComputers
+          .filter((computer) => computer.status === "sleeping" || computer.status === "offline")
+          .flatMap((computer) => (computer.environmentId === null ? [] : [computer.environmentId])),
+      ),
+    [dKnownComputers],
+  );
+  const dHomePaths = useHomeFolderPaths(dComputerIds);
+  // A computer's home folder: its chats are the "Home folder" group, not a project.
+  const dIsHomeProject = useCallback(
+    (project: Project) => {
+      const home =
+        dHomePaths.get(project.environmentId) ??
+        (project.environmentId === dThisComputer
+          ? (dHomeFolderPath?.replace(/\/+$/, "") ?? null)
+          : null);
+      if (home !== null) return project.cwd.replace(/\/+$/, "") === home;
+      // Computer not answering yet: the home folder's project carries its name.
+      return project.name === HOME_FOLDER_TITLE;
+    },
+    [dHomeFolderPath, dHomePaths, dThisComputer],
+  );
+  // What a chat is listed under: its project (one per repository across
+  // computers), or the Home folder for a chat outside any project folder.
+  const dGroupOf = useCallback(
+    (thread: SidebarThreadSummary): { key: string; name: string } => {
+      const key = projectKeyOf(thread);
+      const project = projectByKey.get(key);
+      if (!project || isAssistantProjectId(project.id) || dIsHomeProject(project)) {
+        return { key: HOME_FOLDER_GROUP_KEY, name: HOME_FOLDER_GROUP_NAME };
+      }
+      return {
+        key: projectGroupKeyByKey.get(key) ?? key,
+        name: projectDisplayNameByKey.get(key) ?? project.name,
+      };
+    },
+    [dIsHomeProject, projectByKey, projectDisplayNameByKey, projectGroupKeyByKey],
+  );
+  // Every project the person added, by group, with the computers it lives on.
+  const dProjectInfo = useMemo(() => {
+    const map = new Map<
+      string,
+      { name: string; computers: ReadonlyArray<string>; members: ReadonlyArray<Project> }
+    >();
+    for (const group of projectGroups) {
+      const members = group.memberProjects.filter((member) => !dIsHomeProject(member));
+      if (members.length === 0) continue;
+      map.set(group.projectKey, {
+        name: group.displayName,
+        computers: [...new Set(members.map((member) => member.environmentId))],
+        members,
+      });
+    }
+    return map;
+  }, [dIsHomeProject, projectGroups]);
   const dGroups = useMemo(() => {
-    const home = dHomeFolderPath?.replace(/\/+$/, "") ?? null;
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
     // Uno's running chats may live in the assistant's own folder, which the
     // main list keeps out: they still show under Uno while they run.
@@ -1899,47 +2026,140 @@ export default function Sidebar() {
       chats: [...activeThreads, ...unoRunningElsewhere],
       isFromUno: (thread) => isFromAssistant(thread, assistantChatId),
       isRunning: (thread) => isRunningStatus(resolveSidebarThreadStatus(thread)),
-      projectOf: (thread) => {
-        const key = projectKeyOf(thread);
-        const project = projectByKey.get(key);
-        if (!project || isAssistantProjectId(project.id)) return null;
-        if (home !== null && project.cwd.replace(/\/+$/, "") === home) return null;
-        return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
-      },
+      projectOf: dGroupOf,
       activityMs: (thread) =>
         resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined) ?? 0,
       // Every project the person added keeps its row, live chats or not.
-      allProjects: projects
-        .filter(
-          (project) =>
-            !isAssistantProjectId(project.id) &&
-            !(home !== null && project.cwd.replace(/\/+$/, "") === home),
-        )
-        .map((project) => {
-          const key = `${project.environmentId}:${project.id}`;
-          return { key, name: projectDisplayNameByKey.get(key) ?? project.name };
-        }),
+      allProjects: [...dProjectInfo.entries()].map(([key, info]) => ({ key, name: info.name })),
     });
-  }, [
-    activeThreads,
-    assistantChatId,
-    dHomeFolderPath,
-    pinnedThreads,
-    projectByKey,
-    projectDisplayNameByKey,
-    projects,
-    threads,
-  ]);
+  }, [activeThreads, assistantChatId, dGroupOf, dProjectInfo, pinnedThreads, threads]);
+  // The live chats outside Uno's row: what the views below lay out.
+  const dLiveChats = useMemo(() => {
+    const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
+    return activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread)));
+  }, [activeThreads, dGroups.unoRunning]);
+  // One list: the project filter (a choice of this device).
+  const [dListFilterKey, setDListFilterKey] = useLocalStorage<string | null, string | null>(
+    SIDEBAR_D_LIST_FILTER_KEY,
+    null,
+    Schema.NullOr(Schema.String),
+  );
+  const dHasHomeChats = useMemo(
+    () => dLiveChats.some((thread) => dGroupOf(thread).key === HOME_FOLDER_GROUP_KEY),
+    [dGroupOf, dLiveChats],
+  );
+  const dFilterKeys = useMemo(
+    () => new Set<string>([...dProjectInfo.keys(), HOME_FOLDER_GROUP_KEY]),
+    [dProjectInfo],
+  );
+  const dActiveFilterKey =
+    dListFilterKey !== null && dFilterKeys.has(dListFilterKey) ? dListFilterKey : null;
+  const dFilterName =
+    dActiveFilterKey === null
+      ? null
+      : dActiveFilterKey === HOME_FOLDER_GROUP_KEY
+        ? HOME_FOLDER_GROUP_NAME
+        : (dProjectInfo.get(dActiveFilterKey)?.name ?? null);
   // Grouped by status: the same live chats (Uno's running ones stay under
   // Uno), whatever folder they live in.
   const dStatusSections = useMemo(() => {
     if (!dInboxMode) return [];
-    const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
     return groupChatsByStatusForSidebarD({
-      chats: activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread))),
+      chats: dLiveChats,
       markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
     });
-  }, [activeThreads, dInboxMode, dGroups.unoRunning, now]);
+  }, [dInboxMode, dLiveChats, now]);
+  // Projects or one list — under computer headers with "Group by computer".
+  const dSections = useMemo((): ReadonlyArray<DSection> => {
+    if (dInboxMode) return [];
+    const activityMs = (thread: SidebarThreadSummary) =>
+      resolveThreadActivityMs(thread) ?? toSortableTimestamp(thread.updatedAt ?? undefined) ?? 0;
+    // `computer` null: across computers; else that computer's own projects.
+    const buildProjects = (
+      chats: ReadonlyArray<SidebarThreadSummary>,
+      computer: string | null,
+    ): ReadonlyArray<DProjectBlock> =>
+      groupChatsForSidebarD({
+        chats,
+        isFromUno: () => false,
+        isRunning: () => false,
+        projectOf: dGroupOf,
+        activityMs,
+        allProjects: [...dProjectInfo.entries()]
+          .filter(([, info]) => computer === null || info.computers.includes(computer))
+          .map(([key, info]) => ({ key, name: info.name })),
+      }).projects.map((group) => {
+        const isHome = group.key === HOME_FOLDER_GROUP_KEY;
+        const info = dProjectInfo.get(group.key);
+        const here = computer ?? dThisComputer;
+        const newChatProject = isHome
+          ? (projects.find(
+              (project) => project.environmentId === here && dIsHomeProject(project),
+            ) ?? null)
+          : (() => {
+              const members = (info?.members ?? []).filter(
+                (member) => computer === null || member.environmentId === computer,
+              );
+              return members.find((member) => member.environmentId === here) ?? members[0] ?? null;
+            })();
+        return {
+          key: group.key,
+          name: group.name,
+          isHome,
+          chats: group.chats,
+          computers: isHome
+            ? [...new Set(group.chats.map((thread) => thread.environmentId as string))]
+            : computer === null
+              ? (info?.computers ?? [])
+              : [computer],
+          newChatProject,
+        };
+      });
+    const listOf = (chats: ReadonlyArray<SidebarThreadSummary>) =>
+      filterChatsByProject({
+        chats,
+        filterKey: dActiveFilterKey,
+        knownKeys: dFilterKeys,
+        groupKeyOf: (thread) => dGroupOf(thread).key,
+      });
+    if (!dGroupByComputer) {
+      return [
+        {
+          key: "all",
+          computer: null,
+          projects: dView === "projects" ? buildProjects(dLiveChats, null) : [],
+          list: dView === "list" ? listOf(dLiveChats) : [],
+        },
+      ];
+    }
+    return groupChatsByComputer({
+      chats: dLiveChats,
+      computerOf: (thread) => thread.environmentId,
+      computers: dComputers,
+      thisComputer: dThisComputer,
+    }).map((section) => ({
+      key: `computer:${section.computer.key}`,
+      computer: section,
+      projects:
+        dView === "projects" && section.computer.environmentId !== null
+          ? buildProjects(section.chats, section.computer.environmentId)
+          : [],
+      list: dView === "list" ? listOf(section.chats) : [],
+    }));
+  }, [
+    dActiveFilterKey,
+    dComputers,
+    dFilterKeys,
+    dGroupByComputer,
+    dGroupOf,
+    dInboxMode,
+    dIsHomeProject,
+    dLiveChats,
+    dProjectInfo,
+    dThisComputer,
+    dView,
+    projects,
+  ]);
   const foldedProjectKeySet = useMemo(() => new Set(foldedProjectKeys), [foldedProjectKeys]);
   // A folded project with the open chat in it stays open, so the chat is seen.
   const isProjectFolded = useCallback(
@@ -1983,15 +2203,22 @@ export default function Sidebar() {
         expanded: dExpandedGroupKeys.has(key),
         // The open chat and one waiting on the person never hide.
         keepVisible: (thread) => threadKeyOf(thread) === routeThreadKey || threadNeedsUser(thread),
+        // One list is the whole list: a longer first page than a project's.
+        ...(key.startsWith("list:") ? { limit: SIDEBAR_D_LIST_PREVIEW_LIMIT } : {}),
       });
     return {
-      projects: new Map(
-        dGroups.projects.map((project) => [
-          project.key,
-          preview(`project:${project.key}`, project.chats),
+      groups: new Map(
+        dSections.flatMap((section) => [
+          ...section.projects.map(
+            (project) =>
+              [
+                `${section.key}|${project.key}`,
+                preview(`project:${section.key}|${project.key}`, project.chats),
+              ] as const,
+          ),
+          [`${section.key}|list`, preview(`list:${section.key}`, section.list)] as const,
         ]),
       ),
-      recents: preview("recents", dGroups.recents),
       status: new Map(
         dStatusSections.map((section) => [
           section.id,
@@ -1999,7 +2226,13 @@ export default function Sidebar() {
         ]),
       ),
     };
-  }, [dExpandedGroupKeys, dGroups, dStatusSections, routeThreadKey]);
+  }, [dExpandedGroupKeys, dSections, dStatusSections, routeThreadKey]);
+  const isComputerFolded = useCallback(
+    (section: DSection) =>
+      section.computer !== null &&
+      isProjectFolded({ key: section.key, chats: section.computer.chats }),
+    [isProjectFolded],
+  );
 
   const orderedThreads = useMemo(
     () =>
@@ -2011,14 +2244,21 @@ export default function Sidebar() {
               ? dStatusSections.flatMap(
                   (section) => dPreviews.status.get(section.id)?.visible ?? section.chats,
                 )
-              : [
-                  ...dGroups.projects.flatMap((project) =>
-                    isProjectFolded(project)
+              : dSections.flatMap((section) => {
+                  if (isComputerFolded(section)) return [];
+                  if (dView === "list") {
+                    return dPreviews.groups.get(`${section.key}|list`)?.visible ?? section.list;
+                  }
+                  return section.projects.flatMap((project) =>
+                    isProjectFolded({
+                      key: dProjectFoldKey(section.key, project.key),
+                      chats: project.chats,
+                    })
                       ? []
-                      : (dPreviews.projects.get(project.key)?.visible ?? project.chats),
-                  ),
-                  ...dPreviews.recents.visible,
-                ]),
+                      : (dPreviews.groups.get(`${section.key}|${project.key}`)?.visible ??
+                        project.chats),
+                  );
+                })),
             ...renderedSnoozedThreads,
             ...renderedSettledThreads,
           ]
@@ -2033,7 +2273,10 @@ export default function Sidebar() {
       dGroups,
       dInboxMode,
       dPreviews,
+      dSections,
       dStatusSections,
+      dView,
+      isComputerFolded,
       isProjectFolded,
       pinnedThreads,
       renderedSettledThreads,
@@ -2937,7 +3180,13 @@ export default function Sidebar() {
   const renderRow = (
     thread: SidebarThreadSummary,
     section: SidebarSection,
-    options?: { readonly d?: boolean; readonly nested?: boolean; readonly underUno?: boolean },
+    options?: {
+      readonly d?: boolean;
+      readonly nested?: boolean;
+      readonly underUno?: boolean;
+      /** Sidebar D: the computer's chip (see chatRowShowsComputer). */
+      readonly showMachine?: boolean;
+    },
   ) => {
     const threadKey = threadKeyOf(thread);
     // Pinned chats live in the compact Pinned group above every sidebar mode.
@@ -2950,6 +3199,7 @@ export default function Sidebar() {
         thread={thread}
         variant={variant}
         nested={options?.nested ?? false}
+        {...(options?.showMachine !== undefined ? { showMachine: options.showMachine } : {})}
         fromUno={
           options?.d === true && !options.underUno
             ? isFromAssistant(thread, assistantChatId)
@@ -3154,72 +3404,148 @@ export default function Sidebar() {
     sidebarDPanel.closeNow();
     openNewProject();
   };
+  // A computer's chip on a row, grey while it sleeps or can't be reached.
+  const dChipFor = (environmentId: string) => (
+    <SidebarDComputerChip
+      key={environmentId}
+      environmentId={environmentId as EnvironmentId}
+      dimmed={dDimmedComputers.has(environmentId)}
+    />
+  );
+  const dRowChips = (computers: ReadonlyArray<string>, underHeader: boolean) => {
+    const shown = projectRowComputers({
+      computers,
+      thisComputer: dThisComputer,
+      multiComputer: dMultiComputer && !underHeader,
+    });
+    return shown.length > 0 ? shown.map(dChipFor) : null;
+  };
+  const dChatChip = (
+    thread: SidebarThreadSummary,
+    underHeader: boolean,
+    projectComputers: ReadonlyArray<string> | null,
+  ) =>
+    chatRowShowsComputer({
+      chatComputer: thread.environmentId,
+      thisComputer: dThisComputer,
+      multiComputer: dMultiComputer,
+      underComputerHeader: underHeader,
+      projectComputers,
+    });
+  const dNewChatIn = (project: Project) => () => {
+    if (isMobile) setOpenMobile(false);
+    sidebarDPanel.closeNow();
+    void newThreadContext.handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+      envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
+    });
+  };
+  const dProjectRows = (section: DSection, underHeader: boolean) =>
+    section.projects.map((group) => {
+      const foldKey = dProjectFoldKey(section.key, group.key);
+      const folded = isProjectFolded({ key: foldKey, chats: group.chats });
+      const preview = dPreviews.groups.get(`${section.key}|${group.key}`);
+      return (
+        <li key={group.key} className="list-none">
+          <ul role="list" className="flex flex-col gap-px">
+            <SidebarDProjectRow
+              name={group.name}
+              home={group.isHome}
+              computers={dRowChips(group.computers, underHeader)}
+              folded={folded}
+              mark={foldedProjectMark(
+                group.chats.map((thread) =>
+                  dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                ),
+              )}
+              onToggle={() => toggleProjectFolded(foldKey)}
+              onNewChat={group.newChatProject ? dNewChatIn(group.newChatProject) : null}
+            />
+            {folded ? null : (
+              <>
+                {(preview?.visible ?? group.chats).map((thread) =>
+                  renderRow(thread, "active", {
+                    d: true,
+                    nested: true,
+                    showMachine: dChatChip(thread, underHeader, group.computers),
+                  }),
+                )}
+                {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+                  <SidebarDShowMoreRow
+                    nested
+                    hiddenCount={preview.hiddenCount}
+                    testId={`sidebar-d-show-more-project-${group.key}`}
+                    onToggle={() => toggleDGroupExpanded(`project:${section.key}|${group.key}`)}
+                  />
+                ) : null}
+              </>
+            )}
+          </ul>
+        </li>
+      );
+    });
+  const dListRows = (section: DSection, underHeader: boolean) => {
+    const preview = dPreviews.groups.get(`${section.key}|list`);
+    return (
+      <>
+        {(preview?.visible ?? section.list).map((thread) =>
+          renderRow(thread, "active", {
+            d: true,
+            showMachine: dChatChip(thread, underHeader, null),
+          }),
+        )}
+        {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+          <SidebarDShowMoreRow
+            hiddenCount={preview.hiddenCount}
+            testId={`sidebar-d-show-more-list-${section.key}`}
+            onToggle={() => toggleDGroupExpanded(`list:${section.key}`)}
+          />
+        ) : null}
+      </>
+    );
+  };
+  // Projects / One list: everything, or one block per computer.
   const dProjectList = (
     <>
-      {dGroups.projects.length > 0 ? <SidebarDSectionLabel label="Projects" /> : null}
-      {dGroups.projects.map((group) => {
-        const folded = isProjectFolded(group);
-        const project = projectByKey.get(group.key) ?? null;
-        const preview = dPreviews.projects.get(group.key);
+      {dSections.map((section, index) => {
+        if (section.computer === null) {
+          return dView === "list" ? (
+            <Fragment key={section.key}>{dListRows(section, false)}</Fragment>
+          ) : (
+            <Fragment key={section.key}>{dProjectRows(section, false)}</Fragment>
+          );
+        }
+        const folded = isComputerFolded(section);
         return (
-          <li key={group.key} className="list-none">
+          <li
+            key={section.key}
+            className={cn("list-none", index > 0 && "mt-2")}
+            data-testid="sidebar-d-computer-section"
+          >
             <ul role="list" className="flex flex-col gap-px">
-              <SidebarDProjectRow
-                name={group.name}
+              <SidebarDComputerHeader
+                computer={section.computer.computer}
+                isThis={section.computer.isThis}
+                dimmed={section.computer.dimmed}
                 folded={folded}
-                mark={foldedProjectMark(
-                  group.chats.map((thread) =>
-                    dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
-                  ),
-                )}
-                onToggle={() => toggleProjectFolded(group.key)}
-                onNewChat={
-                  project
-                    ? () => {
-                        if (isMobile) setOpenMobile(false);
-                        sidebarDPanel.closeNow();
-                        void newThreadContext.handleNewThread(
-                          scopeProjectRef(project.environmentId, project.id),
-                          {
-                            envMode: resolveSidebarNewThreadEnvMode({
-                              defaultEnvMode: defaultThreadEnvMode,
-                            }),
-                          },
-                        );
-                      }
-                    : null
-                }
+                onToggle={() => toggleProjectFolded(section.key)}
               />
-              {folded ? null : (
-                <>
-                  {(preview?.visible ?? group.chats).map((thread) =>
-                    renderRow(thread, "active", { d: true, nested: true }),
-                  )}
-                  {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
-                    <SidebarDShowMoreRow
-                      nested
-                      hiddenCount={preview.hiddenCount}
-                      testId={`sidebar-d-show-more-project-${group.key}`}
-                      onToggle={() => toggleDGroupExpanded(`project:${group.key}`)}
-                    />
-                  ) : null}
-                </>
-              )}
+              {folded ? null : dView === "list" ? dListRows(section, true) : dProjectRows(section, true)}
             </ul>
           </li>
         );
       })}
-      {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-      {dPreviews.recents.visible.map((thread) => renderRow(thread, "active", { d: true }))}
-      {dPreviews.recents.hiddenCount > 0 || dPreviews.recents.canCollapse ? (
-        <SidebarDShowMoreRow
-          hiddenCount={dPreviews.recents.hiddenCount}
-          testId="sidebar-d-show-more-recents"
-          onToggle={() => toggleDGroupExpanded("recents")}
-        />
-      ) : null}
     </>
   );
+  // One list's filter: all projects, each project, the Home folder.
+  const dFilterOptions: ReadonlyArray<SidebarDProjectFilterOption> = [
+    { key: null, label: "All projects" },
+    ...[...dProjectInfo.entries()].map(([key, info]) => ({
+      key,
+      label: info.name,
+      adornment: dRowChips(info.computers, false),
+    })),
+    ...(dHasHomeChats ? [{ key: HOME_FOLDER_GROUP_KEY, label: HOME_FOLDER_GROUP_NAME }] : []),
+  ];
   const dStatusList = (
     <>
       {dStatusSections.map((section) => {
@@ -3229,7 +3555,10 @@ export default function Sidebar() {
             <ul role="list" className="flex flex-col gap-px">
               <SidebarDSectionLabel label={section.label} />
               {(preview?.visible ?? section.chats).map((thread) =>
-                renderRow(thread, "active", { d: true }),
+                renderRow(thread, "active", {
+                  d: true,
+                  showMachine: dChatChip(thread, false, null),
+                }),
               )}
               {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
                 <SidebarDShowMoreRow
@@ -3262,18 +3591,35 @@ export default function Sidebar() {
             className="relative flex flex-1 flex-col gap-px"
             data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
           >
-            <SidebarDUnoRow
-              runningCount={dGroups.unoRunning.length}
-              folded={unoChildrenFolded}
-              onToggleFolded={() => setUnoFolded((value) => !value)}
-              isActive={assistantChatId !== null && routeThreadRef?.threadId === assistantChatId}
+            <SidebarAssistants
+              routeThreadKey={routeThreadKey}
+              unoRunning={dGroups.unoRunning}
+              renderChat={(thread) =>
+                renderRow(thread, "active", { d: true, nested: true, underUno: true })
+              }
             />
-            {unoChildrenFolded
-              ? null
-              : dGroups.unoRunning.map((thread) =>
-                  renderRow(thread, "active", { d: true, nested: true, underUno: true }),
-                )}
             <SidebarDChatsBar
+              view={dView}
+              title={sidebarDViewTitle(dView, dFilterName)}
+              viewInHeader={dViewInHeader}
+              onViewChange={(view) => void updateSidebarSettings({ sidebarView: view })}
+              projectFilter={
+                dView === "list"
+                  ? {
+                      value: dActiveFilterKey,
+                      options: dFilterOptions,
+                      onChange: setDListFilterKey,
+                    }
+                  : null
+              }
+              groupByComputer={
+                dMultiComputer
+                  ? {
+                      checked: dGroupByComputerSetting,
+                      onChange: (on) => void updateSidebarSettings({ sidebarGroupByComputer: on }),
+                    }
+                  : null
+              }
               onNewChat={handleNewThreadClick}
               newChatShortcutLabel={newChatShortcutLabel}
               onAddProject={handleAddProject}
@@ -3341,7 +3687,7 @@ export default function Sidebar() {
               </Button>
               <span className="text-[11px]">Your folders live in ~/projects</span>
             </div>
-          ) : !dInboxMode ? null : (
+          ) : dView === "projects" ? null : (
             <SidebarEmptyProjects
               projects={projectGroups.map((group) => ({
                 key: group.projectKey,

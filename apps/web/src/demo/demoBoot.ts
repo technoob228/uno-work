@@ -11,6 +11,8 @@ import { HttpResponse, delay, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
+import { answerFileRpc } from "./demoFiles";
+import "./seedTabs";
 import {
   CHATS,
   DEMO_VERSION,
@@ -30,6 +32,7 @@ import {
   type DemoMachine,
   type WireThread,
 } from "./heavyFixtures";
+import { assistantHandlers, seedAssistantTeam } from "./assistantsFixtures";
 
 const SEED_VERSION = "w0138-1";
 
@@ -41,7 +44,13 @@ function seedLocalStorage() {
   }
   localStorage.setItem(
     "t3code:client-settings:v1",
-    JSON.stringify({ ...DEFAULT_CLIENT_SETTINGS, onboardingCompleted: true }),
+    JSON.stringify({
+      ...DEFAULT_CLIENT_SETTINGS,
+      onboardingCompleted: true,
+      // p5: every computer in one sidebar, as one list with a project filter.
+      sidebarEnvironmentScope: "all",
+      sidebarView: "list",
+    }),
   );
   const records = [MACHINES.work, MACHINES.product].map((machine) => ({
     environmentId: machine.environmentId,
@@ -161,6 +170,9 @@ const unknownTags = new Set<string>();
 
 function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): unknown {
   const tag = body._tag;
+  // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
+  const fileAnswer = answerFileRpc(machine, body);
+  if (fileAnswer !== undefined) return fileAnswer;
   switch (tag) {
     case WS_METHODS.serverGetConfig:
       return serverConfigFor(machine);
@@ -298,7 +310,8 @@ function computerStateFor(machine: DemoMachine) {
           vcpu: 8,
           diskGb: 160,
           startedAt: new Date(Date.now() - 86_400_000).toISOString(),
-          address: null,
+          // p8: a cloud computer has a public address — its share links work from anywhere.
+          address: `${machine.label}-${machine.boxId}.app.uno4.dev`,
           ssh: null,
           ports: [],
         },
@@ -327,6 +340,28 @@ function box(id: number, name: string, status: string) {
     url: `https://${name}.app.uno4.dev`,
     workMachine: true,
   };
+}
+
+/** The account's computers as the console lists them (`GET /api/v1/boxes`). */
+function accountBoxes() {
+  const wire = (id: number, name: string, status: string) => ({
+    id,
+    name,
+    status,
+    os: "Ubuntu 24.04",
+    ram_mb: 16_384,
+    vcpu: 8,
+    disk_gb: 160,
+    created_at: new Date(Date.now() - 86_400_000 * 20).toISOString(),
+    hostname: `${name}.app.uno4.dev`,
+    url: `https://${name}.app.uno4.dev`,
+    work_machine: true,
+  });
+  return [
+    wire(MACHINES.work.boxId!, MACHINES.work.label, "running"),
+    wire(MACHINES.product.boxId!, MACHINES.product.label, "running"),
+    wire(SLEEPING_BOX.id, SLEEPING_BOX.name, "sleeping"),
+  ];
 }
 
 function cloudState() {
@@ -661,6 +696,58 @@ export function retryChatIn(environmentId: string, threadId: string, text: strin
   publishInbox(machine);
 }
 
+/** p3: the agent of a running chat finishes its turn with `text` (a reply arrives). */
+export function demoAgentRepliesIn(environmentId: string, threadId: string, text: string) {
+  const machine = machineByEnv(environmentId);
+  if (machine) finishTurn(machine, threadId, text);
+}
+
+/** p3: the agent of a chat stops and asks for an OK to run `command` (an approval). */
+export function demoAgentAsksApprovalIn(environmentId: string, threadId: string, command: string) {
+  const machine = machineByEnv(environmentId);
+  if (!machine) return;
+  const model = modelFor(machine);
+  const target = model.threads.find((t) => t.id === threadId) as
+    | (WireThread & Record<string, unknown>)
+    | undefined;
+  if (!target) return;
+  const now = new Date().toISOString();
+  const stamp = Date.now();
+  // The agent is mid-turn while it waits: a running turn that asks.
+  const turnId = `turn-${threadId}-ask-${stamp}`;
+  (target.activities as Array<Record<string, unknown>>).push({
+    id: `${threadId}-approval-${stamp}`,
+    tone: "approval",
+    kind: "approval.requested",
+    summary: "Waiting for your OK",
+    payload: { requestId: `${threadId}-req-${stamp}`, requestKind: "command", detail: command },
+    turnId,
+    createdAt: now,
+  });
+  Object.assign(target, {
+    updatedAt: now,
+    latestTurn: {
+      turnId,
+      state: "running",
+      requestedAt: now,
+      startedAt: now,
+      completedAt: null,
+      assistantMessageId: null,
+    },
+    session: {
+      threadId,
+      status: "running",
+      providerName: "uno",
+      runtimeMode: "full-access",
+      activeTurnId: turnId,
+      lastError: null,
+      updatedAt: now,
+    },
+  });
+  touch(model);
+  publishThread(machine, threadId);
+}
+
 function publishThread(machine: DemoMachine, threadId: string) {
   const model = modelFor(machine);
   const changed = model.threads.find((t) => t.id === threadId);
@@ -751,8 +838,31 @@ const sessionJson = (machine: DemoMachine) => ({
   expiresAt: new Date(Date.now() + 86_400_000 * 30).toISOString(),
 });
 
+/** p7: "New assistant" makes its folder on that computer (like project.create). */
+function addDemoProject(
+  machine: DemoMachine,
+  input: { id: string; title: string; workspaceRoot: string },
+) {
+  const model = modelFor(machine);
+  if (model.projects.some((project) => project.id === input.id)) return;
+  const now = new Date().toISOString();
+  const project = {
+    ...input,
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  model.projects.push(project);
+  touch(model);
+  emitShell(machine, { kind: "project-upserted", sequence: model.snapshotSequence, project });
+}
+
 export async function startDemo(): Promise<void> {
   seedLocalStorage();
+  seedAssistantTeam();
   // Touch every fixture once so a typo in them fails loudly at start.
   void CHATS.length;
   void ago(0);
@@ -800,6 +910,26 @@ export async function startDemo(): Promise<void> {
       HttpResponse.json({ state: "idle", current: DEMO_VERSION, available: null }),
     ),
     http.get("*/api/health", () => HttpResponse.json({ ok: true, version: DEMO_VERSION })),
+    ...assistantHandlers({ machineForHost, addProject: addDemoProject }),
+    // The Uno account (accountTransport() is "work-proxy" in the demo): the
+    // person signed in, the computers on the account (two clouds + one asleep).
+    http.get("*/_account/auth/me", () =>
+      HttpResponse.json({
+        id: 85,
+        username: "misha",
+        email: "misha@example.com",
+        balance: 212.4,
+        llm_balance: 0,
+        one_wallet: true,
+        role: "admin",
+      }),
+    ),
+    http.get("*/_account/api/v1/boxes", () => HttpResponse.json({ boxes: accountBoxes() })),
+    http.get("*/_account/api/v1/boxes/:id", ({ params }) => {
+      const found = accountBoxes().find((item) => String(item.id) === String(params.id));
+      return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });
+    }),
+    http.all("*/_account/*", () => HttpResponse.json({}, { status: 404 })),
     // Anything else of a daemon: an empty answer, never the network.
     http.all("*/api/*", () => HttpResponse.json({}, { status: 404 })),
   );

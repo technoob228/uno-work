@@ -134,7 +134,7 @@ export function demoDesktop(): boolean {
  * function that puts the interface into the state to look at (opens a chat,
  * the panel, a tab, a menu…). Filled by the code of each point (demo only).
  */
-export type DemoShowKey = "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7" | "p8";
+export type DemoShowKey = "p1" | "p2" | "p3" | "p4" | "p5" | "p5b" | "p6" | "p7" | "p8";
 export const demoShow: Partial<Record<DemoShowKey, () => void | Promise<void>>> = {};
 
 /** Extra synchronous answers the always-loaded app asks the demo (empty outside it). */

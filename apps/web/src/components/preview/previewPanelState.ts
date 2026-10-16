@@ -247,7 +247,9 @@ export function openTab(
   if (existingKey) return revealTab(states, target, existingKey, file.id, source);
   const bucketKey = scopeKeyForTarget(target, scope);
   const bucket = getPreviewBucketState(states, bucketKey);
-  const next = { ...states, [bucketKey]: { ...bucket, files: [...bucket.files, file] } };
+  // What the agent opened carries a small mark in the tab row (w0138 p4).
+  const tab: PreviewFile = source === "agent" ? { ...file, openedBy: "agent" } : file;
+  const next = { ...states, [bucketKey]: { ...bucket, files: [...bucket.files, tab] } };
   return revealTab(next, target, bucketKey, file.id, source);
 }
 
