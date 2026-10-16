@@ -1,0 +1,55 @@
+name: Desktop Stage (no publish)
+
+# «Uno Work Stage» for Misha's Mac: macOS arm64 dmg with --flavor stage
+# (bundle id com.unotools.work.stage, data in ~/.unowork-stage, no update feed).
+# Builds an artifact only: no GitHub Release, no tags, no signing secrets.
+on:
+  push:
+    branches:
+      - "stage-desktop/**"
+
+permissions:
+  contents: read
+
+jobs:
+  mac-arm64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Build Uno Work Stage dmg
+        shell: bash
+        run: |
+          env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY -u GH_TOKEN -u CSC_LINK \
+            node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 \
+            --flavor stage --output-dir release-stage --verbose
+          ls -la release-stage
+      - name: Check bundle before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(ls release-stage/*.dmg | head -1)
+          MNT=$(hdiutil attach -nobrowse "$DMG" | awk -F'\t' '/Volumes/{print $NF}')
+          APP=$(ls -d "$MNT"/*.app | head -1)
+          echo "app: $APP"
+          ID=$(defaults read "$APP/Contents/Info" CFBundleIdentifier); echo "bundle id: $ID"
+          defaults read "$APP/Contents/Info" CFBundleName
+          defaults read "$APP/Contents/Info" CFBundleShortVersionString
+          [ "$ID" = com.unotools.work.stage ] || { echo "not a Stage build"; exit 1; }
+          if [ -e "$APP/Contents/Resources/app-update.yml" ]; then echo "update feed present"; exit 1; fi
+          hdiutil detach "$MNT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-stage-mac-arm64
+          path: |
+            release-stage/*.dmg
+            release-stage/*.zip
+          if-no-files-found: error
+          retention-days: 14
