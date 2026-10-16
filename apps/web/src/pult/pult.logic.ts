@@ -44,18 +44,21 @@ export function relTime(iso: string | null | undefined, now: number): string {
 
 export function clock(iso: string | null | undefined): string {
   if (!iso) return "";
-  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** "сегодня 18:00", "завтра 12:00", "18 окт. 00:00" (UTC, as the team writes deadlines). */
+/** "сегодня 18:00", "завтра 12:00", "18 окт. 00:00" — in the owner's own time zone. */
 export function dayTime(iso: string | null | undefined, now: number): string {
   if (!iso) return "";
-  const dayOf = (t: number) => Math.floor(t / 86400000);
+  const dayOf = (t: number) => {
+    const d = new Date(t);
+    return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  };
   const diff = dayOf(Date.parse(iso)) - dayOf(now);
   if (diff === 0) return `сегодня ${clock(iso)}`;
   if (diff === 1) return `завтра ${clock(iso)}`;
   if (diff === -1) return `вчера ${clock(iso)}`;
-  return `${new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" })} ${clock(iso)}`;
+  return `${new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} ${clock(iso)}`;
 }
 
 /* ───────── Words ───────── */
@@ -162,7 +165,8 @@ const GROUP_OF: Record<PultTaskStatus, PultGroupId> = {
 export function groupTasks(tasks: ReadonlyArray<PultTask>): PultGroup[] {
   const by: Record<PultGroupId, PultTask[]> = { blocked: [], doing: [], review: [], later: [], done: [] };
   for (const t of tasks.toSorted((a, b) => a.rank - b.rank)) {
-    if (hasOpenNeed(t)) continue;
+    // A stuck task stays visible as stuck even when it also asks the owner something.
+    if (hasOpenNeed(t) && t.status !== "blocked") continue;
     by[GROUP_OF[t.status]].push(t);
   }
   const groups: PultGroup[] = [
@@ -173,6 +177,35 @@ export function groupTasks(tasks: ReadonlyArray<PultTask>): PultGroup[] {
     { id: "done", label: "Готово", tasks: by.done, folded: true },
   ];
   return groups.filter((g) => g.tasks.length > 0);
+}
+
+/**
+ * The right side of a task row: how much is left (short), and where it runs —
+ * or, when the chat is not fine, that instead ("молчит 9 ч", "на лимите").
+ */
+export function rowSide(t: PultTask, ix: PultIndex): { readonly left: string; readonly where: string; readonly alarm: boolean } {
+  const c = ix.chat(ownerChatId(t));
+  const etaLeft = t.eta?.left?.replace(/ работы$/, "") ?? "";
+  const left = etaLeft && etaLeft.length <= 9 ? etaLeft : `${t.progress}%`;
+  if (!c) return { left, where: "никто не делает", alarm: true };
+  if (c.state === "quiet") return { left, where: `молчит ${relTime(c.lastAt, ix.now).replace(" назад", "")}`, alarm: true };
+  if (c.state === "paused_limit") return { left, where: "на лимите", alarm: true };
+  if (c.state === "dead") return { left, where: "упал", alarm: true };
+  if (c.state === "sleeping") return { left, where: "спит", alarm: false };
+  return { left, where: machineWord(ix.machineName(c.machine)), alarm: false };
+}
+
+/** What is on fire outside the tasks: a subscription running out, an alert that needs the owner. */
+export function hotItems(data: PultData): ReadonlyArray<{ readonly text: string; readonly view: PultView }> {
+  const out: Array<{ text: string; view: PultView }> = [];
+  for (const s of data.subscriptions) {
+    if (s.state !== "ok") out.push({ text: `лимит ${s.label.split(" · ").at(-1)}`, view: "limits" });
+  }
+  const alerts = data.alerts.filter((a) => a.needYou).length;
+  if (alerts) out.push({ text: `${alerts} ${plural(alerts, "алерт", "алерта", "алертов")}`, view: "alerts" });
+  const lost = data.wishes.filter((w) => w.where === "lost").length;
+  if (lost) out.push({ text: `${lost} ${plural(lost, "просьба потерялась", "просьбы потерялись", "просьб потерялось")}`, view: "wishes" });
+  return out;
 }
 
 /** One word "who/where" for a row: the machine of the chat doing it, or "никто". */
@@ -226,6 +259,7 @@ export type PultAct =
   | { readonly type: "broadcast"; readonly text: string; readonly chats: ReadonlyArray<string> }
   | { readonly type: "send"; readonly chat: string; readonly task: string; readonly text: string; readonly files: ReadonlyArray<string> }
   | { readonly type: "files-only"; readonly task: string; readonly files: ReadonlyArray<string> }
+  | { readonly type: "route-pick"; readonly text: string }
   | { readonly type: "open-chat"; readonly chat: string }
   | { readonly type: "open-task"; readonly task: string }
   | { readonly type: "move"; readonly chat: string; readonly to: string }
@@ -306,9 +340,12 @@ export function dispatch(input: string, attachments: number, ix: PultIndex): Pul
     if (!t) {
       return {
         intent: "feedback-unknown",
-        text: "Не понял, к какой задаче это. Заведу новую задачу координатору — или открой нужный чат и вставь туда.",
+        text: "Не понял, к какой задаче это. Выбери чат — передам туда.",
         cards: [],
-        actions: [{ label: "Новая задача", primary: true, act: { type: "new-task", title: q } }],
+        actions: [
+          { label: "Выбрать чат", primary: true, act: { type: "route-pick", text: q } },
+          { label: "Новая задача", act: { type: "new-task", title: q } },
+        ],
       };
     }
     const chatId = ownerChatId(t);
@@ -322,7 +359,7 @@ export function dispatch(input: string, attachments: number, ix: PultIndex): Pul
       actions: chatId
         ? [
             { label: asleep ? "Разбудить и отправить" : "Отправить", primary: true, act: { type: "send", chat: chatId, task: t.id, text: q, files } },
-            { label: "Только в файлы", act: { type: "files-only", task: t.id, files } },
+            { label: "Другой чат", act: { type: "route-pick", text: q } },
           ]
         : [{ label: "Новая задача", primary: true, act: { type: "new-task", title: q } }],
     };

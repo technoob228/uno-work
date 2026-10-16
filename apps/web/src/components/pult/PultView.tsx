@@ -45,7 +45,10 @@ import {
   openableArtifacts,
   ownerChatId,
   relTime,
-  whereWord,
+  rowSide,
+  plural,
+  hotItems,
+  NEED_MINUTES,
   type PultAct,
   type PultAnswer,
   type PultCard,
@@ -61,6 +64,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/men
 import { toastManager } from "../ui/toast";
 import { makePultFile, usePreviewPane } from "../preview/PreviewPaneContext";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 
 export type PultLayout = "panel" | "center";
 
@@ -72,6 +76,8 @@ const TONE_DOT: Record<PultTone, string> = {
   grey: "bg-muted-foreground/40",
   green: "bg-emerald-500",
 };
+
+const PRIORITY_WORD = { P0: "горит", P1: "важно", P2: "обычно", P3: "когда-нибудь" } as const;
 
 const SCREENS: ReadonlyArray<{ readonly id: PultScreen; readonly label: string }> = [
   { id: "board", label: "Задачи" },
@@ -105,9 +111,12 @@ function useOpenTask(layout: PultLayout) {
   const navigate = useNavigate();
   const pane = usePreviewPane();
   const openTaskInStore = usePultStore((s) => s.openTask);
+  const isMobile = useIsMobile();
   return useCallback(
     (task: PultTask, ix: PultIndex, chatId?: string) => {
       openTaskInStore(task.id);
+      // A phone has no room for both: the task opens in the Pult, its chat — by "Открыть чат".
+      if (isMobile && !chatId) return;
       const chat = ix.chat(chatId ?? ownerChatId(task));
       if (!chat?.thread) return;
       const file = makePultFile();
@@ -119,7 +128,7 @@ function useOpenTask(layout: PultLayout) {
       }
       void navigate({ to: "/$environmentId/$threadId", params: threadRouteParams(chat.thread) });
     },
-    [layout, navigate, openTaskInStore, pane],
+    [isMobile, layout, navigate, openTaskInStore, pane],
   );
 }
 
@@ -155,14 +164,6 @@ function useAnswer() {
 
 function Dot({ tone, pulse }: { tone: PultTone; pulse?: boolean }) {
   return <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone], pulse && "animate-pulse")} />;
-}
-
-function Bar({ value }: { value: number }) {
-  return (
-    <span className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-muted" title={`${value}%`}>
-      <span className="block h-full rounded-full bg-foreground/45" style={{ width: `${Math.max(4, value)}%` }} />
-    </span>
-  );
 }
 
 function SectionLabel({ children, right }: { children: ReactNode; right?: ReactNode }) {
@@ -203,11 +204,18 @@ function NeedRow({ task, ix, onOpen }: { task: PultTask; ix: PultIndex; onOpen: 
   const need = task.needs;
   if (!need) return null;
   const options = need.options ?? [];
+  const until = need.autoAt ?? task.deadline ?? null;
+  const meta = until ? `до ${dayTime(until, ix.now).replace(/^сегодня /, "")}` : `≈ ${NEED_MINUTES[need.kind]} мин`;
   return (
     <div className="rounded-lg px-2 py-2 hover:bg-accent/40" data-testid={`pult-need-${task.id}`}>
-      <button type="button" onClick={onOpen} className="block w-full cursor-pointer text-left text-sm font-medium leading-snug">
-        {need.title}
-      </button>
+      <div className="flex items-baseline gap-2">
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 cursor-pointer text-left text-sm font-medium leading-snug">
+          {need.title}
+        </button>
+        <span className="shrink-0 text-[11px] text-muted-foreground" title={need.autoText}>
+          {meta}
+        </span>
+      </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {options.length > 0 ? (
           options.map((option) => (
@@ -263,6 +271,7 @@ function TaskRow({
 }) {
   const chat = ix.chat(ownerChatId(task));
   const live = chat ? CHAT_STATE[chat.state] : { tone: "grey" as const, label: "никто не делает" };
+  const side = rowSide(task, ix);
   const move = usePultStore((s) => s.move);
   const order = usePultStore((s) => s.order);
   const [over, setOver] = useState(false);
@@ -291,9 +300,16 @@ function TaskRow({
       <GripVerticalIcon className="absolute -left-0.5 size-3 cursor-grab text-muted-foreground/0 group-hover/row:text-muted-foreground/60" />
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 px-2 py-1.5 text-left" title={`${chat?.title ?? "Без исполнителя"} · ${live.label}`}>
         <Dot tone={live.tone} pulse={chat?.state === "working"} />
-        <span className="min-w-0 flex-1 truncate text-sm">{task.title}</span>
-        <Bar value={task.progress} />
-        <span className="w-[70px] shrink-0 truncate text-right text-xs text-muted-foreground">{whereWord(task, ix)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm">{task.title}</span>
+          {task.status === "blocked" && task.blocker ? (
+            <span className="block truncate text-xs text-muted-foreground">{task.blocker}</span>
+          ) : null}
+        </span>
+        <span className="w-14 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{side.left}</span>
+        <span className={cn("w-[88px] shrink-0 truncate text-right text-xs", side.alarm ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+          {side.where}
+        </span>
       </button>
       <Menu>
         <MenuTrigger
@@ -345,7 +361,7 @@ function Board({ layout }: { layout: PultLayout }) {
           ))}
           {needs.length > shownNeeds.length ? (
             <button type="button" onClick={() => setAllNeeds(true)} className="cursor-pointer px-2 py-1 text-xs text-muted-foreground hover:text-foreground">
-              Ещё {needs.length - shownNeeds.length}
+              Ещё {needs.length - shownNeeds.length} {plural(needs.length - shownNeeds.length, "вопрос", "вопроса", "вопросов")}
             </button>
           ) : null}
           {answered.map(({ task, mark }) => (
@@ -408,6 +424,7 @@ function ArtifactRow({ artifact, onOpen }: { artifact: PultArtifact; onOpen: () 
           className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground"
           title="Скопировать пароль страницы"
         >
+          <span className="font-sans">пароль</span>
           {artifact.password}
           <CopyIcon className="size-3" />
         </button>
@@ -416,8 +433,8 @@ function ArtifactRow({ artifact, onOpen }: { artifact: PultArtifact; onOpen: () 
   );
 }
 
-function Details({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+function Details({ title, count, children, defaultOpen = false }: { title: string; count?: number; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center gap-1 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground">
@@ -438,6 +455,7 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
   const openTask = useOpenTask(layout);
   const answerTask = useAnswer();
   const undo = usePultStore((s) => s.undoAnswer);
+  const isMobile = useIsMobile();
   if (!pult) return null;
   const { ix, answers, original } = pult;
   const now = ix.now;
@@ -446,7 +464,8 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
   const answered = answers[task.id];
   const originalNeed = original.task(task.id)?.needs;
   const owner = ix.chat(ownerChatId(task));
-  const arts = openableArtifacts(task);
+  const arts = openableArtifacts(task).filter((a) => a.kind === "site" || a.kind === "link");
+  const branches = (task.artifacts ?? []).filter((a) => a.kind === "branch");
   const left = leftActions(task);
   const docs = (task.docs ?? []).map((path) => ({ path, doc: ix.data.docs[path] })).filter((d) => d.doc);
 
@@ -468,8 +487,30 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
           <ArrowLeftIcon />
           Задачи
         </Button>
+        <Menu>
+          <MenuTrigger
+            aria-label="Приоритет"
+            className={cn(
+              "inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground outline-hidden hover:bg-accent hover:text-foreground data-[popup-open]:bg-accent",
+              !(owner?.thread && layout === "center") && "ml-auto",
+            )}
+          >
+            Приоритет {task.priority}
+            <ChevronDownIcon className="size-3" />
+          </MenuTrigger>
+          <MenuPopup align="end" className="min-w-44">
+            {(["P0", "P1", "P2", "P3"] as const).map((p) => (
+              <MenuItem key={p} onClick={() => usePultStore.getState().setPriority(task.id, p)}>
+                <span className="flex-1">
+                  {p} · {PRIORITY_WORD[p]}
+                </span>
+                {task.priority === p ? <CheckIcon className="size-3.5" /> : null}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
         {owner?.thread && layout === "center" ? (
-          <Button size="xs" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => openTask(task, ix)}>
+          <Button size="xs" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => (isMobile ? openChat(ix, owner.id) : openTask(task, ix))}>
             <MessageSquareIcon />
             Открыть чат
           </Button>
@@ -486,6 +527,17 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
           {task.eta?.left ? <span>осталось {task.eta.left}</span> : null}
           {task.deadline ? <span>срок {dayTime(task.deadline, now)}</span> : null}
         </div>
+        <button
+          type="button"
+          disabled={!owner?.thread}
+          onClick={() => owner && openChat(ix, owner.id)}
+          className="mt-1 block max-w-full truncate text-left text-xs text-muted-foreground enabled:cursor-pointer enabled:hover:text-foreground"
+          title="Чат, который делает задачу"
+        >
+          {owner
+            ? `Чат «${owner.title}» · ${owner.agent} · ${machineWord(ix.machineName(owner.machine))}${layout === "panel" && pane.currentChatThreadId === owner.thread?.threadId ? " — открыт слева" : ""}`
+            : "Никто не делает — начни чат ниже"}
+        </button>
       </div>
 
       {need ? (
@@ -593,7 +645,7 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
 
       <div className="mt-4 border-t border-border/60 pt-1">
         {task.request ? (
-          <Details title="Что ты просил">
+          <Details title="Что ты просил" defaultOpen>
             <p className="text-muted-foreground">
               {task.request.by} · {dayTime(task.request.at, now)}
             </p>
@@ -607,8 +659,15 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
             ) : null}
           </Details>
         ) : null}
-        <Details title="Кто делает и где" count={task.chats.length}>
+        <Details title="Кто и где" count={task.chats.length}>
           {task.chats.length === 0 ? <p className="text-muted-foreground">Никто — задача ждёт исполнителя.</p> : null}
+          {branches.map((b) => (
+            <p key={b.title} className="flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground">
+              <GitBranchIcon className="size-3" />
+              {b.title}
+              {b.note ? ` · ${b.note}` : ""}
+            </p>
+          ))}
           {task.chats.map((id) => {
             const c = ix.chat(id);
             if (!c) return null;
@@ -638,39 +697,6 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
             ))}
           </Details>
         ) : null}
-        {task.stages?.length ? (
-          <Details title="Этапы">
-            <ol className="space-y-0.5">
-              {task.stages.map((s) => (
-                <li key={s.name} className={cn("flex items-center gap-2", s.done ? "text-muted-foreground" : s.now ? "font-medium" : "")}>
-                  {s.done ? <CheckIcon className="size-3.5 text-emerald-600" /> : <span className={cn("ml-1 mr-0.5 size-1.5 rounded-full", s.now ? "bg-primary" : "bg-muted-foreground/40")} />}
-                  {s.name}
-                </li>
-              ))}
-            </ol>
-          </Details>
-        ) : null}
-        {task.feed?.length ? (
-          <Details title="Лента" count={task.feed.length}>
-            <ul className="space-y-1">
-              {task.feed.map((f) => (
-                <li key={f.at + f.text} className="flex gap-2">
-                  <span className="w-20 shrink-0 text-xs text-muted-foreground">{relTime(f.at, now)}</span>
-                  <span className="min-w-0">{f.text}</span>
-                </li>
-              ))}
-            </ul>
-          </Details>
-        ) : null}
-        <Details title={`Приоритет · ${task.priority}`}>
-          <div className="flex gap-1">
-            {(["P0", "P1", "P2", "P3"] as const).map((p) => (
-              <Button key={p} size="xs" variant={task.priority === p ? "secondary" : "ghost"} onClick={() => usePultStore.getState().setPriority(task.id, p)}>
-                {p}
-              </Button>
-            ))}
-          </div>
-        </Details>
       </div>
 
       <div className="mt-2 px-2">
@@ -681,7 +707,7 @@ function TaskCard({ task, layout }: { task: PultTask; layout: PultLayout }) {
 }
 
 /** "New chat for this task" — on any computer, the freest subscription marked. */
-function NewChatMenu({ ix, task }: { ix: PultIndex; task: PultTask }) {
+function NewChatMenu({ ix, task, compact = false }: { ix: PultIndex; task?: PultTask; compact?: boolean }) {
   const subs = new Map(ix.data.subscriptions.map((s) => [s.id, s]));
   const free = (subId: string | undefined) => {
     const s = subId ? subs.get(subId) : undefined;
@@ -693,14 +719,25 @@ function NewChatMenu({ ix, task }: { ix: PultIndex; task: PultTask }) {
     ix.data.chats.find((c) => c.machine === machineId && c.thread)?.thread?.environmentId ?? null;
   return (
     <Menu>
-      <MenuTrigger
-        data-testid="pult-new-chat"
-        className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs outline-hidden hover:bg-accent data-[popup-open]:bg-accent"
-      >
-        <SquarePenIcon className="size-3.5" />
-        Новый чат по задаче
-        <ChevronDownIcon className="size-3 text-muted-foreground" />
-      </MenuTrigger>
+      {compact ? (
+        <MenuTrigger
+          data-testid="pult-new-chat-any"
+          aria-label="Новый чат"
+          title="Новый чат — с любым ИИ, на любом компьютере"
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-foreground data-[popup-open]:bg-accent"
+        >
+          <SquarePenIcon className="size-3.5" />
+        </MenuTrigger>
+      ) : (
+        <MenuTrigger
+          data-testid="pult-new-chat"
+          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs outline-hidden hover:bg-accent data-[popup-open]:bg-accent"
+        >
+          <SquarePenIcon className="size-3.5" />
+          Новый чат по задаче
+          <ChevronDownIcon className="size-3 text-muted-foreground" />
+        </MenuTrigger>
+      )}
       <MenuPopup align="start" className="min-w-64">
         {machines.map((m) => (
           <NewChatItem
@@ -708,12 +745,13 @@ function NewChatMenu({ ix, task }: { ix: PultIndex; task: PultTask }) {
             environmentId={envOf(m.id)}
             name={m.name}
             note={m.id === best?.id ? `свободнее всего · ${free(m.subscription)}%` : `лимит свободен на ${free(m.subscription)}%`}
-            prompt={`По задаче «${task.title}»: `}
+            prompt={task ? `По задаче «${task.title}»: ` : ""}
           />
         ))}
         <MenuSeparator />
         <div className="max-w-64 px-2 py-1 text-[11px] leading-snug text-muted-foreground">
-          Новый чат на этом компьютере, текст про задачу уже в поле. ИИ и модель выбираешь в самом чате.
+          {task ? "Новый чат на этом компьютере, текст про задачу уже в поле. " : "Новый чат на выбранном компьютере. "}
+          ИИ и модель выбираешь в самом чате.
         </div>
       </MenuPopup>
     </Menu>
@@ -842,7 +880,9 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
   const openChat = useOpenChat();
   const setView = usePultStore((s) => s.setView);
   const [text, setText] = useState("");
-  const [shots, setShots] = useState(0);
+  const [images, setImages] = useState<ReadonlyArray<string>>([]);
+  const shots = images.length;
+  const [picking, setPicking] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const [answer, setAnswer] = useState<PultAnswer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -863,11 +903,11 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
   useEffect(() => {
     if (!handoff || !pult) return;
     setText(handoff.text);
-    setShots(handoff.shots);
+    setImages(handoff.images);
     setBusy(true);
     setAnswer(null);
     const timer = window.setTimeout(() => {
-      setAnswer(dispatch(handoff.text, handoff.shots, pult.ix));
+      setAnswer(dispatch(handoff.text, handoff.images.length, pult.ix));
       setBusy(false);
     }, 500);
     return () => window.clearTimeout(timer);
@@ -881,6 +921,7 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
   const ask = (q: string) => {
     setBusy(true);
     setAnswer(null);
+    setPicking(null);
     const n = shots;
     window.setTimeout(() => {
       setAnswer(dispatch(q, n, ix));
@@ -915,7 +956,7 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
         toastManager.add({ type: "success", title: `Ушло в «${c?.title ?? "чат"}»` });
         setAnswer(null);
         setText("");
-        setShots(0);
+        setImages([]);
         break;
       }
       case "broadcast": {
@@ -928,6 +969,9 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
         setText("");
         break;
       }
+      case "route-pick":
+        setPicking(act.text);
+        break;
       default:
         toastManager.add({ type: "info", title: "В моке это только отмечается" });
         setAnswer(null);
@@ -973,13 +1017,15 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
         onPaste={(e) => {
           if ([...e.clipboardData.items].some((it) => it.type.startsWith("image/"))) {
             e.preventDefault();
-            setShots((n) => n + 1);
+            const file = [...e.clipboardData.items].find((it) => it.type.startsWith("image/"))?.getAsFile();
+            if (file) setImages((list) => [...list, URL.createObjectURL(file)]);
           }
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
-          if (e.dataTransfer.files.length) setShots((n) => n + e.dataTransfer.files.length);
+          const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
+          if (files.length) setImages((list) => [...list, ...files.map((f) => URL.createObjectURL(f))]);
         }}
       >
         <div className="flex items-start gap-2 px-2.5 py-1.5">
@@ -1005,11 +1051,14 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
             data-testid="pult-dispatch-input"
           />
           {shots ? (
-            <button type="button" onClick={() => setShots(0)} className="mt-0.5 flex shrink-0 cursor-pointer items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title="Убрать">
-              <ImageIcon className="size-3" />
-              {shots} скрин
-              <XIcon className="size-3" />
-            </button>
+            <span className="flex shrink-0 items-center gap-1">
+              {images.slice(0, 3).map((src) => (
+                <img key={src} src={src} alt="Скрин" className="size-7 rounded border border-border object-cover" />
+              ))}
+              <button type="button" onClick={() => setImages([])} aria-label="Убрать скрины" className="cursor-pointer text-muted-foreground hover:text-foreground">
+                <XIcon className="size-3" />
+              </button>
+            </span>
           ) : (
             <kbd className="mt-1 shrink-0 text-[10px] text-muted-foreground/70">⇧⌘K</kbd>
           )}
@@ -1045,6 +1094,25 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
             </button>
           </div>
           {answer.cards.length ? <div className="mt-1">{answer.cards.map(card)}</div> : null}
+          {picking !== null ? (
+            <div className="mt-2 max-h-48 overflow-y-auto border-t border-border/60 pt-1">
+              {ix.data.chats.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    setPicking(null);
+                    run({ type: "send", chat: c.id, task: c.tasks[0] ?? "", text: picking, files: [] });
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent/60"
+                >
+                  <Dot tone={CHAT_STATE[c.state].tone} pulse={c.state === "working"} />
+                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{machineWord(ix.machineName(c.machine))}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {answer.actions.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5 px-1">
               {answer.actions.map((a) => (
@@ -1056,6 +1124,27 @@ function Dispatcher({ layout }: { layout: PultLayout }) {
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* ───────── What is on fire outside the tasks ───────── */
+
+function HotLine() {
+  const pult = usePult();
+  const setView = usePultStore((s) => s.setView);
+  if (!pult) return null;
+  const hot = hotItems(pult.ix.data);
+  if (!hot.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-1 px-2 pt-2 text-xs text-amber-700 dark:text-amber-400" data-testid="pult-hot">
+      <span className="text-muted-foreground">Горит:</span>
+      {hot.map((h, i) => (
+        <button key={h.text} type="button" onClick={() => setView(h.view)} className="cursor-pointer hover:underline">
+          {h.text}
+          {i < hot.length - 1 ? "," : ""}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1072,7 +1161,9 @@ function SinceLastSeen() {
   if (!events.length) return null;
   const good = events.filter((e) => e.kind === "release").length;
   const bad = events.filter((e) => e.bad).length;
-  const summary = [good ? `${good} в проде` : null, bad ? `${bad} плохо` : null, `${events.length} событий`].filter(Boolean).join(" · ");
+  const summary = [good ? `${good} ${plural(good, "выкатка", "выкатки", "выкаток")}` : null, bad ? `${bad} ${plural(bad, "проблема", "проблемы", "проблем")}` : null]
+    .filter(Boolean)
+    .join(", ") || `${events.length} событий`;
   return (
     <div className="px-2 pt-2">
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
@@ -1175,10 +1266,12 @@ export function PultView({ layout }: { layout: PultLayout }) {
                   ))}
                 </MenuPopup>
               </Menu>
+              <NewChatMenu ix={ix} compact />
                         </div>
             {view === "board" ? (
               <>
                 <Dispatcher layout={layout} />
+                <HotLine />
                 <SinceLastSeen />
                 <Board layout={layout} />
               </>

@@ -7,12 +7,15 @@ import { effectiveTasks } from "./pultStore";
 const ix = indexPult(PULT_DEMO_DATA);
 
 describe("pult board", () => {
-  it("puts a task that waits for the owner only under «Нужен ты»", () => {
+  it("puts a task that waits for the owner only under «Нужен ты» — unless it is stuck", () => {
     const needs = openNeeds(PULT_DEMO_DATA.tasks).map((t) => t.id);
-    const inGroups = groupTasks(PULT_DEMO_DATA.tasks).flatMap((g) => g.tasks.map((t) => t.id));
+    const groups = groupTasks(PULT_DEMO_DATA.tasks);
+    const inGroups = groups.flatMap((g) => g.tasks.map((t) => t.id));
     expect(needs).toContain("T07");
     expect(inGroups).not.toContain("T07");
-    expect(needs.filter((id) => inGroups.includes(id))).toEqual([]);
+    // T06 asks the owner and is stuck on a node: it shows in both places.
+    expect(groups.find((g) => g.id === "blocked")?.tasks.map((t) => t.id)).toEqual(["T06"]);
+    expect(needs.filter((id) => inGroups.includes(id))).toEqual(["T06"]);
   });
 
   it("folds later and done, keeps blocked/doing/review open", () => {

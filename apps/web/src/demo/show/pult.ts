@@ -45,7 +45,7 @@ async function chatWithPult(chatId: string) {
 
 /** Start where the Pult lives in this variant: a chat + the panel, or the Pult screen. */
 async function start(chatId = "ch-kv") {
-  if (demoSwitch("pult") === "center") {
+  if (demoSwitch("pult") === "center" || phone()) {
     await router()?.navigate({ to: "/pult" });
     await waitFor(() => location.hash.includes("/pult"));
     return;
@@ -69,7 +69,7 @@ demoShow.q2 = async () => {
   store().setView("board");
   store().openTask(null);
   store().undoAnswer("T07");
-  await (demoSwitch("pult") === "center" ? start() : chatWithPult("ch-kv"));
+  await (demoSwitch("pult") === "center" || phone() ? start() : chatWithPult("ch-kv"));
   await waitFor(() => !!document.querySelector('[data-testid="pult-need-T07"]'));
   await new Promise((r) => setTimeout(r, 700));
   clickByText('[data-testid="pult-need-T07"] button', "Всем по промокоду");
@@ -77,8 +77,9 @@ demoShow.q2 = async () => {
 
 demoShow.q3 = async () => {
   const task = PULT_DEMO.tasks.find((t) => t.id === "T06")!;
+  if (phone()) await start();
   store().openTask(task.id);
-  await chatWithPult(task.owner ?? "ch-onb");
+  if (!phone()) await chatWithPult(task.owner ?? "ch-onb");
 };
 
 demoShow.q4 = async () => {
@@ -88,7 +89,9 @@ demoShow.q4 = async () => {
 
 demoShow.q5 = async () => {
   await start();
-  store().askDispatcher("посмотрел новый экран пробника, тут кнопку «Add a card» переделать — мелкая на телефоне", 1);
+  store().askDispatcher("посмотрел новый экран пробника, тут кнопку «Add a card» переделать — мелкая на телефоне", [
+    `${import.meta.env.BASE_URL}demo-files/hero-variants.png`,
+  ]);
 };
 
 demoShow.q6 = async () => {

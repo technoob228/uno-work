@@ -24,8 +24,8 @@ interface PultState {
   readonly order: ReadonlyArray<string>;
   readonly priority: Readonly<Record<string, PultTask["priority"]>>;
   /** A question handed to the dispatcher from elsewhere (a screenshot "send to Pult", a shortcut). */
-  readonly handoff: { readonly text: string; readonly shots: number; readonly at: number } | null;
-  readonly askDispatcher: (text: string, shots?: number) => void;
+  readonly handoff: { readonly text: string; readonly images: ReadonlyArray<string>; readonly at: number } | null;
+  readonly askDispatcher: (text: string, images?: ReadonlyArray<string>) => void;
   readonly load: (data: PultData) => void;
   readonly openTask: (id: string | null) => void;
   readonly setView: (view: PultView) => void;
@@ -43,7 +43,7 @@ export const usePultStore = create<PultState>((set, get) => ({
   order: [],
   priority: {},
   handoff: null,
-  askDispatcher: (text, shots = 0) => set({ handoff: { text, shots, at: Date.now() }, openTaskId: null, view: "board" }),
+  askDispatcher: (text, images = []) => set({ handoff: { text, images, at: Date.now() }, openTaskId: null, view: "board" }),
   load: (data) => set({ data, order: data.tasks.toSorted((a, b) => a.rank - b.rank).map((t) => t.id) }),
   openTask: (openTaskId) => set({ openTaskId, ...(openTaskId ? { view: "board" as const } : {}) }),
   setView: (view) => set({ view, openTaskId: null }),
