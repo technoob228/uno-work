@@ -32,7 +32,7 @@ describe("personFirstName", () => {
       personFirstName({ email: "anna.k@uno4.dev", username: "mikhail.t", osUser: "kate" }),
     ).toBe("Anna");
     expect(
-      personFirstName({ email: "shubaduba4th@gmail.com", username: "mikhail.t", osUser: "kate" }),
+      personFirstName({ email: "misha@getuno.xyz", username: "mikhail.t", osUser: "kate" }),
     ).toBe("Mikhail");
     expect(
       personFirstName({ email: "hello@getuno.xyz", username: "shubaduba4th", osUser: "kate" }),
@@ -45,7 +45,7 @@ describe("personFirstName", () => {
       personFirstName({
         username: "shubaduba4th",
         osUser: "ubuntu",
-        email: "shubaduba4th@gmail.com",
+        email: "misha@getuno.xyz",
       }),
     ).toBeNull();
     expect(personFirstName({ email: "hello@getuno.xyz" })).toBeNull();

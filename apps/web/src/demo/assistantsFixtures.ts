@@ -441,7 +441,7 @@ const VAULT = [
     id: "cred-cloudflare",
     label: "Cloudflare",
     url: "https://dash.cloudflare.com",
-    username: "shubaduba4th@gmail.com",
+    username: "misha@getuno.xyz",
   },
   { id: "cred-cloudflare-token", label: "Cloudflare API token", url: "", username: "" },
   { id: "cred-openai", label: "OpenAI API key", url: "", username: "" },
