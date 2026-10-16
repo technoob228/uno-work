@@ -24,7 +24,6 @@ import {
   SparklesIcon,
   SquareTerminalIcon,
   TriangleAlertIcon,
-  WandSparklesIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -63,21 +62,21 @@ export function primaryActionTitle(tile: ProgramTile, action: AppPrimaryAction):
 }
 
 /**
- * The "on the internet" badge: a solid circle with a border and a shadow, so
- * it reads on any icon colour and on cards in both themes (a `bg-background`
- * circle looked see-through on a card).
+ * What an app's caption says about its state — only when it isn't simply
+ * there to use. Misha 16.10: dots and badges on the icons looked dirty, so the
+ * icon stays clean like on a PC and the state is a word under the name.
  */
-export const ONLINE_BADGE_CLASS =
-  "absolute -top-1.5 -right-1.5 z-[1] flex size-5 items-center justify-center rounded-full border border-black/10 bg-white text-primary shadow-sm dark:border-white/15 dark:bg-neutral-800";
-
-export const STATUS_DOT: Record<ProgramStatus, string | null> = {
-  running: "bg-success",
-  stopped: "bg-muted-foreground/60",
-  installing: null,
-  failed: "bg-destructive",
-  asleep: "bg-info",
+export const STATUS_NOTE: Record<ProgramStatus, { text: string; className: string } | null> = {
+  running: null,
   unknown: null,
+  stopped: { text: "Stopped", className: "text-muted-foreground" },
+  installing: { text: "Installing…", className: "text-muted-foreground" },
+  failed: { text: "Didn't start", className: "text-destructive-foreground" },
+  asleep: { text: "Asleep", className: "text-muted-foreground" },
 };
+
+/** Chips under a tile: only what a click can't say — a token to add, a fix, an install, a start under way. */
+const CHIP_KINDS: ReadonlySet<AppPrimaryAction["kind"]> = new Set(["token", "fix", "installing"]);
 
 const TILE_COLORS = [
   "from-sky-500/80 to-indigo-500/80",
@@ -189,9 +188,9 @@ export function ActionChip({
   busy?: boolean;
   className?: string;
 }) {
-  // A click opens it (or its settings): nothing to spell under the tile.
-  if (action.kind === "open" || action.kind === "openOnComputer" || action.kind === "settings")
-    return null;
+  // A click opens it (starts it, opens its settings, Telegram): nothing to
+  // spell under the tile — the caption says "Stopped" when it is.
+  if (!CHIP_KINDS.has(action.kind) && !(busy && action.kind === "start")) return null;
   return (
     <span
       className={cn(
@@ -246,7 +245,7 @@ export function TileShell({
   onDetails?: () => void;
   title?: string;
 }) {
-  const dot = status ? STATUS_DOT[status] : null;
+  const note = status ? STATUS_NOTE[status] : null;
   return (
     <li className="group relative">
       <button
@@ -275,19 +274,6 @@ export function TileShell({
       >
         <span className="relative transition-transform duration-150 group-hover:-translate-y-0.5">
           {icon}
-          {status === "installing" ? (
-            <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full bg-background ring-1 ring-border">
-              <Spinner className="size-3" />
-            </span>
-          ) : dot ? (
-            <span
-              className={cn(
-                "absolute -right-0.5 -bottom-0.5 size-3 rounded-full ring-2 ring-background",
-                dot,
-              )}
-              aria-hidden
-            />
-          ) : null}
           {aiWarning ? (
             <span
               className="absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm ring-1 ring-background"
@@ -295,23 +281,6 @@ export function TileShell({
               data-testid="program-ai-warning"
             >
               <TriangleAlertIcon className="size-2.5" />
-            </span>
-          ) : aiNote ? (
-            <span
-              className="absolute -top-1 -left-1 flex size-4 items-center justify-center rounded-full bg-background text-primary shadow-sm ring-1 ring-border"
-              aria-label={aiNote}
-              data-testid="program-ai-badge"
-            >
-              <WandSparklesIcon className="size-2.5" />
-            </span>
-          ) : null}
-          {online ? (
-            <span
-              className={ONLINE_BADGE_CLASS}
-              title="On the internet"
-              data-testid="program-online-badge"
-            >
-              <GlobeIcon className="size-3" />
             </span>
           ) : null}
         </span>
@@ -323,9 +292,16 @@ export function TileShell({
         >
           {label}
         </span>
-        {caption && !small ? (
-          <span className="-mt-1.5 w-full truncate text-[11px] text-muted-foreground">
-            {caption}
+        {(caption || note) && !small ? (
+          <span
+            className={cn(
+              "-mt-1.5 inline-flex w-full items-center justify-center gap-1 truncate text-[11px]",
+              note ? note.className : "text-muted-foreground",
+            )}
+            data-testid={online ? "program-online-badge" : undefined}
+          >
+            {online ? <GlobeIcon className="size-3 shrink-0" aria-label="On the internet" /> : null}
+            <span className="truncate">{note ? note.text : caption}</span>
           </span>
         ) : null}
         {action ? <ActionChip action={action} busy={actionBusy} className="-mt-0.5" /> : null}

@@ -9,6 +9,7 @@
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
+  GlobeIcon,
   HardDriveIcon,
   PanelRightIcon,
   PinIcon,
@@ -28,7 +29,7 @@ import {
   ActionChip,
   primaryActionTitle,
   ProgramIcon,
-  STATUS_DOT,
+  STATUS_NOTE,
 } from "../computer/ComputerPrograms";
 import type { ProgramTile } from "../computer/programModel";
 import {
@@ -158,7 +159,7 @@ function AppRow({
   const navigate = useNavigate();
   const { openBeside } = useOpenApp();
   const { isPinned, toggle } = usePins();
-  const dot = STATUS_DOT[tile.status];
+  const note = STATUS_NOTE[tile.status];
   const url = tile.openUrl;
   const pinned = url ? isPinned("app", url) : false;
   const app = url ? { url, name: tile.name, icon: tile.icon } : null;
@@ -193,28 +194,24 @@ function AppRow({
           app ? "pr-20" : "pr-8",
         )}
       >
-        <span className="relative shrink-0">
-          <ProgramIcon
-            name={tile.name}
-            icon={tile.icon}
-            iconImage={tile.iconImage}
-            templateId={tile.templateId}
-            className="size-6 rounded-md text-sm shadow-none"
-          />
-          {dot ? (
-            <span
-              aria-hidden
-              className={cn(
-                "absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-sidebar",
-                dot,
-              )}
-            />
-          ) : null}
-        </span>
+        <ProgramIcon
+          name={tile.name}
+          icon={tile.icon}
+          iconImage={tile.iconImage}
+          templateId={tile.templateId}
+          className="size-6 rounded-md text-sm shadow-none"
+        />
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-sm text-sidebar-foreground">{tile.name}</span>
-          <span className="block truncate text-[11px] text-muted-foreground/80">
-            {tile.product ?? tile.caption}
+          <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground/80">
+            {tile.online ? (
+              <GlobeIcon className="size-3 shrink-0" aria-label="On the internet" />
+            ) : null}
+            {note ? <span className={cn("shrink-0", note.className)}>{note.text}</span> : null}
+            <span className="truncate">
+              {note ? " · " : null}
+              {tile.product ?? tile.caption}
+            </span>
           </span>
         </span>
         <ActionChip action={action} busy={starting} className="shrink-0" />
