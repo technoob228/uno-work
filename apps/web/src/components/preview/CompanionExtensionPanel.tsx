@@ -19,13 +19,14 @@ import {
   readExtensionStatus,
   runExtensionBrowserCommand,
 } from "../../browserExtensionBridge";
+import { cn } from "../../lib/utils";
 import { toastManager, stackedThreadToast } from "../ui/toast";
 import { Button } from "../ui/button";
 
 export const COMPANION_EXTENSION_DOWNLOAD_URL =
   "https://console.uno4.dev/cli/work/uno-work-companion-0.2.0.zip";
 
-type DetectState = "checking" | "connected" | "missing";
+export type DetectState = "checking" | "connected" | "missing";
 
 export function CompanionExtensionPanel({
   url,
@@ -133,45 +134,98 @@ export function CompanionExtensionPanel({
           Open {host ?? "it"} in a new tab
         </Button>
       ) : null}
-      <details className="mx-auto mt-2 max-w-sm text-xs">
-        <summary className="cursor-pointer text-center text-muted-foreground/80 hover:text-foreground">
-          Want the agent to work in this browser too?
-        </summary>
-        <div className="mt-2 space-y-2 text-left">
-          <p>
-            Only if you want the agent to click and type in your own tabs (with your sign-ins). For
-            that, add the Uno Work Companion extension to Chrome. You don't need it to open sites —
-            the agent also has its own browser on your computer.
-          </p>
-          <ol className="list-decimal space-y-1 pl-5">
-            <li>Download the archive and unzip it into a folder.</li>
-            <li>
-              Open <span className="font-mono">chrome://extensions</span> and turn on Developer
-              mode.
-            </li>
-            <li>Click "Load unpacked" and pick the folder from the archive.</li>
-            <li>Come back and press Check again.</li>
-          </ol>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="xs"
-              variant="outline"
-              render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}
-            >
-              <DownloadIcon className="size-3.5" />
-              Download extension
-            </Button>
-            <Button size="xs" variant="ghost" onClick={() => void check()}>
-              {detectState === "checking" ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                <RefreshCwIcon className="size-3.5" />
-              )}
-              Check again
-            </Button>
-          </div>
-        </div>
-      </details>
+      <CompanionExtensionDetails
+        className="mx-auto mt-2 max-w-sm"
+        detectState={detectState}
+        onCheck={() => void check()}
+        summary="Want the agent to work in this browser too?"
+      />
     </div>
   );
+}
+
+/**
+ * The optional extension, folded: what it's for and how to add it. Shared by
+ * the page above and the web version's live tab (YourBrowserTab), where it is
+ * the small "Advanced" line under the page.
+ */
+export function CompanionExtensionDetails({
+  summary,
+  detectState,
+  onCheck,
+  className,
+  summaryClassName,
+}: {
+  summary: string;
+  detectState: DetectState;
+  onCheck: () => void;
+  className?: string;
+  summaryClassName?: string;
+}) {
+  return (
+    <details className={cn("text-xs", className)} data-testid="companion-extension-details">
+      <summary
+        className={cn(
+          "cursor-pointer text-center text-muted-foreground/80 hover:text-foreground",
+          summaryClassName,
+        )}
+      >
+        {summary}
+      </summary>
+      <div className="mt-2 space-y-2 text-left text-muted-foreground">
+        <p>
+          Only if you want the agent to click and type in your own tabs (with your sign-ins). For
+          that, add the Uno Work Companion extension to Chrome. You don't need it to open sites —
+          the agent also has its own browser on your computer.
+        </p>
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>Download the archive and unzip it into a folder.</li>
+          <li>
+            Open <span className="font-mono">chrome://extensions</span> and turn on Developer mode.
+          </li>
+          <li>Click "Load unpacked" and pick the folder from the archive.</li>
+          <li>Come back and press Check again.</li>
+        </ol>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="xs"
+            variant="outline"
+            render={<a href={COMPANION_EXTENSION_DOWNLOAD_URL} download />}
+          >
+            <DownloadIcon className="size-3.5" />
+            Download extension
+          </Button>
+          <Button size="xs" variant="ghost" onClick={onCheck}>
+            {detectState === "checking" ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCwIcon className="size-3.5" />
+            )}
+            Check again
+          </Button>
+          {detectState === "connected" ? (
+            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2Icon className="size-3.5" />
+              Connected
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+/** Is the extension in this browser: checked once on mount, again on "Check again". */
+export function useCompanionExtensionCheck(): { detectState: DetectState; check: () => void } {
+  const [detectState, setDetectState] = useState<DetectState>("checking");
+  const check = useCallback(() => {
+    setDetectState("checking");
+    void detectBrowserExtension().then((detected) =>
+      setDetectState(detected === null ? "missing" : "connected"),
+    );
+  }, []);
+  useEffect(() => {
+    check();
+  }, [check]);
+  return { detectState, check };
 }

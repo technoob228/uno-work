@@ -21,9 +21,15 @@ import { openOutsideTarget } from "./openOutsideTarget";
 export function LiveBrowserOpenOutside({
   environmentId,
   pageUrl,
+  labelled = false,
 }: {
   environmentId: EnvironmentId;
   pageUrl: string;
+  /**
+   * A plain button with words, "Open in my browser" (the web version's own
+   * tab, p.14), instead of the header's icon.
+   */
+  labelled?: boolean;
 }) {
   const queryClient = useQueryClient();
   const apps = useQuery(machineAppsQueryOptions(environmentId));
@@ -64,6 +70,25 @@ export function LiveBrowserOpenOutside({
       >
         {publish.isPending ? <Spinner className="size-3" /> : <GlobeIcon />}
         Show on the internet
+      </Button>
+    );
+  }
+  if (labelled) {
+    return (
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={target.kind === "none"}
+        title={
+          target.kind === "open" ? "Open this page in a new tab of this browser" : target.reason
+        }
+        data-testid="your-browser-open-outside"
+        onClick={() => {
+          if (target.kind === "open") openInNewTab(target.url);
+        }}
+      >
+        <ExternalLinkIcon />
+        Open in my browser
       </Button>
     );
   }

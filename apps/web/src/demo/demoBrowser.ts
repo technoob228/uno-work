@@ -259,6 +259,20 @@ export function demoBrowserLiveUnary(
     case WS_METHODS.browserLiveOpen: {
       const context = (body.context ?? {}) as { threadId?: string };
       const url = typeof body.url === "string" && body.url ? body.url : null;
+      // The web version's own tab (YourBrowserTab): a page of its own, the person drives.
+      if (typeof body.tab === "string" && body.tab) {
+        const mine = state.pages.find((page) => page.tab === body.tab);
+        if (mine) return { value: { pageId: mine.pageId } };
+        const page: BrowserLivePage = {
+          ...livePage(machine, `page-${state.pages.length + 1}`, "", url ?? "about:blank"),
+          context: {},
+          tab: body.tab,
+          control: "human",
+          title: "",
+        };
+        update(machine, { ...state, pages: [...state.pages, page] }, emit);
+        return { value: { pageId: page.pageId } };
+      }
       const threadId = context.threadId ?? "agent";
       const existing = state.pages.find((page) => page.context?.threadId === threadId);
       if (existing) {

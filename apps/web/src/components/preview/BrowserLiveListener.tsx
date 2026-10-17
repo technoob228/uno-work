@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { liveBrowserTabId, liveBrowserTabName, setBrowserLiveState } from "./browserLiveStore";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
 import { shouldCloseSetupTabOnState } from "./browserSource";
+import { isPersonTabPage } from "./yourBrowserTab.logic";
 import {
   findTabScopeKey,
   makeBrowserSetupFile,
@@ -107,6 +108,9 @@ export function BrowserLiveListener() {
 
         for (const page of state.pages) {
           next.set(page.pageId, page.attention);
+          // A page of someone's own panel tab (the web version's browser tab)
+          // is shown by that tab, never as a tab of its own.
+          if (isPersonTabPage(page)) continue;
           const tabId = liveBrowserTabId(environmentId, page.pageId);
           const known = previous.get(page.pageId);
           const bumped = first

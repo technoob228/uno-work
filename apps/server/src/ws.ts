@@ -2391,7 +2391,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.browserLiveOpen]: (input) =>
           observeRpcEffect(
             WS_METHODS.browserLiveOpen,
-            serverBrowser.live.open(input.context, input.url),
+            serverBrowser.live.open(input.context, input.url, input.tab),
             { "rpc.aggregate": "browser" },
           ),
         [WS_METHODS.browserLiveResize]: (input) =>
