@@ -8,6 +8,15 @@
 
 ---
 
+## v0.0.145 — 2026-10-17
+
+- **Apps & sites back in order.** An app from the App Store with a brand logo (Notetaker) blew its icon up into a huge white box that broke the list and the app's top bar. The logo now keeps its size everywhere.
+- **On the web, a tab in the panel shows the page right there**, through your computer's browser: click, type, scroll, Comment. Sign-ins you make stay on the computer. "Open in my browser" opens it in a tab of yours; the browser extension is one folded line under Advanced. On the Mac nothing changes.
+- **Tab groups you can see.** In a chat every group is always there; an empty one is a small dashed slot to drop a tab on. Each tab carries its group's letter (C / P / E), and hovering it says at once where it stays pinned.
+- Apps with "Sign in with Uno" open inside Uno Work, already signed in, where Uno supports it.
+- Projects move between your cloud computers: `uno project sync` and `uno project get`, through your Uno cloud.
+- Security: the file with this computer's key is readable by you only.
+
 ## v0.0.144 — 2026-10-17
 
 - **Comment everywhere, like Codex.** In the agent's browser too, on the Mac and on the web: point at a part of the page, click, write a note. It goes to the chat with the element and a screenshot. On the web, your site at the computer's own address (localhost) opens in the computer's browser in the panel, so you can comment on it there.
