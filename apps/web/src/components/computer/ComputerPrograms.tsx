@@ -127,14 +127,17 @@ export function ProgramIcon({
     "flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5 dark:ring-white/10";
   if (src) {
     // App Store logos (served by Uno) are brand marks: whole, on white, with air.
+    // The air is the logo's own size, not padding: a percentage padding counts
+    // from the PARENT's width, so in a wide bar (the app's header) the 28 px
+    // icon grew into a white box half the screen wide (Misha 17.10, Notetaker).
     const logo = src.includes("/api/v1/apps/icons/");
     return (
-      <span className={cn(base, logo ? "bg-white p-[18%]" : "bg-card", className)}>
+      <span className={cn(base, logo ? "bg-white" : "bg-card", className)}>
         <img
           key={src}
           src={src}
           alt=""
-          className={cn("size-full", logo ? "object-contain" : "object-cover")}
+          className={cn(logo ? "size-[64%] object-contain" : "size-full object-cover")}
           draggable={false}
           onError={() => setFailed({ key, count: attempt + 1 })}
         />
