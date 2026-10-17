@@ -491,81 +491,83 @@ export function PanelTabStrip({
                   <Fragment key={file.id}>
                     {lineAt(file.id)}
                     <Tooltip>
-                    <TooltipTrigger
-                    render={
-                    <div
-                      role="tab"
-                      tabIndex={0}
-                      aria-selected={isActive}
-                      aria-label={file.name}
-                      data-preview-tab={file.id}
-                      data-tab-scope={scope}
-                      {...dragSource(file)}
-                      onDragOver={(event) => aimAtTab(event, scope, groupFiles, file)}
-                      onClick={() => onSelect(file.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          onSelect(file.id);
-                        }
-                      }}
-                      onDoubleClick={() => {
-                        if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
-                      }}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        openMenuUnderTab(file, event.currentTarget);
-                      }}
-                      style={
-                        iconOnly
-                          ? undefined
-                          : fold
-                            ? // In a folded group the open tab keeps its whole name.
-                              { flex: "0 0 auto", maxWidth: TAB_MAX_WIDTH }
-                            : // As wide as the name (up to 180), shrinking to 72 when the row is tight.
-                              { flex: "0 1 auto", minWidth: TAB_MIN_WIDTH, maxWidth: TAB_MAX_WIDTH }
-                      }
-                      className={cn(
-                        "group relative inline-flex h-6 cursor-default items-center rounded-md text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
-                        iconOnly ? "w-6 shrink-0 justify-center" : "gap-1.5 pr-1 pl-1.5",
-                        isActive
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/50",
-                        dragging?.id === file.id && "opacity-40",
-                      )}
-                    />
-                    }
-                    >
-                      <span className="relative inline-flex shrink-0">
-                        <Icon className="size-3.5" />
-                        <AgentMark file={file} />
-                      </span>
-                      {iconOnly ? null : (
-                        <>
-                          <span className="min-w-0 flex-1 truncate">
-                            {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
-                          </span>
-                          <GroupMark scope={scope} />
-                          <button
-                            type="button"
-                            aria-label={`Close ${file.name}`}
-                            className={cn(
-                              "size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
-                              isActive ? "inline-flex" : "hidden group-hover:inline-flex",
-                            )}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              closeFile(file.id);
+                      <TooltipTrigger
+                        render={
+                          <div
+                            role="tab"
+                            tabIndex={0}
+                            aria-selected={isActive}
+                            aria-label={file.name}
+                            data-preview-tab={file.id}
+                            data-tab-scope={scope}
+                            {...dragSource(file)}
+                            onDragOver={(event) => aimAtTab(event, scope, groupFiles, file)}
+                            onClick={() => onSelect(file.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                onSelect(file.id);
+                              }
                             }}
-                          >
-                            <XIcon className="size-3" />
-                          </button>
-                        </>
-                      )}
-                    </TooltipTrigger>
-                    {dragging ? null : (
-                      <TabTooltip lines={tooltip(file)} />
-                    )}
+                            onDoubleClick={() => {
+                              if (DUAL_VIEW_KINDS.has(file.kind)) toggleSourceView(file.id);
+                            }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              openMenuUnderTab(file, event.currentTarget);
+                            }}
+                            style={
+                              iconOnly
+                                ? undefined
+                                : fold
+                                  ? // In a folded group the open tab keeps its whole name.
+                                    { flex: "0 0 auto", maxWidth: TAB_MAX_WIDTH }
+                                  : // As wide as the name (up to 180), shrinking to 72 when the row is tight.
+                                    {
+                                      flex: "0 1 auto",
+                                      minWidth: TAB_MIN_WIDTH,
+                                      maxWidth: TAB_MAX_WIDTH,
+                                    }
+                            }
+                            className={cn(
+                              "group relative inline-flex h-6 cursor-default items-center rounded-md text-xs outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
+                              iconOnly ? "w-6 shrink-0 justify-center" : "gap-1.5 pr-1 pl-1.5",
+                              isActive
+                                ? "bg-accent text-accent-foreground"
+                                : "text-muted-foreground hover:bg-accent/50",
+                              dragging?.id === file.id && "opacity-40",
+                            )}
+                          />
+                        }
+                      >
+                        <span className="relative inline-flex shrink-0">
+                          <Icon className="size-3.5" />
+                          <AgentMark file={file} />
+                        </span>
+                        {iconOnly ? null : (
+                          <>
+                            <span className="min-w-0 flex-1 truncate">
+                              {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
+                            </span>
+                            <GroupMark scope={scope} />
+                            <button
+                              type="button"
+                              aria-label={`Close ${file.name}`}
+                              className={cn(
+                                "size-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-background/60 hover:opacity-100",
+                                isActive ? "inline-flex" : "hidden group-hover:inline-flex",
+                              )}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                closeFile(file.id);
+                              }}
+                            >
+                              <XIcon className="size-3" />
+                            </button>
+                          </>
+                        )}
+                      </TooltipTrigger>
+                      {dragging ? null : <TabTooltip lines={tooltip(file)} />}
                     </Tooltip>
                   </Fragment>
                 );
