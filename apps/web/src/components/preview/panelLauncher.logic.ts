@@ -28,6 +28,8 @@ export type LauncherTileId = "site" | "agentBrowser" | "files" | "changes" | "ap
 export interface LauncherTileCopy {
   readonly id: LauncherTileId;
   readonly name: string;
+  /** Which browser, after the name: both are "Browser" (Misha 17.10). */
+  readonly tag?: string;
   /** The letter that opens it while the launcher has focus (like t3's empty panel). */
   readonly key: string;
   readonly description: string;
@@ -37,9 +39,10 @@ export interface LauncherTileCopy {
 export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
   {
     id: "site",
-    name: "Your site",
-    key: "S",
-    description: "Open your site or app — comment and debug right on the page",
+    name: "Browser",
+    tag: "local",
+    key: "B",
+    description: "Right here, in your browser — comment and debug on the page",
   },
   { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
   { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
@@ -48,9 +51,10 @@ export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
   // browser comes last and quieter.
   {
     id: "agentBrowser",
-    name: "Agent's browser",
-    key: "B",
-    description: "The browser on the agent's computer — sign in for it when it asks",
+    name: "Browser",
+    tag: "agent's computer",
+    key: "R",
+    description: "Runs on the agent's computer — sign in for it when it asks",
   },
 ];
 

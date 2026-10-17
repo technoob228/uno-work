@@ -175,6 +175,6 @@ describe("browserSourceCopy (the chip's words)", () => {
 
   it("flag on: the launcher's two tiles", () => {
     const copy = browserSourceCopy(true);
-    expect(copy.label).toEqual({ app: "Browser", computer: "Agent's browser" });
+    expect(copy.label).toEqual({ app: "Browser", computer: "Browser · agent's computer" });
   });
 });

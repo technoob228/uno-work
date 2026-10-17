@@ -22,7 +22,7 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
-export const DEMO_VERSION = "0.0.137";
+export const DEMO_VERSION = "0.0.145";
 
 export const ENV_WORK = EnvironmentId.make("env-demo-uno-work");
 export const ENV_PRODUCT = EnvironmentId.make("env-demo-uno-product");

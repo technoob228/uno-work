@@ -19,6 +19,7 @@ import {
   availableBrowserSources,
   type BrowserSource,
   resolveBrowserOpenSource,
+  WEB_PAGE_IN_PANEL,
 } from "./browserSource";
 import { makeBrowserSetupFile, makeLiveBrowserFile, usePreviewPane } from "./PreviewPaneContext";
 
@@ -56,7 +57,7 @@ export function useChatBrowser(): {
   const sources = useMemo(
     () =>
       availableBrowserSources({
-        desktopApp: isElectron || demoDesktop,
+        desktopApp: isElectron || demoDesktop || WEB_PAGE_IN_PANEL,
         computerBrowser: currentChatEnvironmentId !== null && liveState !== null,
       }),
     [currentChatEnvironmentId, liveState, demoDesktop],

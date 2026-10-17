@@ -57,6 +57,7 @@ import {
   launcherTileForKey,
   visibleLauncherTiles,
 } from "./panelLauncher.logic";
+import { WEB_PAGE_IN_PANEL } from "./browserSource";
 import type { PluginPanelDescriptor } from "./PluginPanelChat";
 import { makeAppFile, makePluginPanelFile, usePreviewPane } from "./PreviewPaneContext";
 import { useChatBrowser } from "./useChatBrowser";
@@ -113,6 +114,8 @@ function PanelLauncherV2({
   const pluginsEnabled = useFeatureFlag("plugins");
   const demoDesktop = useDemoDesktop();
   const desktop = isElectron || demoDesktop;
+  // The web keeps the page in the panel too (WEB_PAGE_IN_PANEL, Misha 17.10).
+  const pageHere = desktop || WEB_PAGE_IN_PANEL;
   const { sources, openInSource } = useChatBrowser();
   const chatActions = useChatPanelActions(currentChatThreadId);
   const machine = useActiveMachine();
@@ -247,8 +250,8 @@ function PanelLauncherV2({
               const secondary = tile.id === "agentBrowser";
               const where =
                 tile.id === "site"
-                  ? desktop
-                    ? `Opens on ${deviceName}. Turn on Comment to leave notes and see errors.`
+                  ? pageHere
+                    ? `Opens right here, on ${deviceName}. Turn on Comment to leave notes and see errors.`
                     : primaryEnvironmentId
                       ? // The web version (p.14): a live page of the computer's browser.
                         `Opens right here, in the browser of ${machineLabels.get(primaryEnvironmentId) ?? "your computer"}. Your sign-ins stay there.`
@@ -275,8 +278,13 @@ function PanelLauncherV2({
                       <Icon className="size-3.5" />
                     </span>
                     <span className="min-w-0 flex-1 leading-tight">
-                      <span className="block truncate text-[13px] font-medium text-foreground">
+                      <span className="flex items-center gap-1.5 truncate text-[13px] font-medium text-foreground">
                         {tile.name}
+                        {tile.tag ? (
+                          <span className="rounded bg-muted px-1 py-px text-[10.5px] font-normal text-muted-foreground">
+                            {tile.tag}
+                          </span>
+                        ) : null}
                       </span>
                       <span className="line-clamp-2 block text-xs text-muted-foreground">
                         {tile.description}

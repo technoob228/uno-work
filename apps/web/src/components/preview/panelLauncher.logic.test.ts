@@ -41,13 +41,15 @@ describe("visibleLauncherTiles", () => {
   });
 
   it("says what each browser is for, in plain words", () => {
-    expect(tile(everything, "site")?.name).toBe("Your site");
+    expect(tile(everything, "site")?.name).toBe("Browser");
+    expect(tile(everything, "site")?.tag).toBe("local");
     expect(tile(everything, "site")?.description).toBe(
-      "Open your site or app — comment and debug right on the page",
+      "Right here, in your browser — comment and debug on the page",
     );
-    expect(tile(everything, "agentBrowser")?.name).toBe("Agent's browser");
+    expect(tile(everything, "agentBrowser")?.name).toBe("Browser");
+    expect(tile(everything, "agentBrowser")?.tag).toBe("agent's computer");
     expect(tile(everything, "agentBrowser")?.description).toBe(
-      "The browser on the agent's computer — sign in for it when it asks",
+      "Runs on the agent's computer — sign in for it when it asks",
     );
   });
 
@@ -75,11 +77,11 @@ describe("visibleLauncherTiles", () => {
     expect(ids({ ...everything, canOpenChanges: false })).not.toContain("changes");
   });
 
-  it("every tile has its own letter: S for the site, B for the agent's browser", () => {
+  it("every tile has its own letter: B for the local browser, R for the agent's", () => {
     const keys = LAUNCHER_TILES.map(launcherKeyLabel);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(launcherKeyLabel(tile(everything, "site")!)).toBe("S");
-    expect(launcherKeyLabel(tile(everything, "agentBrowser")!)).toBe("B");
+    expect(launcherKeyLabel(tile(everything, "site")!)).toBe("B");
+    expect(launcherKeyLabel(tile(everything, "agentBrowser")!)).toBe("R");
   });
 });
 
@@ -99,8 +101,8 @@ describe("launcherTileForKey", () => {
     });
 
   it("one letter opens its tile, either case", () => {
-    expect(key("s")).toBe("site");
-    expect(key("b")).toBe("agentBrowser");
+    expect(key("b")).toBe("site");
+    expect(key("R")).toBe("agentBrowser");
     expect(key("F")).toBe("files");
     expect(key("c")).toBe("changes");
     expect(key("a")).toBe("apps");

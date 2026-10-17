@@ -63,6 +63,7 @@ import { usePageTools } from "./annotate/usePageTools";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { YourBrowserTab } from "./YourBrowserTab";
 import { browserTabMode } from "./yourBrowserTab.logic";
+import { WEB_PAGE_IN_PANEL } from "./browserSource";
 import { isTypingTarget } from "./panelLauncher.logic";
 import { useChatBrowser } from "./useChatBrowser";
 import { BrowserSourceChip } from "./BrowserSourceChip";
@@ -265,7 +266,7 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const demoDesktop = useDemoDesktop();
   const mode = browserTabMode({
-    desktopApp: isElectron || demoDesktop,
+    desktopApp: isElectron || demoDesktop || WEB_PAGE_IN_PANEL,
     computer: primaryEnvironmentId !== null,
   });
   const visibleKeys = new Set(
@@ -347,8 +348,8 @@ function BrowserView({
   // The page lives in the panel: the desktop app's <webview>, or — in the demo
   // of the desktop app — a same-origin iframe that talks like one.
   const demoDesktop = useDemoDesktop();
-  const pageInPanel = isElectron || demoDesktop;
-  const iframeMode = !isElectron && demoDesktop;
+  const pageInPanel = isElectron || demoDesktop || WEB_PAGE_IN_PANEL;
+  const iframeMode = !isElectron;
   // Comment / Debug (flag `browserPageTools`): only where the page is in the
   // panel (the desktop app, its demo). The web build's page is a companion
   // tab in the person's own browser — no tools there, flag or not.

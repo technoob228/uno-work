@@ -4,16 +4,16 @@
  * Everywhere, left to right (the wider the group, the further right). Each
  * group starts with its label — a small icon (bubble / folder / globe) or its
  * name; a click on the label collapses the group into it, like Chrome (the open
- * tab stays in view). An empty group isn't drawn. Switching to another chat
+ * tab stays in view); the name is in its tooltip (Misha 17.10: "the icons
+ * were good — show the name on hover"). Switching to another chat
  * of the same project keeps Everywhere and Project as they are — only the
  * chat's group changes.
  *
  * Dragging, like Chrome: a tab dragged along its group changes places, into
- * another outline moves there (a line shows where it lands). In a chat the
- * groups without tabs are always there as small dashed slots with their icon
- * — otherwise nobody knows they exist (Misha 17.10: "didn't notice the
- * groups"); while dragging they open up with their names. Right-click → Move
- * to is the fallback.
+ * another outline moves there (a line shows where it lands). A group without
+ * tabs isn't drawn — it shows up, as a dashed slot with its icon and name,
+ * only while a tab is dragged (Misha 17.10, evening). Right-click → Move to
+ * is the fallback.
  * The slots appear a tick after the drag starts: changing the row's layout
  * inside `dragstart` makes Chrome/Electron cancel the drag on the spot (Misha
  * 16.10, point 3 — "dragging into another group does nothing").
@@ -26,7 +26,7 @@
  * stays in view; past that the row scrolls with a fade at the edge. Tabs the
  * agent opened carry a small robot mark.
  */
-import { BotIcon, FolderIcon, GlobeIcon, MessageSquareIcon, XIcon } from "lucide-react";
+import { BotIcon, FolderIcon, HomeIcon, MessageSquareIcon, XIcon } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useDemoSwitch } from "../../demo/demoFlag";
@@ -51,7 +51,6 @@ import {
 } from "./PreviewPaneContext";
 import {
   dropBeforeId,
-  EMPTY_SLOT_WIDTH,
   foldedGroups,
   GROUP_LABEL,
   GROUP_LETTER,
@@ -91,7 +90,8 @@ function readCollapsed(): ReadonlyArray<PreviewTabScope> {
 }
 
 const GROUP_ICON: Record<PreviewTabScope, KindIcon> = {
-  global: GlobeIcon,
+  // A house, not a globe: the globe is the browser tab's icon (Misha 17.10).
+  global: HomeIcon,
   project: FolderIcon,
   chat: MessageSquareIcon,
 };
@@ -237,15 +237,10 @@ export function PanelTabStrip({
     observer.observe(row);
     return () => observer.disconnect();
   }, []);
-  // Empty groups shown as slots outside a drag take their room too.
-  const emptySlots =
-    inChat && dragging === null
-      ? GROUP_ORDER.filter((scope) => !groups.some((group) => group.scope === scope)).length
-      : 0;
   const folded = useMemo(
     () =>
       foldedGroups({
-        available: available - emptySlots * EMPTY_SLOT_WIDTH,
+        available,
         groups: groups.map((group) => {
           const count = shownIn(group.scope, group.files).length;
           return {
@@ -257,7 +252,7 @@ export function PanelTabStrip({
         }),
       }),
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- shownIn reads collapsed/activeId
-    [available, emptySlots, withIcons, groups, activeScope, collapsed, activeId],
+    [available, withIcons, groups, activeScope, collapsed, activeId],
   );
   // The active tab is always fully in view.
   useEffect(() => {
@@ -354,8 +349,9 @@ export function PanelTabStrip({
     return lines;
   };
 
-  // In a chat every group a tab could go to shows — empty ones as slots (named while dragging).
-  const shown = groupsForDrag(groups, inChat);
+  // Empty groups show only while a tab is dragged, named, so there is somewhere
+  // to drop it (Misha 17.10: "when Browsers and Project are empty, don't show them").
+  const shown = groupsForDrag(groups, inChat && dragging !== null);
   // The empty slots appear at the row's ends, which a narrow panel scrolls out
   // of view (Misha 16.10 p.3: "dragging into another group does nothing" — the
   // Everywhere slot was past the right edge). Bring them into view.
@@ -428,20 +424,15 @@ export function PanelTabStrip({
                         data-testid={`panel-tab-group-label-${scope}`}
                         className={cn(
                           "inline-flex h-5 shrink-0 items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap text-muted-foreground",
-                          dragging ? "px-1.5" : "min-w-5 justify-center px-1",
+                          "px-1.5",
                         )}
                       />
                     }
                   >
-                    {dragging ? (
-                      scope === "project" && projectName ? (
-                        `Project · ${projectName}`
-                      ) : (
-                        GROUP_LABEL[scope]
-                      )
-                    ) : (
-                      <GroupIcon className="size-3" />
-                    )}
+                    <GroupIcon className="size-3" />
+                    {scope === "project" && projectName
+                      ? `Project · ${projectName}`
+                      : GROUP_LABEL[scope]}
                   </TooltipTrigger>
                   <TooltipPopup side="bottom" className="whitespace-pre-line">
                     {groupTitle(scope, projectName)}

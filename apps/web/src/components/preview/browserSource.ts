@@ -25,6 +25,15 @@ import {
 
 export type BrowserSource = "app" | "computer";
 
+/**
+ * The web version keeps the person's page in the panel too, like the desktop
+ * app — an <iframe> instead of the <webview>, with the same Comment / Debug
+ * (Misha 17.10: "a browser in the browser — the same as in the desktop, one
+ * to one"). Before, the web opened it in the computer's browser (p.14) or a
+ * tab of the person's browser through the companion extension.
+ */
+export const WEB_PAGE_IN_PANEL = true;
+
 export const BROWSER_SOURCE_LABEL: Record<BrowserSource, string> = {
   app: "This app",
   computer: "The computer's browser",
@@ -39,7 +48,7 @@ export const BROWSER_SOURCE_DESCRIPTION: Record<BrowserSource, string> = {
 /** Same words as the launcher's two tiles (w0138, flag `panelLauncherV2`). */
 export const BROWSER_SOURCE_LABEL_V2: Record<BrowserSource, string> = {
   app: "Browser",
-  computer: "Agent's browser",
+  computer: "Browser · agent's computer",
 };
 
 export const BROWSER_SOURCE_DESCRIPTION_V2: Record<BrowserSource, string> = {
