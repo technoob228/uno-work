@@ -148,7 +148,9 @@ export function AppView() {
     refetchOnWindowFocus: false,
   });
   const firstSrc =
-    signInLink.data?.signedIn && /^https?:\/\//.test(signInLink.data.url) ? signInLink.data.url : null;
+    signInLink.data?.signedIn && /^https?:\/\//.test(signInLink.data.url)
+      ? signInLink.data.url
+      : null;
 
   const frame =
     search.app && !byKey && loading ? (
@@ -210,14 +212,12 @@ export function AppView() {
           </Button>
         </div>
       </Notice>
+    ) : signInDeployment !== null && signInLink.isPending ? (
+      <div className="flex h-full items-center justify-center">
+        <Spinner className="size-5 text-muted-foreground" />
+      </div>
     ) : (
-      signInDeployment !== null && signInLink.isPending ? (
-        <div className="flex h-full items-center justify-center">
-          <Spinner className="size-5 text-muted-foreground" />
-        </div>
-      ) : (
-        <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} firstSrc={firstSrc} />
-      )
+      <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} firstSrc={firstSrc} />
     );
 
   if (fullscreen && app && known && !onComputer) {

@@ -47,7 +47,6 @@ export function useAppPrimaryAction(input: {
   readonly boxId?: number | null;
 }): AppPrimaryRunner {
   const { environmentId } = input;
-  const boxId = input.boxId ?? null;
   const queryClient = useQueryClient();
   const { openHere, openComputerApp } = useOpenApp();
   const navigate = useNavigate();
@@ -112,7 +111,7 @@ export function useAppPrimaryAction(input: {
       }
       return action;
     },
-    [boxId, environmentId, navigate, openComputerApp, openHere, sendToUno, startMutate],
+    [navigate, openComputerApp, openHere, sendToUno, startMutate],
   );
 
   return {
