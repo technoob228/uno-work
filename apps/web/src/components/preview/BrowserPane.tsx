@@ -36,6 +36,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useDemoDesktop } from "../../demo/demoFlag";
 import { isElectron } from "../../env";
+import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import {
   isBrowserExtensionConnected,
   runExtensionBrowserCommand,
@@ -60,6 +61,8 @@ import { PageToolsButtons } from "./annotate/PageToolsButtons";
 import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
 import { usePageTools } from "./annotate/usePageTools";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
+import { YourBrowserTab } from "./YourBrowserTab";
+import { browserTabMode } from "./yourBrowserTab.logic";
 import { isTypingTarget } from "./panelLauncher.logic";
 import { useChatBrowser } from "./useChatBrowser";
 import { BrowserSourceChip } from "./BrowserSourceChip";
@@ -257,6 +260,14 @@ export function matchCredentialsForOrigin(input: {
 export function BrowserViews({ activeId }: { activeId: string | null }) {
   const { statesByScopeKey, currentProjectKey, currentChatThreadId, activeFileId } =
     usePreviewPane();
+  // The web version shows a tab's page from the computer's browser (p.14);
+  // the desktop app (and its demo) keeps its own page in the panel.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const demoDesktop = useDemoDesktop();
+  const mode = browserTabMode({
+    desktopApp: isElectron || demoDesktop,
+    computer: primaryEnvironmentId !== null,
+  });
   const visibleKeys = new Set(
     visibleScopeKeys({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
   );
@@ -274,6 +285,19 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
         ? bucketActiveId
         : tabs[tabs.length - 1]!.id;
     for (const tab of tabs) {
+      const visible = visibleKeys.has(scopeKey) && tab.id === activeId;
+      if (mode === "computer" && primaryEnvironmentId) {
+        views.push(
+          <YourBrowserTab
+            key={`${scopeKey}::${tab.id}`}
+            tab={tab}
+            scopeKey={scopeKey}
+            environmentId={primaryEnvironmentId}
+            visible={visible}
+          />,
+        );
+        continue;
+      }
       views.push(
         <BrowserView
           // Один и тот же файл может быть открыт в бакетах разных тредов —
@@ -282,7 +306,7 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
           tab={tab}
           scopeKey={scopeKey}
           projectKey={browserTabProjectKey(tab, scopeKey)}
-          visible={visibleKeys.has(scopeKey) && tab.id === activeId}
+          visible={visible}
           automationActive={tab.id === automationTabId}
         />,
       );

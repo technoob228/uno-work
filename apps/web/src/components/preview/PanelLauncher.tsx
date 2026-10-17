@@ -249,7 +249,10 @@ function PanelLauncherV2({
                 tile.id === "site"
                   ? desktop
                     ? `Opens on ${deviceName}. Turn on Comment to leave notes and see errors.`
-                    : "Opens in a new tab of your browser, with your own sign-ins."
+                    : primaryEnvironmentId
+                      ? // The web version (p.14): a live page of the computer's browser.
+                        `Opens right here, in the browser of ${machineLabels.get(primaryEnvironmentId) ?? "your computer"}. Your sign-ins stay there.`
+                      : "Opens in a new tab of your browser, with your own sign-ins."
                   : tile.id === "agentBrowser"
                     ? `Runs on ${agentComputer ?? "the chat's computer"}. The agent works there; your sign-ins stay on that computer.`
                     : undefined;

@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { readEnvironmentApi } from "../../environmentApi";
 import { liveBrowserTabId, useBrowserLiveState } from "../preview/browserLiveStore";
 import { LiveBrowserView } from "../preview/LiveBrowserView";
+import { isPersonTabPage } from "../preview/yourBrowserTab.logic";
 import type { PreviewFile } from "../preview/PreviewPaneContext";
 import { Spinner } from "../ui/spinner";
 
@@ -44,7 +45,9 @@ export function ComputerAppPage({
   // A page of this app already open on the computer (no chat's own page).
   const existing = useMemo(
     () =>
-      state?.pages.find((page) => !page.context?.threadId && sameAppOrigin(page.url, url)) ?? null,
+      state?.pages.find(
+        (page) => !page.context?.threadId && !isPersonTabPage(page) && sameAppOrigin(page.url, url),
+      ) ?? null,
     [state, url],
   );
 

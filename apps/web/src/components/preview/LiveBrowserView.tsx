@@ -46,6 +46,7 @@ import { isTypingTarget } from "./panelLauncher.logic";
 import { useBrowserLivePage, useBrowserLiveState, useBrowserOpenError } from "./browserLiveStore";
 import { useChatBrowser } from "./useChatBrowser";
 import { browserUrlOrigin, normalizeBrowserUrl } from "./browserUrl";
+import { isBlankPageUrl } from "./yourBrowserTab.logic";
 import type { PreviewFile } from "./PreviewPaneContext";
 
 const IS_MAC = typeof navigator !== "undefined" && isMacPlatform(navigator.platform);
@@ -69,8 +70,12 @@ export function agentUsesBrowser(
  * Вкладка браузера самой машины (Work в облаке). Браузер работает на машине —
  * и когда приложение закрыто; здесь его картинка (CDP screencast) и, после
  * «Take control», мышь и клавиатура человека. Пока рулит человек, агент ждёт.
+ *
+ * `mine` — своя вкладка человека в веб-версии (YourBrowserTab, п.14): страница
+ * не чата, рулит человек с самого начала — ни «Take control», ни строки про
+ * агента; «Open in my browser» и расширение — под страницей, у вкладки.
  */
-export function LiveBrowserView({ file }: { file: PreviewFile }) {
+export function LiveBrowserView({ file, mine = false }: { file: PreviewFile; mine?: boolean }) {
   const environmentId = (file.environmentId ?? null) as EnvironmentId | null;
   const pageId = file.livePageId ?? null;
   const state = useBrowserLiveState(environmentId);
@@ -203,11 +208,12 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         page={page}
         human={human}
         tabId={file.id}
-        sourceChip={!launcherV2}
+        sourceChip={!launcherV2 && !mine}
         pageToolsOn={pageToolsOn}
+        mine={mine}
       />
       <LocationStrip environmentId={environmentId} location={state.location} />
-      {launcherV2 ? (
+      {mine ? null : launcherV2 ? (
         // Sign-in, captcha, 2FA: the same card as above the chat's composer.
         <BrowserHelpCard environmentId={environmentId} page={page} where="panel" />
       ) : page.help ? (
@@ -243,13 +249,15 @@ export function LiveBrowserView({ file }: { file: PreviewFile }) {
         tabId={tabId}
         tools={pageToolsOn ? liveView : null}
         commenting={pageToolsOn && pageTools.commenting}
+        // A new tab of one's own: the address bar has the focus, not the page.
+        focusOnControl={!(mine && isBlankPageUrl(page.url))}
       />
       {pageToolsOn ? <CommentBar tabId={tabId} pageUrl={page.url} /> : null}
       {pageToolsOn && pageTools.commenting ? (
         <DebugDrawer tabId={tabId} pageUrl={page.url} />
       ) : null}
       <div
-        hidden={launcherV2 && page.help !== null}
+        hidden={mine || (launcherV2 && page.help !== null)}
         className={cn(
           "flex items-center gap-2 border-t px-3 py-1.5 text-xs",
           human ? "border-primary/40 bg-primary/5" : "border-border",
@@ -545,22 +553,27 @@ function Toolbar({
   tabId,
   sourceChip,
   pageToolsOn,
+  mine,
 }: {
   environmentId: EnvironmentId;
   page: BrowserLivePage;
   human: boolean;
   tabId: string;
+  /** The person's own tab: "Open in my browser" is under the page, not here. */
+  mine: boolean;
   /** The "Opens in" chip of 0.0.135–0.0.137 (without Labs `panelLauncherV2`). */
   sourceChip: boolean;
   /** Comment in the bar (flag `browserPageTools`), on the desktop and on the web. */
   pageToolsOn: boolean;
 }) {
   const api = useMemo(() => readEnvironmentApi(environmentId), [environmentId]);
-  const [draft, setDraft] = useState(page.url);
+  // A blank page shows an empty address bar, not "about:blank".
+  const shownUrl = isBlankPageUrl(page.url) ? "" : page.url;
+  const [draft, setDraft] = useState(shownUrl);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
-    if (!editing) setDraft(page.url);
-  }, [editing, page.url]);
+    if (!editing) setDraft(shownUrl);
+  }, [editing, shownUrl]);
 
   const navigate = useCallback(
     async (action: "goto" | "back" | "forward" | "reload", url?: string) => {
@@ -691,14 +704,21 @@ function Toolbar({
           const url = normalizeBrowserUrl(draft);
           if (!url) return;
           setEditing(false);
+          // The keyboard goes back to the page, as in a browser.
+          (event.currentTarget.elements.namedItem("address") as HTMLInputElement | null)?.blur();
           void navigate("goto", url);
         }}
       >
         <input
+          name="address"
           value={draft}
           readOnly={!human}
           title={navTitle}
           placeholder={human ? "Type an address" : ""}
+          autoFocus={mine && shownUrl === ""}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           onFocus={() => setEditing(true)}
           onBlur={() => setEditing(false)}
           onChange={(event) => setDraft(event.target.value)}
@@ -719,7 +739,7 @@ function Toolbar({
           <KeyRoundIcon />
         </Button>
       ) : null}
-      <LiveBrowserOpenOutside environmentId={environmentId} pageUrl={page.url} />
+      {mine ? null : <LiveBrowserOpenOutside environmentId={environmentId} pageUrl={page.url} />}
     </div>
   );
 }
@@ -757,6 +777,7 @@ function Screen({
   tabId,
   tools,
   commenting,
+  focusOnControl = true,
 }: {
   environmentId: EnvironmentId;
   pageId: string;
@@ -775,6 +796,8 @@ function Screen({
    * page never gets these clicks.
    */
   commenting: boolean;
+  /** Taking control puts the keyboard into the page (not for a new tab's address bar). */
+  focusOnControl?: boolean;
 }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -833,8 +856,10 @@ function Screen({
   const commentPointer = commenting && tools !== null;
 
   // Взял управление — фокус на поверхность, чтобы клавиатура сразу шла в страницу.
+  const focusOnControlRef = useRef(focusOnControl);
+  focusOnControlRef.current = focusOnControl;
   useEffect(() => {
-    if (human) surfaceRef.current?.focus();
+    if (human && focusOnControlRef.current) surfaceRef.current?.focus();
     setHint(false);
   }, [human]);
 
