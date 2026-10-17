@@ -64,6 +64,16 @@ import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { YourBrowserTab } from "./YourBrowserTab";
 import { browserTabMode } from "./yourBrowserTab.logic";
 import { WEB_PAGE_IN_PANEL } from "./browserSource";
+
+/** A page of the address Work itself is served from (the web's iframe can reach only those). */
+function isSameOriginUrl(url: string): boolean {
+  if (!url) return true;
+  try {
+    return new URL(url, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
 import { isTypingTarget } from "./panelLauncher.logic";
 import { useChatBrowser } from "./useChatBrowser";
 import { BrowserSourceChip } from "./BrowserSourceChip";
@@ -354,7 +364,11 @@ function BrowserView({
   // panel (the desktop app, its demo). The web build's page is a companion
   // tab in the person's own browser — no tools there, flag or not.
   const pageToolsFlag = useFeatureFlag("browserPageTools");
-  const pageToolsOn = pageToolsFlag && pageInPanel;
+  const currentUrl = tab.url ?? "";
+  // The web's iframe reaches only a page of Work's own address; on any other
+  // page Comment couldn't see it, so it isn't offered there.
+  const pageToolsOn =
+    pageToolsFlag && pageInPanel && (!iframeMode || demoDesktop || isSameOriginUrl(currentUrl));
   const pageElementRef = useRef<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
@@ -394,7 +408,6 @@ function BrowserView({
     password: string;
   } | null>(null);
 
-  const currentUrl = tab.url ?? "";
   // No "Opens in" chip (Misha 16.10, Labs `panelLauncherV2`): Your site and
   // the agent's browser are two tools, not one browser with a default. Moving
   // a page over is an explicit action in ⋮, for when the agent should work
@@ -408,14 +421,16 @@ function BrowserView({
   // with Comment; public addresses stay as they are (a tab of this browser).
   const openedOnComputerRef = useRef<string | null>(null);
   useEffect(() => {
-    if (pageInPanel || !visible || !pageToolsFlag || !canOpenInAgentBrowser) return;
+    // Still in the web (Misha 17.10): until Work forwards the computer's ports
+    // to its own address, this device's iframe would open its own localhost.
+    if (isElectron || demoDesktop || !visible || !pageToolsFlag || !canOpenInAgentBrowser) return;
     if (!currentUrl || !isComputerLocalUrl(currentUrl)) return;
     if (openedOnComputerRef.current === currentUrl) return;
     openedOnComputerRef.current = currentUrl;
     openInSource("computer", currentUrl);
     closeFile(tab.id);
   }, [
-    pageInPanel,
+    demoDesktop,
     visible,
     pageToolsFlag,
     canOpenInAgentBrowser,

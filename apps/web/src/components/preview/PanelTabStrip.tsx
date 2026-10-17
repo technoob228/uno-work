@@ -18,8 +18,8 @@
  * inside `dragstart` makes Chrome/Electron cancel the drag on the spot (Misha
  * 16.10, point 3 — "dragging into another group does nothing").
  *
- * Each tab carries the letter of its group in the group's color (C / P / E;
- * dropped when the tab shrinks to an icon), and its tooltip — Uno's, not the
+ * A tab carries no group letter — the group's outline and icon say it (Misha
+ * 17.10: "remove the letters, keep the icon"); its tooltip — Uno's, not the
  * browser's slow `title` — says first where it stays pinned (`scopeHint`).
  * Tabs size like Chrome (`foldedGroups`): 180 → 72 px, then inactive tabs
  * fold into icons — the chat's group first; the active tab keeps its name and
@@ -53,7 +53,6 @@ import {
   dropBeforeId,
   foldedGroups,
   GROUP_LABEL,
-  GROUP_LETTER,
   GROUP_ORDER,
   groupLabelWidth,
   groupsForDrag,
@@ -125,22 +124,6 @@ type DropSpot = { readonly scope: PreviewTabScope; readonly beforeId: string | n
 
 function DropLine() {
   return <span aria-hidden className="h-5 w-0.5 shrink-0 rounded-full bg-primary" />;
-}
-
-/** The tab's group after its name: its letter in the group's color (Misha 17.10, point 4). */
-function GroupMark({ scope }: { scope: PreviewTabScope }) {
-  return (
-    <span
-      aria-hidden
-      data-tab-group-mark={scope}
-      className={cn(
-        "inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded px-0.5 text-[9px] leading-none font-semibold",
-        LABEL_TINT[scope],
-      )}
-    >
-      {GROUP_LETTER[scope]}
-    </span>
-  );
 }
 
 function TabTooltip({ lines }: { lines: ReadonlyArray<string> }) {
@@ -540,7 +523,6 @@ export function PanelTabStrip({
                             <span className="min-w-0 flex-1 truncate">
                               {isTasksTab(file) ? <TasksTabName file={file} /> : file.name}
                             </span>
-                            <GroupMark scope={scope} />
                             <button
                               type="button"
                               aria-label={`Close ${file.name}`}
