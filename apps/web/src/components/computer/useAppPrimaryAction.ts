@@ -13,8 +13,7 @@ import { useCallback } from "react";
 import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { toastManager } from "../ui/toast";
 import { appPrimaryAction, type AppPrimaryAction } from "./appPrimaryAction";
-import { appSignInApi, machineAppActionMutationOptions } from "./computerQueries";
-import { openAppSignedIn } from "./openSignedIn";
+import { machineAppActionMutationOptions } from "./computerQueries";
 import type { ProgramTile } from "./programModel";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 
@@ -62,17 +61,11 @@ export function useAppPrimaryAction(input: {
       const action = appPrimaryAction(tile);
       switch (action.kind) {
         case "open": {
-          const store = tile.storeApp;
-          const url = action.url!;
-          if (store?.sso && store.deploymentId !== null) {
-            // Sign in with Uno: the app opens already signed in, in its own tab —
-            // the Uno sign-in cookie can't work inside Uno Work's cross-site frame.
-            const deploymentId = store.deploymentId;
-            const signIn = appSignInApi(environmentId, boxId);
-            void openAppSignedIn(() => signIn.openLink(deploymentId), url);
-          } else {
-            openHere({ url, name: tile.name, icon: tile.icon });
-          }
+          // Sign in with Uno apps too: inside Uno Work, already signed in — the
+          // window loads the app's one-time sign-in link first (AppView), and the
+          // console keeps that sign-in in Uno Work's partition (Misha 17.10:
+          // "inside Work the app opens without its password").
+          openHere({ url: action.url!, name: tile.name, icon: tile.icon });
           break;
         }
         case "openOnComputer":

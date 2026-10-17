@@ -43,6 +43,7 @@ export function AppFrame({
   name,
   icon,
   reloadKey = 0,
+  firstSrc = null,
   compact = false,
   className,
 }: {
@@ -51,6 +52,12 @@ export function AppFrame({
   icon?: string | null;
   /** Bump to reload the app. */
   reloadKey?: number;
+  /**
+   * What the frame loads first instead of `url`: the one-time "Sign in with
+   * Uno" link of an App Store app, which lands in the app already signed in.
+   * A reload goes to `url` (the sign-in is there by then).
+   */
+  firstSrc?: string | null;
   /** The right panel: a smaller "can't show it here" card. */
   compact?: boolean;
   className?: string;
@@ -59,7 +66,7 @@ export function AppFrame({
     return (
       <webview
         key={`${url}#${reloadKey}`}
-        src={url}
+        src={reloadKey === 0 && firstSrc ? firstSrc : url}
         partition="persist:uno-apps"
         allowpopups
         className={cn("h-full w-full", className)}
@@ -73,6 +80,7 @@ export function AppFrame({
       name={name}
       icon={icon ?? null}
       reloadKey={reloadKey}
+      firstSrc={firstSrc}
       compact={compact}
       className={className}
     />
@@ -84,6 +92,7 @@ function BrowserAppFrame({
   name,
   icon,
   reloadKey,
+  firstSrc,
   compact,
   className,
 }: {
@@ -91,6 +100,7 @@ function BrowserAppFrame({
   name: string;
   icon: string | null;
   reloadKey: number;
+  firstSrc: string | null;
   compact: boolean;
   className: string | undefined;
 }) {
@@ -172,7 +182,7 @@ function BrowserAppFrame({
   return (
     <iframe
       key={`${url}#${reloadKey}`}
-      src={url}
+      src={reloadKey === 0 && firstSrc ? firstSrc : url}
       title={name}
       allow={FRAME_ALLOW}
       sandbox={FRAME_SANDBOX}

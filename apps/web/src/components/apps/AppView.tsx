@@ -30,7 +30,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useNavStore } from "../../navigation/navStore";
@@ -39,7 +39,7 @@ import { useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { computerLocalUrl } from "../computer/appPrimaryAction";
-import { machineAppActionMutationOptions } from "../computer/computerQueries";
+import { appSignInApi, machineAppActionMutationOptions } from "../computer/computerQueries";
 import { useStartingAppId } from "../computer/useAppPrimaryAction";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
@@ -131,6 +131,25 @@ export function AppView() {
       canStartHere ||
       (startingId !== null && startingId === machineApp?.id));
 
+  // An App Store app with Sign in with Uno: the window loads its one-time
+  // sign-in link first and lands in the app signed in, no password. Asked at
+  // the moment of opening (the link works once, for a minute); no link (older
+  // console, app not ready) → the app's own address and its own sign-in.
+  const store = tile?.storeApp ?? null;
+  const signInDeployment =
+    store?.sso && store.deploymentId !== null && known && !onComputer ? store.deploymentId : null;
+  const signInLink = useQuery({
+    queryKey: ["uno-app-sign-in-link", machine.environmentId, signInDeployment, url],
+    queryFn: () => appSignInApi(machine.environmentId, null).openLink(signInDeployment!),
+    enabled: signInDeployment !== null && machine.environmentId !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const firstSrc =
+    signInLink.data?.signedIn && /^https?:\/\//.test(signInLink.data.url) ? signInLink.data.url : null;
+
   const frame =
     search.app && !byKey && loading ? (
       <div className="flex h-full items-center justify-center">
@@ -192,7 +211,13 @@ export function AppView() {
         </div>
       </Notice>
     ) : (
-      <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} />
+      signInDeployment !== null && signInLink.isPending ? (
+        <div className="flex h-full items-center justify-center">
+          <Spinner className="size-5 text-muted-foreground" />
+        </div>
+      ) : (
+        <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} firstSrc={firstSrc} />
+      )
     );
 
   if (fullscreen && app && known && !onComputer) {
