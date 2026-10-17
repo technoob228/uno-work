@@ -84,6 +84,19 @@ export const GROUP_LABEL: Record<PreviewTabScope, string> = {
   chat: "This chat",
 };
 
+/**
+ * The letter each tab carries for its group (Misha 17.10: the tiny icon
+ * wasn't noticed — "a mark or a letter of the group on the tab").
+ */
+export const GROUP_LETTER: Record<PreviewTabScope, string> = {
+  chat: "C",
+  project: "P",
+  global: "E",
+};
+
+/** An empty group outside a drag: a small dashed slot with its icon, room to drop a tab. */
+export const EMPTY_SLOT_WIDTH = 30;
+
 /** "Move to" choices of a tab's menu. */
 export function moveToLabel(scope: PreviewTabScope, projectName: string | null): string {
   if (scope === "project") return projectName ? `Project · ${projectName}` : "Project";

@@ -9,15 +9,18 @@
  * chat's group changes.
  *
  * Dragging, like Chrome: a tab dragged along its group changes places, into
- * another outline moves there (a line shows where it lands; while dragging,
- * missing groups show as empty slots). Right-click → Move to is the fallback.
+ * another outline moves there (a line shows where it lands). In a chat the
+ * groups without tabs are always there as small dashed slots with their icon
+ * — otherwise nobody knows they exist (Misha 17.10: "didn't notice the
+ * groups"); while dragging they open up with their names. Right-click → Move
+ * to is the fallback.
  * The slots appear a tick after the drag starts: changing the row's layout
  * inside `dragstart` makes Chrome/Electron cancel the drag on the spot (Misha
  * 16.10, point 3 — "dragging into another group does nothing").
  *
- * Each tab carries a tiny mark of its group (bubble / folder / globe — the
- * same icons as the group labels; dropped when the tab shrinks to an icon), and
- * its tooltip says where it stays pinned (`scopeHint`).
+ * Each tab carries the letter of its group in the group's color (C / P / E;
+ * dropped when the tab shrinks to an icon), and its tooltip — Uno's, not the
+ * browser's slow `title` — says first where it stays pinned (`scopeHint`).
  * Tabs size like Chrome (`foldedGroups`): 180 → 72 px, then inactive tabs
  * fold into icons — the chat's group first; the active tab keeps its name and
  * stays in view; past that the row scrolls with a fade at the edge. Tabs the
@@ -48,8 +51,10 @@ import {
 } from "./PreviewPaneContext";
 import {
   dropBeforeId,
+  EMPTY_SLOT_WIDTH,
   foldedGroups,
   GROUP_LABEL,
+  GROUP_LETTER,
   GROUP_ORDER,
   groupLabelWidth,
   groupsForDrag,
@@ -122,15 +127,33 @@ function DropLine() {
   return <span aria-hidden className="h-5 w-0.5 shrink-0 rounded-full bg-primary" />;
 }
 
-/** The tab's group, tiny and quiet, after its name (Misha 16.10, point 4). */
+/** The tab's group after its name: its letter in the group's color (Misha 17.10, point 4). */
 function GroupMark({ scope }: { scope: PreviewTabScope }) {
-  const Icon = GROUP_ICON[scope];
   return (
-    <Icon
+    <span
       aria-hidden
       data-tab-group-mark={scope}
-      className="size-2.5 shrink-0 text-muted-foreground/60"
-    />
+      className={cn(
+        "inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded px-0.5 text-[9px] leading-none font-semibold",
+        LABEL_TINT[scope],
+      )}
+    >
+      {GROUP_LETTER[scope]}
+    </span>
+  );
+}
+
+function TabTooltip({ lines }: { lines: ReadonlyArray<string> }) {
+  const [first, ...rest] = lines;
+  return (
+    <TooltipPopup side="bottom" className="max-w-72" data-testid="panel-tab-tooltip">
+      <div className="font-medium">{first}</div>
+      {rest.map((line) => (
+        <div key={line} className="text-muted-foreground">
+          {line}
+        </div>
+      ))}
+    </TooltipPopup>
   );
 }
 
@@ -214,10 +237,15 @@ export function PanelTabStrip({
     observer.observe(row);
     return () => observer.disconnect();
   }, []);
+  // Empty groups shown as slots outside a drag take their room too.
+  const emptySlots =
+    inChat && dragging === null
+      ? GROUP_ORDER.filter((scope) => !groups.some((group) => group.scope === scope)).length
+      : 0;
   const folded = useMemo(
     () =>
       foldedGroups({
-        available,
+        available: available - emptySlots * EMPTY_SLOT_WIDTH,
         groups: groups.map((group) => {
           const count = shownIn(group.scope, group.files).length;
           return {
@@ -229,7 +257,7 @@ export function PanelTabStrip({
         }),
       }),
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- shownIn reads collapsed/activeId
-    [available, withIcons, groups, activeScope, collapsed, activeId],
+    [available, emptySlots, withIcons, groups, activeScope, collapsed, activeId],
   );
   // The active tab is always fully in view.
   useEffect(() => {
@@ -316,17 +344,18 @@ export function PanelTabStrip({
     setMenu({ file, anchor: from.closest("[data-preview-tab]") ?? from });
   };
 
-  const tooltip = (file: PreviewFile) => {
-    if (isTasksTab(file)) return "Tasks and plan of this chat";
-    const lines = [`${kindLabel[file.kind]} — ${file.name}`, scopeHint(scopeOf(file), projectName)];
+  /** First the group (where it stays pinned), then the rest. */
+  const tooltip = (file: PreviewFile): ReadonlyArray<string> => {
+    if (isTasksTab(file)) return ["Tasks and plan of this chat"];
+    const lines = [scopeHint(scopeOf(file), projectName), `${kindLabel[file.kind]} — ${file.name}`];
     if (file.openedBy === "agent") lines.push("Opened by the agent");
     if (DUAL_VIEW_KINDS.has(file.kind)) lines.push("Double-click: code ↔ preview");
     if (movable(file)) lines.push("Drag to reorder or into another group · right-click → Move to");
-    return lines.join("\n");
+    return lines;
   };
 
-  // While a tab is dragged in a chat, every group it could go to shows — empty ones as slots.
-  const shown = groupsForDrag(groups, dragging !== null && inChat);
+  // In a chat every group a tab could go to shows — empty ones as slots (named while dragging).
+  const shown = groupsForDrag(groups, inChat);
   // The empty slots appear at the row's ends, which a narrow panel scrolls out
   // of view (Misha 16.10 p.3: "dragging into another group does nothing" — the
   // Everywhere slot was past the right edge). Bring them into view.
@@ -388,47 +417,72 @@ export function PanelTabStrip({
               )}
               style={{ flex: "0 1 auto" }}
             >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={`${GROUP_LABEL[scope]}${isCollapsed ? ` — ${hidden} hidden` : ""}`}
-                      aria-expanded={groupFiles.length > 0 ? !isCollapsed : undefined}
-                      data-testid={`panel-tab-group-label-${scope}`}
-                      disabled={groupFiles.length === 0}
-                      onClick={() => toggleCollapsed(scope)}
-                      className={cn(
-                        "inline-flex h-5 shrink-0 items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default",
-                        // An empty slot's label is a disabled button, and Chrome
-                        // swallows drag events on it: let them reach the outline.
-                        groupFiles.length === 0 && "pointer-events-none",
-                        withIcons ? "min-w-5 justify-center px-1" : "px-1.5",
-                        groupFiles.length === 0 ? "text-muted-foreground" : LABEL_TINT[scope],
-                        groupFiles.length > 0 && "cursor-pointer hover:brightness-95",
-                      )}
-                    />
-                  }
-                >
-                  {withIcons ? <GroupIcon className="size-3" /> : null}
-                  {!withIcons || groupFiles.length === 0
-                    ? scope === "project" && projectName && groupFiles.length === 0
-                      ? `Project · ${projectName}`
-                      : GROUP_LABEL[scope]
-                    : null}
-                  {isCollapsed && hidden > 0 ? (
-                    <span className="tabular-nums opacity-80">{hidden}</span>
-                  ) : null}
-                </TooltipTrigger>
-                <TooltipPopup side="bottom" className="whitespace-pre-line">
-                  {groupTitle(scope, projectName)}
-                  {groupFiles.length > 0
-                    ? isCollapsed
-                      ? "\nClick to show its tabs"
-                      : "\nClick to collapse"
-                    : ""}
-                </TooltipPopup>
-              </Tooltip>
+              {groupFiles.length === 0 ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      // A span, not a disabled button: Chrome swallows drag
+                      // events on a disabled button, and they must reach the outline.
+                      <span
+                        aria-label={`${GROUP_LABEL[scope]} — empty`}
+                        data-testid={`panel-tab-group-label-${scope}`}
+                        className={cn(
+                          "inline-flex h-5 shrink-0 items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap text-muted-foreground",
+                          dragging ? "px-1.5" : "min-w-5 justify-center px-1",
+                        )}
+                      />
+                    }
+                  >
+                    {dragging ? (
+                      scope === "project" && projectName ? (
+                        `Project · ${projectName}`
+                      ) : (
+                        GROUP_LABEL[scope]
+                      )
+                    ) : (
+                      <GroupIcon className="size-3" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom" className="whitespace-pre-line">
+                    {groupTitle(scope, projectName)}
+                    {"\nDrag a tab here to keep it "}
+                    {scope === "global"
+                      ? "everywhere"
+                      : scope === "project"
+                        ? "in this project"
+                        : "only in this chat"}
+                  </TooltipPopup>
+                </Tooltip>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`${GROUP_LABEL[scope]}${isCollapsed ? ` — ${hidden} hidden` : ""}`}
+                        aria-expanded={!isCollapsed}
+                        data-testid={`panel-tab-group-label-${scope}`}
+                        onClick={() => toggleCollapsed(scope)}
+                        className={cn(
+                          "inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-md text-[11px] font-medium whitespace-nowrap outline-none hover:brightness-95 focus-visible:ring-1 focus-visible:ring-ring",
+                          withIcons ? "min-w-5 justify-center px-1" : "px-1.5",
+                          LABEL_TINT[scope],
+                        )}
+                      />
+                    }
+                  >
+                    {withIcons ? <GroupIcon className="size-3" /> : null}
+                    {withIcons ? null : GROUP_LABEL[scope]}
+                    {isCollapsed && hidden > 0 ? (
+                      <span className="tabular-nums opacity-80">{hidden}</span>
+                    ) : null}
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom" className="whitespace-pre-line">
+                    {groupTitle(scope, projectName)}
+                    {isCollapsed ? "\nClick to show its tabs" : "\nClick to collapse"}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
               {visible.map((file) => {
                 const Icon = kindIcon[file.kind];
                 const isActive = file.id === activeId;
@@ -436,6 +490,9 @@ export function PanelTabStrip({
                 return (
                   <Fragment key={file.id}>
                     {lineAt(file.id)}
+                    <Tooltip>
+                    <TooltipTrigger
+                    render={
                     <div
                       role="tab"
                       tabIndex={0}
@@ -459,7 +516,6 @@ export function PanelTabStrip({
                         event.preventDefault();
                         openMenuUnderTab(file, event.currentTarget);
                       }}
-                      title={tooltip(file)}
                       style={
                         iconOnly
                           ? undefined
@@ -477,6 +533,8 @@ export function PanelTabStrip({
                           : "text-muted-foreground hover:bg-accent/50",
                         dragging?.id === file.id && "opacity-40",
                       )}
+                    />
+                    }
                     >
                       <span className="relative inline-flex shrink-0">
                         <Icon className="size-3.5" />
@@ -504,7 +562,11 @@ export function PanelTabStrip({
                           </button>
                         </>
                       )}
-                    </div>
+                    </TooltipTrigger>
+                    {dragging ? null : (
+                      <TabTooltip lines={tooltip(file)} />
+                    )}
+                    </Tooltip>
                   </Fragment>
                 );
               })}

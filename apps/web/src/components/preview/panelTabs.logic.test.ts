@@ -4,6 +4,7 @@ import {
   dropBeforeId,
   foldedGroups,
   groupLabelWidth,
+  GROUP_LETTER,
   groupsForDrag,
   groupStripTabs,
   moveToLabel,
@@ -207,5 +208,11 @@ describe("tabs saved by 0.0.137 and earlier", () => {
       },
     });
     expect(saving).toEqual({ [GLOBAL_SCOPE_KEY]: [saved[GLOBAL_SCOPE_KEY]![0]] });
+  });
+});
+
+describe("GROUP_LETTER", () => {
+  it("gives each group its own letter: Chat, Project, Everywhere", () => {
+    expect(GROUP_LETTER).toEqual({ chat: "C", project: "P", global: "E" });
   });
 });
