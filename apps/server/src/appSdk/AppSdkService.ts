@@ -82,11 +82,14 @@ import {
 } from "./appStorage.ts";
 import { type ModelPrice, parseModelPrices } from "./pricing.ts";
 import { installSdkFiles } from "./sdkFiles.ts";
+import { ensureGitRemoteUnoAlias, runGitConfigGlobal } from "./gitRemoteUno.ts";
+import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { openAiSpendLedger } from "./aiSpendLedger.ts";
 import { openAiStatusReader } from "./aiStatus.ts";
 
 export const APP_API_GATEWAY_ENV = "UNO_WORK_APP_GATEWAY_URL";
 const SYNC_EVERY = Duration.seconds(5);
+const GIT_REMOTE_CHECK_EVERY = Duration.minutes(1);
 const AI_SPEND_SAMPLE_EVERY = Duration.minutes(20);
 const BRIDGE_CHECK_EVERY = Duration.seconds(30);
 const PRICES_TTL_MS = 60 * 60_000;
@@ -887,10 +890,34 @@ export const makeAppSdkService = (
       });
 
     if (options.background !== false) {
-      yield* Effect.promise(() => installSdkFiles(home)).pipe(
+      // daemon.json tells git-remote-uno where this daemon keeps the computer's key.
+      yield* Effect.promise(() =>
+        installSdkFiles(home, {
+          settingsPath: config.settingsPath,
+          consoleUrl: controlPlaneBaseUrl(),
+        }),
+      ).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("app sdk: could not install SDK files", { cause }),
         ),
+      );
+      // `uno::` git remotes from any terminal of a cloud computer (gitRemoteUno.ts).
+      // The console may link the computer after start: checked every minute until set.
+      let gitRemoteReady = false;
+      yield* Effect.forkScoped(
+        Effect.promise(async () => {
+          if (gitRemoteReady) return;
+          const current = await runPromise(readSettings);
+          if (!current?.uno.boxToken?.trim()) return;
+          await ensureGitRemoteUnoAlias({
+            home,
+            gitConfigGlobal: (args) => runGitConfigGlobal(args),
+          })
+            .then(() => {
+              gitRemoteReady = true;
+            })
+            .catch(() => undefined);
+        }).pipe(Effect.repeat(Schedule.spaced(GIT_REMOTE_CHECK_EVERY))),
       );
       yield* Effect.promise(() => sync());
 

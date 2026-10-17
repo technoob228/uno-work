@@ -44,11 +44,18 @@ export function parseDriveFile(raw: unknown): FilesDriveFile | null {
 }
 
 /**
- * Older copies of replaced files live in `<folder>/.versions/<name>/` (the
- * server's files/cloudVersions.ts); search and "recent" leave them out.
+ * The hidden root of git projects synced between the person's computers
+ * (`uno project sync`, git remotes `uno::<name>`: app-sdk git-remote-uno.mjs).
  */
-function isOlderCopy(key: string): boolean {
-  return key.split("/").includes(".versions");
+export const DRIVE_GIT_ROOT = ".uno-git";
+
+/**
+ * Not the person's files: older copies of replaced files in
+ * `<folder>/.versions/<name>/` (the server's files/cloudVersions.ts) and git
+ * projects under `.uno-git/`. Search and "recent" leave them out.
+ */
+export function isHiddenDriveKey(key: string): boolean {
+  return key.startsWith(`${DRIVE_GIT_ROOT}/`) || key.split("/").includes(".versions");
 }
 
 export function parseDriveFiles(raw: unknown): FilesDriveFile[] {
@@ -56,7 +63,7 @@ export function parseDriveFiles(raw: unknown): FilesDriveFile[] {
   return Array.isArray(list)
     ? list
         .map(parseDriveFile)
-        .filter((file): file is FilesDriveFile => file !== null && !isOlderCopy(file.key))
+        .filter((file): file is FilesDriveFile => file !== null && !isHiddenDriveKey(file.key))
     : [];
 }
 

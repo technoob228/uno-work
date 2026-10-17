@@ -1129,9 +1129,18 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
       if (!s.isDirectory() || s.isSymbolicLink()) return;
       const resolved = await realpath(dir);
       if (!isInside(realHome, resolved) || resolved === realHome) return;
+      // One entry at a time, each allowed to fail: a build writing into the
+      // cache while it is emptied (2507, 16.10: a Go build next to the clean-up)
+      // made one rm throw ENOTEMPTY and the whole clean-up report nothing.
+      let failed = 0;
       for (const name of await readdir(resolved)) {
-        await rm(path.join(resolved, name), { recursive: true, force: true });
+        await rm(path.join(resolved, name), { recursive: true, force: true, maxRetries: 3 }).catch(
+          () => {
+            failed += 1;
+          },
+        );
       }
+      return failed;
     };
 
     const clean: ComputerResourcesServiceShape["clean"] = (input) =>
@@ -1175,9 +1184,13 @@ export const makeComputerResourcesService = (options: ComputerResourcesOptions =
           } else {
             const paths = target.paths(home, platform);
             const before = (await measurePaths(paths)) ?? 0;
-            for (const dir of paths) await emptyFolder(dir, realHome);
+            let failed = 0;
+            for (const dir of paths) failed += (await emptyFolder(dir, realHome)) ?? 0;
             const after = (await measurePaths(paths)) ?? 0;
             freed = Math.max(0, before - after);
+            if (failed > 0 && freed === 0) {
+              throw new ActionError("Something is using these files right now. Try again later.");
+            }
           }
           // The home answer is out of date now.
           const homeScan = scans.get(realHome);

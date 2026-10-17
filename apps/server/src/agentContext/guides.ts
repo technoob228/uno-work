@@ -82,14 +82,14 @@ Check \`computer_status\` before installs, builds, test runs, docker images, dat
 - **The person's files and results** (documents, reports, PDFs, images, recordings, exports, archives, datasets, backups): Uno Drive — \`drive_save\` from here, \`drive_get\` back, \`drive_share_link\` to send. It is roomy and the same on every computer of the account; this disk is a working disk. Saving over a file in the Drive keeps the old one as a version.
 - **Code**: \`~/projects/<name>\`, one folder per project. One working copy per task: don't clone or copy a project again "to be safe", and don't make extra git worktrees; each has its own \`node_modules\`/\`.venv\` (hundreds of MB).
 - **Never on the disk**: a second copy of what is already in the Drive, big downloads you only need once (stream them or delete after), media inside a git repository.
-- In a shell or a script the same is one command: \`uno status\`, \`uno cleanup [--apply]\`, \`uno drive ls|put|get|link\`, \`uno guide <topic>\`.
+- In a shell or a script the same is one command: \`uno status\`, \`uno cleanup [--apply]\`, \`uno drive ls|put|get|link\`, \`uno project sync|get|ls\`, \`uno guide <topic>\`.
 
 ### Versions with git
 - Every project folder is a git repository: \`git init\` if it isn't; commit after each finished step with a message a person understands. That history is how work comes back after a mistake.
 - First \`.gitignore\`, then the first commit: \`.env\`, keys, \`node_modules/\`, \`.venv/\`, \`dist/\`, \`build/\`, caches, and big binaries (videos, archives, datasets, models: they belong in the Drive). Check \`git status\` before every commit; never \`git add\` a secret.
 - Git needs an author: if a commit says "Please tell me who you are", set \`git config --global user.name\` and \`user.email\` once for this computer — the person's name and email if you know them, else \`Uno Work\` and \`work@noreply.uno.place\`.
 - **GitHub**: cloning a public repository just works. A private one or a push needs the person's access: ask them to connect GitHub, or to add this computer's SSH key (show \`~/.ssh/id_ed25519.pub\`, make it with \`ssh-keygen -t ed25519\` if missing) at github.com/settings/keys. Never ask for a GitHub password or token in the chat (a token goes through \`request_secret\`). \`gh\` isn't installed: for issues, pull requests and files use the connected GitHub tools.
-- **Another computer of the same person**: hand work over through the project's git remote (push here, pull there) or the Drive for documents; never copy whole folders with \`node_modules\` around.`;
+- **Another computer of the same person**: code projects sync through the person's Uno cloud — \`uno project sync\` here (commit first; it adds the git remote \`uno\`), \`uno project get <name>\` there (lands in \`~/projects/<name>\`); after that plain \`git push uno\` / \`git pull uno\`; \`uno project ls\` lists them. Conflicts are normal git: pull, merge, push. GitHub only when the person asks for it or has it connected. Documents go through the Drive; never copy whole folders with \`node_modules\` around.`;
 
 const HTTP_FALLBACK_NOTE =
   "Prefer the `uno-work` tools named above. The raw HTTP API below is what they call; use it only when the tools are not available in your session.";

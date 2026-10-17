@@ -64,7 +64,7 @@ import {
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
-import { resourceWarnings } from "../computerResources/resourceWarnings.ts";
+import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ToolApprovalOutcome } from "../browserBridge.ts";
@@ -1030,6 +1030,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             mount: volume.mount,
             totalGb: volume.totalGb,
             freeGb: volume.freeGb,
+            usedPct: diskUsedPct(volume),
           })),
           topUsers: resources.groups
             .toSorted((a, b) => b.memMb - a.memMb)

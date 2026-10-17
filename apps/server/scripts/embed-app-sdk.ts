@@ -18,6 +18,8 @@ export const SOURCES = {
   python: "sdk/python/uno_app.py",
   /** The `uno` shell command (~/.uno/sdk/bin/uno runs it). */
   cli: "packages/app-sdk/src/uno-cli.mjs",
+  /** The `uno::<name>` git remote helper (~/.uno/sdk/bin/git-remote-uno runs it). */
+  gitRemote: "packages/app-sdk/src/git-remote-uno.mjs",
 } as const;
 export const TARGET = "apps/server/src/appSdk/sdkBundle.generated.ts";
 

@@ -24,6 +24,10 @@ export type Plan =
     }
   | { kind: "drive-ls"; folder: string; json: boolean }
   | { kind: "guide"; topic: string }
+  /** Git projects in the person's Uno cloud (git-remote-uno.mjs). */
+  | { kind: "project-ls"; json: boolean }
+  | { kind: "project-sync"; dir: string; name: string | null }
+  | { kind: "project-get"; name: string; dir: string }
   /** Not ours: handed to the Uno API CLI (`uno boxes list`) when one is on PATH. */
   | { kind: "delegate"; argv: string[] };
 
@@ -60,6 +64,9 @@ export declare function runOtherUno(
   argv: string[],
   env: NodeJS.ProcessEnv,
 ): Promise<number>;
+
+/** `env` with ~/.uno/sdk/bin (git-remote-uno) on PATH when the helper sits there. */
+export declare function projectGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 
 export declare function formatBytes(bytes: unknown): string;
 export declare function renderStatus(status: unknown): string;

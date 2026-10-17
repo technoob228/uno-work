@@ -21,6 +21,12 @@ export const SWAP_BUSY_PCT = 50;
 /** Swap use only matters while memory is short too (available below this share). */
 export const SWAP_MATTERS_AVAILABLE_PCT = 30;
 
+/** Used share as `df` shows it: used / (used + free for programs). */
+export function diskUsedPct(volume: Pick<UnoResourcesDiskVolume, "usedGb" | "freeGb">): number {
+  const room = volume.usedGb + volume.freeGb;
+  return room > 0 ? Math.round((volume.usedGb / room) * 100) : 0;
+}
+
 const gb = (value: number) => `${value < 10 ? value.toFixed(1) : Math.round(value)} GB`;
 
 export function resourceWarnings(input: {
@@ -30,7 +36,8 @@ export function resourceWarnings(input: {
   const notes: string[] = [];
   for (const volume of input.volumes) {
     if (volume.totalGb <= 0) continue;
-    const usedPct = Math.round((volume.usedGb / volume.totalGb) * 100);
+    // Like df: the blocks only root may use count neither as used nor as free.
+    const usedPct = diskUsedPct(volume);
     const where = input.volumes.length > 1 ? ` (${volume.mount})` : "";
     if (usedPct >= DISK_FULL_PCT || volume.freeGb < DISK_FULL_FREE_GB) {
       notes.push(

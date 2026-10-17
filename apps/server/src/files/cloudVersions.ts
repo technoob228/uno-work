@@ -11,6 +11,7 @@
  *
  * @module files/cloudVersions
  */
+import { DRIVE_GIT_ROOT } from "@t3tools/shared/unoDrive";
 
 /** The hidden folder next to a file that holds its older copies. */
 export const CLOUD_VERSIONS_FOLDER = ".versions";
@@ -79,6 +80,8 @@ export function cloudVersionSkipReason(
   keptSoFar: number,
 ): string | null {
   if (isCloudVersionKey(key)) return "it is an older copy itself";
+  // Git keeps its own history there (`uno project`, git-remote-uno).
+  if (key.startsWith(`${DRIVE_GIT_ROOT}/`)) return "git keeps the history of synced projects";
   if (size > CLOUD_VERSION_MAX_BYTES) {
     return `older copies are kept for files up to ${CLOUD_VERSION_MAX_BYTES / 1024 / 1024} MB`;
   }

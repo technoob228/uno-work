@@ -13,6 +13,7 @@ import {
   copyToCloud,
   copyToComputer,
   normalizeCloudPrefix,
+  parseListing,
 } from "./cloudStorage.ts";
 import { CLOUD_KEEP_VERSIONS, cloudVersionsPrefix } from "./cloudVersions.ts";
 import { NotEnoughSpaceError } from "./diskSpace.ts";
@@ -29,6 +30,17 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
 describe("cloud storage", () => {
+  it("hides .versions folders and, at the top, the git projects folder", () => {
+    const top = parseListing(
+      { folders: [".uno-git/", ".versions/", "Reports/"], objects: [{ key: "a.txt", size: 1 }] },
+      "",
+    );
+    expect(top.folders.map((folder) => folder.name)).toEqual(["Reports"]);
+    // Inside it (the `uno project` commands list it): shown as is.
+    const inside = parseListing({ folders: [".uno-git/notes/"], objects: [] }, ".uno-git/");
+    expect(inside.folders.map((folder) => folder.name)).toEqual(["notes"]);
+  });
+
   it("reports usage and buckets", async () => {
     const { deps } = fakeCloud();
     const state = await cloudState(deps);
