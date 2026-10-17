@@ -14,7 +14,9 @@ import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
 import {
   liveCaptureClip,
+  MAX_PERSON_TAB_PAGES,
   parseTrace,
+  personTabPageKey,
   proxyConfigProblem,
   SERVER_BROWSER_EXECUTABLE_ENV,
   ServerBrowser,
@@ -202,6 +204,68 @@ it.live.skipIf(!hasChromium)(
     }).pipe(Effect.provide(testLayer)),
   120_000,
 );
+
+it.live.skipIf(!hasChromium)(
+  "the person's own tabs: a page per tab, theirs from the start, out of the agents' reach",
+  () =>
+    Effect.gen(function* () {
+      const serverBrowser = yield* ServerBrowser;
+
+      const first = yield* serverBrowser.live.open({}, "", "dev1.browser-1");
+      const again = yield* serverBrowser.live.open({}, "", "dev1.browser-1");
+      const second = yield* serverBrowser.live.open({}, "", "dev1.browser-2");
+      assert.equal(again.pageId, first.pageId);
+      assert.notEqual(second.pageId, first.pageId);
+
+      const state = yield* serverBrowser.live.state;
+      const mine = state.pages.find((candidate) => candidate.pageId === first.pageId);
+      assert.equal(mine?.tab, "dev1.browser-1");
+      assert.isUndefined(mine?.context);
+      assert.equal(mine?.control, "human");
+      // Already on screen in its tab: no second tab for it in the app.
+      assert.equal(mine?.attention, 0);
+
+      // Clicks and typing straight away — no Take control.
+      yield* serverBrowser.live.input(first.pageId, { type: "mouse", action: "down", x: 5, y: 5 });
+      yield* serverBrowser.live.input(first.pageId, { type: "mouse", action: "up", x: 5, y: 5 });
+
+      // An agent without a chat (legacy token, app window) gets a page of its own.
+      const agent = yield* serverBrowser.execute({ command: "navigate", url: PAGE_URL }, {});
+      assert.isTrue(agent.ok, agent.error);
+      const after = yield* serverBrowser.live.state;
+      const agentPage = after.pages.find(
+        (candidate) => candidate.url.startsWith("data:text/html") && candidate.tab === undefined,
+      );
+      assert.isDefined(agentPage);
+      assert.notEqual(agentPage!.pageId, first.pageId);
+      assert.notEqual(agentPage!.pageId, second.pageId);
+
+      const refused = yield* serverBrowser.live.open({}, "", "bad tab id").pipe(Effect.flip);
+      assert.include(refused.detail, "can't open");
+
+      // Tabs gone without closing (a reloaded window) don't pile up: past the
+      // limit the longest-unseen page goes, the newest stay.
+      for (let i = 3; i <= MAX_PERSON_TAB_PAGES + 1; i++) {
+        yield* serverBrowser.live.open({}, "", `dev1.browser-${i}`);
+      }
+      const trimmed = yield* serverBrowser.live.state;
+      const tabs = trimmed.pages.flatMap((candidate) => (candidate.tab ? [candidate.tab] : []));
+      assert.equal(tabs.length, MAX_PERSON_TAB_PAGES);
+      assert.notInclude(tabs, "dev1.browser-1");
+      assert.include(tabs, `dev1.browser-${MAX_PERSON_TAB_PAGES + 1}`);
+
+      yield* serverBrowser.shutdown;
+    }).pipe(Effect.provide(testLayer)),
+  120_000,
+);
+
+it("keys a person's tab page apart from chats and legacy contexts", () => {
+  assert.equal(personTabPageKey("dev1.browser-3"), "tab:dev1.browser-3");
+  assert.isNull(personTabPageKey(undefined));
+  assert.isNull(personTabPageKey("  "));
+  assert.isNull(personTabPageKey("a b"));
+  assert.isNull(personTabPageKey("x".repeat(200)));
+});
 
 it("keeps a comment's picture inside the page", () => {
   const viewport = { width: 800, height: 600 };

@@ -50,6 +50,12 @@ export const BrowserLivePage = Schema.Struct({
   url: Schema.String,
   title: Schema.String,
   context: Schema.optional(BrowserBridgeRequestContext),
+  /**
+   * The person's own tab in the panel this page belongs to (the web version's
+   * "Your browser", see {@link BrowserLiveOpenInput.tab}); absent on the
+   * agents' pages.
+   */
+  tab: Schema.optional(Schema.String),
   control: BrowserLiveControl,
   help: Schema.NullOr(BrowserLiveHelpRequest),
   /**
@@ -184,6 +190,13 @@ export type BrowserLiveNavigateInput = typeof BrowserLiveNavigateInput.Type;
 export const BrowserLiveOpenInput = Schema.Struct({
   context: BrowserBridgeRequestContext,
   url: Schema.String,
+  /**
+   * A tab of the person's own in the panel (the web version's "Your browser",
+   * Misha 16.10 p.14): its own page, one per tab, not any chat's — the person
+   * drives it from the start and the agents never address it. Absent — the
+   * chat's page (`context`), as before.
+   */
+  tab: Schema.optional(Schema.String),
 });
 export type BrowserLiveOpenInput = typeof BrowserLiveOpenInput.Type;
 

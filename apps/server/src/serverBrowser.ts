@@ -88,9 +88,11 @@ export interface ServerBrowserLiveShape {
     control: BrowserLiveControl,
   ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
   readonly navigate: (input: BrowserLiveNavigateInput) => Effect.Effect<void, BrowserLiveError>;
+  /** `tab` — the person's own panel tab (see BrowserLiveOpenInput.tab), else the chat's page. */
   readonly open: (
     context: BrowserBridgeRequestContext,
     url: string,
+    tab?: string,
   ) => Effect.Effect<{ readonly pageId: string }, BrowserLiveError>;
   readonly close: (pageId: string) => Effect.Effect<void, BrowserLiveError>;
   readonly resize: (
@@ -249,6 +251,10 @@ interface PageEntry {
    */
   readonly inputSemaphore: Semaphore.Semaphore;
   readonly context: BrowserBridgeRequestContext | undefined;
+  /** Своя вкладка человека в панели (веб «Your browser»): не чат, агент её не адресует. */
+  readonly tab: string | undefined;
+  /** Когда человек последний раз открывал или смотрел страницу (лимит своих вкладок). */
+  lastSeen: number;
   /** Размер страницы: агентский VIEWPORT или размер панели, пока рулит человек. */
   viewport: { width: number; height: number };
   title: string;
@@ -491,6 +497,25 @@ function pageKeyFor(context: BrowserBridgeRequestContext | undefined): string {
   return bridgeContextKey(context ?? {});
 }
 
+/**
+ * Ключ страницы своей вкладки человека (веб «Your browser», п.14): одна
+ * страница на вкладку панели, в своём пространстве ключей — ни с чатом, ни с
+ * легаси-ключом по cwd не совпадает. null — id вкладки не годится.
+ */
+export function personTabPageKey(tab: string | undefined): string | null {
+  const id = tab?.trim() ?? "";
+  if (id === "" || id.length > MAX_PERSON_TAB_ID_LENGTH || !/^[\w:.-]+$/.test(id)) return null;
+  return `tab:${id}`;
+}
+const MAX_PERSON_TAB_ID_LENGTH = 128;
+/**
+ * Сколько страниц своих вкладок держит браузер машины. Вкладка, закрытая в
+ * приложении, закрывает и страницу, но закрытое окно или перезагрузка — нет:
+ * лишние (давно не смотренные) закрываются при открытии новой. Вкладка такой
+ * страницы откроет её заново со своим адресом, входы остаются в профиле.
+ */
+export const MAX_PERSON_TAB_PAGES = 6;
+
 /** Клавиши, которых playwright не знает (IME, мёртвые) — молча пропускаем. */
 const IGNORED_KEYS = new Set(["Unidentified", "Dead", "Process", "Compose"]);
 
@@ -554,7 +579,11 @@ export const makeServerBrowser = Effect.gen(function* () {
   /** Страницы, которые человек открыл, пока браузер ставился: откроются сами. */
   const pendingOpens = new Map<
     string,
-    { readonly context: BrowserBridgeRequestContext; readonly url: string }
+    {
+      readonly context: BrowserBridgeRequestContext;
+      readonly url: string;
+      readonly tab?: { readonly id: string; readonly key: string };
+    }
   >();
 
   const pageSnapshot = (entry: PageEntry): BrowserLivePage => ({
@@ -562,6 +591,7 @@ export const makeServerBrowser = Effect.gen(function* () {
     url: entry.page.isClosed() ? "" : entry.page.url(),
     title: entry.title,
     ...(entry.context ? { context: entry.context } : {}),
+    ...(entry.tab ? { tab: entry.tab } : {}),
     control: entry.control,
     help: entry.help,
     attention: entry.attention,
@@ -668,6 +698,7 @@ export const makeServerBrowser = Effect.gen(function* () {
     key: string,
     context: BrowserBridgeRequestContext | undefined,
     semaphore: Semaphore.Semaphore,
+    tab?: string,
   ): PageEntry => {
     const entry: PageEntry = {
       pageId: `pg_${randomBytes(9).toString("base64url")}`,
@@ -676,6 +707,8 @@ export const makeServerBrowser = Effect.gen(function* () {
       semaphore,
       inputSemaphore: Semaphore.makeUnsafe(1),
       context,
+      tab,
+      lastSeen: Date.now(),
       viewport: { ...VIEWPORT },
       title: "",
       control: "agent",
@@ -715,6 +748,9 @@ export const makeServerBrowser = Effect.gen(function* () {
         Semaphore.makeUnsafe(1),
       );
       popupEntry.attention = 1;
+      // Окно своей вкладки человека (вход через Google и т.п.) — тоже его:
+      // рулит сразу, без «Take control».
+      if (entry.tab) popupEntry.control = "human";
       emitState();
     });
     return entry;
@@ -808,11 +844,17 @@ export const makeServerBrowser = Effect.gen(function* () {
 
   const getPageEntry = (
     context: BrowserBridgeRequestContext | undefined,
+    tab?: { readonly id: string; readonly key: string },
   ): Effect.Effect<PageEntry, ServerBrowserCommandError> =>
     Effect.gen(function* () {
       const browserContext = yield* getBrowserContext;
-      const normalized = context ? normalizeBridgeRequestContext(context) : undefined;
-      const key = pageKeyFor(normalized);
+      // Своя вкладка человека — без чата: ни контекста, ни общего с агентом ключа.
+      const normalized = tab
+        ? undefined
+        : context
+          ? normalizeBridgeRequestContext(context)
+          : undefined;
+      const key = tab?.key ?? pageKeyFor(normalized);
       const existing = pagesByContextKey.get(key);
       if (existing && !existing.page.isClosed()) {
         return existing;
@@ -822,7 +864,7 @@ export const makeServerBrowser = Effect.gen(function* () {
         catch: (cause) => new ServerBrowserCommandError({ message: commandErrorMessage(cause) }),
       });
       const semaphore = existing?.semaphore ?? (yield* Semaphore.make(1));
-      const entry = registerPage(page, key, normalized, semaphore);
+      const entry = registerPage(page, key, normalized, semaphore, tab?.id);
       pagesByContextKey.set(key, entry);
       emitState();
       return entry;
@@ -836,10 +878,11 @@ export const makeServerBrowser = Effect.gen(function* () {
    */
   const getPageEntryWhenReady = (
     context: BrowserBridgeRequestContext | undefined,
+    tab?: { readonly id: string; readonly key: string },
   ): Effect.Effect<PageEntry, ServerBrowserCommandError> => {
     const deadline = Date.now() + SERVER_BROWSER_READY_RETRY_MS;
     const attempt = (): Effect.Effect<PageEntry, ServerBrowserCommandError> =>
-      getPageEntry(context).pipe(
+      getPageEntry(context, tab).pipe(
         Effect.catch((error: ServerBrowserCommandError) =>
           error.message === CHROMIUM_MISSING_ERROR ||
           Date.now() + SERVER_BROWSER_READY_RETRY_STEP_MS > deadline
@@ -1065,16 +1108,44 @@ export const makeServerBrowser = Effect.gen(function* () {
 
   const liveError = (detail: string) => new BrowserLiveError({ detail });
 
-  /** Страница чата, которую открыл человек: рулит он, пока не отдаст агенту. */
-  const openForPerson = (context: BrowserBridgeRequestContext, target: string) =>
+  /** Перед новой своей вкладкой: самые давние, на которые никто не смотрит, — закрыть. */
+  const trimPersonTabPages = (key: string) =>
+    Effect.promise(async () => {
+      const existing = pagesByContextKey.get(key);
+      if (existing && !existing.page.isClosed()) return;
+      const pages = [...pagesById.values()].filter(
+        (entry) => entry.tab !== undefined && pagesByContextKey.get(entry.key) === entry,
+      );
+      const extra = pages.length - (MAX_PERSON_TAB_PAGES - 1);
+      if (extra <= 0) return;
+      const idle = pages
+        .filter((entry) => entry.frameListeners.size === 0)
+        .toSorted((a, b) => a.lastSeen - b.lastSeen)
+        .slice(0, extra);
+      await Promise.all(idle.map((entry) => entry.page.close().catch(() => undefined)));
+    });
+
+  /**
+   * Страница чата, которую открыл человек: рулит он, пока не отдаст агенту.
+   * Со `tab` — страница его своей вкладки панели: она уже на экране, так что
+   * без attention (иначе приложение открыло бы рядом вторую вкладку), и тот
+   * же адрес не перезагружается.
+   */
+  const openForPerson = (
+    context: BrowserBridgeRequestContext,
+    target: string,
+    tab?: { readonly id: string; readonly key: string },
+  ) =>
     Effect.gen(function* () {
-      const entry = yield* getPageEntryWhenReady(context).pipe(
+      if (tab) yield* trimPersonTabPages(tab.key);
+      const entry = yield* getPageEntryWhenReady(context, tab).pipe(
         Effect.mapError((error) => liveError(error.message)),
       );
+      entry.lastSeen = Date.now();
       entry.control = "human";
-      entry.attention += 1;
+      if (!tab) entry.attention += 1;
       emitState();
-      if (target !== "") {
+      if (target !== "" && !(tab && entry.page.url() === target)) {
         yield* livePromise(() => entry.page.goto(target, { waitUntil: "domcontentloaded" }));
       }
       return entry.pageId;
@@ -1127,6 +1198,7 @@ export const makeServerBrowser = Effect.gen(function* () {
                   Queue.offerUnsafe(queue, frame);
                 };
                 entry.frameListeners.add(listener);
+                entry.lastSeen = Date.now();
                 if (entry.lastFrame) Queue.offerUnsafe(queue, entry.lastFrame);
                 void startScreencast(entry);
                 return listener;
@@ -1229,11 +1301,17 @@ export const makeServerBrowser = Effect.gen(function* () {
           }
         });
       }),
-    open: (context, url) =>
+    open: (context, url, tabId) =>
       Effect.gen(function* () {
         const target = url.trim();
         if (target !== "" && !/^https?:\/\//i.test(target)) {
           return yield* liveError("Only http(s) addresses open here.");
+        }
+        let tab: { readonly id: string; readonly key: string } | undefined;
+        if (tabId !== undefined) {
+          const key = personTabPageKey(tabId);
+          if (key === null) return yield* liveError("This tab can't open a page.");
+          tab = { id: tabId.trim(), key };
         }
         if (setup && setup.current().status !== "ready") {
           const current = yield* Effect.tryPromise({
@@ -1243,14 +1321,15 @@ export const makeServerBrowser = Effect.gen(function* () {
           if (current.status !== "ready") {
             // Страница откроется сама, когда браузер встанет; пока приложение
             // показывает установку.
-            pendingOpens.set(pageKeyFor(normalizeBridgeRequestContext(context)), {
+            pendingOpens.set(tab?.key ?? pageKeyFor(normalizeBridgeRequestContext(context)), {
               context,
               url: target,
+              ...(tab ? { tab } : {}),
             });
             return { pageId: BROWSER_LIVE_SETUP_PAGE_ID };
           }
         }
-        return { pageId: yield* openForPerson(context, target) };
+        return { pageId: yield* openForPerson(context, target, tab) };
       }),
     close: (pageId) =>
       Effect.gen(function* () {
@@ -1367,7 +1446,9 @@ export const makeServerBrowser = Effect.gen(function* () {
       const opens = [...pendingOpens.values()];
       pendingOpens.clear();
       for (const pending of opens) {
-        void Effect.runPromise(openForPerson(pending.context, pending.url).pipe(Effect.ignore));
+        void Effect.runPromise(
+          openForPerson(pending.context, pending.url, pending.tab).pipe(Effect.ignore),
+        );
       }
     });
     // Установка могла идти до рестарта демона — подхватываем её прогресс.
