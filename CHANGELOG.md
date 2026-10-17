@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.146 — 2026-10-17
+
+- **Tab groups, quieter.** A group's label is just its icon; its name shows when you hover it. "Everywhere" is a house now, so it no longer looks like a browser tab. Empty groups stay hidden and appear only while you drag a tab, so you can drop it there. Tabs no longer carry a group letter.
+- **Two browsers in "+".** "Browser · local" comes first: the page opens right in the panel, on the web too, with Comment and Debug as on the Mac. "Browser · agent's computer" is last. On the web, a site at the computer's own address (localhost) still opens in the computer's browser.
+
 ## v0.0.145 — 2026-10-17
 
 - **Apps & sites back in order.** An app from the App Store with a brand logo (Notetaker) blew its icon up into a huge white box that broke the list and the app's top bar. The logo now keeps its size everywhere.
