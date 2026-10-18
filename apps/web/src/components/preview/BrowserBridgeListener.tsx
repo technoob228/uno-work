@@ -16,6 +16,7 @@ import {
   runBrowserAutomationCommand,
 } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
+import { readCloudComputer } from "./portPreview";
 import { detectFileKind, makeAppFile, usePreviewPane } from "./PreviewPaneContext";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { automationScopeKeys, type PreviewTabScope } from "./previewTabScopes";
@@ -31,6 +32,7 @@ import {
 import { isWebApp } from "../../webMode";
 import {
   AGENT_PRIVATE_URL_MESSAGE,
+  isComputerLocalUrl,
   isPrivateNetworkUrl,
   normalizeAgentBrowserUrl,
 } from "./browserUrl";
@@ -261,6 +263,14 @@ export function BrowserBridgeListener() {
         if (event.type === "openUrl") {
           const url = normalizeAgentBrowserUrl(event.url);
           if (!url) return;
+          // "Your site" (18.10): the agent's own site on its cloud computer
+          // opens as a panel tab, shown from the port's address (or, without
+          // one, in the computer's browser) — never this device's localhost,
+          // so there is nothing to confirm.
+          if (isComputerLocalUrl(url) && readCloudComputer(connection.environmentId) !== null) {
+            openUrlForTargetRef.current(target, scope, url, "agent");
+            return;
+          }
           if (isPrivateNetworkUrl(url)) {
             askBeforeOpeningPrivateUrl(url, () => {
               if (isWebApp) {

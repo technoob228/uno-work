@@ -74,6 +74,9 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   // "My Uno": the whole account in one window — plans, sites, cloud, payments,
   // roles and servers without Uno Work. Money still moves only in the console.
   { method: "GET", pattern: /^\/api\/v1\/work\/(plans|sites)$/ },
+  // "Your site" from a cloud computer (18.10): a one-time link to show its
+  // localhost port in the panel (web/…/preview/portPreview.ts).
+  { method: "POST", pattern: /^\/api\/v1\/work\/port-preview$/ },
   { method: "POST", pattern: /^\/api\/v1\/work\/servers$/ },
   { method: "GET", pattern: /^\/api\/v1\/buckets$/ },
   { method: "GET", pattern: /^\/pay\/(history|spending)$/ },

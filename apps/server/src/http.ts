@@ -379,12 +379,21 @@ export const browserBridgeOpenRouteLayer = HttpRouter.add(
       resolveBridgeRequestContext(thread.context, body),
       tabScope,
     );
+    // `where: "panel"`: a cloud computer's localhost went to the person's
+    // panel ("Your site"), not the computer's browser — the agent is told.
+    const where = readOpenedWhere(result.data);
     return HttpServerResponse.jsonUnsafe(
-      result.ok ? { ok: true } : { ok: false, error: result.error },
+      result.ok ? { ok: true, ...(where ? { where } : {}) } : { ok: false, error: result.error },
       { status: result.ok ? 200 : 502 },
     );
   }),
 );
+
+function readOpenedWhere(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const where = (data as { where?: unknown }).where;
+  return typeof where === "string" ? where : null;
+}
 
 export const browserBridgeCommandRouteLayer = HttpRouter.add(
   "POST",

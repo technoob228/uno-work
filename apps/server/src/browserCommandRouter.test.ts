@@ -14,6 +14,7 @@ import { Effect, Fiber, Layer, Scope, Stream } from "effect";
 import { BrowserBridge, BrowserBridgeTest } from "./browserBridge.ts";
 import {
   decideBrowserExecutorTarget,
+  decideBrowserOpenUrlTarget,
   executeBridgeCommand,
   executeBridgeOpenUrl,
 } from "./browserCommandRouter.ts";
@@ -46,6 +47,32 @@ it("keeps the browser where the agent is on a machine in the cloud", () => {
   // Явный выбор в настройках сильнее правила.
   assert.equal(
     decideBrowserExecutorTarget({ executor: "local", hasSubscribers: true, hostedMachine: true }),
+    "client",
+  );
+});
+
+it("sends a cloud computer's localhost to the person's panel when it is open", () => {
+  const hosted = { executor: "auto" as const, hasSubscribers: true, hostedMachine: true };
+  assert.equal(decideBrowserOpenUrlTarget({ ...hosted, url: "http://localhost:5173/" }), "client");
+  assert.equal(decideBrowserOpenUrlTarget({ ...hosted, url: "http://127.0.0.1:3000/a" }), "client");
+  // Public sites and an empty panel stay in the computer's browser.
+  assert.equal(decideBrowserOpenUrlTarget({ ...hosted, url: "https://example.com/" }), "server");
+  assert.equal(
+    decideBrowserOpenUrlTarget({ ...hosted, hasSubscribers: false, url: "http://localhost:5173/" }),
+    "server",
+  );
+  // An explicit setting wins.
+  assert.equal(
+    decideBrowserOpenUrlTarget({ ...hosted, executor: "server", url: "http://localhost:5173/" }),
+    "server",
+  );
+  // The desktop daemon: as before.
+  assert.equal(
+    decideBrowserOpenUrlTarget({
+      executor: "auto",
+      hasSubscribers: true,
+      url: "http://localhost:5173/",
+    }),
     "client",
   );
 });

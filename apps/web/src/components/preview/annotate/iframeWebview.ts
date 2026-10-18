@@ -15,6 +15,9 @@
  * `page-title-updated`, `dom-ready`, `console-message` (every console call of
  * the page, like Electron's). Back and forward keep their own list and use
  * `location.replace`, so the app's own history (hash routes) is never touched.
+ *
+ * A page of another origin ("Your site" from a cloud computer) talks through
+ * postMessage instead: postMessageWebview.ts.
  */
 
 type ConsoleLevel = "log" | "info" | "warn" | "error" | "debug";
@@ -47,11 +50,11 @@ export class IframeWebview extends EventTarget {
     this.disposeWindow = null;
   }
 
-  private win(): (Window & typeof globalThis) | null {
+  protected win(): (Window & typeof globalThis) | null {
     return (this.iframe.contentWindow as (Window & typeof globalThis) | null) ?? null;
   }
 
-  private readUrl(): string {
+  protected readUrl(): string {
     try {
       return this.win()?.location.href ?? this.iframe.src;
     } catch {
@@ -59,11 +62,11 @@ export class IframeWebview extends EventTarget {
     }
   }
 
-  private emit(type: string, props?: Record<string, unknown>): void {
+  protected emit(type: string, props?: Record<string, unknown>): void {
     this.dispatchEvent(eventWith(type, props));
   }
 
-  private onLoad = (): void => {
+  protected onLoad = (): void => {
     const url = this.readUrl();
     if (!url || url === "about:blank") return;
     if (this.pendingIndex !== null) {

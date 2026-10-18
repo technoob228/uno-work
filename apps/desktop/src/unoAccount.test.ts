@@ -72,6 +72,8 @@ describe("UnoAccountService", () => {
     });
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/12")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/boxes/12/delete")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/port-preview")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/port-preview")).toBe(false);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/../tokens")).toBe(false);
     // "My Uno": read the account, set a role, add a server — never move money.
     expect(isAllowedAccountRequest("GET", "/api/v1/work/plans")).toBe(true);

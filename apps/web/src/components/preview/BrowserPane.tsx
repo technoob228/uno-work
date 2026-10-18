@@ -64,6 +64,7 @@ import {
 import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { IframeWebview } from "./annotate/iframeWebview";
+import { PostMessageWebview } from "./annotate/postMessageWebview";
 import { base64ToBlob } from "./annotate/liveWebview";
 import { PageToolsButtons } from "./annotate/PageToolsButtons";
 import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
@@ -73,6 +74,8 @@ import { YourBrowserTab } from "./YourBrowserTab";
 import { browserTabMode } from "./yourBrowserTab.logic";
 import { WEB_PAGE_IN_PANEL } from "./browserSource";
 import { DEVICE_ZOOM_CHOICES, deviceScaleFor, type DeviceZoom } from "./deviceZoom";
+import { localUrlToPortPreviewUrl, portPreviewUrlToLocalUrl } from "@t3tools/shared/portPreview";
+import { useCloudComputer, usePortPreview } from "./portPreview";
 
 /** The page at its real size, its picture scaled from the top left corner. */
 function deviceFrameStyle(
@@ -373,8 +376,13 @@ function BrowserView({
   visible: boolean;
   automationActive: boolean;
 }) {
-  const { updateBrowserTab, currentChatThreadId, currentChatProjectCwd, closeFile } =
-    usePreviewPane();
+  const {
+    updateBrowserTab,
+    currentChatThreadId,
+    currentChatProjectCwd,
+    currentChatEnvironmentId,
+    closeFile,
+  } = usePreviewPane();
   const browserProfileScope = useSettings((settings) => settings.browserProfileScope);
   // The page lives in the panel: the desktop app's <webview>, or — in the demo
   // of the desktop app — a same-origin iframe that talks like one.
@@ -386,10 +394,26 @@ function BrowserView({
   // tab in the person's own browser — no tools there, flag or not.
   const pageToolsFlag = useFeatureFlag("browserPageTools");
   const currentUrl = tab.url ?? "";
+  // "Your site" (18.10): the chat's cloud computer's localhost comes from the
+  // port's own address (portPreview.ts) — in the web's iframe and in the
+  // desktop's <webview> alike. The address bar keeps localhost.
+  const cloudComputer = useCloudComputer(currentChatEnvironmentId);
+  const portPreview = usePortPreview({
+    url: currentUrl,
+    computer: cloudComputer,
+    enabled: pageInPanel && !demoDesktop,
+  });
+  const portLink = portPreview.kind === "ready" ? portPreview.link : null;
+  const portMode = portPreview.kind !== "off";
+  const portModeRef = useRef(portMode);
+  portModeRef.current = portMode;
   // The web's iframe reaches only a page of Work's own address; on any other
-  // page Comment couldn't see it, so it isn't offered there.
+  // page Comment couldn't see it, so it isn't offered there — except a port's
+  // page, which carries the script itself (postMessage channel).
   const pageToolsOn =
-    pageToolsFlag && pageInPanel && (!iframeMode || demoDesktop || isSameOriginUrl(currentUrl));
+    pageToolsFlag &&
+    pageInPanel &&
+    (!iframeMode || demoDesktop || isSameOriginUrl(currentUrl) || portLink !== null);
   const pageElementRef = useRef<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
@@ -457,10 +481,15 @@ function BrowserView({
   // with Comment; public addresses stay as they are (a tab of this browser).
   const openedOnComputerRef = useRef<string | null>(null);
   useEffect(() => {
-    // Still in the web (Misha 17.10): until Work forwards the computer's ports
-    // to its own address, this device's iframe would open its own localhost.
-    if (isElectron || demoDesktop || !visible || !pageToolsFlag || !canOpenInAgentBrowser) return;
+    // Still in the web (Misha 17.10) where Work can't show the port itself
+    // ("Your site" off for the account, a self-hosted daemon): this device's
+    // iframe would open its own localhost. The desktop app: only a cloud
+    // computer's page that couldn't get a link (a local chat's localhost is
+    // the Mac's own, right there).
+    if (demoDesktop || !visible || !canOpenInAgentBrowser) return;
     if (!currentUrl || !isComputerLocalUrl(currentUrl)) return;
+    if (portPreview.kind === "ready" || portPreview.kind === "minting") return;
+    if (portPreview.kind === "off" && (isElectron || !pageToolsFlag)) return;
     if (openedOnComputerRef.current === currentUrl) return;
     openedOnComputerRef.current = currentUrl;
     openInSource("computer", currentUrl);
@@ -470,6 +499,7 @@ function BrowserView({
     visible,
     pageToolsFlag,
     canOpenInAgentBrowser,
+    portPreview.kind,
     currentUrl,
     openInSource,
     closeFile,
@@ -513,13 +543,25 @@ function BrowserView({
         return;
       }
       const view = webviewRef.current;
+      if (cloudComputer && isComputerLocalUrl(url)) {
+        // Another page of the same port: straight from its address. A new
+        // port gets its own link (usePortPreview) and a fresh frame.
+        const sameFrame = portLink ? localUrlToPortPreviewUrl(url, portLink.origin) : null;
+        if (sameFrame && view && readyRef.current) void view.loadURL(sameFrame).catch(() => {});
+        return;
+      }
+      // Leaving a port's page: the page frame mounts anew with this address.
+      if (portMode) {
+        setMountSrc(url);
+        return;
+      }
       if (view && readyRef.current) {
         void view.loadURL(url).catch(() => {});
       } else {
         setMountSrc(url);
       }
     },
-    [scopeKey, tab.id, updateBrowserTab, pageInPanel],
+    [scopeKey, tab.id, updateBrowserTab, pageInPanel, cloudComputer, portLink, portMode],
   );
 
   const attachWebview = useCallback((node: HTMLWebViewElement | null) => {
@@ -541,6 +583,23 @@ function BrowserView({
     if (!view) readyRef.current = false;
     setWebviewNode(view);
   }, []);
+
+  // "Your site" in the web: the port's page is another origin — the frame
+  // talks through postMessage (the script the daemon put in the page).
+  const portOrigin = portLink?.origin ?? null;
+  const attachPortFrame = useCallback(
+    (node: HTMLIFrameElement | null) => {
+      iframeAdapterRef.current?.dispose();
+      iframeAdapterRef.current =
+        node && portOrigin ? new PostMessageWebview(node, portOrigin) : null;
+      const view = iframeAdapterRef.current as unknown as ElectronWebviewElement | null;
+      webviewRef.current = view;
+      pageElementRef.current = node;
+      if (!view) readyRef.current = false;
+      setWebviewNode(view);
+    },
+    [portOrigin],
+  );
 
   // Comment mode (C): the page's half lives in the page. The picked element's
   // picture goes with the comment (the desktop's <webview>; the demo's iframe has none).
@@ -631,7 +690,11 @@ function BrowserView({
       const navigateEvent = event as WebviewNavigateEvent;
       if (navigateEvent.isMainFrame === false) return;
       setLoadError(null);
-      updateBrowserTab(scopeKey, tab.id, { url: navigateEvent.url });
+      // A port's page shows as the computer's localhost; a page elsewhere
+      // that a port's page led to is the page frame's from now on.
+      const url = portPreviewUrlToLocalUrl(navigateEvent.url) ?? navigateEvent.url;
+      if (portModeRef.current && !isComputerLocalUrl(url)) setMountSrc(url);
+      updateBrowserTab(scopeKey, tab.id, { url });
       syncNavState();
     };
     const onTitleUpdated = (event: Event) => {
@@ -1271,10 +1334,16 @@ function BrowserView({
                     : undefined
                 }
               >
-                {iframeMode ? (
+                {portMode && !portLink ? (
+                  <PortPreviewPlaceholder
+                    opening={portPreview.kind === "minting"}
+                    canOpenOnComputer={canOpenInAgentBrowser}
+                  />
+                ) : iframeMode ? (
                   <iframe
-                    ref={attachIframe}
-                    src={mountSrc}
+                    key={portLink ? portLink.url : "page"}
+                    ref={portLink ? attachPortFrame : attachIframe}
+                    src={portLink ? portLink.url : mountSrc}
                     // Same origin on purpose (Comment / Debug reach the page);
                     // no top navigation, so a page can't take Work away.
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
@@ -1287,8 +1356,9 @@ function BrowserView({
                   />
                 ) : (
                   <webview
+                    key={portLink ? portLink.url : "page"}
                     ref={attachWebview}
-                    src={mountSrc}
+                    src={portLink ? portLink.url : mountSrc}
                     partition={partition}
                     allowpopups
                     className={
@@ -1325,6 +1395,28 @@ function BrowserView({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** A cloud computer's localhost while its link comes (or when there is none). */
+function PortPreviewPlaceholder({
+  opening,
+  canOpenOnComputer,
+}: {
+  opening: boolean;
+  canOpenOnComputer: boolean;
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-muted-foreground">
+      {opening ? <Loader2Icon className="size-5 animate-spin opacity-60" /> : null}
+      <p>
+        {opening
+          ? "Opening your site from the computer…"
+          : canOpenOnComputer
+            ? "Opening it in the computer's browser…"
+            : "This site runs on your cloud computer and can't be shown here yet."}
+      </p>
     </div>
   );
 }

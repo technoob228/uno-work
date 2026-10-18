@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.148 — unreleased
+
+- **Your site from a cloud computer opens right in your browser.** When the agent starts a site on the computer (localhost:5173 and the like) and shows it to you, the panel loads it in your own browser from your Work address instead of streaming the computer's browser: scrolling and clicks are instant, live reload works, and Comment picks any part of it for the chat. The address bar still says localhost. The agent's own clicks on the page still happen in the computer's browser. Where your account doesn't have it yet, nothing changes.
+
 ## v0.0.147 — 2026-10-18
 
 - **The panel follows you between chats.** A tab kept for the project (or everywhere) that you were looking at stays open when you move to another chat of the project (or any chat), even where the panel was hidden. Close the panel on such a tab and it stays closed in those chats too. A chat's own tabs stay in their chat; and if that chat's agent showed you something while you were away, the panel opens with it.

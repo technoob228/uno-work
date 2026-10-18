@@ -218,6 +218,7 @@ import { PluginRuntimeLive } from "./plugins/PluginRuntime.ts";
 import { ReminderSchedulerLive } from "./reminders/Layers/ReminderScheduler.ts";
 import { NetService } from "@t3tools/shared/Net";
 import { installStartupGate } from "./startupGate.ts";
+import { portPreviewLayer } from "./portPreviewHttp.ts";
 import { warmOfficeEngineCompression } from "./officeEngineAssets.ts";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -679,7 +680,13 @@ export const makeRoutesLayer = Layer.mergeAll(
   ...unoWorkRouteLayers,
   warmStatusRouteLayer,
   ...setupToolsRouteLayers,
-).pipe(Layer.provide(browserApiCorsLayer));
+).pipe(
+  Layer.provide(browserApiCorsLayer),
+  // Provided last, so built first: the outermost global middleware. A request
+  // for a port's address ("Your site", portPreviewHttp.ts) never reaches the
+  // routes or the CORS answers.
+  Layer.provide(portPreviewLayer),
+);
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {

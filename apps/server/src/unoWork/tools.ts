@@ -2228,6 +2228,21 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(url !== undefined ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 } : {}),
           })
           .pipe(Effect.flatMap(bridgeOk));
+        // A cloud computer's localhost went to the person's own panel
+        // ("Your site", browserCommandRouter.decideBrowserOpenUrlTarget).
+        const inPanel =
+          url !== undefined &&
+          typeof opened === "object" &&
+          opened !== null &&
+          (opened as { where?: unknown }).where === "panel";
+        if (inPanel) {
+          return {
+            ok: true,
+            opened: url,
+            where: "the person's panel",
+            note: "This opened in the person's panel as their site: their own browser shows this computer's page through Uno, with live reload, and they can comment on any part of it. It is not open in the computer's browser: to click or read the page yourself, first browser_command openUrl with the same address. For a link they can open on a phone or share, offer app_show_on_internet (they approve it).",
+          };
+        }
         if (url !== undefined && localOnly) {
           return {
             ok: true,
