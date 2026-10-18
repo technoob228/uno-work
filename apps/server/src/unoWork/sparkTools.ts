@@ -56,7 +56,7 @@ const nameArg = {
 };
 
 export const SPARK_LIMITS_LINE =
-  "Inside: env.KV (get/put/delete/list/incr, shared by the account's apps), fetch to public addresses, variables and secrets. Not there: files, SQL databases, AI calls, packages, timers or cron (it only answers requests). Limits: Free 3 apps (paid plans 20), a few ms of CPU per call, a call ends after 10 s, a fetch waits 5 s, about 120 requests a minute per account.";
+  "Inside: env.KV (get/put/delete/list/incr, shared by the account's apps), fetch to public addresses, variables and secrets. Not there: files, SQL databases, AI calls, packages, timers or cron (it only answers requests). Limits: Free 3 apps (paid plans 20), a few ms of CPU per call, on Free a call ends after 30 s (an AI answer without streaming fits; spark_list shows the exact limits), about 600 requests a minute per account, no streamed answers.";
 
 const sparkUnavailable = (kit: SparkToolKit) => kit.fail(SPARK_NOT_LINKED_MESSAGE);
 
@@ -103,7 +103,7 @@ export function sparkReplyMessage(
     return "This is too big for Spark: it takes a small program. Leave out data and packages.";
   }
   if (reply.status === 429 || reply.sparkError === "rate_limited") {
-    return "Spark is rate limiting this account (about 120 requests a minute). Wait a minute and try again.";
+    return "Spark is rate limiting this account (about 600 requests a minute on Free). Wait a minute and try again.";
   }
   return `Spark couldn't ${input.what}: ${[code, detail].filter(Boolean).join(" — ") || `HTTP ${reply.status}`}.`;
 }
@@ -160,7 +160,7 @@ export function sparkTools(kit: SparkToolKit): ReadonlyArray<UnoWorkTool> {
       description:
         "Put one JavaScript or Python file (or a small folder with an entry file) on Uno Spark: it answers HTTPS at https://<name>.spark.uno4.me/ right away — no server, free, nothing to keep running. Use it for webhooks, Telegram bots, small JSON APIs and form handlers; a frontend goes on Sites (site_publish). JS: `export default { async fetch(request, env) { return Response.json({...}) } }`; Python: `import spark` + `def fetch(request, env): return spark.Response.json({...})`. " +
         SPARK_LIMITS_LINE +
-        " Anything that needs more (a timer, AI answers longer than 10 s, a SQL database, packages) is not Spark: read uno_guide spark first if unsure. Redeploying the same name makes a new version. `env` sets plain variables (replaces all; never tokens); `secrets` hands a value from the project's .env to Spark for the listed hosts only — you never see it, and it never goes into the result. Runs without asking, like a site; spark_delete takes it down.",
+        " Anything that needs more (a timer, answers streamed back or longer than 30 s, a SQL database, packages) is not Spark: read uno_guide spark first if unsure. Redeploying the same name makes a new version. `env` sets plain variables (replaces all; never tokens); `secrets` hands a value from the project's .env to Spark for the listed hosts only — you never see it, and it never goes into the result. Runs without asking, like a site; spark_delete takes it down.",
       inputSchema: {
         type: "object",
         properties: {
