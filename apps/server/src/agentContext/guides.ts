@@ -105,8 +105,10 @@ One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\`
 ### When Spark, when not
 - **Fits:** a webhook, a Telegram bot, a small JSON API, a form handler, glue between services — anything that answers a request with a little work.
 - **Inside:** \`env.KV\` (key → value, shared by the account's apps: \`get\`, \`put\`, \`delete\`, \`list\`, \`incr\`), \`fetch\` to public addresses, variables (\`env\`) and secrets.
-- **Not there:** files on a disk, SQL databases, AI calls, packages (npm, pip), timers or cron — it runs only when a request comes.
-- **Limits:** Free holds 3 apps, paid plans 20; a few ms of CPU per call; on Free a call ends after 30 s (a \`fetch\` is cut with it; exact figures: \`spark_list\`); about 600 requests a minute per account; no streamed answers yet. Over a limit the answer carries \`X-Uno-Spark-Error\`: \`cpu_limit\`, \`wall_limit\`, \`rate_limited\`, \`concurrency\` (retry).
+- **Not there:** files on a disk, SQL databases, packages (npm, pip), timers or cron — it runs only when a request comes.
+- **A model without a key:** \`await env.AI.chat({ messages })\` → the OpenAI chat answer; \`return env.AI.chat({ stream: true, messages })\` streams it to the client (Python: \`env.AI.chat(messages)\`, \`stream=True\`). The account pays from its AI balance and Uno AI hours through its AI key «spark» ($5 limit to start, the person changes it in the console). Never put a model key in the code.
+- **Streaming:** return a \`fetch(url, { ..., stream: true })\` as it is (Python \`spark.fetch(..., stream=True)\`) and the client gets it as it arrives — up to 120 s, 2 streams at once on Free.
+- **Limits:** Free holds 3 apps, paid plans 20; a few ms of CPU per call; on Free a call ends after 30 s (a \`fetch\` is cut with it; exact figures: \`spark_list\`); about 600 requests a minute per account; a streamed answer may run 120 s. Over a limit the answer carries \`X-Uno-Spark-Error\`: \`cpu_limit\`, \`wall_limit\`, \`rate_limited\`, \`concurrency\` (retry).
 - "Deploy / put online my project" (also "on uno.place"): pages and a built frontend go on Sites (\`site_publish\`); a small backend goes on Spark. Never answer "there is no server, order a plan" when it fits Spark.
 
 ### A small backend, rewritten for Spark
@@ -154,7 +156,7 @@ A bot that writes on its own on a schedule (reminders, "every morning") needs a 
 ### When it doesn't fit
 Say in one sentence what stops it, then the next step — no long explanation, no workaround that breaks the limits:
 - "It checks prices every 30 seconds, and Spark only answers requests (no timers)."
-- "Its AI answers stream back or take longer than 30 seconds, the most a Spark call may take on Free."
+- "Its jobs take longer than 30 seconds, the most a Spark call may take on Free."
 - "It needs a SQL database (or files, headless Chrome, packages)."
 Next step: run it as an app on this computer (\`uno_guide("apps")\`; a computer that sleeps pauses it — Plus stays on), or on an app server when \`app_servers_list\` says \`enabled: true\` (\`uno_guide("app-servers")\`); a database: \`db_create\`. If the plan is short, give the upgrade link from \`account_overview\`.
 
