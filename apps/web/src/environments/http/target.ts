@@ -218,6 +218,10 @@ async function fetchOrThrow(
   }
 }
 
+/** What a person sees when a proxy in front of the computer answered instead of it. */
+export const ENVIRONMENT_PROXY_ERROR_MESSAGE =
+  "Couldn't reach this computer just now. Try again in a minute.";
+
 async function readErrorMessage(response: Response): Promise<string> {
   const text = await response.text().catch(() => "");
   if (text.length === 0) return `Request failed with status ${response.status}.`;
@@ -227,5 +231,18 @@ async function readErrorMessage(response: Response): Promise<string> {
   } catch {
     // Non-JSON body — fall through to the raw text.
   }
+  // An HTML page is never the daemon's message: it is Cloudflare or Caddy
+  // answering for it (18.10: Cloudflare's whole 521 page ended up in the
+  // "A new version of Uno Work is ready" banner while Caddy restarted).
+  if (isHtmlBody(response, text)) {
+    return response.status >= 500
+      ? ENVIRONMENT_PROXY_ERROR_MESSAGE
+      : `Request failed with status ${response.status}.`;
+  }
   return text;
+}
+
+function isHtmlBody(response: Response, text: string): boolean {
+  if ((response.headers.get("content-type") ?? "").includes("text/html")) return true;
+  return /^\s*<(?:!doctype|html|head|body)\b/i.test(text);
 }

@@ -24,6 +24,7 @@ vi.mock("../runtime/catalog", () => ({
 }));
 
 const {
+  ENVIRONMENT_PROXY_ERROR_MESSAGE,
   environmentFetchJson,
   isEnvironmentHttpError,
   isEnvironmentUnavailableError,
@@ -170,6 +171,48 @@ describe("environmentFetchJson", () => {
     expect(isEnvironmentUnavailableError(error)).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(resolvePrimaryEnvironmentHttpUrl).not.toHaveBeenCalled();
+  });
+
+  it("shows a plain sentence instead of a proxy's HTML error page", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        '<!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <title>uno4.work | 521: Web server is down</title>',
+        { status: 521, headers: { "content-type": "text/html; charset=UTF-8" } },
+      ),
+    );
+
+    const error = await environmentFetchJson({
+      environmentId: SAVED_ID,
+      pathname: "/api/self-update/start",
+      method: "POST",
+    }).catch((cause: unknown) => cause);
+
+    expect(isEnvironmentHttpError(error)).toBe(true);
+    expect((error as Error).message).toBe(ENVIRONMENT_PROXY_ERROR_MESSAGE);
+  });
+
+  it("treats an HTML body without a content type as a proxy page too", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("<html><body>Bad gateway</body></html>", { status: 404 }),
+    );
+
+    const error = await environmentFetchJson({
+      environmentId: SAVED_ID,
+      pathname: "/api/self-update/start",
+    }).catch((cause: unknown) => cause);
+
+    expect((error as Error).message).toBe("Request failed with status 404.");
+  });
+
+  it("keeps a plain-text daemon message as it is", async () => {
+    fetchMock.mockResolvedValue(new Response("Only the owner can do this.", { status: 403 }));
+
+    const error = await environmentFetchJson({
+      environmentId: SAVED_ID,
+      pathname: "/api/self-update/start",
+    }).catch((cause: unknown) => cause);
+
+    expect((error as Error).message).toBe("Only the owner can do this.");
   });
 
   it("does not leak the bearer token into the error message", async () => {
