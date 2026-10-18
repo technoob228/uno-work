@@ -818,6 +818,22 @@ describe("telling and showing", () => {
     expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/" } });
   });
 
+  it("tells the agent when its localhost went to the person's panel as their site", async () => {
+    const { deps } = makeDeps({ hostedMachine: true });
+    const panelDeps = {
+      ...deps,
+      bridge: () => Effect.succeed({ status: 200, body: { ok: true, where: "panel" } }),
+    };
+    const result = await run("open_in_panel", panelDeps, { url: "http://localhost:5173/" });
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { opened: "http://localhost:5173/", where: "the person's panel" },
+    });
+    expect((result as { success: { note: string } }).success.note).toContain(
+      "browser_command openUrl",
+    );
+  });
+
   it("never opens a Telegram bot in the panel: it gives its t.me link", async () => {
     const { deps, recorded } = makeDeps({
       hostedMachine: true,

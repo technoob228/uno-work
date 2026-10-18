@@ -84,6 +84,14 @@
       "types": "./src/searchRanking.ts",
       "import": "./src/searchRanking.ts"
     },
+    "./portPreview": {
+      "types": "./src/portPreview.ts",
+      "import": "./src/portPreview.ts"
+    },
+    "./pageToolsScript": {
+      "types": "./src/pageToolsScript.ts",
+      "import": "./src/pageToolsScript.ts"
+    },
     "./qrCode": {
       "types": "./src/qrCode.ts",
       "import": "./src/qrCode.ts"

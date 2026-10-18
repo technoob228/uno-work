@@ -1097,6 +1097,57 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("relays a port preview before the SPA, only for the owner", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-port-preview-" });
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, "index.html"),
+        "<html>work-shell</html>",
+      );
+      const NodeHttp = yield* Effect.promise(() => import("node:http"));
+      const app = yield* Effect.acquireRelease(
+        Effect.promise(
+          () =>
+            new Promise<import("node:http").Server>((resolve) => {
+              const server = NodeHttp.createServer((req, res) => {
+                res.writeHead(200, { "content-type": "text/plain" });
+                res.end(`app:${req.url}:${req.headers.cookie ?? "-"}`);
+              });
+              server.listen(0, "127.0.0.1", () => resolve(server));
+            }),
+        ),
+        (server) => Effect.sync(() => server.close()),
+      );
+      const appPort = (app.address() as { port: number }).port;
+
+      yield* buildAppUnderTest({ config: { staticDir } });
+
+      const refused = yield* HttpClient.get("/hello", {
+        headers: { "x-uno-port-preview": String(appPort) },
+      });
+      assert.equal(refused.status, 401);
+      assert.equal(refused.headers["x-uno-port-preview-auth"], "failed");
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const relayed = yield* HttpClient.get("/hello", {
+        headers: { "x-uno-port-preview": String(appPort), cookie: `${cookie}; theme=dark` },
+      });
+      assert.equal(relayed.status, 200);
+      assert.equal(yield* relayed.text, "app:/hello:theme=dark");
+      assert.isUndefined(relayed.headers["x-uno-port-preview-auth"]);
+
+      const badPort = yield* HttpClient.get("/", {
+        headers: { "x-uno-port-preview": "80", cookie },
+      });
+      assert.equal(badPort.status, 400);
+
+      const work = yield* HttpClient.get("/hello", { headers: { cookie } });
+      assert.include(yield* work.text, "work-shell");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("redirects to dev URL when configured", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({

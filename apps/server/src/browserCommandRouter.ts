@@ -12,6 +12,7 @@ import {
   isEmptyFrameError,
   isEmptyScreenshotResultData,
 } from "@t3tools/shared/browserScreenshot";
+import { isComputerLocalUrl } from "@t3tools/shared/portPreview";
 import { Effect } from "effect";
 
 import { BrowserBridge, type BrowserBridgeShape } from "./browserBridge.ts";
@@ -41,6 +42,33 @@ export function decideBrowserExecutorTarget(input: {
   if (input.hostedMachine === true) return "server";
   return input.hasSubscribers ? "client" : "server";
 }
+
+/**
+ * Where an address the agent opens goes. One exception to the rule above
+ * (18.10, "Your site"): on a cloud computer, the agent's own site at
+ * localhost goes to the person's panel when it is open — the app shows it
+ * from the port's address in the person's browser (fast, with Comment). The
+ * agent's `browser_command` still works in the computer's browser.
+ */
+export function decideBrowserOpenUrlTarget(input: {
+  readonly executor: BrowserExecutor;
+  readonly hasSubscribers: boolean;
+  readonly hostedMachine?: boolean;
+  readonly url: string;
+}): "client" | "server" {
+  if (
+    input.executor === "auto" &&
+    input.hostedMachine === true &&
+    input.hasSubscribers &&
+    isComputerLocalUrl(input.url)
+  ) {
+    return "client";
+  }
+  return decideBrowserExecutorTarget(input);
+}
+
+/** Where `open_in_panel` showed the page: the person's panel ("Your site") or the computer's browser. */
+export const OPENED_IN_PANEL = "panel";
 
 /** Демон отдаёт веб-клиент сам — значит, это машина в облаке, а не десктоп. */
 const readHostedMachine: Effect.Effect<boolean, never, ServerConfig> = Effect.gen(function* () {
@@ -214,15 +242,21 @@ export const executeBridgeOpenUrl = (
     const browserBridge = yield* BrowserBridge;
     const browserSettings = yield* readBrowserSettings;
     const hasSubscribers = yield* browserBridge.hasSubscribers;
-    const target = decideBrowserExecutorTarget({
+    const hostedMachine = yield* readHostedMachine;
+    const target = decideBrowserOpenUrlTarget({
       executor: browserSettings.executor,
       hasSubscribers,
-      hostedMachine: yield* readHostedMachine,
+      hostedMachine,
+      url,
     });
 
     if (target === "client") {
       yield* browserBridge.publishOpenUrl(url, context, scope);
-      return { ok: true, commandId: "open" };
+      return {
+        ok: true,
+        commandId: "open",
+        ...(hostedMachine ? { data: { where: OPENED_IN_PANEL } } : {}),
+      };
     }
     if (browserSettings.serverAutomationLevel === "off") {
       return blockedResult(

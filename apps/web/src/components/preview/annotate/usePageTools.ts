@@ -11,6 +11,11 @@
  * main process) — then nothing is put into the page: the same messages come
  * as the <webview>'s `ipc-message`, the calls go as `<webview>.send`
  * (contracts pageTools.ts). Older desktop apps and the demo: the script.
+ *
+ * "Your site" in the web's iframe (another origin, postMessageWebview.ts):
+ * the daemon already put the script in the page; it gets its nonce and the
+ * tab's state as messages (`postPageTools`), its lines come back as
+ * `console-message` like the console channel's.
  */
 import {
   PAGE_TOOLS_COMMAND_CHANNEL,
@@ -27,6 +32,7 @@ import {
   type PagePin,
   type PageToolsChannel,
   pageToolsCall,
+  type PageToolsPostCommand,
   type PageToolsMessage,
   parsePageToolsMessage,
 } from "./pageToolsScript";
@@ -41,6 +47,8 @@ export interface PageToolsView {
   send?(channel: string, ...args: unknown[]): void;
   /** How the page script talks back (the computer's live browser: a queue the view drains). */
   readonly pageToolsChannel?: PageToolsChannel;
+  /** The postMessage channel: a call into the script the page already has. */
+  postPageTools?(command: PageToolsPostCommand): void;
 }
 
 /** A picture of part of the page (viewport CSS pixels) for a comment; null — none. */
@@ -92,6 +100,8 @@ export function usePageTools(input: {
       view,
       typeof window === "undefined" ? undefined : window.desktopBridge,
     );
+    const viaPostMessage =
+      view.pageToolsChannel === "postMessage" && typeof view.postPageTools === "function";
     readyRef.current = false;
 
     const syncPage = () => {
@@ -102,6 +112,12 @@ export function usePageTools(input: {
         selector: comment.selector,
         docRect: comment.docRect,
       }));
+      if (viaPostMessage) {
+        view.postPageTools?.({ method: "setMode", arg: tab?.commenting ? "comment" : "off" });
+        view.postPageTools?.({ method: "setPins", arg: pins });
+        view.postPageTools?.({ method: "setPaused", arg: tab?.draft != null });
+        return;
+      }
       if (viaPreload) {
         const commands: PageToolsWireCommand[] = [
           { method: "setMode", arg: tab?.commenting ? "comment" : "off" },
@@ -127,6 +143,13 @@ export function usePageTools(input: {
         .catch(() => {});
     };
     const install = () => {
+      if (viaPostMessage) {
+        // The script is in the page already (the daemon put it there).
+        view.postPageTools?.({ method: "setNonce", arg: nonce });
+        readyRef.current = true;
+        syncPage();
+        return;
+      }
       if (viaPreload) {
         // The preload is already in the page: just tell it the tab's state.
         readyRef.current = true;
