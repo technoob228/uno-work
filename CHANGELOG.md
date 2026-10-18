@@ -8,9 +8,11 @@
 
 ---
 
-## v0.0.148 — unreleased
+## v0.0.148 — 2026-10-18
 
 - **Your site from a cloud computer opens right in your browser.** When the agent starts a site on the computer (localhost:5173 and the like) and shows it to you, the panel loads it in your own browser from your Work address instead of streaming the computer's browser: scrolling and clicks are instant, live reload works, and Comment picks any part of it for the chat. The address bar still says localhost. The agent's own clicks on the page still happen in the computer's browser. Where your account doesn't have it yet, nothing changes.
+- **The agent knows Uno Spark.** It can deploy a small serverless app to Spark, list, read logs and delete them; streaming answers work, and an app can call a model without a key (`env.AI.chat`, paid from your AI balance).
+- When the computer can't be reached for a moment, the update banner says "Couldn't reach this computer just now" instead of showing a proxy's error page.
 
 ## v0.0.147 — 2026-10-18
 
