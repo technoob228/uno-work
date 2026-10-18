@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -18,6 +19,7 @@ import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
 import { forgetScrollPosition } from "./previewScrollMemory";
 import {
   applyPreviewBucketPatch,
+  carryPanelOnChatSwitch,
   closeTab,
   collectVisibleTabs,
   DEFAULT_PREVIEW_BUCKET_STATE,
@@ -741,6 +743,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     );
   }, [updateViewState]);
 
+  /** The last chat on screen (Home and other screens in between don't count). */
+  const lastChatRef = useRef<PreviewTabTarget | null>(null);
   const setCurrentChatContext = useCallback(
     (context: {
       projectKey: string | null;
@@ -749,13 +753,26 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       environmentId: EnvironmentId | null;
       threadId: string | null;
     }) => {
+      // Into another chat: the panel follows from the last chat (Misha 18.10),
+      // in the same batch, so the new chat never shows its own state first.
+      const target = {
+        projectKey: context.projectKey ?? NO_PROJECT_KEY,
+        threadId: context.threadId,
+      };
+      const last = lastChatRef.current;
+      if (target.threadId !== null) {
+        if (last !== null && last.threadId !== target.threadId) {
+          transition((prev) => carryPanelOnChatSwitch(prev, last, target));
+        }
+        lastChatRef.current = target;
+      }
       setCurrentProjectKey(context.projectKey ?? NO_PROJECT_KEY);
       setCurrentChatProjectCwd(context.projectCwd);
       setCurrentChatProjectId(context.projectId);
       setCurrentChatEnvironmentId(context.environmentId);
       setCurrentChatThreadId(context.threadId);
     },
-    [],
+    [transition],
   );
 
   const leaveChat = useCallback((threadId: string) => {

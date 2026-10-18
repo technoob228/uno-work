@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.147 — 2026-10-18
+
+- **The panel follows you between chats.** A tab kept for the project (or everywhere) that you were looking at stays open when you move to another chat of the project (or any chat), even where the panel was hidden. Close the panel on such a tab and it stays closed in those chats too. A chat's own tabs stay in their chat; and if that chat's agent showed you something while you were away, the panel opens with it.
+
 ## v0.0.146 — 2026-10-17
 
 - **Tab groups, quieter.** A group's label is just its icon; its name shows when you hover it. "Everywhere" is a house now, so it no longer looks like a browser tab. Empty groups stay hidden and appear only while you drag a tab, so you can drop it there. Tabs no longer carry a group letter.

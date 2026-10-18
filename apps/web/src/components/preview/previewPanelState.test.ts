@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  carryPanelOnChatSwitch,
   closeTab,
   DEFAULT_PREVIEW_BUCKET_STATE,
   dropChatBuckets,
@@ -541,5 +542,98 @@ describe("dragging a tab like in Chrome", () => {
       "notes",
       "report",
     ]);
+  });
+});
+
+describe("the panel follows you between chats (Misha 18.10)", () => {
+  const otherProject = { projectKey: "other", threadId: "thread-c" };
+  const readme = file("readme");
+  const pult = file("pult");
+  const draft = file("draft");
+  const view = (states: PreviewStates, target: { projectKey: string; threadId: string | null }) =>
+    resolvePanelView(states, target);
+  /** B was looked at before and its panel closed there. */
+  const bClosed = (states: PreviewStates) => setPanelOpen(states, chatB, false);
+
+  it("1. an open project tab follows into another chat of the project, even where the panel was closed", () => {
+    let states = bClosed({});
+    states = openTab(states, chatA, "project", readme, "person");
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(true);
+    expect(view(states, chatB).view.activeFileId).toBe("readme");
+  });
+
+  it("1. an open tab pinned everywhere follows into any chat, another project too", () => {
+    let states = openTab({}, chatA, "global", pult, "person");
+    states = carryPanelOnChatSwitch(states, chatA, otherProject);
+    expect(view(states, otherProject).open).toBe(true);
+    expect(view(states, otherProject).view.activeFileId).toBe("pult");
+  });
+
+  it("2. closed by the person on a project tab → closed in the project's other chats", () => {
+    let states = openTab({}, chatB, "chat", notes, "person");
+    states = openTab(states, chatA, "project", readme, "person");
+    states = setPanelOpen(states, chatA, false);
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(false);
+  });
+
+  it("3. what the chat's agent showed while you were away wins over a carried 'closed'", () => {
+    let states = openTab({}, chatA, "project", readme, "person");
+    states = setPanelOpen(states, chatA, false);
+    states = openTab(states, chatB, "chat", report, "agent");
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(true);
+    expect(view(states, chatB).view.activeFileId).toBe("report");
+    // Seen once: next time the carried state decides.
+    states = carryPanelOnChatSwitch(states, chatB, chatA);
+    expect(getPreviewBucketState(states, chatScopeKey("thread-b")).agentNews).toBeNull();
+  });
+
+  it("3. what the agent showed while you watched doesn't come back as news", () => {
+    let states = openTab({}, chatB, "chat", report, "agent");
+    states = setPanelOpen(states, chatB, false);
+    states = carryPanelOnChatSwitch(states, chatB, chatA);
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(false);
+  });
+
+  it("4. a chat tab stays behind: the other chat keeps its own panel", () => {
+    let states = openTab({}, chatB, "chat", notes, "person");
+    states = setPanelOpen(states, chatB, false);
+    states = openTab(states, chatA, "chat", draft, "person");
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(false);
+  });
+
+  it("4. open with no tabs of its own → the project's tab, else everywhere's, else closed", () => {
+    let states = openTab({}, chatB, "chat", notes, "person");
+    states = closeTab(states, chatB, "notes").states;
+    states = openTab(states, chatA, "project", readme, "person");
+    states = openTab(states, chatA, "chat", draft, "person");
+    states = carryPanelOnChatSwitch(states, chatA, chatB);
+    expect(view(states, chatB).open).toBe(true);
+    expect(view(states, chatB).view.activeFileId).toBe("readme");
+
+    let lonely = openTab({}, chatB, "chat", notes, "person");
+    lonely = closeTab(lonely, chatB, "notes").states;
+    lonely = openTab(lonely, chatA, "chat", draft, "person");
+    lonely = carryPanelOnChatSwitch(lonely, chatA, chatB);
+    expect(view(lonely, chatB).open).toBe(false);
+  });
+
+  it("5. into another project: the project tab stays; an open panel shows the tab pinned everywhere", () => {
+    let states = openTab({}, chatA, "global", pult, "person");
+    states = openTab(states, chatA, "project", readme, "person");
+    states = carryPanelOnChatSwitch(states, chatA, otherProject);
+    expect(view(states, otherProject).open).toBe(true);
+    expect(view(states, otherProject).view.activeFileId).toBe("pult");
+    expect(view(states, otherProject).files.map((f) => f.id)).toEqual(["pult"]);
+  });
+
+  it("5. into another project with nothing pinned everywhere: that chat's own panel", () => {
+    let states = openTab({}, chatA, "project", readme, "person");
+    states = carryPanelOnChatSwitch(states, chatA, otherProject);
+    expect(view(states, otherProject).open).toBe(false);
   });
 });

@@ -14,6 +14,10 @@
  * 3. Человек закрыл панель в чате → агент её больше не распахивает: вкладка
  *    добавляется, на кнопке панели в шапке чата загорается бейдж. Открыл
  *    человек — бейдж гаснет, агент снова может показывать.
+ * 4. Панель «ходит за тобой» (Миша 18.10, `carryPanelOnChatSwitch`): открытая
+ *    или закрытая человеком панель с вкладкой проекта переходит в другие чаты
+ *    проекта, с вкладкой «везде» — в любые чаты; свежая вкладка агента чата,
+ *    куда пришёл, важнее.
  */
 
 import {
@@ -55,6 +59,12 @@ export interface PreviewBucketState {
   unseen: number;
   /** Ширина панели в этом контексте; null — общая ширина по умолчанию. */
   width: number | null;
+  /**
+   * Вкладка, которую агент этого чата показал последней и человек ещё не
+   * видел, уходя из чата; null — нет. При входе в чат она важнее панели,
+   * пришедшей за человеком из другого чата.
+   */
+  agentNews: string | null;
 }
 
 export const EMPTY_BROWSER_CONTEXT: BrowserContext = { environmentId: null, startPath: null };
@@ -72,6 +82,7 @@ export const DEFAULT_PREVIEW_BUCKET_STATE: PreviewBucketState = {
   dismissed: false,
   unseen: 0,
   width: null,
+  agentNews: null,
 };
 
 export type PreviewStates = Readonly<Record<string, PreviewBucketState>>;
@@ -202,10 +213,17 @@ function revealInView(
   source: PanelOpenSource,
 ): PreviewStates {
   return patchView(states, viewKey, (view) => {
+    const news = source === "agent" ? id : view.agentNews;
     if (source === "agent" && view.dismissed) {
-      return { ...view, viewTouched: true, activeFileId: id, unseen: view.unseen + 1 };
+      return {
+        ...view,
+        viewTouched: true,
+        activeFileId: id,
+        unseen: view.unseen + 1,
+        agentNews: news,
+      };
     }
-    return shownView(view, id);
+    return { ...shownView(view, id), agentNews: news };
   });
 }
 
@@ -406,4 +424,88 @@ export function closeTab(
     sourceViewFileIds: view.sourceViewFileIds.filter((existing) => existing !== id),
   }));
   return { states: next, closed };
+}
+
+/**
+ * Переход из чата `from` в чат `to` (Миша 18.10: панель «ходит за тобой»).
+ * Состояние панели помнится на уровне самой широкой вкладки, которую человек
+ * смотрел:
+ *
+ * 1. Смотрел вкладку проекта (в другой чат того же проекта) или «везде» (в
+ *    любой чат), панель открыта → в `to` панель открыта с этой вкладкой, даже
+ *    если там её закрывали.
+ * 2. Закрыл панель сам с такой вкладкой → в `to` она тоже закрыта.
+ * 3. Агент чата `to` показал вкладку, пока человек был не там → `to`
+ *    открывается с ней: свежий результат важнее пришедшего «закрыто».
+ * 4. Смотрел вкладку только своего чата → у `to` его собственная панель;
+ *    открыта, а своих вкладок нет → вкладка проекта, иначе «везде», иначе
+ *    закрыта.
+ * 5. Ушёл в другой проект от вкладки проекта → она остаётся там; панель была
+ *    открыта и есть вкладка «везде» → показать её, иначе панель `to`.
+ *
+ * Уходя, человек видел всё, что агент показал в `from`: его новости гаснут.
+ */
+export function carryPanelOnChatSwitch(
+  states: PreviewStates,
+  from: PreviewTabTarget,
+  to: PreviewTabTarget,
+): PreviewStates {
+  if (!from.threadId || !to.threadId || from.threadId === to.threadId) return states;
+  const fromKey = chatScopeKey(from.threadId);
+  const toKey = chatScopeKey(to.threadId);
+  const fromView = getPreviewBucketState(states, fromKey);
+  let next = fromView.agentNews
+    ? patchView(states, fromKey, (view) => ({ ...view, agentNews: null }))
+    : states;
+
+  const toView = getPreviewBucketState(next, toKey);
+  const toTabs = collectVisibleTabs(next, to);
+  // 3.
+  const news = toView.agentNews;
+  if (news !== null && toTabs.tabScopeById[news]) {
+    return patchView(next, toKey, (view) => ({ ...shownView(view, news), agentNews: null }));
+  }
+
+  const fromTabs = collectVisibleTabs(states, from);
+  const activeId =
+    fromView.activeFileId !== null && fromTabs.tabScopeById[fromView.activeFileId]
+      ? fromView.activeFileId
+      : (fromTabs.files[0]?.id ?? null);
+  const activeScope = activeId === null ? null : (fromTabs.tabScopeById[activeId] ?? null);
+  const fromOpen = isPanelOpen(states, from) && fromTabs.files.length > 0;
+  const closedByPerson = fromView.viewTouched && !fromView.open;
+  const sameProject = from.projectKey === to.projectKey;
+  const firstOf = (scope: PreviewTabScope) =>
+    toTabs.files.find((file) => toTabs.tabScopeById[file.id] === scope)?.id ?? null;
+
+  // 1, 2.
+  if (
+    activeId !== null &&
+    (activeScope === "global" || (activeScope === "project" && sameProject))
+  ) {
+    if (fromOpen) return patchView(next, toKey, (view) => shownView(view, activeId));
+    if (closedByPerson) {
+      return patchView(next, toKey, (view) =>
+        view.viewTouched && !view.open ? view : { ...view, open: false, viewTouched: true },
+      );
+    }
+    return next;
+  }
+  // 5.
+  if (activeScope === "project") {
+    const pinned = fromOpen ? firstOf("global") : null;
+    return pinned === null ? next : patchView(next, toKey, (view) => shownView(view, pinned));
+  }
+  // 4.
+  if (isPanelOpen(next, to) && firstOf("chat") === null) {
+    const active = toView.activeFileId;
+    if (active !== null && toTabs.tabScopeById[active]) return next;
+    const pinned = firstOf("project") ?? firstOf("global");
+    next = patchView(next, toKey, (view) =>
+      pinned === null
+        ? { ...view, open: false, viewTouched: true }
+        : { ...view, open: true, viewTouched: true, activeFileId: pinned },
+    );
+  }
+  return next;
 }
