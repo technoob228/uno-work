@@ -13,7 +13,15 @@ import {
   XIcon,
   MonitorSmartphoneIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   BrowserAutomationCommandInput,
   BrowserCredentialRecord,
@@ -64,6 +72,19 @@ import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
 import { YourBrowserTab } from "./YourBrowserTab";
 import { browserTabMode } from "./yourBrowserTab.logic";
 import { WEB_PAGE_IN_PANEL } from "./browserSource";
+import { DEVICE_ZOOM_CHOICES, deviceScaleFor, type DeviceZoom } from "./deviceZoom";
+
+/** The page at its real size, its picture scaled from the top left corner. */
+function deviceFrameStyle(
+  size: { readonly width: number; readonly height: number },
+  scale: number,
+): React.CSSProperties {
+  return {
+    width: size.width,
+    height: size.height,
+    ...(scale === 1 ? {} : { transform: `scale(${scale})`, transformOrigin: "0 0" }),
+  };
+}
 
 /** A page of the address Work itself is served from (the web's iframe can reach only those). */
 function isSameOriginUrl(url: string): boolean {
@@ -398,6 +419,21 @@ function BrowserView({
   const [zoomFactor, setZoomFactor] = useState(DEFAULT_ZOOM_FACTOR);
   const [deviceToolbarOpen, setDeviceToolbarOpen] = useState(false);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
+  // A device size bigger than the panel renders at its real size and the
+  // picture shrinks to fit, like DevTools' device mode (Misha 18.10).
+  const [deviceZoom, setDeviceZoom] = useState<DeviceZoom>("fit");
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el || !viewportSize) return;
+    const measure = () => setStage({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [viewportSize]);
+  const deviceScale = viewportSize ? deviceScaleFor(viewportSize, stage, deviceZoom) : 1;
   const [recentUrls, setRecentUrls] = useState<readonly string[]>(() => readBrowserRecents());
   const credentialsQuery = useVaultCredentials();
   const invalidateCredentials = useInvalidateBrowserCredentials();
@@ -1153,9 +1189,27 @@ function BrowserView({
         {deviceToolbarOpen ? (
           <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-card px-2 text-[11px] text-muted-foreground">
             <MonitorSmartphoneIcon className="size-3.5" />
-            <span className="font-mono">
-              {viewportSize ? `${viewportSize.width} x ${viewportSize.height}` : "Responsive"}
+            <span className="font-mono" data-testid="device-size-label">
+              {viewportSize
+                ? `${viewportSize.width} × ${viewportSize.height} · ${Math.round(deviceScale * 100)}%`
+                : "Responsive"}
             </span>
+            {viewportSize ? (
+              <select
+                aria-label="Zoom"
+                value={String(deviceZoom)}
+                onChange={(event) =>
+                  setDeviceZoom(event.target.value === "fit" ? "fit" : Number(event.target.value))
+                }
+                className="h-5 rounded border border-border bg-transparent px-1 text-[11px] text-foreground"
+              >
+                {DEVICE_ZOOM_CHOICES.map((choice) => (
+                  <option key={String(choice)} value={String(choice)}>
+                    {choice === "fit" ? "Fit" : `${Math.round(choice * 100)}%`}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <button
               type="button"
               onClick={() => setViewportSize(null)}
@@ -1169,6 +1223,13 @@ function BrowserView({
               className="rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
             >
               Mobile
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewportSize({ width: 768, height: 1024 })}
+              className="rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+            >
+              Tablet
             </button>
             <button
               type="button"
@@ -1192,50 +1253,61 @@ function BrowserView({
         ) : mountSrc ? (
           <div className="relative flex min-h-0 flex-1 flex-col">
             <div
+              ref={stageRef}
               className={cn(
                 "min-h-0 w-full flex-1",
                 viewportSize && "overflow-auto bg-muted/20 p-4",
-                viewportSize && deviceToolbarOpen && "flex justify-center",
+                viewportSize && deviceToolbarOpen && "flex items-start justify-center",
               )}
             >
-              {iframeMode ? (
-                <iframe
-                  ref={attachIframe}
-                  src={mountSrc}
-                  // Same origin on purpose (Comment / Debug reach the page);
-                  // no top navigation, so a page can't take Work away.
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-                  title={tab.name || "Browser"}
-                  className={cn(
-                    "border-0 bg-white",
-                    viewportSize ? "shrink-0 shadow-lg" : "block h-full w-full",
-                  )}
-                  style={
-                    viewportSize
-                      ? { width: viewportSize.width, height: viewportSize.height }
-                      : undefined
-                  }
-                />
-              ) : (
-                <webview
-                  ref={attachWebview}
-                  src={mountSrc}
-                  partition={partition}
-                  allowpopups
-                  className={viewportSize ? "shrink-0 bg-background shadow-lg" : "h-full w-full"}
-                  style={
-                    viewportSize
-                      ? { display: "flex", width: viewportSize.width, height: viewportSize.height }
-                      : { display: "flex" }
-                  }
-                />
-              )}
+              <div
+                className={viewportSize ? "relative shrink-0 shadow-lg" : "contents"}
+                style={
+                  viewportSize
+                    ? {
+                        width: Math.round(viewportSize.width * deviceScale),
+                        height: Math.round(viewportSize.height * deviceScale),
+                      }
+                    : undefined
+                }
+              >
+                {iframeMode ? (
+                  <iframe
+                    ref={attachIframe}
+                    src={mountSrc}
+                    // Same origin on purpose (Comment / Debug reach the page);
+                    // no top navigation, so a page can't take Work away.
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+                    title={tab.name || "Browser"}
+                    className={cn(
+                      "border-0 bg-white",
+                      viewportSize ? "absolute top-0 left-0 block" : "block h-full w-full",
+                    )}
+                    style={viewportSize ? deviceFrameStyle(viewportSize, deviceScale) : undefined}
+                  />
+                ) : (
+                  <webview
+                    ref={attachWebview}
+                    src={mountSrc}
+                    partition={partition}
+                    allowpopups
+                    className={
+                      viewportSize ? "absolute top-0 left-0 bg-background" : "h-full w-full"
+                    }
+                    style={
+                      viewportSize
+                        ? { display: "flex", ...deviceFrameStyle(viewportSize, deviceScale) }
+                        : { display: "flex" }
+                    }
+                  />
+                )}
+              </div>
             </div>
             {pageToolsOn ? (
               <CommentLayer
                 tabId={tab.id}
                 pageRef={pageElementRef}
-                zoom={iframeMode ? 1 : zoomFactor}
+                zoom={(iframeMode ? 1 : zoomFactor) * deviceScale}
               />
             ) : null}
           </div>

@@ -11,6 +11,7 @@
 ## v0.0.147 — 2026-10-18
 
 - **The panel follows you between chats.** A tab kept for the project (or everywhere) that you were looking at stays open when you move to another chat of the project (or any chat), even where the panel was hidden. Close the panel on such a tab and it stays closed in those chats too. A chat's own tabs stay in their chat; and if that chat's agent showed you something while you were away, the panel opens with it.
+- **Device sizes fit the panel, like DevTools.** Desktop 1280 × 800 (and Mobile, Tablet) in a narrow panel renders at its real size and the picture shrinks to fit, with the zoom next to the size: "1280 × 800 · 62%". Pick Fit, 100%, 75% or 50%; clicks, scrolling and Comment land where you point.
 
 ## v0.0.146 — 2026-10-17
 
