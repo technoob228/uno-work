@@ -86,6 +86,8 @@ import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
+import type { SparkReply, SparkRequest } from "./sparkClient.ts";
+import { sparkTools } from "./sparkTools.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
@@ -264,6 +266,14 @@ export interface UnoWorkToolDeps {
    */
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
+  };
+  /**
+   * Uno Spark's gateway with a Spark-only token the daemon gets from the
+   * console itself (`sparkClient.ts`): mints, caches, renews on 401. Absent
+   * (tests, older wiring): the spark_* tools say the computer isn't linked.
+   */
+  readonly spark?: {
+    readonly request: (input: SparkRequest) => Effect.Effect<SparkReply, UnoWorkToolError>;
   };
   /**
    * Pictures from the Uno gateway (`POST /v1/images/generations`) with the
@@ -3042,6 +3052,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         };
       }),
   },
+
+  // Spark: one JS/Python file answers HTTPS, no server, free (sparkTools.ts)
+  ...sparkTools({
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    displayPath: (absolute, home) => displayPath(absolute, home),
+    fail: toolError,
+  }),
 
   // App servers: bots and backends on their own sleeping server (appServerTools.ts)
   ...appServerTools({
