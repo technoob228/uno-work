@@ -606,6 +606,31 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => named("Read the Uno guide:", text(c.args, "topic"), "Read the Uno guide"),
     "Couldn't read the Uno guide",
   ],
+  spark_deploy: [
+    "Putting the code on Spark…",
+    (c) =>
+      named(
+        "Put on Spark:",
+        hostOf(text(c.result, "url")) ?? text(c.args, "name"),
+        "Put the code on Spark",
+      ),
+    "The code didn't go on Spark",
+  ],
+  spark_list: [
+    "Looking at your Spark apps…",
+    (c) => countOf(c, "apps", "Spark apps", ["name"]),
+    "Couldn't read the Spark apps",
+  ],
+  spark_logs: [
+    "Reading the Spark app's log…",
+    (c) => named("Read the Spark log of", text(c.args, "name"), "Read the Spark app's log"),
+    "Couldn't read the Spark app's log",
+  ],
+  spark_delete: [
+    "Deleting the Spark app…",
+    (c) => named("Deleted Spark app", text(c.args, "name"), "Deleted the Spark app"),
+    "The Spark app wasn't deleted",
+  ],
   app_servers_list: ["Checking app servers…", "Checked app servers", "Couldn't check app servers"],
   app_deploy: [
     "Deploying to an app server…",

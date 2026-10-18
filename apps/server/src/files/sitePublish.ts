@@ -117,12 +117,32 @@ export function validateSiteSlug(slug: string): string {
   return normalized;
 }
 
+/** How much one upload may hold, and what to say when it is more. */
+export interface CollectLimits {
+  readonly maxFiles: number;
+  readonly maxBytes: number;
+  readonly tooManyMessage: string;
+  readonly tooBigMessage: string;
+}
+
+const SITE_LIMITS: CollectLimits = {
+  maxFiles: SITE_MAX_FILES,
+  maxBytes: SITE_MAX_BYTES,
+  tooManyMessage: `This folder has more than ${SITE_MAX_FILES} files — too many for one website.`,
+  tooBigMessage: "This folder is bigger than 50 MB — too big for one website.",
+};
+
 /**
  * Non-hidden files under `folder`, in a stable order, within Uno Hosting
- * limits. What stays behind (hidden files, key files, package folders,
- * links) goes into `skips` when given.
+ * limits (or `limits`: Spark packs a folder the same way). What stays behind
+ * (hidden files, key files, package folders, links) goes into `skips` when
+ * given.
  */
-export async function collectSiteFiles(folder: string, skips?: SiteSkip[]): Promise<SiteFile[]> {
+export async function collectSiteFiles(
+  folder: string,
+  skips?: SiteSkip[],
+  limits: CollectLimits = SITE_LIMITS,
+): Promise<SiteFile[]> {
   const files: SiteFile[] = [];
   let total = 0;
   const walk = async (directory: string, prefix: string): Promise<void> => {
@@ -165,17 +185,11 @@ export async function collectSiteFiles(folder: string, skips?: SiteSkip[]): Prom
       const { size } = await fsPromises.stat(absolutePath);
       total += size;
       files.push({ relativePath, absolutePath, size });
-      if (files.length > SITE_MAX_FILES) {
-        throw new FilesPathError(
-          "forbidden",
-          `This folder has more than ${SITE_MAX_FILES} files — too many for one website.`,
-        );
+      if (files.length > limits.maxFiles) {
+        throw new FilesPathError("forbidden", limits.tooManyMessage);
       }
-      if (total > SITE_MAX_BYTES) {
-        throw new FilesPathError(
-          "forbidden",
-          "This folder is bigger than 50 MB — too big for one website.",
-        );
+      if (total > limits.maxBytes) {
+        throw new FilesPathError("forbidden", limits.tooBigMessage);
       }
     }
   };

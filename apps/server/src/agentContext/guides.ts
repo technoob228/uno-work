@@ -27,6 +27,7 @@ export const UNO_WORK_GUIDE_TOPICS = [
   "chats",
   "secrets",
   "sites",
+  "spark",
   "databases",
   "app-servers",
   "account",
@@ -90,6 +91,76 @@ Check \`computer_status\` before installs, builds, test runs, docker images, dat
 - Git needs an author: if a commit says "Please tell me who you are", set \`git config --global user.name\` and \`user.email\` once for this computer — the person's name and email if you know them, else \`Uno Work\` and \`work@noreply.uno.place\`.
 - **GitHub**: cloning a public repository just works. A private one or a push needs the person's access: ask them to connect GitHub, or to add this computer's SSH key (show \`~/.ssh/id_ed25519.pub\`, make it with \`ssh-keygen -t ed25519\` if missing) at github.com/settings/keys. Never ask for a GitHub password or token in the chat (a token goes through \`request_secret\`). \`gh\` isn't installed: for issues, pull requests and files use the connected GitHub tools.
 - **Another computer of the same person**: code projects sync through the person's Uno cloud — \`uno project sync\` here (commit first; it adds the git remote \`uno\`), \`uno project get <name>\` there (lands in \`~/projects/<name>\`); after that plain \`git push uno\` / \`git pull uno\`; \`uno project ls\` lists them. Conflicts are normal git: pull, merge, push. GitHub only when the person asks for it or has it connected. Documents go through the Drive; never copy whole folders with \`node_modules\` around.`;
+
+/**
+ * Uno Spark for the agent: when one JS/Python file on Spark is the answer,
+ * how to fit a small backend into it, and what to say when it doesn't fit.
+ * Misha's walk 18.10: asked to "deploy my project to uno.place", the agent
+ * didn't know Spark and said "there is no server, order Small".
+ */
+const SPARK_GUIDE = `## Spark: code without a server (free)
+
+One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\` — no server, nothing to keep running, free on every plan. \`spark_deploy\` puts it there (a file, or a small folder with \`entry\`) and returns the address; deploying the same name again makes a new version. \`spark_logs\` shows what it printed and a line per request, \`spark_list\` the apps and the account's limits, \`spark_delete\` removes one (the person approves).
+
+### When Spark, when not
+- **Fits:** a webhook, a Telegram bot, a small JSON API, a form handler, glue between services — anything that answers a request with a little work.
+- **Inside:** \`env.KV\` (key → value, shared by the account's apps: \`get\`, \`put\`, \`delete\`, \`list\`, \`incr\`), \`fetch\` to public addresses, variables (\`env\`) and secrets.
+- **Not there:** files on a disk, SQL databases, packages (npm, pip), timers or cron — it runs only when a request comes.
+- **A model without a key:** \`await env.AI.chat({ messages })\` → the OpenAI chat answer; \`return env.AI.chat({ stream: true, messages })\` streams it to the client (Python: \`env.AI.chat(messages)\`, \`stream=True\`). The account pays from its AI balance and Uno AI hours through its AI key «spark» ($5 limit to start, the person changes it in the console). Never put a model key in the code.
+- **Streaming:** return a \`fetch(url, { ..., stream: true })\` as it is (Python \`spark.fetch(..., stream=True)\`) and the client gets it as it arrives — up to 120 s, 2 streams at once on Free.
+- **Limits:** Free holds 3 apps, paid plans 20; a few ms of CPU per call; on Free a call ends after 30 s (a \`fetch\` is cut with it; exact figures: \`spark_list\`); about 600 requests a minute per account; a streamed answer may run 120 s. Over a limit the answer carries \`X-Uno-Spark-Error\`: \`cpu_limit\`, \`wall_limit\`, \`rate_limited\`, \`concurrency\` (retry).
+- "Deploy / put online my project" (also "on uno.place"): pages and a built frontend go on Sites (\`site_publish\`); a small backend goes on Spark. Never answer "there is no server, order a plan" when it fits Spark.
+
+### A small backend, rewritten for Spark
+When the person's backend (Express, Flask, FastAPI, Go, PHP…) is small and fits the list above, rewrite it as one file and keep the original:
+- One \`fetch(request, env)\`; route by \`new URL(request.url).pathname\` and \`request.method\`; answer JSON.
+- Data: SQLite or a JSON file → \`env.KV\` (one key per record, a prefix and \`list\` for a collection, \`incr\` for counters).
+- A background job ("check every minute") → do the check when a request comes, but only if that is acceptable for what the person wants; say so in one line.
+- Packages and SDKs → plain \`fetch\` to the service's HTTP API.
+- The frontend → Sites, calling the Spark address (send \`Access-Control-Allow-Origin\` from Spark when the site calls it).
+- Put it next to the project (\`spark.js\` or \`spark.py\`), deploy, call the address once to check, read \`spark_logs\` if it fails. Several files: deploy the folder with \`entry\` (no packages inside).
+
+JavaScript:
+\`\`\`js
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/visits") {
+      const visits = await env.KV.incr("visits");
+      return Response.json({ visits });
+    }
+    return Response.json({ error: "not found" }, { status: 404 });
+  },
+};
+\`\`\`
+
+Python:
+\`\`\`python
+import spark
+
+def fetch(request, env):
+    visits = env.KV.incr("visits")
+    return spark.Response.json({"hello": "world", "visits": visits})
+\`\`\`
+
+### Variables and secrets
+\`env\` in \`spark_deploy\` sets plain variables (it replaces them all): never tokens. A token or password is a secret: first \`request_secret\` puts it in the project's \`.env\`, then \`spark_deploy\` with \`secrets: [{"name": "API_TOKEN", "hosts": ["api.example.com"]}]\` — Uno Work reads the value from \`.env\` and hands it to Spark for those hosts only. The app writes \`env.API_TOKEN\` in the URL or a header of a \`fetch\` to those hosts and the real value is put in only there; it never appears in code, logs or the chat.
+
+### A Telegram bot on Spark
+1. FIRST, before code: \`request_secret\` for \`TELEGRAM_BOT_TOKEN\` with \`wait: false\` (in the project folder).
+2. The bot answers Telegram's POST: read the update (\`await request.json()\`), reply with \`fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", …)\` and return 200 fast. Keep what it must remember in \`env.KV\`.
+3. \`spark_deploy\` with \`secrets: [{"name": "TELEGRAM_BOT_TOKEN", "hosts": ["api.telegram.org"]}]\`.
+4. Point the bot's webhook at the app address once (\`setWebhook\`; the deploy result has the command — it reads \`.env\` and never prints the token). Then write to the bot to check, and \`spark_logs\` if it is silent.
+A bot that writes on its own on a schedule (reminders, "every morning") needs a timer: not Spark.
+
+### When it doesn't fit
+Say in one sentence what stops it, then the next step — no long explanation, no workaround that breaks the limits:
+- "It checks prices every 30 seconds, and Spark only answers requests (no timers)."
+- "Its jobs take longer than 30 seconds, the most a Spark call may take on Free."
+- "It needs a SQL database (or files, headless Chrome, packages)."
+Next step: run it as an app on this computer (\`uno_guide("apps")\`; a computer that sleeps pauses it — Plus stays on), or on an app server when \`app_servers_list\` says \`enabled: true\` (\`uno_guide("app-servers")\`); a database: \`db_create\`. If the plan is short, give the upgrade link from \`account_overview\`.
+
+Without the \`spark_*\` tools in this session: the full reference is the "Spark — code without a server (free)" section of \`curl -s https://console.uno.place/llms.txt\`.`;
 
 const HTTP_FALLBACK_NOTE =
   "Prefer the `uno-work` tools named above. The raw HTTP API below is what they call; use it only when the tools are not available in your session.";
@@ -164,6 +235,8 @@ export function buildUnoWorkGuide(
         'Forms work without a backend: the page posts to `/__forms` (`<form action="/__forms" method="POST">` with named inputs). `site_forms_set` chooses where answers go: `email` (the account\'s own address works at once; another address gets a confirmation link first), `telegram: true` (returns a link the person opens in Telegram and presses Start), `webhookUrl` (https, JSON). An empty string switches a channel off. `site_forms_get` shows the delivery and, with `submissions`, the latest answers. A new site with a form already sends every entry to the account\'s email. After publishing such a site say so in one line and give the link where all entries are kept: `entriesUrl` from the `site_publish` result (`https://console.uno.place/sites/<slug>?tab=forms`).',
         "Publishing a plain static site, setting a password and sending answers to email or Telegram run without asking: don't ask \"shall I publish?\", just publish and give the address. Removing a password, sending answers to an outside webhook and `site_unpublish` (takes a site off the internet) wait for the person's Allow. Only built pages go up: from a project folder Uno takes `dist/` or `public/`, and keys, `.env` and source files are left out (the result's `skipped` lists them; say in one line which stayed on the computer and stop there: never suggest a way to get a key or secret file published, such as renaming or moving it; only if the person says on their own that such a file holds no secrets, help with it). A backend (server code, package.json without a build) can't be a site: run it as an app instead. The person can Unpublish a site in Apps & sites, or ask you (`site_unpublish`); connecting a custom domain is in the Uno console.",
       ].join("\n\n");
+    case "spark":
+      return SPARK_GUIDE;
     case "databases":
       return [
         "## Databases",

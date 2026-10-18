@@ -78,9 +78,42 @@ import {
 } from "./tools.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { consoleRequest, consoleToken } from "./consoleClient.ts";
+import {
+  SparkError,
+  makeSparkClient,
+  memorySparkTokenCache,
+  parseStoredSparkToken,
+  type SparkTokenCache,
+} from "./sparkClient.ts";
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
+
+/** The Spark token in the daemon's secret store (`<state>/secrets/spark-token.bin`, 0600). */
+const SPARK_TOKEN_SECRET_KEY = "spark-token";
+
+function secretStoreSparkCache(store: typeof ServerSecretStore.Service): SparkTokenCache {
+  return {
+    read: () =>
+      Effect.runPromise(
+        store.get(SPARK_TOKEN_SECRET_KEY).pipe(
+          Effect.map(parseStoredSparkToken),
+          Effect.orElseSucceed(() => null),
+        ),
+      ),
+    write: (token) =>
+      Effect.runPromise(
+        (token === null
+          ? store.remove(SPARK_TOKEN_SECRET_KEY)
+          : store.set(SPARK_TOKEN_SECRET_KEY, new TextEncoder().encode(JSON.stringify(token)))
+        ).pipe(Effect.ignore),
+      ),
+  };
+}
+
+/** Where there is no secret store (it is always there in the daemon): this process only. */
+const processSparkCache = memorySparkTokenCache();
 
 function run(command: string, args: ReadonlyArray<string>): Promise<string> {
   return new Promise((resolve) => {
@@ -210,6 +243,7 @@ const makeDeps = (input: {
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
+    const secretStore = Option.getOrNull(yield* Effect.serviceOption(ServerSecretStore));
     // What the assistant's bot-token card needs (Inbox, messenger, the late answer).
     const secretServices = yield* Effect.context<
       | BrowserBridge
@@ -438,6 +472,34 @@ const makeDeps = (input: {
             });
           }),
       },
+      // Spark: the console mints a Spark-only token with this computer's own
+      // credential; it lives in the secret store (0600), never in a result.
+      spark: (() => {
+        const client = makeSparkClient({
+          credential: () =>
+            Effect.runPromise(
+              serverSettings.getSettings.pipe(
+                Effect.map((current) => consoleToken(current)),
+                Effect.orElseSucceed(() => ""),
+              ),
+            ),
+          consoleBaseUrl: controlPlaneBaseUrl(),
+          cache: secretStore ? secretStoreSparkCache(secretStore) : processSparkCache,
+        });
+        return {
+          request: (request) =>
+            Effect.tryPromise({
+              try: () => client.request(request),
+              catch: (cause) =>
+                new UnoWorkToolError({
+                  message:
+                    cause instanceof SparkError
+                      ? cause.message
+                      : `Uno Spark didn't answer: ${cause instanceof Error ? cause.message : String(cause)}`,
+                }),
+            }),
+        };
+      })(),
       readLogTail: ({ app, lines }) =>
         Effect.promise(() => readAppLogTail(app, lines, manifestDir)),
       // Pictures come with the console's assistants (ASSISTANTS_MVP): where the
