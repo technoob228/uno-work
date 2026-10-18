@@ -11,6 +11,9 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+// A narrow chat header (the right panel open) keeps the eye and the check mark.
+const HEADER_LABEL_CLASS = "hidden @lg/header-actions:inline";
+
 /**
  * "Read" and "Done" in the chat's header while the chat waits on the person:
  * looking at the answer doesn't end "Your turn" — replying or one of these
@@ -61,7 +64,7 @@ export function ChatDoneButton(props: {
         }
       >
         <EyeIcon className="size-3" />
-        {props.compact ? null : "Read"}
+        {props.compact ? null : <span className={HEADER_LABEL_CLASS}>Read</span>}
       </TooltipTrigger>
       <TooltipPopup side="bottom" className="max-w-64">
         You've seen the answer and have nothing to add for now. The chat stays in the list and stops
@@ -89,7 +92,7 @@ export function ChatDoneButton(props: {
           }
         >
           <CheckIcon className="size-3" />
-          {props.compact ? null : "Done"}
+          {props.compact ? null : <span className={HEADER_LABEL_CLASS}>Done</span>}
         </TooltipTrigger>
         <TooltipPopup side="bottom" className="max-w-64">
           This chat finished and waits for you. Reply to keep going, or press Done when there's
