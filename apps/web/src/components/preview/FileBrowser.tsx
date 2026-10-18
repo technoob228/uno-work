@@ -55,6 +55,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
   tasks: ListTodoIcon,
+  files: FolderIcon,
   unknown: FileIcon,
 };
 
@@ -74,6 +75,7 @@ const KIND_BG: Record<PreviewFileKind, string> = {
   "plugin-panel": "bg-violet-500/16 text-violet-700 dark:text-violet-300",
   app: "bg-sky-500/16 text-sky-700 dark:text-sky-300",
   tasks: "bg-blue-500/16 text-blue-700 dark:text-blue-300",
+  files: "bg-amber-500/16 text-amber-700 dark:text-amber-300",
   unknown: "bg-muted text-muted-foreground",
 };
 

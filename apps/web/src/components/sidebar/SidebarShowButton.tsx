@@ -5,7 +5,7 @@
  * With the rail layout the rail keeps its own trigger, so nothing here.
  */
 import { PanelLeftIcon } from "lucide-react";
-import { useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 
 import { isElectron } from "../../env";
 import { resolveShortcutCommand } from "../../keybindings";
@@ -18,13 +18,17 @@ import { useSidebar } from "../ui/sidebar";
 import { isMacCtrlBSidebarToggle, sidebarToggleLabel, withSidebarToggle } from "./sidebarShortcut";
 import { useSidebarDRailVisible } from "./sidebarDState";
 
+/** True inside a screen shown in the right panel (Files beside a chat): no button there. */
+export const SidebarShowButtonHidden = createContext(false);
+
 export function SidebarShowButton({ className }: { className?: string }) {
+  const hidden = useContext(SidebarShowButtonHidden);
   const { open, isMobile, toggleSidebar } = useSidebar();
   const rail = useNavLayout() === "rail";
   // Sidebar D folded to its rail: the rail is the way back.
   const railD = useSidebarDRailVisible();
   const keybindings = useServerKeybindings();
-  if (!isMobile && (open || rail || railD)) return null;
+  if (hidden || (!isMobile && (open || rail || railD))) return null;
   const shortcut = isMobile ? null : sidebarToggleLabel(keybindings);
   return (
     <Tooltip>

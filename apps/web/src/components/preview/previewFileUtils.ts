@@ -107,6 +107,7 @@ const NOT_A_FILE_KINDS: ReadonlySet<PreviewFile["kind"]> = new Set([
   "plugin-panel",
   "app",
   "tasks",
+  "files",
 ]);
 
 /** Where the Download button of a panel tab takes the bytes from. */

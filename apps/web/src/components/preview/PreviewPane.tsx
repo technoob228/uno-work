@@ -63,6 +63,7 @@ import {
   DUAL_VIEW_KINDS,
   isAppTab,
   isBrowserTab,
+  isFilesTab,
   isLiveBrowserTab,
   isPluginPanelTab,
   isTasksTab,
@@ -93,6 +94,8 @@ import {
 import { AppFrame } from "../apps/AppFrame";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
+import { PanelFilesTab } from "../files/PanelFilesTab";
+import { usePanelFilesStore } from "../files/filesPanelTab";
 import { PanelLauncher } from "./PanelLauncher";
 import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
@@ -129,6 +132,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   "plugin-panel": PuzzleIcon,
   app: AppWindowIcon,
   tasks: ListTodoIcon,
+  files: FolderIcon,
   unknown: FileIcon,
 };
 
@@ -148,6 +152,7 @@ const KIND_LABEL: Record<PreviewFileKind, string> = {
   "plugin-panel": "Plugin panel",
   app: "App",
   tasks: "Tasks",
+  files: "Files",
   unknown: "File",
 };
 
@@ -1462,6 +1467,9 @@ function Body({ file }: { file: PreviewFile }) {
   if (file.kind === "tasks") {
     return <TasksTabBody file={file} />;
   }
+  if (isFilesTab(file)) {
+    return <PanelFilesTab file={file} />;
+  }
   const hasInlineContent = Boolean(file.content) || Boolean(file.blobUrl);
   const sourceView = DUAL_VIEW_KINDS.has(file.kind) && sourceViewFileIds.includes(file.id);
 
@@ -2065,18 +2073,26 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   const fullScreenTarget =
     active && isAppTab(active) && active.url
       ? ({ type: "app", url: active.url } as const)
-      : active &&
-          active.path?.startsWith("/") &&
-          !isBrowserTab(active) &&
-          !isPluginPanelTab(active) &&
-          !isLiveBrowserTab(active)
-        ? ({ type: "file", path: active.path } as const)
-        : null;
+      : active && isFilesTab(active)
+        ? ({ type: "files" } as const)
+        : active &&
+            active.path?.startsWith("/") &&
+            !isBrowserTab(active) &&
+            !isPluginPanelTab(active) &&
+            !isLiveBrowserTab(active)
+          ? ({ type: "file", path: active.path } as const)
+          : null;
   const openFullScreen = () => {
     if (!active || !fullScreenTarget) return;
     closeFile(active.id);
     if (fullScreenTarget.type === "app") {
       openHere({ url: fullScreenTarget.url, name: active.name, icon: active.content || null });
+      return;
+    }
+    if (fullScreenTarget.type === "files") {
+      // The Files screen at the place the tab shows.
+      const place = usePanelFilesStore.getState().byTab[active.id] ?? {};
+      void navigate({ to: "/files", search: place });
       return;
     }
     const folder = fullScreenTarget.path.replace(/\/[^/]*$/, "") || "/";
@@ -2302,7 +2318,8 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       !isPluginPanelTab(active) &&
       !isAppTab(active) &&
       !isLiveBrowserTab(active) &&
-      !isTasksTab(active) ? (
+      !isTasksTab(active) &&
+      !isFilesTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
       <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>

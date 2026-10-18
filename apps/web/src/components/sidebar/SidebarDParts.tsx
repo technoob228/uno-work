@@ -59,6 +59,7 @@ import {
 } from "./SidebarDAccountButton";
 import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
+import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
 /** The computer this window works on, by the name the person knows it by. */
@@ -323,9 +324,12 @@ function PlaceRow(props: {
 function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
+  const openFilesInPanel = useOpenFilesInPanel(isMobile);
   return (to: "/files" | "/sites") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
+    // In a chat, Files opens on the right, beside it (Misha 18.10).
+    if (to === "/files" && openFilesInPanel()) return;
     void navigate({ to });
   };
 }
