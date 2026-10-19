@@ -189,16 +189,51 @@ describe("a harness not signed in on this computer", () => {
     expect(
       newThreadStartSelection({
         stickyActiveProvider: id("codex"),
+        projectDefault: null,
         providers,
         settings: DEFAULT_UNIFIED_SETTINGS,
       }),
     ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
   });
 
+  it("isn't where New chat starts when a project added by the CLI defaults to it", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault: codexPick,
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+
+  it("leaves a project default that runs here alone", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault: { instanceId: id("claudeAgent"), model: "claude-sonnet-5" },
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toBeNull();
+  });
+
+  it("waits for the computer's harness list before re-pointing anything", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault: codexPick,
+        providers: [],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toBeNull();
+  });
+
   it("leaves a signed-in sticky pick alone", () => {
     expect(
       newThreadStartSelection({
         stickyActiveProvider: id("claudeAgent"),
+        projectDefault: codexPick,
         providers,
         settings: DEFAULT_UNIFIED_SETTINGS,
       }),

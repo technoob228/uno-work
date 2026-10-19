@@ -132,3 +132,29 @@ export function isUnusableAutoBootstrapDefault(
     (provider) => provider.instanceId === selection.instanceId && isUsableForDefault(provider),
   );
 }
+
+/**
+ * Stricter than {@link isUnusableAutoBootstrapDefault}, for re-pointing the
+ * defaults of projects a person works in: the server's fallback pair whose
+ * harness is plainly not usable here — gone, off, not installed, or signed
+ * out. A probe that merely couldn't tell (`unknown`) leaves it alone.
+ */
+export function isSignedOutAutoBootstrapDefault(
+  selection: ModelSelection | null,
+  providers: ReadonlyArray<ServerProvider>,
+): boolean {
+  if (
+    selection === null ||
+    selection.instanceId !== FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION.instanceId ||
+    selection.model !== FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION.model
+  ) {
+    return false;
+  }
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  return (
+    provider === undefined ||
+    !provider.enabled ||
+    !provider.installed ||
+    provider.auth.status === "unauthenticated"
+  );
+}

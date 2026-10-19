@@ -1,6 +1,7 @@
 import {
   CommandId,
   DEFAULT_MODEL,
+  isAssistantProjectId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
   ProjectId,
@@ -46,9 +47,10 @@ import { ProviderSessionDirectory } from "./provider/Services/ProviderSessionDir
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
 import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
+  isSignedOutAutoBootstrapDefault,
   selectAutoBootstrapModelSelection,
 } from "./provider/autoBootstrapModelSelection.ts";
-import { awaitUsableBootDefault } from "./provider/awaitUsableBootDefault.ts";
+import { awaitUsableBootDefault, bootProbesFinished } from "./provider/awaitUsableBootDefault.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
 import {
   formatHeadlessServeOutput,
@@ -186,6 +188,44 @@ export const getAutoBootstrapDefaultModelSelection: Effect.Effect<
   yield* awaitUsableBootDefault();
   const providers = yield* providerRegistry.getProviders;
   return selectAutoBootstrapModelSelection(providers) ?? FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
+});
+
+/**
+ * Projects added with `uno-work project add` (or created before the harness
+ * probes landed) carry the server's fallback — Codex — as their default, and
+ * every new chat and every thread an assistant spawns there starts on it. On a
+ * computer where Codex isn't signed in that is a "Sign in to Codex" card the
+ * person never asked for (Misha 19.10, uno-product). Once the boot probes are
+ * in, re-point such defaults to what runs here; a default someone picked is
+ * never touched, and neither is the assistant's (AssistantService does it).
+ */
+export const repairSignedOutProjectDefaults = Effect.gen(function* () {
+  const providerRegistry = yield* ProviderRegistry;
+  const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  yield* awaitUsableBootDefault();
+  // Cached snapshots from before the probes can't say what is signed in.
+  if (!(yield* bootProbesFinished(providerRegistry))) return;
+  const providers = yield* providerRegistry.getProviders;
+  const usable = selectAutoBootstrapModelSelection(providers);
+  if (usable === null) return;
+  const snapshot = yield* projectionReadModelQuery.getShellSnapshot();
+  for (const project of snapshot.projects) {
+    if (isAssistantProjectId(project.id)) continue;
+    if (!isSignedOutAutoBootstrapDefault(project.defaultModelSelection, providers)) continue;
+    yield* orchestrationEngine.dispatch(
+      {
+        type: "project.meta.update",
+        commandId: CommandId.make(crypto.randomUUID()),
+        projectId: project.id,
+        defaultModelSelection: usable,
+      },
+      { origin: systemCommandOrigin("runtime-startup", "project-default-repair") },
+    );
+    yield* Effect.logInfo("project default model re-pointed to a usable harness").pipe(
+      Effect.annotateLogs({ projectId: project.id, ...usable }),
+    );
+  }
 });
 
 export const resolveWelcomeBase = Effect.gen(function* () {
@@ -489,6 +529,18 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       runStartupPhase(
         "self-update.report",
         reportSelfUpdateAfterStartToConsole.pipe(Effect.ignore),
+      ),
+    );
+
+    // Forked: waits for the harness probes, which must not hold the start.
+    yield* Effect.forkScoped(
+      runStartupPhase(
+        "projects.default-model.repair",
+        repairSignedOutProjectDefaults.pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("project default model repair failed", { cause }),
+          ),
+        ),
       ),
     );
 

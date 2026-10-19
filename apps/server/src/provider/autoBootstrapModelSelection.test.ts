@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
+  isSignedOutAutoBootstrapDefault,
   isUnusableAutoBootstrapDefault,
   selectAutoBootstrapModelSelection,
 } from "./autoBootstrapModelSelection.ts";
@@ -282,5 +283,34 @@ describe("isUnusableAutoBootstrapDefault", () => {
 
   it("has nothing to repair when the project carries no default", () => {
     expect(isUnusableAutoBootstrapDefault(null, [])).toBe(false);
+  });
+});
+
+describe("isSignedOutAutoBootstrapDefault", () => {
+  const fallback = FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION;
+  const codex = (input: Partial<Parameters<typeof provider>[0]>) =>
+    provider({ instanceId: "codex", driver: "codex", models: [DEFAULT_MODEL], ...input });
+
+  it("flags the fallback of a project added on a computer where Codex never signed in", () => {
+    expect(
+      isSignedOutAutoBootstrapDefault(fallback, [codex({ authStatus: "unauthenticated" })]),
+    ).toBe(true);
+    expect(isSignedOutAutoBootstrapDefault(fallback, [codex({ installed: false })])).toBe(true);
+    expect(isSignedOutAutoBootstrapDefault(fallback, [claudeReady])).toBe(true);
+  });
+
+  it("leaves it alone while Codex works or the probe couldn't tell", () => {
+    expect(isSignedOutAutoBootstrapDefault(fallback, [codexReady])).toBe(false);
+    expect(isSignedOutAutoBootstrapDefault(fallback, [codex({ authStatus: "unknown" })])).toBe(
+      false,
+    );
+  });
+
+  it("never touches a default someone picked", () => {
+    const picked = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5-codex" };
+    expect(
+      isSignedOutAutoBootstrapDefault(picked, [codex({ authStatus: "unauthenticated" })]),
+    ).toBe(false);
+    expect(isSignedOutAutoBootstrapDefault(null, [])).toBe(false);
   });
 });
