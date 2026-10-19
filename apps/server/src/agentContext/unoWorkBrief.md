@@ -21,6 +21,8 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 
 Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.
 
+Deploying to Uno / uno.place: use the uno-work tools (`uno_guide`) or read https://uno.place/llms.txt first; never ask the person to sign in in the browser — POST /api/v1/agent/connect.
+
 ## Where things live
 
 - `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`. Projects go in `~/projects/<name>`.
