@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.150 — 2026-10-19
+
+- **Files from a chat start in the chat's folder.** New tab → Files, or Files in the sidebar while you're in a chat, opens the chat's project folder (not your home folder), and the tab stays with that chat. Each chat keeps its own place. Outside a chat nothing changes.
+- A new chat never starts on an agent you aren't signed in to on this computer (no more "Sign in to Codex" in a fresh chat).
+
 ## v0.0.149 — 2026-10-19
 
 - **Comment works on your own sites in the web panel.** Open one of your Uno Sites (or your computer's app address) in the panel of Uno Work on the web, and Comment picks any part of the page for the chat, with Debug showing the page's console and network. Other people's sites stay as they were. Where your account doesn't have it yet, nothing changes.
