@@ -36,6 +36,21 @@
  * (`{ __unoPageTools: true, method, arg }`), the first being `setNonce`;
  * until then lines wait in the page. Outside a frame (and in a <webview>,
  * which is a top window) the script does nothing.
+ *
+ * Who the page talks to (19.10) — never `"*"`, never "any *.uno4.work": the
+ * page's console, its fetch/XHR bodies and the person's picks go to one
+ * exact origin, and only that origin's calls count.
+ *
+ *   - A port's page (`p5173--abc.uno4.work`, served by the daemon): Work at
+ *     `https://abc.uno4.work`, read from the page's own host.
+ *   - The person's own site on Uno Sites (`*.uno4.me` or its own domain,
+ *     served by the console with `verifyPath`): nobody, until the parent's
+ *     `setNonce` comes with a token (`{ method: "setNonce", arg, token }`)
+ *     that the site's own server confirms for exactly that parent origin
+ *     (`POST verifyPath` `{ token, parentOrigin }` → `{ ok: true }`). Only the
+ *     site's owner gets such a token, for their own Work address. Until then
+ *     nothing leaves the page — not even its address; the parent's other
+ *     calls from that origin wait and are applied after.
  */
 
 export const PAGE_TOOLS_GLOBAL = "__unoPageTools";
@@ -98,9 +113,16 @@ export type PageToolsChannel = "console" | "queue" | "postMessage";
 /** Marks our messages between a port's page and the host (postMessage channel). */
 export const PAGE_TOOLS_MESSAGE_KEY = "__unoPageTools";
 
+/**
+ * Where a site's page asks its own server whether the parent's token is good
+ * (the console serves the script and this on the person's Uno Sites hosts).
+ */
+export const SITE_PAGE_TOOLS_VERIFY_PATH = "/__uno/page-tools/verify";
+
 /** What the host tells the page over the postMessage channel. */
 export type PageToolsPostCommand =
-  | { readonly method: "setNonce"; readonly arg: string }
+  /** `token`: a site's page talks only to a parent whose token its server confirmed. */
+  | { readonly method: "setNonce"; readonly arg: string; readonly token?: string }
   | { readonly method: "setMode"; readonly arg: "comment" | "off" }
   | { readonly method: "setPins"; readonly arg: ReadonlyArray<PagePin> }
   | { readonly method: "setPaused"; readonly arg: boolean };
@@ -128,7 +150,14 @@ export function parsePageToolsPostEvent(data: unknown): PageToolsPostEvent | nul
 
 /** The message the host posts into a port's page. */
 export function pageToolsPostMessage(command: PageToolsPostCommand): Record<string, unknown> {
-  return { [PAGE_TOOLS_MESSAGE_KEY]: true, method: command.method, arg: command.arg };
+  const message: Record<string, unknown> = {
+    [PAGE_TOOLS_MESSAGE_KEY]: true,
+    method: command.method,
+    arg: command.arg,
+  };
+  if (command.method === "setNonce" && command.token !== undefined)
+    message["token"] = command.token;
+  return message;
 }
 
 /** The person's pointer over a live picture, in the page's CSS pixels. */
@@ -155,25 +184,21 @@ export function pageToolsCall(method: "setMode" | "setPins" | "setPaused", arg: 
 }
 
 const SCRIPT = String.raw`
-(function (NONCE, QUEUE, POST) {
+(function (NONCE, QUEUE, POST, VERIFY) {
   var w = window;
   var G = "${PAGE_TOOLS_GLOBAL}";
   var M = "${PAGE_TOOLS_MESSAGE_KEY}";
   // The postMessage channel lives only in a frame: anywhere else the page is
   // left exactly as it is.
   if (POST && w.parent === w) return "standalone";
-  // A port's address p5173--abc.uno4.work is framed by Work at abc.uno4.work
-  // (or a shared Work host of the same domain, app.uno4.work: who may frame
-  // it at all is the console's frame-ancestors).
-  var PARENT = "*";
-  if (POST) {
-    var ph = /^p\d+--([^.]+)\.(.+)$/.exec(location.hostname);
-    if (ph) {
-      PARENT = location.protocol + "//" + ph[1] + "." + ph[2] + (location.port ? ":" + location.port : "");
-      var ao = location.ancestorOrigins;
-      var up = ao && ao.length ? String(ao[0]) : "";
-      if (/^https:\/\//.test(up) && up.slice(-(ph[2].length + 1)) === "." + ph[2]) PARENT = up;
-    }
+  // The one origin the page talks to (postMessage channel); null — nobody yet.
+  // A port's address p5173--abc.uno4.work: Work at abc.uno4.work exactly. A
+  // site (VERIFY): the parent whose token the site's server confirms.
+  var PARENT = null;
+  if (POST && !VERIFY) {
+    var ph = /^p\d+--([a-z0-9-]+)\.([a-z0-9.-]+)$/i.exec(location.hostname);
+    if (!ph) return "no-parent";
+    PARENT = location.protocol + "//" + ph[1].toLowerCase() + "." + ph[2].toLowerCase() + (location.port ? ":" + location.port : "");
   }
   if (w[G] && w[G].doc === document) {
     if (!QUEUE && w[G].nonce === NONCE) return "already";
@@ -186,12 +211,13 @@ const SCRIPT = String.raw`
   function emit(type, data) {
     try {
       var line = NONCE + JSON.stringify({ type: type, data: data });
-      if (QUEUE || (POST && !NONCE)) { Q.push(line); if (Q.length > 400) Q.splice(0, Q.length - 400); }
+      if (QUEUE || (POST && (!NONCE || !PARENT))) { Q.push(line); if (Q.length > 400) Q.splice(0, Q.length - 400); }
       else if (POST) post({ line: line });
       else origDebug(line);
     } catch (e) {}
   }
   function post(data) {
+    if (!PARENT) return;
     try { data[M] = true; w.parent.postMessage(data, PARENT); } catch (e) {}
   }
   var seq = 0;
@@ -609,7 +635,7 @@ const SCRIPT = String.raw`
       Q = Q.map(function (line) { return line.indexOf(old) === 0 ? n + line.slice(old.length) : line; });
       NONCE = n; w[G].nonce = n;
       // The host is listening now: what the page said before goes first.
-      if (POST && n) { var out = Q; Q = []; out.forEach(function (line) { post({ line: line }); }); }
+      if (POST && n && PARENT) { var out = Q; Q = []; out.forEach(function (line) { post({ line: line }); }); }
     },
     hoverAt: function (x, y) {
       if (mode !== "comment" || paused) return;
@@ -650,13 +676,46 @@ const SCRIPT = String.raw`
     w.addEventListener("hashchange", reportNav);
     w.addEventListener("load", reportNav);
     reportNav();
-    w.addEventListener("message", function (e) {
-      if (e.source !== w.parent || (PARENT !== "*" && e.origin !== PARENT)) return;
-      var d = e.data;
-      if (!d || d[M] !== true || typeof d.method !== "string") return;
+    var apply = function (d) {
       var t = w[G];
       if (d.method === "setNonce" && typeof d.arg === "string") t.setNonce(d.arg);
       else if (d.method === "setMode" || d.method === "setPins" || d.method === "setPaused") t[d.method](d.arg);
+    };
+    // A site: the parent's token goes to the site's own server with the
+    // parent's origin; only its "ok" makes that origin the page's parent.
+    var verifying = null, held = [];
+    var verify = function (origin, d) {
+      if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin) || typeof origFetch !== "function") return;
+      verifying = origin;
+      var done = function (ok) {
+        var later = held;
+        held = []; verifying = null;
+        if (!ok || PARENT) return;
+        PARENT = origin;
+        reportNav();
+        apply(d);
+        later.forEach(apply);
+      };
+      try {
+        origFetch.call(w, VERIFY, {
+          method: "POST", credentials: "same-origin", cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: d.token, parentOrigin: origin })
+        }).then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (j) { done(!!(j && j.ok === true)); }, function () { done(false); });
+      } catch (err) { done(false); }
+    };
+    w.addEventListener("message", function (e) {
+      if (e.source !== w.parent) return;
+      var d = e.data;
+      if (!d || d[M] !== true || typeof d.method !== "string") return;
+      if (PARENT) { if (e.origin === PARENT) apply(d); return; }
+      if (!VERIFY) return;
+      if (verifying) {
+        if (e.origin === verifying) { held.push(d); if (held.length > 50) held.shift(); }
+        return;
+      }
+      if (d.method === "setNonce" && typeof d.arg === "string" && typeof d.token === "string") verify(e.origin, d);
     });
   }
   emit("ready", { url: location.href, title: document.title });
@@ -677,8 +736,21 @@ const SCRIPT = String.raw`
 /**
  * The script with its channel's nonce; `executeJavaScript` it on each
  * `dom-ready`. The postMessage channel's script is served as a file (no
- * nonce yet: the host sends one with `setNonce`).
+ * nonce yet: the host sends one with `setNonce`): by the daemon on a port's
+ * address, and — with `verifyPath` ({@link SITE_PAGE_TOOLS_VERIFY_PATH}) — by
+ * the console on the person's sites (fishcode `site_page_tools.js`, made by
+ * `bun scripts/print-site-page-tools.ts`).
  */
-export function buildPageToolsScript(nonce: string, channel: PageToolsChannel = "console"): string {
-  return `${SCRIPT.trim()}(${JSON.stringify(nonce)}, ${channel === "queue" ? "true" : "false"}, ${channel === "postMessage" ? "true" : "false"});`;
+export function buildPageToolsScript(
+  nonce: string,
+  channel: PageToolsChannel = "console",
+  options: { readonly verifyPath?: string } = {},
+): string {
+  const verify = channel === "postMessage" && options.verifyPath ? options.verifyPath : "";
+  return `${SCRIPT.trim()}(${JSON.stringify(nonce)}, ${channel === "queue" ? "true" : "false"}, ${channel === "postMessage" ? "true" : "false"}, ${JSON.stringify(verify)});`;
+}
+
+/** The script the console puts on the person's Uno Sites pages. */
+export function buildSitePageToolsScript(): string {
+  return buildPageToolsScript("", "postMessage", { verifyPath: SITE_PAGE_TOOLS_VERIFY_PATH });
 }

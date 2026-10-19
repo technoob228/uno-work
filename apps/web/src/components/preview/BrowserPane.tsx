@@ -75,7 +75,11 @@ import { browserTabMode } from "./yourBrowserTab.logic";
 import { WEB_PAGE_IN_PANEL } from "./browserSource";
 import { DEVICE_ZOOM_CHOICES, deviceScaleFor, type DeviceZoom } from "./deviceZoom";
 import { localUrlToPortPreviewUrl, portPreviewUrlToLocalUrl } from "@t3tools/shared/portPreview";
-import { useCloudComputer, usePortPreview } from "./portPreview";
+import { useCloudComputer, usePortPreview, type PortPreviewState } from "./portPreview";
+import { appLocalUrl } from "./openOutsideTarget";
+import { useSiteComment } from "./siteComment";
+import { machineAppsQueryOptions } from "../computer/computerQueries";
+import { useWorkSites } from "../sites/useWorkSites";
 
 /** The page at its real size, its picture scaled from the top left corner. */
 function deviceFrameStyle(
@@ -398,22 +402,50 @@ function BrowserView({
   // port's own address (portPreview.ts) — in the web's iframe and in the
   // desktop's <webview> alike. The address bar keeps localhost.
   const cloudComputer = useCloudComputer(currentChatEnvironmentId);
-  const portPreview = usePortPreview({
-    url: currentUrl,
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const ownEnvironmentId = currentChatEnvironmentId ?? primaryEnvironmentId;
+  // The web's iframe (19.10): a page of another origin is out of Comment's
+  // reach — unless it is the person's own. An app of the computer at its own
+  // address (public or private https) is the computer's localhost: it is
+  // shown as "Your site" (where Comment works); no link — the address as before.
+  const webFrame = iframeMode && !demoDesktop && pageInPanel;
+  const machineApps = useQuery(
+    machineAppsQueryOptions(ownEnvironmentId, webFrame && cloudComputer !== null),
+  );
+  const machineAppList = machineApps.data?.apps;
+  const appLocal =
+    webFrame && cloudComputer !== null ? appLocalUrl(currentUrl, machineAppList ?? []) : null;
+  const portPreviewOfUrl = usePortPreview({
+    url: appLocal ?? currentUrl,
     computer: cloudComputer,
     enabled: pageInPanel && !demoDesktop,
   });
+  const portPreview: PortPreviewState =
+    appLocal !== null && portPreviewOfUrl.kind === "failed" ? { kind: "off" } : portPreviewOfUrl;
   const portLink = portPreview.kind === "ready" ? portPreview.link : null;
   const portMode = portPreview.kind !== "off";
   const portModeRef = useRef(portMode);
   portModeRef.current = portMode;
+  // The person's own site on Uno Sites: the console put the script into its
+  // page; it talks to this Work once the console's token says so (siteComment.ts).
+  const workSites = useWorkSites(webFrame && pageToolsFlag ? ownEnvironmentId : null);
+  const siteComment = useSiteComment({
+    url: currentUrl,
+    sites: workSites.data?.sites,
+    enabled: webFrame && pageToolsFlag && !portMode,
+  });
   // The web's iframe reaches only a page of Work's own address; on any other
   // page Comment couldn't see it, so it isn't offered there — except a port's
-  // page, which carries the script itself (postMessage channel).
+  // page and the person's own site, which carry the script themselves
+  // (postMessage channel).
   const pageToolsOn =
     pageToolsFlag &&
     pageInPanel &&
-    (!iframeMode || demoDesktop || isSameOriginUrl(currentUrl) || portLink !== null);
+    (!iframeMode ||
+      demoDesktop ||
+      isSameOriginUrl(currentUrl) ||
+      portLink !== null ||
+      siteComment !== null);
   const pageElementRef = useRef<HTMLElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [webviewNode, setWebviewNode] = useState<ElectronWebviewElement | null>(null);
@@ -550,6 +582,15 @@ function BrowserView({
         if (sameFrame && view && readyRef.current) void view.loadURL(sameFrame).catch(() => {});
         return;
       }
+      // An app's own address (web): its port's page — in this frame when it is
+      // that port, otherwise a fresh frame (a link, or the address itself).
+      const appTarget = webFrame && cloudComputer ? appLocalUrl(url, machineAppList ?? []) : null;
+      if (appTarget) {
+        const sameFrame = portLink ? localUrlToPortPreviewUrl(appTarget, portLink.origin) : null;
+        if (sameFrame && view && readyRef.current) void view.loadURL(sameFrame).catch(() => {});
+        else setMountSrc(url);
+        return;
+      }
       // Leaving a port's page: the page frame mounts anew with this address.
       if (portMode) {
         setMountSrc(url);
@@ -561,7 +602,17 @@ function BrowserView({
         setMountSrc(url);
       }
     },
-    [scopeKey, tab.id, updateBrowserTab, pageInPanel, cloudComputer, portLink, portMode],
+    [
+      scopeKey,
+      tab.id,
+      updateBrowserTab,
+      pageInPanel,
+      cloudComputer,
+      portLink,
+      portMode,
+      webFrame,
+      machineAppList,
+    ],
   );
 
   const attachWebview = useCallback((node: HTMLWebViewElement | null) => {
@@ -599,6 +650,27 @@ function BrowserView({
       setWebviewNode(view);
     },
     [portOrigin],
+  );
+
+  // The person's own site (web): the same frame, re-wrapped once the console
+  // gave a token — the page doesn't load again.
+  const siteOrigin = siteComment?.origin ?? null;
+  const siteToken = siteComment?.token ?? null;
+  const attachSiteFrame = useCallback(
+    (node: HTMLIFrameElement | null) => {
+      iframeAdapterRef.current?.dispose();
+      iframeAdapterRef.current = node
+        ? siteOrigin && siteToken
+          ? new PostMessageWebview(node, siteOrigin, window, siteToken)
+          : new IframeWebview(node)
+        : null;
+      const view = iframeAdapterRef.current as unknown as ElectronWebviewElement | null;
+      webviewRef.current = view;
+      pageElementRef.current = node;
+      if (!view) readyRef.current = false;
+      setWebviewNode(view);
+    },
+    [siteOrigin, siteToken],
   );
 
   // Comment mode (C): the page's half lives in the page. The picked element's
@@ -1342,7 +1414,7 @@ function BrowserView({
                 ) : iframeMode ? (
                   <iframe
                     key={portLink ? portLink.url : "page"}
-                    ref={portLink ? attachPortFrame : attachIframe}
+                    ref={portLink ? attachPortFrame : siteComment ? attachSiteFrame : attachIframe}
                     src={portLink ? portLink.url : mountSrc}
                     // Same origin on purpose (Comment / Debug reach the page);
                     // no top navigation, so a page can't take Work away.

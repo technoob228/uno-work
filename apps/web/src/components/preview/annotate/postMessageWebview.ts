@@ -14,6 +14,11 @@
  *     setPaused) → `postPageTools`, posted to the port's origin only.
  *
  * Only messages from this frame's window and the port's origin count.
+ *
+ * The person's own site on Uno Sites (19.10) talks the same way, with one
+ * more step: its page answers only a parent whose `setNonce` carries a token
+ * the site's server confirms for this Work address (`siteToken`, from the
+ * console — siteComment.ts). Calls made while the token comes wait, in order.
  */
 import {
   pageToolsPostMessage,
@@ -25,21 +30,31 @@ import { IframeWebview } from "./iframeWebview";
 
 type MessageHost = Pick<Window, "addEventListener" | "removeEventListener">;
 
+/** A fresh token for the site's page (null — none: the page stays silent). */
+export type SiteTokenSource = () => Promise<string | null>;
+
 export class PostMessageWebview extends IframeWebview {
   readonly pageToolsChannel: PageToolsChannel = "postMessage";
   private lastUrl: string | null = null;
+  /** Calls made while `setNonce` waits for its token; null — none waiting. */
+  private waiting: PageToolsPostCommand[] | null = null;
+  private disposed = false;
 
   constructor(
     iframe: HTMLIFrameElement,
-    /** The port's origin: the only one we talk to. */
+    /** The port's (or the site's) origin: the only one we talk to. */
     readonly origin: string,
     private readonly host: MessageHost = window,
+    /** A site's page: `setNonce` goes with a token from here. */
+    private readonly siteToken: SiteTokenSource | null = null,
   ) {
     super(iframe);
     host.addEventListener("message", this.onMessage);
   }
 
   override dispose(): void {
+    this.disposed = true;
+    this.waiting = null;
     this.host.removeEventListener("message", this.onMessage);
     super.dispose();
   }
@@ -55,7 +70,9 @@ export class PostMessageWebview extends IframeWebview {
     try {
       const url = new URL(src);
       const next = url.searchParams.get("next");
-      if (url.pathname === "/enter" && next?.startsWith("/")) return `${url.origin}${next}`;
+      if (!this.siteToken && url.pathname === "/enter" && next?.startsWith("/")) {
+        return `${url.origin}${next}`;
+      }
     } catch {
       // not a URL
     }
@@ -82,6 +99,26 @@ export class PostMessageWebview extends IframeWebview {
 
   /** A call into the page's script (dropped by a page without it). */
   postPageTools(command: PageToolsPostCommand): void {
+    if (this.waiting) {
+      this.waiting.push(command);
+      return;
+    }
+    if (command.method === "setNonce" && this.siteToken) {
+      const waiting: PageToolsPostCommand[] = [];
+      this.waiting = waiting;
+      const send = (token: string | null) => {
+        if (this.disposed || this.waiting !== waiting) return;
+        this.waiting = null;
+        if (token) this.post({ ...command, token });
+        for (const later of waiting) this.postPageTools(later);
+      };
+      this.siteToken().then(send, () => send(null));
+      return;
+    }
+    this.post(command);
+  }
+
+  private post(command: PageToolsPostCommand): void {
     try {
       this.iframe.contentWindow?.postMessage(pageToolsPostMessage(command), this.origin);
     } catch {

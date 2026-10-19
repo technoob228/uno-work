@@ -4,6 +4,8 @@ import { cloudComputerFromDescriptor } from "../portPreview";
 import { PostMessageWebview } from "./postMessageWebview";
 import {
   buildPageToolsScript,
+  buildSitePageToolsScript,
+  SITE_PAGE_TOOLS_VERIFY_PATH,
   PAGE_TOOLS_MESSAGE_KEY,
   pageToolsPostMessage,
   parsePageToolsMessage,
@@ -37,7 +39,12 @@ Xhr.prototype.open = () => {};
 Xhr.prototype.send = () => {};
 
 /** A page in a frame: just enough of a browser window for the script. */
-function fakeFramedPage(options: { framed: boolean }) {
+function fakeFramedPage(options: {
+  framed: boolean;
+  /** A site's page (the console's script): its own host and the verify answer. */
+  site?: { host: string; verify: (body: { token: string; parentOrigin: string }) => boolean };
+  ancestorOrigins?: string[];
+}) {
   const listeners = new Map<string, Array<(event: unknown) => void>>();
   const posted: Array<{ data: Record<string, unknown>; target: string }> = [];
   const parent = {
@@ -49,13 +56,24 @@ function fakeFramedPage(options: { framed: boolean }) {
     },
     fetch: undefined,
   };
+  const verifyCalls: Array<{ url: string; body: { token: string; parentOrigin: string } }> = [];
+  if (options.site) {
+    const verify = options.site.verify;
+    win["fetch"] = (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { token: string; parentOrigin: string };
+      verifyCalls.push({ url, body });
+      const ok = verify(body);
+      return Promise.resolve({ ok, json: () => Promise.resolve({ ok }) });
+    };
+  }
   win["parent"] = options.framed ? parent : win;
+  const pageHost = options.site?.host ?? "p5173--abc123.uno4.work";
   const location = {
-    href: `${PORT_ORIGIN}/about`,
-    hostname: "p5173--abc123.uno4.work",
+    href: `https://${pageHost}/about`,
+    hostname: pageHost,
     protocol: "https:",
     port: "",
-    ancestorOrigins: undefined,
+    ancestorOrigins: options.ancestorOrigins,
   };
   const document = { title: "App" };
   const consoleStub = {
@@ -74,15 +92,18 @@ function fakeFramedPage(options: { framed: boolean }) {
     "history",
     "XMLHttpRequest",
     "performance",
-    `return ${buildPageToolsScript("", "postMessage")}`,
+    `return ${options.site ? buildSitePageToolsScript() : buildPageToolsScript("", "postMessage")}`,
   ) as (...args: unknown[]) => unknown;
   const result = run(win, location, document, consoleStub, history, Xhr, {
     getEntriesByType: () => [],
   });
   const dispatch = (type: string, event: unknown) =>
     (listeners.get(type) ?? []).forEach((listener) => listener(event));
-  return { result, posted, parent, win, dispatch, history };
+  return { result, posted, parent, win, dispatch, history, verifyCalls };
 }
+
+/** Let the page's verify request (a resolved promise chain) finish. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("page script, postMessage channel", () => {
   it("does nothing outside a frame", () => {
@@ -121,6 +142,126 @@ describe("page script, postMessage channel", () => {
     // In-page moves are reported too.
     (page.history.pushState as () => void)();
     expect(page.posted.at(-1)?.data["nav"]).toEqual({ url: `${PORT_ORIGIN}/about`, title: "App" });
+  });
+
+  it("talks to its own Work only, whatever other *.uno4.work frames it", () => {
+    const page = fakeFramedPage({
+      framed: true,
+      ancestorOrigins: ["https://p3000--evil999.uno4.work"],
+    });
+    expect(page.posted.every((entry) => entry.target === WORK_ORIGIN)).toBe(true);
+    page.dispatch("message", {
+      source: page.parent,
+      origin: "https://evil999.uno4.work",
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n:" }),
+    });
+    expect(page.posted.some((entry) => typeof entry.data["line"] === "string")).toBe(false);
+  });
+
+  it("stays silent on a host that isn't a port's", () => {
+    const other = new Function(
+      "window",
+      "location",
+      "document",
+      "console",
+      "history",
+      "XMLHttpRequest",
+      "performance",
+      `return ${buildPageToolsScript("", "postMessage")}`,
+    ) as (...args: unknown[]) => unknown;
+    const posted: unknown[] = [];
+    const win: Record<string, unknown> = { addEventListener: () => {} };
+    win["parent"] = { postMessage: (data: unknown) => posted.push(data) };
+    expect(
+      other(
+        win,
+        { href: "https://example.com/", hostname: "example.com", protocol: "https:", port: "" },
+        { title: "" },
+        { debug() {}, error() {}, warn() {}, info() {}, log() {} },
+        { pushState() {}, replaceState() {} },
+        Xhr,
+        { getEntriesByType: () => [] },
+      ),
+    ).toBe("no-parent");
+    expect(posted).toEqual([]);
+  });
+});
+
+describe("page script, a site of the person (verified parent)", () => {
+  const SITE = "cafe.uno4.me";
+  const TOKEN = "v1.good";
+  const verify = (body: { token: string; parentOrigin: string }) =>
+    body.token === TOKEN && body.parentOrigin === WORK_ORIGIN;
+
+  it("says nothing until a parent's token is confirmed for that parent", async () => {
+    const page = fakeFramedPage({ framed: true, site: { host: SITE, verify } });
+    expect(page.result).toBe("installed");
+    // Not even its address before the token.
+    expect(page.posted).toEqual([]);
+
+    // No token, a wrong token, a token for another parent: silence.
+    page.dispatch("message", {
+      source: page.parent,
+      origin: WORK_ORIGIN,
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n:" }),
+    });
+    page.dispatch("message", {
+      source: page.parent,
+      origin: "https://evil999.uno4.work",
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n:", token: TOKEN }),
+    });
+    await settle();
+    page.dispatch("message", {
+      source: page.parent,
+      origin: WORK_ORIGIN,
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n:", token: "v1.bad" }),
+    });
+    await settle();
+    expect(page.posted).toEqual([]);
+    expect(page.verifyCalls.map((call) => call.url)).toEqual([
+      SITE_PAGE_TOOLS_VERIFY_PATH,
+      SITE_PAGE_TOOLS_VERIFY_PATH,
+    ]);
+    expect(page.verifyCalls[0]?.body).toEqual({
+      token: TOKEN,
+      parentOrigin: "https://evil999.uno4.work",
+    });
+
+    // The owner's Work with its token: the page talks to it, and only to it.
+    page.dispatch("message", {
+      source: page.parent,
+      origin: WORK_ORIGIN,
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n:", token: TOKEN }),
+    });
+    // A call made while the token is checked waits and is applied after.
+    page.dispatch("message", {
+      source: page.parent,
+      origin: WORK_ORIGIN,
+      data: pageToolsPostMessage({ method: "setNonce", arg: "n2:" }),
+    });
+    await settle();
+    expect(page.posted.length).toBeGreaterThan(0);
+    expect(page.posted.every((entry) => entry.target === WORK_ORIGIN)).toBe(true);
+    expect(page.posted[0]?.data["nav"]).toEqual({ url: `https://${SITE}/about`, title: "App" });
+    const firstLine = page.posted
+      .map((entry) => entry.data["line"])
+      .find((line): line is string => typeof line === "string");
+    expect(parsePageToolsMessage("n:", firstLine)?.type).toBe("ready");
+    expect((page.win["__unoPageTools"] as { nonce: string }).nonce).toBe("n2:");
+
+    // Another origin can't take it over afterwards.
+    page.dispatch("message", {
+      source: page.parent,
+      origin: "https://evil999.uno4.work",
+      data: pageToolsPostMessage({ method: "setNonce", arg: "evil:", token: TOKEN }),
+    });
+    await settle();
+    expect((page.win["__unoPageTools"] as { nonce: string }).nonce).toBe("n2:");
+  });
+
+  it("does nothing outside a frame", () => {
+    const page = fakeFramedPage({ framed: false, site: { host: SITE, verify } });
+    expect(page.result).toBe("standalone");
   });
 });
 
@@ -193,6 +334,46 @@ describe("PostMessageWebview", () => {
     (withNext.view.iframe as { src: string }).src =
       `${PORT_ORIGIN}/enter?t=x&next=%2Fabout%3Fq%3D1`;
     expect(withNext.view.getURL()).toBe(`${PORT_ORIGIN}/about?q=1`);
+  });
+
+  it("sends a site's setNonce with a fresh token, and later calls after it, in order", async () => {
+    const contentWindow = {
+      posted: [] as Array<{ data: Record<string, unknown>; target: string }>,
+      postMessage(data: Record<string, unknown>, target: string) {
+        this.posted.push({ data, target });
+      },
+    };
+    const iframe = {
+      src: "https://cafe.uno4.me/enter?next=%2Fx",
+      contentWindow,
+      contentDocument: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    } as unknown as HTMLIFrameElement;
+    const host = { addEventListener: () => {}, removeEventListener: () => {} };
+    let release: (token: string | null) => void = () => {};
+    const view = new PostMessageWebview(
+      iframe,
+      "https://cafe.uno4.me",
+      host,
+      () => new Promise((resolve) => (release = resolve)),
+    );
+    // A site's own /enter is just a page.
+    expect(view.getURL()).toBe("https://cafe.uno4.me/enter?next=%2Fx");
+    view.postPageTools({ method: "setNonce", arg: "n:" });
+    view.postPageTools({ method: "setMode", arg: "comment" });
+    expect(contentWindow.posted).toEqual([]);
+    release("v1.tok");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(contentWindow.posted.map((entry) => entry.data["method"])).toEqual([
+      "setNonce",
+      "setMode",
+    ]);
+    expect(contentWindow.posted[0]?.data["token"]).toBe("v1.tok");
+    expect(contentWindow.posted.every((entry) => entry.target === "https://cafe.uno4.me")).toBe(
+      true,
+    );
   });
 
   it("stops listening when disposed", () => {
