@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.149 — 2026-10-19
+
+- **Comment works on your own sites in the web panel.** Open one of your Uno Sites (or your computer's app address) in the panel of Uno Work on the web, and Comment picks any part of the page for the chat, with Debug showing the page's console and network. Other people's sites stay as they were. Where your account doesn't have it yet, nothing changes.
+- **Files from a chat open on the right.** Files in a chat is now a tab of the panel, and its button makes it full screen.
+- The chat header never clips: at any width, what doesn't fit folds into ⋯.
+
 ## v0.0.148 — 2026-10-18
 
 - **Your site from a cloud computer opens right in your browser.** When the agent starts a site on the computer (localhost:5173 and the like) and shows it to you, the panel loads it in your own browser from your Work address instead of streaming the computer's browser: scrolling and clicks are instant, live reload works, and Comment picks any part of it for the chat. The address bar still says localhost. The agent's own clicks on the page still happen in the computer's browser. Where your account doesn't have it yet, nothing changes.
