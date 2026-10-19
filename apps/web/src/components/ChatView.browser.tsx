@@ -1986,6 +1986,107 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("folds the chat header into ⋯ instead of clipping it, at any width", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: withProjectScripts(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-user-header-fold" as MessageId,
+          targetText: "header fold",
+        }),
+        [
+          {
+            id: "lint",
+            name: "Lint",
+            command: "bun run lint",
+            icon: "lint",
+            runOnWorktreeCreate: false,
+          },
+        ],
+      ),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          availableEditors: ["vscode"],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const header = await waitForElement(
+        () => document.querySelector<HTMLElement>("header"),
+        "Unable to find the chat header.",
+      );
+      // Toasts of the test environment sit over the header in the shots.
+      const hideToasts = () => {
+        for (const element of Array.from(document.body.querySelectorAll<HTMLElement>("*"))) {
+          if (getComputedStyle(element).position === "fixed" && !element.contains(header)) {
+            element.style.visibility = "hidden";
+          }
+        }
+      };
+      // The window narrows, then the right panel opens and takes its share.
+      const sizes = [
+        { width: 1_400, panel: false },
+        { width: 960, panel: false },
+        { width: 720, panel: false },
+        { width: 1_400, panel: true },
+        { width: 1_100, panel: true },
+        { width: 960, panel: true },
+      ] as const;
+      let foldedSomething = false;
+      for (const { width, panel } of sizes) {
+        await mounted.setViewport({ ...WIDE_FOOTER_VIEWPORT, name: `w${width}`, width });
+        const toggle = header.querySelector<HTMLButtonElement>(
+          '[data-testid="preview-panel-toggle"]',
+        );
+        if (toggle && (toggle.getAttribute("aria-pressed") === "true") !== panel) toggle.click();
+        await waitForLayout();
+        await vi.waitFor(
+          () => {
+            const bounds = header.getBoundingClientRect();
+            const shown = Array.from(header.querySelectorAll<HTMLElement>("button")).filter(
+              (button) => button.getClientRects().length > 0,
+            );
+            expect(shown.length).toBeGreaterThan(0);
+            for (const button of shown) {
+              const rect = button.getBoundingClientRect();
+              expect(
+                rect.right,
+                `${button.getAttribute("aria-label") ?? button.textContent} at ${width}px${panel ? " with the panel" : ""}`,
+              ).toBeLessThanOrEqual(bounds.right + 0.5);
+            }
+            const title = header.querySelector<HTMLElement>("h2");
+            if (title) expect(title.getBoundingClientRect().width).toBeGreaterThan(40);
+          },
+          { timeout: 4_000, interval: 32 },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        hideToasts();
+        await page.screenshot({
+          path: `/tmp/uno-header-shots/w${width}${panel ? "-panel" : ""}.png`,
+          element: header,
+        });
+        // What folded is one click away in "⋯".
+        const more = header.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]');
+        if (more) foldedSomething = true;
+        if (more && width === 1_100) {
+          more.click();
+          await expect.element(page.getByRole("menuitem", { name: "Lint" })).toBeVisible();
+          await expect
+            .element(page.getByRole("menuitem", { name: "Open in VS Code" }))
+            .toBeVisible();
+          more.click();
+          await waitForLayout();
+        }
+      }
+      expect(foldedSomething).toBe(true);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the project cwd with Trae when it is the only available editor", async () => {
     setDraftThreadWithoutWorktree();
 

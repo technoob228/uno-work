@@ -81,15 +81,7 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
   return baseOptions.filter((option) => availableEditors.includes(option.value));
 };
 
-export const OpenInPicker = memo(function OpenInPicker({
-  keybindings,
-  availableEditors,
-  openInCwd,
-}: {
-  keybindings: ResolvedKeybindingsConfig;
-  availableEditors: ReadonlyArray<EditorId>;
-  openInCwd: string | null;
-}) {
+function useOpenInEditor(availableEditors: ReadonlyArray<EditorId>, openInCwd: string | null) {
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
     () => resolveOptions(navigator.platform, availableEditors),
@@ -107,6 +99,42 @@ export const OpenInPicker = memo(function OpenInPicker({
       setPreferredEditor(editor);
     },
     [preferredEditor, openInCwd, setPreferredEditor],
+  );
+  return { options, primaryOption, preferredEditor, openInEditor };
+}
+
+/**
+ * The same editors as items of the chat header's "⋯" menu, when the header
+ * is too narrow for the picker.
+ */
+export function OpenInMenuItems({
+  availableEditors,
+  openInCwd,
+}: {
+  availableEditors: ReadonlyArray<EditorId>;
+  openInCwd: string | null;
+}) {
+  const { options, openInEditor } = useOpenInEditor(availableEditors, openInCwd);
+  return options.map(({ label, Icon, value }) => (
+    <MenuItem key={value} disabled={!openInCwd} onClick={() => openInEditor(value)}>
+      <Icon aria-hidden="true" className="text-muted-foreground" />
+      Open in {label}
+    </MenuItem>
+  ));
+}
+
+export const OpenInPicker = memo(function OpenInPicker({
+  keybindings,
+  availableEditors,
+  openInCwd,
+}: {
+  keybindings: ResolvedKeybindingsConfig;
+  availableEditors: ReadonlyArray<EditorId>;
+  openInCwd: string | null;
+}) {
+  const { options, primaryOption, preferredEditor, openInEditor } = useOpenInEditor(
+    availableEditors,
+    openInCwd,
   );
 
   const openFavoriteEditorShortcutLabel = useMemo(
@@ -127,6 +155,10 @@ export const OpenInPicker = memo(function OpenInPicker({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [preferredEditor, keybindings, openInCwd]);
+
+  // No editor on this computer (a cloud one, the browser): an empty,
+  // disabled button said nothing — leave the picker out.
+  if (options.length === 0) return null;
 
   return (
     <Group aria-label="Subscription actions">

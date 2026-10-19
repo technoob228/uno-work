@@ -20,6 +20,7 @@ import {
   ChevronDownIcon,
   CloudUploadIcon,
   ExternalLinkIcon,
+  GitBranchPlusIcon,
   GitCommitIcon,
   InfoIcon,
   LockIcon,
@@ -1620,13 +1621,20 @@ export default function GitActionsControl({
   return (
     <>
       {!isRepo ? (
+        // Not a repository yet: the button says so (the header has no
+        // separate "No Git" badge), folded to its icon in a narrow header.
         <Button
           variant="outline"
           size="xs"
+          className="shrink-0"
           disabled={initMutation.isPending}
           onClick={() => initMutation.mutate()}
+          title="This folder isn't a Git repository yet — initialize Git"
         >
-          {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+          <GitBranchPlusIcon aria-hidden="true" className="size-3.5" />
+          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+            {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+          </span>
         </Button>
       ) : (
         <Group aria-label="Git actions" className="shrink-0">

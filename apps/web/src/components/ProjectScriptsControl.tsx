@@ -14,7 +14,14 @@ import {
   SettingsIcon,
   WrenchIcon,
 } from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+import React, {
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   keybindingValueForCommand,
@@ -63,7 +70,7 @@ const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "debug", label: "Debug" },
 ];
 
-function ScriptIcon({
+export function ScriptIcon({
   icon,
   className = "size-3.5",
 }: {
@@ -94,6 +101,8 @@ interface ProjectScriptsControlProps {
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
   onDeleteScript: (scriptId: string) => Promise<void> | void;
+  /** Lets the chat header's "⋯" menu open "Add action" while this is folded. */
+  addActionRef?: React.RefObject<(() => void) | null>;
 }
 
 function normalizeShortcutKeyToken(key: string): string | null {
@@ -155,6 +164,7 @@ export default function ProjectScriptsControl({
   onAddScript,
   onUpdateScript,
   onDeleteScript,
+  addActionRef,
 }: ProjectScriptsControlProps) {
   const addScriptFormId = React.useId();
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
@@ -246,6 +256,10 @@ export default function ProjectScriptsControl({
     setValidationError(null);
     setDialogOpen(true);
   };
+
+  useEffect(() => {
+    if (addActionRef) addActionRef.current = openAddDialog;
+  });
 
   const openEditDialog = (script: ProjectScript) => {
     setEditingScriptId(script.id);

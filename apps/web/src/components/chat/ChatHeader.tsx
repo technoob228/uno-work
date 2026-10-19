@@ -6,13 +6,15 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { memo, useState } from "react";
+import { memo, type ReactNode, useRef, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import {
   CodeIcon,
   DiffIcon,
+  EllipsisIcon,
   MonitorSmartphoneIcon,
+  PlusIcon,
   PanelRightIcon,
   SquarePenIcon,
   TerminalSquareIcon,
@@ -22,11 +24,25 @@ import { useGoHome } from "../../navigation/useGoHome";
 import { UnoFace } from "../sidebar/SidebarDParts";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ProjectScriptsControl, {
+  type NewProjectScriptInput,
+  ScriptIcon,
+} from "../ProjectScriptsControl";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { useSidebarDRailVisible } from "../sidebar/sidebarDState";
-import { OpenInPicker } from "./OpenInPicker";
+import { OpenInMenuItems, OpenInPicker } from "./OpenInPicker";
+import { useHeaderOverflow } from "./useHeaderOverflow";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { toggleDevMode, useDevMode } from "../../devMode";
@@ -48,6 +64,44 @@ import {
   isFromAssistant,
 } from "../../assistant/assistantChat.logic";
 import { useAssistantConversations } from "../../assistant/useAssistantConversations";
+
+/** Leaves without a "⋯" entry: no action, and the sidebar names it. */
+const HEADER_FOLD_SILENT = ["project"] as const;
+/**
+ * What leaves the header first when it gets narrow (into "⋯"): the project's
+ * name (it's in the sidebar too), then the rarer tools. Read/Done, the
+ * computer, Git and Panel always stay; Read/Done fold to their icons.
+ */
+const HEADER_FOLD_ORDER = [
+  "project",
+  "startedByUno",
+  "continue",
+  "openIn",
+  "scripts",
+  "diff",
+  "devMode",
+  "terminal",
+] as const;
+type HeaderFoldId = (typeof HEADER_FOLD_ORDER)[number];
+
+/** A header item that can leave for "⋯"; folded, it stays mounted, hidden. */
+function Foldable(props: {
+  readonly id: HeaderFoldId;
+  readonly folded: ReadonlySet<string>;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div
+      data-header-item={props.id}
+      className={cn(
+        "flex shrink-0 items-center gap-2 empty:hidden",
+        props.folded.has(props.id) && "hidden",
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
 
 const HEADER_ICON_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md border border-input px-[calc(--spacing(1)-1px)] text-muted-foreground shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6";
@@ -178,9 +232,12 @@ export const ChatHeader = memo(function ChatHeader({
   // Desktop app only (Misha 11.10): Uno Work in the browser is one cloud
   // computer's window — "continue on another machine" doesn't belong there.
   const canContinueOnMachine = isElectron && Boolean(activeProjectName) && !draftId;
+  const { rootRef, folded, menuNeeded } = useHeaderOverflow(HEADER_FOLD_ORDER, HEADER_FOLD_SILENT);
+  const addActionRef = useRef<(() => void) | null>(null);
+  const isFolded = (id: HeaderFoldId) => folded.has(id);
 
   return (
-    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
+    <div ref={rootRef} className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         {!sidebarVisible && (
           <TooltipProvider delay={0} closeDelay={0}>
@@ -243,45 +300,52 @@ export const ChatHeader = memo(function ChatHeader({
             projectCwd={activeProjectCwd}
           />
         ) : activeProjectName && !isMobile ? (
-          // A phone has no room for it: squeezed, it was an empty pill.
-          <Badge variant="outline" className="max-w-[40%] min-w-12 shrink overflow-hidden">
-            <span className="min-w-0 truncate">{activeProjectName}</span>
-          </Badge>
+          // A phone has no room for it: squeezed, it was an empty pill. Short
+          // of room it leaves whole (it's in the sidebar), never as "H.".
+          <Foldable id="project" folded={folded}>
+            <Badge variant="outline" className="max-w-40 overflow-hidden" title={activeProjectName}>
+              <span className="min-w-0 truncate">{activeProjectName}</span>
+            </Badge>
+          </Foldable>
         ) : null}
         {startedByUno && !isAssistantChat ? (
-          <button
-            type="button"
-            onClick={() => void openAssistantChat()}
-            title="Open Uno's chat"
-            data-testid="chat-started-by-uno"
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-primary/10 py-0.5 pr-2 pl-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-          >
-            <UnoFace className="size-4" />
-            Started by Uno
-          </button>
+          <Foldable id="startedByUno" folded={folded}>
+            <button
+              type="button"
+              onClick={() => void openAssistantChat()}
+              title="Open Uno's chat"
+              data-testid="chat-started-by-uno"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-primary/10 py-0.5 pr-2 pl-0.5 text-xs font-medium text-primary hover:bg-primary/15"
+            >
+              <UnoFace className="size-4" />
+              Started by Uno
+            </button>
+          </Foldable>
         ) : null}
         {isMobile ? null : (
-          <TooltipProvider delay={0} closeDelay={0}>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Toggle
-                    className="shrink-0 data-[pressed]:border-primary/40 data-[pressed]:bg-primary/15 data-[pressed]:text-primary"
-                    pressed={devMode}
-                    onPressedChange={() => toggleDevMode()}
-                    aria-label="Toggle dev mode"
-                    variant="outline"
-                    size="xs"
-                  >
-                    <CodeIcon className="size-3" />
-                  </Toggle>
-                }
-              />
-              <TooltipPopup side="bottom">
-                {devMode ? "Dev mode: on" : "Dev mode: off"}
-              </TooltipPopup>
-            </Tooltip>
-          </TooltipProvider>
+          <Foldable id="devMode" folded={folded}>
+            <TooltipProvider delay={0} closeDelay={0}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Toggle
+                      className="shrink-0 data-[pressed]:border-primary/40 data-[pressed]:bg-primary/15 data-[pressed]:text-primary"
+                      pressed={devMode}
+                      onPressedChange={() => toggleDevMode()}
+                      aria-label="Toggle dev mode"
+                      variant="outline"
+                      size="xs"
+                    >
+                      <CodeIcon className="size-3" />
+                    </Toggle>
+                  }
+                />
+                <TooltipPopup side="bottom">
+                  {devMode ? "Dev mode: on" : "Dev mode: off"}
+                </TooltipPopup>
+              </Tooltip>
+            </TooltipProvider>
+          </Foldable>
         )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
@@ -310,24 +374,30 @@ export const ChatHeader = memo(function ChatHeader({
           <AssistantChatHeaderActions environmentId={activeThreadEnvironmentId} />
         ) : null}
         {devMode && activeProjectScripts && (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
+          <Foldable id="scripts" folded={folded}>
+            <ProjectScriptsControl
+              scripts={activeProjectScripts}
+              keybindings={keybindings}
+              preferredScriptId={preferredScriptId}
+              onRunScript={onRunProjectScript}
+              onAddScript={onAddProjectScript}
+              onUpdateScript={onUpdateProjectScript}
+              onDeleteScript={onDeleteProjectScript}
+              addActionRef={addActionRef}
+            />
+          </Foldable>
         )}
         {devMode && showOpenInPicker && (
-          <OpenInPicker
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
+          <Foldable id="openIn" folded={folded}>
+            <OpenInPicker
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              openInCwd={openInCwd}
+            />
+          </Foldable>
         )}
-        {devMode && activeProjectName && !isGitRepo && (
+        {/* With a folder, the Git control's own "Initialize Git" says it. */}
+        {devMode && activeProjectName && !isGitRepo && !gitCwd && (
           <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git
           </Badge>
@@ -342,73 +412,79 @@ export const ChatHeader = memo(function ChatHeader({
         {/* Terminal is always one click away (it's not a developer-only tool);
             a phone keeps the room for the chat's title instead. */}
         {isMobile ? null : (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Toggle
-                  className="shrink-0"
-                  pressed={terminalOpen}
-                  onPressedChange={onToggleTerminal}
-                  aria-label="Toggle terminal drawer"
-                  variant="outline"
-                  size="xs"
-                  disabled={!terminalAvailable}
-                >
-                  <TerminalSquareIcon className="size-3" />
-                </Toggle>
-              }
-            />
-            <TooltipPopup side="bottom">
-              {!terminalAvailable
-                ? "Terminal is unavailable until this chat has an active project."
-                : terminalToggleShortcutLabel
-                  ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
-                  : "Toggle terminal drawer"}
-            </TooltipPopup>
-          </Tooltip>
+          <Foldable id="terminal" folded={folded}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    className="shrink-0"
+                    pressed={terminalOpen}
+                    onPressedChange={onToggleTerminal}
+                    aria-label="Toggle terminal drawer"
+                    variant="outline"
+                    size="xs"
+                    disabled={!terminalAvailable}
+                  >
+                    <TerminalSquareIcon className="size-3" />
+                  </Toggle>
+                }
+              />
+              <TooltipPopup side="bottom">
+                {!terminalAvailable
+                  ? "Terminal is unavailable until this chat has an active project."
+                  : terminalToggleShortcutLabel
+                    ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
+                    : "Toggle terminal drawer"}
+              </TooltipPopup>
+            </Tooltip>
+          </Foldable>
         )}
         {devMode && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Toggle
-                  className="shrink-0"
-                  pressed={diffOpen}
-                  onPressedChange={onToggleDiff}
-                  aria-label="Toggle diff panel"
-                  variant="outline"
-                  size="xs"
-                  disabled={!isGitRepo && !diffOpen}
-                >
-                  <DiffIcon className="size-3" />
-                </Toggle>
-              }
-            />
-            <TooltipPopup side="bottom">
-              {!isGitRepo && !diffOpen
-                ? "Diff panel is unavailable because this project is not a git repository."
-                : diffToggleShortcutLabel
-                  ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                  : "Toggle diff panel"}
-            </TooltipPopup>
-          </Tooltip>
+          <Foldable id="diff" folded={folded}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    className="shrink-0"
+                    pressed={diffOpen}
+                    onPressedChange={onToggleDiff}
+                    aria-label="Toggle diff panel"
+                    variant="outline"
+                    size="xs"
+                    disabled={!isGitRepo && !diffOpen}
+                  >
+                    <DiffIcon className="size-3" />
+                  </Toggle>
+                }
+              />
+              <TooltipPopup side="bottom">
+                {!isGitRepo && !diffOpen
+                  ? "Diff panel is unavailable because this project is not a git repository."
+                  : diffToggleShortcutLabel
+                    ? `Toggle diff panel (${diffToggleShortcutLabel})`
+                    : "Toggle diff panel"}
+              </TooltipPopup>
+            </Tooltip>
+          </Foldable>
         )}
         {canContinueOnMachine && !isMobile && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => setContinueDialogOpen(true)}
-                  aria-label={CONTINUE_ON_MACHINE_COPY.action}
-                  className={HEADER_ICON_BUTTON_CLASS}
-                >
-                  <MonitorSmartphoneIcon className="size-3" />
-                </button>
-              }
-            />
-            <TooltipPopup side="bottom">{CONTINUE_ON_MACHINE_COPY.action}</TooltipPopup>
-          </Tooltip>
+          <Foldable id="continue" folded={folded}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => setContinueDialogOpen(true)}
+                    aria-label={CONTINUE_ON_MACHINE_COPY.action}
+                    className={HEADER_ICON_BUTTON_CLASS}
+                  >
+                    <MonitorSmartphoneIcon className="size-3" />
+                  </button>
+                }
+              />
+              <TooltipPopup side="bottom">{CONTINUE_ON_MACHINE_COPY.action}</TooltipPopup>
+            </Tooltip>
+          </Foldable>
         )}
         {canContinueOnMachine && (
           <ContinueOnMachineDialog
@@ -417,6 +493,89 @@ export const ChatHeader = memo(function ChatHeader({
             onOpenChange={setContinueDialogOpen}
           />
         )}
+        {menuNeeded ? (
+          <Menu>
+            <MenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="More"
+                  title="More"
+                  data-header-more=""
+                  data-testid="chat-header-more"
+                  className={HEADER_ICON_BUTTON_CLASS}
+                />
+              }
+            >
+              <EllipsisIcon className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="min-w-48">
+              {isFolded("startedByUno") && startedByUno && !isAssistantChat ? (
+                <MenuItem onClick={() => void openAssistantChat()}>
+                  <UnoFace className="size-4" />
+                  Started by Uno — open Uno's chat
+                </MenuItem>
+              ) : null}
+              {isFolded("terminal") && !isMobile ? (
+                <MenuCheckboxItem
+                  checked={terminalOpen}
+                  onCheckedChange={onToggleTerminal}
+                  disabled={!terminalAvailable}
+                >
+                  Terminal
+                  {terminalToggleShortcutLabel ? ` (${terminalToggleShortcutLabel})` : ""}
+                </MenuCheckboxItem>
+              ) : null}
+              {isFolded("diff") && devMode ? (
+                <MenuCheckboxItem
+                  checked={diffOpen}
+                  onCheckedChange={onToggleDiff}
+                  disabled={!isGitRepo && !diffOpen}
+                >
+                  Diff panel{diffToggleShortcutLabel ? ` (${diffToggleShortcutLabel})` : ""}
+                </MenuCheckboxItem>
+              ) : null}
+              {isFolded("devMode") && !isMobile ? (
+                <MenuCheckboxItem checked={devMode} onCheckedChange={() => toggleDevMode()}>
+                  Dev mode
+                </MenuCheckboxItem>
+              ) : null}
+              {isFolded("scripts") && devMode && activeProjectScripts ? (
+                <>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Actions</MenuGroupLabel>
+                    {activeProjectScripts.map((script) => (
+                      <MenuItem key={script.id} onClick={() => onRunProjectScript(script)}>
+                        <ScriptIcon icon={script.icon} className="size-4" />
+                        <span className="truncate">{script.name}</span>
+                      </MenuItem>
+                    ))}
+                    <MenuItem onClick={() => addActionRef.current?.()}>
+                      <PlusIcon className="size-4" />
+                      Add action…
+                    </MenuItem>
+                  </MenuGroup>
+                </>
+              ) : null}
+              {isFolded("openIn") && devMode && showOpenInPicker ? (
+                <>
+                  <MenuSeparator />
+                  <OpenInMenuItems availableEditors={availableEditors} openInCwd={openInCwd} />
+                </>
+              ) : null}
+              {isFolded("continue") && canContinueOnMachine && !isMobile ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem onClick={() => setContinueDialogOpen(true)}>
+                    <MonitorSmartphoneIcon className="size-4" />
+                    {CONTINUE_ON_MACHINE_COPY.action}
+                  </MenuItem>
+                </>
+              ) : null}
+            </MenuPopup>
+          </Menu>
+        ) : null}
         {/* One Panel button (plan 22): an empty panel opens its launcher —
             Browser, Files, Terminal, Changes, Apps, Sites. */}
         <Tooltip>
