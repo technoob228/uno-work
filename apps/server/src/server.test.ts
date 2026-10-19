@@ -1354,6 +1354,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const fromThisMachine = yield* toolsList({});
       assert.equal(fromThisMachine.status, 200);
+
+      // The scheduled turn (prompt in, the assistant acts) is the CLI's alone:
+      // through the edge it refuses even the right token.
+      const scheduledTurn = (headers: Record<string, string>) =>
+        HttpClient.post("/api/manager/assistant/scheduled-turn", {
+          headers: { authorization: "Bearer uwm_cloned", ...headers },
+          body: HttpBody.text(JSON.stringify({ prompt: "hi" }), "application/json"),
+        });
+      assert.equal((yield* scheduledTurn({ "x-forwarded-for": "203.0.113.7" })).status, 401);
+      assert.equal((yield* scheduledTurn({ "x-real-ip": "203.0.113.7" })).status, 401);
+      assert.notEqual((yield* scheduledTurn({})).status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
