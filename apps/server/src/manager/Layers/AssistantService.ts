@@ -564,11 +564,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
             },
           },
         };
-        yield* fs.writeFileString(mcpConfigPath, `${JSON.stringify(mcpConfig, null, 2)}\n`);
+        yield* fs.writeFileString(mcpConfigPath, `${JSON.stringify(mcpConfig, null, 2)}\n`, {
+          mode: 0o600,
+        });
         yield* Effect.logInfo("assistant capability token rotated").pipe(
           Effect.annotateLogs({ projectId, tokenId: issued.descriptor.tokenId }),
         );
       }
+      // The file holds the assistant's token: owner-only, also for files
+      // written before (mode applies only on create).
+      yield* fs.chmod(mcpConfigPath, 0o600).pipe(Effect.ignore);
 
       if (Option.isNone(registeredProject)) {
         // Start the assistant on a harness this machine can actually run —
