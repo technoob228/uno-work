@@ -57,3 +57,37 @@ export function openOutsideTarget(
         "This address is the computer's own (localhost): only its browser can open it."),
   };
 }
+
+/**
+ * The other way (web panel, 19.10): a page at an app's own address — its
+ * public address (`publication.url`) or its private https one (`privateUrl`)
+ * — is the computer's `http://localhost:<port>/…`. The web's panel shows that
+ * through "Your site" (portPreview.ts), where Comment works; the address
+ * itself, another origin, can't be reached from the panel. Null for any
+ * other page.
+ */
+export function appLocalUrl(pageUrl: string, apps: ReadonlyArray<UnoMachineApp>): string | null {
+  let page: URL;
+  try {
+    page = new URL(pageUrl);
+  } catch {
+    return null;
+  }
+  if (page.protocol !== "http:" && page.protocol !== "https:") return null;
+  if (LOOPBACK.has(page.hostname.toLowerCase())) return null;
+  for (const app of apps) {
+    if (app.port === null || app.telegramBot !== undefined) continue;
+    for (const candidate of [app.publication?.url, app.privateUrl]) {
+      if (!candidate) continue;
+      let own: URL;
+      try {
+        own = new URL(candidate);
+      } catch {
+        continue;
+      }
+      if (own.origin !== page.origin) continue;
+      return `http://localhost:${app.port}${page.pathname}${page.search}${page.hash}`;
+    }
+  }
+  return null;
+}

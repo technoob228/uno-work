@@ -232,7 +232,8 @@ describe("port preview relay", () => {
     expect(response.headers.get("content-type")).toContain("javascript");
     const script = await response.text();
     expect(script).toContain('"standalone"');
-    expect(script.trim().endsWith('("", false, true);')).toBe(true);
+    // A port's page: no verify step (its parent is read off its own host).
+    expect(script.trim().endsWith('("", false, true, "");')).toBe(true);
   });
 
   it("pipes a WebSocket upgrade both ways", async () => {

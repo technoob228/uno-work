@@ -1,7 +1,7 @@
 import type { UnoMachineApp } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { openOutsideTarget } from "./openOutsideTarget";
+import { appLocalUrl, openOutsideTarget } from "./openOutsideTarget";
 
 function app(patch: Partial<UnoMachineApp> = {}): UnoMachineApp {
   return {
@@ -62,5 +62,33 @@ describe("openOutsideTarget", () => {
       reason: "Not an Uno computer",
     });
     expect(openOutsideTarget("about:blank", []).kind).toBe("none");
+  });
+});
+
+describe("appLocalUrl", () => {
+  const shown = app({
+    publication: { url: "http://203.0.113.5:31080/", forwards: [] } as never,
+    privateUrl: "https://orders-box12.app.uno4.dev/",
+  });
+
+  it("turns an app's public or private address into the computer's localhost, same page", () => {
+    expect(appLocalUrl("http://203.0.113.5:31080/orders?id=3#top", [shown])).toBe(
+      "http://localhost:8087/orders?id=3#top",
+    );
+    expect(appLocalUrl("https://orders-box12.app.uno4.dev/", [shown])).toBe(
+      "http://localhost:8087/",
+    );
+  });
+
+  it("leaves every other page alone", () => {
+    expect(appLocalUrl("http://203.0.113.5:31081/", [shown])).toBeNull();
+    expect(appLocalUrl("https://example.com/", [shown])).toBeNull();
+    expect(appLocalUrl("http://localhost:8087/", [shown])).toBeNull();
+    expect(appLocalUrl("not a url", [shown])).toBeNull();
+    expect(
+      appLocalUrl("https://orders-box12.app.uno4.dev/", [
+        app({ port: null, privateUrl: "https://orders-box12.app.uno4.dev/" }),
+      ]),
+    ).toBeNull();
   });
 });
