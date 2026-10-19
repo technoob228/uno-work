@@ -25,6 +25,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
     options?.select ? options.select({ pathname }) : { pathname },
 }));
 vi.mock("../../navigation/useGoHome", () => ({ useGoHome: () => goHome }));
+// Files in a chat opens as a panel tab (filesPanelTab.ts, its own tests); here
+// only whether the sidebar asks the panel first.
+let filesInPanel = false;
+const openFilesInPanel = vi.fn(() => filesInPanel);
+vi.mock("../files/filesPanelTab", () => ({ useOpenFilesInPanel: () => openFilesInPanel }));
 vi.mock("../../inbox/inboxStore", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useInboxUnreadCount: () => unread,
@@ -62,6 +67,8 @@ beforeEach(() => {
   needsYou = 0;
   navigate.mockReset();
   goHome.mockReset();
+  filesInPanel = false;
+  openFilesInPanel.mockClear();
   sidebarDPanel.closeNow();
 });
 afterEach(() => {
@@ -109,6 +116,17 @@ describe("sidebar D places", () => {
     expect(navigate).toHaveBeenCalledWith({ to: "/sites" });
     await screen.getByTestId("sidebar-nav-files").click();
     expect(navigate).toHaveBeenCalledWith({ to: "/files" });
+  });
+
+  it("in a chat, opens Files on the right instead of leaving the chat", async () => {
+    filesInPanel = true;
+    const screen = await mount(<SidebarDPlaces />);
+    await screen.getByTestId("sidebar-nav-files").click();
+    expect(openFilesInPanel).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+    // Apps & sites still opens as a place.
+    await screen.getByTestId("sidebar-nav-apps").click();
+    expect(navigate).toHaveBeenCalledWith({ to: "/sites" });
   });
 
   it("lights Apps & sites on its page", async () => {

@@ -38,7 +38,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useIsMobile } from "../../hooks/useMediaQuery";
@@ -101,6 +101,7 @@ import { prefetchFileForView } from "./filesPrefetch";
 import { useProgressiveRows } from "./useProgressiveRows";
 import { registerBuiltInFileOpeners } from "./openers";
 import { activePanelFilePath, filesOpenTarget, filesPanelBeside } from "./filesPanel";
+import type { FilesRouteSearch } from "./filesRouteSearch";
 import { computerFileTab } from "../../navigation/useOpenComputerFile";
 import { detectFileKind, usePreviewPane } from "../preview/PreviewPaneContext";
 import { PinPathButton } from "./PinPathButton";
@@ -116,7 +117,7 @@ import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
 import { folderTagOf, folderTags, type FolderTag } from "./folderTags";
 import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
-import { SidebarShowButton } from "../sidebar/SidebarShowButton";
+import { SidebarShowButton, SidebarShowButtonHidden } from "../sidebar/SidebarShowButton";
 
 /** Let the listing load first. */
 const FILES_OFFICE_PREWARM_DELAY_MS = 2_000;
@@ -201,12 +202,44 @@ type DialogState =
   | { type: "links" }
   | { type: "toCloud"; entries: FilesEntry[] };
 
+/** The Files screen: the place is the URL (`/files?path=…&file=…`). */
 export function FilesView() {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
-  const environmentId = activeEnvironmentId ?? primaryEnvironmentId;
   const search = useSearch({ from: "/_chat/files" });
   const navigate = useNavigate({ from: "/files" });
+  const setSearch = useCallback(
+    (next: FilesRouteSearch) => void navigate({ search: next }),
+    [navigate],
+  );
+  return <FilesBrowser search={search} setSearch={setSearch} />;
+}
+
+/** Files shown as a tab of the right panel, beside a chat (filesPanelTab.ts). */
+export interface FilesInPanel {
+  readonly environmentId: EnvironmentId | null;
+  /**
+   * The panel has the whole window (its full-screen mode): Files lays out as
+   * on its own screen, a file opening next to the tree. Otherwise the panel
+   * is a column: one column at a time, and a file opens as another tab.
+   */
+  readonly wide: boolean;
+}
+
+export function FilesBrowser({
+  search,
+  setSearch,
+  panel,
+}: {
+  search: FilesRouteSearch;
+  setSearch: (next: FilesRouteSearch) => void;
+  panel?: FilesInPanel;
+}) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  const environmentId = panel
+    ? (panel.environmentId ?? activeEnvironmentId ?? primaryEnvironmentId)
+    : (activeEnvironmentId ?? primaryEnvironmentId);
+  // Leaving for another screen (a new Office document) — the panel's Files too.
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const uploads = useFilesUploads(environmentId);
   const [dialog, setDialog] = useState<DialogState>({ type: "none" });
@@ -215,24 +248,27 @@ export function FilesView() {
   // right — the default) or Recent (recent files where the tree is). A phone
   // has no room for two columns: the list or Recent, the file over it.
   const [storedViewMode, setViewMode] = useFilesViewMode();
-  const isMobile = useIsMobile();
+  const isPhone = useIsMobile();
+  // A column of the panel has the room of a phone: one column at a time.
+  const isMobile = isPhone || (panel !== undefined && !panel.wide);
   const viewMode: FilesViewMode = effectiveFilesViewMode(storedViewMode, isMobile);
   const splitView = !isMobile && (viewMode === "tree" || viewMode === "recent");
-  const history = useFilesHistory(
-    search,
-    useCallback((next) => void navigate({ search: next }), [navigate]),
-  );
+  const history = useFilesHistory(search, setSearch);
   const [viewerUnsaved, setViewerUnsaved] = useState(false);
   const [pendingOpen, setPendingOpen] = useState<null | (() => void)>(null);
   // The right panel on screen (Misha 16.10 p.6): files open there, in the
   // Everywhere group, and the middle column steps aside (filesPanel.ts).
   const preview = usePreviewPane();
-  const panelBeside = filesPanelBeside({
-    isMobile,
-    panelOpen: preview.open,
-    panelTabCount: preview.files.length,
-    inChat: preview.currentChatThreadId !== null,
-  });
+  // In the panel's column the panel itself is beside: a picked file is one
+  // more tab. With the whole window, Files opens it next to the tree.
+  const panelBeside = panel
+    ? !panel.wide
+    : filesPanelBeside({
+        isMobile,
+        panelOpen: preview.open,
+        panelTabCount: preview.files.length,
+        inChat: preview.currentChatThreadId !== null,
+      });
 
   // Documents are opened from here: get the office engine into the browser's
   // cache in the background so the first one opens fast (officePrewarm.ts).
@@ -245,13 +281,12 @@ export function FilesView() {
   }, []);
 
   const openFolder = useCallback(
-    (path: string | undefined) => void navigate({ search: path ? { path } : {} }),
-    [navigate],
+    (path: string | undefined) => setSearch(path ? { path } : {}),
+    [setSearch],
   );
   const openFile = useCallback(
-    (entry: Pick<FilesEntry, "path">) =>
-      void navigate({ search: { path: dirname(entry.path), file: entry.path } }),
-    [navigate],
+    (entry: Pick<FilesEntry, "path">) => setSearch({ path: dirname(entry.path), file: entry.path }),
+    [setSearch],
   );
   // A file the person picks (tree, list, Recent, shared links): beside an open
   // panel — a tab of its Everywhere group, made active; otherwise in Files.
@@ -274,13 +309,13 @@ export function FilesView() {
       );
       recordFileOpened(environmentId, entry.path);
       // One place to look at a file: the middle column lets go of its file.
-      if (search.file) void navigate({ search: search.path ? { path: search.path } : {} });
+      if (search.file) setSearch(search.path ? { path: search.path } : {});
     },
     [
       currentChatThreadId,
       currentProjectKey,
       environmentId,
-      navigate,
+      setSearch,
       openFile,
       openFileForTarget,
       panelBeside,
@@ -301,9 +336,8 @@ export function FilesView() {
     [pickFile, search.file, viewerUnsaved],
   );
   const selectFolder = useCallback(
-    (path: string) =>
-      void navigate({ search: search.file ? { path, file: search.file } : { path } }),
-    [navigate, search.file],
+    (path: string) => setSearch(search.file ? { path, file: search.file } : { path }),
+    [setSearch, search.file],
   );
 
   const refreshAll = useCallback(
@@ -424,7 +458,7 @@ export function FilesView() {
         }
         onBack={() =>
           viewMode === "recent"
-            ? void navigate({ search: search.path ? { path: search.path } : {} })
+            ? setSearch(search.path ? { path: search.path } : {})
             : openFolder(search.path ?? dirname(search.file!))
         }
         onShare={(entry) => setDialog({ type: "share", entry })}
@@ -453,7 +487,7 @@ export function FilesView() {
         onViewModeChange={setViewMode}
         compactSwitch={isMobile}
         onOpenHome={() => openFolder(undefined)}
-        onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
+        onOpenCloud={() => setSearch({ cloud: "1" })}
         onCreate={(kind) =>
           kind === "folder" ? setDialog({ type: "newFolder" }) : void createUntitled(kind)
         }
@@ -464,7 +498,7 @@ export function FilesView() {
     ) : null;
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <FilesRoot inPanel={panel !== undefined}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {search.cloud === "1" ? (
           <CloudBrowser
@@ -474,12 +508,10 @@ export function FilesView() {
             uploads={uploads}
             onOpenComputer={() => openFolder(undefined)}
             onNavigate={(bucket, prefix) =>
-              void navigate({
-                search: {
-                  cloud: "1",
-                  ...(bucket !== null ? { bucket } : {}),
-                  ...(prefix ? { prefix } : {}),
-                },
+              setSearch({
+                cloud: "1",
+                ...(bucket !== null ? { bucket } : {}),
+                ...(prefix ? { prefix } : {}),
               })
             }
           />
@@ -519,7 +551,7 @@ export function FilesView() {
             uploads={uploads}
             onDialog={setDialog}
             onCreateFile={(kind) => void createUntitled(kind)}
-            onOpenCloud={() => void navigate({ search: { cloud: "1" } })}
+            onOpenCloud={() => setSearch({ cloud: "1" })}
             onMoveInto={(entries, destination) =>
               moveEntries(entries, destination).catch((error: unknown) =>
                 toastManager.add({
@@ -626,7 +658,20 @@ export function FilesView() {
           share.kind === "folder" ? openFolder(share.path) : pickFile(share)
         }
       />
-    </SidebarInset>
+    </FilesRoot>
+  );
+}
+
+/** The Files screen beside the sidebar, or a panel tab (no "Show sidebar" there). */
+function FilesRoot({ inPanel, children }: { inPanel: boolean; children: ReactNode }) {
+  const className = "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground";
+  if (!inPanel) return <SidebarInset className={cn("h-dvh", className)}>{children}</SidebarInset>;
+  return (
+    <SidebarShowButtonHidden.Provider value={true}>
+      <div className={cn("relative flex h-full w-full min-w-0 flex-col", className)}>
+        {children}
+      </div>
+    </SidebarShowButtonHidden.Provider>
   );
 }
 

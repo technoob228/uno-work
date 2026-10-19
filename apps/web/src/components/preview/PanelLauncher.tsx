@@ -38,10 +38,12 @@ import {
   usePrimaryEnvironmentId,
 } from "../../environments/primary";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useMachineLabels } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { siteRows } from "../sites/sitesModel";
 import { useWorkSites } from "../sites/useWorkSites";
 import { Skeleton } from "../ui/skeleton";
@@ -109,6 +111,7 @@ function PanelLauncherV2({
     openFile,
   } = usePreviewPane();
   const navigate = useNavigate();
+  const openFilesInPanel = useOpenFilesInPanel(useIsMobile());
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   const pluginsEnabled = useFeatureFlag("plugins");
@@ -171,7 +174,13 @@ function PanelLauncherV2({
         onOpenedTab();
         return;
       case "files":
-        // "Browse files" as before: pick a file, it opens as a tab.
+        // In a chat: Files itself as a tab, starting in the chat's project
+        // (the same tab as Files in the sidebar). Elsewhere "Browse files" as
+        // before: pick a file, it opens as a tab.
+        if (openFilesInPanel(currentChatProjectCwd)) {
+          onOpenedTab();
+          return;
+        }
         openBrowser({ environmentId, startPath: currentChatProjectCwd ?? null });
         return;
       case "changes":

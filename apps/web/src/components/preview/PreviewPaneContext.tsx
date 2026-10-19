@@ -74,6 +74,7 @@ export type PreviewFileKind =
   | "plugin-panel"
   | "app"
   | "tasks"
+  | "files"
   | "unknown";
 
 export interface PreviewFile {
@@ -248,6 +249,31 @@ export function threadIdFromTasksFile(file: Pick<PreviewFile, "id" | "kind">): s
   if (!isTasksTab(file) || !file.id.startsWith(TASKS_TAB_ID_PREFIX)) return null;
   const threadId = file.id.slice(TASKS_TAB_ID_PREFIX.length);
   return threadId.length > 0 ? threadId : null;
+}
+
+const FILES_TAB_ID_PREFIX = "files:";
+
+/**
+ * Files as a panel tab (Misha 18.10): in a chat, Files in the sidebar opens the
+ * computer's files on the right, beside the chat, instead of leaving it. One
+ * tab per computer; the folder it shows lives in `files/filesPanelTab.ts`.
+ */
+export function isFilesTab(file: Pick<PreviewFile, "kind">): boolean {
+  return file.kind === "files";
+}
+
+export function filesTabId(environmentId: EnvironmentId): string {
+  return `${FILES_TAB_ID_PREFIX}${environmentId}`;
+}
+
+export function makeFilesTabFile(environmentId: EnvironmentId): PreviewFile {
+  return {
+    id: filesTabId(environmentId),
+    name: "Files",
+    kind: "files",
+    content: "",
+    environmentId,
+  };
 }
 
 const PLUGIN_PANEL_ID_PREFIX = "plugin-panel:";
