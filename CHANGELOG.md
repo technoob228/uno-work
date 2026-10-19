@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.151 — 2026-10-19
+
+- Security: the assistant's scheduled turn answers only from inside the computer (loopback, no forwarded headers), like the manager MCP. The assistant's `.mcp.json` is owner-only (0600), and Claude chats no longer show the uno-work token or MCP addresses in `ps` (passed via env).
+- Agents' brief: deploying to Uno / uno.place goes through the uno-work tools or uno.place/llms.txt; never ask the person to sign in in the browser.
+- A new chat in a project no longer opens on "Sign in to Codex" when Codex isn't signed in here; projects' untouched Codex default moves to the computer's working model.
+
 ## v0.0.150 — 2026-10-19
 
 - **Files from a chat start in the chat's folder.** New tab → Files, or Files in the sidebar while you're in a chat, opens the chat's project folder (not your home folder), and the tab stays with that chat. Each chat keeps its own place. Outside a chat nothing changes.
