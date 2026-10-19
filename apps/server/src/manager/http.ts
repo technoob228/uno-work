@@ -210,6 +210,13 @@ export const managerAssistantScheduledTurnRouteLayer = HttpRouter.add(
   "/api/manager/assistant/scheduled-turn",
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    // Only an assistant's own token runs a turn, and that token serves only
+    // the CLI on this machine (127.0.0.1 from the assistant's .mcp.json). From
+    // the internet a matching token proves nothing: snapshot clones before
+    // 0.0.139 shared one (16.10), and this route is not behind the edge block.
+    if (!isDirectLocalRequest(request)) {
+      return yield* respondUnauthorized;
+    }
     const tokenAuth = yield* ManagerTokenAuthService;
     const caller = yield* tokenAuth
       .authenticate(request.headers["authorization"])

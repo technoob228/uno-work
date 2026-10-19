@@ -2942,7 +2942,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         bridgeEnvironment: sessionBridgeEnvironment,
         custom: options?.customMcpServers?.(),
       });
-      const mcpServerEntries = claudeMcpServers(sessionMcp);
+      // Entries reference the token and addresses as ${VAR} (they end up in
+      // `ps` via --mcp-config); the values ride in the env below.
+      const { mcpServers: mcpServerEntries, env: mcpServerEnv } = claudeMcpServers(sessionMcp);
       const preApprovedMcpTools = claudePreApprovedTools(sessionMcp);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -2975,6 +2977,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         env: {
           ...claudeEnvironment,
           ...sessionBridgeEnvironment,
+          ...mcpServerEnv,
         },
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
