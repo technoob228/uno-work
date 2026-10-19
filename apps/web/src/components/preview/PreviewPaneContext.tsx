@@ -262,13 +262,21 @@ export function isFilesTab(file: Pick<PreviewFile, "kind">): boolean {
   return file.kind === "files";
 }
 
-export function filesTabId(environmentId: EnvironmentId): string {
-  return `${FILES_TAB_ID_PREFIX}${environmentId}`;
+/**
+ * One Files tab per computer — and, opened from a chat, one per chat (Misha
+ * 19.10: it starts in the chat's folder and stays in the chat's group, so each
+ * chat keeps its own place).
+ */
+export function filesTabId(environmentId: EnvironmentId, threadId: string | null = null): string {
+  return `${FILES_TAB_ID_PREFIX}${environmentId}${threadId ? `:chat:${threadId}` : ""}`;
 }
 
-export function makeFilesTabFile(environmentId: EnvironmentId): PreviewFile {
+export function makeFilesTabFile(
+  environmentId: EnvironmentId,
+  threadId: string | null = null,
+): PreviewFile {
   return {
-    id: filesTabId(environmentId),
+    id: filesTabId(environmentId, threadId),
     name: "Files",
     kind: "files",
     content: "",

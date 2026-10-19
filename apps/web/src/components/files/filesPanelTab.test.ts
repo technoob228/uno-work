@@ -24,6 +24,14 @@ describe("Files in the right panel (Misha 18.10)", () => {
     expect(previewDownloadSource(tab, env)).toBeNull();
   });
 
+  it("opened from a chat, it is that chat's own tab (Misha 19.10)", () => {
+    const inChatA = makeFilesTabFile(env, "thread-a");
+    expect(inChatA.id).toBe(filesTabId(env, "thread-a"));
+    expect(inChatA.id).not.toBe(makeFilesTabFile(env, "thread-b").id);
+    expect(inChatA.id).not.toBe(makeFilesTabFile(env).id);
+    expect(isFilesTab(inChatA)).toBe(true);
+  });
+
   it("keeps each tab's place", () => {
     const { setPlace } = usePanelFilesStore.getState();
     setPlace("files:a", { path: "/home/unowork/project" });

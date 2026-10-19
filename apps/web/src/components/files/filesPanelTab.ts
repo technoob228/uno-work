@@ -1,7 +1,8 @@
 /**
  * Files in the right panel (Misha 18.10): in a chat, Files in the sidebar (and
  * the panel's own Files tile) opens the computer's files as a tab of the
- * panel, beside the chat, so the chat stays put. The tab's full-screen button
+ * panel, beside the chat, so the chat stays put — the chat's own tab, starting
+ * in its folder (19.10). The tab's full-screen button
  * gives it the whole window; "Open in Files" in its menu leaves the chat for
  * the Files screen. Outside a chat (Home, Apps…) Files opens as a screen, as
  * before.
@@ -47,10 +48,13 @@ export function filesOpensInPanel(input: {
 }
 
 /**
- * Opens (or focuses) the Files tab of the chat's computer, in the Everywhere
- * group like the files picked in it. A tab seen for the first time starts in
- * `startFolder` (the home folder without it); one already used keeps its place. Returns false when Files isn't for the panel
- * here (not in a chat, a phone) — then the caller opens the Files screen.
+ * Opens (or focuses) this chat's Files tab, in the chat's group (Misha 19.10:
+ * "new tab → file" and Files in the sidebar, from a chat, open in the chat's
+ * folder, pinned to the chat). A tab seen for the first time starts in
+ * `startFolder`, by default the chat's project folder (the home folder for a
+ * chat without one); one already used keeps its place. Returns false when
+ * Files isn't for the panel here (not in a chat, a phone) — then the caller
+ * opens the Files screen, as before.
  */
 export function useOpenFilesInPanel(isMobile: boolean): (startFolder?: string | null) => boolean {
   const preview = usePreviewPane();
@@ -76,12 +80,13 @@ export function useOpenFilesInPanel(isMobile: boolean): (startFolder?: string | 
       return false;
     }
     if (!environmentId) return false;
-    const tab = makeFilesTabFile(environmentId);
+    const tab = makeFilesTabFile(environmentId, pane.currentChatThreadId);
     const store = usePanelFilesStore.getState();
-    if (startFolder && !store.byTab[tab.id]) store.setPlace(tab.id, { path: startFolder });
+    const folder = startFolder ?? pane.currentChatProjectCwd;
+    if (folder && !store.byTab[tab.id]) store.setPlace(tab.id, { path: folder });
     pane.openFileForTarget(
       { projectKey: pane.currentProjectKey, threadId: pane.currentChatThreadId },
-      "global",
+      "chat",
       tab,
     );
     return true;
