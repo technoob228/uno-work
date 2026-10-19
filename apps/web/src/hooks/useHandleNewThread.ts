@@ -27,7 +27,7 @@ import {
   readEnvironmentServerConfig,
   useEnvironmentProviders,
 } from "../environments/settings/serverSettings";
-import { newChatModelSelection } from "../components/computer/home/homeStartModel";
+import { newThreadStartSelection } from "../components/computer/home/homeStartModel";
 import { createStarterProject } from "../starterProject";
 import { useDefaultEnvironment } from "./useDefaultEnvironment";
 import { getClientSettings, useSettings } from "./useSettings";
@@ -35,13 +35,15 @@ import { getClientSettings, useSettings } from "./useSettings";
 /**
  * "New chats start on" (Settings → AI, Misha 15.10) for a new chat in
  * `projectRef`. Null when it isn't set or can't run on that computer: the chat
- * then starts on the last pick, as before. The assistant's chat never asks — it
- * runs on Hermes.
+ * then starts on the last pick, as before — unless that pick's harness isn't
+ * signed in there, then on the computer's usable default. The assistant's chat
+ * never asks — it runs on Hermes.
  */
 function newChatStartSelection(projectRef: ScopedProjectRef): ModelSelection | null {
   if (isAssistantProjectId(projectRef.projectId)) return null;
   const config = readEnvironmentServerConfig(projectRef.environmentId);
-  return newChatModelSelection({
+  return newThreadStartSelection({
+    stickyActiveProvider: useComposerDraftStore.getState().stickyActiveProvider,
     providers: config?.providers ?? [],
     settings: { ...DEFAULT_UNIFIED_SETTINGS, ...config?.settings, ...getClientSettings() },
   });

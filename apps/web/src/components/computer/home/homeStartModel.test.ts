@@ -2,7 +2,11 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 
-import { homeStartModelSelection, newChatModelSelection } from "./homeStartModel";
+import {
+  homeStartModelSelection,
+  newChatModelSelection,
+  newThreadStartSelection,
+} from "./homeStartModel";
 
 function provider(input: {
   provider: string;
@@ -153,5 +157,51 @@ describe("New chats start on (15.10)", () => {
         settings: choose("claudeAgent", "claude-sonnet-5"),
       }),
     ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+});
+
+describe("a harness not signed in on this computer", () => {
+  const codexSignedOut = provider({
+    provider: "codex",
+    authStatus: "unauthenticated",
+    models: ["gpt-5.5-codex"],
+  });
+  const providers = [uno, claude, codexSignedOut];
+  const codexPick = { instanceId: id("codex"), model: "gpt-5.5-codex" };
+
+  it("isn't where Home starts after it was picked elsewhere", () => {
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: id("codex"),
+        stickyModelSelectionByProvider: { [id("codex")]: codexPick },
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+
+  it("turns 'New chats start on' off here", () => {
+    const settings = { ...DEFAULT_UNIFIED_SETTINGS, newChatModelSelection: codexPick };
+    expect(newChatModelSelection({ providers, settings })).toBeNull();
+  });
+
+  it("makes New chat start on the usable default instead of the sticky pick", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: id("codex"),
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toEqual({ instanceId: "uno", model: "uno/moonshotai/kimi-k2.7-code" });
+  });
+
+  it("leaves a signed-in sticky pick alone", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: id("claudeAgent"),
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toBeNull();
   });
 });
