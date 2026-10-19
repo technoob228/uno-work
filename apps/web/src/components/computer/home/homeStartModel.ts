@@ -74,23 +74,29 @@ export function homeStartModelSelection(input: {
   return pickUsableDefaultModelSelection(input.providers);
 }
 
+/** The chat would open on a sign-in or install card here, not an answer. */
+function cannotRunHere(provider: ServerProvider | undefined): boolean {
+  return !provider || !provider.enabled || !provider.installed || signedOutHere(provider);
+}
+
 /**
- * What "New chat" sets over the draft's sticky pick: "New chats start on" when
- * it can run here; else, when the last pick's harness isn't signed in on this
- * computer, the machine's usable default; else null (the sticky pick stands).
+ * What "New chat" sets over the draft's own start: "New chats start on" when
+ * it can run here; else, when what the draft would open on — the last pick, or
+ * with none the project's default — can't run on this computer, the machine's
+ * usable default; else null (the draft's start stands). A project added with
+ * `uno-work project add` carries Codex as its default whether or not Codex is
+ * signed in here (Misha 19.10, uno-product: "I never used Codex there").
  */
 export function newThreadStartSelection(input: {
   readonly stickyActiveProvider: ProviderInstanceId | null;
+  readonly projectDefault: ModelSelection | null;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
-  const active = input.stickyActiveProvider;
-  const provider = active
-    ? input.providers.find((candidate) => candidate.instanceId === active)
-    : undefined;
-  return provider && signedOutHere(provider)
-    ? pickUsableDefaultModelSelection(input.providers)
-    : null;
+  const opensOn = input.stickyActiveProvider ?? input.projectDefault?.instanceId ?? null;
+  if (opensOn === null || input.providers.length === 0) return null;
+  const provider = input.providers.find((candidate) => candidate.instanceId === opensOn);
+  return cannotRunHere(provider) ? pickUsableDefaultModelSelection(input.providers) : null;
 }

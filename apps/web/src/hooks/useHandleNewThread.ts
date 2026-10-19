@@ -35,15 +35,19 @@ import { getClientSettings, useSettings } from "./useSettings";
 /**
  * "New chats start on" (Settings → AI, Misha 15.10) for a new chat in
  * `projectRef`. Null when it isn't set or can't run on that computer: the chat
- * then starts on the last pick, as before — unless that pick's harness isn't
- * signed in there, then on the computer's usable default. The assistant's chat
+ * then starts on the last pick (or the project's default), as before — unless
+ * that harness can't run there, then on the computer's usable default. The assistant's chat
  * never asks — it runs on Hermes.
  */
-function newChatStartSelection(projectRef: ScopedProjectRef): ModelSelection | null {
+function newChatStartSelection(
+  projectRef: ScopedProjectRef,
+  projectDefault: ModelSelection | null,
+): ModelSelection | null {
   if (isAssistantProjectId(projectRef.projectId)) return null;
   const config = readEnvironmentServerConfig(projectRef.environmentId);
   return newThreadStartSelection({
     stickyActiveProvider: useComposerDraftStore.getState().stickyActiveProvider,
+    projectDefault,
     providers: config?.providers ?? [],
     settings: { ...DEFAULT_UNIFIED_SETTINGS, ...config?.settings, ...getClientSettings() },
   });
@@ -80,13 +84,13 @@ function useNewThreadState() {
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
       } = useComposerDraftStore.getState();
-      const startOn = newChatStartSelection(projectRef);
       const currentRouteTarget = getCurrentRouteTarget();
       const project = projects.find(
         (candidate) =>
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
+      const startOn = newChatStartSelection(projectRef, project?.defaultModelSelection ?? null);
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
