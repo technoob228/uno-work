@@ -11,7 +11,9 @@
  *   without rebuilding (and interrupting) running agents.
  *
  * One set of per-harness shapes, so a server shows up in every agent alike:
- * - Claude: the SDK's `mcpServers` query option (`type: "http"`);
+ * - Claude: the SDK's `mcpServers` query option (`type: "http"`); it lands on
+ *   the CLI's command line, so the token and addresses are `${VAR}`
+ *   references to the session env, never the values themselves;
  * - Codex: `-c mcp_servers.<name>.*` overrides on `codex app-server` (a token
  *   is read from the session env via `bearer_token_env_var`, never put on the
  *   command line);
@@ -137,25 +139,51 @@ export function sessionMcpServers(input: {
 
 // ── Claude Agent SDK ───────────────────────────────────────────────────
 
-/** Claude Agent SDK `mcpServers` entries. */
-export function claudeMcpServers(servers: ReadonlyArray<McpServerEntry>): Record<
-  string,
-  {
-    readonly type: "http";
-    readonly url: string;
-    readonly headers?: Readonly<Record<string, string>>;
-  }
-> {
-  return Object.fromEntries(
-    enabledMcpServers(servers).map((server) => [
-      server.name,
-      {
-        type: "http" as const,
-        url: server.url.trim(),
-        ...(server.headers ? { headers: server.headers } : {}),
-      },
-    ]),
+/** Env var carrying the address of the owner's Nth server to Claude (see below). */
+export const claudeMcpUrlEnvVar = (index: number): string => `UNO_WORK_MCP_URL_${index}`;
+
+/**
+ * Claude Agent SDK `mcpServers` entries plus the env they read.
+ *
+ * The SDK hands `mcpServers` to the CLI as `--mcp-config <json>`, i.e. on the
+ * process's command line, which every user of the machine sees in `ps`. So no
+ * secret goes into the JSON itself: Claude Code expands `${VAR}` in the `url`
+ * and `headers` of `--mcp-config` from its own environment, and the env of a
+ * process is readable only by its user (and root). The uno-work bearer token
+ * is already in the session env (`bearerTokenEnvVar`); an owner's server may
+ * keep its secret in the address (`…/mcp/s/<key>/…`), so addresses travel as
+ * `UNO_WORK_MCP_URL_<n>`. The caller merges `env` into the session env.
+ */
+export function claudeMcpServers(servers: ReadonlyArray<McpServerEntry>): {
+  readonly mcpServers: Record<
+    string,
+    {
+      readonly type: "http";
+      readonly url: string;
+      readonly headers?: Readonly<Record<string, string>>;
+    }
+  >;
+  readonly env: Readonly<Record<string, string>>;
+} {
+  const env: Record<string, string> = {};
+  const mcpServers = Object.fromEntries(
+    enabledMcpServers(servers).map((server, index) => {
+      const urlVar = claudeMcpUrlEnvVar(index);
+      env[urlVar] = server.url.trim();
+      const headers = server.bearerTokenEnvVar
+        ? { Authorization: `Bearer \${${server.bearerTokenEnvVar}}` }
+        : server.headers;
+      return [
+        server.name,
+        {
+          type: "http" as const,
+          url: `\${${urlVar}}`,
+          ...(headers ? { headers } : {}),
+        },
+      ];
+    }),
   );
+  return { mcpServers, env };
 }
 
 /** Claude permission rules (`mcp__<server>`) for servers that ask the person themselves. */

@@ -23,9 +23,10 @@ describe("custom MCP servers", () => {
     expect(enabledMcpServers(undefined)).toEqual([]);
   });
 
-  it("maps to Claude SDK http servers", () => {
+  it("maps to Claude SDK http servers, the address through the env", () => {
     expect(claudeMcpServers([docs, off])).toEqual({
-      docs: { type: "http", url: "https://mcp.example.com/mcp" },
+      mcpServers: { docs: { type: "http", url: "${UNO_WORK_MCP_URL_0}" } },
+      env: { UNO_WORK_MCP_URL_0: "https://mcp.example.com/mcp" },
     });
   });
 
@@ -111,12 +112,30 @@ describe("session MCP servers: built-in uno-work + the owner's own", () => {
 
   it("Claude: HTTP with the chat's header; only uno-work skips Claude's own prompt", () => {
     const servers = sessionMcpServers({ bridgeEnvironment: bridge, custom: [docs] });
-    expect(claudeMcpServers(servers)["uno-work"]).toEqual({
+    const claude = claudeMcpServers(servers);
+    expect(claude.mcpServers["uno-work"]).toEqual({
       type: "http",
-      url: "http://127.0.0.1:4321/api/uno-work/mcp",
-      headers: { Authorization: "Bearer thread-token" },
+      url: "${UNO_WORK_MCP_URL_0}",
+      headers: { Authorization: "Bearer ${UNO_WORK_BRIDGE_TOKEN}" },
+    });
+    expect(claude.mcpServers.docs).toEqual({ type: "http", url: "${UNO_WORK_MCP_URL_1}" });
+    expect(claude.env).toEqual({
+      UNO_WORK_MCP_URL_0: "http://127.0.0.1:4321/api/uno-work/mcp",
+      UNO_WORK_MCP_URL_1: "https://mcp.example.com/mcp",
     });
     expect(claudePreApprovedTools(servers)).toEqual(["mcp__uno-work"]);
+  });
+
+  it("Claude: no token or address on the command line (--mcp-config is seen in ps)", () => {
+    const secretUrl = {
+      name: "zap",
+      url: "https://mcp.example.com/s/owner-key/mcp",
+      enabled: true,
+    };
+    const servers = sessionMcpServers({ bridgeEnvironment: bridge, custom: [secretUrl] });
+    const argvJson = JSON.stringify({ mcpServers: claudeMcpServers(servers).mcpServers });
+    expect(argvJson).not.toContain("thread-token");
+    expect(argvJson).not.toContain("owner-key");
   });
 
   it("Codex: token read from the env, never on the command line", () => {
