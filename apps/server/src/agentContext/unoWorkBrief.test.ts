@@ -33,8 +33,16 @@ describe("Uno Work environment brief", () => {
     // agents filled disks and memory; the long rules are uno_guide("computer"));
     // +100 for Spark (Misha's walk 18.10: asked to deploy a project on
     // uno.place, the agent didn't know Spark and said "order Small"; the
-    // details are uno_guide("spark")).
+    // details are uno_guide("spark")); ~60 for "Deploying to Uno / uno.place"
+    // (Misha 19.10: a Codex chat asked to deploy on uno.place went to click
+    // the site and hit the sign-in page instead of reading llms.txt).
     expect(buildUnoWorkBrief().length / 4).toBeLessThan(1900);
+  });
+
+  it("deploying to uno.place: tools or llms.txt first, never a browser sign-in", () => {
+    expect(buildUnoWorkBrief()).toContain(
+      "Deploying to Uno / uno.place: use the uno-work tools (`uno_guide`) or read https://uno.place/llms.txt first; never ask the person to sign in in the browser — POST /api/v1/agent/connect.",
+    );
   });
 
   it("a Telegram bot or an assistant: the token is asked before looking at the machine", () => {

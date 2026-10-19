@@ -24,6 +24,7 @@ import { it, vi } from "@effect/vitest";
 import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
+import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
@@ -401,6 +402,54 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         serviceTier: "fast",
       });
     }).pipe(Effect.provide(customLayer));
+  });
+
+  // Misha 19.10: a Codex chat asked to deploy on uno.place had no uno-work
+  // tools. A Codex chat in Uno Work gets the same uno-work MCP server as a
+  // Claude chat — as `-c` overrides on `codex app-server` (the person's own
+  // ~/.codex/config.toml is never written), the token only in the env — and
+  // the environment brief as developer instructions.
+  it.effect("a Codex session gets the uno-work MCP server and the brief, token only in env", () => {
+    const runtimeFactory = makeRuntimeFactory();
+    const brief = buildUnoWorkBrief();
+    const layer = Layer.effect(
+      CodexAdapter,
+      Effect.gen(function* () {
+        const codexConfig = Schema.decodeSync(CodexSettings)({});
+        return yield* makeCodexAdapter(codexConfig, {
+          makeRuntime: runtimeFactory.factory,
+          appendDeveloperInstructions: brief,
+          bridgeEnvironment: ({ threadId }) => ({
+            UNO_WORK_BRIDGE_URL: "http://127.0.0.1:3773",
+            UNO_WORK_BRIDGE_TOKEN: `secret-for-${threadId}`,
+          }),
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-uno-work-mcp"),
+        runtimeMode: "full-access",
+      });
+      const options = runtimeFactory.factory.mock.calls[0]?.[0];
+      assert.ok(options);
+      const args = options.extraArgs ?? [];
+      assert.ok(args.includes('mcp_servers.uno-work.url="http://127.0.0.1:3773/api/uno-work/mcp"'));
+      assert.ok(args.includes('mcp_servers.uno-work.bearer_token_env_var="UNO_WORK_BRIDGE_TOKEN"'));
+      assert.ok(args.includes('mcp_servers.uno-work.default_tools_approval_mode="approve"'));
+      assert.ok(!args.join(" ").includes("secret-for-"));
+      assert.equal(options.environment?.UNO_WORK_BRIDGE_TOKEN, "secret-for-sess-uno-work-mcp");
+      assert.equal(options.appendDeveloperInstructions, brief);
+      assert.match(brief, /Deploying to Uno \/ uno\.place: use the uno-work tools/);
+    }).pipe(Effect.provide(layer));
   });
 });
 
