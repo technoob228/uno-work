@@ -57,6 +57,12 @@ const rpcClientMock = {
     status: vi.fn(),
     install: vi.fn(),
     remove: vi.fn(),
+    scan: vi.fn(),
+    uploadChunk: vi.fn(),
+    stage: vi.fn(),
+    add: vi.fn(),
+    setEnabled: vi.fn(),
+    setPluginEnabled: vi.fn(),
   },
   filesystem: {
     browse: vi.fn(),

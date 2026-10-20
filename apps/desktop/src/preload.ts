@@ -3,6 +3,7 @@ import type { DesktopBridge } from "@t3tools/contracts";
 import { PAGE_TOOLS_PRELOAD_VERSION } from "@t3tools/contracts/pageTools";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
+const READ_SKILLS_FOLDER_CHANNEL = "desktop:read-skills-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const SET_BADGE_COUNT_CHANNEL = "desktop:set-badge-count";
@@ -155,6 +156,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
   getAdvertisedEndpoints: () => ipcRenderer.invoke(GET_ADVERTISED_ENDPOINTS_CHANNEL),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),
+  readSkillsFolder: () => ipcRenderer.invoke(READ_SKILLS_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
   setBadgeCount: (count) => ipcRenderer.invoke(SET_BADGE_COUNT_CHANNEL, count),

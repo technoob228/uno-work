@@ -48,8 +48,15 @@ export function crc32(data: Uint8Array): number {
  */
 export function readZip(
   bytes: Uint8Array,
-  options?: { readonly include?: (name: string) => boolean },
+  options?: {
+    readonly include?: (name: string) => boolean;
+    /** Lower caps than the Office defaults (skills imports). */
+    readonly maxEntries?: number;
+    readonly maxTotalBytes?: number;
+  },
 ): ZipEntry[] {
+  const maxEntries = options?.maxEntries ?? ZIP_MAX_ENTRIES;
+  const maxTotalBytes = options?.maxTotalBytes ?? ZIP_MAX_TOTAL_BYTES;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // End of central directory: last 22 bytes + up to 64 KB of comment.
   let eocd = -1;
@@ -64,7 +71,7 @@ export function readZip(
   const cdOffset = view.getUint32(eocd + 16, true);
   if (count === 0xffff || cdOffset === 0xffffffff)
     throw new ZipFormatError("zip64 isn't supported");
-  if (count > ZIP_MAX_ENTRIES) throw new ZipFormatError("too many entries");
+  if (count > maxEntries) throw new ZipFormatError("too many entries");
   const entries: ZipEntry[] = [];
   const seen = new Set<string>();
   let total = 0;
@@ -89,7 +96,7 @@ export function readZip(
     if (name.endsWith("/")) continue; // folder entries carry nothing
     if (options?.include && !options.include(name)) continue;
     total += size;
-    if (total > ZIP_MAX_TOTAL_BYTES) throw new ZipFormatError("package too large when unpacked");
+    if (total > maxTotalBytes) throw new ZipFormatError("package too large when unpacked");
     if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
       throw new ZipFormatError("broken local header");
     }

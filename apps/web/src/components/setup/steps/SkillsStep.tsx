@@ -1,8 +1,12 @@
 /**
- * Step 4 — skills. Two cards picked for the kind of work, the rest of the
- * catalog under "More skills", each installed by the daemon for every agent
- * (see setupSkills.ts). The one-click store is a teaser.
+ * Step 4 — skills. What the agents already read comes first ("Found in your
+ * project", "On this computer"); then two cards picked for the kind of work,
+ * the rest of the catalog under "More skills", each installed by the daemon
+ * for every agent (see setupSkills.ts); then "Add your own skill" — a link,
+ * a file or the laptop's skills folder, previewed before anything is written
+ * (skillImport.ts). The one-click store is a teaser.
  */
+import type { FoundSkill, SkillsStageResult } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpenIcon,
@@ -20,16 +24,32 @@ import {
   ShieldCheckIcon,
   StoreIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import { useHomeFolderPath } from "../../../hooks/useFolderChats";
+import { useServerProviders } from "../../../rpc/serverState";
 import { cn } from "../../../lib/utils";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/collapsible";
 import { SetupHeading, SetupShell } from "../SetupShell";
+import { SkillImportDialog } from "../SkillImportDialog";
+import { SkillsAddOwn } from "../SkillsAddOwn";
+import { foundRowKey, SkillsFound } from "../SkillsFound";
 import {
+  existingNames,
+  type FoundPlugin,
+  foundSkillsView,
+  installedAgents,
+  readFoundSkills,
+  setFoundSkillEnabled,
+  setPluginEnabled,
+  stageFolder,
+} from "../skillImport";
+import {
+  ALL_SETUP_SKILLS,
   installSkill,
   moreSkills,
   offeredSkills,
@@ -52,6 +72,19 @@ const ICON: Readonly<Record<SetupSkillIcon, typeof BookOpenIcon>> = {
 };
 
 export const SKILLS_STATUS_QUERY_KEY = ["uno-setup", "skills"] as const;
+const FOUND_SKILLS_QUERY_KEY = ["uno-setup", "skills", "found"] as const;
+const CATALOG_IDS: ReadonlySet<string> = new Set(ALL_SETUP_SKILLS.map((skill) => skill.id));
+
+function useFoundSkills(projectPath: string | null) {
+  const environmentId = usePrimaryEnvironmentId();
+  return useQuery({
+    queryKey: [...FOUND_SKILLS_QUERY_KEY, environmentId, projectPath],
+    queryFn: () => readFoundSkills(environmentId!, projectPath),
+    enabled: environmentId !== null,
+    // An older daemon has no scan: the step just shows what it showed before.
+    retry: false,
+  });
+}
 
 export function useSkillsStatus() {
   const environmentId = usePrimaryEnvironmentId();
@@ -154,13 +187,81 @@ function SkillRow({
 }
 
 export function SkillsStep() {
+  const environmentId = usePrimaryEnvironmentId();
+  const queryClient = useQueryClient();
   const progress = useSetupProgress();
   const { completeStep } = useSetupNavigation();
   const status = useSkillsStatus();
-  const kind = progress.project?.kind;
+  const project = progress.project;
+  const found = useFoundSkills(project?.path ?? null);
+  const [preview, setPreview] = useState<SkillsStageResult | null>(null);
+  const [pendingRow, setPendingRow] = useState<string | null>(null);
+  const providers = useServerProviders();
+  const installed = useMemo(() => installedAgents(providers), [providers]);
+  const home = useHomeFolderPath(environmentId);
+  const [previewPlace, setPreviewPlace] = useState<"computer" | "project">("computer");
+  const kind = project?.kind;
   const offered = offeredSkills(kind);
   const more = moreSkills(kind);
-  const count = status.data?.installed.size ?? 0;
+  const view = useMemo(() => foundSkillsView(found.data ?? [], CATALOG_IDS), [found.data]);
+  const existing = useMemo(
+    () => existingNames(found.data ?? [], status.data?.installed ?? new Set()),
+    [found.data, status.data],
+  );
+  const count = (status.data?.installed.size ?? 0) + view.activeNames.size;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: SKILLS_STATUS_QUERY_KEY });
+  // A project's own skills/ folder: no agent reads it, so turning one on goes
+  // through the same preview as any other skill.
+  const turnOn = async (skill: FoundSkill) => {
+    const folder = skill.paths[0];
+    if (!environmentId || !folder) return;
+    setPendingRow(foundRowKey(skill));
+    try {
+      const staged = await stageFolder(environmentId, folder);
+      setPreviewPlace("project");
+      setPreview(staged);
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: cause instanceof Error ? cause.message : "Couldn't read this skill.",
+      });
+    } finally {
+      setPendingRow(null);
+    }
+  };
+  // Untick = the folders move to <skills folder>-off (files kept); tick = back.
+  const runToggle = async (key: string, change: () => Promise<void>, done: string) => {
+    setPendingRow(key);
+    try {
+      await change();
+      await refresh();
+      toastManager.add({ type: "success", title: done, description: "Applies to new chats." });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: cause instanceof Error ? cause.message : "Couldn't change the skill.",
+      });
+    } finally {
+      setPendingRow(null);
+    }
+  };
+  const toggleSkill = (skill: FoundSkill, enabled: boolean) => {
+    if (!environmentId) return;
+    void runToggle(
+      foundRowKey(skill),
+      () =>
+        setFoundSkillEnabled({ environmentId, skill, enabled, projectPath: project?.path ?? null }),
+      enabled ? `${skill.name} is on` : `${skill.name} is off. Its files are kept`,
+    );
+  };
+  const togglePlugin = (plugin: FoundPlugin, enabled: boolean) => {
+    if (!environmentId) return;
+    void runToggle(
+      `plugin:${plugin.pluginId}`,
+      () => setPluginEnabled({ environmentId, pluginId: plugin.pluginId, enabled }),
+      enabled ? `Plugin ${plugin.name} is on` : `Plugin ${plugin.name} is off in Claude Code`,
+    );
+  };
   return (
     <SetupShell
       step="skills"
@@ -172,6 +273,21 @@ export function SkillsStep() {
       <SetupHeading
         title="Give your AI skills"
         lead="A skill is a short playbook for one kind of task. Add it once, and your AI uses it when it fits."
+      />
+      <SkillsFound
+        project={view.project}
+        computer={view.computer}
+        plugins={view.plugins}
+        projectName={project?.name || null}
+        actions={{
+          installed,
+          home,
+          projectPath: project?.path ?? null,
+          pending: pendingRow,
+          onToggle: toggleSkill,
+          onTogglePlugin: togglePlugin,
+          onTurnOn: (skill) => void turnOn(skill),
+        }}
       />
       <div className="overflow-hidden rounded-2xl border border-border">
         {offered.map((skill, index) => (
@@ -190,11 +306,36 @@ export function SkillsStep() {
           ))}
         </CollapsiblePanel>
       </Collapsible>
+      <SkillsAddOwn
+        environmentId={environmentId}
+        onStaged={(staged) => {
+          setPreviewPlace("computer");
+          setPreview(staged);
+        }}
+      />
+      <SkillImportDialog
+        environmentId={environmentId}
+        preview={preview}
+        project={project ? { name: project.name || "this project", path: project.path } : null}
+        existing={existing}
+        initialPlace={previewPlace}
+        onClose={() => setPreview(null)}
+        onAdded={(added) => {
+          setPreview(null);
+          toastManager.add({
+            type: "success",
+            title: added === 1 ? "Skill added" : `${added} skills added`,
+            description: `Your AI uses ${added === 1 ? "it" : "them"} in new chats.`,
+          });
+          void refresh();
+        }}
+      />
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <div className="text-sm">
           <h3 className="font-medium">Find more</h3>
           <p className="mt-1 text-muted-foreground">
-            Skills are plain folders. Grab any from the web, or ask your AI to install one.
+            Skills are plain folders. Paste a link from these sites above, or ask your AI to install
+            one.
           </p>
           <div className="mt-2 flex flex-wrap gap-3 text-xs">
             {["https://skills.sh", "https://github.com/anthropics/skills"].map((href) => (
@@ -214,7 +355,7 @@ export function SkillsStep() {
           </p>
         </div>
         <div className="text-sm">
-          <h3 className="font-medium">Your own</h3>
+          <h3 className="font-medium">Write your own</h3>
           <p className="mt-1 text-muted-foreground">
             Write a skill for something you do often, like your weekly report. Ask: “Turn this into
             a skill”.

@@ -53,6 +53,19 @@ import {
   removeSkill,
   skillTargetRoots,
 } from "./skills/skillInstaller.ts";
+import {
+  addStagedSkills,
+  appendUploadChunk,
+  projectTargetRoots,
+  stageSkills,
+} from "./skills/skillImport.ts";
+import {
+  agentHomes,
+  scanComputerSkills,
+  scanRootsFor,
+  setClaudePluginEnabled,
+  setSkillsEnabled,
+} from "./skills/skillScan.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
@@ -268,10 +281,19 @@ const makeWsRpcLayer = (
       const skillsContext = serverSettings.getSettings.pipe(
         Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
         Effect.map((settings) => ({
+          settings,
           catalogDir: skillsCatalogDir,
           roots: skillTargetRoots(settings),
         })),
       );
+      /** A project folder the person picked: absolute and there. */
+      const skillsProjectDir = async (path: string | undefined): Promise<string> => {
+        const dir = path?.trim();
+        const stat =
+          dir && nodePath.isAbsolute(dir) ? await fsPromises.stat(dir).catch(() => null) : null;
+        if (!dir || !stat?.isDirectory()) throw new Error("Open a project first.");
+        return dir;
+      };
       const toSkillsError = (cause: unknown) =>
         new SkillsError({
           message: cause instanceof Error ? cause.message : "Couldn't change the skill.",
@@ -1923,6 +1945,104 @@ const makeWsRpcLayer = (
               Effect.flatMap(({ roots }) =>
                 Effect.tryPromise({
                   try: () => removeSkill({ id: input.id, roots }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsScan]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsScan,
+            skillsContext.pipe(
+              Effect.flatMap(({ settings }) =>
+                Effect.tryPromise({
+                  try: async () => ({
+                    skills: await scanComputerSkills({ settings, projectPath: input.projectPath }),
+                  }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsUploadChunk]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsUploadChunk,
+            Effect.tryPromise({
+              try: async () => ({ bytes: await appendUploadChunk(input) }),
+              catch: toSkillsError,
+            }),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsStage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsStage,
+            Effect.tryPromise({
+              try: () => stageSkills(input),
+              catch: toSkillsError,
+            }),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsAdd]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsAdd,
+            skillsContext.pipe(
+              Effect.flatMap(({ roots }) =>
+                Effect.tryPromise({
+                  try: async () => ({
+                    added: await addStagedSkills({
+                      token: input.token,
+                      keys: input.keys,
+                      roots:
+                        input.scope === "project"
+                          ? projectTargetRoots(await skillsProjectDir(input.projectPath))
+                          : roots,
+                    }),
+                  }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsSetEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsSetEnabled,
+            skillsContext.pipe(
+              Effect.flatMap(({ settings }) =>
+                Effect.tryPromise({
+                  try: async () => {
+                    const { roots } = await scanRootsFor({
+                      settings,
+                      projectPath: input.projectPath,
+                    });
+                    return {
+                      paths: await setSkillsEnabled({
+                        paths: input.paths,
+                        enabled: input.enabled,
+                        roots,
+                      }),
+                    };
+                  },
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsSetPluginEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsSetPluginEnabled,
+            skillsContext.pipe(
+              Effect.flatMap(({ settings }) =>
+                Effect.tryPromise({
+                  try: () =>
+                    setClaudePluginEnabled({
+                      claudeDir: agentHomes(settings, os.homedir(), process.env).claudeDir,
+                      pluginId: input.pluginId,
+                      enabled: input.enabled,
+                    }),
                   catch: toSkillsError,
                 }),
               ),
