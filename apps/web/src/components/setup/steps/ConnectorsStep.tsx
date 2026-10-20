@@ -20,7 +20,9 @@ import { type ReactNode, useEffect, useState } from "react";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
+  connectGithubAccount,
   disconnectConnector,
+  getGithubAccount,
   listConnectors,
   openAuthWindow,
   probeMcpServer,
@@ -176,6 +178,93 @@ export function useConnectors(environmentId: ReturnType<typeof usePrimaryEnviron
     enabled: environmentId !== null,
     staleTime: 10_000,
   });
+}
+
+const GITHUB_ACCOUNT_KEY = ["uno-setup", "github-account"] as const;
+/** How long to keep checking after GitHub's page opened. */
+const GITHUB_WAIT_MS = 180_000;
+
+/**
+ * GitHub of the account (the Uno GitHub App): one Connect, the repositories
+ * picked on GitHub's page, and git on every cloud computer signs in by itself.
+ * Off a cloud computer (or an older console) it falls back to this
+ * computer's own `gh` sign-in.
+ */
+function GitHubAccountRow({ first }: { first: boolean }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
+  const account = useQuery({
+    queryKey: [...GITHUB_ACCOUNT_KEY, environmentId],
+    queryFn: () => getGithubAccount({ environmentId: environmentId! }),
+    enabled: environmentId !== null,
+    retry: false,
+    refetchInterval: waitingUntil !== null ? 3000 : false,
+  });
+  const state = account.data;
+  const connected = state?.connected === true;
+  useEffect(() => {
+    if (waitingUntil === null) return;
+    if (connected) {
+      setWaitingUntil(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setWaitingUntil(null), waitingUntil - Date.now());
+    return () => window.clearTimeout(timer);
+  }, [waitingUntil, connected]);
+
+  if (account.isError || (state && !state.available)) return <GitHubMachineRow first={first} />;
+
+  const open = async () => {
+    if (!environmentId) return;
+    try {
+      const { authorizeUrl } = await connectGithubAccount({ environmentId });
+      setWaitingUntil(Date.now() + GITHUB_WAIT_MS);
+      await openAuthWindow(authorizeUrl, "uno-connector");
+      await account.refetch();
+    } catch (cause) {
+      setWaitingUntil(null);
+      toastManager.add({
+        type: "error",
+        title: "Couldn’t open GitHub",
+        description: cause instanceof Error ? cause.message : undefined,
+      });
+    }
+  };
+  const waiting = waitingUntil !== null && !connected;
+  return (
+    <Row
+      first={first}
+      done={connected}
+      logo={<GitHubIcon className="size-5" />}
+      name="GitHub"
+      testId="setup-connector-github"
+      description={
+        connected ? (
+          <ConnectedBadge>
+            Connected{state.accounts.length > 0 ? ` · ${state.accounts.join(", ")}` : ""}
+          </ConnectedBadge>
+        ) : (
+          "Your repositories for git on every computer. You pick them on GitHub."
+        )
+      }
+      side={
+        !state ? (
+          <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+        ) : (
+          <Button
+            size="sm"
+            variant={connected ? "ghost" : "outline"}
+            disabled={waiting}
+            onClick={() => void open()}
+            data-testid="setup-connect-github-account"
+          >
+            {waiting ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+            {waiting ? "Waiting for GitHub" : connected ? "Choose repositories" : "Connect"}
+          </Button>
+        )
+      }
+    />
+  );
 }
 
 /** This computer's own `gh` sign-in — GitHub's fallback while the connector isn't available. */
@@ -547,7 +636,7 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
     >
       {PROVIDERS.map((meta, index) =>
         meta.provider === "github" && githubViaMachine ? (
-          <GitHubMachineRow key={meta.provider} first={index === 0} />
+          <GitHubAccountRow key={meta.provider} first={index === 0} />
         ) : (
           <ProviderRow
             key={meta.provider}
