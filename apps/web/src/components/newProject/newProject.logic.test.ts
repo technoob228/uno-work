@@ -170,6 +170,20 @@ describe("describedProjectPrompt", () => {
     expect(cloned).toContain("About it, in my words: An online shop.");
     expect(cloned).toContain("Look at what's inside");
   });
+
+  it("part of the upload didn't fit: says so and where the list is, even with no words", () => {
+    const prompt = describedProjectPrompt({
+      ...base,
+      about: "",
+      contents: "files",
+      notUploaded: { files: 87741, listFile: ".uno-not-uploaded.txt" },
+    });
+    expect(prompt).not.toContain("About it");
+    expect(prompt).toContain(
+      "Not everything fit in the upload: 87,741 files stayed on my computer. The list is in .uno-not-uploaded.txt.",
+    );
+    expect(prompt).toContain("Start your reply with one line on what's missing");
+  });
 });
 
 describe("checkRepositoryInput without a scheme", () => {

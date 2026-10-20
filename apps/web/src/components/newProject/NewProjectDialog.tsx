@@ -123,6 +123,7 @@ import {
   checkNewFolderName,
   describedProjectPrompt,
   type NewProjectContents,
+  type NotUploadedFiles,
   cloudCrumbs,
   cloudProjectName,
   freeProjectName,
@@ -302,6 +303,8 @@ function dialogCopy(
 interface ProjectStory {
   readonly about: string;
   readonly contents: NewProjectContents;
+  /** Part of the upload didn't fit: the first message says so. */
+  readonly notUploaded?: NotUploadedFiles;
 }
 
 function useFinishNewProject() {
@@ -328,8 +331,9 @@ function useFinishNewProject() {
         );
         if (done) return;
       }
-      // They told Uno about it: the project opens with their words as its first message.
-      if (story && story.about.length > 0) {
+      // They told Uno about it, or part of the upload didn't fit: the project
+      // opens with a first message (their words, what's missing).
+      if (story && (story.about.length > 0 || story.notUploaded)) {
         const sent = await startTask(describedProjectPrompt({ name, folder, ...story }), {
           folder,
           modelSelection: null,
@@ -660,7 +664,14 @@ function UploadStep({
     setStarting(true);
     try {
       const projectRef = await ensureFolderProject(target, name, { createFolder: true });
-      const story = { about: aboutText, contents: "files" as const };
+      const notUploaded = summary.leftOut.length + summary.tooLarge.length;
+      const story: ProjectStory = {
+        about: aboutText,
+        contents: "files",
+        ...(notUploaded > 0
+          ? { notUploaded: { files: notUploaded, listFile: LEFT_OUT_LIST_FILE } }
+          : {}),
+      };
       const leftOut =
         summary.leftOut.length > 0 || summary.tooLarge.length > 0
           ? {
