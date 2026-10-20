@@ -1048,7 +1048,8 @@ function FolderBrowser({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* @container: the columns follow the width of this list, not of the window. */}
+      <div className="@container min-h-0 flex-1 overflow-y-auto">
         {listing.isPending ? (
           <div className="flex flex-col gap-2 p-5">
             {Array.from({ length: 6 }, (_, index) => (
@@ -1123,16 +1124,16 @@ function FolderBrowser({
                   sortKey="modified"
                   sort={sort}
                   onSort={setSort}
-                  className="hidden w-36 md:table-cell"
+                  className="hidden w-36 pr-3 @2xl:table-cell"
                 />
                 <SortHeader
                   label="Size"
                   sortKey="size"
                   sort={sort}
                   onSort={setSort}
-                  className="hidden w-24 text-right sm:table-cell"
+                  className="hidden w-24 text-right @xl:table-cell"
                 />
-                <th className="w-28 pr-3 sm:pr-5" />
+                <th className="w-12 pr-3 sm:pr-5 @md:w-28" />
               </tr>
             </thead>
             <tbody>
@@ -1340,7 +1341,7 @@ function FileRow({
           onCheckedChange={(checked) => onToggle(checked === true)}
         />
       </td>
-      <td className="py-1.5">
+      <td className="overflow-hidden py-1.5">
         <button
           type="button"
           onClick={onOpen}
@@ -1350,9 +1351,12 @@ function FileRow({
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
             <Icon className={cn("size-4.5", FILE_KIND_TINT[kind])} />
           </span>
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
-              <span className="truncate font-medium text-foreground group-hover:underline">
+              <span
+                className="truncate font-medium text-foreground group-hover:underline"
+                title={entry.name}
+              >
                 {entry.name}
               </span>
               {tag ? (
@@ -1379,37 +1383,47 @@ function FileRow({
                 in {locationHint}
               </span>
             ) : null}
+            {/* Narrow list: Modified (and Size) move under the name instead of taking columns. */}
+            <span className="block truncate text-xs text-muted-foreground @2xl:hidden">
+              {formatModified(entry.modifiedAt)}
+              {entry.kind === "directory" ? null : (
+                <span className="@xl:hidden"> · {formatFileSize(entry.size)}</span>
+              )}
+            </span>
           </span>
         </button>
       </td>
-      <td className="hidden py-1.5 text-muted-foreground md:table-cell">
+      <td className="hidden py-1.5 pr-3 whitespace-nowrap text-muted-foreground @2xl:table-cell">
         {formatModified(entry.modifiedAt)}
       </td>
-      <td className="hidden py-1.5 text-right text-muted-foreground tabular-nums sm:table-cell">
+      <td className="hidden py-1.5 text-right whitespace-nowrap text-muted-foreground tabular-nums @xl:table-cell">
         {entry.kind === "directory" ? "—" : formatFileSize(entry.size)}
       </td>
       <td className="py-1.5 pr-3 sm:pr-5">
         <div className="flex items-center justify-end gap-0.5">
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={`Share ${entry.name}`}
-            onClick={onShare}
-            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          >
-            <Share2Icon />
-          </Button>
-          {entry.kind === "file" ? (
+          {/* Share/Download are also in the menu: a narrow list keeps only the menu. */}
+          <span className="hidden items-center gap-0.5 @md:flex">
             <Button
               size="icon-xs"
               variant="ghost"
-              aria-label={`Download ${entry.name}`}
-              onClick={onDownload}
+              aria-label={`Share ${entry.name}`}
+              onClick={onShare}
               className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
-              <DownloadIcon />
+              <Share2Icon />
             </Button>
-          ) : null}
+            {entry.kind === "file" ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label={`Download ${entry.name}`}
+                onClick={onDownload}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <DownloadIcon />
+              </Button>
+            ) : null}
+          </span>
           <Menu>
             <MenuTrigger
               render={

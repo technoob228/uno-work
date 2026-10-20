@@ -435,9 +435,9 @@ export function CloudBrowser({
         <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
           <tr className="border-b border-border text-left text-xs text-muted-foreground">
             <th className="py-2 pl-3 font-normal sm:pl-5">Name</th>
-            <th className="hidden w-36 py-2 font-normal md:table-cell">Modified</th>
-            <th className="hidden w-24 py-2 text-right font-normal sm:table-cell">Size</th>
-            <th className="w-24 pr-3 sm:pr-5" />
+            <th className="hidden w-36 py-2 pr-3 font-normal @2xl:table-cell">Modified</th>
+            <th className="hidden w-24 py-2 text-right font-normal @xl:table-cell">Size</th>
+            <th className="w-12 pr-3 sm:pr-5 @md:w-24" />
           </tr>
         </thead>
         <tbody>
@@ -447,7 +447,7 @@ export function CloudBrowser({
             const Icon = row.isFolder ? FolderOpenIcon : FILE_KIND_ICON[kind];
             return (
               <tr key={row.key} className="group border-b border-border/60 hover:bg-accent/40">
-                <td className="py-1.5 pl-3 sm:pl-5">
+                <td className="overflow-hidden py-1.5 pl-3 sm:pl-5">
                   <button
                     type="button"
                     onClick={() =>
@@ -461,27 +461,43 @@ export function CloudBrowser({
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
                       <Icon className={cn("size-4.5", FILE_KIND_TINT[kind])} />
                     </span>
-                    <span className="truncate font-medium group-hover:underline">{row.name}</span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className="block truncate font-medium group-hover:underline"
+                        title={row.name}
+                      >
+                        {row.name}
+                      </span>
+                      {/* Narrow list: Modified (and Size) move under the name. */}
+                      <span className="block truncate text-xs text-muted-foreground @2xl:hidden">
+                        {object?.modifiedAt ? formatModified(object.modifiedAt) : ""}
+                        {object ? (
+                          <span className="@xl:hidden"> · {formatFileSize(object.size)}</span>
+                        ) : null}
+                      </span>
+                    </span>
                   </button>
                 </td>
-                <td className="hidden py-1.5 text-muted-foreground md:table-cell">
+                <td className="hidden py-1.5 pr-3 whitespace-nowrap text-muted-foreground @2xl:table-cell">
                   {object?.modifiedAt ? formatModified(object.modifiedAt) : ""}
                 </td>
-                <td className="hidden py-1.5 text-right text-muted-foreground tabular-nums sm:table-cell">
+                <td className="hidden py-1.5 text-right whitespace-nowrap text-muted-foreground tabular-nums @xl:table-cell">
                   {object ? formatFileSize(object.size) : "—"}
                 </td>
                 <td className="py-1.5 pr-3 sm:pr-5">
                   <div className="flex items-center justify-end gap-0.5">
                     {object ? (
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Download ${row.name}`}
-                        className="opacity-0 group-hover:opacity-100"
-                        onClick={() => void download(object)}
-                      >
-                        <DownloadIcon />
-                      </Button>
+                      <span className="hidden @md:flex">
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={`Download ${row.name}`}
+                          className="opacity-0 group-hover:opacity-100"
+                          onClick={() => void download(object)}
+                        >
+                          <DownloadIcon />
+                        </Button>
+                      </span>
                     ) : null}
                     <Menu>
                       <MenuTrigger
@@ -559,7 +575,7 @@ export function CloudBrowser({
       }}
     >
       {header}
-      <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+      <div className="@container min-h-0 flex-1 overflow-y-auto">{body}</div>
       {dragging ? (
         <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-sky-500 bg-sky-500/5">
           <div className="rounded-xl bg-popover px-4 py-3 text-sm font-medium shadow-lg">
