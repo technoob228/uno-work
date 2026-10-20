@@ -158,7 +158,7 @@ describe("uploadFilesIntoDirectory", () => {
     );
     expect(result.uploadedFiles).toBe(1);
     expect(result.plan.skipped).toEqual([
-      { relativePath: "node_modules/junk.js", reason: "ignored" },
+      { relativePath: "node_modules/junk.js", reason: "ignored", folder: "node_modules" },
     ]);
     expect(writes.map((write) => write.relativePath)).toEqual(["src/app.ts"]);
   });
@@ -181,5 +181,84 @@ describe("a drop on a new chat", () => {
     expect(isFolderOrZipDrop([{ isDirectory: false, name: "clip.mp4" }])).toBe(false);
     expect(isFolderOrZipDrop([{ isDirectory: false, name: "notes.zip.txt" }])).toBe(false);
     expect(isFolderOrZipDrop([])).toBe(false);
+  });
+});
+
+describe("uploadFilesIntoDirectory — a big folder", () => {
+  const instantChunk = async (chunk: Blob) => `b64:${chunk.size}`;
+
+  it("keeps several files in flight, and each file's chunks in order", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const writes: ProjectUploadWriteInput[] = [];
+    const files = [
+      ...Array.from({ length: 30 }, (_, index) => makeFile(`src/f${index}.ts`, 10)),
+      makeFile("big.bin", PROJECT_UPLOAD_CHUNK_BYTES * 3),
+    ];
+    await uploadFilesIntoDirectory(
+      {
+        writeFile: async (input) => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          writes.push(input);
+          inFlight -= 1;
+        },
+        readChunkBase64: instantChunk,
+      },
+      { targetDir: "/p", files, filterIgnored: true, concurrency: 8 },
+    );
+    expect(peak).toBe(8);
+    expect(writes).toHaveLength(30 + 3);
+    const big = writes.filter((write) => write.relativePath === "big.bin");
+    expect(big.map((write) => write.mode ?? "replace")).toEqual(["replace", "append", "append"]);
+  });
+
+  it("resumes: files already on the computer are counted, not sent", async () => {
+    const sent: string[] = [];
+    const progress: Array<{ completedFiles: number; sentBytes: number }> = [];
+    const result = await uploadFilesIntoDirectory(
+      {
+        writeFile: async (input) => void sent.push(input.relativePath),
+        readChunkBase64: instantChunk,
+      },
+      {
+        targetDir: "/p",
+        files: [makeFile("a.txt", 5), makeFile("b.txt", 7), makeFile("c.txt", 9)],
+        filterIgnored: true,
+        alreadyUploaded: new Set(["a.txt", "c.txt"]),
+        onProgress: (next) => progress.push(next),
+      },
+    );
+    expect(sent).toEqual(["b.txt"]);
+    expect(result.uploadedFiles).toBe(3);
+    expect(progress[0]).toMatchObject({ completedFiles: 2, sentBytes: 14 });
+    expect(progress.at(-1)).toMatchObject({ completedFiles: 3, sentBytes: 21 });
+  });
+
+  it("stops every worker on the first failure and reports what finished", async () => {
+    const done: string[] = [];
+    let calls = 0;
+    await expect(
+      uploadFilesIntoDirectory(
+        {
+          writeFile: async (input) => {
+            calls += 1;
+            if (input.relativePath === "f3.txt") throw new Error("socket closed");
+            await new Promise((resolve) => setTimeout(resolve, 2));
+          },
+          readChunkBase64: instantChunk,
+        },
+        {
+          targetDir: "/p",
+          files: Array.from({ length: 50 }, (_, index) => makeFile(`f${index}.txt`, 1)),
+          filterIgnored: true,
+          concurrency: 4,
+          onFileUploaded: (path) => done.push(path),
+        },
+      ),
+    ).rejects.toThrow("socket closed");
+    expect(calls).toBeLessThan(12);
+    expect(done).not.toContain("f3.txt");
   });
 });

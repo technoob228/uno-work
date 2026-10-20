@@ -18,6 +18,7 @@ import { StaleBundleNotice } from "../components/StaleBundleNotice";
 import { CommandPalette } from "../components/CommandPalette";
 import { SetupTourCoach } from "../components/setup/SetupTour";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
+import { ProjectUploadsPanel } from "../components/newProject/ProjectUploadsPanel";
 import { WorkIntentBridge } from "../components/newProject/uploadAndAsk";
 import { PreviewPaneProvider } from "../components/preview/PreviewPaneContext";
 import { LinkRequestPromptDialog } from "../components/desktop/LinkRequestPromptDialog";
@@ -218,6 +219,7 @@ function RootRouteView() {
           <Outlet />
         </AppSidebarLayout>
         <NewProjectDialog />
+        <ProjectUploadsPanel />
         <WorkIntentBridge />
         <SetupTourCoach />
       </CommandPalette>

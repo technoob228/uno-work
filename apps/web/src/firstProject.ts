@@ -16,22 +16,63 @@ export const UPLOAD_MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const UPLOAD_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 export const UPLOAD_MAX_FILE_COUNT = 2000;
 
-/** Directories that are never worth uploading from a browser file picker. */
+/**
+ * Folders that are never worth uploading from a browser file picker: version
+ * control, installed dependencies, build output and caches — the computer gets
+ * them back from the project's own files (`npm install`, `pip install`, a build).
+ */
 const UPLOAD_IGNORED_SEGMENTS = new Set([
   ".git",
   ".hg",
   ".svn",
   "node_modules",
   ".next",
+  ".nuxt",
+  ".output",
+  ".svelte-kit",
   ".turbo",
+  ".parcel-cache",
+  ".angular",
+  ".expo",
+  ".cache",
+  ".gradle",
+  ".dart_tool",
+  ".terraform",
+  "DerivedData",
   ".venv",
+  "venv",
+  "site-packages",
+  "__pypackages__",
   "__pycache__",
+  ".tox",
+  ".nox",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
   "dist",
   "build",
   "target",
 ]);
 
 const UPLOAD_IGNORED_FILE_NAMES = new Set([".DS_Store", "Thumbs.db"]);
+
+/** `camo-venv`, `.venv-sweep`, `venv311`: a Python virtual environment by its name. */
+const VENV_NAME_PATTERN = /^\.?venv(?:[-_.\d].*)?$|[-_.]venv$/i;
+
+/** A folder skipped by its name alone (no need to look inside it). */
+export function isIgnoredUploadFolderName(name: string): boolean {
+  return UPLOAD_IGNORED_SEGMENTS.has(name) || VENV_NAME_PATTERN.test(name);
+}
+
+/** A Python virtual environment under any name has this file at its root. */
+export const VENV_MARKER_FILE = "pyvenv.cfg";
+
+/** How a skipped folder is named to the person ("node_modules", "Python environments"). */
+export function ignoredFolderLabel(name: string): string {
+  return VENV_NAME_PATTERN.test(name) || name === "site-packages" || name === "__pypackages__"
+    ? "Python environments"
+    : name;
+}
 
 export function normalizeProjectName(raw: string): string {
   const trimmed = raw.trim().replace(/[/\\]+/g, "-");
@@ -96,6 +137,10 @@ export interface UploadPlanEntry {
 export interface UploadSkippedEntry {
   readonly relativePath: string;
   readonly reason: UploadSkipReason;
+  /** `ignored`: the folder that rules it out — "node_modules", "Python environments", a chosen one. */
+  readonly folder?: string;
+  /** `over-budget`: which limit it hit — the number of files or the total size. */
+  readonly limit?: "files" | "bytes";
 }
 
 export interface UploadPlan {
@@ -110,11 +155,34 @@ function isUnsafeRelativePath(relativePath: string): boolean {
   return relativePath.split(PATH_SEPARATOR).some((segment) => segment === ".." || segment === "");
 }
 
-function isIgnoredRelativePath(relativePath: string): boolean {
+/** The folder (as the person sees it) that rules this path out, or null. */
+function ignoredByFolder(
+  relativePath: string,
+  venvRoots: ReadonlySet<string>,
+  extraSkips: ReadonlyMap<string, string>,
+): string | null {
   const segments = relativePath.split(PATH_SEPARATOR);
   const fileName = segments[segments.length - 1] ?? "";
-  if (UPLOAD_IGNORED_FILE_NAMES.has(fileName)) return true;
-  return segments.slice(0, -1).some((segment) => UPLOAD_IGNORED_SEGMENTS.has(segment));
+  if (UPLOAD_IGNORED_FILE_NAMES.has(fileName)) return fileName;
+  let prefix = "";
+  for (const segment of segments.slice(0, -1)) {
+    prefix = prefix ? `${prefix}${PATH_SEPARATOR}${segment}` : segment;
+    if (isIgnoredUploadFolderName(segment)) return ignoredFolderLabel(segment);
+    if (venvRoots.has(prefix)) return "Python environments";
+    const extra = extraSkips.get(prefix);
+    if (extra !== undefined) return extra;
+  }
+  return null;
+}
+
+/** Folders holding `pyvenv.cfg`: virtual environments whatever they are called. */
+function findVenvRoots(paths: ReadonlyArray<string>): Set<string> {
+  const roots = new Set<string>();
+  const suffix = `${PATH_SEPARATOR}${VENV_MARKER_FILE}`;
+  for (const path of paths) {
+    if (path.endsWith(suffix)) roots.add(path.slice(0, -suffix.length));
+  }
+  return roots;
 }
 
 export interface UploadPlanLimits {
@@ -127,6 +195,12 @@ export interface UploadPlanLimits {
    * выбрал сам, значит они нужны.
    */
   readonly filterIgnored: boolean;
+  /**
+   * More folders to leave out (relative path → how the person sees it, e.g.
+   * "Go vendor folders") — what they ticked under "Also skip". Only with
+   * `filterIgnored`.
+   */
+  readonly skipFolders?: ReadonlyMap<string, string>;
 }
 
 const FIRST_PROJECT_UPLOAD_LIMITS: UploadPlanLimits = {
@@ -148,33 +222,42 @@ export function planUpload(
   const accepted: UploadPlanEntry[] = [];
   const skipped: UploadSkippedEntry[] = [];
   let totalBytes = 0;
+  const normalized = candidates.map((candidate) =>
+    candidate.relativePath.replace(/\\/g, PATH_SEPARATOR).replace(/^\/+/, ""),
+  );
+  const venvRoots = limits.filterIgnored ? findVenvRoots(normalized) : new Set<string>();
+  const extraSkips = limits.skipFolders ?? new Map<string, string>();
 
-  for (const candidate of candidates) {
-    const relativePath = candidate.relativePath.replace(/\\/g, PATH_SEPARATOR).replace(/^\/+/, "");
+  candidates.forEach((candidate, index) => {
+    const relativePath = normalized[index]!;
 
     if (isUnsafeRelativePath(relativePath)) {
       skipped.push({ relativePath: candidate.relativePath, reason: "unsafe-path" });
-      continue;
+      return;
     }
-    if (limits.filterIgnored && isIgnoredRelativePath(relativePath)) {
-      skipped.push({ relativePath, reason: "ignored" });
-      continue;
+    const ignoredBy = limits.filterIgnored
+      ? ignoredByFolder(relativePath, venvRoots, extraSkips)
+      : null;
+    if (ignoredBy !== null) {
+      skipped.push({ relativePath, reason: "ignored", folder: ignoredBy });
+      return;
     }
     if (candidate.size > limits.maxFileBytes) {
       skipped.push({ relativePath, reason: "too-large" });
-      continue;
+      return;
     }
-    if (
-      accepted.length >= limits.maxFileCount ||
-      totalBytes + candidate.size > limits.maxTotalBytes
-    ) {
-      skipped.push({ relativePath, reason: "over-budget" });
-      continue;
+    if (accepted.length >= limits.maxFileCount) {
+      skipped.push({ relativePath, reason: "over-budget", limit: "files" });
+      return;
+    }
+    if (totalBytes + candidate.size > limits.maxTotalBytes) {
+      skipped.push({ relativePath, reason: "over-budget", limit: "bytes" });
+      return;
     }
 
     accepted.push({ relativePath, size: candidate.size });
     totalBytes += candidate.size;
-  }
+  });
 
   return { accepted, skipped, totalBytes };
 }
