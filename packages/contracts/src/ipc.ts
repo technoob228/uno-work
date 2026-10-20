@@ -1,8 +1,16 @@
 import type {
+  SkillsAddInput,
+  SkillsAddResult,
   SkillsInstallInput,
   SkillsInstallResult,
+  SkillsScanInput,
+  SkillsScanResult,
+  SkillsStageInput,
+  SkillsStageResult,
   SkillsStatusInput,
   SkillsStatusResult,
+  SkillsUploadChunkInput,
+  SkillsUploadChunkResult,
 } from "./skills.ts";
 import type {
   VcsSwitchRefInput,
@@ -596,6 +604,15 @@ export interface DesktopBridge {
   }) => Promise<DesktopServerExposureState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
+  /**
+   * The person's skills folder on this laptop, picked in the system dialog
+   * and read whole (25 MB cap); null when they cancel. Absent before the
+   * skills import (Oct 2026).
+   */
+  readSkillsFolder?: () => Promise<{
+    readonly folder: string;
+    readonly files: ReadonlyArray<{ readonly path: string; readonly data: Uint8Array }>;
+  } | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
   /** The number on the app's Dock icon (chats waiting on the person); 0 clears it. Absent before 0.0.105. */
@@ -778,6 +795,10 @@ export interface EnvironmentApi {
     status: (input: SkillsStatusInput) => Promise<SkillsStatusResult>;
     install: (input: SkillsInstallInput) => Promise<SkillsInstallResult>;
     remove: (input: SkillsInstallInput) => Promise<void>;
+    scan: (input: SkillsScanInput) => Promise<SkillsScanResult>;
+    uploadChunk: (input: SkillsUploadChunkInput) => Promise<SkillsUploadChunkResult>;
+    stage: (input: SkillsStageInput) => Promise<SkillsStageResult>;
+    add: (input: SkillsAddInput) => Promise<SkillsAddResult>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

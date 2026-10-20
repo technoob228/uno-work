@@ -120,6 +120,7 @@ import {
 } from "./desktopFlavor.ts";
 import { UNO_CONSOLE_URL, UnoAccountService } from "./unoAccount.ts";
 import { nodeInspectFile, nodeUploadFile, shareLocalFileViaDrive } from "./driveShareFile.ts";
+import { defaultSkillsFolder, readLocalSkillsFolder } from "./localSkillsFolder.ts";
 import {
   decideMainWindowNavigation,
   isAllowedWebviewUrl,
@@ -147,6 +148,7 @@ function installStdIoBrokenPipeGuards(): void {
 installStdIoBrokenPipeGuards();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
+const READ_SKILLS_FOLDER_CHANNEL = "desktop:read-skills-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const SET_BADGE_COUNT_CHANNEL = "desktop:set-badge-count";
@@ -2334,6 +2336,26 @@ function registerIpcHandlers(): void {
       : await dialog.showOpenDialog(openDialogOptions);
     if (result.canceled) return null;
     return result.filePaths[0] ?? null;
+  });
+
+  // "Import from this computer" (skills step): the person picks the folder,
+  // only then is it read (localSkillsFolder.ts).
+  ipcMain.removeHandler(READ_SKILLS_FOLDER_CHANNEL);
+  handleTrustedIpc(READ_SKILLS_FOLDER_CHANNEL, async () => {
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const openDialogOptions: OpenDialogOptions = {
+      title: "Choose your skills folder",
+      buttonLabel: "Import",
+      message:
+        "Your skills folder, e.g. ~/.claude/skills (Claude Code) or ~/.agents/skills (Codex)",
+      properties: ["openDirectory", "showHiddenFiles"],
+      defaultPath: defaultSkillsFolder(OS.homedir()),
+    };
+    const result = owner
+      ? await dialog.showOpenDialog(owner, openDialogOptions)
+      : await dialog.showOpenDialog(openDialogOptions);
+    const folder = result.canceled ? null : result.filePaths[0];
+    return folder ? readLocalSkillsFolder(folder) : null;
   });
 
   ipcMain.removeHandler(CONFIRM_CHANNEL);

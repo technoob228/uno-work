@@ -4,11 +4,19 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { EnvironmentId } from "./baseSchemas.ts";
 import {
+  SkillsAddInput,
+  SkillsAddResult,
   SkillsError,
   SkillsInstallInput,
   SkillsInstallResult,
+  SkillsScanInput,
+  SkillsScanResult,
+  SkillsStageInput,
+  SkillsStageResult,
   SkillsStatusInput,
   SkillsStatusResult,
+  SkillsUploadChunkInput,
+  SkillsUploadChunkResult,
 } from "./skills.ts";
 import {
   UnoBoxConnection,
@@ -351,6 +359,10 @@ export const WS_METHODS = {
   skillsStatus: "skills.status",
   skillsInstall: "skills.install",
   skillsRemove: "skills.remove",
+  skillsScan: "skills.scan",
+  skillsUploadChunk: "skills.uploadChunk",
+  skillsStage: "skills.stage",
+  skillsAdd: "skills.add",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -920,6 +932,30 @@ export const WsSkillsInstallRpc = Rpc.make(WS_METHODS.skillsInstall, {
 
 export const WsSkillsRemoveRpc = Rpc.make(WS_METHODS.skillsRemove, {
   payload: SkillsInstallInput,
+  error: SkillsError,
+});
+
+export const WsSkillsScanRpc = Rpc.make(WS_METHODS.skillsScan, {
+  payload: SkillsScanInput,
+  success: SkillsScanResult,
+  error: SkillsError,
+});
+
+export const WsSkillsUploadChunkRpc = Rpc.make(WS_METHODS.skillsUploadChunk, {
+  payload: SkillsUploadChunkInput,
+  success: SkillsUploadChunkResult,
+  error: SkillsError,
+});
+
+export const WsSkillsStageRpc = Rpc.make(WS_METHODS.skillsStage, {
+  payload: SkillsStageInput,
+  success: SkillsStageResult,
+  error: SkillsError,
+});
+
+export const WsSkillsAddRpc = Rpc.make(WS_METHODS.skillsAdd, {
+  payload: SkillsAddInput,
+  success: SkillsAddResult,
   error: SkillsError,
 });
 
@@ -2186,6 +2222,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsSkillsStatusRpc,
   WsSkillsInstallRpc,
   WsSkillsRemoveRpc,
+  WsSkillsScanRpc,
+  WsSkillsUploadChunkRpc,
+  WsSkillsStageRpc,
+  WsSkillsAddRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsFilesystemReadFileRpc,
