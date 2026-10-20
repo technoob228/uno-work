@@ -716,6 +716,20 @@ function SidebarDProjectRow(props: {
 }
 
 /** The one mark at the end of a D row: working, needs you, error, or Your turn. */
+/**
+ * Sidebar D row, hover / focus / open Snooze menu: the actions take over the
+ * right part of the row. The project chip, the computer mark and the status
+ * ("Ready") step out of the way (display: none, so the title gets their room),
+ * and the title fades out under the buttons instead of being cut by them. The
+ * fade is a mask, so it matches the row in any theme and any hover colour.
+ * `--row-actions-w` (set on the content box) is the width of the buttons.
+ */
+const D_ROW_TAIL_HIDE =
+  "group-hover/sidebar-row:hidden group-focus-within/sidebar-row:hidden group-data-[menu-open]/sidebar-row:hidden";
+// Literal class strings on purpose: Tailwind finds classes by scanning the source.
+const D_ROW_FADE =
+  "group-hover/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))] group-focus-within/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))] group-data-[menu-open]/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))]";
+
 function SidebarDMark(props: { mark: DRowMark }) {
   switch (props.mark) {
     case "working":
@@ -1146,7 +1160,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const showDone = canSettle && !parked;
     const hasActions = showRead || showDSnooze || showDone;
     const dActionClassName =
-      "inline-flex h-6 cursor-pointer items-center rounded-md px-1 text-xs text-muted-foreground transition-colors hover:text-foreground";
+      "inline-flex h-6 cursor-pointer items-center rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground";
+    // Buttons are h-6 px-1.5 (1.625rem wide) with gap-0.5 between them.
+    const actionCount = [showRead, showDSnooze, showDone].filter(Boolean).length;
+    const actionsWidthRem = actionCount * 1.625 + Math.max(0, actionCount - 1) * 0.125;
+    const tailHide = hasActions ? D_ROW_TAIL_HIDE : undefined;
     return (
       <li data-thread-item className="list-none">
         <div
@@ -1155,6 +1173,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           data-testid="sidebar-row-d"
           data-sidebar-section={section}
           data-thread-mark={mark ?? undefined}
+          data-menu-open={snoozeMenuOpen ? "" : undefined}
           className={cn(
             rowSurfaceClassName,
             "flex h-8 items-center gap-2 pr-1.5",
@@ -1165,108 +1184,118 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           onKeyDown={handleKeyDown}
           onContextMenu={handleContextMenu}
         >
-          {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
-          {isRenaming ? (
-            title
-          ) : (
+          <div
+            data-testid="sidebar-row-content"
+            style={
+              hasActions
+                ? ({ "--row-actions-w": `${actionsWidthRem}rem` } as React.CSSProperties)
+                : undefined
+            }
+            className={cn("flex min-w-0 flex-1 items-center gap-2", hasActions && D_ROW_FADE)}
+          >
+            {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
+            {isRenaming ? (
+              title
+            ) : (
+              <span
+                data-testid={`thread-title-${thread.id}`}
+                className={cn(
+                  "min-w-0 truncate text-sm",
+                  // A place label after the title gives way first (Misha 16.10).
+                  props.placeLabel ? "min-w-[45%] shrink" : "flex-1",
+                  props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
+                    ? "text-foreground"
+                    : shouldRecede
+                      ? "text-sidebar-foreground/70"
+                      : "text-sidebar-foreground/90",
+                  (mark === "your-turn" || mark === "input" || mark === "approval") &&
+                    "font-medium",
+                )}
+              >
+                {thread.title}
+              </span>
+            )}
+            {pinIndicator}
+            {props.placeLabel ? (
+              <span
+                className={cn(
+                  "max-w-[45%] min-w-[2.75rem] shrink-[6] truncate rounded-[4px] bg-muted/70 px-1 py-px text-[10.5px] leading-none text-muted-foreground",
+                  tailHide,
+                )}
+                data-testid="sidebar-row-place"
+              >
+                {props.placeLabel}
+              </span>
+            ) : null}
+            {props.computerIcon ? (
+              (props.showMachine ?? isRemote) ? (
+                <span className={cn("contents", tailHide)}>
+                  <SidebarDComputerChip environmentId={thread.environmentId} />
+                </span>
+              ) : null
+            ) : machineMark ? (
+              <span className={cn("contents", tailHide)}>{machineMark}</span>
+            ) : null}
             <span
-              data-testid={`thread-title-${thread.id}`}
-              className={cn(
-                "min-w-0 truncate text-sm",
-                // A place label after the title gives way first (Misha 16.10).
-                props.placeLabel ? "min-w-[45%] shrink" : "flex-1",
-                props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
-                  ? "text-foreground"
-                  : shouldRecede
-                    ? "text-sidebar-foreground/70"
-                    : "text-sidebar-foreground/90",
-                (mark === "your-turn" || mark === "input" || mark === "approval") && "font-medium",
-              )}
-            >
-              {thread.title}
-            </span>
-          )}
-          {pinIndicator}
-          {props.placeLabel ? (
-            <span
-              className="max-w-[45%] min-w-[2.75rem] shrink-[6] truncate rounded-[4px] bg-muted/70 px-1 py-px text-[10.5px] leading-none text-muted-foreground"
-              data-testid="sidebar-row-place"
-            >
-              {props.placeLabel}
-            </span>
-          ) : null}
-          {props.computerIcon ? (
-            (props.showMachine ?? isRemote) ? (
-              <SidebarDComputerChip environmentId={thread.environmentId} />
-            ) : null
-          ) : (
-            machineMark
-          )}
-          <span className="relative ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end">
-            <span
-              className={cn(
-                "inline-flex items-center transition-opacity",
-                hasActions &&
-                  "group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0 group-focus-within/sidebar-row:absolute group-focus-within/sidebar-row:right-0 group-focus-within/sidebar-row:opacity-0",
-                snoozeMenuOpen && "absolute right-0 opacity-0",
-              )}
+              className={cn("ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end", tailHide)}
             >
               <SidebarDMark mark={mark} />
             </span>
-            {hasActions ? (
-              <span
-                className={cn(
-                  "pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:static group-focus-within/sidebar-row:opacity-100",
-                  snoozeMenuOpen && "pointer-events-auto static opacity-100",
-                )}
-              >
-                {showRead ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label="Mark chat as read"
-                          data-testid="sidebar-row-read"
-                          onClick={stopAnd((ref) => setThreadReadAt(ref, new Date().toISOString()))}
-                          className={dActionClassName}
-                        />
-                      }
-                    >
-                      <EyeIcon className="size-3.5" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">Mark as read — it stays in the list</TooltipPopup>
-                  </Tooltip>
-                ) : null}
-                {showDSnooze ? (
-                  <SnoozeMenuButton
-                    open={snoozeMenuOpen}
-                    onOpenChange={setSnoozeMenuOpen}
-                    onSnooze={(snoozedUntil) => onSnooze(threadRef, snoozedUntil)}
-                    onPickTime={() => onPickSnoozeTime(threadRef)}
-                  />
-                ) : null}
-                {showDone ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label="Mark chat done"
-                          data-testid="sidebar-row-done"
-                          onClick={stopAnd(onSettle)}
-                          className={dActionClassName}
-                        />
-                      }
-                    >
-                      <CheckIcon className="size-3.5" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">Done — take it out of the list</TooltipPopup>
-                  </Tooltip>
-                ) : null}
-              </span>
-            ) : null}
-          </span>
+          </div>
+          {hasActions ? (
+            <span
+              data-testid="sidebar-row-actions"
+              className={cn(
+                "pointer-events-none absolute top-1/2 right-1.5 flex h-6 -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100",
+                snoozeMenuOpen && "pointer-events-auto opacity-100",
+              )}
+            >
+              {showRead ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Mark chat as read"
+                        data-testid="sidebar-row-read"
+                        onClick={stopAnd((ref) => setThreadReadAt(ref, new Date().toISOString()))}
+                        className={dActionClassName}
+                      />
+                    }
+                  >
+                    <EyeIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Mark as read — it stays in the list</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              {showDSnooze ? (
+                <SnoozeMenuButton
+                  open={snoozeMenuOpen}
+                  onOpenChange={setSnoozeMenuOpen}
+                  onSnooze={(snoozedUntil) => onSnooze(threadRef, snoozedUntil)}
+                  onPickTime={() => onPickSnoozeTime(threadRef)}
+                />
+              ) : null}
+              {showDone ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Mark chat done"
+                        data-testid="sidebar-row-done"
+                        onClick={stopAnd(onSettle)}
+                        className={dActionClassName}
+                      />
+                    }
+                  >
+                    <CheckIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Done — take it out of the list</TooltipPopup>
+                </Tooltip>
+              ) : null}
+            </span>
+          ) : null}
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </div>
       </li>
