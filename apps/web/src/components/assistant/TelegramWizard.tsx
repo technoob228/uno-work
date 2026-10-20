@@ -320,36 +320,43 @@ export function TelegramWizard(props: {
           <div className="flex flex-col gap-2 pl-7 text-sm">
             {supportsPairing ? (
               link ? (
-                <div className="flex items-start gap-4">
+                <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
                   <QRCodeSvg
                     value={link}
                     size={112}
                     className="hidden shrink-0 rounded-lg border border-border bg-white p-1 sm:block"
                     title="Open your bot in Telegram"
                   />
-                  <div className="flex min-w-0 flex-col gap-2">
+                  {/* min-w-0 + basis: on a narrow card the text column drops under the QR
+                      instead of squeezing into a thin strip. */}
+                  <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-2">
                     <p className="text-muted-foreground">
                       Open the link (or scan it with your phone) and press <b>Start</b> in Telegram.
                       This window updates by itself.
                     </p>
+                    {/* A long bot name never pushes the button out of the card: the button
+                        is capped at the column width and the name inside it gets an ellipsis. */}
                     <Button
                       size="sm"
-                      className="self-start"
+                      className="max-w-full self-start"
                       onClick={() => openInstallDocs(link)}
+                      title={`Open @${bot} in Telegram`}
                       data-testid="uno-telegram-open-link"
                     >
                       <SendIcon className="size-3.5" />
-                      Open @{bot} in Telegram
+                      <span className="min-w-0 truncate">Open @{bot} in Telegram</span>
                     </Button>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Loader2Icon className="size-3 animate-spin" />
-                      Waiting for Start…
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                        <Loader2Icon className="size-3 shrink-0 animate-spin" />
+                        Waiting for Start…
+                      </span>
                       <button
                         type="button"
-                        className="ml-1 inline-flex items-center gap-1 text-primary hover:underline"
+                        className="inline-flex items-center gap-1 whitespace-nowrap text-primary hover:underline"
                         onClick={() => void requestCode()}
                       >
-                        <RefreshCwIcon className="size-3" /> New link
+                        <RefreshCwIcon className="size-3 shrink-0" /> New link
                       </button>
                     </div>
                   </div>
