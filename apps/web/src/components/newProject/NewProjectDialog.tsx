@@ -110,7 +110,9 @@ import {
   isPickableFolder,
   recentHomeFolders,
   tildePath,
+  connectGithubPrompt,
 } from "./newProject.logic";
+import { RepoAccessNotice, useRepoClone } from "./repoAccess";
 
 const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
@@ -422,6 +424,8 @@ function UploadStep({
   const [about, setAbout] = useState("");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
+  const access = useRepoClone(environmentId);
+  const askUno = useAskUnoToClone(environmentId);
   const aboutText = rich ? about.trim() : "";
   const fromRepo = rich && picked === null && repo.trim().length > 0;
   const aboutOnly = rich && picked === null && !fromRepo && aboutText.length > 0;
@@ -445,6 +449,8 @@ function UploadStep({
     [picked],
   );
   const busy = progress !== null || working !== null;
+  const { reset: resetAccess } = access;
+  useEffect(() => resetAccess(), [repo, resetAccess]);
 
   const accept = (raw: ReadonlyArray<ProjectUploadFile>) => {
     if (raw.length === 0) return;
@@ -477,10 +483,11 @@ function UploadStep({
     setWorking(fromRepo ? "Cloning…" : "Creating…");
     try {
       if (fromRepo && repoCheck.ok) {
-        const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
+        const result = await access.clone({
           remoteUrl: repoCheck.remoteUrl,
           destinationPath: target,
         });
+        if (result === null) return; // refused for access: the notice says what to do
         const folder = result.cwd || target;
         await finish(await ensureFolderProject(folder, name), name, folder, {
           about: aboutText,
@@ -496,7 +503,7 @@ function UploadStep({
         errorMessage(
           cause,
           fromRepo
-            ? "Couldn't clone the repository. For a private one, connect GitHub in Settings → Source control."
+            ? "Couldn't clone the repository. Check the address and try again."
             : "Couldn't create the project.",
         ),
       );
@@ -683,6 +690,28 @@ function UploadStep({
               }}
               data-testid="new-project-upload-repo"
             />
+            {fromRepo && repoCheck.ok ? (
+              <RepoAccessNotice
+                access={access}
+                remoteUrl={repoCheck.remoteUrl}
+                busy={busy}
+                onOpenGithub={() =>
+                  void access.openGithub(submitWithoutUpload).catch((cause: unknown) => {
+                    setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
+                  })
+                }
+                onAskUno={() => {
+                  if (!name || !target) return;
+                  setWorking("Starting…");
+                  void askUno({ remoteUrl: repoCheck.remoteUrl, folder: target, name })
+                    .then(onDone)
+                    .catch((cause: unknown) =>
+                      setError(errorMessage(cause, "Couldn't start the chat. Try again.")),
+                    )
+                    .finally(() => setWorking(null));
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
         {rich && !busy ? (
@@ -738,6 +767,7 @@ function UploadStep({
         busy={busy}
         disabled={
           reading ||
+          access.waiting ||
           name === null ||
           takenOrNull === null ||
           (picked !== null && (plan === null || plan.accepted.length === 0))
@@ -747,7 +777,9 @@ function UploadStep({
           (progress !== null
             ? "Uploading…"
             : fromRepo
-              ? "Clone and open"
+              ? access.offer !== null
+                ? "Try again"
+                : "Clone and open"
               : aboutOnly
                 ? "Create and open"
                 : wording === "folder"
@@ -1254,12 +1286,18 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const access = useRepoClone(environmentId);
+  const askUno = useAskUnoToClone(environmentId);
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const finish = useFinishNewProject();
   const wording = useNewProjectStore((state) => state.wording);
   const check = checkRepositoryInput(input, taken ?? new Set());
-  useEffect(() => setError(null), [input]);
+  const { reset } = access;
+  useEffect(() => {
+    setError(null);
+    reset(); // a new address: stop waiting for GitHub on the old one
+  }, [input, reset]);
 
   const submit = async () => {
     if (!check.ok) {
@@ -1270,20 +1308,37 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
     setError(null);
     try {
       const destinationPath = uploadedProjectPath(home, check.name);
-      const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
-        remoteUrl: check.remoteUrl,
-        destinationPath,
-      });
+      const result = await access.clone({ remoteUrl: check.remoteUrl, destinationPath });
+      if (result === null) return; // refused for access: the notice says what to do
       const folder = result.cwd || destinationPath;
       await finish(await ensureFolderProject(folder, check.name), check.name, folder);
       onDone();
     } catch (cause) {
       setError(
-        errorMessage(
-          cause,
-          "Couldn't clone the repository. For a private one, connect GitHub in Settings → Source control.",
-        ),
+        errorMessage(cause, "Couldn't clone the repository. Check the address and try again."),
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openGithub = () =>
+    void access.openGithub(submit).catch((cause: unknown) => {
+      setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
+    });
+
+  const startChat = async () => {
+    if (!check.ok) return;
+    setBusy(true);
+    try {
+      await askUno({
+        remoteUrl: check.remoteUrl,
+        folder: uploadedProjectPath(home, check.name),
+        name: check.name,
+      });
+      onDone();
+    } catch (cause) {
+      setError(errorMessage(cause, "Couldn't start the chat. Try again."));
     } finally {
       setBusy(false);
     }
@@ -1314,16 +1369,56 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
             ? `Clones into ${tildePath(uploadedProjectPath(home, check.name), home)}`
             : "Clones into ~/projects/<repo>"}
         </p>
+        {check.ok ? (
+          <RepoAccessNotice
+            access={access}
+            remoteUrl={check.remoteUrl}
+            busy={busy}
+            onOpenGithub={openGithub}
+            onAskUno={() => void startChat()}
+          />
+        ) : null}
       </DialogPanel>
       <StepFooter
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
-        disabled={!check.ok || taken === null}
-        label={busy ? "Cloning…" : wording === "folder" ? "Clone" : "Clone and open"}
+        disabled={!check.ok || taken === null || access.waiting}
+        label={
+          busy
+            ? "Cloning…"
+            : access.offer !== null
+              ? "Try again"
+              : wording === "folder"
+                ? "Clone"
+                : "Clone and open"
+        }
         icon={<GitHubIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
       />
     </>
   );
+}
+
+/**
+ * "Let Uno connect GitHub" where the account's GitHub can't sign git in: the
+ * project folder is made now (empty), and a chat in it asks Uno to connect
+ * this computer with an SSH key — one paste on github.com, no tokens — and
+ * clone into it (connectGithubPrompt).
+ */
+function useAskUnoToClone(environmentId: StepProps["environmentId"]) {
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const { startTask } = useHomeLaunchers(environmentId);
+  return async (input: {
+    readonly remoteUrl: string;
+    readonly folder: string;
+    readonly name: string;
+  }) => {
+    await ensureFolderProject(input.folder, input.name, { createFolder: true });
+    await startTask(connectGithubPrompt(input.remoteUrl), {
+      folder: input.folder,
+      modelSelection: null,
+      runtimeMode: "full-access",
+    });
+  };
 }

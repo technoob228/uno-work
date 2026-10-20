@@ -67,6 +67,42 @@ export function disconnectConnector(
   });
 }
 
+// ── GitHub of the account (git on every computer) ─────────────────────
+
+/**
+ * The account's GitHub — the Uno GitHub App, connected once and used by git
+ * on every cloud computer, by site deploys and by assistants the person
+ * allowed. Not the same thing as this computer's own `gh` sign-in.
+ */
+export interface GithubAccountState {
+  /** False: "Connect GitHub" can't be offered here (not a cloud computer, older console). */
+  readonly available: boolean;
+  readonly reason: string | null;
+  readonly connected: boolean;
+  /** GitHub accounts / organisations Uno is installed on. */
+  readonly accounts: ReadonlyArray<string>;
+  readonly permission: "none" | "read" | "write";
+}
+
+export function getGithubAccount(input: EnvironmentScoped): Promise<GithubAccountState> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/github",
+  });
+}
+
+/** The install page of the Uno GitHub App: open it with `openAuthWindow`. */
+export function connectGithubAccount(
+  input: EnvironmentScoped,
+): Promise<{ readonly authorizeUrl: string }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/github/connect",
+    method: "POST",
+    body: {},
+  });
+}
+
 // ── Your own MCP server ───────────────────────────────────────────────
 
 export interface McpProbeResult {
@@ -232,11 +268,15 @@ export function isTrustedAuthMessage(
  * where it is). Resolves when the console's callback page reports back
  * (`postMessage` {type, ok} from that popup and the callback's origin) or
  * the window closes. Popup blocked → a new tab.
+ *
+ * `external`: no window of ours came up — the desktop app hands `window.open`
+ * to the system browser, a blocker may refuse it. Then "closed" says nothing
+ * about the person being done: they come back to this window when they are.
  */
 export function openAuthWindow(
   url: string,
   messageType: "uno-connector" | "uno-slack",
-): Promise<{ readonly ok: boolean; readonly closed: boolean }> {
+): Promise<{ readonly ok: boolean; readonly closed: boolean; readonly external: boolean }> {
   return new Promise((resolve) => {
     const width = 520;
     const height = 680;
@@ -248,12 +288,13 @@ export function openAuthWindow(
       `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
     );
     let done = false;
+    const external = popup === null;
     const finish = (result: { ok: boolean; closed: boolean }) => {
       if (done) return;
       done = true;
       window.removeEventListener("message", onMessage);
       window.clearInterval(timer);
-      resolve(result);
+      resolve({ ...result, external });
     };
     const expectedOrigin = expectedAuthCallbackOrigin(url);
     const onMessage = (event: MessageEvent) => {

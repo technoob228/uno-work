@@ -11,6 +11,12 @@ import {
   uploadedProjectPath,
   checkNewFolderName,
   checkRepositoryInput,
+  connectGithubPrompt,
+  cloneFailureMessage,
+  githubHttpsRemote,
+  githubRepoSlug,
+  repoAccessOffer,
+  isRepoAccessError,
   clampToHome,
   homeCrumbs,
   isInsideHome,
@@ -183,5 +189,105 @@ describe("checkRepositoryInput without a scheme", () => {
       ok: true,
       remoteUrl: "https://github.com/owner/repo.git",
     });
+  });
+});
+
+describe("private repository on clone (icp3 09.10)", () => {
+  it("tells git's sign-in failures from other errors", () => {
+    expect(
+      isRepoAccessError(
+        "git clone -- https://github.com/a/b.git b failed: Cloning into 'b'... fatal: could not read Username for 'https://github.com': No such device or address",
+      ),
+    ).toBe(true);
+    expect(isRepoAccessError("remote: Repository not found.")).toBe(true);
+    expect(isRepoAccessError("git@github.com: Permission denied (publickey).")).toBe(true);
+    expect(isRepoAccessError("fatal: destination path 'b' already exists")).toBe(false);
+  });
+
+  it("asks Uno for an SSH key and the SSH address", () => {
+    expect(githubRepoSlug("https://github.com/technoob228/uno-workspace.git")).toBe(
+      "technoob228/uno-workspace",
+    );
+    expect(githubRepoSlug("git@github.com:technoob228/uno-workspace.git")).toBe(
+      "technoob228/uno-workspace",
+    );
+    const prompt = connectGithubPrompt("https://github.com/technoob228/uno-workspace.git");
+    expect(prompt).toContain("git@github.com:technoob228/uno-workspace.git");
+    expect(prompt).toContain("https://github.com/settings/ssh/new");
+    expect(prompt).not.toMatch(/token:/i);
+  });
+});
+
+const github = (connected: boolean, available = true) => ({
+  available,
+  connected,
+  accounts: connected ? ["technoob228"] : [],
+});
+
+describe("GitHub of the account on a refused clone (icp3 10.10)", () => {
+  const repo = "https://github.com/technoob228/uno-workspace.git";
+
+  it("offers one Connect GitHub for the whole account", () => {
+    expect(repoAccessOffer(repo, github(false))).toBe("connect");
+  });
+
+  it("asks to add the repository when GitHub is connected already", () => {
+    expect(repoAccessOffer(repo, github(true))).toBe("add-repo");
+    expect(repoAccessOffer("git@github.com:technoob228/uno-workspace.git", github(true))).toBe(
+      "add-repo",
+    );
+  });
+
+  it("falls back to this computer's SSH key where the account's GitHub can't help", () => {
+    expect(repoAccessOffer(repo, null)).toBe("ssh-key");
+    expect(repoAccessOffer(repo, github(false, false))).toBe("ssh-key");
+    expect(repoAccessOffer("https://gitlab.com/a/b.git", github(true))).toBe("ssh-key");
+  });
+
+  it("clones over https once the account signs git in", () => {
+    expect(githubHttpsRemote("git@github.com:technoob228/uno-workspace.git")).toBe(repo);
+    expect(githubHttpsRemote(repo)).toBe(repo);
+    expect(githubHttpsRemote("git@gitlab.com:a/b.git")).toBe("git@gitlab.com:a/b.git");
+  });
+});
+
+const wrapped = (detail: string) =>
+  `Source control repository operation cloneRepository failed for unknown: git clone -- https://github.com/a/b.git b failed: Cloning into 'b'... ${detail}`;
+
+describe("a failed clone in words for people (Misha 20.10)", () => {
+  it("never passes git's own text through", () => {
+    for (const detail of [
+      "fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com",
+      "fatal: early EOF",
+      "error: RPC failed; curl 56 GnuTLS recv error",
+      "fatal: something nobody has seen before",
+    ]) {
+      const message = cloneFailureMessage(wrapped(detail));
+      expect(message).not.toContain("fatal");
+      expect(message).not.toContain("Source control");
+      expect(message).not.toContain("git clone");
+    }
+  });
+
+  it("names the cause it can tell", () => {
+    expect(
+      cloneFailureMessage(wrapped("fatal: unable to access …: Could not resolve host: github.com")),
+    ).toMatch(/internet connection/);
+    expect(cloneFailureMessage("Destination path already exists and is not empty.")).toMatch(
+      /already a folder/,
+    );
+    expect(cloneFailureMessage(wrapped("fatal: write error: No space left on device"))).toMatch(
+      /no free space/,
+    );
+  });
+
+  it("sends the access refusals to the GitHub notice, not here", () => {
+    expect(
+      isRepoAccessError(
+        wrapped(
+          "Uno: GitHub isn't connected to your Uno account yet.\nfatal: could not read Username for 'https://github.com': No such device or address",
+        ),
+      ),
+    ).toBe(true);
   });
 });

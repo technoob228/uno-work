@@ -265,3 +265,103 @@ export function describedProjectPrompt(input: {
     "Look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step.",
   ].join("\n\n");
 }
+
+/**
+ * A clone that failed because this computer can't sign in to the host: a
+ * private repository (or a typo — GitHub answers the same for both). git's
+ * own words ("could not read Username for 'https://github.com'") are not for
+ * people (icp3 09.10: Misha's private repo on a fresh cloud computer).
+ */
+export function isRepoAccessError(message: string): boolean {
+  return /could not read (Username|Password)|Authentication failed|Repository not found|terminal prompts disabled|Permission denied \(publickey\)|returned error: 40[134]|Invalid username or password/i.test(
+    message,
+  );
+}
+
+/**
+ * What a person reads when a clone failed for another reason than access.
+ * git's own text (and the "Source control repository operation … failed"
+ * wrapper around it) never reaches the screen (Misha 20.10).
+ */
+export function cloneFailureMessage(message: string): string {
+  if (/already exists and is not (empty|a directory)/i.test(message)) {
+    return "There is already a folder with this name in ~/projects. Remove it or pick another repository.";
+  }
+  if (
+    /Could not resolve host|unable to access|Failed to connect|Connection (refused|reset|timed out)|Network is unreachable|early EOF|unexpected disconnect/i.test(
+      message,
+    )
+  ) {
+    return "Couldn't reach the repository. Check the internet connection and try again.";
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return "Cloning took too long. Try again — a very large repository is easier to clone from a chat: ask Uno to do it.";
+  }
+  if (/No space left on device|Disk quota exceeded/i.test(message)) {
+    return "There is no free space on this computer for the repository.";
+  }
+  if (
+    /does not appear to be a git repository|not found|not a valid repository name/i.test(message)
+  ) {
+    return "There is no repository at this address. Check it and try again.";
+  }
+  return "Couldn't clone the repository. Check the address and try again.";
+}
+
+/** `owner/repo` of a GitHub remote, or null. */
+export function githubRepoSlug(remoteUrl: string): string | null {
+  const match = /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(remoteUrl.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/**
+ * `https://github.com/owner/repo.git` of a GitHub remote however it was typed
+ * (`git@github.com:…` included): the account's GitHub signs git in over https.
+ * Other hosts come back unchanged.
+ */
+export function githubHttpsRemote(remoteUrl: string): string {
+  const slug = githubRepoSlug(remoteUrl);
+  return slug ? `https://github.com/${slug}.git` : remoteUrl;
+}
+
+/** What the account's GitHub looks like from this computer (`GET /api/manager/github`). */
+export interface RepoAccessGithubState {
+  readonly available: boolean;
+  readonly connected: boolean;
+  readonly accounts: ReadonlyArray<string>;
+}
+
+/**
+ * What to offer when a clone was refused:
+ * - `connect`  — GitHub isn't connected to the account yet: one button, once,
+ *   and it works on every computer;
+ * - `add-repo` — it is connected, but Uno wasn't given this repository;
+ * - `ssh-key`  — the account's GitHub can't be used here (not a cloud
+ *   computer, an older console, another host): the key Uno makes for this
+ *   computer (connectGithubPrompt).
+ */
+export type RepoAccessOffer = "connect" | "add-repo" | "ssh-key";
+
+export function repoAccessOffer(
+  remoteUrl: string,
+  github: RepoAccessGithubState | null,
+): RepoAccessOffer {
+  if (github === null || !github.available || githubRepoSlug(remoteUrl) === null) return "ssh-key";
+  return github.connected ? "add-repo" : "connect";
+}
+
+/**
+ * The task for Uno when the repository is private: connect this computer to
+ * GitHub with an SSH key (one paste on github.com, no tokens to pick scopes
+ * for) and clone into the project folder made for it.
+ */
+export function connectGithubPrompt(remoteUrl: string): string {
+  const slug = githubRepoSlug(remoteUrl);
+  const repo = slug ?? remoteUrl;
+  const sshUrl = slug ? `git@github.com:${slug}.git` : remoteUrl;
+  return [
+    `This folder is for ${repo} — a private repository. This computer isn't signed in to GitHub yet.`,
+    "Connect it with an SSH key, no tokens: make a key if there is none (ssh-keygen -t ed25519), show me the public key and the page to add it — https://github.com/settings/ssh/new — and wait until I say it's added.",
+    `Then check with ssh -T git@github.com and clone ${sshUrl} into this folder (it is empty).`,
+  ].join("\n\n");
+}
