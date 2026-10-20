@@ -238,16 +238,26 @@ export function checkRepositoryInput(raw: string, taken: ReadonlySet<string>): R
 /** What a new project's folder starts with. */
 export type NewProjectContents = "files" | "repository" | "none";
 
+/** Files that didn't come with the upload (over the browser limits), and where the list is. */
+export interface NotUploadedFiles {
+  readonly files: number;
+  /** Relative to the project folder. */
+  readonly listFile: string;
+}
+
 /**
  * The first message of a project the person told Uno about (Misha 11.10:
  * "just tell about it and add files — not only a folder; describe the context
  * yourself when there is no folder"). Their words go first, as they wrote them.
+ * When part of an upload didn't fit (Misha 20.10), the message says so and
+ * Uno opens its reply with it — even when the person wrote nothing.
  */
 export function describedProjectPrompt(input: {
   readonly name: string;
   readonly folder: string;
   readonly about: string;
   readonly contents: NewProjectContents;
+  readonly notUploaded?: NotUploadedFiles | undefined;
 }): string {
   const about = input.about.trim();
   if (input.contents === "none") {
@@ -257,12 +267,20 @@ export function describedProjectPrompt(input: {
       "Ask me what you need to know, one question at a time, then suggest where to start.",
     ].join("\n\n");
   }
+  const missing = input.notUploaded && input.notUploaded.files > 0 ? input.notUploaded : null;
   return [
     input.contents === "repository"
       ? `I've cloned my project "${input.name}" into ${input.folder}.`
       : `I've added my project "${input.name}" to ${input.folder}.`,
-    `About it, in my words: ${about}`,
-    "Look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step.",
+    ...(about.length > 0 ? [`About it, in my words: ${about}`] : []),
+    ...(missing
+      ? [
+          `Not everything fit in the upload: ${missing.files.toLocaleString("en-US")} ${missing.files === 1 ? "file" : "files"} stayed on my computer. The list is in ${missing.listFile}.`,
+        ]
+      : []),
+    missing
+      ? "Start your reply with one line on what's missing and whether it matters. Then look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step."
+      : "Look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step.",
   ].join("\n\n");
 }
 

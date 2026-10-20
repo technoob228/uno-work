@@ -18,6 +18,15 @@ export const PROJECT_UPLOAD_MAX_FILE_COUNT = 20_000;
 /** Бинарный размер чанка; в base64 он превращается в ~4 МБ на WS-сообщение. */
 export const PROJECT_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024;
 
+/**
+ * Файлов в полёте у загрузки папки. Каждый файл — минимум один запрос по WS
+ * с ответом, и на 20 000 мелких файлов последовательная загрузка упирается в
+ * задержку сети (20 000 × RTT), а не в канал. Замер 20.10 (1000 файлов,
+ * 15 МБ, RTT 200 мс): по одному — ~210 с, 8 — 27.6 с, 16 — 14.5 с. Память:
+ * до 16 чанков по ~4 МБ base64 сразу, когда параллельно идут большие файлы.
+ */
+export const PROJECT_UPLOAD_PARALLEL_FILES = 16;
+
 export interface ProjectUploadFile {
   /** Путь относительно целевой папки, posix-разделители. */
   readonly relativePath: string;
@@ -26,14 +35,18 @@ export interface ProjectUploadFile {
 }
 
 export function planProjectUpload(
-  files: ReadonlyArray<ProjectUploadFile>,
-  options: { readonly filterIgnored: boolean },
+  files: ReadonlyArray<{ readonly relativePath: string; readonly size: number }>,
+  options: {
+    readonly filterIgnored: boolean;
+    readonly skipFolders?: ReadonlyMap<string, string>;
+  },
 ): UploadPlan {
   const limits: UploadPlanLimits = {
     maxFileBytes: PROJECT_UPLOAD_MAX_FILE_BYTES,
     maxTotalBytes: PROJECT_UPLOAD_MAX_TOTAL_BYTES,
     maxFileCount: PROJECT_UPLOAD_MAX_FILE_COUNT,
     filterIgnored: options.filterIgnored,
+    ...(options.skipFolders ? { skipFolders: options.skipFolders } : {}),
   };
   return planUpload(
     files.map((file) => ({ relativePath: file.relativePath, size: file.size })),
@@ -71,8 +84,9 @@ export interface ProjectUploadResult {
 /**
  * Загружает уже отфильтрованные планом файлы в `targetDir`. Первый чанк файла
  * пишется в режиме replace (перезаписывает существующий файл с тем же именем),
- * остальные — append. Файлы идут последовательно: параллельные append по WS
- * ничего не ускорят, а порядок чанков обязан быть строгим.
+ * остальные — append. Чанки одного файла идут строго по порядку; разные
+ * файлы — по `concurrency` штук сразу (по умолчанию один): на тысячах мелких
+ * файлов время уходит на ожидание ответа, а не на канал.
  */
 export async function uploadFilesIntoDirectory(
   deps: ProjectUploadDeps,
@@ -80,8 +94,22 @@ export async function uploadFilesIntoDirectory(
     readonly targetDir: string;
     readonly files: ReadonlyArray<ProjectUploadFile>;
     readonly filterIgnored: boolean;
+    /** Folders the person also chose to leave out (see `UploadPlanLimits.skipFolders`). */
+    readonly skipFolders?: ReadonlyMap<string, string>;
     readonly onProgress?: (progress: ProjectUploadProgress) => void;
     readonly signal?: AbortSignal;
+    /**
+     * Files in flight at once (default 1). Chunks of one file always go in
+     * order; different files go side by side.
+     */
+    readonly concurrency?: number;
+    /**
+     * Already on the computer from an earlier try (resume): not sent again,
+     * counted as done.
+     */
+    readonly alreadyUploaded?: ReadonlySet<string>;
+    /** Told after each file is fully written (and put in place). */
+    readonly onFileUploaded?: (relativePath: string) => void;
     /**
      * Write each file under another relative path first (e.g. a hidden temp
      * name next to it) and hand it to `onFileWritten` to put in place — so a
@@ -95,11 +123,24 @@ export async function uploadFilesIntoDirectory(
   },
 ): Promise<ProjectUploadResult> {
   const readChunkBase64 = deps.readChunkBase64 ?? readFileAsBase64;
-  const plan = planProjectUpload(input.files, { filterIgnored: input.filterIgnored });
+  const plan = planProjectUpload(input.files, {
+    filterIgnored: input.filterIgnored,
+    ...(input.skipFolders ? { skipFolders: input.skipFolders } : {}),
+  });
   const byRelativePath = new Map(input.files.map((file) => [file.relativePath, file]));
+  const done = input.alreadyUploaded ?? new Set<string>();
 
   let completedFiles = 0;
   let sentBytes = 0;
+  const queue: UploadPlan["accepted"][number][] = [];
+  for (const entry of plan.accepted) {
+    if (done.has(entry.relativePath)) {
+      completedFiles += 1;
+      sentBytes += entry.size;
+    } else {
+      queue.push(entry);
+    }
+  }
   const report = (currentPath: string | null) => {
     input.onProgress?.({
       completedFiles,
@@ -110,14 +151,22 @@ export async function uploadFilesIntoDirectory(
     });
   };
 
-  for (const entry of plan.accepted) {
+  // The first failure stops the other workers before their next request.
+  const failed = new AbortController();
+  const stopped = () => failed.signal.aborted || input.signal?.aborted === true;
+  const checkStopped = () => {
+    throwIfAborted(input.signal);
+    if (failed.signal.aborted) throw new DOMException("Upload stopped.", "AbortError");
+  };
+
+  const uploadOne = async (entry: UploadPlan["accepted"][number]) => {
     const file = byRelativePath.get(entry.relativePath);
-    if (!file) continue;
+    if (!file) return;
     report(entry.relativePath);
     const writePath = input.stagedPathFor?.(entry.relativePath) ?? entry.relativePath;
 
     if (file.size === 0) {
-      throwIfAborted(input.signal);
+      checkStopped();
       await deps.writeFile({
         cwd: input.targetDir,
         relativePath: writePath,
@@ -127,7 +176,7 @@ export async function uploadFilesIntoDirectory(
     } else {
       let offset = 0;
       while (offset < file.size) {
-        throwIfAborted(input.signal);
+        checkStopped();
         const chunk = file.blob.slice(offset, offset + PROJECT_UPLOAD_CHUNK_BYTES);
         const contents = await readChunkBase64(chunk);
         await deps.writeFile({
@@ -150,8 +199,28 @@ export async function uploadFilesIntoDirectory(
       });
     }
     completedFiles += 1;
+    input.onFileUploaded?.(entry.relativePath);
     report(null);
-  }
+  };
+
+  let next = 0;
+  let firstError: unknown = null;
+  const worker = async () => {
+    while (next < queue.length && !stopped()) {
+      const entry = queue[next++]!;
+      try {
+        await uploadOne(entry);
+      } catch (error) {
+        if (firstError === null) firstError = error;
+        failed.abort();
+        return;
+      }
+    }
+  };
+  const workers = Math.max(1, Math.min(input.concurrency ?? 1, queue.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  if (firstError !== null) throw firstError;
+  throwIfAborted(input.signal);
 
   return { plan, uploadedFiles: completedFiles };
 }

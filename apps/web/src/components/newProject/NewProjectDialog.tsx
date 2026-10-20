@@ -53,18 +53,44 @@ import { useMachineRows } from "../../hooks/useMachineRows";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import {
+  PROJECT_UPLOAD_MAX_FILE_COUNT,
   formatUploadBytes,
   planProjectUpload,
-  uploadFilesIntoDirectory,
   type ProjectUploadFile,
 } from "../../projectUpload";
 import {
+  attachProjectUpload,
+  openUploadedProject,
+  resumeProjectUpload,
+  startProjectUpload,
+  stopProjectUpload,
+  useProjectUploads,
+  type ProjectUploadJob,
+} from "../../projectUploadJobs";
+import {
+  chooseFolderForProjectUpload,
   pickFilesForProjectUpload,
-  pickFolderForProjectUpload,
-  readDroppedUploadFiles,
+  readDroppedFolder,
+  type FileSystemDirectoryHandleLike,
+  type ReadFolder,
 } from "../../projectUploadPickers";
+import {
+  LEFT_OUT_LIST_FILE,
+  count,
+  findSkipSuggestions,
+  leftOutHotspots,
+  leftOutListText,
+  skipFoldersFor,
+  skippedGroupsLine,
+  summarizeUploadPlan,
+  uploadLimitLine,
+  type SkipSuggestion,
+  type SkipSuggestionId,
+  type UploadPlanSummary,
+} from "../../projectUploadSummary";
+import { UploadProgressDetails } from "./ProjectUploadsPanel";
 import { cloudListQueryOptions, cloudStateQueryOptions, filesApi } from "../files/filesApi";
-import { stripSharedTopFolder } from "../setup/goals";
+import { isJunkPath, stripSharedTopFolder } from "../setup/goals";
 import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
@@ -77,6 +103,7 @@ import {
 } from "../../navigation/newProjectStore";
 import { selectProjectsForEnvironment, useStore } from "../../store";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -96,6 +123,7 @@ import {
   checkNewFolderName,
   describedProjectPrompt,
   type NewProjectContents,
+  type NotUploadedFiles,
   cloudCrumbs,
   cloudProjectName,
   freeProjectName,
@@ -277,6 +305,8 @@ function dialogCopy(
 interface ProjectStory {
   readonly about: string;
   readonly contents: NewProjectContents;
+  /** Part of the upload didn't fit: the first message says so. */
+  readonly notUploaded?: NotUploadedFiles;
 }
 
 function useFinishNewProject() {
@@ -303,8 +333,9 @@ function useFinishNewProject() {
         );
         if (done) return;
       }
-      // They told Uno about it: the project opens with their words as its first message.
-      if (story && story.about.length > 0) {
+      // They told Uno about it, or part of the upload didn't fit: the project
+      // opens with a first message (their words, what's missing).
+      if (story && (story.about.length > 0 || story.notUploaded)) {
         const sent = await startTask(describedProjectPrompt({ name, folder, ...story }), {
           folder,
           modelSelection: null,
@@ -380,20 +411,73 @@ function SourceCard({
 interface PickedUpload {
   readonly files: ReadonlyArray<ProjectUploadFile>;
   readonly name: string;
+  /** The picked folder's own name on the laptop (Resume checks a re-pick by it). */
+  readonly sourceName: string;
   readonly fromZip: boolean;
   /** A folder or a zip names the project; loose files leave the name to the person. */
   readonly named: boolean;
+  /** Heavy folders the reader skipped without opening them. */
+  readonly unopenedFolders: ReadonlyArray<string>;
+  /** The drop reader hit its own ceiling: the folder has more than we read. */
+  readonly truncated: boolean;
+  readonly handle: FileSystemDirectoryHandleLike | null;
+  /** "Also skip" offers: vendor folders, git worktrees. */
+  readonly suggestions: ReadonlyArray<SkipSuggestion>;
 }
 
-/** Zips unpacked, a shared top folder (the picked folder itself) taken off. */
-async function preparePicked(raw: ReadonlyArray<ProjectUploadFile>): Promise<PickedUpload> {
-  const fromZip = raw.some((file) => /\.zip$/i.test(file.relativePath));
+/**
+ * A zip picked or dropped on its own is unpacked; a zip inside a folder is a
+ * file of the project and stays as it is (before 20.10 it was unpacked into
+ * the project's root, and the folder landed one level too deep).
+ */
+function isTopLevelZip(file: ProjectUploadFile): boolean {
+  return /\.zip$/i.test(file.relativePath) && !file.relativePath.includes("/");
+}
+
+async function preparePicked(read: ReadFolder): Promise<PickedUpload> {
+  const raw = read.files;
+  const topZip = isTopLevelZip;
+  const fromZip = raw.some(topZip);
   const name = uploadProjectName(raw);
   const named = (raw[0]?.relativePath.includes("/") ?? false) || (raw.length === 1 && fromZip);
-  const expanded = await expandZips(raw);
+  const sourceName = raw[0]?.relativePath.split("/")[0] ?? name;
+  const expanded = fromZip
+    ? [...raw.filter((file) => !topZip(file)), ...(await expandZips(raw.filter(topZip)))]
+    : [...raw];
   const files = stripSharedTopFolder(expanded, (file, relativePath) => ({ ...file, relativePath }));
-  return { files, name, fromZip, named };
+  // Looked for before the top folder comes off: that step also drops `.git`
+  // paths, and a worktree is known by its `.git` file.
+  const visible = expanded.filter((file) => !isJunkPath(file.relativePath));
+  const top = visible[0]?.relativePath.split("/")[0] ?? "";
+  const sharedTop = visible.every((file) => file.relativePath.startsWith(`${top}/`));
+  const suggestions = (await findSkipSuggestions(expanded)).map((suggestion) => ({
+    ...suggestion,
+    folders: sharedTop
+      ? suggestion.folders.map((folder) =>
+          folder.startsWith(`${top}/`) ? folder.slice(top.length + 1) : folder,
+        )
+      : suggestion.folders,
+  }));
+  // `.git` paths come off with the top folder (above), never planned: still say so.
+  const hadGit = expanded.some((file) => file.relativePath.split("/").includes(".git"));
+  return {
+    files,
+    name,
+    sourceName,
+    fromZip,
+    named,
+    unopenedFolders:
+      hadGit && !read.unopenedFolders.includes(".git")
+        ? [...read.unopenedFolders, ".git"]
+        : read.unopenedFolders,
+    truncated: read.truncated,
+    handle: read.handle ?? null,
+    suggestions,
+  };
 }
+
+/** Reading a folder: waiting for the browser (no count yet), or the live count. */
+type ReadingState = { readonly found: number | null } | null;
 
 function UploadStep({
   environmentId,
@@ -403,11 +487,12 @@ function UploadStep({
   onDone,
 }: StepProps & { readonly machineLabel: string }) {
   const [picked, setPicked] = useState<PickedUpload | null>(null);
-  const [reading, setReading] = useState(false);
+  const [reading, setReading] = useState<ReadingState>(null);
   const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number; bytes: string } | null>(
-    null,
-  );
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useProjectUploads((state) => state.jobs.find((entry) => entry.id === jobId) ?? null);
+  const [starting, setStarting] = useState(false);
+  const [ticked, setTicked] = useState<ReadonlySet<SkipSuggestionId> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const { ensureFolderProject } = useFolderChats(environmentId);
@@ -444,28 +529,92 @@ function UploadStep({
         ? repoCheck.name
         : null;
   const target = name ? uploadedProjectPath(home, name) : null;
-  const plan = useMemo(
+  // "Also skip" is ticked by default only when the folder is over the limits
+  // without it — otherwise everything that isn't rebuilt goes.
+  const basePlan = useMemo(
     () => (picked ? planProjectUpload(picked.files, { filterIgnored: true }) : null),
     [picked],
   );
-  const busy = progress !== null || working !== null;
+  const effectiveTicked = useMemo<ReadonlySet<SkipSuggestionId>>(() => {
+    if (ticked) return ticked;
+    if (!picked || !basePlan) return new Set();
+    const over = basePlan.skipped.some((entry) => entry.reason === "over-budget");
+    return new Set(over ? picked.suggestions.map((suggestion) => suggestion.id) : []);
+  }, [ticked, picked, basePlan]);
+  const skipFolders = useMemo(
+    () => skipFoldersFor(picked?.suggestions ?? [], effectiveTicked),
+    [picked, effectiveTicked],
+  );
+  const plan = useMemo(
+    () =>
+      picked
+        ? skipFolders.size > 0
+          ? planProjectUpload(picked.files, { filterIgnored: true, skipFolders })
+          : basePlan
+        : null,
+    [picked, basePlan, skipFolders],
+  );
+  const summary = useMemo(
+    () => (plan && picked ? summarizeUploadPlan(plan, picked.unopenedFolders) : null),
+    [plan, picked],
+  );
+  const uploading = job !== null && job.status === "uploading";
+  const busy = job !== null || working !== null || starting;
   const { reset: resetAccess } = access;
   useEffect(() => resetAccess(), [repo, resetAccess]);
 
-  const accept = (raw: ReadonlyArray<ProjectUploadFile>) => {
-    if (raw.length === 0) return;
+  // The dialog shows this upload; when it closes, the corner panel takes over.
+  useEffect(() => {
+    if (!jobId) return;
+    attachProjectUpload(jobId, true);
+    return () => attachProjectUpload(jobId, false);
+  }, [jobId]);
+
+  // Cancel while the browser is still reading: whatever it hands over later is dropped.
+  const readToken = useRef(0);
+  const cancelReading = () => {
+    readToken.current += 1;
+    setReading(null);
+  };
+  const accept = (read: ReadFolder | null) => {
+    if (!read || read.files.length === 0) {
+      setReading(null);
+      if (read) setError("There are no files in it.");
+      return;
+    }
     setError(null);
-    setReading(true);
-    void preparePicked(raw)
+    setReading((current) => current ?? { found: read.files.length });
+    void preparePicked(read)
       .then((next) => {
         if (next.files.length === 0) {
           setError("There are no files in it.");
           return;
         }
+        setTicked(null);
         setPicked(next);
       })
       .catch((cause: unknown) => setError(errorMessage(cause, "Couldn't read these files.")))
-      .finally(() => setReading(false));
+      .finally(() => setReading(null));
+  };
+
+  const chooseFolder = () => {
+    setError(null);
+    setReading(null);
+    const token = ++readToken.current;
+    const current = () => token === readToken.current;
+    void chooseFolderForProjectUpload({
+      onReading: (found) => {
+        if (current()) setReading({ found });
+      },
+    })
+      .then((read) => {
+        if (current()) accept(read);
+      })
+      .catch((cause: unknown) => {
+        if (!current()) return;
+        setReading(null);
+        setError(errorMessage(cause, "The browser didn't let us read this folder. Try again."));
+      });
   };
 
   // Dropped on the start screen: the dialog opens with them.
@@ -474,7 +623,7 @@ function UploadStep({
     if (dropped.current) return;
     dropped.current = true;
     const files = takeFiles();
-    if (files) accept(files);
+    if (files) accept({ files: [...files], unopenedFolders: [], truncated: false });
   }, [takeFiles]);
 
   const submitWithoutUpload = async () => {
@@ -517,34 +666,54 @@ function UploadStep({
       await submitWithoutUpload();
       return;
     }
-    if (!name || !target || !plan) return;
+    if (!name || !target || !plan || !summary) return;
     setError(null);
-    setProgress({ done: 0, total: plan.accepted.length, bytes: "" });
+    setStarting(true);
     try {
       const projectRef = await ensureFolderProject(target, name, { createFolder: true });
-      const api = ensureEnvironmentApi(environmentId);
-      await uploadFilesIntoDirectory(
-        { writeFile: (write) => api.projects.writeFile(write) },
-        {
-          targetDir: target,
+      const notUploaded = summary.leftOut.length + summary.tooLarge.length;
+      const story: ProjectStory = {
+        about: aboutText,
+        contents: "files",
+        ...(notUploaded > 0
+          ? { notUploaded: { files: notUploaded, listFile: LEFT_OUT_LIST_FILE } }
+          : {}),
+      };
+      const leftOut =
+        summary.leftOut.length > 0 || summary.tooLarge.length > 0
+          ? {
+              fileName: LEFT_OUT_LIST_FILE,
+              text: leftOutListText({ summary, folderName: picked.sourceName }),
+            }
+          : null;
+      setJobId(
+        startProjectUpload({
+          environmentId,
+          name,
+          sourceName: picked.sourceName,
+          target,
+          targetLabel: tildePath(target, home),
+          projectRef,
           files: picked.files,
-          filterIgnored: true,
-          onProgress: (next) =>
-            setProgress({
-              done: next.completedFiles,
-              total: next.totalFiles,
-              bytes: `${formatUploadBytes(next.sentBytes)} of ${formatUploadBytes(next.totalBytes)}`,
-            }),
-        },
+          totalFiles: plan.accepted.length,
+          totalBytes: plan.totalBytes,
+          skipFolders,
+          leftOut,
+          handle: picked.handle,
+          onFinished: async () => {
+            await finish(projectRef, name, target, story);
+            onDone();
+          },
+        }),
       );
-      await finish(projectRef, name, target, { about: aboutText, contents: "files" });
-      onDone();
     } catch (cause) {
-      setError(errorMessage(cause, "The upload stopped. Try again."));
+      setError(errorMessage(cause, "Couldn't create the project."));
     } finally {
-      setProgress(null);
+      setStarting(false);
     }
   };
+
+  const overLimit = summary !== null && summary.leftOut.length > 0 && summary.leftOutBy !== null;
 
   return (
     <>
@@ -560,7 +729,14 @@ function UploadStep({
             onDrop={(event) => {
               event.preventDefault();
               setDragging(false);
-              void readDroppedUploadFiles(event.dataTransfer).then(accept);
+              const token = ++readToken.current;
+              const current = () => token === readToken.current;
+              setReading({ found: 0 });
+              void readDroppedFolder(event.dataTransfer, (found) => {
+                if (current()) setReading({ found });
+              }).then((read) => {
+                if (current()) accept(read);
+              });
             }}
             data-testid="new-project-upload-drop"
             className={cn(
@@ -568,60 +744,78 @@ function UploadStep({
               dragging ? "border-primary bg-primary/5" : "border-border",
             )}
           >
-            <FolderUpIcon className="size-7 text-muted-foreground" />
-            <p className="text-sm">
-              {reading
-                ? "Reading the files…"
-                : rich
-                  ? "Drop a folder, a .zip or files here"
-                  : "Drop a folder or a .zip here"}
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button
-                size="sm"
-                disabled={reading}
-                onClick={() => pickFolderForProjectUpload(accept)}
-                data-testid="new-project-upload-folder"
-              >
-                <FolderOpenIcon className="size-4" />
-                Choose a folder…
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={reading}
-                onClick={() => zipInput.current?.click()}
-              >
-                <FileArchiveIcon className="size-4" />
-                Choose a .zip…
-              </Button>
-              {rich ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={reading}
-                  onClick={() => pickFilesForProjectUpload(accept)}
-                  data-testid="new-project-upload-files"
-                >
-                  <FilesIcon className="size-4" />
-                  Choose files…
+            {reading ? (
+              <div className="flex flex-col items-center gap-1.5" role="status">
+                <Spinner className="size-6 text-muted-foreground" />
+                <p className="text-sm font-medium tabular-nums" data-testid="new-project-reading">
+                  {reading.found === null || reading.found === 0
+                    ? "Reading the folder…"
+                    : `Reading the folder… ${count(reading.found)} files found`}
+                </p>
+                <p className="max-w-80 text-xs text-muted-foreground">
+                  {reading.found === null
+                    ? "A big folder takes a few seconds. Then your browser asks to confirm the upload — click Upload."
+                    : "node_modules, .git and other heavy folders aren't even opened."}
+                </p>
+                <Button size="xs" variant="ghost" onClick={cancelReading}>
+                  Cancel
                 </Button>
-              ) : null}
-              <input
-                ref={zipInput}
-                type="file"
-                accept=".zip,application/zip"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (file) accept([{ relativePath: file.name, size: file.size, blob: file }]);
-                }}
-              />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Up to 2 GB. Zips are unpacked. node_modules, .git and other heavy folders are skipped.
-            </p>
+              </div>
+            ) : (
+              <>
+                <FolderUpIcon className="size-7 text-muted-foreground" />
+                <p className="text-sm">
+                  {rich ? "Drop a folder, a .zip or files here" : "Drop a folder or a .zip here"}
+                </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button size="sm" onClick={chooseFolder} data-testid="new-project-upload-folder">
+                    <FolderOpenIcon className="size-4" />
+                    Choose a folder…
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => zipInput.current?.click()}>
+                    <FileArchiveIcon className="size-4" />
+                    Choose a .zip…
+                  </Button>
+                  {rich ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        pickFilesForProjectUpload((files) =>
+                          accept({ files, unopenedFolders: [], truncated: false }),
+                        )
+                      }
+                      data-testid="new-project-upload-files"
+                    >
+                      <FilesIcon className="size-4" />
+                      Choose files…
+                    </Button>
+                  ) : null}
+                  <input
+                    ref={zipInput}
+                    type="file"
+                    accept=".zip,application/zip"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) {
+                        accept({
+                          files: [{ relativePath: file.name, size: file.size, blob: file }],
+                          unopenedFolders: [],
+                          truncated: false,
+                        });
+                      }
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Up to {count(PROJECT_UPLOAD_MAX_FILE_COUNT)} files and 2 GB. node_modules, .git,
+                  Python environments and build folders are skipped. Your browser asks to confirm —
+                  that's expected.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2 rounded-xl border border-border p-3.5">
@@ -637,11 +831,13 @@ function UploadStep({
                 <span className="block truncate text-sm font-semibold">
                   {picked.named ? name : `${picked.files.length === 1 ? "1 file" : "Files"}`}
                 </span>
-                <span className="block text-xs text-muted-foreground">
+                <span
+                  className="block text-xs text-muted-foreground tabular-nums"
+                  data-testid="new-project-upload-summary"
+                >
                   {plan
-                    ? `${plan.accepted.length} files · ${formatUploadBytes(plan.totalBytes)}`
+                    ? `${count(plan.accepted.length)} files · ${formatUploadBytes(plan.totalBytes)}`
                     : null}
-                  {plan && plan.skipped.length > 0 ? ` · ${plan.skipped.length} skipped` : null}
                 </span>
               </span>
               {busy ? null : (
@@ -651,30 +847,51 @@ function UploadStep({
                   onClick={() => {
                     setPicked(null);
                     setNameDraft(null);
+                    setTicked(null);
                   }}
                 >
                   Change
                 </Button>
               )}
             </div>
-            {progress ? (
-              <div className="flex flex-col gap-1" role="status">
-                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width]"
-                    style={{
-                      width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  Uploading {progress.done} of {progress.total} files
-                  {progress.bytes ? ` · ${progress.bytes}` : ""}
-                </span>
-              </div>
+            {job ? (
+              <UploadProgressDetails job={job} />
+            ) : summary ? (
+              <UploadPlanNotes
+                summary={summary}
+                suggestions={picked.suggestions}
+                ticked={effectiveTicked}
+                onTick={(id, on) => {
+                  const next = new Set(effectiveTicked);
+                  if (on) next.add(id);
+                  else next.delete(id);
+                  setTicked(next);
+                }}
+                truncated={picked.truncated}
+              />
             ) : null}
           </div>
         )}
+        {overLimit && !busy && summary ? (
+          <OverLimitNotice
+            summary={summary}
+            onPickAnother={() => {
+              setPicked(null);
+              setTicked(null);
+            }}
+            onUseGithub={
+              rich
+                ? () => {
+                    setPicked(null);
+                    setTicked(null);
+                    requestAnimationFrame(() =>
+                      document.getElementById("new-project-upload-repo")?.focus(),
+                    );
+                  }
+                : null
+            }
+          />
+        ) : null}
         {rich && picked === null && !busy ? (
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium" htmlFor="new-project-upload-repo">
@@ -748,49 +965,207 @@ function UploadStep({
           </div>
         ) : null}
         <p className="text-xs text-muted-foreground" data-testid="new-project-destination">
-          Goes to{" "}
+          {job ? (uploading ? "Uploading to " : "Goes to ") : "Goes to "}
           <span className="font-mono text-foreground">
             {target ? tildePath(target, home) : "~/projects/<name>"}
           </span>{" "}
           on computer {machineLabel}.
+          {uploading ? " You can close this window — the upload keeps going." : ""}
         </p>
       </DialogPanel>
-      <StepFooter
-        error={
-          error ??
-          (fromRepo && !repoCheck.ok
-            ? repoCheck.error
-            : needsName && !nameCheck.ok
-              ? nameCheck.error
-              : null)
-        }
-        busy={busy}
-        disabled={
-          reading ||
-          access.waiting ||
-          name === null ||
-          takenOrNull === null ||
-          (picked !== null && (plan === null || plan.accepted.length === 0))
-        }
-        label={
-          working ??
-          (progress !== null
-            ? "Uploading…"
-            : fromRepo
-              ? access.offer !== null
-                ? "Try again"
-                : "Clone and open"
-              : aboutOnly
-                ? "Create and open"
-                : wording === "folder"
-                  ? "Upload"
-                  : "Upload and open")
-        }
-        icon={fromRepo ? <GitHubIcon /> : aboutOnly ? <PlusIcon /> : <FolderUpIcon />}
-        onSubmit={() => void submit()}
-        onCancel={onDone}
-      />
+      {job ? (
+        <UploadJobFooter job={job} onHide={onDone} />
+      ) : (
+        <StepFooter
+          error={
+            error ??
+            (fromRepo && !repoCheck.ok
+              ? repoCheck.error
+              : needsName && !nameCheck.ok
+                ? nameCheck.error
+                : null)
+          }
+          busy={busy}
+          disabled={
+            reading !== null ||
+            access.waiting ||
+            name === null ||
+            takenOrNull === null ||
+            (picked !== null && (plan === null || plan.accepted.length === 0))
+          }
+          label={
+            working ??
+            (starting
+              ? "Starting…"
+              : fromRepo
+                ? access.offer !== null
+                  ? "Try again"
+                  : "Clone and open"
+                : aboutOnly
+                  ? "Create and open"
+                  : overLimit && plan && summary
+                    ? `Upload ${count(plan.accepted.length)} of ${count(summary.wantedFiles)} files`
+                    : wording === "folder"
+                      ? "Upload"
+                      : "Upload and open")
+          }
+          icon={fromRepo ? <GitHubIcon /> : aboutOnly ? <PlusIcon /> : <FolderUpIcon />}
+          onSubmit={() => void submit()}
+          onCancel={onDone}
+        />
+      )}
     </>
+  );
+}
+
+/** What stays behind and why — before the upload, so nothing is a surprise. */
+function UploadPlanNotes({
+  summary,
+  suggestions,
+  ticked,
+  onTick,
+  truncated,
+}: {
+  summary: UploadPlanSummary;
+  suggestions: ReadonlyArray<SkipSuggestion>;
+  ticked: ReadonlySet<SkipSuggestionId>;
+  onTick: (id: SkipSuggestionId, on: boolean) => void;
+  truncated: boolean;
+}) {
+  const automatic = summary.skippedGroups.filter(
+    (group) => group.label !== "vendor" && group.label !== "git worktrees",
+  );
+  const automaticFiles = automatic.reduce((sum, group) => sum + (group.files ?? 0), 0);
+  return (
+    <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+      {automatic.length > 0 ? (
+        <p data-testid="new-project-upload-skipped">
+          Skipped: {skippedGroupsLine(automatic)}
+          {automaticFiles > 0 ? ` (${count(automaticFiles)} files)` : ""} — the computer rebuilds
+          these from the project.
+        </p>
+      ) : null}
+      {summary.tooLarge.length > 0 ? (
+        <p className="text-warning-foreground">
+          {summary.tooLarge.length === 1
+            ? `${summary.tooLarge[0]} is over 1 GB and stays on your computer.`
+            : `${count(summary.tooLarge.length)} files over 1 GB stay on your computer.`}
+        </p>
+      ) : null}
+      {truncated ? (
+        <p className="text-warning-foreground">
+          This folder is too big to read from a drop. Use Choose a folder… to read all of it.
+        </p>
+      ) : null}
+      {suggestions.length > 0 ? (
+        <div className="flex flex-col gap-1 pt-0.5" data-testid="new-project-upload-also-skip">
+          <span className="font-medium text-foreground">Also skip</span>
+          {suggestions.map((suggestion) => (
+            <label key={suggestion.id} className="flex cursor-pointer items-start gap-2">
+              <Checkbox
+                checked={ticked.has(suggestion.id)}
+                onCheckedChange={(on) => onTick(suggestion.id, on === true)}
+                className="mt-0.5"
+                data-testid={`new-project-upload-skip-${suggestion.id}`}
+              />
+              <span>
+                <span className="text-foreground">{suggestion.label}</span> — {suggestion.hint}
+                <span className="block truncate" title={suggestion.folders.join("\n")}>
+                  {suggestion.folders.slice(0, 2).join(", ")}
+                  {suggestion.folders.length > 2
+                    ? ` and ${suggestion.folders.length - 2} more`
+                    : ""}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Over the browser limits: say it before the upload, with the ways out. */
+function OverLimitNotice({
+  summary,
+  onPickAnother,
+  onUseGithub,
+}: {
+  summary: UploadPlanSummary;
+  onPickAnother: () => void;
+  onUseGithub: (() => void) | null;
+}) {
+  const hotspots = leftOutHotspots(summary.leftOut);
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning/8 p-3 text-xs"
+      role="alert"
+      data-testid="new-project-upload-over-limit"
+    >
+      <p className="font-medium text-foreground">
+        {count(summary.leftOut.length)} files won't fit. A browser upload takes{" "}
+        {uploadLimitLine(summary.leftOutBy ?? "files")}, this folder has{" "}
+        {count(summary.wantedFiles)}.
+      </p>
+      {hotspots.length > 0 ? (
+        <p className="text-muted-foreground">
+          Most of them are in{" "}
+          {hotspots.map((spot) => `${spot.folder} (${count(spot.files)})`).join(", ")}.
+        </p>
+      ) : null}
+      <p className="text-muted-foreground">
+        Upload anyway and Uno gets the list of what's missing, in {LEFT_OUT_LIST_FILE}. Or pick a
+        smaller folder{onUseGithub ? ", or paste a GitHub link — a clone has no limit" : ""}.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="xs" variant="outline" onClick={onPickAnother}>
+          Choose another folder
+        </Button>
+        {onUseGithub ? (
+          <Button size="xs" variant="outline" onClick={onUseGithub}>
+            <GitHubIcon />
+            Use a GitHub link
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** While uploading: Stop, and Hide (the upload keeps going); after: Resume. */
+function UploadJobFooter({ job, onHide }: { job: ProjectUploadJob; onHide: () => void }) {
+  return (
+    <DialogFooter className="items-center">
+      {job.status === "uploading" ? (
+        <>
+          <Button
+            variant="outline"
+            onClick={() => stopProjectUpload(job.id)}
+            data-testid="new-project-upload-stop"
+          >
+            Stop upload
+          </Button>
+          <Button onClick={onHide} data-testid="new-project-upload-hide">
+            Hide
+          </Button>
+        </>
+      ) : job.status === "done" ? (
+        <Button onClick={() => void openUploadedProject(job.id)}>Open</Button>
+      ) : (
+        <>
+          <Button variant="outline" onClick={onHide}>
+            Close
+          </Button>
+          <Button
+            onClick={() => void resumeProjectUpload(job.id)}
+            data-testid="new-project-upload-resume"
+          >
+            <FolderUpIcon />
+            Resume
+          </Button>
+        </>
+      )}
+    </DialogFooter>
   );
 }
 

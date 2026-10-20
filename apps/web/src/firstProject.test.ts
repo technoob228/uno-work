@@ -158,3 +158,81 @@ describe("inferProjectNameFromUpload", () => {
     expect(inferProjectNameFromUpload([])).toBe("uploaded-files");
   });
 });
+
+describe("planUpload — what a big project leaves out", () => {
+  const limits = {
+    maxFileBytes: 1000,
+    maxTotalBytes: 10_000,
+    maxFileCount: 3,
+    filterIgnored: true,
+  };
+
+  it("skips Python environments by name or by pyvenv.cfg, and says which folder", () => {
+    const plan = planUpload(
+      [
+        { relativePath: "lab/camo-venv/lib/x.py", size: 1 },
+        { relativePath: "lab/.venv-sweep/bin/python", size: 1 },
+        { relativePath: "lab/env311/pyvenv.cfg", size: 1 },
+        { relativePath: "lab/env311/lib/site.py", size: 1 },
+        { relativePath: "lib/site-packages/y.py", size: 1 },
+        { relativePath: "web/.nuxt/app.js", size: 1 },
+        { relativePath: "main.py", size: 1 },
+      ],
+      limits,
+    );
+    expect(plan.accepted.map((entry) => entry.relativePath)).toEqual(["main.py"]);
+    const folders = plan.skipped.map((entry) => entry.folder);
+    expect(folders).toEqual([
+      "Python environments",
+      "Python environments",
+      "Python environments",
+      "Python environments",
+      "Python environments",
+      ".nuxt",
+    ]);
+  });
+
+  it("keeps folders that only look like a venv", () => {
+    const plan = planUpload(
+      [
+        { relativePath: "src/environment/a.ts", size: 1 },
+        { relativePath: "src/prevent/b.ts", size: 1 },
+      ],
+      limits,
+    );
+    expect(plan.accepted).toHaveLength(2);
+  });
+
+  it("marks what the limits cut, by which limit", () => {
+    const plan = planUpload(
+      [
+        { relativePath: "a", size: 1 },
+        { relativePath: "b", size: 1 },
+        { relativePath: "c", size: 1 },
+        { relativePath: "d", size: 1 },
+      ],
+      limits,
+    );
+    expect(plan.skipped).toEqual([{ relativePath: "d", reason: "over-budget", limit: "files" }]);
+    const bytes = planUpload(
+      [
+        { relativePath: "a", size: 900 },
+        { relativePath: "b", size: 900 },
+      ],
+      { ...limits, maxTotalBytes: 1000 },
+    );
+    expect(bytes.skipped).toEqual([{ relativePath: "b", reason: "over-budget", limit: "bytes" }]);
+  });
+
+  it("leaves out folders the person chose to skip", () => {
+    const plan = planUpload(
+      [
+        { relativePath: "svc/vendor/x.go", size: 1 },
+        { relativePath: "svc/main.go", size: 1 },
+      ],
+      { ...limits, skipFolders: new Map([["svc/vendor", "vendor"]]) },
+    );
+    expect(plan.accepted.map((entry) => entry.relativePath)).toEqual(["svc/main.go"]);
+    expect(plan.skipped[0]).toMatchObject({ reason: "ignored", folder: "vendor" });
+  });
+});
