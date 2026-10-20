@@ -245,6 +245,11 @@ export interface NotUploadedFiles {
   readonly listFile: string;
 }
 
+/** The first message's lines about files that stayed on the laptop. */
+export function notUploadedLines(missing: NotUploadedFiles): string {
+  return `Not everything fit in the upload: ${missing.files.toLocaleString("en-US")} ${missing.files === 1 ? "file" : "files"} stayed on my computer. The list is in ${missing.listFile}. Start your reply with one line on what's missing and whether it matters.`;
+}
+
 /**
  * The first message of a project the person told Uno about (Misha 11.10:
  * "just tell about it and add files — not only a folder; describe the context
@@ -273,13 +278,9 @@ export function describedProjectPrompt(input: {
       ? `I've cloned my project "${input.name}" into ${input.folder}.`
       : `I've added my project "${input.name}" to ${input.folder}.`,
     ...(about.length > 0 ? [`About it, in my words: ${about}`] : []),
-    ...(missing
-      ? [
-          `Not everything fit in the upload: ${missing.files.toLocaleString("en-US")} ${missing.files === 1 ? "file" : "files"} stayed on my computer. The list is in ${missing.listFile}.`,
-        ]
-      : []),
+    ...(missing ? [notUploadedLines(missing)] : []),
     missing
-      ? "Start your reply with one line on what's missing and whether it matters. Then look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step."
+      ? "Then look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step."
       : "Look at what's inside, tell me in two or three plain sentences how you understand it, and suggest the next step.",
   ].join("\n\n");
 }
