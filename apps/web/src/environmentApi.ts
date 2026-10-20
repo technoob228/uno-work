@@ -29,6 +29,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       uploadChunk: rpcClient.skills.uploadChunk,
       stage: rpcClient.skills.stage,
       add: rpcClient.skills.add,
+      setEnabled: rpcClient.skills.setEnabled,
+      setPluginEnabled: rpcClient.skills.setPluginEnabled,
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,

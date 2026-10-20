@@ -5,6 +5,9 @@ import type {
   SkillsInstallResult,
   SkillsScanInput,
   SkillsScanResult,
+  SkillsSetEnabledInput,
+  SkillsSetEnabledResult,
+  SkillsSetPluginEnabledInput,
   SkillsStageInput,
   SkillsStageResult,
   SkillsStatusInput,
@@ -799,6 +802,8 @@ export interface EnvironmentApi {
     uploadChunk: (input: SkillsUploadChunkInput) => Promise<SkillsUploadChunkResult>;
     stage: (input: SkillsStageInput) => Promise<SkillsStageResult>;
     add: (input: SkillsAddInput) => Promise<SkillsAddResult>;
+    setEnabled: (input: SkillsSetEnabledInput) => Promise<SkillsSetEnabledResult>;
+    setPluginEnabled: (input: SkillsSetPluginEnabledInput) => Promise<void>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

@@ -77,6 +77,8 @@ export interface WsRpcClient {
     readonly uploadChunk: RpcUnaryMethod<typeof WS_METHODS.skillsUploadChunk>;
     readonly stage: RpcUnaryMethod<typeof WS_METHODS.skillsStage>;
     readonly add: RpcUnaryMethod<typeof WS_METHODS.skillsAdd>;
+    readonly setEnabled: RpcUnaryMethod<typeof WS_METHODS.skillsSetEnabled>;
+    readonly setPluginEnabled: RpcUnaryMethod<typeof WS_METHODS.skillsSetPluginEnabled>;
   };
   readonly filesystem: {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
@@ -385,6 +387,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.skillsUploadChunk](input)),
       stage: (input) => transport.request((client) => client[WS_METHODS.skillsStage](input)),
       add: (input) => transport.request((client) => client[WS_METHODS.skillsAdd](input)),
+      setEnabled: (input) =>
+        transport.request((client) => client[WS_METHODS.skillsSetEnabled](input)),
+      setPluginEnabled: (input) =>
+        transport.request((client) => client[WS_METHODS.skillsSetPluginEnabled](input)),
     },
     filesystem: {
       browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),

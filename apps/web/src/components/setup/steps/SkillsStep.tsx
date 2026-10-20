@@ -27,6 +27,8 @@ import {
 import { useMemo, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import { useHomeFolderPath } from "../../../hooks/useFolderChats";
+import { useServerProviders } from "../../../rpc/serverState";
 import { cn } from "../../../lib/utils";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
 import { Button } from "../../ui/button";
@@ -35,8 +37,17 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/coll
 import { SetupHeading, SetupShell } from "../SetupShell";
 import { SkillImportDialog } from "../SkillImportDialog";
 import { SkillsAddOwn } from "../SkillsAddOwn";
-import { SkillsFound } from "../SkillsFound";
-import { existingNames, foundSkillsView, readFoundSkills, stageFolder } from "../skillImport";
+import { foundRowKey, SkillsFound } from "../SkillsFound";
+import {
+  existingNames,
+  type FoundPlugin,
+  foundSkillsView,
+  installedAgents,
+  readFoundSkills,
+  setFoundSkillEnabled,
+  setPluginEnabled,
+  stageFolder,
+} from "../skillImport";
 import {
   ALL_SETUP_SKILLS,
   installSkill,
@@ -184,7 +195,10 @@ export function SkillsStep() {
   const project = progress.project;
   const found = useFoundSkills(project?.path ?? null);
   const [preview, setPreview] = useState<SkillsStageResult | null>(null);
-  const [turningOn, setTurningOn] = useState<string | null>(null);
+  const [pendingRow, setPendingRow] = useState<string | null>(null);
+  const providers = useServerProviders();
+  const installed = useMemo(() => installedAgents(providers), [providers]);
+  const home = useHomeFolderPath(environmentId);
   const [previewPlace, setPreviewPlace] = useState<"computer" | "project">("computer");
   const kind = project?.kind;
   const offered = offeredSkills(kind);
@@ -201,7 +215,7 @@ export function SkillsStep() {
   const turnOn = async (skill: FoundSkill) => {
     const folder = skill.paths[0];
     if (!environmentId || !folder) return;
-    setTurningOn(skill.name);
+    setPendingRow(foundRowKey(skill));
     try {
       const staged = await stageFolder(environmentId, folder);
       setPreviewPlace("project");
@@ -212,8 +226,41 @@ export function SkillsStep() {
         title: cause instanceof Error ? cause.message : "Couldn't read this skill.",
       });
     } finally {
-      setTurningOn(null);
+      setPendingRow(null);
     }
+  };
+  // Untick = the folders move to <skills folder>-off (files kept); tick = back.
+  const runToggle = async (key: string, change: () => Promise<void>, done: string) => {
+    setPendingRow(key);
+    try {
+      await change();
+      await refresh();
+      toastManager.add({ type: "success", title: done, description: "Applies to new chats." });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: cause instanceof Error ? cause.message : "Couldn't change the skill.",
+      });
+    } finally {
+      setPendingRow(null);
+    }
+  };
+  const toggleSkill = (skill: FoundSkill, enabled: boolean) => {
+    if (!environmentId) return;
+    void runToggle(
+      foundRowKey(skill),
+      () =>
+        setFoundSkillEnabled({ environmentId, skill, enabled, projectPath: project?.path ?? null }),
+      enabled ? `${skill.name} is on` : `${skill.name} is off. Its files are kept`,
+    );
+  };
+  const togglePlugin = (plugin: FoundPlugin, enabled: boolean) => {
+    if (!environmentId) return;
+    void runToggle(
+      `plugin:${plugin.pluginId}`,
+      () => setPluginEnabled({ environmentId, pluginId: plugin.pluginId, enabled }),
+      enabled ? `Plugin ${plugin.name} is on` : `Plugin ${plugin.name} is off in Claude Code`,
+    );
   };
   return (
     <SetupShell
@@ -230,9 +277,17 @@ export function SkillsStep() {
       <SkillsFound
         project={view.project}
         computer={view.computer}
+        plugins={view.plugins}
         projectName={project?.name || null}
-        onTurnOn={(skill) => void turnOn(skill)}
-        turningOn={turningOn}
+        actions={{
+          installed,
+          home,
+          projectPath: project?.path ?? null,
+          pending: pendingRow,
+          onToggle: toggleSkill,
+          onTogglePlugin: togglePlugin,
+          onTurnOn: (skill) => void turnOn(skill),
+        }}
       />
       <div className="overflow-hidden rounded-2xl border border-border">
         {offered.map((skill, index) => (

@@ -11,6 +11,9 @@ import {
   SkillsInstallResult,
   SkillsScanInput,
   SkillsScanResult,
+  SkillsSetEnabledInput,
+  SkillsSetEnabledResult,
+  SkillsSetPluginEnabledInput,
   SkillsStageInput,
   SkillsStageResult,
   SkillsStatusInput,
@@ -363,6 +366,8 @@ export const WS_METHODS = {
   skillsUploadChunk: "skills.uploadChunk",
   skillsStage: "skills.stage",
   skillsAdd: "skills.add",
+  skillsSetEnabled: "skills.setEnabled",
+  skillsSetPluginEnabled: "skills.setPluginEnabled",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -956,6 +961,17 @@ export const WsSkillsStageRpc = Rpc.make(WS_METHODS.skillsStage, {
 export const WsSkillsAddRpc = Rpc.make(WS_METHODS.skillsAdd, {
   payload: SkillsAddInput,
   success: SkillsAddResult,
+  error: SkillsError,
+});
+
+export const WsSkillsSetEnabledRpc = Rpc.make(WS_METHODS.skillsSetEnabled, {
+  payload: SkillsSetEnabledInput,
+  success: SkillsSetEnabledResult,
+  error: SkillsError,
+});
+
+export const WsSkillsSetPluginEnabledRpc = Rpc.make(WS_METHODS.skillsSetPluginEnabled, {
+  payload: SkillsSetPluginEnabledInput,
   error: SkillsError,
 });
 
@@ -2226,6 +2242,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSkillsUploadChunkRpc,
   WsSkillsStageRpc,
   WsSkillsAddRpc,
+  WsSkillsSetEnabledRpc,
+  WsSkillsSetPluginEnabledRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsFilesystemReadFileRpc,

@@ -59,7 +59,13 @@ import {
   projectTargetRoots,
   stageSkills,
 } from "./skills/skillImport.ts";
-import { scanComputerSkills } from "./skills/skillScan.ts";
+import {
+  agentHomes,
+  scanComputerSkills,
+  scanRootsFor,
+  setClaudePluginEnabled,
+  setSkillsEnabled,
+} from "./skills/skillScan.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
@@ -1994,6 +2000,49 @@ const makeWsRpcLayer = (
                           : roots,
                     }),
                   }),
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsSetEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsSetEnabled,
+            skillsContext.pipe(
+              Effect.flatMap(({ settings }) =>
+                Effect.tryPromise({
+                  try: async () => {
+                    const { roots } = await scanRootsFor({
+                      settings,
+                      projectPath: input.projectPath,
+                    });
+                    return {
+                      paths: await setSkillsEnabled({
+                        paths: input.paths,
+                        enabled: input.enabled,
+                        roots,
+                      }),
+                    };
+                  },
+                  catch: toSkillsError,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "skills" },
+          ),
+        [WS_METHODS.skillsSetPluginEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillsSetPluginEnabled,
+            skillsContext.pipe(
+              Effect.flatMap(({ settings }) =>
+                Effect.tryPromise({
+                  try: () =>
+                    setClaudePluginEnabled({
+                      claudeDir: agentHomes(settings, os.homedir(), process.env).claudeDir,
+                      pluginId: input.pluginId,
+                      enabled: input.enabled,
+                    }),
                   catch: toSkillsError,
                 }),
               ),

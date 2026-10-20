@@ -37,8 +37,8 @@ export class SkillsError extends Schema.TaggedErrorClass<SkillsError>()("SkillsE
 
 // ── Skills already on the computer, and skills of your own ───────────
 
-/** Agent families that read a skills folder (Uno and Hermes read what OpenCode/Claude do). */
-export const SkillAgent = Schema.Literals(["claude", "codex", "opencode"]);
+/** Agents that read a skills folder (`uno` = Uno AI, our OpenCode-based harness). */
+export const SkillAgent = Schema.Literals(["claude", "codex", "uno", "opencode", "hermes"]);
 export type SkillAgent = typeof SkillAgent.Type;
 
 /** `project` — inside the opened project; `computer` — for every project; `plugin` — a Claude Code plugin. */
@@ -52,10 +52,18 @@ export const FoundSkill = Schema.Struct({
   scope: FoundSkillScope,
   /** Every folder it was found in (absolute), e.g. Claude's and Codex's copy. */
   paths: Schema.Array(Schema.String),
-  /** Who reads it there. Empty = no agent loads this folder (a `skills/` in the project). */
+  /** Who reads it now. Empty = off, or a folder no agent loads (a `skills/` in the project). */
   agents: Schema.Array(SkillAgent),
-  /** The Claude Code plugin it comes with. */
+  /**
+   * On, or turned off on the setup step: the folders were moved to
+   * `<skills folder>-off/` (files kept); for a plugin skill, the plugin is off.
+   */
+  enabled: Schema.Boolean,
+  /** Agents that would read it but have it off in their own settings. */
+  offIn: Schema.Array(SkillAgent),
+  /** The Claude Code plugin it comes with: its name, and the id to turn it on or off. */
   plugin: Schema.optional(Schema.String),
+  pluginId: Schema.optional(Schema.String),
 });
 export type FoundSkill = typeof FoundSkill.Type;
 
@@ -145,3 +153,28 @@ export const SkillsAddResult = Schema.Struct({
   added: Schema.Array(Schema.Struct({ name: Schema.String, paths: Schema.Array(Schema.String) })),
 });
 export type SkillsAddResult = typeof SkillsAddResult.Type;
+
+export const SkillsSetEnabledInput = Schema.Struct({
+  /** Folders from `FoundSkill.paths`; each must sit in a skills folder (or its `-off`). */
+  paths: Schema.Array(Schema.String.check(Schema.isMaxLength(4096))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(20),
+  ),
+  enabled: Schema.Boolean,
+  /** The project the step is about, for skills inside it. */
+  projectPath: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
+});
+export type SkillsSetEnabledInput = typeof SkillsSetEnabledInput.Type;
+
+export const SkillsSetEnabledResult = Schema.Struct({
+  /** Where the folders are now. */
+  paths: Schema.Array(Schema.String),
+});
+export type SkillsSetEnabledResult = typeof SkillsSetEnabledResult.Type;
+
+export const SkillsSetPluginEnabledInput = Schema.Struct({
+  /** `name@marketplace`, as in Claude Code's `enabledPlugins`. */
+  pluginId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  enabled: Schema.Boolean,
+});
+export type SkillsSetPluginEnabledInput = typeof SkillsSetPluginEnabledInput.Type;

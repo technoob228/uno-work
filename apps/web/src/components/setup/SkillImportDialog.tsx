@@ -201,7 +201,7 @@ export function SkillImportDialog({
               <span className="text-sm">
                 All projects
                 <span className="block text-xs text-muted-foreground">
-                  Every AI on this computer: Claude Code, Codex, Uno AI
+                  Every AI on this computer, in every project
                 </span>
               </span>
             </label>

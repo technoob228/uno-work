@@ -1,9 +1,12 @@
 /**
  * The skills step's "Found on this computer" and "Add your own skill".
  *
- * Found: the daemon looks in every folder Claude Code, Codex and OpenCode
- * (Uno AI) read, plus the open project (`skills.scan`, see
+ * Found: the daemon looks in every folder Claude Code, Codex, Uno AI,
+ * OpenCode and Hermes read, plus the open project (`skills.scan`, see
  * apps/server/src/skills/skillScan.ts) — what's there already works.
+ * Unticking one moves its folders to `<skills folder>-off/` (files kept, no
+ * agent reads them); ticking moves them back. Plugin skills go off with
+ * their plugin.
  *
  * Add: a link, a dropped SKILL.md / folder / .zip, or (desktop app) the
  * skills folder on the laptop. Everything becomes one .zip that goes to the
@@ -22,21 +25,60 @@ import type { ProjectUploadFile } from "../../projectUpload";
 export const SKILL_AGENT_LABEL: Readonly<Record<SkillAgent, string>> = {
   claude: "Claude Code",
   codex: "Codex",
-  // uno-code is an OpenCode fork: same folders.
-  opencode: "Uno AI",
+  uno: "Uno AI",
+  opencode: "OpenCode",
+  hermes: "Hermes",
 };
 
-/** "Claude Code · Codex · Uno AI". */
-export function agentsLine(agents: ReadonlyArray<SkillAgent>): string {
-  return agents.map((agent) => SKILL_AGENT_LABEL[agent]).join(" · ");
+/** The harness drivers behind each agent (ServerProvider.driver). */
+const AGENT_DRIVER: Readonly<Record<SkillAgent, string>> = {
+  claude: "claudeAgent",
+  codex: "codex",
+  uno: "uno",
+  opencode: "opencode",
+  hermes: "hermes",
+};
+
+/** Agents installed on this computer; `null` while the list isn't known yet. */
+export function installedAgents(
+  providers: ReadonlyArray<{ readonly driver: string; readonly installed: boolean }>,
+): ReadonlySet<SkillAgent> | null {
+  if (providers.length === 0) return null;
+  const drivers = new Set(providers.filter((p) => p.installed).map((p) => String(p.driver)));
+  return new Set(
+    (Object.keys(AGENT_DRIVER) as SkillAgent[]).filter((agent) => drivers.has(AGENT_DRIVER[agent])),
+  );
+}
+
+/**
+ * "Claude Code · Codex · Uno AI" — only agents this computer has: the
+ * OpenCode family is "Uno AI" with our harness and "OpenCode" with a plain one.
+ */
+export function agentsLine(
+  agents: ReadonlyArray<SkillAgent>,
+  installed: ReadonlySet<SkillAgent> | null = null,
+): string {
+  const shown = installed ? agents.filter((agent) => installed.has(agent)) : agents;
+  return shown.map((agent) => SKILL_AGENT_LABEL[agent]).join(" · ");
+}
+
+/** One row per Claude Code plugin: its skills can only go off together. */
+export interface FoundPlugin {
+  readonly pluginId: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly skills: ReadonlyArray<FoundSkill>;
 }
 
 export interface FoundSkillsView {
   readonly project: ReadonlyArray<FoundSkill>;
   readonly computer: ReadonlyArray<FoundSkill>;
+  readonly plugins: ReadonlyArray<FoundPlugin>;
   /** Skills the AI uses now (not counting Uno's catalog, counted on its own). */
   readonly activeNames: ReadonlySet<string>;
 }
+
+const isOn = (skill: FoundSkill) => skill.enabled !== false && skill.agents.length > 0;
 
 /**
  * Split for the card; Uno's own catalog skills are left out — the lists
@@ -47,18 +89,78 @@ export function foundSkillsView(
   catalogIds: ReadonlySet<string>,
 ): FoundSkillsView {
   const own = found.filter((skill) => skill.plugin !== undefined || !catalogIds.has(skill.name));
+  const plugins = new Map<string, { name: string; enabled: boolean; skills: FoundSkill[] }>();
+  for (const skill of own) {
+    if (skill.scope !== "plugin" || !skill.pluginId) continue;
+    const entry = plugins.get(skill.pluginId) ?? {
+      name: skill.plugin ?? skill.pluginId,
+      enabled: skill.enabled !== false,
+      skills: [],
+    };
+    entry.skills.push(skill);
+    plugins.set(skill.pluginId, entry);
+  }
+  // Ones no AI reads yet first: they're the ones with a button.
+  const notReadFirst = (a: FoundSkill, b: FoundSkill) =>
+    Number(a.agents.length > 0 || a.enabled === false) -
+    Number(b.agents.length > 0 || b.enabled === false);
   return {
-    // Ones no AI reads yet first: they're the ones with a button.
-    project: own
-      .filter((skill) => skill.scope === "project")
-      .toSorted((a, b) => Number(a.agents.length > 0) - Number(b.agents.length > 0)),
-    computer: own.filter((skill) => skill.scope !== "project"),
+    project: own.filter((skill) => skill.scope === "project").toSorted(notReadFirst),
+    computer: own.filter((skill) => skill.scope === "computer"),
+    plugins: [...plugins.entries()].map(([pluginId, entry]) => ({ pluginId, ...entry })),
     activeNames: new Set(
       own
-        .filter((skill) => skill.agents.length > 0)
+        .filter(isOn)
         .map((skill) => (skill.plugin ? `${skill.plugin}:${skill.name}` : skill.name)),
     ),
   };
+}
+
+/** A project's `skills/` folder: no agent reads it, it can only be turned on (copied). */
+export function isUnread(skill: FoundSkill): boolean {
+  return skill.enabled !== false && skill.agents.length === 0 && skill.offIn.length === 0;
+}
+
+/**
+ * Where a turned-off skill's files are: "~/.claude/skills-off", or
+ * ".claude/skills-off" inside the project.
+ */
+export function offFolderLine(
+  skill: FoundSkill,
+  home: string | null,
+  projectPath: string | null = null,
+): string | null {
+  const first = skill.paths[0];
+  if (!first) return null;
+  const parent = first.replace(/\/+[^/]+\/?$/, "");
+  const project = projectPath?.replace(/\/+$/, "");
+  if (project && parent.startsWith(`${project}/`)) return parent.slice(project.length + 1);
+  const base = home?.replace(/\/+$/, "");
+  return base && parent.startsWith(`${base}/`) ? `~${parent.slice(base.length)}` : parent;
+}
+
+export async function setFoundSkillEnabled(input: {
+  readonly environmentId: EnvironmentId;
+  readonly skill: FoundSkill;
+  readonly enabled: boolean;
+  readonly projectPath: string | null;
+}): Promise<void> {
+  await ensureEnvironmentApi(input.environmentId).skills.setEnabled({
+    paths: [...input.skill.paths],
+    enabled: input.enabled,
+    ...(input.projectPath ? { projectPath: input.projectPath } : {}),
+  });
+}
+
+export async function setPluginEnabled(input: {
+  readonly environmentId: EnvironmentId;
+  readonly pluginId: string;
+  readonly enabled: boolean;
+}): Promise<void> {
+  await ensureEnvironmentApi(input.environmentId).skills.setPluginEnabled({
+    pluginId: input.pluginId,
+    enabled: input.enabled,
+  });
 }
 
 /** Names a new skill would replace, per place. */
@@ -69,7 +171,9 @@ export function existingNames(
   return {
     computer: new Set([
       ...catalogInstalled,
-      ...found.filter((skill) => skill.scope === "computer").map((skill) => skill.name),
+      ...found
+        .filter((skill) => skill.scope === "computer" && skill.enabled !== false)
+        .map((skill) => skill.name),
     ]),
     project: new Set(
       found
