@@ -328,7 +328,8 @@ describe("git asks git-credential-uno", () => {
       });
       expect(strayHit).toBe(false);
       expect(result.stdout).toContain("password=ghs_onehour\n");
-      expect(stand.calls).toHaveLength(1);
+      // git may ask more than once; every ask went to the baked-in console.
+      expect(stand.calls.length).toBeGreaterThan(0);
     } finally {
       await new Promise<void>((resolve) => stray.close(() => resolve()));
     }
