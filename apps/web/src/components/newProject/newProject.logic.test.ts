@@ -183,6 +183,7 @@ describe("describedProjectPrompt", () => {
       "Not everything fit in the upload: 87,741 files stayed on my computer. The list is in .uno-not-uploaded.txt.",
     );
     expect(prompt).toContain("Start your reply with one line on what's missing");
+    expect(prompt).toContain("Then look at what's inside");
   });
 });
 

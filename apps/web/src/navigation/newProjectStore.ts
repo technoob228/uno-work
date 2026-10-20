@@ -13,6 +13,7 @@ import { create } from "zustand";
 import type {
   NewProjectContents,
   NewProjectSource,
+  NotUploadedFiles,
 } from "../components/newProject/newProject.logic";
 import type { ProjectUploadFile } from "../projectUpload";
 
@@ -29,6 +30,8 @@ export interface CreatedProject {
   readonly about?: string;
   /** What the folder starts with: uploaded files, a cloned repository, or nothing yet. */
   readonly contents?: NewProjectContents;
+  /** Part of the upload didn't fit (over the browser limits): how many, and the list's file. */
+  readonly notUploaded?: NotUploadedFiles;
 }
 
 /**
