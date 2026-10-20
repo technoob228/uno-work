@@ -69,12 +69,6 @@ import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { folderDisplayName, useFolderChats, useHomeFolderPath } from "../../hooks/useFolderChats";
-import {
-  connectGithubAccount,
-  getGithubAccount,
-  openAuthWindow,
-  type GithubAccountState,
-} from "../../lib/setupApi";
 import { cn } from "../../lib/utils";
 import {
   type NewProjectStep,
@@ -83,7 +77,6 @@ import {
 } from "../../navigation/newProjectStore";
 import { selectProjectsForEnvironment, useStore } from "../../store";
 import { Button } from "../ui/button";
-import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import {
   Dialog,
   DialogDescription,
@@ -118,10 +111,8 @@ import {
   recentHomeFolders,
   tildePath,
   connectGithubPrompt,
-  githubHttpsRemote,
-  isRepoAccessError,
-  repoAccessOffer,
 } from "./newProject.logic";
+import { RepoAccessNotice, useRepoClone } from "./repoAccess";
 
 const SOURCE_COPY: Record<
   Exclude<NewProjectSource, "template">,
@@ -433,6 +424,8 @@ function UploadStep({
   const [about, setAbout] = useState("");
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
+  const access = useRepoClone(environmentId);
+  const askUno = useAskUnoToClone(environmentId);
   const aboutText = rich ? about.trim() : "";
   const fromRepo = rich && picked === null && repo.trim().length > 0;
   const aboutOnly = rich && picked === null && !fromRepo && aboutText.length > 0;
@@ -456,6 +449,8 @@ function UploadStep({
     [picked],
   );
   const busy = progress !== null || working !== null;
+  const { reset: resetAccess } = access;
+  useEffect(() => resetAccess(), [repo, resetAccess]);
 
   const accept = (raw: ReadonlyArray<ProjectUploadFile>) => {
     if (raw.length === 0) return;
@@ -488,10 +483,11 @@ function UploadStep({
     setWorking(fromRepo ? "Cloning…" : "Creating…");
     try {
       if (fromRepo && repoCheck.ok) {
-        const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
+        const result = await access.clone({
           remoteUrl: repoCheck.remoteUrl,
           destinationPath: target,
         });
+        if (result === null) return; // refused for access: the notice says what to do
         const folder = result.cwd || target;
         await finish(await ensureFolderProject(folder, name), name, folder, {
           about: aboutText,
@@ -507,7 +503,7 @@ function UploadStep({
         errorMessage(
           cause,
           fromRepo
-            ? "Couldn't clone the repository. For a private one, connect GitHub in Settings → Source control."
+            ? "Couldn't clone the repository. Check the address and try again."
             : "Couldn't create the project.",
         ),
       );
@@ -694,6 +690,28 @@ function UploadStep({
               }}
               data-testid="new-project-upload-repo"
             />
+            {fromRepo && repoCheck.ok ? (
+              <RepoAccessNotice
+                access={access}
+                remoteUrl={repoCheck.remoteUrl}
+                busy={busy}
+                onOpenGithub={() =>
+                  void access.openGithub(submitWithoutUpload).catch((cause: unknown) => {
+                    setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
+                  })
+                }
+                onAskUno={() => {
+                  if (!name || !target) return;
+                  setWorking("Starting…");
+                  void askUno({ remoteUrl: repoCheck.remoteUrl, folder: target, name })
+                    .then(onDone)
+                    .catch((cause: unknown) =>
+                      setError(errorMessage(cause, "Couldn't start the chat. Try again.")),
+                    )
+                    .finally(() => setWorking(null));
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
         {rich && !busy ? (
@@ -749,6 +767,7 @@ function UploadStep({
         busy={busy}
         disabled={
           reading ||
+          access.waiting ||
           name === null ||
           takenOrNull === null ||
           (picked !== null && (plan === null || plan.accepted.length === 0))
@@ -758,7 +777,9 @@ function UploadStep({
           (progress !== null
             ? "Uploading…"
             : fromRepo
-              ? "Clone and open"
+              ? access.offer !== null
+                ? "Try again"
+                : "Clone and open"
               : aboutOnly
                 ? "Create and open"
                 : wording === "folder"
@@ -1265,38 +1286,20 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The repository is private (or mistyped) and this computer can't sign in to GitHub.
-  const [noAccess, setNoAccess] = useState(false);
-  // The account's GitHub (the Uno GitHub App): connected once, used by git on
-  // every computer. Asked only after a clone was refused.
-  const [github, setGithub] = useState<GithubAccountState | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  const mounted = useRef(true);
-  // Bumped to drop a wait for GitHub that is no longer wanted.
-  const watching = useRef(0);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const access = useRepoClone(environmentId);
+  const askUno = useAskUnoToClone(environmentId);
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
-  const { startTask } = useHomeLaunchers(environmentId);
   const finish = useFinishNewProject();
   const wording = useNewProjectStore((state) => state.wording);
   const check = checkRepositoryInput(input, taken ?? new Set());
+  const { reset } = access;
   useEffect(() => {
     setError(null);
-    setNoAccess(false);
-    watching.current += 1; // a new address: stop waiting for GitHub on the old one
-  }, [input]);
+    reset(); // a new address: stop waiting for GitHub on the old one
+  }, [input, reset]);
 
-  const readGithub = () =>
-    getGithubAccount({ environmentId }).catch((): GithubAccountState | null => null);
-
-  /** `viaAccount`: GitHub is connected to the account — git signs in over https. */
-  const submit = async (options?: { readonly viaAccount?: boolean }) => {
+  const submit = async () => {
     if (!check.ok) {
       setError(check.error);
       return;
@@ -1305,77 +1308,33 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
     setError(null);
     try {
       const destinationPath = uploadedProjectPath(home, check.name);
-      const result = await ensureEnvironmentApi(environmentId).sourceControl.cloneRepository({
-        remoteUrl: options?.viaAccount ? githubHttpsRemote(check.remoteUrl) : check.remoteUrl,
-        destinationPath,
-      });
+      const result = await access.clone({ remoteUrl: check.remoteUrl, destinationPath });
+      if (result === null) return; // refused for access: the notice says what to do
       const folder = result.cwd || destinationPath;
       await finish(await ensureFolderProject(folder, check.name), check.name, folder);
       onDone();
     } catch (cause) {
-      const message = errorMessage(cause, "");
-      if (isRepoAccessError(message)) {
-        // Also makes sure git on this computer asks Uno for its GitHub sign-in.
-        const state = await readGithub();
-        if (!mounted.current) return;
-        setGithub(state);
-        setNoAccess(true);
-      } else setError(message || "Couldn't clone the repository. Check the address and try again.");
+      setError(
+        errorMessage(cause, "Couldn't clone the repository. Check the address and try again."),
+      );
     } finally {
-      if (mounted.current) setBusy(false);
+      setBusy(false);
     }
   };
 
-  /**
-   * "Connect GitHub": the Uno GitHub App, once per account. The person picks
-   * the repositories on github.com in a small window; after that the clone
-   * just works — here and on every other computer of the account.
-   */
-  const connectGithub = async () => {
-    if (!check.ok) return;
-    setConnecting(true);
-    setError(null);
-    const watch = (watching.current += 1);
-    try {
-      const wasConnected = github?.connected === true;
-      const { authorizeUrl } = await connectGithubAccount({ environmentId });
-      await openAuthWindow(authorizeUrl, "uno-connector");
-      let state = await readGithub();
-      if (!mounted.current) return;
-      setConnecting(false);
-      // The window can read as closed while the person is still on github.com
-      // (or it was a new tab): keep looking for a while, quietly.
-      const tries = wasConnected ? 0 : 40;
-      for (let attempt = 0; attempt < tries && !state?.connected; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 3000));
-        if (!mounted.current || watching.current !== watch) return;
-        state = await readGithub();
-      }
-      if (!mounted.current || watching.current !== watch) return;
-      if (state !== null) setGithub(state);
-      if (state?.connected) await submit({ viaAccount: true });
-    } catch (cause) {
-      if (mounted.current) setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
-    } finally {
-      if (mounted.current && watching.current === watch) setConnecting(false);
-    }
-  };
+  const openGithub = () =>
+    void access.openGithub(submit).catch((cause: unknown) => {
+      setError(errorMessage(cause, "Couldn't open GitHub. Try again."));
+    });
 
-  /**
-   * "Let Uno connect GitHub": the project folder is made now (empty), and a
-   * chat in it asks Uno to connect this computer with an SSH key — one paste
-   * on github.com, no tokens — and clone into it (connectGithubPrompt).
-   */
-  const askUno = async () => {
+  const startChat = async () => {
     if (!check.ok) return;
     setBusy(true);
     try {
-      const folder = uploadedProjectPath(home, check.name);
-      await ensureFolderProject(folder, check.name, { createFolder: true });
-      await startTask(connectGithubPrompt(check.remoteUrl), {
-        folder,
-        modelSelection: null,
-        runtimeMode: "full-access",
+      await askUno({
+        remoteUrl: check.remoteUrl,
+        folder: uploadedProjectPath(home, check.name),
+        name: check.name,
       });
       onDone();
     } catch (cause) {
@@ -1384,11 +1343,6 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
       setBusy(false);
     }
   };
-
-  const offer = repoAccessOffer(check.ok ? check.remoteUrl : "", github);
-  // After a refusal with GitHub connected to the account, "Try again" clones
-  // over https, where the account signs git in.
-  const retry = () => void submit({ viaAccount: noAccess && offer === "add-repo" });
 
   return (
     <>
@@ -1406,7 +1360,7 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              retry();
+              void submit();
             }
           }}
         />
@@ -1415,95 +1369,56 @@ function GithubStep({ environmentId, home, onBack, onDone }: StepProps) {
             ? `Clones into ${tildePath(uploadedProjectPath(home, check.name), home)}`
             : "Clones into ~/projects/<repo>"}
         </p>
+        {check.ok ? (
+          <RepoAccessNotice
+            access={access}
+            remoteUrl={check.remoteUrl}
+            busy={busy}
+            onOpenGithub={openGithub}
+            onAskUno={() => void startChat()}
+          />
+        ) : null}
       </DialogPanel>
-      {noAccess && offer === "connect" ? (
-        <div
-          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
-          data-testid="new-project-repo-private"
-        >
-          <p>
-            <b className="font-medium">This repository is private</b> (or the address has a typo).
-            GitHub isn't connected to your Uno account yet.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Connect it once and choose the repositories — it then works on all your computers and
-            for your sites. No tokens or keys.
-          </p>
-          <div>
-            <Button
-              size="sm"
-              disabled={busy || connecting}
-              onClick={() => void connectGithub()}
-              data-testid="new-project-connect-github"
-            >
-              <GitHubIcon />
-              {connecting ? "Waiting for GitHub…" : "Connect GitHub"}
-            </Button>
-          </div>
-        </div>
-      ) : noAccess && offer === "add-repo" ? (
-        <div
-          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
-          data-testid="new-project-repo-private"
-        >
-          <p>
-            <b className="font-medium">Uno isn't allowed into this repository yet</b> (or the
-            address has a typo).
-          </p>
-          <p className="text-xs text-muted-foreground">
-            GitHub is connected{github?.accounts.length ? ` (${github.accounts.join(", ")})` : ""},
-            but this repository isn't on Uno's list. Add it on GitHub, then it clones here.
-          </p>
-          <div>
-            <Button
-              size="sm"
-              disabled={busy || connecting}
-              onClick={() => void connectGithub()}
-              data-testid="new-project-connect-github"
-            >
-              <GitHubIcon />
-              {connecting ? "Waiting for GitHub…" : "Add it on GitHub"}
-            </Button>
-          </div>
-        </div>
-      ) : noAccess ? (
-        <div
-          className="mx-6 mb-1 flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm"
-          data-testid="new-project-repo-private"
-        >
-          <p>
-            <b className="font-medium">This repository is private</b> (or the address has a typo).
-            This computer isn't signed in to GitHub yet.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Uno makes a key for this computer and shows you where to add it on GitHub — one paste,
-            no tokens. Then it clones the repository here.
-          </p>
-          <div>
-            <Button size="sm" disabled={busy} onClick={() => void askUno()}>
-              <GitHubIcon />
-              Let Uno connect GitHub
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <StepFooter
         error={error ?? (input.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
-        disabled={!check.ok || taken === null}
+        disabled={!check.ok || taken === null || access.waiting}
         label={
           busy
             ? "Cloning…"
-            : noAccess
+            : access.offer !== null
               ? "Try again"
               : wording === "folder"
                 ? "Clone"
                 : "Clone and open"
         }
         icon={<GitHubIcon />}
-        onSubmit={retry}
+        onSubmit={() => void submit()}
         onCancel={onDone}
       />
     </>
   );
+}
+
+/**
+ * "Let Uno connect GitHub" where the account's GitHub can't sign git in: the
+ * project folder is made now (empty), and a chat in it asks Uno to connect
+ * this computer with an SSH key — one paste on github.com, no tokens — and
+ * clone into it (connectGithubPrompt).
+ */
+function useAskUnoToClone(environmentId: StepProps["environmentId"]) {
+  const { ensureFolderProject } = useFolderChats(environmentId);
+  const { startTask } = useHomeLaunchers(environmentId);
+  return async (input: {
+    readonly remoteUrl: string;
+    readonly folder: string;
+    readonly name: string;
+  }) => {
+    await ensureFolderProject(input.folder, input.name, { createFolder: true });
+    await startTask(connectGithubPrompt(input.remoteUrl), {
+      folder: input.folder,
+      modelSelection: null,
+      runtimeMode: "full-access",
+    });
+  };
 }

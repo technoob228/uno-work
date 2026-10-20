@@ -104,7 +104,10 @@ async function main() {
   const creds = machineCredentials();
   if (creds === null) return;
 
-  const base = (process.env.UNO_WORK_DEV_CONTROL_PLANE_URL || BASE_URL).replace(/\/+$/, "");
+  // The address is baked in when the daemon writes this file — never read
+  // from the environment here: any process on this computer can set an
+  // environment variable and would send the machine token elsewhere.
+  const base = BASE_URL.replace(/\/+$/, "");
   let response;
   try {
     response = await fetch(base + "/api/v1/boxes/" + creds.boxId + "/work/git/github/token", {
@@ -135,13 +138,16 @@ async function main() {
   const code = (answer && (answer.code || answer.error)) || "";
   if (code === "GITHUB_NOT_CONNECTED") {
     return fail(
-      "GitHub isn't connected to your Uno account yet. Connect it once in Uno Work (New project → From GitHub → Connect GitHub) and it works on every computer.",
+      "GitHub isn't connected to your Uno account yet. Connect it once in Uno Work (New project → From GitHub → Continue with GitHub) and it works on every computer.",
     );
   }
   if (code === "GITHUB_REPO_NOT_ALLOWED") {
     return fail(
-      "Uno isn't allowed into " + repo + " on GitHub yet. Add the repository: Uno Work → New project → From GitHub → Connect GitHub.",
+      "Uno has no access to " + repo + " on GitHub yet. Give it access: Uno Work → New project → From GitHub → Give Uno access to this repository.",
     );
+  }
+  if (code === "GITHUB_TOKEN_RATE_LIMITED") {
+    return fail("too many GitHub sign-ins from this computer in the last hour; try again in a few minutes.");
   }
   if (code === "CONNECTOR_NOT_ALLOWED") {
     return fail("GitHub is turned off for this assistant (Uno Work → Assistants → Access).");

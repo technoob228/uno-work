@@ -278,6 +278,36 @@ export function isRepoAccessError(message: string): boolean {
   );
 }
 
+/**
+ * What a person reads when a clone failed for another reason than access.
+ * git's own text (and the "Source control repository operation … failed"
+ * wrapper around it) never reaches the screen (Misha 20.10).
+ */
+export function cloneFailureMessage(message: string): string {
+  if (/already exists and is not (empty|a directory)/i.test(message)) {
+    return "There is already a folder with this name in ~/projects. Remove it or pick another repository.";
+  }
+  if (
+    /Could not resolve host|unable to access|Failed to connect|Connection (refused|reset|timed out)|Network is unreachable|early EOF|unexpected disconnect/i.test(
+      message,
+    )
+  ) {
+    return "Couldn't reach the repository. Check the internet connection and try again.";
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return "Cloning took too long. Try again — a very large repository is easier to clone from a chat: ask Uno to do it.";
+  }
+  if (/No space left on device|Disk quota exceeded/i.test(message)) {
+    return "There is no free space on this computer for the repository.";
+  }
+  if (
+    /does not appear to be a git repository|not found|not a valid repository name/i.test(message)
+  ) {
+    return "There is no repository at this address. Check it and try again.";
+  }
+  return "Couldn't clone the repository. Check the address and try again.";
+}
+
 /** `owner/repo` of a GitHub remote, or null. */
 export function githubRepoSlug(remoteUrl: string): string | null {
   const match = /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(remoteUrl.trim());

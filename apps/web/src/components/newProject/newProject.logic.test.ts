@@ -12,6 +12,7 @@ import {
   checkNewFolderName,
   checkRepositoryInput,
   connectGithubPrompt,
+  cloneFailureMessage,
   githubHttpsRemote,
   githubRepoSlug,
   repoAccessOffer,
@@ -188,7 +189,6 @@ describe("checkRepositoryInput without a scheme", () => {
       ok: true,
       remoteUrl: "https://github.com/owner/repo.git",
     });
-    });
   });
 });
 
@@ -248,5 +248,46 @@ describe("GitHub of the account on a refused clone (icp3 10.10)", () => {
     expect(githubHttpsRemote("git@github.com:technoob228/uno-workspace.git")).toBe(repo);
     expect(githubHttpsRemote(repo)).toBe(repo);
     expect(githubHttpsRemote("git@gitlab.com:a/b.git")).toBe("git@gitlab.com:a/b.git");
+  });
+});
+
+const wrapped = (detail: string) =>
+  `Source control repository operation cloneRepository failed for unknown: git clone -- https://github.com/a/b.git b failed: Cloning into 'b'... ${detail}`;
+
+describe("a failed clone in words for people (Misha 20.10)", () => {
+  it("never passes git's own text through", () => {
+    for (const detail of [
+      "fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com",
+      "fatal: early EOF",
+      "error: RPC failed; curl 56 GnuTLS recv error",
+      "fatal: something nobody has seen before",
+    ]) {
+      const message = cloneFailureMessage(wrapped(detail));
+      expect(message).not.toContain("fatal");
+      expect(message).not.toContain("Source control");
+      expect(message).not.toContain("git clone");
+    }
+  });
+
+  it("names the cause it can tell", () => {
+    expect(
+      cloneFailureMessage(wrapped("fatal: unable to access …: Could not resolve host: github.com")),
+    ).toMatch(/internet connection/);
+    expect(cloneFailureMessage("Destination path already exists and is not empty.")).toMatch(
+      /already a folder/,
+    );
+    expect(cloneFailureMessage(wrapped("fatal: write error: No space left on device"))).toMatch(
+      /no free space/,
+    );
+  });
+
+  it("sends the access refusals to the GitHub notice, not here", () => {
+    expect(
+      isRepoAccessError(
+        wrapped(
+          "Uno: GitHub isn't connected to your Uno account yet.\nfatal: could not read Username for 'https://github.com': No such device or address",
+        ),
+      ),
+    ).toBe(true);
   });
 });

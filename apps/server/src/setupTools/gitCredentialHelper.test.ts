@@ -301,7 +301,48 @@ describe("git asks git-credential-uno", () => {
       body: { error: "GITHUB_REPO_NOT_ALLOWED", code: "GITHUB_REPO_NOT_ALLOWED" },
     };
     const other = await git(stand, ["credential", "fill"], ask("github.com", "octocat/secret"));
-    expect(other.stderr).toContain("Uno isn't allowed into octocat/secret");
+    expect(other.stderr).toContain("Uno has no access to octocat/secret");
+  });
+
+  it("sends the machine token only to the console it was written for", async () => {
+    const stand = await makeStand();
+    let strayHit = false;
+    const stray = NodeHttp.createServer((_request, response) => {
+      strayHit = true;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ token: "ghs_stolen" }));
+    });
+    await new Promise<void>((resolve) => stray.listen(0, "127.0.0.1", () => resolve()));
+    try {
+      const port = (stray.address() as AddressInfo).port;
+      const result = await new Promise<{ stdout: string }>((resolve) => {
+        const child = spawn("git", ["credential", "fill"], {
+          // Any process on the computer can set this; the helper must not follow it.
+          env: { ...stand.env, UNO_WORK_DEV_CONTROL_PLANE_URL: `http://127.0.0.1:${port}` },
+          cwd: stand.dir,
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk) => (stdout += chunk));
+        child.on("close", () => resolve({ stdout }));
+        child.stdin.end(ask("github.com", "octocat/site.git"));
+      });
+      expect(strayHit).toBe(false);
+      expect(result.stdout).toContain("password=ghs_onehour\n");
+      expect(stand.calls).toHaveLength(1);
+    } finally {
+      await new Promise<void>((resolve) => stray.close(() => resolve()));
+    }
+  });
+
+  it("says so when the console slows a computer down", async () => {
+    const stand = await makeStand();
+    stand.reply = {
+      status: 429,
+      body: { error: "GITHUB_TOKEN_RATE_LIMITED", code: "GITHUB_TOKEN_RATE_LIMITED" },
+    };
+    const result = await git(stand, ["credential", "fill"], ask("github.com", "octocat/site"));
+    expect(result.stdout).not.toContain("password=");
+    expect(result.stderr).toContain("too many GitHub sign-ins");
   });
 
   it("is silent with an older console and off a linked computer", async () => {
