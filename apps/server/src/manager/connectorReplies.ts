@@ -91,6 +91,13 @@ export const NO_TEXT_GRACE_MS = 45_000;
 export const LOST_TURN_MS = 3 * 60_000;
 /** A thread that vanished (deleted) this long ago is given up. */
 export const MISSING_THREAD_MS = 2 * 60_000;
+/**
+ * How long the loop sleeps before a ready answer's quiet window ends: just
+ * past it (the clock check is strict), never busy-spinning, never longer than
+ * a normal round.
+ */
+export const replyPauseMs = (untilReadyMs: number): number =>
+  Math.min(Duration.toMillis(REPLY_TICK), Math.max(50, Math.ceil(untilReadyMs) + 25));
 /** A restart (or a harness crash) cuts a turn off: re-run it at most this often. */
 export const MAX_RESUME_ATTEMPTS = 2;
 /** A message queued behind a turn running this long hears that it is queued. */
@@ -148,7 +155,12 @@ export interface ReplyProbe {
 }
 
 export type ReplyVerdict =
-  | { readonly kind: "wait"; readonly turnId: string | null }
+  | {
+      readonly kind: "wait";
+      readonly turnId: string | null;
+      /** The answer is ready and only sitting out the quiet window: look again in this long. */
+      readonly readyInMs?: number;
+    }
   | {
       readonly kind: "answer";
       readonly turnId: string | null;
@@ -296,8 +308,9 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
 
   const settledAtMs = Math.max(requestedMs, toMs(session?.updatedAt));
   if (final !== null) {
-    if (probe.nowMs - Math.max(settledAtMs, toMs(final.updatedAt)) < SETTLE_QUIET_MS) {
-      return { kind: "wait", turnId };
+    const quietForMs = probe.nowMs - Math.max(settledAtMs, toMs(final.updatedAt));
+    if (quietForMs < SETTLE_QUIET_MS) {
+      return { kind: "wait", turnId, readyInMs: SETTLE_QUIET_MS - quietForMs };
     }
     // The turn worked on after its last message: the answer is still on its
     // way (hermes ends the prompt before the final text lands). Give it the
@@ -520,6 +533,9 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
     const sendStateRef = yield* Ref.make<ReadonlyMap<string, SendState>>(new Map());
     const missingSinceRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
     const lastPruneRef = yield* Ref.make(0);
+    // An answer only sitting out SETTLE_QUIET_MS: the loop wakes for it right
+    // then, not on its next 2 s round (up to 2 s off every Telegram reply).
+    const nextWakeAtRef = yield* Ref.make<number | null>(null);
     // The loop and a fresh message both act on rows: one at a time, or a
     // queued row could be dispatched (or told it waits) twice.
     const rowsLock = yield* Semaphore.make(1);
@@ -935,6 +951,10 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           activities: detail.activities,
           nowMs,
         });
+        if (verdict.kind === "wait" && verdict.readyInMs !== undefined) {
+          const wakeAt = nowMs + verdict.readyInMs;
+          yield* Ref.update(nextWakeAtRef, (at) => (at === null ? wakeAt : Math.min(at, wakeAt)));
+        }
         let current = row;
         if (verdict.turnId !== null && verdict.turnId !== row.turnId) {
           current = yield* save({ ...current, turnId: TurnId.make(verdict.turnId) });
@@ -1038,7 +1058,14 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
       ),
     );
 
-    yield* Effect.forkScoped(Effect.forever(tick.pipe(Effect.andThen(Effect.sleep(REPLY_TICK)))));
+    const pause = Effect.gen(function* () {
+      const wakeAt = yield* Ref.getAndSet(nextWakeAtRef, null);
+      if (wakeAt === null) return yield* Effect.sleep(REPLY_TICK);
+      const nowMs = yield* Clock.currentTimeMillis;
+      yield* Effect.sleep(Duration.millis(replyPauseMs(wakeAt - nowMs)));
+    });
+
+    yield* Effect.forkScoped(Effect.forever(tick.pipe(Effect.andThen(pause))));
 
     /** Whether a message already has its pending reply (a replayed update). */
     const isKnown = (connectorProjectId: ProjectId, replyKey: string) =>
