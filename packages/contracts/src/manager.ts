@@ -174,11 +174,39 @@ export const AssistantDraftResult = Schema.Struct({
 });
 export type AssistantDraftResult = typeof AssistantDraftResult.Type;
 
+/**
+ * What an assistant may do (decision 21.10, enforced by the daemon, not the
+ * prompt): `full` — everything except money, the account and deleting
+ * computers; `helper` — works in its projects, but the chats it starts ask
+ * the person before risky steps and it can't approve anything; `observer` —
+ * reads chats in its projects and changes nothing. Rules:
+ * `@t3tools/shared/assistantPreset`.
+ */
+export const AssistantPreset = Schema.Literals(["full", "helper", "observer"]);
+export type AssistantPreset = typeof AssistantPreset.Type;
+
+/** The preset plus the projects it applies to (its own workspace is always in). */
+export const AssistantPresetAccess = Schema.Struct({
+  preset: AssistantPreset,
+  projects: ManagerProjectAllowlist,
+});
+export type AssistantPresetAccess = typeof AssistantPresetAccess.Type;
+
+/** `POST /api/manager/assistant/preset` — owner session only. */
+export const AssistantPresetInput = Schema.Struct({
+  projectId: ProjectId,
+  preset: AssistantPreset,
+  projects: ManagerProjectAllowlist,
+});
+export type AssistantPresetInput = typeof AssistantPresetInput.Type;
+
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
   /** "New assistant" (0.0.106): its picture and role template, kept in `.uno/profile.json`. */
   emoji: Schema.optional(Schema.String.check(Schema.isMaxLength(16))),
   template: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(40)))),
+  /** Its preset from the first token on (absent: Full, every project). */
+  access: Schema.optional(AssistantPresetAccess),
 });
 export type ManagerCreateAssistantInput = typeof ManagerCreateAssistantInput.Type;
 
