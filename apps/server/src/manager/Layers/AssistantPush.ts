@@ -108,7 +108,7 @@ const toPushShell = (shell: OrchestrationThreadShell): PushThreadShell => ({
   spawnedByThreadId: shell.spawnedByThreadId ?? null,
   archivedAt: shell.archivedAt,
   updatedAt: shell.updatedAt,
-  session: shell.session === null ? null : { status: shell.session.status },
+  session: shell.session == null ? null : { status: shell.session.status },
 });
 
 export interface AssistantPushOptions {
