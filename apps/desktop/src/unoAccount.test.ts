@@ -62,6 +62,38 @@ describe("UnoAccountService", () => {
     expect(seen.at(-1)).toBe("GET https://console.test/api/v1/boxes");
   });
 
+  it("signing out revokes the token at the console, and forgets it even offline", async () => {
+    const seen: string[] = [];
+    let down = false;
+    const consoleFetch = (async (input: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST" && input.endsWith("/api/v1/work/desktop-token")) {
+        return new Response(JSON.stringify({ token: "uno_usr_secret", user: { email: "m@x" } }));
+      }
+      seen.push(`${method} ${input} ${(init?.headers as Record<string, string>).Authorization}`);
+      if (down) throw new TypeError("fetch failed");
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    const { service, filePath } = makeService(consoleFetch);
+    await service.signIn();
+    expect(await service.signOut()).toEqual({ signedIn: false, email: null });
+    expect(seen).toEqual([
+      "DELETE https://console.test/api/v1/work/desktop-token Bearer uno_usr_secret",
+    ]);
+    expect(FS.existsSync(filePath)).toBe(false);
+
+    // Signed out already: nothing to revoke.
+    await service.signOut();
+    expect(seen).toHaveLength(1);
+
+    // The console is unreachable: the sign-in is still forgotten here.
+    await service.signIn();
+    down = true;
+    expect(await service.signOut()).toEqual({ signedIn: false, email: null });
+    expect(seen).toHaveLength(2);
+    expect(FS.existsSync(filePath)).toBe(false);
+  });
+
   it("refuses anything outside the allowlist without calling the console", async () => {
     const { service } = makeService((async () => {
       throw new Error("must not be called");
