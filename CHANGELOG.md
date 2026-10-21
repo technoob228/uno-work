@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.152 — 2026-10-21
+
+- **Rename a project from the sidebar.** Right-click a project, or its ⋯ button, for Rename project and Copy path; double-click the name to rename it. Only the name in the sidebar changes, the folder keeps its own.
+- **Private GitHub repositories in New project.** A private repository asks "Continue with GitHub" (the Uno GitHub App), then clones by itself; on a cloud computer git signs in with a token for that one repository, valid one hour, never written to disk.
+- **Skills step:** found skills first, your own by link, file or folder; a checkbox turns each on or off.
+- **Folder upload** is about 14× faster, shows progress by bytes, keeps going in the background and resumes (also after a reload); it warns at 20,000 files and says what didn't fit.
+- Inbox rows show their actions on hover instead of the chip and status; Files columns fit a narrow panel; a long bot name no longer spills out of the Telegram card.
+
 ## v0.0.151 — 2026-10-19
 
 - Security: the assistant's scheduled turn answers only from inside the computer (loopback, no forwarded headers), like the manager MCP. The assistant's `.mcp.json` is owner-only (0600), and Claude chats no longer show the uno-work token or MCP addresses in `ps` (passed via env).
