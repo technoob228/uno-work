@@ -3891,6 +3891,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("renames a project from the ⋯ menu on its sidebar row", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-project-rename-target" as MessageId,
+        targetText: "project rename target",
+      }),
+    });
+
+    try {
+      const menuButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[aria-label="More for Project"]'),
+        "Unable to find the project row's ⋯ button.",
+      );
+      menuButton.click();
+      const renameItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+            (button) => button.textContent?.trim() === "Rename project",
+          ) ?? null,
+        "Unable to find Rename project in the project menu.",
+      );
+      renameItem.click();
+
+      await page.getByLabelText("Project name").fill("Renamed project");
+      await page.getByRole("button", { name: "Save" }).click();
+
+      await vi.waitFor(
+        () => {
+          const renameRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.meta.update",
+          ) as { projectId?: string; title?: string } | undefined;
+          expect(renameRequest?.projectId).toBe(PROJECT_ID);
+          expect(renameRequest?.title).toBe("Renamed project");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows the confirm archive action after clicking the archive button", async () => {
     localStorage.setItem(
       "t3code:client-settings:v1",
