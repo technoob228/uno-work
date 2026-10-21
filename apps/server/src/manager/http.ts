@@ -27,6 +27,7 @@ import {
   isAssistantProjectId,
   ManagerAssistantAccessInput,
   ManagerAssistantTurnInput,
+  MANAGER_CALLER_THREAD_HEADER,
   ManagerConnectorBindingRemoveInput,
   ManagerConnectorBindingUpsertInput,
   ManagerCreateAssistantInput,
@@ -89,7 +90,7 @@ import {
 } from "../assistants/localAssistantStore.ts";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
-import { AssistantSchedules } from "../assistants/schedules.ts";
+import { AssistantSchedules, assistantProjectOfCaller } from "../assistants/schedules.ts";
 import {
   buildAssistantChats,
   fetchGatewayThreadUsage,
@@ -101,7 +102,8 @@ import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { handleManagerMcpMessage } from "./mcp.ts";
 import { ManagerApprovalService } from "./Services/ManagerApprovalService.ts";
 import { ManagerTokenAuthService } from "./Services/ManagerTokenAuth.ts";
-import { ManagerToolService } from "./Services/ManagerToolService.ts";
+import { ManagerToolService, type ManagerCaller } from "./Services/ManagerToolService.ts";
+import { isAssistantConversationThread } from "./assistantPush.ts";
 
 export const respondToAuthError = (error: AuthError) =>
   Effect.succeed(
@@ -129,6 +131,23 @@ export const authenticateOwnerSession = Effect.gen(function* () {
   }
   return session;
 });
+
+/** The header's thread when it is a conversation of the caller's own assistant. */
+const resolveCallerConversation = (caller: ManagerCaller, header: string | undefined) =>
+  Effect.gen(function* () {
+    const assistant = assistantProjectOfCaller(caller);
+    const raw = header?.trim() ?? "";
+    if (assistant === null || raw.length === 0 || raw.length > 128) return null;
+    const projections = yield* ProjectionSnapshotQuery;
+    const shell = yield* projections
+      .getThreadShellById(ThreadId.make(raw))
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    return Option.isSome(shell) &&
+      shell.value.projectId === assistant &&
+      isAssistantConversationThread(shell.value)
+      ? shell.value.id
+      : null;
+  });
 
 export const managerMcpRouteLayer = HttpRouter.add(
   "POST",
@@ -163,6 +182,13 @@ export const managerMcpRouteLayer = HttpRouter.add(
     if (caller.label?.startsWith(assistantTokenLabel("")) && !isDirectLocalRequest(request)) {
       return yield* respondUnauthorized;
     }
+    // Which of the assistant's conversations calls (HermesAdapter adds the
+    // header): only one of its own counts, anything else is ignored.
+    const callerThreadId = yield* resolveCallerConversation(
+      caller,
+      request.headers[MANAGER_CALLER_THREAD_HEADER],
+    );
+    const callerWithThread = callerThreadId === null ? caller : { ...caller, callerThreadId };
 
     const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
     if (body === null) {
@@ -186,7 +212,7 @@ export const managerMcpRouteLayer = HttpRouter.add(
       : true;
     const outcome = yield* handleManagerMcpMessage(
       toolService,
-      caller,
+      callerWithThread,
       body,
       schedules ? { schedules } : {},
       { assistantsEnabled },

@@ -23,6 +23,7 @@ import path from "node:path";
 
 import { lastAssistantAnswer } from "../appSdk/appTasks.ts";
 import { ServerConfig } from "../config.ts";
+import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -104,6 +105,8 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
     const config = yield* ServerConfig;
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
+    // Optional: wirings without the manager layer (tests).
+    const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
     const filePath = options.filePath ?? path.join(config.stateDir, "inbox.json");
 
     const initial = prune(yield* Effect.promise(() => readItems(filePath)), Date.now());
@@ -198,6 +201,16 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
         const shell = yield* threadShell(action.threadId);
         // Archived or deleted chats don't come back through the Inbox.
         if (shell === null || shell.archivedAt !== null) return;
+        // A chat an assistant handed work to: the assistant checks the result
+        // and reports it (its conversation's own item is the news), so this
+        // chat's raw "Finished" / "Stopped with an error" would only double it.
+        if (
+          (action.kind === "agent.done" || action.kind === "agent.error") &&
+          push !== null &&
+          (yield* push.reportsOutcomeOf(action.threadId))
+        ) {
+          return;
+        }
         let detail = action.detail;
         if (action.kind === "agent.done") {
           const thread = yield* projections

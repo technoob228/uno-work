@@ -657,6 +657,12 @@ export const ManagerProposedActionCreateThread = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: RuntimeMode,
+  /**
+   * The id the new thread gets, chosen when the proposal is filed so the
+   * caller learns it from the receipt (no list_threads round trip). Absent
+   * in proposals filed before 0.0.153: a fresh id then.
+   */
+  threadId: Schema.optional(ThreadId),
 });
 export type ManagerProposedActionCreateThread = typeof ManagerProposedActionCreateThread.Type;
 
@@ -826,6 +832,19 @@ export const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
 export const MANAGER_WAIT_MAX_THREADS = 20;
 export const MANAGER_WAIT_REPLY_MAX_CHARS = 4_000;
 export const MANAGER_WAIT_MAX_CHANGED_FILES = 50;
+/**
+ * The longest wait an assistant's own token gets: the assistant is a
+ * dispatcher that hands work off and ends its turn — the daemon tells it when
+ * a thread it started settles (`manager/assistantPush.ts`). Longer requests
+ * are cut to this.
+ */
+export const MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC = 30;
+/**
+ * Header the daemon adds to an assistant chat's own `uno-manager` server
+ * (HermesAdapter): which conversation makes the call, so the work it hands
+ * off is reported back to that conversation.
+ */
+export const MANAGER_CALLER_THREAD_HEADER = "x-uno-thread-id";
 
 const ManagerWaitTimeoutSec = PositiveInt.check(
   Schema.isLessThanOrEqualTo(MANAGER_WAIT_MAX_TIMEOUT_SEC),
@@ -906,6 +925,62 @@ export const ManagerWaitForThreadsResult = Schema.Struct({
 });
 export type ManagerWaitForThreadsResult = typeof ManagerWaitForThreadsResult.Type;
 
+// ===============================
+// work_status — the assistant's one-call digest
+// ===============================
+
+/** Threads in one work_status answer (the assistant's own first). */
+export const MANAGER_WORK_STATUS_MAX_THREADS = 15;
+/** The person's own threads in it: only ones active this recently. */
+export const MANAGER_WORK_STATUS_RECENT_HOURS = 24;
+
+/**
+ * - `running` — a turn is in flight;
+ * - `needs_you` — waits for the person (an approval or a question);
+ * - `done` / `failed` / `stopped` — the latest turn ended so;
+ * - `idle` — nothing ran yet.
+ */
+export const ManagerWorkStatusState = Schema.Literals([
+  "running",
+  "needs_you",
+  "done",
+  "failed",
+  "stopped",
+  "idle",
+]);
+export type ManagerWorkStatusState = typeof ManagerWorkStatusState.Type;
+
+export const ManagerWorkStatusThread = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  project: Schema.String,
+  /** `you`: this assistant started or steered it; `person`: the person's own chat. */
+  startedBy: Schema.Literals(["you", "person"]),
+  status: ManagerWorkStatusState,
+  /** For `running`: seconds since its turn started. */
+  runningForSec: Schema.NullOr(NonNegativeInt),
+  /** For a settled thread: when its latest turn ended. */
+  finishedAt: Schema.NullOr(IsoDateTime),
+  /** What it is doing / did last, a few words (its latest tool or task). */
+  step: Schema.NullOr(Schema.String),
+  /** The start of its last answer (untrusted, wrapped). */
+  lastAnswer: Schema.NullOr(Schema.String),
+  /** The daemon has news about it you have not received yet (it is on its way). */
+  reportPending: Schema.Boolean,
+});
+export type ManagerWorkStatusThread = typeof ManagerWorkStatusThread.Type;
+
+export const ManagerWorkStatusInput = Schema.Struct({});
+export type ManagerWorkStatusInput = typeof ManagerWorkStatusInput.Type;
+
+export const ManagerWorkStatusResult = Schema.Struct({
+  now: IsoDateTime,
+  threads: Schema.Array(ManagerWorkStatusThread),
+  /** Threads left out to keep the answer short. */
+  omitted: NonNegativeInt,
+});
+export type ManagerWorkStatusResult = typeof ManagerWorkStatusResult.Type;
+
 export const ManagerListPendingApprovalsResult = Schema.Struct({
   approvals: Schema.Array(ManagerPendingApprovalSummary),
 });
@@ -961,6 +1036,8 @@ export const ManagerWriteReceipt = Schema.Union([
     status: Schema.Literal("executed"),
     proposalId: ManagerProposalId,
     commandIds: Schema.Array(CommandId),
+    /** create_thread: the new thread. */
+    threadId: Schema.optional(ThreadId),
   }),
 ]);
 export type ManagerWriteReceipt = typeof ManagerWriteReceipt.Type;

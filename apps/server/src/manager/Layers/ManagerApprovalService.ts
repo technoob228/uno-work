@@ -97,7 +97,8 @@ const makeManagerApprovalService = Effect.gen(function* () {
           // an explicit command before starting the first turn.
           const createCommandId = makeCommandId();
           const turnCommandId = makeCommandId();
-          const threadId = ThreadId.make(crypto.randomUUID());
+          // The id the receipt already named (proposals filed before 0.0.153: fresh).
+          const threadId = action.threadId ?? ThreadId.make(crypto.randomUUID());
           yield* orchestrationEngine.dispatch(
             {
               type: "thread.create",

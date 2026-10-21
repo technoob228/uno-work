@@ -468,12 +468,11 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // orchestration/persistence layers provided further down this pipe so it
   // shares the same engine and SqlClient instances.
   Layer.provideMerge(
-    Layer.mergeAll(
-      ManagerLayerLive,
-      // Inbox: agents' and apps' news for the person. Below the App SDK (apps
-      // post through it) and above orchestration (it listens to the events).
-      InboxServiceLive,
-    ),
+    // Inbox: agents' and apps' news for the person. Below the App SDK (apps
+    // post through it) and above orchestration (it listens to the events).
+    // Above the manager layer: a chat whose assistant reports its outcome
+    // gets no "Finished" item of its own (AssistantPushService).
+    InboxServiceLive.pipe(Layer.provideMerge(ManagerLayerLive)),
   ),
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),

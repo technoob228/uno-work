@@ -30,6 +30,7 @@ import {
   trackDomainEvent,
   type NotifyTrackerState,
 } from "../connectorNotify.ts";
+import { AssistantPushService } from "../Services/AssistantPush.ts";
 import { ConnectorNotifyService } from "../Services/ConnectorNotify.ts";
 
 const makeConnectorEventsForwarder = Effect.gen(function* () {
@@ -37,6 +38,8 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const notifyService = yield* ConnectorNotifyService;
   const pendingReplies = yield* ManagerConnectorPendingReplyRepository;
+  // Optional: wirings without it (tests) keep every notice.
+  const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
 
   const trackerRef = yield* Ref.make<NotifyTrackerState>(INITIAL_NOTIFY_TRACKER_STATE);
   const sentAtRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
@@ -48,6 +51,17 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
         return [next.notification, next.state] as const;
       });
       if (notification === null) {
+        return;
+      }
+      // A chat an assistant handed work to: the assistant checks the result
+      // and reports it to the person itself (assistantPush.ts). Its raw
+      // "completed" / "failed" would double that; an approval request still
+      // goes out here (it is actionable with /approve right in that chat).
+      if (
+        notification.kind !== "approval.requested" &&
+        push !== null &&
+        (yield* push.reportsOutcomeOf(notification.threadId))
+      ) {
         return;
       }
       const shell = yield* projectionSnapshotQuery

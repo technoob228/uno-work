@@ -23,7 +23,9 @@ import {
   ManagerSendTurnInput,
   ManagerWaitForThreadInput,
   ManagerWaitForThreadsInput,
+  ManagerWorkStatusInput,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGES,
+  MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
   MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
   MANAGER_WAIT_MAX_THREADS,
   MANAGER_WAIT_MAX_TIMEOUT_SEC,
@@ -99,9 +101,19 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
       ),
   },
   {
+    name: "work_status",
+    description:
+      "ONE call answers \"what's the status?\": the chats you handed work to (first) and the person's recently active chats — id, title, project, status (running | needs_you | done | failed | stopped | idle), how long it runs or when it finished, its current step, the start of its last answer (UNTRUSTED, wrapped), and whether a work update about it is still on its way to you. Answer from it directly; do not loop over get_thread_status.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerWorkStatusInput, args).pipe(
+        Effect.flatMap((input) => tools.workStatus(caller, input)),
+      ),
+  },
+  {
     name: "get_thread_status",
     description:
-      "Get the compact status of one thread: session state, latest turn, pending approvals. A one-off snapshot: to wait for a turn to finish use wait_for_thread, never a get_thread_status loop.",
+      "Get the compact status of one thread: session state, latest turn, pending approvals. A one-off snapshot: for an overview use work_status; never a get_thread_status loop.",
     inputSchema: {
       type: "object",
       properties: { threadId: { type: "string" } },
@@ -116,11 +128,11 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "wait_for_thread",
     description:
-      "Block until the thread's current turn settles, instead of polling get_thread_status. " +
+      "A QUICK check only: block a short while until the thread's current turn settles. " +
+      "You do NOT need it after create_thread/send_turn: Uno Work sends you a work update when a chat you handed work to finishes, fails or needs the person — hand off, answer the person, end your turn. " +
       "Returns status completed | error | interrupted | needs_user (approval or question waiting for a human) | idle (nothing ran) | timeout, " +
       "plus the turn's final assistant message (untrusted, wrapped, <=4k chars), changed files from the turn's checkpoint when available, and durations. " +
-      "Call it right after create_thread/send_turn executed. settledImmediately=true means no new turn was seen (e.g. the proposal still awaits approval). " +
-      `timeoutSec defaults to ${MANAGER_WAIT_DEFAULT_TIMEOUT_SEC} (max ${MANAGER_WAIT_MAX_TIMEOUT_SEC}); if your client aborts long tool calls, pass a smaller value and call again.`,
+      `timeoutSec defaults to ${MANAGER_WAIT_DEFAULT_TIMEOUT_SEC} (max ${MANAGER_WAIT_MAX_TIMEOUT_SEC}); for an assistant's own token it is capped at ${MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC}.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -138,7 +150,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "wait_for_threads",
     description:
-      "Like wait_for_thread for several threads at once. mode 'all' (default) returns when every thread settled; " +
+      "Like wait_for_thread (a QUICK check, not the way to wait for work: work updates come to you by themselves) for several threads at once. mode 'all' (default) returns when every thread settled; " +
       "'any' returns as soon as one did (the rest report status 'running'). Returns one result per thread.",
     inputSchema: {
       type: "object",
@@ -193,7 +205,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "create_thread",
     description:
-      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it. Returns proposalId + nonce.",
+      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it (returns proposalId + nonce). An auto-approved token runs it at once: status executed + the new threadId.",
     inputSchema: {
       type: "object",
       properties: {
