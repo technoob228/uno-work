@@ -41,6 +41,7 @@ import {
   GitBranchIcon,
   HouseIcon,
   MessageCircleQuestionIcon,
+  MoreHorizontalIcon,
   PinIcon,
   PlusIcon,
   ShieldQuestionIcon,
@@ -197,6 +198,7 @@ import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
+import { ProjectRenameDialog, type ProjectRenameTarget } from "./sidebar/ProjectRenameDialog";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { setThreadAgentsClosed } from "../agentsAccess";
 import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
@@ -658,13 +660,27 @@ function SidebarDProjectRow(props: {
   mark: DRowMark;
   onToggle: () => void;
   onNewChat: (() => void) | null;
+  /** The project's menu (Rename, Copy path) at a point; null for the Home folder. */
+  onMenu?: ((position: { x: number; y: number }) => void) | null;
+  /** Double-click on the name renames the project. */
+  onRename?: (() => void) | null;
 }) {
+  const { onMenu, onRename } = props;
   return (
     <li className="group/project list-none" data-testid="sidebar-project-row">
       <div className="flex h-8 w-full items-center rounded-md transition-colors hover:bg-sidebar-row-hover">
         <button
           type="button"
           onClick={props.onToggle}
+          {...(onMenu
+            ? {
+                onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => {
+                  event.preventDefault();
+                  onMenu({ x: event.clientX, y: event.clientY });
+                },
+              }
+            : {})}
+          {...(onRename ? { onDoubleClick: () => onRename() } : {})}
           aria-expanded={!props.folded}
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-2.5 text-left text-sm text-sidebar-foreground/90 outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -693,6 +709,23 @@ function SidebarDProjectRow(props: {
             </span>
           ) : null}
         </button>
+        {onMenu ? (
+          <button
+            type="button"
+            aria-label={`More for ${props.name}`}
+            data-testid="sidebar-project-row-menu"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              onMenu({ x: rect.left, y: rect.bottom + 4 });
+            }}
+            className={cn(
+              "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100",
+              !props.onNewChat && "mr-1",
+            )}
+          >
+            <MoreHorizontalIcon className="size-3.5" />
+          </button>
+        ) : null}
         {props.onNewChat ? (
           <Tooltip>
             <TooltipTrigger
@@ -2320,7 +2353,7 @@ export default function Sidebar() {
         ? (projects.find((project) => project.environmentId === here && dIsHomeProject(project)) ??
           null)
         : (members.find((member) => member.environmentId === here) ?? members[0] ?? null);
-      return { name: dProjectName(key), isHome, computers, newChatProject };
+      return { name: dProjectName(key), isHome, computers, newChatProject, members };
     },
     [dComputerPicks, dIsHomeProject, dProjectInfo, dProjectName, dThisComputer, projects],
   );
@@ -2852,6 +2885,7 @@ export default function Sidebar() {
     setSnoozePickerTarget(null);
   }, [attemptSnooze, snoozePickerTarget, snoozePickerWake]);
   const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
+  const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRenameTarget | null>(null);
 
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) =>
@@ -3578,6 +3612,10 @@ export default function Sidebar() {
 
   const sharedDialogs = (
     <>
+      <ProjectRenameDialog
+        target={projectRenameTarget}
+        onClose={() => setProjectRenameTarget(null)}
+      />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}
@@ -3665,6 +3703,58 @@ export default function Sidebar() {
       envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
     });
   };
+  const toRenameTarget = (project: Project): ProjectRenameTarget => ({
+    id: project.id,
+    environmentId: project.environmentId,
+    name: project.name,
+    cwd: project.cwd,
+    environmentLabel: resolveEnvironmentLabel(project.environmentId),
+  });
+  const dRenameProject = (project: Project | null) =>
+    project ? () => setProjectRenameTarget(toRenameTarget(project)) : null;
+  // A project row's menu. A project on several computers is one row: each
+  // action then asks which computer's entry it is about.
+  const dProjectMenu =
+    (members: ReadonlyArray<Project>) =>
+    (position: { x: number; y: number }): void => {
+      const api = readLocalApi();
+      if (!api) return;
+      const handlers = new Map<string, () => void>();
+      const actions = [
+        {
+          id: "rename",
+          label: "Rename project",
+          run: (member: Project) => setProjectRenameTarget(toRenameTarget(member)),
+        },
+        {
+          id: "copy-path",
+          label: "Copy path",
+          run: (member: Project) => copyPathToClipboard(member.cwd, { path: member.cwd }),
+        },
+      ];
+      const items: ContextMenuItem<string>[] = actions.map((action) => {
+        if (members.length === 1) {
+          const only = members[0]!;
+          handlers.set(action.id, () => action.run(only));
+          return { id: action.id, label: action.label };
+        }
+        return {
+          id: `${action.id}:submenu`,
+          label: action.label,
+          children: members.map((member) => {
+            const id = `${action.id}:${member.environmentId}:${member.id}`;
+            handlers.set(id, () => action.run(member));
+            return {
+              id,
+              label: resolveEnvironmentLabel(member.environmentId) ?? member.environmentId,
+            };
+          }),
+        };
+      });
+      void api.contextMenu.show(items, position).then((clicked) => {
+        if (clicked) handlers.get(clicked)?.();
+      });
+    };
   const dChatRows = (
     key: string,
     chats: ReadonlyArray<SidebarThreadSummary>,
@@ -3759,6 +3849,14 @@ export default function Sidebar() {
               )}
               onToggle={() => toggleProjectFolded(node.path)}
               onNewChat={block.newChatProject ? dNewChatIn(block.newChatProject) : null}
+              onMenu={
+                block.isHome || block.members.length === 0 ? null : dProjectMenu(block.members)
+              }
+              onRename={
+                block.isHome
+                  ? null
+                  : dRenameProject(block.newChatProject ?? block.members[0] ?? null)
+              }
             />
             {foldedChats
               ? dChatRows(node.path, foldedChats, undefined, {
@@ -3829,6 +3927,8 @@ export default function Sidebar() {
                 )}
                 onToggle={() => toggleProjectFolded(group.key)}
                 onNewChat={project ? dNewChatIn(project) : null}
+                onMenu={project ? dProjectMenu([project]) : null}
+                onRename={dRenameProject(project)}
               />
               {folded ? null : (
                 <>
