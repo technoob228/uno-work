@@ -56,7 +56,7 @@ import { QRCodeSvg } from "../../ui/qr-code";
 import { toastManager } from "../../ui/toast";
 import { SlackBrandMark, TelegramMark } from "../brandMarks";
 import { ConnectedBadge, SetupHeading, SetupNote, SetupShell, SoonBadge } from "../SetupShell";
-import { SlackGuide } from "../SlackGuide";
+import { SLACK_NEW_APP_URL, SlackGuide } from "../SlackGuide";
 import { SlackChannelsPicker } from "../../assistants/SlackChannelsPicker";
 import { useAssistantsAvailability } from "../../assistants/useAssistants";
 import { useSetupNavigation } from "../useSetupNavigation";
@@ -480,6 +480,14 @@ export function AssistantSlackPanel({
 
 // ── Slack ──────────────────────────────────────────────────────────────
 
+/**
+ * When a bot of your own is the better choice, and its catch: Socket Mode is
+ * a connection from this computer, so nothing wakes a sleeping cloud computer
+ * for it (only Uno's app goes through the console, which wakes the computer).
+ */
+export const OWN_SLACK_BOT_LINE =
+  "Your own bot is for your own name and picture, or a workspace already connected to another Uno account. It answers only while this computer is awake.";
+
 /** Slack opened in the system browser (desktop app): how long to keep checking. */
 const EXTERNAL_INSTALL_WAIT_MS = 3 * 60_000;
 
@@ -657,21 +665,25 @@ function SlackCard({
         {install.isFetched && !available ? <SoonBadge /> : null}
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-      {ownApp || (install.isFetched && !available) ? (
-        ownApp ? (
-          <div className="rounded-xl border border-border p-3">
-            <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
-          </div>
-        ) : (
+      {ownApp ? (
+        <div className="rounded-xl border border-border p-3">
+          <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1" data-testid="setup-slack-own-bot">
           <button
             type="button"
             className="self-start text-xs text-primary hover:underline"
-            onClick={() => setOwnApp(true)}
+            onClick={() => {
+              window.open(SLACK_NEW_APP_URL, "_blank", "noopener,noreferrer");
+              setOwnApp(true);
+            }}
           >
-            Connect your own Slack app now
+            Create your own Slack bot
           </button>
-        )
-      ) : null}
+          <p className="text-xs text-muted-foreground">{OWN_SLACK_BOT_LINE}</p>
+        </div>
+      )}
     </div>
   );
 }
