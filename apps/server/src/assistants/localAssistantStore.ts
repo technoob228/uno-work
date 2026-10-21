@@ -31,7 +31,10 @@ import {
   ASSISTANT_PROJECT_ID,
   isAssistantProjectId,
   type AssistantAppLevel,
+  type AssistantPreset,
+  type ManagerScope,
 } from "@t3tools/contracts";
+import { capAppLevel, type AssistantTokenAccess } from "@t3tools/shared/assistantPreset";
 
 /** How long a deleted assistant is kept (same as an assistant computer). */
 export const DELETED_ASSISTANT_KEEP_DAYS = 7;
@@ -138,12 +141,77 @@ export function connectorAccessDecision(
   access: AppAccess,
   provider: string,
   toolChangesThings: boolean,
+  /** The assistant's preset caps the level (Observer only reads). Absent: Full. */
+  preset: AssistantPreset = "full",
 ): "allow" | "none" | "read-only" {
-  if (!access.restricted) return "allow";
-  const level = access.permissions[provider] ?? "write";
+  const picked = access.restricted ? (access.permissions[provider] ?? "write") : "write";
+  const level = capAppLevel(picked, preset);
   if (level === "none") return "none";
   if (level === "read" && toolChangesThings) return "read-only";
   return "allow";
+}
+
+// ── What it may do (its preset, as token access) ──────────────────────
+
+/**
+ * The assistant's access (preset → scopes, projects, autoApprove), kept by
+ * the daemon so a new token gets it back: tokens are re-issued when the
+ * daemon port changes, on a cloned computer and on Restore. The live copy is
+ * the token itself; this file is what a fresh token starts from. Not in the
+ * assistant's folder, which the assistant can write.
+ */
+const accessFile = (stateDir: string, projectId: string) =>
+  nodePath.join(storeDir(stateDir), encodeURIComponent(projectId), "access.json");
+
+const SCOPES: ReadonlySet<string> = new Set([
+  "threads:read",
+  "threads:write",
+  "threads:approve",
+  "manager:memory",
+]);
+
+export function normalizeTokenAccess(raw: unknown): AssistantTokenAccess | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.scopes)) return null;
+  const scopes = record.scopes.filter(
+    (scope): scope is ManagerScope => typeof scope === "string" && SCOPES.has(scope),
+  );
+  const allowlist = record.projectAllowlist;
+  const projectAllowlist =
+    allowlist === "all"
+      ? ("all" as const)
+      : Array.isArray(allowlist)
+        ? allowlist.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : null;
+  if (projectAllowlist === null) return null;
+  return {
+    scopes,
+    projectAllowlist: projectAllowlist as AssistantTokenAccess["projectAllowlist"],
+    autoApprove: record.autoApprove === true,
+  };
+}
+
+export async function readStoredAccess(
+  stateDir: string,
+  projectId: string,
+): Promise<AssistantTokenAccess | null> {
+  return normalizeTokenAccess(await readJson<unknown>(accessFile(stateDir, projectId), null));
+}
+
+export function writeStoredAccess(
+  stateDir: string,
+  projectId: string,
+  access: AssistantTokenAccess,
+): Promise<void> {
+  const file = accessFile(stateDir, projectId);
+  return serialized(file, () =>
+    writeJson(file, {
+      scopes: access.scopes,
+      projectAllowlist: access.projectAllowlist,
+      autoApprove: access.autoApprove,
+    }),
+  );
 }
 
 // ── Which assistant started which chat ────────────────────────────────

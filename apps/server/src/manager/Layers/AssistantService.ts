@@ -24,6 +24,7 @@ import {
   pickAssistantChatToMigrate,
 } from "@t3tools/shared/assistantChat";
 import { rebaseEdit, ROUTING_PERSON_RULE } from "@t3tools/shared/assistantMemory";
+import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import {
   mergeInstructions,
   planInstructions,
@@ -50,6 +51,7 @@ import * as os from "node:os";
 
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
 import { resolveAssistantsDir } from "../../assistants/assistantsDir.ts";
+import { accessForNewToken } from "../../assistants/assistantAccess.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
@@ -68,6 +70,7 @@ import {
   readDeletedAssistants,
   readProfile,
   writeProfile,
+  writeStoredAccess,
   type DeletedAssistantRecord,
 } from "../../assistants/localAssistantStore.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -573,12 +576,9 @@ const makeManagerAssistantService = Effect.gen(function* () {
             revokedAt: new Date().toISOString(),
           });
         }
-        const issued = yield* tokenAuth.issueToken({
-          label,
-          scopes: ["threads:read", "threads:write", "threads:approve"],
-          projectAllowlist: "all",
-          autoApprove: true,
-        });
+        // Its preset survives a re-issue (port change, clone, Restore).
+        const access = yield* accessForNewToken(config.stateDir, projectId, existingToken);
+        const issued = yield* tokenAuth.issueToken({ label, ...access });
         const mcpConfig = {
           mcpServers: {
             "uno-manager": {
@@ -663,6 +663,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
     name,
     emoji,
     template,
+    access,
   }) =>
     Effect.gen(function* () {
       const base = slugifyAssistantName(name);
@@ -673,6 +674,16 @@ const makeManagerAssistantService = Effect.gen(function* () {
       if (Option.isSome(existing)) {
         candidate = ProjectId.make(
           `${ASSISTANT_PROJECT_ID_PREFIX}${base}-${crypto.randomUUID().slice(0, 6)}`,
+        );
+      }
+      if (access !== undefined) {
+        // Before the first token: it is issued with this preset.
+        yield* Effect.promise(() =>
+          writeStoredAccess(
+            config.stateDir,
+            candidate,
+            presetTokenAccess(access.preset, access.projects, candidate),
+          ),
         );
       }
       yield* ensureAssistant({ projectId: candidate, title: name });

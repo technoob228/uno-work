@@ -105,6 +105,10 @@ export class UnoWorkToolError extends Data.TaggedError("UnoWorkToolError")<{
 
 const toolError = (message: string) => new UnoWorkToolError({ message });
 
+/** What an Observer's chat reads when it reaches for a tool that changes something. */
+export const observerRefusal = (assistant: string) =>
+  `${assistant} is an Observer: it reads and reports, and changes nothing. Tell the person what you would change; they can give ${assistant} more access on its page in Uno Work. Don't retry or work around it.`;
+
 /** Any failure with a message → a tool error the model can read. */
 const asToolError = <A, E extends { readonly message: string }, R>(
   effect: Effect.Effect<A, E, R>,
@@ -136,6 +140,12 @@ export interface BridgeReply {
 
 export interface UnoWorkToolDeps {
   readonly caller: UnoWorkCaller;
+  /**
+   * The calling chat's assistant preset refuses tools that change things
+   * (an Observer's chats): the text the model reads, or null. Absent: no
+   * assistant rules.
+   */
+  readonly presetRefusal?: Effect.Effect<string | null>;
   readonly home: string;
   /** `~/.uno/apps` (absolute). */
   readonly manifestDir: string;
@@ -3274,6 +3284,10 @@ export function runUnoWorkTool(
       return yield* toolError(`Invalid arguments for ${tool.name}: ${problem}`);
     }
     const level = toolLevel(tool, args);
+    if (level !== "safe" && deps.presetRefusal) {
+      const refusal = yield* deps.presetRefusal;
+      if (refusal !== null) return yield* toolError(refusal);
+    }
     if (tool.prepare) yield* tool.prepare(deps, args);
     if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not

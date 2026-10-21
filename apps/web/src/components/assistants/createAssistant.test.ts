@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { EMPTY_SETUP_PROGRESS } from "../setup/setupModel";
@@ -157,6 +157,18 @@ describe("createLocalAssistant (on this computer, the default)", () => {
         ),
       }),
     );
+  });
+
+  it("creates it with its preset when one was picked (Helper on one project)", async () => {
+    const { deps: d } = localDeps();
+    const access = { preset: "helper" as const, projects: ["project-site" as ProjectId] };
+    await createLocalAssistant({ ...plan, access }, d);
+    expect(d.createAssistant).toHaveBeenCalledWith({
+      name: "Ana",
+      emoji: plan.emoji,
+      template: "marketing",
+      access,
+    });
   });
 
   it("explains instead of failing when this computer can't wake it or keep its apps", async () => {

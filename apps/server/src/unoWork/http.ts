@@ -55,12 +55,10 @@ import { ManagerConnectorRepository } from "../persistence/Services/ManagerConne
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
-import {
-  connectorAccessDecision,
-  owningAssistant,
-  readAppAccess,
-  readStartedChats,
-} from "../assistants/localAssistantStore.ts";
+import { connectorAccessDecision, readAppAccess } from "../assistants/localAssistantStore.ts";
+import { assistantOfThread } from "../assistants/assistantAccess.ts";
+import { assistantPresetAllows } from "@t3tools/shared/assistantPreset";
+import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
   buildUnoWorkGuide,
   isUnoWorkGuideTopic,
@@ -71,6 +69,7 @@ import {
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
   buildUnoWorkMcpServer,
+  observerRefusal,
   UnoWorkToolError,
   type AssistantConnectStatus,
   type BridgeReply,
@@ -256,6 +255,27 @@ const makeDeps = (input: {
     const shell = yield* projections
       .getThreadShellById(ThreadId.make(input.threadId))
       .pipe(Effect.orElseSucceed(() => Option.none()));
+
+    // The assistant this chat belongs to (its preset), looked up once and
+    // only when a tool needs it. Unreadable: the person's own chat rules.
+    const tokenRepository = Option.getOrNull(
+      yield* Effect.serviceOption(ManagerCapabilityTokenRepository),
+    );
+    const callerAssistant = yield* Effect.cached(
+      Effect.gen(function* () {
+        if (tokenRepository === null) return null;
+        const snapshot = yield* projections.getShellSnapshot();
+        const owner = yield* assistantOfThread(
+          { tokens: tokenRepository, stateDir: serverConfig.stateDir, threads: snapshot.threads },
+          input.threadId,
+        );
+        if (owner === null) return null;
+        const title =
+          snapshot.projects.find((project) => project.id === owner.projectId)?.title ??
+          "This assistant";
+        return { ...owner, title };
+      }).pipe(Effect.orElseSucceed(() => null)),
+    );
     const thread = Option.getOrNull(shell);
     const home = os.homedir();
     const manifestDir = resolveManifestDir(home);
@@ -268,6 +288,14 @@ const makeDeps = (input: {
     );
 
     const deps: UnoWorkToolDeps = {
+      // An Observer changes nothing: its chats get no change tools at all.
+      presetRefusal: callerAssistant.pipe(
+        Effect.map((owner) =>
+          owner === null || assistantPresetAllows(owner.preset, "change-things")
+            ? null
+            : observerRefusal(owner.title),
+        ),
+      ),
       caller: {
         threadId: input.threadId,
         threadTitle: thread?.title ?? "Chat",
@@ -542,25 +570,20 @@ const makeDeps = (input: {
                 Effect.gen(function* () {
                   // Whose chat is this: an assistant's (its workspace, a chat
                   // it started, a chat one of those started) or the person's.
-                  const snapshot = yield* projections.getShellSnapshot();
-                  const byId = new Map(
-                    snapshot.threads.map((entry) => [entry.id as string, entry]),
-                  );
-                  const self = byId.get(input.threadId);
-                  if (self === undefined) return { decision: "allow" as const, assistant: null };
-                  const startedBy = yield* Effect.promise(() =>
-                    readStartedChats(serverConfig.stateDir),
-                  );
-                  const owner = owningAssistant(self, (id) => byId.get(id), startedBy);
+                  const owner = yield* callerAssistant;
                   if (owner === null) return { decision: "allow" as const, assistant: null };
                   const access = yield* Effect.promise(() =>
-                    readAppAccess(serverConfig.stateDir, owner),
+                    readAppAccess(serverConfig.stateDir, owner.projectId),
                   );
-                  const title =
-                    snapshot.projects.find((project) => project.id === owner)?.title ?? null;
                   return {
-                    decision: connectorAccessDecision(access, provider, changesThings),
-                    assistant: title,
+                    // Its preset caps the level: an Observer only reads.
+                    decision: connectorAccessDecision(
+                      access,
+                      provider,
+                      changesThings,
+                      owner.preset,
+                    ),
+                    assistant: owner.title,
                   };
                 }).pipe(
                   // Can't tell: the person's own chat rules apply (Ask / Allow).

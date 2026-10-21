@@ -16,6 +16,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
 import { describe } from "vitest";
 
+import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
@@ -119,6 +120,8 @@ function makeFixture(options?: {
   readonly dispatchError?: OrchestrationDispatchError;
   readonly onSleep?: (threads: Map<string, OrchestrationThreadShell>) => void;
   readonly assistantAllowlist?: "all" | ReadonlyArray<string>;
+  /** Whose chat the caller is (assistants/assistantAccess.ts); wins over assistantAllowlist. */
+  readonly callerAssistant?: (caller: OrchestrationThreadShell) => AssistantAccessView | null;
   /** Thread every project inherits its modes from (default: none). */
   readonly inheritModesFrom?: ThreadId;
 }): Fixture {
@@ -184,9 +187,23 @@ function makeFixture(options?: {
         Effect.succeed(Option.fromNullishOr(options?.inheritModesFrom)),
     },
     getAgentThreadsScope: Effect.succeed(options?.scope ?? "own-project"),
-    ...(options?.assistantAllowlist !== undefined
-      ? { getAssistantProjectAllowlist: Effect.succeed(options.assistantAllowlist) }
-      : {}),
+    ...(options?.callerAssistant !== undefined
+      ? { getCallerAssistant: (caller) => Effect.succeed(options.callerAssistant!(caller)) }
+      : options?.assistantAllowlist !== undefined
+        ? {
+            // A Full assistant: a chat in an assistant workspace is its conversation.
+            getCallerAssistant: (caller) =>
+              Effect.succeed(
+                caller.projectId.startsWith("assistant-")
+                  ? {
+                      projectId: caller.projectId,
+                      preset: "full" as const,
+                      allowlist: options.assistantAllowlist as "all" | ReadonlyArray<ProjectId>,
+                    }
+                  : null,
+              ),
+          }
+        : {}),
     getProviders: Effect.succeed(providers),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
@@ -1138,5 +1155,146 @@ describe("agent threads bridge: computerId (assistants MVP)", () => {
       assert.match(String(body(other).message), /not allowed yet/);
       assert.strictEqual(dispatched.length, 2);
     }),
+  );
+});
+
+describe("agent threads bridge: assistant presets (21.10)", () => {
+  const SCOUT = "assistant-scout" as ProjectId;
+  const THIRD_PROJECT = "project-third" as ProjectId;
+  const SPAWNED = "thread-spawned" as ThreadId;
+  const ASKING = "thread-asking" as ThreadId;
+  const presetFixture = (
+    preset: AssistantAccessView["preset"],
+    allowlist: AssistantAccessView["allowlist"] = [OWN_PROJECT],
+    scope: AgentThreadsScope = "own-project",
+  ) =>
+    makeFixture({
+      scope,
+      // The caller is Scout's conversation (its workspace) or a chat it started.
+      callerAssistant: (caller) =>
+        caller.projectId === SCOUT || caller.id === SPAWNED
+          ? { projectId: SCOUT, preset, allowlist }
+          : null,
+      projects: [
+        projectShell(SCOUT),
+        projectShell(OWN_PROJECT),
+        projectShell(OTHER_PROJECT),
+        projectShell(THIRD_PROJECT),
+      ],
+      threads: [
+        threadShell(CALLER, { projectId: SCOUT, runtimeMode: "full-access" }),
+        threadShell(SPAWNED, { projectId: OWN_PROJECT, runtimeMode: "approval-required" }),
+        threadShell(ASKING, { projectId: OWN_PROJECT, runtimeMode: "approval-required" }),
+        threadShell("thread-free" as ThreadId, {
+          projectId: OWN_PROJECT,
+          runtimeMode: "full-access",
+        }),
+        threadShell("thread-in-other" as ThreadId, { projectId: OTHER_PROJECT }),
+      ],
+    });
+
+  it.effect("Observer lists and reads its projects, but can't start or write in chats", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = presetFixture("observer");
+      const list = yield* handlers.listThreads(scoped(), { scope: "all" });
+      assert.strictEqual(list.status, 200);
+      const ids = new Set(
+        (body(list).threads as ReadonlyArray<{ id: string }>).map((entry) => entry.id),
+      );
+      assert.ok(ids.has(ASKING));
+      assert.ok(!ids.has("thread-in-other"));
+      const read = yield* handlers.getThread(scoped(), {
+        threadId: ASKING,
+        limit: null,
+        waitMs: null,
+      });
+      assert.strictEqual(read.status, 200);
+
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix it",
+        projectId: OWN_PROJECT,
+      });
+      assert.strictEqual(created.status, 403);
+      assert.strictEqual(body(created).error, "assistant_preset_denied");
+      const sent = yield* handlers.sendMessage(scoped(), {
+        threadId: ASKING,
+        body: { text: "go on" },
+      });
+      assert.strictEqual(sent.status, 403);
+      assert.strictEqual(body(sent).error, "assistant_preset_denied");
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("Helper starts chats only in its projects, and they ask (approval-required)", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = presetFixture("helper");
+      const outside = yield* handlers.createThread(scoped(), {
+        text: "Fix it",
+        projectId: OTHER_PROJECT,
+      });
+      assert.strictEqual(outside.status, 403);
+      assert.strictEqual(body(outside).error, "project_not_allowed");
+
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix it",
+        projectId: OWN_PROJECT,
+      });
+      assert.strictEqual(created.status, 200);
+      const create = dispatched.find((entry) => entry.command.type === "thread.create")!;
+      assert.strictEqual(
+        create.command.type === "thread.create" && create.command.runtimeMode,
+        "approval-required",
+      );
+    }),
+  );
+
+  it.effect("Helper writes in asking chats, not in freer ones (Uno's included)", () =>
+    Effect.gen(function* () {
+      const { handlers } = presetFixture("helper");
+      const ok = yield* handlers.sendMessage(scoped(), { threadId: ASKING, body: { text: "hi" } });
+      assert.strictEqual(ok.status, 200);
+      const wider = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-free",
+        body: { text: "hi" },
+      });
+      assert.strictEqual(wider.status, 403);
+      assert.strictEqual(body(wider).error, "runtime_mode_escalation");
+    }),
+  );
+
+  it.effect("Full reaches its projects from its conversation (no global setting needed)", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = presetFixture("full", "all");
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Ship it",
+        projectId: THIRD_PROJECT,
+      });
+      assert.strictEqual(created.status, 200);
+      const create = dispatched.find((entry) => entry.command.type === "thread.create")!;
+      // The project's own mode (none here → the fallback), never capped by the preset.
+      assert.notStrictEqual(create, undefined);
+      const wide = yield* handlers.sendMessage(scoped(), {
+        threadId: "thread-free",
+        body: { text: "hi" },
+      });
+      assert.strictEqual(wide.status, 200);
+    }),
+  );
+
+  it.effect(
+    "a chat an assistant started keeps the person's setting, narrowed to its projects",
+    () =>
+      Effect.gen(function* () {
+        // The person allows any project, Scout only OWN_PROJECT: the child can't leave it.
+        const { handlers } = presetFixture("full", [OWN_PROJECT], "any-project");
+        const outside = yield* handlers.createThread(scoped(SPAWNED), {
+          text: "Look there",
+          projectId: OTHER_PROJECT,
+        });
+        assert.strictEqual(outside.status, 403);
+        const inside = yield* handlers.createThread(scoped(SPAWNED), { text: "Look here" });
+        assert.strictEqual(inside.status, 200);
+      }),
   );
 });
