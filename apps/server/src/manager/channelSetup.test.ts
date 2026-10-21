@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, beforeEach, expect, it, vi } from "@effect/vitest";
 import {
@@ -29,7 +31,12 @@ import {
   connectSharedTelegram,
   readSlackInstall,
   assignSlackChannelsFor,
+  forgetDeviceSlack,
+  isSlackRelayToken,
+  parseConsoleSlackInstall,
+  relayMatchesFingerprint,
   routeSlackThroughHolder,
+  syncDeviceSlackInstall,
   saveAssistantOwnBot,
   slackRelayHolderFor,
   startSlackInstall,
@@ -779,6 +786,219 @@ it.layer(NodeServices.layer)("Slack via Uno's app", (it) => {
         ok: false,
         failure: { status: 502, error: "console_error" },
       });
+    }).pipe(Effect.provide(slackLayer(false))),
+  );
+});
+
+it.layer(NodeServices.layer)("Slack via Uno's app on the desktop (a laptop)", (it) => {
+  const installed = parseConsoleSlackInstall({
+    available: true,
+    installed: true,
+    team_name: "Acme",
+    bot_user_name: "uno",
+    installer_user_id: "UINST",
+    device: true,
+  });
+
+  it("reads the console's answer and recognises relay tokens", () => {
+    expect(installed).toEqual({
+      available: true,
+      installed: true,
+      teamName: "Acme",
+      botUserName: "uno",
+      installerUserId: "UINST",
+      relayFingerprint: null,
+    });
+    expect(parseConsoleSlackInstall(null)).toEqual({
+      available: false,
+      installed: false,
+      teamName: null,
+      botUserName: null,
+      installerUserId: null,
+      relayFingerprint: null,
+    });
+    expect(isSlackRelayToken(SLR)).toBe(true);
+    expect(isSlackRelayToken("xoxb-own")).toBe(false);
+    expect(isSlackRelayToken(`${SLR}x`)).toBe(false);
+  });
+
+  it.effect("asks for a relay token, then stores it and opens the installer's DM", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: "xoxb-own",
+          appToken: "xapp-own",
+          allowedChannelIds: ["C_KEEP"],
+          enabled: false,
+          defaultModelSelection: null,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      const calls = installFetch([
+        route("POST", `/api/v1/work-relay/slack/${SLR}/api/conversations.open`, () =>
+          json({ ok: true, channel: { id: "DINST" } }),
+        ),
+      ]);
+
+      // No token yet: the interface has to bring one; the own-token row stays.
+      const first = yield* syncDeviceSlackInstall({
+        projectId,
+        identity: null,
+        install: installed,
+        relayToken: null,
+      });
+      expect(first).toMatchObject({
+        ok: true,
+        value: { installed: true, connected: false, needsRelay: true, installerDmReady: false },
+      });
+      expect((yield* readSlackRow)?.botToken).toBe("xoxb-own");
+      // This server never calls the console itself on a laptop.
+      expect(calls.some((call) => call.url.includes("/api/v1/boxes/"))).toBe(false);
+
+      const second = yield* syncDeviceSlackInstall({
+        projectId,
+        identity: null,
+        install: installed,
+        relayToken: SLR,
+      });
+      expect(second).toEqual({
+        ok: true,
+        value: {
+          available: true,
+          installed: true,
+          teamName: "Acme",
+          botUserName: "uno",
+          connected: true,
+          installerDmReady: true,
+          needsRelay: false,
+        },
+      });
+      expect(yield* readSlackRow).toMatchObject({
+        botToken: `unorelay:${SLR}`,
+        appToken: "unorelay",
+        enabled: true,
+        allowedChannelIds: ["C_KEEP", "DINST"],
+        ownerUserIds: ["UINST"],
+      });
+
+      // Once on the relay, a later sync needs nothing more.
+      const third = yield* syncDeviceSlackInstall({
+        projectId,
+        identity: null,
+        install: installed,
+        relayToken: null,
+      });
+      expect(third).toMatchObject({ ok: true, value: { needsRelay: false, connected: true } });
+    }).pipe(Effect.provide(slackLayer(true))),
+  );
+
+  it.effect("replaces a relay token left from an earlier sign-in of the desktop", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      const OLD = "slr_" + "c".repeat(64);
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: `unorelay:${OLD}`,
+          appToken: "unorelay",
+          allowedChannelIds: ["DINST"],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      installFetch([
+        route("POST", "/conversations.open", () => json({ ok: true, channel: { id: "DINST" } })),
+      ]);
+      const current = createHash("sha256").update(SLR).digest("hex").slice(0, 16);
+      expect(relayMatchesFingerprint(SLR, current)).toBe(true);
+      expect(relayMatchesFingerprint(OLD, current)).toBe(false);
+      expect(relayMatchesFingerprint(OLD, null)).toBe(true);
+
+      const install = { ...installed, relayFingerprint: current };
+      expect(
+        yield* syncDeviceSlackInstall({ projectId, identity: null, install, relayToken: null }),
+      ).toMatchObject({ ok: true, value: { needsRelay: true } });
+      yield* syncDeviceSlackInstall({ projectId, identity: null, install, relayToken: SLR });
+      expect(yield* readSlackRow).toMatchObject({
+        botToken: `unorelay:${SLR}`,
+        allowedChannelIds: ["DINST"],
+      });
+      expect(
+        yield* syncDeviceSlackInstall({ projectId, identity: null, install, relayToken: null }),
+      ).toMatchObject({ ok: true, value: { needsRelay: false } });
+    }).pipe(Effect.provide(slackLayer(true))),
+  );
+
+  it.effect("refuses on a cloud computer and rejects what is not a relay token", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* syncDeviceSlackInstall({ projectId, identity, install: installed, relayToken: SLR }),
+      ).toMatchObject({ ok: false, failure: { status: 409, error: "cloud_computer" } });
+      expect(yield* forgetDeviceSlack({ projectId, identity })).toMatchObject({
+        ok: false,
+        failure: { status: 409, error: "cloud_computer" },
+      });
+      expect(
+        yield* syncDeviceSlackInstall({
+          projectId,
+          identity: null,
+          install: installed,
+          relayToken: "xoxb-not-a-relay",
+        }),
+      ).toMatchObject({ ok: false, failure: { status: 400 } });
+      expect(yield* readSlackRow).toBeNull();
+    }).pipe(Effect.provide(slackLayer(false))),
+  );
+
+  it.effect("does nothing while the app is not installed", () =>
+    Effect.gen(function* () {
+      const result = yield* syncDeviceSlackInstall({
+        projectId,
+        identity: null,
+        install: { ...installed, installed: false, teamName: null, installerUserId: null },
+        relayToken: null,
+      });
+      expect(result).toMatchObject({ ok: true, value: { installed: false, needsRelay: false } });
+      expect(yield* readSlackRow).toBeNull();
+    }).pipe(Effect.provide(slackLayer(false))),
+  );
+
+  it.effect("forgets a relay-mode row only", () =>
+    Effect.gen(function* () {
+      const repository = yield* ManagerConnectorRepository;
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: `unorelay:${SLR}`,
+          appToken: "unorelay",
+          allowedChannelIds: [],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      expect(yield* forgetDeviceSlack({ projectId, identity: null })).toEqual({
+        ok: true,
+        value: { ok: true },
+      });
+      expect(yield* readSlackRow).toBeNull();
+      yield* repository.upsert({
+        projectId,
+        kind: "slack",
+        config: {
+          botToken: "xoxb-own",
+          appToken: "xapp-own",
+          allowedChannelIds: [],
+          enabled: true,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      yield* forgetDeviceSlack({ projectId, identity: null });
+      expect((yield* readSlackRow)?.botToken).toBe("xoxb-own");
     }).pipe(Effect.provide(slackLayer(false))),
   );
 });

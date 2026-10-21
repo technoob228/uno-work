@@ -484,12 +484,40 @@ export const ManagerSlackInstallStatus = Schema.Struct({
 export type ManagerSlackInstallStatus = typeof ManagerSlackInstallStatus.Type;
 
 /**
+ * `POST /api/manager/assistant/slack/device` — "Add to Slack" for the desktop
+ * app on a laptop. The interface reads the installation at the console with
+ * the desktop's own sign-in and passes the answer here; `relayToken` only
+ * when the previous call said `needsRelay`.
+ */
+export const ManagerSlackDeviceSyncInput = Schema.Struct({
+  projectId: ProjectId,
+  available: Schema.Boolean,
+  installed: Schema.Boolean,
+  teamName: Schema.NullOr(Schema.String),
+  botUserName: Schema.NullOr(Schema.String),
+  installerUserId: Schema.NullOr(Schema.String),
+  /** The console's `relay_fingerprint`: tells a relay token of an earlier sign-in. */
+  relayFingerprint: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  relayToken: Schema.optionalKey(Schema.String),
+});
+export type ManagerSlackDeviceSyncInput = typeof ManagerSlackDeviceSyncInput.Type;
+
+export const ManagerSlackDeviceSyncResult = Schema.Struct({
+  ...ManagerSlackInstallStatus.fields,
+  /** Installed, but this computer has no relay token yet: mint one and call again. */
+  needsRelay: Schema.Boolean,
+});
+export type ManagerSlackDeviceSyncResult = typeof ManagerSlackDeviceSyncResult.Type;
+
+/**
  * Error codes of the shared-bot / Add-to-Slack routes, in `{ error }`:
- * `not_cloud_computer` (409, no machine token), `shared_bot_unavailable` /
+ * `not_cloud_computer` (409, no machine token), `cloud_computer` (409, the
+ * desktop-only routes on a cloud computer), `shared_bot_unavailable` /
  * `slack_app_unavailable` (503), `console_unreachable` / `console_error` (502).
  */
 export const ManagerChannelSetupErrorCode = Schema.Literals([
   "not_cloud_computer",
+  "cloud_computer",
   "shared_bot_unavailable",
   "slack_app_unavailable",
   "slack_not_installed",

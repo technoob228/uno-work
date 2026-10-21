@@ -12,6 +12,9 @@
  * Slack: "Add to Slack" — Uno's Slack app, installed with Slack's own consent
  * screen; the console relays the workspace's events to this computer. Until
  * that app is live, "Connect your own Slack app" (manifest + two tokens).
+ * On a laptop (the desktop app) the same button installs Uno's app for the
+ * desktop itself through its own sign-in (lib/deviceSlack.ts); it answers
+ * while Uno Work is open, and the card says so.
  *
  * New chats' messages go to the setup's project when there is one.
  */
@@ -44,6 +47,7 @@ import {
   startSlackInstall,
   type SharedTelegramLink,
 } from "../../../lib/setupApi";
+import { DEVICE_QUEUE_TTL_HOURS, deviceSlackDeliveryLine } from "../../../lib/deviceSlack";
 import { cn } from "../../../lib/utils";
 import { TelegramWizard } from "../../assistant/TelegramWizard";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
@@ -476,6 +480,9 @@ export function AssistantSlackPanel({
 
 // ── Slack ──────────────────────────────────────────────────────────────
 
+/** Slack opened in the system browser (desktop app): how long to keep checking. */
+const EXTERNAL_INSTALL_WAIT_MS = 3 * 60_000;
+
 function SlackCard({
   environmentId,
   summary,
@@ -527,7 +534,14 @@ function SlackCard({
       }
       const result = await openAuthWindow(started.authorizeUrl, "uno-slack");
       await queryClient.invalidateQueries({ queryKey: ["uno-setup", "slack-install"] });
-      if (!result.ok) window.setTimeout(() => setInstalling(false), 4000);
+      // The desktop app hands Slack to the system browser: no window of ours
+      // to watch, so keep checking while the person finishes there.
+      if (!result.ok) {
+        window.setTimeout(
+          () => setInstalling(false),
+          result.external ? EXTERNAL_INSTALL_WAIT_MS : 4000,
+        );
+      }
     } catch (cause) {
       setInstalling(false);
       setError(cause instanceof Error ? cause.message : "Couldn't open Slack.");
@@ -551,6 +565,14 @@ function SlackCard({
     onChanged();
   };
 
+  // A laptop answers in Slack only while Uno Work is open (lib/deviceSlack.ts).
+  const deviceLine =
+    state?.device === true ? (
+      <p className="text-xs text-muted-foreground" data-testid="setup-slack-device-line">
+        {deviceSlackDeliveryLine(state.queueTtlHours ?? DEVICE_QUEUE_TTL_HOURS)}
+      </p>
+    ) : null;
+
   if (connected) {
     const where = state?.installed ? state.teamName : summary.slack.botUserName;
     return (
@@ -561,6 +583,7 @@ function SlackCard({
             ? ` as @${summary.slack.botUserName}`
             : ""}
         </ConnectedBadge>
+        {state?.installed ? deviceLine : null}
         <Preview
           lines={[
             "@Uno summarize today’s notes-from-call.md",
@@ -583,12 +606,39 @@ function SlackCard({
   }
 
   const available = state?.available === true;
+  if (state?.signInRequired) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">
+          Sign in with Uno in this app to add Uno to your Slack workspace.
+        </p>
+        <Button
+          size="sm"
+          className="self-start"
+          onClick={() =>
+            void window.desktopBridge?.unoAccount
+              ?.signIn()
+              .then(() =>
+                queryClient.invalidateQueries({ queryKey: ["uno-setup", "slack-install"] }),
+              )
+              .catch((cause: unknown) =>
+                setError(cause instanceof Error ? cause.message : "Couldn't sign in."),
+              )
+          }
+        >
+          Sign in with Uno
+        </Button>
+        {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
         Add Uno to your workspace, then mention <b className="text-foreground">@Uno</b> in any
         channel you invite it to.
       </p>
+      {deviceLine}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"

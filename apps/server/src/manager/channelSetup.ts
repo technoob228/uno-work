@@ -26,6 +26,8 @@ import {
   type ManagerTelegramSharedResult,
   type ProjectId,
 } from "@t3tools/contracts";
+import { createHash } from "node:crypto";
+
 import { Effect, Option, Schema } from "effect";
 
 import type { ManagerRepositoryError } from "../persistence/Errors.ts";
@@ -588,84 +590,122 @@ export const startSlackInstall = (input: {
   });
 
 /**
- * The installation as the console sees it. Once Slack reports it installed
- * and the connector is not on the relay yet, mint the relay and store it in
- * the row (settings kept, enabled) — the connector switches to relay mode on
- * its next reconcile.
+ * The console's answer about an "Add to Slack" installation — of this cloud
+ * computer (`GET /api/v1/boxes/<id>/work/slack`) or, on a laptop, of the
+ * desktop app itself (`GET /api/v1/work/slack/device`, read by the interface).
  */
-export const readSlackInstall = (input: {
+export interface ConsoleSlackInstall {
+  readonly available: boolean;
+  readonly installed: boolean;
+  readonly teamName: string | null;
+  readonly botUserName: string | null;
+  /** Slack id of whoever added the app: their DM is opened and allowlisted. */
+  readonly installerUserId: string | null;
+  /**
+   * Desktop only: the first 16 hex of sha256(the installation's current relay
+   * token). A relay token here that doesn't match belongs to an earlier
+   * sign-in of the desktop (a new sign-in is a new device at the console).
+   */
+  readonly relayFingerprint?: string | null;
+}
+
+export const parseConsoleSlackInstall = (body: unknown): ConsoleSlackInstall => ({
+  available: consoleBoolean(body, "available") ?? false,
+  installed: consoleBoolean(body, "installed") ?? false,
+  teamName: consoleString(body, "team_name"),
+  botUserName: consoleString(body, "bot_user_name"),
+  installerUserId: consoleString(body, "installer_user_id"),
+  relayFingerprint: consoleString(body, "relay_fingerprint"),
+});
+
+/** Does this relay token match the console's `relay_fingerprint` (null: can't tell → yes)? */
+export const relayMatchesFingerprint = (
+  relayToken: string,
+  fingerprint: string | null | undefined,
+): boolean =>
+  fingerprint === null ||
+  fingerprint === undefined ||
+  createHash("sha256").update(relayToken).digest("hex").slice(0, fingerprint.length) ===
+    fingerprint;
+
+/**
+ * A relay token for the row: minted now (`ok` + token), not available here
+ * (`ok` + null — the desktop's interface brings it next call), or a failure.
+ */
+type RelayMint = Effect.Effect<ChannelSetupOutcome<string | null>>;
+
+/**
+ * What a cloud computer and the desktop both do with the console's answer:
+ * once installed and the connector is not on the relay yet, take a relay
+ * token (`mintRelay`) and store it in the row (settings kept, enabled) — the
+ * connector switches to relay mode on its next reconcile — then open the
+ * installer's DM and allowlist it. `needsRelay`: installed, no relay row and
+ * no token offered (the desktop's interface asks the console and calls again).
+ */
+const applySlackInstall = (input: {
   readonly projectId: ProjectId;
-  readonly identity: WorkMachineIdentity | null;
+  readonly install: ConsoleSlackInstall;
+  readonly mintRelay: RelayMint;
+  /** For logs: the box id, or null on the desktop. */
+  readonly boxId: number | null;
   readonly fetchImpl?: FetchLike;
 }): Effect.Effect<
-  ChannelSetupOutcome<ManagerSlackInstallStatus>,
+  ChannelSetupOutcome<ManagerSlackInstallStatus & { readonly needsRelay: boolean }>,
   ManagerRepositoryError,
   ManagerConnectorRepository | ManagerSlackService
 > =>
   Effect.gen(function* () {
-    if (input.identity === null) {
-      return fail(409, "not_cloud_computer", NOT_CLOUD_COMPUTER_MESSAGE);
-    }
     const repository = yield* ManagerConnectorRepository;
     const slack = yield* ManagerSlackService;
-    const fetchOption = input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {};
-
-    const response = yield* askConsole({
-      identity: input.identity,
-      method: "GET",
-      subpath: "slack",
-      ...fetchOption,
-    });
-    if (response === null || !isSuccess(response)) {
-      return consoleFailure("read the Slack installation", response);
-    }
-    const available = consoleBoolean(response.body, "available") ?? false;
-    const installed = consoleBoolean(response.body, "installed") ?? false;
-    const teamName = consoleString(response.body, "team_name");
-    const botUserName = consoleString(response.body, "bot_user_name");
+    const { available, installed, teamName, botUserName, installerUserId } = input.install;
 
     const existing = yield* repository.get({ projectId: input.projectId, kind: "slack" });
     const previous = Option.isSome(existing) ? decodeSlackRow(existing.value.config) : null;
-    let relayRow = previous !== null && isRelayCredential(previous.botToken) ? previous : null;
+    const heldRelay = previous === null ? null : parseRelayCredential(previous.botToken);
+    let relayRow =
+      previous !== null &&
+      heldRelay !== null &&
+      (!installed || relayMatchesFingerprint(heldRelay, input.install.relayFingerprint))
+        ? previous
+        : null;
+    let needsRelay = false;
 
     if (installed && relayRow === null) {
-      const minted = yield* askConsole({
-        identity: input.identity,
-        method: "POST",
-        subpath: "slack/relay",
-        body: {},
-        ...fetchOption,
-      });
-      const relayToken =
-        minted !== null && isSuccess(minted) ? consoleString(minted.body, "relay_token") : null;
+      const minted = yield* input.mintRelay;
+      if (!minted.ok) return minted;
+      const relayToken = minted.value;
       if (relayToken === null) {
-        return consoleFailure("connect this computer to Slack", minted);
+        needsRelay = true;
+      } else {
+        const config = {
+          botToken: relayCredential(relayToken),
+          appToken: SLACK_RELAY_APP_TOKEN,
+          allowedChannelIds: previous?.allowedChannelIds ?? [],
+          enabled: true,
+          defaultModelSelection: previous?.defaultModelSelection ?? null,
+          ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
+          ...(previous?.ownerUserIds !== undefined ? { ownerUserIds: previous.ownerUserIds } : {}),
+          ...(previous?.groupMembers !== undefined ? { groupMembers: previous.groupMembers } : {}),
+        } satisfies ManagerSlackConnectorConfig;
+        yield* repository.upsert({
+          projectId: input.projectId,
+          kind: "slack",
+          config,
+          updatedAt: new Date().toISOString(),
+        });
+        relayRow = config;
+        yield* Effect.logInfo("slack connector switched to Uno's Slack app").pipe(
+          Effect.annotateLogs({
+            projectId: input.projectId,
+            boxId: input.boxId,
+            target: input.boxId === null ? "desktop" : "cloud",
+          }),
+        );
       }
-      const config = {
-        botToken: relayCredential(relayToken),
-        appToken: SLACK_RELAY_APP_TOKEN,
-        allowedChannelIds: previous?.allowedChannelIds ?? [],
-        enabled: true,
-        defaultModelSelection: previous?.defaultModelSelection ?? null,
-        ...(previous?.addressing !== undefined ? { addressing: previous.addressing } : {}),
-        ...(previous?.ownerUserIds !== undefined ? { ownerUserIds: previous.ownerUserIds } : {}),
-        ...(previous?.groupMembers !== undefined ? { groupMembers: previous.groupMembers } : {}),
-      } satisfies ManagerSlackConnectorConfig;
-      yield* repository.upsert({
-        projectId: input.projectId,
-        kind: "slack",
-        config,
-        updatedAt: new Date().toISOString(),
-      });
-      relayRow = config;
-      yield* Effect.logInfo("slack connector switched to Uno's Slack app").pipe(
-        Effect.annotateLogs({ projectId: input.projectId, boxId: input.identity.boxId }),
-      );
     }
 
     // The person who added the app can DM it right away: open that DM
     // through the relay and allowlist it (channels stay opt-in).
-    const installerUserId = consoleString(response.body, "installer_user_id");
     let installerDmReady = false;
     if (installed && relayRow !== null && installerUserId !== null) {
       const relayBotToken = relayRow.botToken;
@@ -714,7 +754,137 @@ export const readSlackInstall = (input: {
       botUserName: botUserName ?? runtime.botUserName,
       connected: installed && relayRow !== null && relayRow.enabled && runtime.connected,
       installerDmReady,
+      needsRelay,
     });
+  });
+
+/**
+ * The installation as the console sees it. Once Slack reports it installed
+ * and the connector is not on the relay yet, mint the relay and store it in
+ * the row (settings kept, enabled) — the connector switches to relay mode on
+ * its next reconcile.
+ */
+export const readSlackInstall = (input: {
+  readonly projectId: ProjectId;
+  readonly identity: WorkMachineIdentity | null;
+  readonly fetchImpl?: FetchLike;
+}): Effect.Effect<
+  ChannelSetupOutcome<ManagerSlackInstallStatus>,
+  ManagerRepositoryError,
+  ManagerConnectorRepository | ManagerSlackService
+> =>
+  Effect.gen(function* () {
+    const identity = input.identity;
+    if (identity === null) {
+      return fail(409, "not_cloud_computer", NOT_CLOUD_COMPUTER_MESSAGE);
+    }
+    const fetchOption = input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {};
+
+    const response = yield* askConsole({
+      identity,
+      method: "GET",
+      subpath: "slack",
+      ...fetchOption,
+    });
+    if (response === null || !isSuccess(response)) {
+      return consoleFailure("read the Slack installation", response);
+    }
+    const mintRelay: RelayMint = askConsole({
+      identity,
+      method: "POST",
+      subpath: "slack/relay",
+      body: {},
+      ...fetchOption,
+    }).pipe(
+      Effect.map((minted) => {
+        const relayToken =
+          minted !== null && isSuccess(minted) ? consoleString(minted.body, "relay_token") : null;
+        return relayToken === null
+          ? consoleFailure<string | null>("connect this computer to Slack", minted)
+          : succeed<string | null>(relayToken);
+      }),
+    );
+    const applied = yield* applySlackInstall({
+      projectId: input.projectId,
+      install: parseConsoleSlackInstall(response.body),
+      mintRelay,
+      boxId: identity.boxId,
+      ...fetchOption,
+    });
+    if (!applied.ok) return applied;
+    const { needsRelay: _needsRelay, ...status } = applied.value;
+    return succeed(status);
+  });
+
+// ---------------------------------------------------------------------------
+// Slack on the desktop app (a laptop, 21.10)
+// ---------------------------------------------------------------------------
+
+/** A Slack relay token as the console mints it (`slr_` + 64 hex). */
+export const isSlackRelayToken = (value: string): boolean => /^slr_[0-9a-f]{64}$/.test(value);
+
+const CLOUD_COMPUTER_MESSAGE =
+  "This is an Uno cloud computer: it connects Uno's Slack app by itself.";
+
+/**
+ * "Add to Slack" for the desktop app on a laptop. The laptop's server has no
+ * identity at the console (only a cloud computer has a machine token); the
+ * person's interface does — the desktop's own sign-in, held by its main
+ * process. So the interface reads the installation from the console and
+ * hands this server the console's answer and, when asked (`needsRelay`), a
+ * fresh relay token; the server stores it like a cloud computer would and
+ * polls the relay while Uno Work is open.
+ */
+export const syncDeviceSlackInstall = (input: {
+  readonly projectId: ProjectId;
+  readonly identity: WorkMachineIdentity | null;
+  readonly install: ConsoleSlackInstall;
+  readonly relayToken: string | null;
+  readonly fetchImpl?: FetchLike;
+}): Effect.Effect<
+  ChannelSetupOutcome<ManagerSlackInstallStatus & { readonly needsRelay: boolean }>,
+  ManagerRepositoryError,
+  ManagerConnectorRepository | ManagerSlackService
+> =>
+  Effect.gen(function* () {
+    if (input.identity !== null) {
+      return fail(409, "cloud_computer", CLOUD_COMPUTER_MESSAGE);
+    }
+    if (input.relayToken !== null && !isSlackRelayToken(input.relayToken)) {
+      return fail(400, "console_error", "That is not a Slack relay token from Uno.");
+    }
+    return yield* applySlackInstall({
+      projectId: input.projectId,
+      install: input.install,
+      mintRelay: Effect.succeed(succeed<string | null>(input.relayToken)),
+      boxId: null,
+      ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
+    });
+  });
+
+/**
+ * The desktop's interface removed Uno's app at the console: forget the
+ * relay-mode row here (an own-token row is left alone).
+ */
+export const forgetDeviceSlack = (input: {
+  readonly projectId: ProjectId;
+  readonly identity: WorkMachineIdentity | null;
+}): Effect.Effect<
+  ChannelSetupOutcome<{ readonly ok: true }>,
+  ManagerRepositoryError,
+  ManagerConnectorRepository
+> =>
+  Effect.gen(function* () {
+    if (input.identity !== null) {
+      return fail(409, "cloud_computer", CLOUD_COMPUTER_MESSAGE);
+    }
+    const repository = yield* ManagerConnectorRepository;
+    const existing = yield* repository.get({ projectId: input.projectId, kind: "slack" });
+    const previous = Option.isSome(existing) ? decodeSlackRow(existing.value.config) : null;
+    if (previous !== null && isRelayCredential(previous.botToken)) {
+      yield* repository.remove({ projectId: input.projectId, kind: "slack" });
+    }
+    return succeed({ ok: true as const });
   });
 
 /**

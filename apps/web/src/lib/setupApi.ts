@@ -7,7 +7,22 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
-import { environmentFetchJson } from "~/environments/http/target";
+import {
+  AccountHttpError,
+  AccountSignInRequiredError,
+  accountRequest,
+  accountTransport,
+} from "~/account/unoAccount";
+import { readPrimaryEnvironmentDescriptor } from "~/environments/primary";
+import { EnvironmentHttpError, environmentFetchJson } from "~/environments/http/target";
+
+import {
+  type DeviceSlackDeps,
+  type DeviceSlackSyncResult,
+  readDeviceSlack,
+  removeDeviceSlack,
+  startDeviceSlack,
+} from "./deviceSlack";
 
 interface EnvironmentScoped {
   readonly environmentId: EnvironmentId;
@@ -198,38 +213,100 @@ export interface SlackInstallState {
   readonly botUserName: string | null;
   /** The computer is listening to the installation. */
   readonly connected: boolean;
+  /**
+   * The desktop app on a laptop (21.10): Uno's app answers it only while Uno
+   * Work is open, messages wait at Uno up to `queueTtlHours`.
+   */
+  readonly device?: boolean;
+  readonly queueTtlHours?: number;
+  /** On the desktop: sign in with Uno first. */
+  readonly signInRequired?: boolean;
 }
 
-export function startSlackInstall(
+/**
+ * The daemon said "not a cloud computer" and this window is the desktop app
+ * looking at its own laptop: "Add to Slack" then goes through the desktop's
+ * own sign-in (lib/deviceSlack.ts). A remote environment that isn't a cloud
+ * computer (a self-hosted daemon) keeps the plain 409.
+ */
+function takesDeviceSlackPath(error: unknown, environmentId: EnvironmentId): boolean {
+  return (
+    error instanceof EnvironmentHttpError &&
+    error.status === 409 &&
+    error.message.includes("not_cloud_computer") &&
+    accountTransport() === "desktop" &&
+    readPrimaryEnvironmentDescriptor()?.environmentId === environmentId
+  );
+}
+
+function deviceSlackDeps(environmentId: EnvironmentId): DeviceSlackDeps {
+  return {
+    account: (method, path, body) => accountRequest(method, path, body),
+    sync: (body) =>
+      environmentFetchJson<DeviceSlackSyncResult>({
+        environmentId,
+        pathname: "/api/manager/assistant/slack/device",
+        method: "POST",
+        body,
+      }),
+    forget: (projectId) =>
+      environmentFetchJson({
+        environmentId,
+        pathname: "/api/manager/assistant/slack/device",
+        method: "DELETE",
+        searchParams: { projectId },
+      }),
+    isSignInRequired: (error) => error instanceof AccountSignInRequiredError,
+    statusOf: (error) => (error instanceof AccountHttpError ? error.status : null),
+  };
+}
+
+export async function startSlackInstall(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<{ readonly available: boolean; readonly authorizeUrl: string | null }> {
-  return environmentFetchJson({
-    environmentId: input.environmentId,
-    pathname: "/api/manager/assistant/slack/install",
-    method: "POST",
-    body: { projectId: input.projectId },
-  });
+  try {
+    return await environmentFetchJson({
+      environmentId: input.environmentId,
+      pathname: "/api/manager/assistant/slack/install",
+      method: "POST",
+      body: { projectId: input.projectId },
+    });
+  } catch (error) {
+    if (!takesDeviceSlackPath(error, input.environmentId)) throw error;
+    return startDeviceSlack(deviceSlackDeps(input.environmentId));
+  }
 }
 
-export function getSlackInstall(
+export async function getSlackInstall(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<SlackInstallState> {
-  return environmentFetchJson({
-    environmentId: input.environmentId,
-    pathname: "/api/manager/assistant/slack/install",
-    searchParams: { projectId: input.projectId },
-  });
+  try {
+    return await environmentFetchJson({
+      environmentId: input.environmentId,
+      pathname: "/api/manager/assistant/slack/install",
+      searchParams: { projectId: input.projectId },
+    });
+  } catch (error) {
+    if (!takesDeviceSlackPath(error, input.environmentId)) throw error;
+    return readDeviceSlack(deviceSlackDeps(input.environmentId), input.projectId);
+  }
 }
 
-export function removeSlackInstall(
+export async function removeSlackInstall(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<unknown> {
-  return environmentFetchJson({
-    environmentId: input.environmentId,
-    pathname: "/api/manager/assistant/slack/install",
-    method: "DELETE",
-    searchParams: { projectId: input.projectId },
-  });
+  try {
+    return await environmentFetchJson({
+      environmentId: input.environmentId,
+      pathname: "/api/manager/assistant/slack/install",
+      method: "DELETE",
+      searchParams: { projectId: input.projectId },
+    });
+  } catch (error) {
+    if (!takesDeviceSlackPath(error, input.environmentId)) throw error;
+    await removeDeviceSlack(deviceSlackDeps(input.environmentId), input.projectId);
+    return { ok: true };
+  }
 }
 
 /**

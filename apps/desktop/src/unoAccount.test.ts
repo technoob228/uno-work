@@ -87,6 +87,14 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("PUT", "/api/v1/account/goal")).toBe(true);
     expect(isAllowedAccountRequest("DELETE", "/api/v1/account/goal")).toBe(false);
     expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
+    // "Add to Slack" for this desktop itself (21.10): its own installation only.
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/slack/device/install")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/slack/device/relay")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/slack/device")).toBe(true);
+    expect(isAllowedAccountRequest("DELETE", "/api/v1/work/slack/device")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/slack/device/relay")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/slack/device/../install")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/slack/events")).toBe(false);
     // Uno Drive: share a copy of a file on this Mac (w0139) — not buckets' raw presign.
     expect(isAllowedAccountRequest("GET", "/api/v1/drive")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/drive/upload-link")).toBe(true);

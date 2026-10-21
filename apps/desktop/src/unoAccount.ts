@@ -109,6 +109,12 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "GET", pattern: /^\/api\/v1\/ai\/meter$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/verify-email$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/computer\/trial$/ },
+  // "Add to Slack" for this desktop app itself (21.10): Uno's Slack app answers
+  // here while Uno Work is open. The console's target is this sign-in's token,
+  // never a computer; the local server only gets the relay token.
+  { method: "POST", pattern: /^\/api\/v1\/work\/slack\/device\/(install|relay)$/ },
+  { method: "GET", pattern: /^\/api\/v1\/work\/slack\/device$/ },
+  { method: "DELETE", pattern: /^\/api\/v1\/work\/slack\/device$/ },
   // Uno Drive (w0139): "Share with a link…" for a file on this Mac uploads a
   // copy through a one-time upload address and links to it (driveShareFile.ts).
   { method: "GET", pattern: /^\/api\/v1\/drive$/ },

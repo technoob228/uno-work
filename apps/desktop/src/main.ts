@@ -2076,7 +2076,11 @@ function registerIpcHandlers(): void {
     const method = input?.method;
     const path = input?.path;
     if (
-      (method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH") ||
+      (method !== "GET" &&
+        method !== "POST" &&
+        method !== "PUT" &&
+        method !== "PATCH" &&
+        method !== "DELETE") ||
       typeof path !== "string"
     ) {
       return { status: 400, body: { error: "INVALID_REQUEST" } };
