@@ -1,6 +1,6 @@
 import * as Crypto from "node:crypto";
 
-import { CommandId } from "@t3tools/contracts";
+import { CommandId, isAssistantProjectId } from "@t3tools/contracts";
 import { Duration, Effect, Layer, Option, Schedule } from "effect";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -18,11 +18,23 @@ const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
 const DEFAULT_ACTIVE_TURN_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
+/** One of an assistant's conversations, not a work chat it started. */
+const isAssistantConversationShell = (thread: {
+  readonly projectId: string;
+  readonly assistantRole?: string | null | undefined;
+  readonly spawnedByThreadId?: string | null | undefined;
+}) =>
+  isAssistantProjectId(thread.projectId) &&
+  thread.assistantRole !== "spawned" &&
+  (thread.spawnedByThreadId ?? null) === null;
+
 const serverCommandId = (tag: string): CommandId =>
   CommandId.make(`server:${tag}:${Crypto.randomUUID()}`);
 
 export interface ProviderSessionReaperLiveOptions {
   readonly inactivityThresholdMs?: number;
+  /** For the assistant's conversations; never below `inactivityThresholdMs`. */
+  readonly assistantInactivityThresholdMs?: number;
   readonly activeTurnThresholdMs?: number;
   readonly sweepIntervalMs?: number;
 }
@@ -37,6 +49,10 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
     const inactivityThresholdMs = Math.max(
       1,
       options?.inactivityThresholdMs ?? DEFAULT_INACTIVITY_THRESHOLD_MS,
+    );
+    const assistantInactivityThresholdMs = Math.max(
+      inactivityThresholdMs,
+      options?.assistantInactivityThresholdMs ?? inactivityThresholdMs,
     );
     const activeTurnThresholdMs = Math.max(
       1,
@@ -166,6 +182,18 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
+        // The assistant's other conversations (a Telegram/Slack chat, a
+        // desktop one) are answered from a warm harness for longer: the next
+        // message would otherwise pay the cold start. The live-harness cap
+        // still evicts them first when the machine needs the slot.
+        if (
+          thread !== undefined &&
+          isAssistantConversationShell(thread) &&
+          idleDurationMs < assistantInactivityThresholdMs
+        ) {
+          continue;
+        }
+
         // The pinned Uno chat keeps its harness up (it is started ahead of
         // the first message, manager/assistantPrewarm.ts): reaping it would
         // put the ~4 s cold start back on the next message. On a clone of a
@@ -243,7 +271,8 @@ export const makeProviderSessionReaperLive = (options?: ProviderSessionReaperLiv
 
 /**
  * The live reaper: idle threshold and sweep interval follow the machine's
- * harness budget (5 min on ≤4 GB machines, 15 min otherwise; see
+ * harness budget (5 min on ≤4 GB machines, 15 min otherwise; the assistant's
+ * conversations 15 / 60 min; see
  * `harnessBudget.ts`). A stopped session resumes on the thread's next message.
  */
 export const ProviderSessionReaperLive = Layer.unwrap(
@@ -251,6 +280,7 @@ export const ProviderSessionReaperLive = Layer.unwrap(
     const budget = currentHarnessBudget();
     return makeProviderSessionReaperLive({
       inactivityThresholdMs: budget.inactivityThresholdMs,
+      assistantInactivityThresholdMs: budget.assistantInactivityThresholdMs,
       sweepIntervalMs: budget.sweepIntervalMs,
     });
   }),
