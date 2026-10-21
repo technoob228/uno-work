@@ -30,6 +30,7 @@
  * @module manager/assistantPush
  */
 import { isAssistantProjectId, type OrchestrationCommandOrigin } from "@t3tools/contracts";
+import { WORK_UPDATE_NOTICE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 
 import { sanitizeUntrustedField, wrapUntrustedContent } from "../untrustedContent.ts";
 import type { SettledProbe } from "./threadSettlement.ts";
@@ -50,7 +51,8 @@ export const PUSH_SENT_KEYS_LIMIT = 500;
 /** How much of the chat's last answer the notice carries. */
 export const PUSH_EXCERPT_CHARS = 600;
 /** First line of every notice — how the assistant (and a reader) tells it from the person. */
-export const PUSH_NOTICE_MARKER = "[Uno Work — work update";
+/** Shared with the client, which shows the notice as a quiet line, not the person's bubble. */
+export const PUSH_NOTICE_MARKER = WORK_UPDATE_NOTICE_PREFIX;
 
 export const assistantPushEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
   env.UNO_WORK_ASSISTANT_PUSH?.trim() !== "0";

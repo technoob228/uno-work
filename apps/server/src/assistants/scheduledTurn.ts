@@ -28,6 +28,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import { SCHEDULED_TASK_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { Context, Data, Effect, Layer, Option } from "effect";
 
 import { currentAssistantModelSelection } from "../manager/assistantEngineSelection.ts";
@@ -56,7 +57,7 @@ export class AssistantTurnError extends Data.TaggedError("AssistantTurnError")<{
 export function wrapScheduledPrompt(input: { readonly name?: string; readonly prompt: string }) {
   const title = input.name ? `"${input.name}"` : "";
   return [
-    `[Scheduled task ${title}— it runs on its own: the person is not in this chat right now.`,
+    `${SCHEDULED_TASK_PREFIX}${title}— it runs on its own: the person is not in this chat right now.`,
     "Your final message is sent to them in Telegram/Slack, so make it short and useful.",
     `If there is nothing worth telling them, answer exactly ${ASSISTANT_TURN_NO_REPLY}.]`,
     "",

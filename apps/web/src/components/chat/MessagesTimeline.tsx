@@ -874,13 +874,18 @@ const HandoffSeedBody = memo(function HandoffSeedBody(props: { text: string }) {
 
 /**
  * A message Uno Work put into the chat for the agent ("(Uno Work) The person
- * entered TELEGRAM_BOT_TOKEN — it is saved in /home/…"): the person reads one
- * centred line in their words; Dev mode shows what the agent got.
+ * entered TELEGRAM_BOT_TOKEN — it is saved in /home/…", the assistant's work
+ * update, a scheduled task's prompt): the person reads one centred line in
+ * their words; Dev mode shows what the agent got.
  */
 const UnoWorkNoteLine = memo(function UnoWorkNoteLine(props: { note: UnoWorkNote; raw: string }) {
   const devMode = useDevMode();
   return (
-    <div className="flex justify-center px-4" data-testid="uno-work-note">
+    <div
+      className="flex justify-center px-4"
+      data-testid="uno-work-note"
+      data-note-kind={props.note.kind}
+    >
       <p
         className="max-w-[80%] text-center text-xs text-muted-foreground"
         title={devMode ? props.raw : undefined}
