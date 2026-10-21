@@ -83,11 +83,12 @@ import {
   hermesThreadHomeLinks,
   makeHermesAcpRuntime,
   parseMcpJsonToAcpServers,
+  withManagerCallerHeader,
   resolveHermesBaseModelId,
   resolveHermesModeId,
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
-import { buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
+import { buildAssistantContextHint, buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
@@ -222,6 +223,8 @@ interface HermesSessionContext {
    * chat's visible history (hermesHandoff.ts). Cleared after that prompt.
    */
   handoffPending: boolean;
+  /** NOTES.md went into this session's system prompt (assistantContextHint): no second copy. */
+  readonly notesInSystemPrompt: boolean;
   /** The last turn that has streamed assistant text (the 402 check looks at a turn's first text only). */
   replyTextTurnId: TurnId | undefined;
   /** The last turn whose `turn.completed` has gone out. */
@@ -594,7 +597,13 @@ export function makeHermesAdapter(
             .pipe(Effect.orElseSucceed(() => ""));
           // The workspace's own servers (the assistant's uno-manager) win over
           // the owner's custom ones (settings.mcpServers) of the same name.
-          const workspaceMcpServers = mcpJsonRaw ? parseMcpJsonToAcpServers(mcpJsonRaw) : [];
+          // The assistant's uno-manager learns which of its conversations
+          // calls (work it hands off is reported back there).
+          const workspaceMcpServers = withManagerCallerHeader(
+            mcpJsonRaw ? parseMcpJsonToAcpServers(mcpJsonRaw) : [],
+            MANAGER_MCP_SERVER_NAME,
+            input.threadId,
+          );
           const workspaceMcpNames = new Set(workspaceMcpServers.map((server) => server.name));
           const mcpServers = [
             ...workspaceMcpServers,
@@ -614,6 +623,12 @@ export function makeHermesAdapter(
           const threadHermesHome = nodePath.join(baseHermesHome, "threads", input.threadId);
           const configuredModel =
             resolveHermesBaseModelId(hermesModelSelection?.model) ?? HERMES_DEFAULT_MODEL;
+          const inAssistantWorkspace = yield* fileSystem
+            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
+            .pipe(Effect.orElseSucceed(() => false));
+          // SOUL.md / USER.md / the newest NOTES.md in the system prompt: a
+          // status or dispatch turn needs no file reads (assistantContextHint).
+          const assistantContext = inAssistantWorkspace ? yield* readAssistantContext(cwd) : null;
           const hermesProvider = hermesProviderIdOf(llmRoute);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
@@ -632,6 +647,7 @@ export function makeHermesAdapter(
                     ...options?.extraMcpToolTimeoutsSec?.({ threadId: input.threadId, cwd }),
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
+                  ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see
                   // HERMES_TITLE_GENERATION_TIMEOUT_SECONDS). A brought key
@@ -672,9 +688,6 @@ export function makeHermesAdapter(
 
           // Skills for assistants come only from the Uno catalog: close
           // Hermes' own hub (ClawHub & co.) in this HERMES_HOME.
-          const inAssistantWorkspace = yield* fileSystem
-            .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
-            .pipe(Effect.orElseSucceed(() => false));
           const lockHub =
             (inAssistantWorkspace &&
               (options?.assistantsEnabled ? yield* options.assistantsEnabled : true)) ||
@@ -847,6 +860,7 @@ export function makeHermesAdapter(
             llmProvider,
             hermesProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
+            notesInSystemPrompt: assistantContext?.withNotes ?? false,
             replyTextTurnId: undefined,
             completedTurnId: undefined,
             billingFailure: undefined,
@@ -999,6 +1013,20 @@ export function makeHermesAdapter(
         }).pipe(Effect.scoped),
       );
 
+    /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
+    const readAssistantContext = (cwd: string) =>
+      Effect.gen(function* () {
+        const read = (name: string) =>
+          fileSystem.readFileString(nodePath.join(cwd, name)).pipe(Effect.orElseSucceed(() => ""));
+        return buildAssistantContextHint({
+          soul: yield* read("SOUL.md"),
+          user: yield* read("USER.md"),
+          notes: yield* read(ASSISTANT_NOTES_FILE),
+          routing: yield* read("ROUTING.md"),
+          readAt: yield* nowIso,
+        });
+      });
+
     /** First prompt of a fresh session: carried history + the assistant's NOTES.md. */
     const readHandoffPrompt = (
       ctx: HermesSessionContext,
@@ -1013,7 +1041,7 @@ export function makeHermesAdapter(
             .exists(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER))
             .pipe(Effect.orElseSucceed(() => false)));
         const notes =
-          isAssistantWorkspace && cwd !== undefined
+          isAssistantWorkspace && cwd !== undefined && !ctx.notesInSystemPrompt
             ? yield* fileSystem
                 .readFileString(nodePath.join(cwd, ASSISTANT_NOTES_FILE))
                 .pipe(Effect.orElseSucceed(() => ""))

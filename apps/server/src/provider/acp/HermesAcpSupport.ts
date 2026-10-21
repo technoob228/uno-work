@@ -29,7 +29,11 @@ import type {
   RuntimeMode,
   SubscriptionLlmProvider,
 } from "@t3tools/contracts";
-import { HERMES_SUBSCRIPTION_PROVIDER_IDS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts";
+import {
+  HERMES_SUBSCRIPTION_PROVIDER_IDS,
+  MANAGER_CALLER_THREAD_HEADER,
+  UNO_GATEWAY_BASE_URL,
+} from "@t3tools/contracts";
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
@@ -438,6 +442,12 @@ export function buildHermesConfigYaml(input: {
    * uno-work calls that wait for a person (approvals, request_secret).
    */
   readonly mcpToolTimeoutSec?: Readonly<Record<string, number>>;
+  /**
+   * `agent.environment_hint`: text Hermes puts into the stable (cached)
+   * part of its system prompt — an assistant's own files
+   * (`buildAssistantContextHint`). Older Hermes ignores the key.
+   */
+  readonly environmentHint?: string;
 }): string {
   const quote = JSON.stringify;
   const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
@@ -446,6 +456,9 @@ export function buildHermesConfigYaml(input: {
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
     `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
     `  verify_on_stop: ${HERMES_AGENT_VERIFY_ON_STOP}`,
+    ...(input.environmentHint !== undefined && input.environmentHint.trim().length > 0
+      ? [`  environment_hint: ${quote(input.environmentHint)}`]
+      : []),
     "model:",
     `  provider: ${quote(provider)}`,
     `  default: ${quote(input.model)}`,
@@ -516,6 +529,29 @@ export function buildHermesConfigYaml(input: {
     }
   }
   return lines.join("\n") + "\n";
+}
+
+/**
+ * The assistant's `uno-manager` server with the caller header
+ * (`MANAGER_CALLER_THREAD_HEADER`): which conversation makes each call. The
+ * daemon checks it belongs to the token's assistant; any other server is
+ * left as it is.
+ */
+export function withManagerCallerHeader(
+  servers: ReadonlyArray<EffectAcpSchema.McpServer>,
+  managerServerName: string,
+  threadId: string,
+): ReadonlyArray<EffectAcpSchema.McpServer> {
+  return servers.map((server) => {
+    if (server.name !== managerServerName || !("url" in server)) return server;
+    const headers = server.headers.filter(
+      (header) => header.name.toLowerCase() !== MANAGER_CALLER_THREAD_HEADER,
+    );
+    return {
+      ...server,
+      headers: [...headers, { name: MANAGER_CALLER_THREAD_HEADER, value: threadId }],
+    };
+  });
 }
 
 // ── project-level .mcp.json → ACP mcpServers ────────────────────────────

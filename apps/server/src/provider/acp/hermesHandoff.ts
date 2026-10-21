@@ -89,3 +89,80 @@ export function buildHermesHandoffPrompt(input: {
   sections.push(`Current message:\n${input.currentText}`);
   return sections.join("\n\n");
 }
+
+// ── The assistant's own files in the system prompt ──────────────────────
+
+/** Budgets of the assistant's files in its session's system prompt. */
+export const ASSISTANT_CONTEXT_SOUL_CHARS = 3_000;
+export const ASSISTANT_CONTEXT_USER_CHARS = 3_000;
+export const ASSISTANT_CONTEXT_NOTES_CHARS = 6_000;
+export const ASSISTANT_CONTEXT_ROUTING_CHARS = 3_000;
+
+/** ROUTING.md without its logs: the table and notes above "## Outcomes log". */
+function routingTable(routing: string): string | null {
+  const cut = routing.search(/^## Outcomes log/m);
+  const head = (cut >= 0 ? routing.slice(0, cut) : routing).trim();
+  return head.includes("|") ? head : null;
+}
+
+/** A file that is only its seeded heading ("# Who I am") says nothing. */
+function meaningful(text: string): string | null {
+  const body = text
+    .split("\n")
+    .filter((line) => !/^#\s/.test(line.trim()))
+    .join("\n")
+    .trim();
+  return body.length > 0 ? text.trim() : null;
+}
+
+/** The newest part of NOTES.md (entries are appended): its end, cut at a line. */
+function notesTail(notes: string, max: number): string {
+  const trimmed = notes.trim();
+  if (trimmed.length <= max) return trimmed;
+  const tail = trimmed.slice(-max);
+  const firstBreak = tail.indexOf("\n");
+  return `[…older notes omitted — read NOTES.md for them]\n${firstBreak >= 0 ? tail.slice(firstBreak + 1) : tail}`;
+}
+
+/**
+ * An assistant session's own files as one block for Hermes'
+ * `agent.environment_hint` (the stable, cached part of its system prompt):
+ * who it is (SOUL.md), the person (USER.md), the newest NOTES.md and the
+ * ROUTING.md table (read before every hand-off). Hermes
+ * already loads AGENTS.md from the working directory, and SOUL.md only from
+ * its HERMES_HOME (where it would replace Hermes' own identity), so these
+ * would otherwise cost a file read on every status or dispatch turn.
+ *
+ * A snapshot of the session start: the files on disk win if they changed.
+ * `withNotes`: the fresh-session handoff then carries no second copy.
+ */
+export function buildAssistantContextHint(input: {
+  readonly soul: string;
+  readonly user: string;
+  readonly notes: string;
+  readonly routing: string;
+  readonly readAt: string;
+}): { readonly hint: string; readonly withNotes: boolean } | null {
+  const soul = meaningful(input.soul);
+  const user = meaningful(input.user);
+  const notes = meaningful(input.notes);
+  const routing = routingTable(input.routing);
+  if (soul === null && user === null && notes === null && routing === null) return null;
+  const sections = [
+    `[Your own files in this assistant folder, as read when this session started (${input.readAt}). ` +
+      "You do not need to read them again for a status or a hand-off; the files win if you or the person changed them since.]",
+  ];
+  if (soul !== null)
+    sections.push(`<SOUL.md>\n${clip(soul, ASSISTANT_CONTEXT_SOUL_CHARS)}\n</SOUL.md>`);
+  if (user !== null)
+    sections.push(`<USER.md>\n${clip(user, ASSISTANT_CONTEXT_USER_CHARS)}\n</USER.md>`);
+  if (notes !== null) {
+    sections.push(`<NOTES.md>\n${notesTail(notes, ASSISTANT_CONTEXT_NOTES_CHARS)}\n</NOTES.md>`);
+  }
+  if (routing !== null) {
+    sections.push(
+      `<ROUTING.md table>\n${clip(routing, ASSISTANT_CONTEXT_ROUTING_CHARS)}\n</ROUTING.md table>`,
+    );
+  }
+  return { hint: sections.join("\n\n"), withNotes: notes !== null };
+}
