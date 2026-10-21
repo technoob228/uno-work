@@ -12,6 +12,7 @@
  */
 import type {
   AssistantDraftQuestion,
+  AssistantPresetAccess,
   AssistantDraftResult,
   AssistantTemplateId,
 } from "@t3tools/contracts";
@@ -347,6 +348,11 @@ export interface AssistantPlan {
    * what isn't connected yet) — appended to SOUL.md as is.
    */
   readonly howIWork?: string;
+  /**
+   * What it may do on this computer — Full / Helper / Observer and its
+   * projects. Absent: Full on every project.
+   */
+  readonly access?: AssistantPresetAccess;
 }
 
 export const ASSISTANT_NAME_MAX = 40;

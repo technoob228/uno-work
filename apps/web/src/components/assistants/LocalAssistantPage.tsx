@@ -9,9 +9,11 @@
  * computer of role `assistant`) for assistants that read other people's
  * emails or sites.
  */
+import { ASSISTANT_PRESET_COPY } from "@t3tools/shared/assistantPreset";
 import {
   ASSISTANT_PROJECT_ID,
   type AssistantAppLevel,
+  type AssistantPreset,
   type EnvironmentId,
   type ManagerAssistantSummary,
   type ProjectId,
@@ -32,8 +34,10 @@ import {
   deleteLocalAssistant,
   ensureAssistantChat,
   getAssistantApps,
+  listProjectsForAccessPicker,
   putAssistantApps,
   readAssistantFile,
+  setAssistantPreset,
   writeAssistantFile,
 } from "../../lib/managerApi";
 import { listConnectors, openAuthWindow, startConnector } from "../../lib/setupApi";
@@ -45,6 +49,15 @@ import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block, EmojiAvatar, LevelPicker } from "./AssistantBits";
+import { AssistantPresetPicker } from "./AssistantPresetPicker";
+import {
+  effectiveLevel,
+  levelCeiling,
+  presetAccessFromForm,
+  presetFormFromToken,
+  samePresetForm,
+  type PresetForm,
+} from "./assistantPreset.logic";
 import { ChatsBlock, MemoryBlock, ModelsBlock } from "./AssistantMemoryModels";
 import { appState, ScheduleBlock } from "./AssistantPage";
 import {
@@ -127,6 +140,7 @@ export function LocalAssistantPage({
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const availability = useAssistantsAvailability();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: LOCAL_ASSISTANTS_KEY });
+  const presetForm = presetFormFromToken(summary.token);
 
   const talk = async () => {
     setBusy("chat");
@@ -281,7 +295,20 @@ export function LocalAssistantPage({
         </Button>
       </div>
 
-      <LocalAppsBlock environmentId={environmentId} projectId={projectId} name={name} />
+      <LocalPresetBlock
+        environmentId={environmentId}
+        projectId={projectId}
+        name={name}
+        current={presetForm}
+        onSaved={refresh}
+      />
+
+      <LocalAppsBlock
+        environmentId={environmentId}
+        projectId={projectId}
+        name={name}
+        preset={presetForm.preset}
+      />
 
       <section
         className={
@@ -392,10 +419,13 @@ function LocalAppsBlock({
   environmentId,
   projectId,
   name,
+  preset,
 }: {
   environmentId: EnvironmentId;
   projectId: string;
   name: string;
+  /** Its preset caps the levels (an Observer only reads). */
+  preset: AssistantPreset;
 }) {
   const queryClient = useQueryClient();
   const key = ["uno-assistant-local-apps", environmentId, projectId] as const;
@@ -489,7 +519,8 @@ function LocalAppsBlock({
                     <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
                   ) : null}
                   <LevelPicker
-                    value={levels[provider]}
+                    value={effectiveLevel(levels[provider], preset)}
+                    max={levelCeiling(preset)}
                     disabled={saving !== null}
                     onChange={(level) => void change(provider, level)}
                     testId={`assistant-local-access-${provider}`}
@@ -498,6 +529,14 @@ function LocalAppsBlock({
               );
             })}
           </div>
+          {levelCeiling(preset) !== "write" ? (
+            <p
+              className="pt-1 text-xs text-muted-foreground"
+              data-testid="assistant-local-access-cap"
+            >
+              {name} is an Observer: it only reads your apps, whatever is set here.
+            </p>
+          ) : null}
           <p
             className="flex gap-1.5 pt-1 text-xs text-muted-foreground"
             data-testid="assistant-local-access-honest"
@@ -511,6 +550,88 @@ function LocalAppsBlock({
           </p>
         </>
       )}
+    </Block>
+  );
+}
+
+/**
+ * "What {name} may do": Full / Helper / Observer and its projects (decision
+ * 21.10). Work on this computer enforces it from the assistant's next step.
+ */
+function LocalPresetBlock({
+  environmentId,
+  projectId,
+  name,
+  current,
+  onSaved,
+}: {
+  environmentId: EnvironmentId;
+  projectId: string;
+  name: string;
+  /** What its token says now. */
+  current: PresetForm;
+  onSaved: () => void;
+}) {
+  const projects = useQuery({
+    queryKey: ["uno-assistant", "access-projects", environmentId],
+    queryFn: () => listProjectsForAccessPicker({ environmentId }),
+    retry: false,
+  });
+  const [draft, setDraft] = useState<PresetForm | null>(null);
+  const [saving, setSaving] = useState(false);
+  const form = draft ?? current;
+  const dirty = draft !== null && !samePresetForm(draft, current);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await setAssistantPreset({ environmentId, projectId, ...presetAccessFromForm(form) });
+      setDraft(null);
+      onSaved();
+      toastManager.add({
+        type: "success",
+        title: `${name} is ${ASSISTANT_PRESET_COPY[form.preset].name} now`,
+        description: "It follows this from its next step.",
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't change what it may do",
+        description: errorText(cause, "This computer didn't answer."),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Block
+      title={`What ${name} may do`}
+      testId="assistant-local-preset"
+      action={
+        dirty ? (
+          <Button
+            size="xs"
+            onClick={() => void save()}
+            disabled={saving}
+            data-testid="assistant-local-preset-save"
+          >
+            {saving ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
+            Save
+          </Button>
+        ) : null
+      }
+    >
+      <div className="py-1">
+        <AssistantPresetPicker
+          name={name}
+          value={form}
+          onChange={setDraft}
+          projects={projects.data ?? []}
+          disabled={saving}
+          testId="assistant-local-preset"
+        />
+      </div>
     </Block>
   );
 }

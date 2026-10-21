@@ -17,6 +17,8 @@ import type {
   AssistantDraftResult,
   AssistantChatsResult,
   AssistantEditableFileName,
+  AssistantPreset,
+  AssistantPresetAccess,
   EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
@@ -126,6 +128,8 @@ export function createAssistant(
     readonly name: string;
     readonly emoji?: string;
     readonly template?: string | null;
+    /** Its preset from the first token on (daemons from 0.0.153; older ones: Full). */
+    readonly access?: AssistantPresetAccess;
   },
 ): Promise<{ projectId: ProjectId }> {
   const { environmentId, ...body } = input;
@@ -330,6 +334,26 @@ export function updateAssistantAccess(
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/access",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * What an assistant may do — Full / Helper / Observer and its projects. The
+ * daemon rewrites its token and enforces it from its next step.
+ */
+export function setAssistantPreset(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly preset: AssistantPreset;
+    readonly projects: "all" | ReadonlyArray<string>;
+  },
+): Promise<{ token: ManagerCapabilityTokenDescriptor | null }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/preset",
     method: "POST",
     body,
   });

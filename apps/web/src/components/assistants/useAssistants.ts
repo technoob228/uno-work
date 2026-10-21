@@ -288,12 +288,13 @@ export function makeLocalCreateDeps(
   onStage: (stage: LocalCreateStage) => void,
 ): LocalCreateDeps {
   return {
-    createAssistant: async ({ name, emoji, template }) => {
+    createAssistant: async ({ name, emoji, template, access }) => {
       const { projectId } = await createAssistantOnComputer({
         environmentId,
         name,
         emoji,
         template,
+        ...(access ? { access } : {}),
       });
       const summary = await getAssistant({ environmentId, projectId }).catch(() => null);
       return { projectId, workspaceRoot: summary?.workspaceRoot ?? null };
