@@ -157,6 +157,7 @@ import {
 import {
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
+  managerAssistantPresetRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,
@@ -615,6 +616,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   browserBridgeOpenRouteLayer,
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
+  managerAssistantPresetRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,

@@ -37,6 +37,7 @@ import { RemindersRepository } from "../../persistence/Services/Reminders.ts";
 import {
   ManagerInvalidRequestError,
   ManagerNotFoundError,
+  ManagerPresetDeniedError,
   ManagerProjectNotAllowedError,
   ManagerProposalResolutionError,
   ManagerScopeDeniedError,
@@ -67,6 +68,14 @@ import {
   ManagerToolService,
   type ManagerToolServiceShape,
 } from "../Services/ManagerToolService.ts";
+import type { AssistantAction } from "@t3tools/shared/assistantPreset";
+import {
+  callerPreset,
+  createRuntimeFor,
+  executesAtOnce,
+  presetDenial,
+  steerDenial,
+} from "../assistantPresetGate.ts";
 
 function requireScope(
   caller: ManagerCaller,
@@ -75,6 +84,29 @@ function requireScope(
   return caller.scopes.includes(scope)
     ? Effect.void
     : Effect.fail(new ManagerScopeDeniedError({ requiredScope: scope }));
+}
+
+/** An assistant token's preset (Full / Helper / Observer) refuses the action. */
+function requirePresetAllows(
+  caller: ManagerCaller,
+  action: AssistantAction,
+): Effect.Effect<void, ManagerPresetDeniedError> {
+  const denial = presetDenial(caller, action);
+  return denial === null
+    ? Effect.void
+    : Effect.fail(new ManagerPresetDeniedError({ detail: denial }));
+}
+
+/**
+ * Reminders go to the person's own messenger and touch no chat: every
+ * assistant preset may set them (Observer too); other tokens need write.
+ */
+function requireReminderAccess(
+  caller: ManagerCaller,
+): Effect.Effect<void, ManagerScopeDeniedError | ManagerPresetDeniedError> {
+  return callerPreset(caller) === null
+    ? requireScope(caller, "threads:write")
+    : requirePresetAllows(caller, "remind");
 }
 
 function isProjectAllowed(caller: ManagerCaller, projectId: ProjectId): boolean {
@@ -221,7 +253,7 @@ const makeManagerToolService = Effect.gen(function* () {
       // Auto-approve tier (in-app assistant): execute right away. The
       // proposal row is still written and resolved as `auto:<tokenId>`, so
       // the audit trail is identical to the manual path.
-      if (caller.autoApprove && caller.scopes.includes("threads:approve")) {
+      if (executesAtOnce(caller)) {
         const resolved = yield* approvalService.resolve({
           proposalId: proposal.proposalId,
           decision: "approved",
@@ -603,6 +635,7 @@ const makeManagerToolService = Effect.gen(function* () {
       if (!target.ok) {
         return yield* new ManagerInvalidRequestError({ detail: target.message });
       }
+      yield* requirePresetAllows(caller, "start-chat");
       yield* requireProjectAllowed(caller, input.projectId);
       const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
       if (Option.isNone(project)) {
@@ -610,8 +643,9 @@ const makeManagerToolService = Effect.gen(function* () {
       }
       // Hard v1 rule: manager-created threads default to approval-required.
       // A full-access request is representable but still lands as an explicit
-      // pending proposal like every other write.
-      const runtimeMode = input.runtimeMode ?? "approval-required";
+      // pending proposal like every other write. A Helper's chats never run
+      // freer than approval-required (its preset), whatever it asks for.
+      const runtimeMode = createRuntimeFor(caller, input.runtimeMode ?? "approval-required");
       return yield* fileProposal(caller, {
         kind: "create-thread",
         projectId: input.projectId,
@@ -624,7 +658,10 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const sendTurn: ManagerToolServiceShape["sendTurn"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* getAllowedThreadShell(caller, input.threadId);
+      yield* requirePresetAllows(caller, "write-chat");
+      const shell = yield* getAllowedThreadShell(caller, input.threadId);
+      const steer = steerDenial(caller, shell.runtimeMode);
+      if (steer !== null) return yield* new ManagerPresetDeniedError({ detail: steer });
       return yield* fileProposal(caller, {
         kind: "send-turn",
         threadId: input.threadId,
@@ -634,6 +671,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const interruptTurn: ManagerToolServiceShape["interruptTurn"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "stop-chat");
       yield* getAllowedThreadShell(caller, input.threadId);
       return yield* fileProposal(caller, {
         kind: "interrupt-turn",
@@ -643,6 +681,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const respondToRequest: ManagerToolServiceShape["respondToRequest"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "answer-requests");
       yield* requireScope(caller, "threads:approve");
       yield* getAllowedThreadShell(caller, input.threadId);
       return yield* fileProposal(caller, {
@@ -666,6 +705,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const resolveProposal: ManagerToolServiceShape["resolveProposal"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "resolve-proposals");
       yield* requireScope(caller, "threads:approve");
       const existing = yield* proposalRepository.getById({ proposalId: input.proposalId });
       if (Option.isNone(existing)) {
@@ -771,7 +811,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const createReminder: ManagerToolServiceShape["createReminder"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* requireScope(caller, "threads:write");
+      yield* requireReminderAccess(caller);
 
       if (input.dueAt === undefined && input.dueInSeconds === undefined) {
         return yield* new ManagerInvalidRequestError({
@@ -829,7 +869,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const cancelReminder: ManagerToolServiceShape["cancelReminder"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* requireScope(caller, "threads:write");
+      yield* requireReminderAccess(caller);
       const existing = yield* remindersRepository.getById({ reminderId: input.reminderId });
       if (Option.isNone(existing)) {
         return yield* new ManagerNotFoundError({ entity: "reminder", id: input.reminderId });

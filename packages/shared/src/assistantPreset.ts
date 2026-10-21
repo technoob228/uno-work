@@ -110,7 +110,11 @@ export function capAppLevel(level: AssistantAppLevel, preset: AssistantPreset): 
   return LEVEL_RANK[level] > LEVEL_RANK[ceiling] ? ceiling : level;
 }
 
-const FULL_SCOPES: ReadonlyArray<ManagerScope> = ["threads:read", "threads:write", "threads:approve"];
+const FULL_SCOPES: ReadonlyArray<ManagerScope> = [
+  "threads:read",
+  "threads:write",
+  "threads:approve",
+];
 
 export interface AssistantTokenAccess {
   readonly scopes: ReadonlyArray<ManagerScope>;
@@ -127,7 +131,7 @@ export function withOwnWorkspace(
   ownProjectId: string,
 ): ManagerProjectAllowlist {
   if (projects === "all") return "all";
-  return [...new Set([ownProjectId, ...projects])] as ReadonlyArray<ProjectId>;
+  return [...new Set<string>([ownProjectId, ...projects])] as unknown as ReadonlyArray<ProjectId>;
 }
 
 /**

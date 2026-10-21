@@ -21,6 +21,7 @@ import {
   AssistantAppAccessInput,
   AssistantEditableFileName,
   AssistantInstructionsResolveInput,
+  AssistantPresetInput,
   assistantTokenLabel,
   CHANNEL_NOTIFY_PATH,
   ChannelNotifyInput,
@@ -87,6 +88,8 @@ import {
   readStartedChats,
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
+import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
+import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPreset";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
 import { AssistantSchedules } from "../assistants/schedules.ts";
@@ -368,6 +371,7 @@ export const managerAssistantsCreateRouteLayer = HttpRouter.add(
         name: input.name,
         ...(input.emoji !== undefined ? { emoji: input.emoji } : {}),
         ...(input.template !== undefined ? { template: input.template } : {}),
+        ...(input.access !== undefined ? { access: input.access } : {}),
       })
       .pipe(
         Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 201 })),
@@ -687,6 +691,7 @@ export const managerAssistantAccessRouteLayer = HttpRouter.add(
     const input = yield* HttpServerRequest.schemaBodyJson(AccessPayload).pipe(
       Effect.mapError(() => new AuthError({ message: "Invalid access payload.", status: 400 })),
     );
+    const config = yield* ServerConfig;
     return yield* Effect.gen(function* () {
       const label = assistantTokenLabel(input.projectId);
       const token = yield* tokenRepository.getActiveByLabel(label);
@@ -696,20 +701,52 @@ export const managerAssistantAccessRouteLayer = HttpRouter.add(
           { status: 409 },
         );
       }
-      yield* tokenRepository.updateAccess({
-        tokenId: token.value.tokenId,
-        scopes: input.scopes ?? token.value.scopes,
-        // "Only these projects" never locks the assistant out of its own
-        // workspace (its conversations, notes and skills live there).
-        projectAllowlist:
-          input.projectAllowlist === "all"
-            ? "all"
-            : [...new Set([input.projectId, ...input.projectAllowlist])],
-        autoApprove: input.autoApprove ?? token.value.autoApprove,
-      });
-      const updated = yield* tokenRepository.getActiveByLabel(label);
+      // Kept by the daemon too, so a re-issued token keeps it.
+      const updated = yield* applyAssistantAccess(
+        { tokens: tokenRepository, stateDir: config.stateDir },
+        input.projectId,
+        {
+          scopes: input.scopes ?? token.value.scopes,
+          // "Only these projects" never locks the assistant out of its own
+          // workspace (its conversations, notes and skills live there).
+          projectAllowlist: withOwnWorkspace(input.projectAllowlist, input.projectId),
+          autoApprove: input.autoApprove ?? token.value.autoApprove,
+        },
+      );
       return HttpServerResponse.jsonUnsafe({ token: Option.getOrNull(updated) }, { status: 200 });
     }).pipe(Effect.catch(respondServerError("assistant:access")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/preset` {projectId, preset, projects} — owner
+ * session only. Rewrites the assistant's token to the preset (Full / Helper /
+ * Observer) and the projects it works in; the daemon enforces it from the
+ * assistant's next call, no restart. An assistant not set up yet gets it
+ * with its first token.
+ */
+export const managerAssistantPresetRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/preset",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const tokenRepository = yield* ManagerCapabilityTokenRepository;
+    const config = yield* ServerConfig;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantPresetInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid preset payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    return yield* Effect.gen(function* () {
+      const updated = yield* applyAssistantAccess(
+        { tokens: tokenRepository, stateDir: config.stateDir },
+        input.projectId,
+        presetTokenAccess(input.preset, input.projects, input.projectId),
+      );
+      yield* Effect.logInfo("assistant preset changed").pipe(
+        Effect.annotateLogs({ projectId: input.projectId, preset: input.preset }),
+      );
+      return HttpServerResponse.jsonUnsafe({ token: Option.getOrNull(updated) }, { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:preset")));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

@@ -12,11 +12,12 @@
  * Authenticated with the thread-scoped browser-bridge token every harness
  * process holds (`UNO_WORK_BRIDGE_TOKEN`), like `POST /api/channels/notify`.
  */
-import { ASSISTANT_PROJECT_ID, assistantTokenLabel } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { assistantOfThread } from "../assistants/assistantAccess.ts";
 import { authorizeLocalBridgeRequest, BrowserBridge } from "../browserBridge.ts";
+import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
@@ -34,6 +35,7 @@ const makeRequestContext = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
   const tokenRepository = yield* ManagerCapabilityTokenRepository;
+  const config = yield* ServerConfig;
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
@@ -42,16 +44,18 @@ const makeRequestContext = Effect.gen(function* () {
       Effect.map((settings) => settings.agentThreadsScope),
       Effect.orElseSucceed(() => "own-project" as const),
     ),
-    // Settings → Assistant → "Can see and manage": the assistant token's
-    // project allowlist is the single source (uno-manager enforces the same).
-    // No token / unreadable → only the caller's own project, never "all".
-    getAssistantProjectAllowlist: tokenRepository
-      .getActiveByLabel(assistantTokenLabel(ASSISTANT_PROJECT_ID))
-      .pipe(
-        Effect.map((token): "all" | ReadonlyArray<string> =>
-          Option.isSome(token) ? token.value.projectAllowlist : [],
+    // Whose chat is calling: an assistant's (its preset and projects, from
+    // its own token — uno-manager enforces the same) or the person's.
+    // Unreadable → treated as the person's chat: the narrow global setting.
+    getCallerAssistant: (caller) =>
+      projections.getShellSnapshot().pipe(
+        Effect.flatMap((snapshot) =>
+          assistantOfThread(
+            { tokens: tokenRepository, stateDir: config.stateDir, threads: snapshot.threads },
+            caller.id,
+          ),
         ),
-        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+        Effect.orElseSucceed(() => null),
       ),
     getProviders: providerRegistry.getProviders,
     getOwnBoxId: serverSettings.getSettings.pipe(

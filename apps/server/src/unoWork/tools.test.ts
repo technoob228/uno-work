@@ -25,6 +25,7 @@ import {
   BOT_WAITING_FOR_TOKEN_NEXT,
   UNO_WORK_MCP_SERVER,
   UNO_WORK_TOOLS,
+  observerRefusal,
   runUnoWorkTool,
   toolLevel,
   type UnoWorkTool,
@@ -462,6 +463,25 @@ describe("approval gate", () => {
     expect(result._tag).toBe("Success");
     expect(recorded.approvals).toEqual([]);
     expect(recorded.actions).toEqual([{ appId: "manifest:notes", action: "stop" }]);
+  });
+
+  it("an Observer's chat gets no change tools, safe ones still run (preset 21.10)", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "full-access" });
+    const observed = { ...deps, presetRefusal: Effect.succeed(observerRefusal("Scout")) };
+    const refused = await run("app_stop", observed, { appId: "notes" });
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("Observer");
+    expect(recorded.actions).toEqual([]);
+    expect(recorded.approvals).toEqual([]);
+    const listed = await run("apps_list", observed);
+    expect(listed._tag).toBe("Success");
+    // Not an Observer: the usual gate.
+    const allowed = await run(
+      "app_stop",
+      { ...deps, presetRefusal: Effect.succeed(null) },
+      { appId: "notes" },
+    );
+    expect(allowed._tag).toBe("Success");
   });
 
   it("asks for a change in Ask mode and runs it once allowed", async () => {
