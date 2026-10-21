@@ -22,6 +22,7 @@
  *
  * @module lib/deviceSlack
  */
+import type { ManagerSlackRoutingStatus } from "@t3tools/contracts";
 
 /** One call to the console as the signed-in person (`accountRequest`). */
 export type AccountCall = (
@@ -49,6 +50,8 @@ export interface DeviceSlackSyncResult {
   readonly connected: boolean;
   readonly installerDmReady: boolean;
   readonly needsRelay: boolean;
+  /** Several computers (or Uno accounts) in the workspace (console 257). */
+  readonly routing?: ManagerSlackRoutingStatus;
 }
 
 export interface DeviceSlackDeps {
@@ -76,6 +79,7 @@ export interface DeviceSlackState {
   readonly queueTtlHours: number;
   /** Sign in with Uno first (the desktop has no account yet). */
   readonly signInRequired: boolean;
+  readonly routing?: ManagerSlackRoutingStatus;
 }
 
 /** The console's default when an older answer has no `queue_ttl_hours`. */
@@ -151,6 +155,7 @@ export async function readDeviceSlack(
     device: true,
     queueTtlHours: num(consoleAnswer, "queue_ttl_hours") ?? DEVICE_QUEUE_TTL_HOURS,
     signInRequired: false,
+    ...(synced.routing !== undefined ? { routing: synced.routing } : {}),
   };
 }
 

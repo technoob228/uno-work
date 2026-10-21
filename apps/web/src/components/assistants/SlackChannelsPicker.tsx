@@ -63,6 +63,8 @@ export function SlackChannelsPicker({
           channels.data.map((channel) => {
             const isMine = channel.assistantProjectId === projectId;
             const taken = channel.assistantProjectId !== null && !isMine;
+            // Several computers in the workspace (console 257).
+            const otherAccount = channel.routedAway === "account";
             return (
               <label
                 key={channel.id}
@@ -71,7 +73,7 @@ export function SlackChannelsPicker({
                 <input
                   type="checkbox"
                   checked={isMine}
-                  disabled={saving !== null}
+                  disabled={saving !== null || (otherAccount && !isMine)}
                   onChange={() => void toggle(channel)}
                 />
                 {channel.isPrivate ? (
@@ -83,7 +85,11 @@ export function SlackChannelsPicker({
                 {saving === channel.id ? (
                   <LoaderCircleIcon className="size-3.5 animate-spin" />
                 ) : null}
-                {taken ? (
+                {otherAccount ? (
+                  <span className="text-[11px] text-muted-foreground">another Uno account</span>
+                ) : channel.routedAway === "computer" ? (
+                  <span className="text-[11px] text-muted-foreground">your other computer</span>
+                ) : taken ? (
                   <span className="text-[11px] text-muted-foreground">another assistant</span>
                 ) : channel.isPrivate && !channel.isMember ? (
                   <span className="text-[11px] text-muted-foreground">invite the app first</span>
@@ -95,7 +101,8 @@ export function SlackChannelsPicker({
       </div>
       <p className="text-xs text-muted-foreground">
         One app in your Slack, each assistant under its own name. A direct message to the app asks
-        who it is for.
+        who it is for. A channel answers on one computer: picking it here moves it from your other
+        computer.
       </p>
     </div>
   );

@@ -53,6 +53,17 @@ function harness(input: {
         connected: installed && hasRelay,
         installerDmReady: installed && hasRelay,
         needsRelay: installed && !hasRelay,
+        ...(installed && hasRelay
+          ? {
+              routing: {
+                computers: [],
+                isDefault: true,
+                defaultChosen: false,
+                shared: false,
+                signedAs: null,
+              },
+            }
+          : {}),
       };
     },
     forget: async (projectId) => {
@@ -87,6 +98,13 @@ describe("readDeviceSlack", () => {
       device: true,
       queueTtlHours: 24,
       signInRequired: false,
+      routing: {
+        computers: [],
+        isDefault: true,
+        defaultChosen: false,
+        shared: false,
+        signedAs: null,
+      },
     });
     expect(h.calls).toEqual([
       "GET /api/v1/work/slack/device",
