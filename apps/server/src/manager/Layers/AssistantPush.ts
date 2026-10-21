@@ -27,7 +27,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
-import { Duration, Effect, Layer, Option, Ref, Semaphore, Stream } from "effect";
+import { Clock, Duration, Effect, Layer, Option, Ref, Semaphore, Stream } from "effect";
 import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as nodePath from "node:path";
@@ -227,7 +227,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           if (next !== state) yield* commit(next);
           return;
         }
-        const nowMs = Date.now();
+        const nowMs = yield* Clock.currentTimeMillis;
         let conversation = decision.conversationThreadId;
         if (conversation === null) {
           const route = (yield* Ref.get(routesRef)).get(threadId);
@@ -392,7 +392,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           selfCreatedAt: null,
           session: Option.isSome(shell) ? shell.value.session : null,
           turns,
-          nowMs: Date.now(),
+          nowMs: yield* Clock.currentTimeMillis,
         });
         return !busy.busy;
       });
@@ -457,7 +457,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
             },
             runtimeMode: conversation.runtimeMode,
             interactionMode: conversation.interactionMode,
-            createdAt: new Date().toISOString(),
+            createdAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
           },
           { origin: systemCommandOrigin(SYSTEM_TURN_ORIGIN_COMPONENT, "work update") },
         );
@@ -494,7 +494,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       });
 
     const tick = Effect.gen(function* () {
-      const nowMs = Date.now();
+      const nowMs = yield* Clock.currentTimeMillis;
       yield* lookAtWatches(nowMs);
       yield* flushOutbox(nowMs);
     }).pipe(
@@ -515,18 +515,19 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
 
     const noteCaller: AssistantPushServiceShape["noteCaller"] = (input) =>
       enabled
-        ? Ref.update(routesRef, (map) => {
-            const nowMs = Date.now();
-            const next = new Map(
-              [...map].filter(([, route]) => nowMs - route.atMs < PUSH_CALLER_ROUTE_TTL_MS),
-            );
-            next.set(input.threadId, {
-              assistant: input.assistantProjectId,
-              conversation: input.conversationThreadId,
-              atMs: nowMs,
-            });
-            return next;
-          })
+        ? Effect.flatMap(Clock.currentTimeMillis, (nowMs) =>
+            Ref.update(routesRef, (map) => {
+              const next = new Map(
+                [...map].filter(([, route]) => nowMs - route.atMs < PUSH_CALLER_ROUTE_TTL_MS),
+              );
+              next.set(input.threadId, {
+                assistant: input.assistantProjectId,
+                conversation: input.conversationThreadId,
+                atMs: nowMs,
+              });
+              return next;
+            }),
+          )
         : Effect.void;
 
     const reportsOutcomeOf: AssistantPushServiceShape["reportsOutcomeOf"] = (threadId) =>
@@ -536,7 +537,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         if (state.watches.some((watch) => watch.threadId === threadId)) return true;
         if (state.outbox.some((notice) => notice.threadId === threadId)) return true;
         const until = (yield* Ref.get(reportedRef)).get(threadId);
-        return until !== undefined && until > Date.now();
+        return until !== undefined && until > (yield* Clock.currentTimeMillis);
       });
 
     const watchedBy: AssistantPushServiceShape["watchedBy"] = (assistantProjectId) =>

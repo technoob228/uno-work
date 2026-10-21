@@ -144,6 +144,23 @@ export function lastAssistantPreview(
   return null;
 }
 
+/**
+ * An assistant's own token waits at most {@link MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC}:
+ * it hands work off and ends its turn; the daemon reports the outcome
+ * (`assistantPush.ts`). Everyone else keeps the long wait.
+ */
+export function effectiveWaitTimeoutSec(
+  caller: ManagerCaller,
+  requested: number | undefined,
+): number {
+  return assistantProjectOfCaller(caller) === null
+    ? (requested ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC)
+    : Math.min(
+        requested ?? MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
+        MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
+      );
+}
+
 function timingSafeStringEqual(a: string, b: string): boolean {
   if (a.length === 0 || a.length !== b.length) {
     return false;
@@ -338,19 +355,6 @@ const makeManagerToolService = Effect.gen(function* () {
   const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
   const serverConfig = Option.getOrNull(yield* Effect.serviceOption(ServerConfig));
 
-  /**
-   * An assistant's own token waits at most {@link MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC}:
-   * it hands work off and ends its turn; the daemon reports the outcome
-   * (`assistantPush.ts`). Everyone else keeps the long wait.
-   */
-  const waitTimeoutSec = (caller: ManagerCaller, requested: number | undefined) =>
-    assistantProjectOfCaller(caller) === null
-      ? (requested ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC)
-      : Math.min(
-          requested ?? MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
-          MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
-        );
-
   /** Tell the push which conversation hands `threadId` work (before the turn starts). */
   const noteCaller = (caller: ManagerCaller, threadId: ThreadId) => {
     const assistantProjectId = assistantProjectOfCaller(caller);
@@ -485,7 +489,7 @@ const makeManagerToolService = Effect.gen(function* () {
       caller,
       [input.threadId],
       "all",
-      waitTimeoutSec(caller, input.timeoutSec),
+      effectiveWaitTimeoutSec(caller, input.timeoutSec),
     ).pipe(
       Effect.map((outcome) => ({
         ...(outcome.results[0] as ManagerWaitThreadResult),
@@ -499,7 +503,7 @@ const makeManagerToolService = Effect.gen(function* () {
       caller,
       input.threadIds,
       mode,
-      waitTimeoutSec(caller, input.timeoutSec),
+      effectiveWaitTimeoutSec(caller, input.timeoutSec),
     ).pipe(Effect.map((outcome) => ({ mode, ...outcome })));
   };
 
