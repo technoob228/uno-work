@@ -121,7 +121,9 @@ import {
   makeConnectorReplies,
   readMeta,
   TYPING_RENEW_MS,
+  type EnqueueOutcome,
   type SendOutcome,
+  type SystemTurnInput,
 } from "../connectorReplies.ts";
 import { detectReplyLanguage } from "../connectorReplyText.ts";
 import {
@@ -212,6 +214,13 @@ export interface ManagerTelegramServiceShape {
   }) => Effect.Effect<
     ReadonlyArray<{ readonly chatId: string; readonly ok: boolean; readonly error: string | null }>
   >;
+  /**
+   * A turn the daemon starts in a chat's conversation (the assistant's work
+   * update, `assistantPush.ts`): queued and answered like a message of that
+   * chat (`connectorReplies.ts`). Never fails: `failed` when it could not be
+   * queued.
+   */
+  readonly enqueueSystemTurn: (input: SystemTurnInput) => Effect.Effect<EnqueueOutcome | "failed">;
 }
 
 export class ManagerTelegramService extends Context.Service<
@@ -1951,11 +1960,24 @@ const makeTelegramConnector = Effect.gen(function* () {
       );
     });
 
+  const enqueueSystemTurn: ManagerTelegramServiceShape["enqueueSystemTurn"] = (input) =>
+    replies
+      .enqueueSystemTurn(input)
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("telegram system turn could not be queued").pipe(
+            Effect.annotateLogs({ threadId: input.from.threadId, cause }),
+            Effect.as("failed" as const),
+          ),
+        ),
+      );
+
   return {
     getRuntimeStatus,
     sendText,
     startPairing,
     sendTestMessage,
+    enqueueSystemTurn,
   } satisfies ManagerTelegramServiceShape;
 });
 

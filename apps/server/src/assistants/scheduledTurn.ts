@@ -32,7 +32,7 @@ import { Context, Data, Effect, Layer, Option } from "effect";
 
 import { currentAssistantModelSelection } from "../manager/assistantEngineSelection.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../manager/connectorBindings.ts";
-import { decidePendingReply, stoppedText } from "../manager/connectorReplies.ts";
+import { decidePendingReply, isNoReply, stoppedText } from "../manager/connectorReplies.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { assistantCommandOrigin } from "../orchestration/commandOrigin.ts";
@@ -64,10 +64,7 @@ export function wrapScheduledPrompt(input: { readonly name?: string; readonly pr
   ].join("\n");
 }
 
-/** NO_REPLY (any case, optional trailing dot) means: say nothing. */
-export function isNoReply(text: string): boolean {
-  return text.trim().replace(/\.$/, "").toUpperCase() === ASSISTANT_TURN_NO_REPLY;
-}
+export { isNoReply };
 
 export interface AssistantScheduledTurnsShape {
   readonly run: (
