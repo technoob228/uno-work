@@ -5,7 +5,7 @@
  * machine talks to the console with its own identity; this interface only
  * asks its daemon. Shapes: reports/day_2026-09-25/onboarding-v3/CONTRACT.md §C.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ManagerSlackRoutingStatus } from "@t3tools/contracts";
 
 import {
   AccountHttpError,
@@ -221,6 +221,24 @@ export interface SlackInstallState {
   readonly queueTtlHours?: number;
   /** On the desktop: sign in with Uno first. */
   readonly signInRequired?: boolean;
+  /** Several computers (or Uno accounts) in the workspace; absent on an older console. */
+  readonly routing?: ManagerSlackRoutingStatus;
+}
+
+/**
+ * "Answer direct messages here" (true) for this account's computers in the
+ * Slack workspace, or back to the cloud computer (false).
+ */
+export function setSlackDefault(
+  input: EnvironmentScoped & { readonly projectId: string; readonly isDefault: boolean },
+): Promise<ManagerSlackRoutingStatus> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/slack/default",
+    method: "POST",
+    body,
+  });
 }
 
 /**

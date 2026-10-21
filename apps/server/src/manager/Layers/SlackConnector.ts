@@ -52,6 +52,7 @@ import { slackCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import { syncSlackRouting } from "../slackRouting.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
 import type { ConnectorPendingReply } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
@@ -1336,6 +1337,18 @@ const makeSlackConnector = Effect.gen(function* () {
         };
         runtimes.set(projectId, runtime);
         runtime.stopRelay = startRelayEvents({ projectId, relayToken, config, web, botUserId });
+        // Several computers in the workspace (console 257): claim this
+        // computer's channels there (best effort; again on every start).
+        runFork(
+          syncSlackRouting().pipe(
+            Effect.provideService(ManagerConnectorRepository, connectorRepository),
+            Effect.catch((cause) =>
+              Effect.logWarning("slack routing sync failed").pipe(
+                Effect.annotateLogs({ projectId, cause: String(cause) }),
+              ),
+            ),
+          ),
+        );
         return;
       }
       const client = new SocketModeClient({ appToken: config.appToken });

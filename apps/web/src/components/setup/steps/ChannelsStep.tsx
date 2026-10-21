@@ -44,10 +44,12 @@ import {
   getSlackInstall,
   openAuthWindow,
   removeSlackInstall,
+  setSlackDefault,
   startSlackInstall,
   type SharedTelegramLink,
 } from "../../../lib/setupApi";
 import { DEVICE_QUEUE_TTL_HOURS, deviceSlackDeliveryLine } from "../../../lib/deviceSlack";
+import { slackRoutingCopy } from "../../../lib/slackRouting";
 import { cn } from "../../../lib/utils";
 import { TelegramWizard } from "../../assistant/TelegramWizard";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
@@ -486,7 +488,7 @@ export function AssistantSlackPanel({
  * for it (only Uno's app goes through the console, which wakes the computer).
  */
 export const OWN_SLACK_BOT_LINE =
-  "Your own bot is for your own name and picture, or a workspace already connected to another Uno account. It answers only while this computer is awake.";
+  "Your own bot is for your own name and picture. It answers only while this computer is awake.";
 
 /** Slack opened in the system browser (desktop app): how long to keep checking. */
 const EXTERNAL_INSTALL_WAIT_MS = 3 * 60_000;
@@ -581,6 +583,18 @@ function SlackCard({
       </p>
     ) : null;
 
+  const routingCopy = slackRoutingCopy(state?.installed ? state.routing : undefined);
+  const routingAction = routingCopy.action;
+  const changeDefault = async (isDefault: boolean) => {
+    setError(null);
+    try {
+      await setSlackDefault({ environmentId, projectId: summary.projectId, isDefault });
+      await queryClient.invalidateQueries({ queryKey: ["uno-setup", "slack-install"] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Couldn't change it.");
+    }
+  };
+
   if (connected) {
     const where = state?.installed ? state.teamName : summary.slack.botUserName;
     return (
@@ -592,6 +606,26 @@ function SlackCard({
             : ""}
         </ConnectedBadge>
         {state?.installed ? deviceLine : null}
+        {routingCopy.directLine ? (
+          <div className="flex flex-col gap-1" data-testid="setup-slack-routing">
+            <p className="text-xs text-muted-foreground">{routingCopy.directLine}</p>
+            {routingAction ? (
+              <button
+                type="button"
+                className="self-start text-xs text-primary hover:underline"
+                onClick={() => void changeDefault(routingAction.kind === "here")}
+              >
+                {routingAction.label}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {routingCopy.sharedLine ? (
+          <p className="text-xs text-muted-foreground" data-testid="setup-slack-shared">
+            {routingCopy.sharedLine}
+          </p>
+        ) : null}
+        {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
         <Preview
           lines={[
             "@Uno summarize today’s notes-from-call.md",

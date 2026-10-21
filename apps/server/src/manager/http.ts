@@ -36,6 +36,7 @@ import {
   ManagerConnectorAddressingConfig,
   ManagerConnectorGroupMembersPolicy,
   ManagerSlackConnectorConfig,
+  ManagerSlackDefaultInput,
   ManagerSlackDeviceSyncInput,
   ManagerTelegramConnectorConfig,
   ManagerTokenId,
@@ -74,6 +75,7 @@ import {
   readSlackInstall,
   syncDeviceSlackInstall,
   assignSlackChannelsFor,
+  slackRoutingStatus,
   isRoutedSlack,
   routeSlackThroughHolder,
   slackRelayHolderFor,
@@ -83,6 +85,7 @@ import {
   type ChannelSetupOutcome,
 } from "./channelSetup.ts";
 import { readWorkMachineIdentity } from "./workConsole.ts";
+import { channelRoutedAway, currentSlackRouting, setSlackDefaultHere } from "./slackRouting.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { AssistantScheduledTurns } from "../assistants/scheduledTurn.ts";
 import {
@@ -1297,6 +1300,8 @@ export const managerAssistantSlackChannelsGetRouteLayer = HttpRouter.add(
       if (decoded._tag !== "Success") continue;
       for (const id of decoded.value.allowedChannelIds) owners.set(id, row.projectId);
     }
+    // Several computers in the workspace (257): channels answered elsewhere.
+    const routing = yield* currentSlackRouting().pipe(Effect.orElseSucceed(() => null));
     return HttpServerResponse.jsonUnsafe(
       {
         channels: channels.map((channel) => ({
@@ -1305,6 +1310,7 @@ export const managerAssistantSlackChannelsGetRouteLayer = HttpRouter.add(
           isPrivate: channel.isPrivate,
           isMember: channel.isMember,
           assistantProjectId: owners.get(channel.id) ?? null,
+          routedAway: channelRoutedAway(channel.id, routing),
         })),
       },
       { status: 200 },
@@ -1339,6 +1345,33 @@ export const managerAssistantSlackChannelsPutRouteLayer = HttpRouter.add(
       }
       return HttpServerResponse.jsonUnsafe({ allowedChannelIds: assigned }, { status: 200 });
     }).pipe(Effect.catch(respondServerError("assistant:slack-channels")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/slack/default` {projectId, isDefault} — owner
+ * only. "Answer direct messages here" for the workspace's computers of this
+ * account (console 257), or back to the cloud-first rule.
+ */
+export const managerAssistantSlackDefaultRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack/default",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(ManagerSlackDefaultInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    return yield* Effect.gen(function* () {
+      const routing = yield* setSlackDefaultHere({ isDefault: input.isDefault });
+      if (routing === null) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Uno's Slack app didn't answer. Try again in a minute." },
+          { status: 502 },
+        );
+      }
+      return HttpServerResponse.jsonUnsafe(slackRoutingStatus(routing), { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:slack-default")));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

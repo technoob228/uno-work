@@ -23,6 +23,7 @@ import {
   type ManagerChannelSetupErrorCode,
   type ManagerSlackInstallStartResult,
   type ManagerSlackInstallStatus,
+  type ManagerSlackRoutingStatus,
   type ManagerTelegramSharedResult,
   type ProjectId,
 } from "@t3tools/contracts";
@@ -33,6 +34,7 @@ import { Effect, Option, Schema } from "effect";
 import type { ManagerRepositoryError } from "../persistence/Errors.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { assignSlackChannels } from "./slackAssistants.ts";
+import { type SlackRouting, syncSlackRouting } from "./slackRouting.ts";
 import {
   callTelegramBotMethod,
   isRelayCredential,
@@ -528,6 +530,7 @@ export const isRoutedSlack = (
 export const assignSlackChannelsFor = (input: {
   readonly projectId: ProjectId;
   readonly channelIds: ReadonlyArray<string>;
+  readonly fetchImpl?: FetchLike;
 }): Effect.Effect<ReadonlyArray<string>, ManagerRepositoryError, ManagerConnectorRepository> =>
   Effect.gen(function* () {
     const repository = yield* ManagerConnectorRepository;
@@ -554,8 +557,27 @@ export const assignSlackChannelsFor = (input: {
         updatedAt: now,
       });
     }
-    return next.get(input.projectId) ?? [];
+    // Several computers in the workspace (257): claim the picked channels at
+    // the console — taken from another computer of the account; a channel of
+    // another Uno account stays there and leaves this allowlist.
+    const routing = yield* syncSlackRouting({
+      picked: input.channelIds,
+      ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
+    });
+    if (routing === null) return next.get(input.projectId) ?? [];
+    const latest = yield* repository.get({ projectId: input.projectId, kind: "slack" });
+    const config = Option.isSome(latest) ? decodeSlackRow(latest.value.config) : null;
+    return config?.allowedChannelIds ?? [];
   });
+
+/** The console's routing as the interface shows it. */
+export const slackRoutingStatus = (routing: SlackRouting): ManagerSlackRoutingStatus => ({
+  computers: routing.computers.map((computer) => ({ ...computer })),
+  isDefault: routing.isDefault,
+  defaultChosen: routing.defaultChosen,
+  shared: routing.shared,
+  signedAs: routing.signedAs,
+});
 
 /** Where to send the person to add Uno's app to their workspace. */
 export const startSlackInstall = (input: {
@@ -746,6 +768,15 @@ const applySlackInstall = (input: {
       }
     }
 
+    // Several computers in the workspace (257): claim this computer's
+    // channels, drop the ones answered elsewhere, report who answers DMs.
+    const routing =
+      installed && relayRow !== null
+        ? yield* syncSlackRouting(
+            input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : undefined,
+          )
+        : null;
+
     const runtime = yield* slack.getRuntimeStatus(input.projectId);
     return succeed({
       available,
@@ -755,6 +786,7 @@ const applySlackInstall = (input: {
       connected: installed && relayRow !== null && relayRow.enabled && runtime.connected,
       installerDmReady,
       needsRelay,
+      ...(routing !== null ? { routing: slackRoutingStatus(routing) } : {}),
     });
   });
 

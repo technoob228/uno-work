@@ -468,6 +468,35 @@ export const ManagerSlackInstallStartResult = Schema.Struct({
 export type ManagerSlackInstallStartResult = typeof ManagerSlackInstallStartResult.Type;
 
 /** `GET /api/manager/assistant/slack/install` — the "Add to Slack" installation as the daemon sees it. */
+/** One computer of this account answering in the Slack workspace. */
+export const ManagerSlackRoutingComputer = Schema.Struct({
+  name: Schema.String,
+  kind: Schema.Literals(["cloud", "desktop"]),
+  isThis: Schema.Boolean,
+  isDefault: Schema.Boolean,
+});
+export type ManagerSlackRoutingComputer = typeof ManagerSlackRoutingComputer.Type;
+
+/**
+ * Several computers — of this account or of several Uno accounts — in one
+ * Slack workspace through Uno's app (console 257): each channel answers on
+ * the computer that took it; direct messages and @mentions elsewhere go to
+ * the account's default computer (picked, else the cloud computer).
+ */
+export const ManagerSlackRoutingStatus = Schema.Struct({
+  /** This account's computers in the workspace (this one included). */
+  computers: Schema.Array(ManagerSlackRoutingComputer),
+  /** This computer gets the account's direct messages and @mentions. */
+  isDefault: Schema.Boolean,
+  /** The person picked the default (not the cloud-first rule). */
+  defaultChosen: Schema.Boolean,
+  /** Other Uno accounts answer in this workspace too. */
+  shared: Schema.Boolean,
+  /** What replies are signed with there ("Misha's assistant"); null = the app's name. */
+  signedAs: Schema.NullOr(Schema.String),
+});
+export type ManagerSlackRoutingStatus = typeof ManagerSlackRoutingStatus.Type;
+
 export const ManagerSlackInstallStatus = Schema.Struct({
   available: Schema.Boolean,
   installed: Schema.Boolean,
@@ -480,7 +509,19 @@ export const ManagerSlackInstallStatus = Schema.Struct({
    * allowlisted — they can message the computer right away.
    */
   installerDmReady: Schema.Boolean,
+  /** The workspace's computers; absent when the console can't tell (older console). */
+  routing: Schema.optionalKey(ManagerSlackRoutingStatus),
 });
+
+/**
+ * `POST /api/manager/assistant/slack/default` {projectId, isDefault} —
+ * "Answer direct messages here" (true) or back to the cloud computer (false).
+ */
+export const ManagerSlackDefaultInput = Schema.Struct({
+  projectId: ProjectId,
+  isDefault: Schema.Boolean,
+});
+export type ManagerSlackDefaultInput = typeof ManagerSlackDefaultInput.Type;
 export type ManagerSlackInstallStatus = typeof ManagerSlackInstallStatus.Type;
 
 /**

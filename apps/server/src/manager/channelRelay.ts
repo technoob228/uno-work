@@ -134,6 +134,17 @@ export function slackRelayEventsUrl(
   return `${slackRelayBase(relayToken, baseUrl)}/events?${query.toString()}`;
 }
 
+/**
+ * This computer's share of a Slack workspace several computers (or Uno
+ * accounts) answer in: `GET`/`PUT` (see `slackRouting.ts`).
+ */
+export function slackRelayRoutingUrl(
+  relayToken: string,
+  baseUrl: string = controlPlaneBaseUrl(),
+): string {
+  return `${slackRelayBase(relayToken, baseUrl)}/routing`;
+}
+
 /** Where to `fetch` a Slack upload target (`files.getUploadURLExternal`'s `upload_url`). */
 export function slackUploadTarget(
   botToken: string,

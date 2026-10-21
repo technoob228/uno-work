@@ -577,6 +577,13 @@ export interface SlackChannelView {
   readonly isMember: boolean;
   /** The assistant of that computer that answers there; null = none yet. */
   readonly assistantProjectId: string | null;
+  /**
+   * Several computers in the workspace (console 257): the channel answers on
+   * another computer of this account ("computer": picking it here moves it)
+   * or of another Uno account ("account": it stays there). Absent on an older
+   * computer.
+   */
+  readonly routedAway?: "computer" | "account" | null;
 }
 
 /** The workspace's channels through Uno's Slack app, and whose each one is. */
