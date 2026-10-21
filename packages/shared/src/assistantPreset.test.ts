@@ -11,7 +11,7 @@ import {
   presetRuntimeCeiling,
   presetTokenAccess,
   type AssistantAction,
-} from "./assistantPreset";
+} from "./assistantPreset.ts";
 
 const ACTIONS: ReadonlyArray<AssistantAction> = [
   "read-chats",

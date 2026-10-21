@@ -178,8 +178,10 @@ const assistantCaller = (preset: AssistantPreset, projectsPicked: "all" | Projec
     return yield* auth.authenticate(`Bearer ${issued.token}`);
   });
 
+type Services = ManagerToolService | ManagerTokenAuthService | ManagerCapabilityTokenRepository;
+
 const run = <A, E>(
-  body: (dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>) => Effect.Effect<A, E, any>,
+  body: (dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>) => Effect.Effect<A, E, Services>,
 ) =>
   Effect.gen(function* () {
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
