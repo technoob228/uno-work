@@ -40,6 +40,7 @@ import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { GithubAccountServiceLive } from "./setupTools/GithubAccountService.ts";
+import { AgentMailServiceLive } from "./setupTools/AgentMailService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
 import {
   filesOfficeVersionsRouteLayer,
@@ -459,6 +460,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // GitHub of the account for git on this computer: state, "Connect
       // GitHub", and the git credential helper on a cloud computer.
       GithubAccountServiceLive,
+      // "Email for your AI": the computer's mailbox address and its rename.
+      AgentMailServiceLive,
       MaterialsServiceLive,
       // "New assistant": Uno AI drafts the assistant from one sentence.
       AssistantDraftServiceLive,
