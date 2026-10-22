@@ -321,7 +321,7 @@ describe("revoke and delete take the helpers along", () => {
     await run(s.team.create(callerOf(SCOUT), { name: "Ada", preset: "helper" }));
     const revoked = await run(s.team.revoke({ projectId: SCOUT, revoked: true }));
     expect(revoked._tag).toBe("Success");
-    expect((revoked as { success: { affected: string[] } }).success.affected).toEqual([
+    expect((revoked as unknown as { success: { affected: string[] } }).success.affected).toEqual([
       "assistant-scout",
       "assistant-ada",
     ]);
