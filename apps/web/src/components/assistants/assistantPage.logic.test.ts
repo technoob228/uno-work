@@ -79,6 +79,46 @@ describe("where it works", () => {
     );
   });
 
+  it("never lists the computer it is on as a cloud computer; cloud rows carry the console's name", () => {
+    const options = worksOnOptions({
+      isUno: false,
+      hereEnvironmentId: "env-box",
+      machines: [
+        // Its own computer, twice: its connection and its box on the account (no connection).
+        {
+          environmentId: "env-box",
+          boxId: 2617,
+          boxName: "uno-work",
+          label: "Mikhail's MacBook Air (2)",
+          kind: "uno_box",
+          status: "online",
+        },
+        {
+          environmentId: null,
+          boxId: 2617,
+          boxName: "uno-work",
+          label: "uno-work",
+          kind: "uno_box",
+          status: "online",
+        },
+        // Another computer with the same daemon label: kept, under the console's name.
+        {
+          environmentId: "env-other",
+          boxId: 2618,
+          boxName: "uno-product",
+          label: "Mikhail's MacBook Air (2)",
+          kind: "uno_box",
+          status: "online",
+        },
+      ],
+    });
+    expect(options.map((option) => [option.kind, option.label])).toEqual([
+      ["here", "Mikhail's MacBook Air (2)"],
+      ["cloud", "uno-product"],
+      ["own", "A new computer of its own"],
+    ]);
+  });
+
   it("says what the person asked for in the setup", () => {
     expect(worksOnWishLine("cloud")).toContain("cloud computers");
     expect(worksOnWishLine("here")).toBeNull();

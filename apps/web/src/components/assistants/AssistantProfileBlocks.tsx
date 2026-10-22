@@ -677,6 +677,8 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
     hereLabel: member.computerLabel || null,
     machines: machines.map((machine) => ({
       environmentId: machine.environmentId,
+      boxId: machine.box?.id ?? null,
+      boxName: machine.box?.name ?? null,
       label: machine.label,
       kind: machine.kind,
       status: machine.status,

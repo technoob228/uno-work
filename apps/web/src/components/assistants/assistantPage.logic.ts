@@ -83,6 +83,10 @@ export function parseDailyLimit(raw: string, max: number): number | null {
 
 export interface WorksOnMachine {
   readonly environmentId: string | null;
+  /** The console's computer (box) id, when this machine is one. */
+  readonly boxId?: number | null;
+  /** The console's name for it — wins over the daemon's label. */
+  readonly boxName?: string | null;
   readonly label: string;
   /** `computer`: a laptop or desktop; the others are cloud computers. */
   readonly kind: string;
@@ -130,6 +134,13 @@ export function worksOnOptions(input: {
   readonly machines: ReadonlyArray<WorksOnMachine>;
 }): ReadonlyArray<WorksOnOption> {
   const here = input.machines.find((machine) => machine.environmentId === input.hereEnvironmentId);
+  const hereBoxId = here?.boxId ?? null;
+  // The computer it is on is matched by ids, never by name: two computers can
+  // share a name, and one computer can show up as two rows (its connection
+  // and its box on the account).
+  const isHere = (machine: WorksOnMachine) =>
+    machine.environmentId === input.hereEnvironmentId ||
+    (hereBoxId !== null && machine.boxId === hereBoxId);
   const hereIsLaptop = here === undefined || here.kind === "computer";
   const options: WorksOnOption[] = [
     {
@@ -140,10 +151,10 @@ export function worksOnOptions(input: {
   ];
   if (input.isUno) return options;
   for (const machine of input.machines) {
-    if (machine.kind === "computer" || machine.environmentId === input.hereEnvironmentId) continue;
+    if (machine.kind === "computer" || isHere(machine)) continue;
     options.push({
       kind: "cloud",
-      label: machine.label,
+      label: machine.boxName?.trim() || machine.label,
       line: WORKS_ON_LINE.cloud,
       environmentId: machine.environmentId,
       blocked:
