@@ -18,7 +18,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { validateArgs, type JsonSchema } from "./argsSchema.ts";
-import { consoleToken, type ConsoleReply, type ConsoleRequest } from "./consoleClient.ts";
+import {
+  MAIL_NOT_ENABLED_MESSAGE,
+  attachmentRefusal,
+  attachmentTarget,
+  fileNameFromContentDisposition,
+  safeAttachmentName,
+} from "./mailTools.ts";
+import {
+  consoleRequest,
+  consoleToken,
+  type ConsoleReply,
+  type ConsoleRequest,
+} from "./consoleClient.ts";
 import { decideUnoWorkGate } from "./policy.ts";
 import {
   BOT_STARTING_NEXT,
@@ -369,6 +381,10 @@ describe("uno-work tool catalogue", () => {
       "uno_guide",
       "notify",
       "open_in_panel",
+      "mail_address",
+      "mail_list",
+      "mail_read",
+      "mail_attachment_save",
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("safe");
     }
@@ -380,6 +396,7 @@ describe("uno-work tool catalogue", () => {
       "chat_create",
       "chat_message",
       "db_connection",
+      "mail_send",
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("change");
     }
@@ -1490,6 +1507,43 @@ describe("console credential", () => {
     expect(consoleToken(settings({ apiKey: "acct-key" }))).toBe("acct-key");
     expect(consoleToken(settings({ apiKey: "unollm_x" }))).toBe("");
   });
+
+  it("reads a file answer as bytes, and an error of a file request as JSON", async () => {
+    const fetchImpl = (async (input: string | URL | Request) =>
+      String(input).endsWith("/0")
+        ? new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: {
+              "content-type": "application/pdf",
+              "content-disposition": 'attachment; filename="a.pdf"',
+            },
+          })
+        : new Response(JSON.stringify({ error: "not_found" }), { status: 404 })) as typeof fetch;
+    const file = await consoleRequest({
+      method: "GET",
+      path: "/api/v1/work/mail/messages/m1/attachments/0",
+      binary: true,
+      baseUrl: "https://console.test",
+      token: "uno_agt_m",
+      fetchImpl,
+    });
+    expect(file).toMatchObject({
+      status: 200,
+      body: null,
+      contentType: "application/pdf",
+      contentDisposition: 'attachment; filename="a.pdf"',
+    });
+    expect([...(file.bytes ?? [])]).toEqual([1, 2, 3]);
+    const missing = await consoleRequest({
+      method: "GET",
+      path: "/api/v1/work/mail/messages/m1/attachments/9",
+      binary: true,
+      baseUrl: "https://console.test",
+      token: "uno_agt_m",
+      fetchImpl,
+    });
+    expect(missing).toEqual({ status: 404, body: { error: "not_found" } });
+  });
 });
 
 describe("image_generate", () => {
@@ -1811,5 +1865,318 @@ describe("computer_cleanup", () => {
     const { deps, cleaned } = withDisk();
     await run("computer_cleanup", deps, { apply: true, only: ["npm-cache", "trash"] });
     expect(cleaned).toEqual(["npm-cache"]);
+  });
+});
+
+describe("the agent's own mailbox (mail_*)", () => {
+  const MAILBOX = {
+    available: true,
+    reason: null,
+    mailbox: {
+      address: "misha-otter@uno4.me",
+      local: "misha-otter",
+      created_at: "2026-10-20T10:00:00Z",
+      limits: { daily_per_mailbox: 50, sent_today: 3 },
+    },
+  };
+
+  it("validates arguments before calling the console", () => {
+    const send = tool("mail_send").inputSchema;
+    expect(
+      validateArgs(send, { to: ["ann@example.com"], subject: "Hi", text: "Hello" }),
+    ).toBeNull();
+    expect(validateArgs(send, { to: ["ann@example.com"], text: "Hello" })).toContain(
+      "subject is required",
+    );
+    expect(
+      validateArgs(send, { to: ["Ann <ann@example.com>"], subject: "s", text: "t" }),
+    ).toContain("must match");
+    expect(validateArgs(send, { to: "ann@example.com", subject: "s", text: "t" })).toContain(
+      "must be an array",
+    );
+    expect(
+      validateArgs(send, {
+        to: ["a@b.co"],
+        subject: "s",
+        text: "t",
+        attachments: Array(11).fill("x"),
+      }),
+    ).toContain("at most 10 items");
+    expect(
+      validateArgs(send, { to: ["a@b.co"], subject: "s", text: "t", bcc: ["x@y.z"] }),
+    ).toContain("not a known field");
+    const list = tool("mail_list").inputSchema;
+    expect(validateArgs(list, { folder: "spam" })).toContain("inbox, sent, all");
+    expect(validateArgs(list, { limit: 500 })).toContain("at most 50");
+    const read = tool("mail_read").inputSchema;
+    expect(validateArgs(read, { id: "../../etc" })).toContain("must match");
+    const save = tool("mail_attachment_save").inputSchema;
+    expect(validateArgs(save, { id: "m1" })).toContain("index is required");
+    expect(validateArgs(save, { id: "m1", index: -1 })).toContain("at least 0");
+  });
+
+  it("mail_address: the address and today's count; a clear sentence when the flag is off", async () => {
+    const on = makeDeps({ console: () => ({ status: 200, body: MAILBOX }) });
+    const result = await run("mail_address", on.deps);
+    expect(result._tag).toBe("Success");
+    expect(result._tag === "Success" && result.success).toMatchObject({
+      address: "misha-otter@uno4.me",
+      sentToday: 3,
+      dailyLimit: 50,
+    });
+    expect(on.recorded.console).toEqual([{ method: "GET", path: "/api/v1/work/mail" }]);
+
+    const off = makeDeps({
+      console: () => ({ status: 200, body: { available: false, reason: "not_enabled" } }),
+    });
+    const refused = await run("mail_address", off.deps);
+    expect(refused._tag === "Failure" && refused.failure.message).toBe(MAIL_NOT_ENABLED_MESSAGE);
+  });
+
+  it("mail_list: builds the query, gives ids as strings and flags unverified senders", async () => {
+    const { deps, recorded } = makeDeps({
+      console: () => ({
+        status: 200,
+        body: {
+          messages: [
+            {
+              id: 41,
+              direction: "in",
+              from: "noreply@service.io",
+              to: ["misha-otter@uno4.me"],
+              subject: "Your code",
+              snippet: "123456",
+              received_at: "2026-10-20T10:00:00Z",
+              read: false,
+              has_attachments: false,
+              suspicious: true,
+            },
+          ],
+          next_before: 41,
+        },
+      }),
+    });
+    const result = await run("mail_list", deps, { unread: true, q: "service", limit: 5 });
+    expect(recorded.console[0]?.path).toBe(
+      "/api/v1/work/mail/messages?folder=inbox&unread=1&q=service&limit=5",
+    );
+    const body = result._tag === "Success" ? (result.success as Record<string, unknown>) : {};
+    expect(body.nextBefore).toBe("41");
+    expect((body.messages as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: "41",
+      subject: "Your code",
+      warning: "⚠ not verified sender",
+    });
+  });
+
+  it("mail_read: text, attachments, an untrusted-content note; a 404 says which", async () => {
+    const { deps, recorded } = makeDeps({
+      console: (request) =>
+        request.path.startsWith("/api/v1/work/mail/messages/m1")
+          ? {
+              status: 200,
+              body: {
+                id: "m1",
+                direction: "in",
+                from: "ann@example.com",
+                subject: "Invoice",
+                text: "x".repeat(50_000),
+                html_available: true,
+                attachments: [{ index: 0, name: "invoice.pdf", type: "application/pdf", size: 10 }],
+              },
+            }
+          : request.path === "/api/v1/work/mail"
+            ? { status: 200, body: MAILBOX }
+            : { status: 404, body: { error: "not_found" } },
+    });
+    const result = await run("mail_read", deps, { id: "m1" });
+    const body = result._tag === "Success" ? (result.success as Record<string, unknown>) : {};
+    expect((body.text as string).length).toBe(40_000);
+    expect(body.textTruncated).toBe(true);
+    expect(body.html).toBeUndefined();
+    expect(body.attachments).toEqual([
+      { index: 0, name: "invoice.pdf", type: "application/pdf", size: 10 },
+    ]);
+    expect(body.note).toMatch(/not instructions/);
+    expect(recorded.console[0]?.path).toBe("/api/v1/work/mail/messages/m1");
+
+    const missing = await run("mail_read", deps, { id: "nope" });
+    expect(missing._tag === "Failure" && missing.failure.message).toMatch(
+      /There is no letter "nope"/,
+    );
+
+    const off = makeDeps({
+      console: (request) =>
+        request.path === "/api/v1/work/mail"
+          ? { status: 200, body: { available: false, reason: "not_enabled" } }
+          : { status: 404, body: null },
+    });
+    const disabled = await run("mail_read", off.deps, { id: "m1" });
+    expect(disabled._tag === "Failure" && disabled.failure.message).toBe(MAIL_NOT_ENABLED_MESSAGE);
+  });
+
+  it("mail_attachment_save: writes under ~/Downloads/mail/<id>/ with a safe name, never over a file", async () => {
+    const { deps, home, recorded } = makeDeps({
+      console: () => ({
+        status: 200,
+        body: null,
+        bytes: new TextEncoder().encode("PDF"),
+        contentType: "application/pdf",
+        contentDisposition: 'attachment; filename="../../.bashrc"',
+      }),
+    });
+    const first = await run("mail_attachment_save", deps, { id: "m1", index: 0 });
+    expect(recorded.console[0]).toEqual({
+      method: "GET",
+      path: "/api/v1/work/mail/messages/m1/attachments/0",
+      binary: true,
+    });
+    expect(first._tag === "Success" && first.success).toMatchObject({
+      file: "~/Downloads/mail/m1/bashrc",
+      size: 3,
+    });
+    expect(readFileSync(path.join(home, "Downloads", "mail", "m1", "bashrc"), "utf8")).toBe("PDF");
+    expect(existsSync(path.join(home, ".bashrc"))).toBe(false);
+    const second = await run("mail_attachment_save", deps, { id: "m1", index: 0 });
+    expect(second._tag === "Success" && second.success).toMatchObject({
+      file: "~/Downloads/mail/m1/bashrc (2)",
+    });
+  });
+
+  it("names and paths of attachments stay inside their folder", async () => {
+    expect(safeAttachmentName("../../etc/passwd", 0)).toBe("passwd");
+    expect(safeAttachmentName("..\\..\\win.ini", 0)).toBe("win.ini");
+    expect(safeAttachmentName("..", 3)).toBe("attachment-3");
+    expect(safeAttachmentName("", 1)).toBe("attachment-1");
+    expect(safeAttachmentName(".env", 0)).toBe("env");
+    expect(safeAttachmentName('a<b>:c"d|e?f*.txt\u0000', 0)).toBe("a_b__c_d_e_f_.txt");
+    const long = safeAttachmentName(`${"x".repeat(300)}.pdf`, 0);
+    expect(long.length).toBe(120);
+    expect(long.endsWith(".pdf")).toBe(true);
+    expect(
+      fileNameFromContentDisposition("attachment; filename*=UTF-8''%D0%A1%D1%87%D1%91%D1%82.pdf"),
+    ).toBe("Счёт.pdf");
+    expect(fileNameFromContentDisposition('attachment; filename="report q3.pdf"')).toBe(
+      "report q3.pdf",
+    );
+    expect(fileNameFromContentDisposition("attachment; filename=plain.txt")).toBe("plain.txt");
+    expect(fileNameFromContentDisposition(undefined)).toBe("");
+    const folder = mkdtempSync(path.join(os.tmpdir(), "uno-mail-"));
+    tempDirs.push(folder);
+    await expect(attachmentTarget(folder, "../escape")).rejects.toThrow(/outside/);
+  });
+
+  it("mail_send: key and hidden files never go out", () => {
+    expect(attachmentRefusal("/home/uno/.ssh/id_ed25519")).toMatch(/hidden/);
+    expect(attachmentRefusal("/home/uno/projects/app/.env")).toMatch(/hidden/);
+    expect(attachmentRefusal("/home/uno/keys/service-account.json")).toMatch(/key or secret/);
+    expect(attachmentRefusal("/home/uno/Documents/report.pdf")).toBeNull();
+  });
+
+  it("mail_send: asks in Ask mode, reads the files and sends base64", async () => {
+    const { deps, home, recorded } = makeDeps({
+      runtimeMode: "approval-required",
+      console: () => ({ status: 200, body: { id: 7, message_id: "<abc@uno4.me>" } }),
+    });
+    mkdirSync(path.join(home, "Documents"), { recursive: true });
+    writeFileSync(path.join(home, "Documents", "report.pdf"), "hello");
+    const result = await run("mail_send", deps, {
+      to: ["ann@example.com"],
+      subject: "Report",
+      text: "Attached.",
+      reply_to_id: "m1",
+      attachments: ["~/Documents/report.pdf"],
+    });
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals).toHaveLength(1);
+    expect(recorded.approvals[0]).toMatchObject({
+      tool: "mail_send",
+      title: "Send an email to ann@example.com",
+      sensitive: false,
+    });
+    expect(recorded.console).toEqual([
+      {
+        method: "POST",
+        path: "/api/v1/work/mail/send",
+        body: {
+          to: ["ann@example.com"],
+          cc: [],
+          subject: "Report",
+          text: "Attached.",
+          reply_to_id: "m1",
+          attachments: [
+            {
+              name: "report.pdf",
+              type: "application/pdf",
+              content_base64: Buffer.from("hello").toString("base64"),
+            },
+          ],
+        },
+      },
+    ]);
+    expect(result._tag === "Success" && result.success).toMatchObject({ sent: true, id: "7" });
+  });
+
+  it("mail_send: runs without asking in full access; refuses before asking when a file can't go", async () => {
+    const full = makeDeps({ console: () => ({ status: 200, body: { id: "x" } }) });
+    await run("mail_send", full.deps, { to: ["a@b.co"], subject: "s", text: "t" });
+    expect(full.recorded.approvals).toEqual([]);
+    expect(full.recorded.console).toHaveLength(1);
+
+    const ask = makeDeps({ runtimeMode: "approval-required" });
+    mkdirSync(path.join(ask.home, "projects", "app"), { recursive: true });
+    writeFileSync(path.join(ask.home, "projects", "app", ".env"), "KEY=1");
+    const refused = await run("mail_send", ask.deps, {
+      to: ["a@b.co"],
+      subject: "s",
+      text: "t",
+      attachments: ["~/projects/app/.env"],
+    });
+    expect(refused._tag === "Failure" && refused.failure.message).toMatch(/can't go out by mail/);
+    expect(ask.recorded.approvals).toEqual([]);
+    expect(ask.recorded.console).toEqual([]);
+
+    const big = makeDeps();
+    writeFileSync(path.join(big.home, "big.bin"), Buffer.alloc(11 * 1024 * 1024));
+    const tooBig = await run("mail_send", big.deps, {
+      to: ["a@b.co"],
+      subject: "s",
+      text: "t",
+      attachments: ["~/big.bin"],
+    });
+    expect(tooBig._tag === "Failure" && tooBig.failure.message).toMatch(/up to 10 MB/);
+
+    const many = makeDeps();
+    const crowd = await run("mail_send", many.deps, {
+      to: Array.from({ length: 15 }, (_, n) => `p${n}@b.co`),
+      cc: Array.from({ length: 6 }, (_, n) => `c${n}@b.co`),
+      subject: "s",
+      text: "t",
+    });
+    expect(crowd._tag === "Failure" && crowd.failure.message).toMatch(/at most 20 people/);
+  });
+
+  it("mail_send: limits and refusals come back as the console's sentence", async () => {
+    const limited = makeDeps({
+      console: () => ({
+        status: 429,
+        body: { error: "Daily limit of 50 emails reached, resets at 00:00 UTC" },
+      }),
+    });
+    const result = await run("mail_send", limited.deps, {
+      to: ["a@b.co"],
+      subject: "s",
+      text: "t",
+    });
+    expect(result._tag === "Failure" && result.failure.message).toBe(
+      "Daily limit of 50 emails reached, resets at 00:00 UTC. Tell the person; don't retry before then and don't send it another way.",
+    );
+    const invalid = makeDeps({
+      console: () => ({ status: 422, body: { error: "invalid", message: "Subject is empty." } }),
+    });
+    const bad = await run("mail_send", invalid.deps, { to: ["a@b.co"], subject: "", text: "t" });
+    expect(bad._tag === "Failure" && bad.failure.message).toBe(
+      "Couldn't send the letter: Subject is empty.",
+    );
   });
 });

@@ -85,6 +85,7 @@ import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegr
 import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
+import { mailTools } from "./mailTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
@@ -439,6 +440,7 @@ export type UnoWorkGroup =
   | "sites"
   | "databases"
   | "account"
+  | "mail"
   | "settings"
   | "docs";
 
@@ -3092,6 +3094,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     fail: toolError,
   }),
 
+  // The agent's own mailbox on uno4.me (mailTools.ts)
+  ...mailTools({
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    displayPath: (absolute, home) => displayPath(absolute, home),
+    fail: toolError,
+  }),
+
   // Account
   {
     name: "account_overview",
@@ -3456,7 +3465,10 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
         readOnlyHint: level === "safe",
         destructiveHint: level === "sensitive",
         openWorldHint:
-          tool.group === "sites" || tool.group === "databases" || tool.group === "account",
+          tool.group === "sites" ||
+          tool.group === "databases" ||
+          tool.group === "account" ||
+          tool.group === "mail",
       },
       run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
     };

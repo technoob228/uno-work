@@ -7,6 +7,10 @@
  *   <account>" when the grant lands. A provider the console has no OAuth app
  *   for yet is shown, marked Soon, not clickable. GitHub falls back to this
  *   computer's own `gh` sign-in then.
+ * - Email for your AI (first, when the account has it): the computer's own
+ *   address on uno4.me for sign-ups and mail the AI writes as itself, with
+ *   Copy and "Change name" (`/api/manager/mail`, spec 20.10). Hidden
+ *   entirely while the console doesn't report a mailbox.
  * - Your own tool: a remote MCP server by address, checked first (it must
  *   answer and list its tools), then handed to every agent in new chats
  *   (`settings.mcpServers`, see customMcpServers.ts on the daemon).
@@ -14,13 +18,17 @@
 import { UNO_MCP_SERVER_NAME_PATTERN, type UnoMcpServer } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Loader2Icon, ServerIcon } from "lucide-react";
+import { Loader2Icon, MailIcon, ServerIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
+  changeAgentMailAddress,
+  connectGithubAccount,
   disconnectConnector,
+  getAgentMail,
+  getGithubAccount,
   listConnectors,
   openAuthWindow,
   probeMcpServer,
@@ -32,13 +40,32 @@ import {
 import { useSourceControlDiscovery } from "../../../lib/sourceControlDiscoveryState";
 import { cn } from "../../../lib/utils";
 import { GitHubIcon } from "../../Icons";
+import { CopyButton } from "../../computer/computerUi";
 import { Button } from "../../ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { toastManager } from "../../ui/toast";
 import { GmailMark, GoogleCalendarMark, GoogleDriveMark, NotionMark } from "../brandMarks";
 import { ConnectedBadge, SetupHeading, SetupShell, SoonBadge } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { maskServerUrl } from "../../connectors/connectorsCatalog.logic";
+import {
+  AGENT_MAIL_NAME_HINT,
+  agentMailChangeError,
+  agentMailDomain,
+  agentMailLocalProblem,
+  agentMailPreview,
+  agentMailRowVisible,
+  normalizeAgentMailLocal,
+} from "../agentMail.logic";
 
 /** A short config name from the server's address: `mcp.context7.com` → `context7`. */
 export function mcpServerNameFromUrl(url: string, taken: ReadonlyArray<string>): string | null {
@@ -178,6 +205,93 @@ export function useConnectors(environmentId: ReturnType<typeof usePrimaryEnviron
   });
 }
 
+const GITHUB_ACCOUNT_KEY = ["uno-setup", "github-account"] as const;
+/** How long to keep checking after GitHub's page opened. */
+const GITHUB_WAIT_MS = 180_000;
+
+/**
+ * GitHub of the account (the Uno GitHub App): one Connect, the repositories
+ * picked on GitHub's page, and git on every cloud computer signs in by itself.
+ * Off a cloud computer (or an older console) it falls back to this
+ * computer's own `gh` sign-in.
+ */
+function GitHubAccountRow({ first }: { first: boolean }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
+  const account = useQuery({
+    queryKey: [...GITHUB_ACCOUNT_KEY, environmentId],
+    queryFn: () => getGithubAccount({ environmentId: environmentId! }),
+    enabled: environmentId !== null,
+    retry: false,
+    refetchInterval: waitingUntil !== null ? 3000 : false,
+  });
+  const state = account.data;
+  const connected = state?.connected === true;
+  useEffect(() => {
+    if (waitingUntil === null) return;
+    if (connected) {
+      setWaitingUntil(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setWaitingUntil(null), waitingUntil - Date.now());
+    return () => window.clearTimeout(timer);
+  }, [waitingUntil, connected]);
+
+  if (account.isError || (state && !state.available)) return <GitHubMachineRow first={first} />;
+
+  const open = async () => {
+    if (!environmentId) return;
+    try {
+      const { authorizeUrl } = await connectGithubAccount({ environmentId });
+      setWaitingUntil(Date.now() + GITHUB_WAIT_MS);
+      await openAuthWindow(authorizeUrl, "uno-connector");
+      await account.refetch();
+    } catch (cause) {
+      setWaitingUntil(null);
+      toastManager.add({
+        type: "error",
+        title: "Couldn’t open GitHub",
+        description: cause instanceof Error ? cause.message : undefined,
+      });
+    }
+  };
+  const waiting = waitingUntil !== null && !connected;
+  return (
+    <Row
+      first={first}
+      done={connected}
+      logo={<GitHubIcon className="size-5" />}
+      name="GitHub"
+      testId="setup-connector-github"
+      description={
+        connected ? (
+          <ConnectedBadge>
+            Connected{state.accounts.length > 0 ? ` · ${state.accounts.join(", ")}` : ""}
+          </ConnectedBadge>
+        ) : (
+          "Your repositories for git on every computer. You pick them on GitHub."
+        )
+      }
+      side={
+        !state ? (
+          <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+        ) : (
+          <Button
+            size="sm"
+            variant={connected ? "ghost" : "outline"}
+            disabled={waiting}
+            onClick={() => void open()}
+            data-testid="setup-connect-github-account"
+          >
+            {waiting ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+            {waiting ? "Waiting for GitHub" : connected ? "Choose repositories" : "Connect"}
+          </Button>
+        )
+      }
+    />
+  );
+}
+
 /** This computer's own `gh` sign-in — GitHub's fallback while the connector isn't available. */
 function GitHubMachineRow({ first }: { first: boolean }) {
   const discovery = useSourceControlDiscovery();
@@ -213,6 +327,190 @@ function GitHubMachineRow({ first }: { first: boolean }) {
         )
       }
     />
+  );
+}
+
+const AGENT_MAIL_KEY = ["uno-setup", "agent-mail"] as const;
+
+/** The computer's own mailbox; undefined (row hidden) until the daemon answers, or on any error. */
+function useAgentMail(environmentId: ReturnType<typeof usePrimaryEnvironmentId>) {
+  return useQuery({
+    queryKey: [...AGENT_MAIL_KEY, environmentId],
+    queryFn: () => getAgentMail({ environmentId: environmentId! }),
+    enabled: environmentId !== null,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** "Email for your AI": the address, Copy, Change name. */
+function AgentMailRow({
+  environmentId,
+  mailbox,
+}: {
+  environmentId: NonNullable<ReturnType<typeof usePrimaryEnvironmentId>>;
+  mailbox: { readonly address: string; readonly local: string };
+}) {
+  const [renaming, setRenaming] = useState(false);
+  return (
+    <>
+      <Row
+        first
+        logo={<MailIcon className="size-5 text-muted-foreground" />}
+        name="Email for your AI"
+        testId="setup-connector-agent-mail"
+        description={
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-1">
+              <span
+                className="truncate font-mono text-sm text-foreground"
+                data-testid="agent-mail-address"
+              >
+                {mailbox.address}
+              </span>
+              <CopyButton value={mailbox.address} label="email address" />
+            </span>
+            <span>
+              Its own address for sign-ups and letters it writes. Your mail stays in Gmail.
+            </span>
+          </span>
+        }
+        side={
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setRenaming(true)}
+            data-testid="agent-mail-change-name"
+          >
+            Change name
+          </Button>
+        }
+      />
+      <AgentMailRenameDialog
+        open={renaming}
+        onOpenChange={setRenaming}
+        environmentId={environmentId}
+        mailbox={mailbox}
+      />
+    </>
+  );
+}
+
+function AgentMailRenameDialog({
+  open,
+  onOpenChange,
+  environmentId,
+  mailbox,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  environmentId: NonNullable<ReturnType<typeof usePrimaryEnvironmentId>>;
+  mailbox: { readonly address: string; readonly local: string };
+}) {
+  const queryClient = useQueryClient();
+  const domain = agentMailDomain(mailbox.address);
+  const [value, setValue] = useState(mailbox.local);
+  const [touched, setTouched] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setValue(mailbox.local);
+    setTouched(false);
+    setServerError(null);
+  }, [open, mailbox.local]);
+
+  const local = normalizeAgentMailLocal(value);
+  const problem = agentMailLocalProblem(value);
+  const unchanged = local === mailbox.local;
+  const shownProblem = serverError ?? (touched && !unchanged ? problem : null);
+
+  const save = async () => {
+    setTouched(true);
+    if (problem !== null || unchanged || pending) return;
+    setPending(true);
+    setServerError(null);
+    try {
+      const { address } = await changeAgentMailAddress({ environmentId, local });
+      await queryClient.invalidateQueries({ queryKey: AGENT_MAIL_KEY });
+      onOpenChange(false);
+      toastManager.add({
+        type: "success",
+        title: "Address changed",
+        description: `Your AI now gets mail at ${address}. Mail to the old address still arrives for 30 days.`,
+      });
+    } catch (cause) {
+      setServerError(agentMailChangeError(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPopup className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Change the email name</DialogTitle>
+          <DialogDescription>
+            Pick the name before @{domain}. Mail to {mailbox.address} keeps arriving for 30 days.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <div className="flex items-center gap-2">
+            <Input
+              className="min-w-0 flex-1 font-mono"
+              value={value}
+              autoFocus
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              maxLength={40}
+              aria-label="Email name"
+              aria-invalid={shownProblem !== null || undefined}
+              onChange={(event) => {
+                setValue(event.target.value);
+                setTouched(true);
+                setServerError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void save();
+              }}
+              data-testid="agent-mail-name-input"
+            />
+            <span className="shrink-0 font-mono text-sm text-muted-foreground">@{domain}</span>
+          </div>
+          <div className="mt-3 text-sm">
+            <span className="text-muted-foreground">New address: </span>
+            <span className="font-mono" data-testid="agent-mail-preview">
+              {agentMailPreview(value, domain)}
+            </span>
+          </div>
+          <div
+            className={cn(
+              "mt-2 text-xs",
+              shownProblem ? "text-destructive-foreground" : "text-muted-foreground",
+            )}
+            role={shownProblem ? "alert" : undefined}
+          >
+            {shownProblem ?? AGENT_MAIL_NAME_HINT}
+          </div>
+        </DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={pending || unchanged || problem !== null}
+            onClick={() => void save()}
+            data-testid="agent-mail-save"
+          >
+            {pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+            {pending ? "Saving" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -539,21 +837,27 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
     useConnectorActions(environmentId);
   const githubConnector = byProvider.get("github");
   const githubViaMachine = connectors.isFetched && githubConnector?.available !== true;
+  const agentMail = useAgentMail(environmentId);
+  const mailbox = agentMailRowVisible(agentMail.data) ? agentMail.data.mailbox : null;
+  const mailShown = environmentId !== null && mailbox !== null;
 
   return (
     <div
       className={cn("overflow-hidden rounded-2xl border border-border", props.className)}
       data-testid="setup-connectors"
     >
+      {environmentId !== null && mailbox !== null ? (
+        <AgentMailRow environmentId={environmentId} mailbox={mailbox} />
+      ) : null}
       {PROVIDERS.map((meta, index) =>
         meta.provider === "github" && githubViaMachine ? (
-          <GitHubMachineRow key={meta.provider} first={index === 0} />
+          <GitHubAccountRow key={meta.provider} first={index === 0 && !mailShown} />
         ) : (
           <ProviderRow
             key={meta.provider}
             meta={meta}
             connector={byProvider.get(meta.provider)}
-            first={index === 0}
+            first={index === 0 && !mailShown}
             pending={pending?.provider === meta.provider ? pending.action : null}
             onConnect={() => void connect(meta.provider)}
             onDisconnect={() => void disconnect(meta.provider)}

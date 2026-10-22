@@ -6,7 +6,6 @@ import {
   buildSettingsNavGroups,
   isSimpleSettingsPath,
   machineNavGroupHeading,
-  simpleNavEntries,
 } from "./settingsNavGroups.ts";
 
 const BOX = { environmentId: "env-box" as EnvironmentId, label: "Office box" };
@@ -98,7 +97,7 @@ describe("buildSettingsNavGroups", () => {
 });
 
 describe("simple settings (01.10)", () => {
-  it("shows five entries without Dev mode", () => {
+  it("shows the simple entries without Dev mode", () => {
     const groups = buildSettingsNavGroups({
       isWebApp: true,
       isFlagEnabled: allFlagsOn,
@@ -109,6 +108,8 @@ describe("simple settings (01.10)", () => {
     expect(groups[0]!.entries.map((entry) => entry.label)).toEqual([
       "Account & plan",
       "AI",
+      "Connectors",
+      "Skills",
       "Assistants & phone",
       "Computer",
       "Developer",
@@ -129,23 +130,8 @@ describe("simple settings (01.10)", () => {
 
   it("knows its pages", () => {
     expect(isSimpleSettingsPath("/settings/ai")).toBe(true);
-    // Connectors is only in the mock (?demo=w0138) for now.
-    expect(isSimpleSettingsPath("/settings/connectors")).toBe(false);
-    expect(isSimpleSettingsPath("/settings/connectors", true)).toBe(true);
+    expect(isSimpleSettingsPath("/settings/connectors")).toBe(true);
+    expect(isSimpleSettingsPath("/settings/skills")).toBe(true);
     expect(isSimpleSettingsPath("/settings/app/general")).toBe(false);
-  });
-});
-
-describe("Connectors (mock only, 16.10)", () => {
-  it("sits after AI when the mock asks for it", () => {
-    expect(simpleNavEntries(true).map((entry) => entry.label)).toEqual([
-      "Account & plan",
-      "AI",
-      "Connectors",
-      "Assistants & phone",
-      "Computer",
-      "Developer",
-    ]);
-    expect(simpleNavEntries(false).map((entry) => entry.label)).not.toContain("Connectors");
   });
 });

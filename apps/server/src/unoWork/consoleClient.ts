@@ -18,7 +18,12 @@ const AI_KEY_PREFIX = "unollm_";
 
 export interface ConsoleReply {
   readonly status: number;
+  /** Parsed JSON (or the text) — null for a successful `binary` request. */
   readonly body: unknown;
+  /** A successful `binary` request: the bytes and what the console said about them. */
+  readonly bytes?: Uint8Array;
+  readonly contentType?: string;
+  readonly contentDisposition?: string;
 }
 
 export interface ConsoleRequest {
@@ -26,6 +31,8 @@ export interface ConsoleRequest {
   /** `/api/v1/...` */
   readonly path: string;
   readonly body?: unknown;
+  /** A file comes back (a mail attachment): read the 2xx answer as bytes. */
+  readonly binary?: boolean;
 }
 
 const CONSOLE_TIMEOUT_MS = 60_000;
@@ -54,6 +61,15 @@ export async function consoleRequest(
     ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
     signal: AbortSignal.timeout(CONSOLE_TIMEOUT_MS),
   });
+  if (input.binary === true && response.ok) {
+    return {
+      status: response.status,
+      body: null,
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get("content-type") ?? "",
+      contentDisposition: response.headers.get("content-disposition") ?? "",
+    };
+  }
   const text = await response.text();
   let body: unknown = text;
   try {

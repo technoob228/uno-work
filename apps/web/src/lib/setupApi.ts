@@ -103,6 +103,45 @@ export function connectGithubAccount(
   });
 }
 
+// ── Email for your AI (the computer's own mailbox) ────────────────────
+
+/**
+ * The AI's own address on uno4.me (one per computer): for sign-ups, codes
+ * and mail it writes as itself. Shown first in Connectors; hidden entirely
+ * while `available` is false (the account's flag is off, not a cloud
+ * computer, an older console).
+ */
+export interface AgentMailState {
+  readonly available: boolean;
+  readonly reason: string | null;
+  readonly mailbox: {
+    readonly address: string;
+    readonly local: string;
+    readonly createdAt: string | null;
+    readonly dailyLimit: number | null;
+    readonly sentToday: number | null;
+  } | null;
+}
+
+export function getAgentMail(input: EnvironmentScoped): Promise<AgentMailState> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/mail",
+  });
+}
+
+/** Rename the mailbox: 409 = taken, 422 = not allowed (the error's message says why). */
+export function changeAgentMailAddress(
+  input: EnvironmentScoped & { readonly local: string },
+): Promise<{ readonly address: string }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/mail/address",
+    method: "PUT",
+    body: { local: input.local },
+  });
+}
+
 // ── Your own MCP server ───────────────────────────────────────────────
 
 export interface McpProbeResult {

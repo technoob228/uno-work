@@ -16,6 +16,7 @@ import {
   WorkspaceWatchFileError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
+import { MIME_BY_EXT } from "../../files/mimeTypes.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
 
@@ -72,30 +73,6 @@ const TEXT_EXTENSIONS = new Set([
   ".gitignore",
   ".editorconfig",
 ]);
-
-const MIME_BY_EXT: Record<string, string> = {
-  ".md": "text/markdown",
-  ".markdown": "text/markdown",
-  ".html": "text/html",
-  ".htm": "text/html",
-  ".json": "application/json",
-  ".yaml": "application/yaml",
-  ".yml": "application/yaml",
-  ".csv": "text/csv",
-  ".tsv": "text/tab-separated-values",
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".svg": "image/svg+xml",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".xls": "application/vnd.ms-excel",
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ".doc": "application/msword",
-  ".txt": "text/plain",
-};
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
