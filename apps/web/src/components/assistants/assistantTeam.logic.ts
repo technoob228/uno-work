@@ -72,12 +72,13 @@ export const CHANNEL_NAME: Readonly<Record<AssistantChannel, string>> = {
   slack: "Slack",
 };
 
+/** The areas (Misha 21.10): what an assistant takes off the person's plate. */
 export const ROLE_CHIPS = [
   "Personal assistant",
-  "Developer",
-  "Marketing",
-  "Security",
-  "Ops",
+  "Finance",
+  "Sales",
+  "Dev",
+  "YouTube & content",
 ] as const;
 
 export const CHARACTER_CHIPS = [
@@ -90,10 +91,10 @@ export const CHARACTER_CHIPS = [
 /** Skills offered on step 5, the ones of the picked roles first. */
 export const SKILLS_BY_ROLE: Readonly<Record<string, ReadonlyArray<string>>> = {
   "Personal assistant": ["Morning plan", "Reminders", "Pay invoices (asks first)", "Inbox digest"],
-  Developer: ["Code review", "Run tests", "Fix CI", "Release notes"],
-  Marketing: ["Read competitors", "Draft posts", "Landing copy", "Weekly numbers"],
-  Security: ["Watch logins", "Check servers", "Dependency alerts"],
-  Ops: ["Check servers", "Watch releases", "Disk and load alerts", "Backups"],
+  Finance: ["Invoices into a sheet", "What's due", "Subscriptions", "Monthly summary"],
+  Sales: ["Leads in Notion", "Follow-up drafts", "Who to answer today"],
+  Dev: ["Code review", "Run tests", "Fix CI", "Release notes"],
+  "YouTube & content": ["Video ideas", "Scripts", "Titles and descriptions", "Content plan"],
 };
 
 /** Names offered to a new teammate (critics 16.10: the name comes filled in). */

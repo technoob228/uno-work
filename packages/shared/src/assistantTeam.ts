@@ -190,7 +190,11 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
   readonly header: string;
   readonly ask: string;
 }> = [
-  { id: "role", header: "My job", ask: "what it should take off the person's plate (its role)" },
+  {
+    id: "role",
+    header: "My job",
+    ask: "what it should take off the person's plate (its area: Personal, Finance, Sales, Dev, YouTube & content — or their own words)",
+  },
   { id: "character", header: "How I talk", ask: "how it should talk (its character)" },
   { id: "channel", header: "Where we talk", ask: "where the person wants to reach it" },
   {

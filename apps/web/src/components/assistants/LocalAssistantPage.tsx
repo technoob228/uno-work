@@ -87,7 +87,7 @@ export const OWN_COMPUTER_CAPTION =
 
 /** Templates whose assistants read strangers' mail and sites: the option is highlighted. */
 export function suggestsOwnComputer(template: string | null | undefined): boolean {
-  return template === "marketing" || template === "support";
+  return template === "sales" || template === "youtube" || template === "marketing";
 }
 
 /** "## My job" of SOUL.md, for the plan of a moved assistant. */

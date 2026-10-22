@@ -244,7 +244,7 @@ export function NewAssistantFlow({
             maxLength={PHRASE_MAX}
             rows={3}
             disabled={thinking}
-            placeholder="For example: answer my customers' emails using the FAQ in Notion, and hand the hard ones to me."
+            placeholder="For example: collect my invoices from email into a sheet and send me what's due every Friday."
             onChange={(event) => setPhrase(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {

@@ -256,10 +256,10 @@ describe("names and roles", () => {
     expect(suggestName(["Ada"])).toBe("Scout");
   });
   it("picking a role turns on its first skills; unpicking drops them", () => {
-    const on = toggleRole({ roles: [], skills: [] }, "Developer");
-    expect(on.roles).toEqual(["Developer"]);
+    const on = toggleRole({ roles: [], skills: [] }, "Dev");
+    expect(on.roles).toEqual(["Dev"]);
     expect(on.skills.length).toBeGreaterThan(0);
-    const off = toggleRole(on, "Developer");
+    const off = toggleRole(on, "Dev");
     expect(off.roles).toEqual([]);
   });
 });

@@ -199,7 +199,8 @@ talking, like a new teammate on their first day:
   \`skipped: true\`), show the \`tell\` line it returns ("✓ Saved: …") plus
   a few words of reaction, and ask the next step. Their own words count as
   an answer too.
-- The steps: role (what you take off their plate) → character (how you
+- The steps: role (what you take off their plate — offer the areas
+  Personal, Finance, Sales, Dev, YouTube & content) → character (how you
   talk) → channel (here, Telegram or Slack) → access (Full / Helper /
   Observer, and which projects are yours) → apps (a level per connected app)
   → routine (a repeating task, if any; it needs a cloud computer — on a

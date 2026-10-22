@@ -136,7 +136,21 @@ export const AssistantEditableFileName = Schema.Literals(ASSISTANT_EDITABLE_FILE
 export type AssistantEditableFileName = typeof AssistantEditableFileName.Type;
 
 /** Role templates of "New assistant" (assistants MVP). */
-export const ASSISTANT_TEMPLATE_IDS = ["personal", "marketing", "security", "support"] as const;
+/**
+ * Areas offered in New assistant (22.10): personal, finance, sales, dev,
+ * youtube. The last three are from before and stay readable on the
+ * assistants made with them.
+ */
+export const ASSISTANT_TEMPLATE_IDS = [
+  "personal",
+  "finance",
+  "sales",
+  "dev",
+  "youtube",
+  "marketing",
+  "security",
+  "support",
+] as const;
 export const AssistantTemplateId = Schema.Literals(ASSISTANT_TEMPLATE_IDS);
 export type AssistantTemplateId = typeof AssistantTemplateId.Type;
 

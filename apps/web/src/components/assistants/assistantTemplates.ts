@@ -124,6 +124,144 @@ export const ASSISTANT_TEMPLATES: ReadonlyArray<AssistantTemplate> = [
     ],
   },
   {
+    id: "finance",
+    title: "Finance",
+    emoji: "📊",
+    defaultName: "Penny",
+    phrase:
+      "Keep my money in order: collect invoices and receipts from email into a sheet, track what's due and send me a short summary every Friday.",
+    connectors: permissions({ gmail: "read", "google-drive": "write" }),
+    never: ["Pay or transfer money", "Change your bank or tax settings", "Touch your servers"],
+    questions: [
+      {
+        id: "focus",
+        text: "What should it keep track of first?",
+        options: [
+          { label: "Invoices to pay", cron: null },
+          { label: "Money owed to me", cron: null },
+          { label: "Subscriptions", cron: null },
+        ],
+      },
+      {
+        id: "how_often",
+        text: "When should it send you the summary?",
+        options: [
+          { label: "Every Friday", cron: "0 17 * * 5" },
+          { label: "First day of the month", cron: "0 9 1 * *" },
+          { label: "Only when I ask", cron: null },
+        ],
+      },
+    ],
+  },
+  {
+    id: "sales",
+    title: "Sales",
+    emoji: "🤝",
+    defaultName: "Rex",
+    phrase:
+      "Help me sell: keep my leads in Notion, draft follow-up emails for me to send, and remind me who to answer each morning.",
+    connectors: permissions({ gmail: "write", notion: "write" }),
+    never: ["Send an email without your OK", "Promise prices or discounts", "Pay for anything"],
+    questions: [
+      {
+        id: "leads",
+        text: "Where do your leads come from?",
+        options: [
+          { label: "Email", cron: null },
+          { label: "My website", cron: null },
+          { label: "LinkedIn", cron: null },
+        ],
+      },
+      { id: "plan", text: "When should it remind you who to answer?", options: HOW_OFTEN_DAILY },
+      {
+        id: "tone",
+        text: "How should its drafts sound?",
+        options: [
+          { label: "Short and direct", cron: null },
+          { label: "Friendly", cron: null },
+          { label: "Formal", cron: null },
+        ],
+      },
+    ],
+  },
+  {
+    id: "dev",
+    title: "Dev",
+    emoji: "🛠️",
+    defaultName: "Builder",
+    phrase:
+      "Help me with code: look through my GitHub issues and pull requests, fix small bugs in a branch and tell me what's ready to review.",
+    connectors: permissions({ github: "write" }),
+    never: ["Push to main without your OK", "Change anything in production", "Read your secrets"],
+    questions: [
+      {
+        id: "focus",
+        text: "What should it start with?",
+        options: [
+          { label: "Fix small bugs", cron: null },
+          { label: "Review pull requests", cron: null },
+          { label: "Keep dependencies fresh", cron: null },
+        ],
+      },
+      {
+        id: "how_often",
+        text: "When should it tell you what's ready?",
+        options: [
+          { label: "Every morning", cron: "0 9 * * *" },
+          { label: "Every Monday", cron: "0 9 * * 1" },
+          { label: "Only when I ask", cron: null },
+        ],
+      },
+    ],
+  },
+  {
+    id: "youtube",
+    title: "YouTube & content",
+    emoji: "🎬",
+    defaultName: "Ana",
+    phrase:
+      "Help me run my channel: find video ideas, write scripts, titles and descriptions, keep the content plan in Notion and send me ideas every Monday.",
+    connectors: permissions({ notion: "write", "google-drive": "write" }),
+    never: ["Publish anything without your OK", "Pay for ads or anything else"],
+    questions: [
+      {
+        id: "where",
+        text: "Where do you publish?",
+        options: [
+          { label: "YouTube", cron: null },
+          { label: "Instagram", cron: null },
+          { label: "Telegram channel", cron: null },
+          { label: "A blog", cron: null },
+        ],
+      },
+      {
+        id: "how_often",
+        text: "How often should it bring ideas?",
+        options: [
+          { label: "Every Monday", cron: "0 10 * * 1" },
+          { label: "Twice a week", cron: "0 10 * * 1,4" },
+          { label: "Only when I ask", cron: null },
+        ],
+      },
+      {
+        id: "tone",
+        text: "What tone fits your channel?",
+        options: [
+          { label: "Friendly", cron: null },
+          { label: "Expert", cron: null },
+          { label: "Playful", cron: null },
+        ],
+      },
+    ],
+  },
+];
+
+/**
+ * Templates from before the areas (22.10): not offered any more, still read
+ * for the assistants made with them (their face and files).
+ */
+const LEGACY_TEMPLATES: ReadonlyArray<AssistantTemplate> = [
+  {
     id: "marketing",
     title: "Marketing",
     emoji: "📣",
@@ -192,47 +330,14 @@ export const ASSISTANT_TEMPLATES: ReadonlyArray<AssistantTemplate> = [
       },
     ],
   },
-  {
-    id: "support",
-    title: "Customer support",
-    emoji: "💬",
-    defaultName: "Lu",
-    phrase:
-      "Answer my customers' emails using the FAQ in Notion, and hand the hard ones over to me.",
-    connectors: permissions({ gmail: "write", notion: "read" }),
-    never: ["Promise refunds or discounts", "Pay for anything", "Touch your servers"],
-    questions: [
-      {
-        id: "handover",
-        text: "When should it hand a customer over to you?",
-        options: [
-          { label: "Angry customers", cron: null },
-          { label: "Money questions", cron: null },
-          { label: "Anything it's unsure about", cron: null },
-        ],
-      },
-      {
-        id: "tone",
-        text: "How should it talk to customers?",
-        options: [
-          { label: "Warm and short", cron: null },
-          { label: "Formal", cron: null },
-        ],
-      },
-      {
-        id: "summary",
-        text: "Should it send you a daily summary?",
-        options: [
-          { label: "Yes, every evening", cron: "0 19 * * *" },
-          { label: "No", cron: null },
-        ],
-      },
-    ],
-  },
 ];
 
 export function findTemplate(id: string | null | undefined): AssistantTemplate | null {
-  return ASSISTANT_TEMPLATES.find((template) => template.id === id) ?? null;
+  return (
+    ASSISTANT_TEMPLATES.find((template) => template.id === id) ??
+    LEGACY_TEMPLATES.find((template) => template.id === id) ??
+    null
+  );
 }
 
 /** Questions for a sentence without a template, when Uno AI can't help. */

@@ -496,9 +496,9 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
           An assistant that works while you don't
         </h1>
         <p className="text-sm text-muted-foreground">
-          Describe it in one sentence: it answers your customers, keeps your inbox in order or
-          prepares posts. It lives on this computer, or on its own, and opens only the apps you
-          allow.
+          Describe it in one sentence: it keeps your inbox in order, tracks your invoices or
+          prepares your next video. It lives on this computer, or on its own, and opens only the
+          apps you allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
@@ -887,7 +887,7 @@ function CreateAssistant({
               value={about}
               maxLength={ASSISTANT_ABOUT_MAX}
               rows={2}
-              placeholder="For example: answers my customers' questions about prices and opening hours"
+              placeholder="For example: keeps my calendar and sends me a plan for the day"
               onChange={(event) => setAbout(event.currentTarget.value)}
               data-testid="assistants-about"
             />
