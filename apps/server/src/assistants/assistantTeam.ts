@@ -39,6 +39,12 @@ import {
   type ThreadId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
+import {
+  applyMailPatch,
+  assistantMailAddress,
+  mailPolicyBeyond,
+  mailPolicyLine,
+} from "@t3tools/shared/assistantMail";
 import { ASSISTANT_PRESET_COPY, assistantPresetAllows } from "@t3tools/shared/assistantPreset";
 import {
   ASSISTANT_SETUP_STEPS,
@@ -62,7 +68,14 @@ import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { askCardQuestion, newAskCardRequestId } from "./askCards.ts";
 import { assistantOfTokenLabel } from "./assistantAccess.ts";
 import { readAppAccess, writeAppAccess } from "./localAssistantStore.ts";
-import { EMPTY_TEAM, readTeam, updateTeam, withActivity, withSetupStep } from "./teamStore.ts";
+import {
+  EMPTY_TEAM,
+  normalizeDuties,
+  readTeam,
+  updateTeam,
+  withActivity,
+  withSetupStep,
+} from "./teamStore.ts";
 
 export class AssistantTeamError extends Data.TaggedError("AssistantTeamError")<{
   readonly message: string;
@@ -143,6 +156,11 @@ export interface AssistantTeamDeps {
   readonly inbox: (post: InboxPost) => Effect.Effect<void>;
   /** Routines (schedules) run here: a cloud computer linked to the console, not a laptop. */
   readonly routinesAvailable: () => Effect.Effect<boolean>;
+  /**
+   * The computer's mailbox address (`name-otter@uno4.me`), or null when mail
+   * isn't there (the account's flag is off, not a cloud computer). Absent: no mail.
+   */
+  readonly mailboxAddress?: () => Effect.Effect<string | null>;
   /** schedule_create for this caller. */
   readonly createRoutine: (
     caller: ManagerCaller,
@@ -203,6 +221,12 @@ const readableLost = (
 };
 
 /** Kickoff of the setup chat: what the assistant reads (the person sees one quiet line). */
+const WORKS_ON_WORDS = {
+  here: "this computer",
+  cloud: "a cloud computer of the person's",
+  own: "a computer of its own",
+} as const;
+
 export const SETUP_KICKOFF_PREFIX = ASSISTANT_SETUP_PREFIX;
 
 export function setupKickoffText(input: {
@@ -446,10 +470,33 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
       return known;
     });
 
+  const stepsLeft = (member: TeamMemberRecord) =>
+    setupStepsLeft(member.team.setup).filter(
+      // Uno lives on its computer: "where it works" is the others' question.
+      (step) => !(step === "computer" && member.projectId === ASSISTANT_PROJECT_ID),
+    );
+
+  const mailView = (member: TeamMemberRecord) =>
+    Effect.gen(function* () {
+      const mailbox = deps.mailboxAddress ? yield* deps.mailboxAddress() : null;
+      if (mailbox === null) {
+        return {
+          available: false,
+          note: "Email of your own isn't on this computer (it comes with an Uno cloud computer, where the account has it). Skip the mail step.",
+        };
+      }
+      return {
+        available: true,
+        address: assistantMailAddress(mailbox, member.projectId),
+        rules: mailPolicyLine(member.team.mail, null),
+        policy: member.team.mail,
+      };
+    });
+
   const profileView = (member: TeamMemberRecord) =>
     Effect.gen(function* () {
       const known = yield* deps.listProjects();
-      const left = setupStepsLeft(member.team.setup);
+      const left = stepsLeft(member);
       return {
         name: memberName(member),
         isUno: member.projectId === ASSISTANT_PROJECT_ID,
@@ -457,6 +504,15 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
         character: member.team.character,
         channel: member.team.channel,
         firstTask: member.team.firstTask,
+        duties: member.team.duties,
+        mail: yield* mailView(member),
+        worksOn: {
+          now: "this computer",
+          wish: member.team.worksOnWish,
+          ...(member.projectId === ASSISTANT_PROJECT_ID
+            ? { note: "You are this computer's own assistant: you stay here." }
+            : {}),
+        },
         access: {
           preset: member.grant.preset,
           presetMeans: ASSISTANT_PRESET_COPY[member.grant.preset].line,
@@ -495,6 +551,21 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
       const member = yield* ownMember(caller);
       const saved: string[] = [];
       const notes: string[] = [];
+
+      // Its mail only narrows too (off, fewer people, a lower limit).
+      const nextMail =
+        input.mail === undefined ? member.team.mail : applyMailPatch(member.team.mail, input.mail);
+      const widerMail = mailPolicyBeyond(member.team.mail, nextMail);
+      if (widerMail.length > 0) {
+        yield* note(member.projectId, {
+          kind: "denied",
+          text: `Wanted more mail: ${widerMail.join(", ")}`,
+        });
+        return yield* fail(
+          `You can't give yourself more mail than you have (${widerMail.join(", ")}). Only the person can — on your page (Assistants → ${memberName(member)} → Mail). Tell them in one line; save the rest of the answer.`,
+          403,
+        );
+      }
 
       // Rights: only narrower than now (child ⊆ itself), checked here.
       const wantsRights =
@@ -583,6 +654,9 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
             ...(input.skills !== undefined ? { skills: input.skills } : {}),
             ...(input.channel !== undefined ? { channel: input.channel } : {}),
             ...(input.firstTask !== undefined ? { firstTask: input.firstTask } : {}),
+            ...(input.duties !== undefined ? { duties: normalizeDuties(input.duties) } : {}),
+            ...(input.mail !== undefined ? { mail: nextMail } : {}),
+            ...(input.worksOn !== undefined ? { worksOnWish: input.worksOn } : {}),
           };
           if (input.step !== undefined) {
             team = withSetupStep(team, input.step, input.skipped === true, now);
@@ -601,9 +675,26 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
       if (input.skills !== undefined) saved.push(`good at — ${input.skills.join(", ")}`);
       if (input.channel !== undefined) saved.push(`talk — ${input.channel}`);
       if (input.firstTask !== undefined) saved.push(`first task — “${input.firstTask}”`);
+      if (input.duties !== undefined) {
+        const duties = normalizeDuties(input.duties);
+        saved.push(
+          duties.length === 0
+            ? "always on you — nothing"
+            : `always on you — ${duties.map((duty) => `“${duty}”`).join(", ")}`,
+        );
+      }
+      if (input.mail !== undefined) saved.push(`email — ${mailPolicyLine(nextMail, null)}`);
+      if (input.worksOn !== undefined) {
+        saved.push(`works on — ${WORKS_ON_WORDS[input.worksOn]}`);
+        if (input.worksOn !== "here" && member.projectId !== ASSISTANT_PROJECT_ID) {
+          notes.push(
+            "Moving you is the person's: tell them in one line it is one click on your page (Works on), and go on with the setup here.",
+          );
+        }
+      }
 
       const after = yield* memberById(member.projectId);
-      const left = setupStepsLeft(after.team.setup);
+      const left = stepsLeft(after);
       return {
         saved,
         tell: saved.length > 0 ? `✓ Saved: ${saved.join("; ")}` : null,
@@ -684,6 +775,9 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
               createdBy: parent.projectId,
               createdAt: now.toISOString(),
               firstTask: input.firstTask ?? null,
+              duties: normalizeDuties(input.duties ?? []),
+              // Its mail is its creator's or narrower: never wider.
+              mail: parent.team.mail,
               // Its creator set it up; the person can still run "Set up again".
               setup: { ...EMPTY_TEAM.setup, state: "done", updatedAt: now.toISOString() },
             },
@@ -767,6 +861,8 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           ...(input.character !== undefined ? { character: input.character } : {}),
           ...(input.skills !== undefined ? { skills: input.skills } : {}),
           ...(input.channel !== undefined ? { channel: input.channel } : {}),
+          ...(input.duties !== undefined ? { duties: normalizeDuties(input.duties) } : {}),
+          ...(input.mail !== undefined ? { mail: applyMailPatch(current.mail, input.mail) } : {}),
           ...(input.paused !== undefined
             ? { pausedAt: input.paused ? now.toISOString() : null }
             : {}),
@@ -912,7 +1008,9 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           : false;
       const restart = setup.state === "done";
       const progress = restart ? { answered: [], skipped: [] } : setup;
-      const left = setupStepsLeft(progress);
+      const left = setupStepsLeft(progress).filter(
+        (step) => !(step === "computer" && projectId === ASSISTANT_PROJECT_ID),
+      );
       const name = memberName(member);
       const threadId: ThreadId = open
         ? (setup.threadId as ThreadId)

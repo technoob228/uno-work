@@ -8,12 +8,19 @@ import { Context, Effect, Layer } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
-import { makeAgentMailClient, type AgentMailClientDeps, type AgentMailState } from "./agentMail.ts";
+import {
+  makeAgentMailClient,
+  type AgentMailClientDeps,
+  type AgentMailListedLetter,
+  type AgentMailState,
+} from "./agentMail.ts";
 import { ConnectorsError } from "./connectors.ts";
 
 export interface AgentMailServiceShape {
   /** Never fails. */
   readonly status: Effect.Effect<AgentMailState>;
+  /** The newest letters of the computer's mailbox; [] when mail isn't there. Never fails. */
+  readonly recent: (limit: number) => Effect.Effect<ReadonlyArray<AgentMailListedLetter>>;
   readonly changeAddress: (
     local: string,
   ) => Effect.Effect<{ readonly address: string }, ConnectorsError>;
@@ -47,6 +54,7 @@ export const makeAgentMailService = (overrides: Partial<AgentMailClientDeps> = {
 
     return {
       status: Effect.promise(() => client.status()),
+      recent: (limit) => Effect.promise(() => client.recent(limit)),
       changeAddress: (local) =>
         Effect.tryPromise({ try: () => client.changeAddress(local), catch: asConnectorsError }),
     } satisfies AgentMailServiceShape;

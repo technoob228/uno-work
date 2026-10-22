@@ -19,6 +19,8 @@ import * as fsp from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import {
+  ASSISTANT_DUTIES_MAX,
+  ASSISTANT_DUTY_MAX_CHARS,
   ASSISTANT_SETUP_STEP_IDS,
   ASSISTANT_TEAM_ACTIVITY_LIMIT,
   ASSISTANT_TEAM_TEXT_MAX,
@@ -27,6 +29,7 @@ import {
   type AssistantTeamActivity,
   type ManagerAssistantTeam,
 } from "@t3tools/contracts";
+import { DEFAULT_ASSISTANT_MAIL_POLICY, normalizeMailPolicy } from "@t3tools/shared/assistantMail";
 
 export const EMPTY_TEAM: ManagerAssistantTeam = {
   name: null,
@@ -39,6 +42,9 @@ export const EMPTY_TEAM: ManagerAssistantTeam = {
   createdAt: null,
   setup: { state: "not-started", answered: [], skipped: [], threadId: null, updatedAt: null },
   firstTask: null,
+  duties: [],
+  mail: DEFAULT_ASSISTANT_MAIL_POLICY,
+  worksOnWish: null,
   revokedAt: null,
   pausedAt: null,
   activity: [],
@@ -56,6 +62,18 @@ const texts = (value: unknown, max = 8): ReadonlyArray<string> =>
         ...new Set(value.flatMap((item) => (text(item, 60) === null ? [] : [text(item, 60)!]))),
       ].slice(0, max)
     : [];
+
+/** Standing duties: trimmed lines, no repeats, at most 12 of 200 characters. */
+export function normalizeDuties(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value)) return [];
+  const out = new Set<string>();
+  for (const item of value) {
+    const line = text(item, ASSISTANT_DUTY_MAX_CHARS)?.replace(/\s+/g, " ") ?? null;
+    if (line !== null) out.add(line);
+    if (out.size >= ASSISTANT_DUTIES_MAX) break;
+  }
+  return [...out];
+}
 
 const STEP_IDS: ReadonlySet<string> = new Set(ASSISTANT_SETUP_STEP_IDS);
 const steps = (value: unknown): ReadonlyArray<AssistantSetupStepId> =>
@@ -121,6 +139,14 @@ export function normalizeTeam(raw: unknown): ManagerAssistantTeam {
       updatedAt: text(setup.updatedAt, 40),
     },
     firstTask: text(record.firstTask, 500),
+    duties: normalizeDuties(record.duties),
+    mail: normalizeMailPolicy(record.mail),
+    worksOnWish:
+      record.worksOnWish === "here" ||
+      record.worksOnWish === "cloud" ||
+      record.worksOnWish === "own"
+        ? record.worksOnWish
+        : null,
     revokedAt: text(record.revokedAt, 40),
     pausedAt: text(record.pausedAt, 40),
     activity: activity.slice(-ASSISTANT_TEAM_ACTIVITY_LIMIT),

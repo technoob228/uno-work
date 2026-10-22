@@ -141,17 +141,27 @@ export function buildAssistantContextHint(input: {
   readonly user: string;
   readonly notes: string;
   readonly routing: string;
+  /** Its duties and rules from its team record (`assistants/profileHint.ts`). */
+  readonly profile?: string | null;
   readonly readAt: string;
 }): { readonly hint: string; readonly withNotes: boolean } | null {
   const soul = meaningful(input.soul);
   const user = meaningful(input.user);
   const notes = meaningful(input.notes);
   const routing = routingTable(input.routing);
-  if (soul === null && user === null && notes === null && routing === null) return null;
+  const profile = input.profile?.trim() ? input.profile.trim() : null;
+  if (soul === null && user === null && notes === null && routing === null && profile === null) {
+    return null;
+  }
   const sections = [
     `[Your own files in this assistant folder, as read when this session started (${input.readAt}). ` +
       "You do not need to read them again for a status or a hand-off; the files win if you or the person changed them since.]",
   ];
+  if (profile !== null) {
+    sections.push(
+      `<Your profile — Uno Work keeps it, the person edits it on your page>\n${profile}\n</Your profile>`,
+    );
+  }
   if (soul !== null)
     sections.push(`<SOUL.md>\n${clip(soul, ASSISTANT_CONTEXT_SOUL_CHARS)}\n</SOUL.md>`);
   if (user !== null)

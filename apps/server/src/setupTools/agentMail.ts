@@ -47,9 +47,24 @@ export interface AgentMailClientDeps {
   readonly requestTimeoutMs?: number;
 }
 
+/** One letter as an assistant's page lists it (the console's list, trimmed). */
+export interface AgentMailListedLetter {
+  readonly id: string;
+  readonly direction: "in" | "out";
+  readonly from: string | null;
+  readonly to: ReadonlyArray<string>;
+  readonly subject: string;
+  readonly snippet: string;
+  readonly receivedAt: string | null;
+  readonly read: boolean;
+  readonly suspicious: boolean;
+}
+
 export interface AgentMailClient {
   /** Never throws: an unreachable console is an answer. */
   readonly status: () => Promise<AgentMailState>;
+  /** The newest letters (both folders); [] when mail isn't there. Never throws. */
+  readonly recent: (limit: number) => Promise<ReadonlyArray<AgentMailListedLetter>>;
   /** The new address; a `ConnectorsError` with a sentence the person can read otherwise. */
   readonly changeAddress: (local: string) => Promise<{ readonly address: string }>;
 }
@@ -94,6 +109,39 @@ export function parseAgentMailState(raw: unknown): AgentMailState {
       sentToday: numberOrNull(limits.sent_today),
     },
   };
+}
+
+const stringsOf = (value: unknown): ReadonlyArray<string> =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : typeof value === "string"
+      ? [value]
+      : [];
+
+/** The console's `{messages: [...]}` → letters for the page (malformed rows dropped). */
+export function parseAgentMailList(raw: unknown): ReadonlyArray<AgentMailListedLetter> {
+  if (raw === null || typeof raw !== "object") return [];
+  const messages = (raw as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return [];
+  return messages.flatMap((entry) => {
+    if (entry === null || typeof entry !== "object") return [];
+    const m = entry as Record<string, unknown>;
+    const id = typeof m.id === "string" || typeof m.id === "number" ? String(m.id) : null;
+    if (id === null) return [];
+    return [
+      {
+        id,
+        direction: m.direction === "out" ? ("out" as const) : ("in" as const),
+        from: typeof m.from === "string" ? m.from : null,
+        to: stringsOf(m.to),
+        subject: typeof m.subject === "string" ? m.subject.slice(0, 300) : "",
+        snippet: typeof m.snippet === "string" ? m.snippet.slice(0, 200) : "",
+        receivedAt: typeof m.received_at === "string" ? m.received_at : null,
+        read: m.read === true,
+        suspicious: m.suspicious === true,
+      },
+    ];
+  });
 }
 
 /** The console's sentence from an error body, if there is one. */
@@ -157,6 +205,21 @@ export function makeAgentMailClient(deps: AgentMailClientDeps): AgentMailClient 
     }
   };
 
+  const recent: AgentMailClient["recent"] = async (limit) => {
+    const token = await currentToken();
+    if (token === null) return [];
+    try {
+      const reply = await request(
+        token,
+        "GET",
+        `/messages?folder=all&limit=${Math.max(1, Math.min(50, Math.floor(limit)))}`,
+      );
+      return reply.status >= 200 && reply.status < 300 ? parseAgentMailList(reply.body) : [];
+    } catch {
+      return [];
+    }
+  };
+
   const changeAddress: AgentMailClient["changeAddress"] = async (local) => {
     const token = await currentToken();
     if (token === null) {
@@ -215,5 +278,5 @@ export function makeAgentMailClient(deps: AgentMailClientDeps): AgentMailClient 
     );
   };
 
-  return { status, changeAddress };
+  return { status, recent, changeAddress };
 }

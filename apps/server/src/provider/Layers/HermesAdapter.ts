@@ -167,10 +167,28 @@ export interface HermesAdapterLiveOptions {
    * keeps its 0.0.105 behaviour. Absent (tests): on.
    */
   readonly assistantsEnabled?: Effect.Effect<boolean>;
+  /**
+   * An assistant's duties and rules from its team record, by its project id
+   * (`assistants/profileHint.ts`), for its session's system prompt. Absent
+   * (tests): only its files.
+   */
+  readonly assistantProfile?: (projectId: string) => Effect.Effect<string | null>;
 }
 
 /** Marker of an assistant workspace (AssistantService): its NOTES.md is the assistant's memory. */
 const ASSISTANT_WORKSPACE_MARKER = ".uno-assistant.json";
+
+/** `{"projectId": "assistant-…"}` in the folder's marker, or null. */
+export function assistantProjectIdOfMarker(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as { projectId?: unknown };
+    return typeof parsed.projectId === "string" && parsed.projectId.startsWith("assistant-")
+      ? parsed.projectId
+      : null;
+  } catch {
+    return null;
+  }
+}
 /** The assistant's own MCP server in its workspace `.mcp.json` (manager/mcp.ts). */
 const MANAGER_MCP_SERVER_NAME = "uno-manager";
 /** `MANAGER_WAIT_MAX_TIMEOUT_SEC` (contracts/manager.ts): the longest wait_for_thread. */
@@ -1018,11 +1036,18 @@ export function makeHermesAdapter(
       Effect.gen(function* () {
         const read = (name: string) =>
           fileSystem.readFileString(nodePath.join(cwd, name)).pipe(Effect.orElseSucceed(() => ""));
+        // The folder's marker names its assistant (written by the daemon).
+        const projectId = assistantProjectIdOfMarker(yield* read(ASSISTANT_WORKSPACE_MARKER));
+        const profile =
+          projectId !== null && options?.assistantProfile
+            ? yield* options.assistantProfile(projectId).pipe(Effect.orElseSucceed(() => null))
+            : null;
         return buildAssistantContextHint({
           soul: yield* read("SOUL.md"),
           user: yield* read("USER.md"),
           notes: yield* read(ASSISTANT_NOTES_FILE),
           routing: yield* read("ROUTING.md"),
+          profile,
           readAt: yield* nowIso,
         });
       });

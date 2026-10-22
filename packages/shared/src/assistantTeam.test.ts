@@ -106,8 +106,11 @@ describe("teamDescendants", () => {
 describe("setupStepsLeft", () => {
   it("keeps the order and drops answered and skipped steps", () => {
     expect(setupStepsLeft({ answered: ["role", "apps"], skipped: ["channel"] })).toEqual([
+      "duties",
       "character",
       "access",
+      "mail",
+      "computer",
       "routine",
       "first-task",
     ]);

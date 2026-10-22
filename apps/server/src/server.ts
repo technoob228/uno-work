@@ -190,6 +190,7 @@ import {
   managerAssistantsDeletedRouteLayer,
   managerAssistantRestoreRouteLayer,
   managerAssistantAppsGetRouteLayer,
+  managerAssistantMailRouteLayer,
   managerAssistantAppsPutRouteLayer,
   managerAssistantInstructionsGetRouteLayer,
   managerAssistantInstructionsResolveRouteLayer,
@@ -471,8 +472,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // "New assistant": Uno AI drafts the assistant from one sentence.
       AssistantDraftServiceLive,
       // The team of assistants: their profiles, helpers within their rights,
-      // question cards and the setup chat (manager + Inbox further down).
-      AssistantTeamLive,
+      // question cards and the setup chat (manager + Inbox further down);
+      // the mailbox address for each assistant's own email.
+      AssistantTeamLive.pipe(Layer.provide(AgentMailServiceLive)),
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -669,6 +671,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerAssistantsDeletedRouteLayer,
   managerAssistantRestoreRouteLayer,
   managerAssistantAppsGetRouteLayer,
+  managerAssistantMailRouteLayer,
   managerAssistantAppsPutRouteLayer,
   managerAssistantInstructionsGetRouteLayer,
   managerAssistantInstructionsResolveRouteLayer,

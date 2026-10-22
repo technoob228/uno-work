@@ -24,6 +24,7 @@ import {
   attachmentTarget,
   fileNameFromContentDisposition,
   safeAttachmentName,
+  type MailOwner,
 } from "./mailTools.ts";
 import {
   consoleRequest,
@@ -2178,5 +2179,146 @@ describe("the agent's own mailbox (mail_*)", () => {
     expect(bad._tag === "Failure" && bad.failure.message).toBe(
       "Couldn't send the letter: Subject is empty.",
     );
+  });
+  describe("an assistant's own address and rules", () => {
+    const LIST = {
+      messages: [
+        {
+          id: 1,
+          direction: "in",
+          from: "a@x.io",
+          to: ["misha-otter+scout@uno4.me"],
+          subject: "Code",
+        },
+        { id: 2, direction: "in", from: "b@x.io", to: ["misha-otter@uno4.me"], subject: "Uno's" },
+        { id: 3, direction: "out", from: "misha-otter@uno4.me", to: ["c@x.io"], subject: "Sent" },
+        { id: 4, direction: "out", from: "misha-otter@uno4.me", to: ["d@x.io"], subject: "Other" },
+      ],
+      next_before: null,
+    };
+    const withOwner = (
+      owner: Partial<MailOwner> = {},
+      reply: (request: ConsoleRequest) => ConsoleReply = (request) =>
+        request.path === "/api/v1/work/mail"
+          ? { status: 200, body: MAILBOX }
+          : request.path.startsWith("/api/v1/work/mail/messages?")
+            ? { status: 200, body: LIST }
+            : request.path === "/api/v1/work/mail/messages/2"
+              ? { status: 200, body: { id: 2, direction: "in", to: ["misha-otter@uno4.me"] } }
+              : { status: 200, body: { id: 9, message_id: "<m9@uno4.me>" } },
+    ) => {
+      const made = makeDeps({ console: reply });
+      const sent: Array<{ id: string | null; messageId: string | null }> = [];
+      const full: MailOwner = {
+        projectId: "assistant-scout",
+        name: "Scout",
+        isUno: false,
+        policy: { enabled: true, recipients: "anyone", allow: [], dailyLimit: 50 },
+        ownerEmail: "misha@example.com",
+        ledger: Effect.succeed({
+          day: "2026-10-22",
+          sentToday: 2,
+          sentIds: ["3"],
+          messageIds: [],
+        }),
+        recordSent: (letter) => Effect.sync(() => void sent.push(letter)),
+        now: () => new Date("2026-10-22T12:00:00Z"),
+        ...owner,
+      };
+      return { ...made, deps: { ...made.deps, mailOwner: Effect.succeed(full) }, sent };
+    };
+
+    it("mail_address: its own plus address, its count and rules", async () => {
+      const { deps } = withOwner();
+      const result = await run("mail_address", deps);
+      expect(result._tag === "Success" && result.success).toMatchObject({
+        address: "misha-otter+scout@uno4.me",
+        sentToday: 2,
+        dailyLimit: 50,
+        rules: "Writes to anyone · up to 50 letters a day",
+      });
+      const uno = withOwner({ projectId: "assistant-home", isUno: true, name: "Uno" });
+      const own = await run("mail_address", uno.deps);
+      expect(own._tag === "Success" && own.success).toMatchObject({
+        address: "misha-otter@uno4.me",
+      });
+    });
+
+    it("mail_list: another assistant sees letters to its address and the ones it sent", async () => {
+      const { deps, recorded } = withOwner();
+      const result = await run("mail_list", deps, { folder: "all", limit: 5 });
+      const ids = (
+        (result._tag === "Success" ? result.success : {}) as { messages: Array<{ id: string }> }
+      ).messages.map((message) => message.id);
+      expect(ids).toEqual(["1", "3"]);
+      expect(recorded.console.find((r) => r.path.includes("messages?"))?.path).toContain(
+        "limit=50",
+      );
+      const uno = withOwner({ projectId: "assistant-home", isUno: true });
+      const all = await run("mail_list", uno.deps, { folder: "all" });
+      expect(
+        ((all._tag === "Success" ? all.success : {}) as { messages: unknown[] }).messages,
+      ).toHaveLength(4);
+    });
+
+    it("mail_read: another assistant's or the computer's letter is refused", async () => {
+      const { deps } = withOwner();
+      const result = await run("mail_read", deps, { id: "2" });
+      expect(result._tag === "Failure" && result.failure.message).toContain("isn't yours");
+    });
+
+    it("mail_send: off, its limit and who it may write to stop it before the console", async () => {
+      const off = withOwner({
+        policy: { enabled: false, recipients: "anyone", allow: [], dailyLimit: 50 },
+      });
+      const refusedOff = await run("mail_send", off.deps, {
+        to: ["a@b.co"],
+        subject: "s",
+        text: "t",
+      });
+      expect(refusedOff._tag === "Failure" && refusedOff.failure.message).toContain(
+        "Your own email is off",
+      );
+      expect(off.recorded.console).toEqual([]);
+
+      const limit = withOwner({
+        policy: { enabled: true, recipients: "anyone", allow: [], dailyLimit: 2 },
+      });
+      const refusedLimit = await run("mail_send", limit.deps, {
+        to: ["a@b.co"],
+        subject: "s",
+        text: "t",
+      });
+      expect(refusedLimit._tag === "Failure" && refusedLimit.failure.message).toContain(
+        "You sent your 2 letters for today",
+      );
+
+      const onlyYou = withOwner({
+        policy: { enabled: true, recipients: "owner", allow: [], dailyLimit: 50 },
+      });
+      const refusedWho = await run("mail_send", onlyYou.deps, {
+        to: ["stranger@x.io"],
+        subject: "s",
+        text: "t",
+      });
+      expect(refusedWho._tag === "Failure" && refusedWho.failure.message).toContain(
+        "You may not write to stranger@x.io",
+      );
+      const toPerson = await run("mail_send", onlyYou.deps, {
+        to: ["Misha@Example.com"],
+        subject: "s",
+        text: "t",
+      });
+      expect(toPerson._tag).toBe("Success");
+    });
+
+    it("mail_send: goes out with its name, and is counted as its letter", async () => {
+      const { deps, recorded, sent } = withOwner();
+      const result = await run("mail_send", deps, { to: ["a@b.co"], subject: "s", text: "t" });
+      expect(result._tag).toBe("Success");
+      const post = recorded.console.find((r) => r.method === "POST");
+      expect((post?.body as { from_name?: string }).from_name).toBe("Scout");
+      expect(sent).toEqual([{ id: "9", messageId: "<m9@uno4.me>" }]);
+    });
   });
 });

@@ -195,6 +195,11 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
     header: "My job",
     ask: "what it should take off the person's plate (its area: Personal, Finance, Sales, Dev, YouTube & content — or their own words)",
   },
+  {
+    id: "duties",
+    header: "Always on me",
+    ask: "what it is always responsible for — standing duties, one line each (watch CI on a project, a morning plan at 9, answer support mail)",
+  },
   { id: "character", header: "How I talk", ask: "how it should talk (its character)" },
   { id: "channel", header: "Where we talk", ask: "where the person wants to reach it" },
   {
@@ -203,6 +208,16 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
     ask: "how much it does on its own (Full / Helper / Observer) and which projects are its",
   },
   { id: "apps", header: "Apps", ask: "what it may do in each connected app" },
+  {
+    id: "mail",
+    header: "My email",
+    ask: "its own email: on or off, who it may write to (anyone / only the person / a list) and how many letters a day",
+  },
+  {
+    id: "computer",
+    header: "Where I work",
+    ask: "where it should work: this computer (stops when a laptop sleeps), one of their cloud computers (always on) or a new computer of its own — moving is the person's click on its page",
+  },
   {
     id: "routine",
     header: "Routine",

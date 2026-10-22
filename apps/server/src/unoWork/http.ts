@@ -57,6 +57,8 @@ import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
 import { connectorAccessDecision, readAppAccess } from "../assistants/localAssistantStore.ts";
 import { assistantOfThread } from "../assistants/assistantAccess.ts";
+import { readMailLedger, recordMailSent } from "../assistants/mailLedger.ts";
+import { readTeam } from "../assistants/teamStore.ts";
 import { assistantPresetAllows } from "@t3tools/shared/assistantPreset";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
@@ -75,6 +77,7 @@ import {
   type BridgeReply,
   type UnoWorkToolDeps,
 } from "./tools.ts";
+import type { MailOwner } from "./mailTools.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { consoleRequest, consoleToken } from "./consoleClient.ts";
 import {
@@ -287,7 +290,38 @@ const makeDeps = (input: {
       Effect.orElseSucceed(() => false),
     );
 
+    // Whose mail rules apply: the assistant whose chat this is (its own
+    // address and rules), or none in the person's own chats.
+    const mailOwner = callerAssistant.pipe(
+      Effect.flatMap((owner) =>
+        owner === null
+          ? Effect.succeed(null)
+          : Effect.gen(function* () {
+              const team = yield* Effect.promise(() =>
+                readTeam(serverConfig.stateDir, owner.projectId),
+              );
+              const cloud = yield* unoCloud.getState().pipe(Effect.orElseSucceed(() => null));
+              const stateDir = serverConfig.stateDir;
+              return {
+                projectId: owner.projectId,
+                name: team.name ?? owner.title,
+                isUno: owner.projectId === ASSISTANT_PROJECT_ID,
+                policy: team.mail,
+                ownerEmail: cloud?.account?.email ?? null,
+                ledger: Effect.promise(() => readMailLedger(stateDir, owner.projectId)),
+                recordSent: (letter: { id: string | null; messageId: string | null }) =>
+                  Effect.promise(() =>
+                    recordMailSent(stateDir, owner.projectId, letter, new Date()),
+                  ).pipe(Effect.asVoid),
+                now: () => new Date(),
+              } satisfies MailOwner;
+            }),
+      ),
+      Effect.orElseSucceed(() => null),
+    );
+
     const deps: UnoWorkToolDeps = {
+      mailOwner,
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
         Effect.map((owner) =>

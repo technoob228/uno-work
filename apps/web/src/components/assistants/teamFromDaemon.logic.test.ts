@@ -3,6 +3,7 @@ import {
   type ManagerAssistantSummary,
   type ManagerAssistantTeam,
 } from "@t3tools/contracts";
+import { DEFAULT_ASSISTANT_MAIL_POLICY } from "@t3tools/shared/assistantMail";
 import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { describe, expect, it } from "vitest";
 
@@ -35,6 +36,9 @@ const TEAM: ManagerAssistantTeam = {
   createdAt: null,
   setup: { state: "not-started", answered: [], skipped: [], threadId: null, updatedAt: null },
   firstTask: null,
+  duties: [],
+  mail: DEFAULT_ASSISTANT_MAIL_POLICY,
+  worksOnWish: null,
   revokedAt: null,
   pausedAt: null,
   activity: [],

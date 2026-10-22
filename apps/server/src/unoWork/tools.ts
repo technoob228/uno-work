@@ -85,7 +85,7 @@ import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegr
 import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
-import { mailTools } from "./mailTools.ts";
+import { mailTools, type MailOwner } from "./mailTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
@@ -278,6 +278,12 @@ export interface UnoWorkToolDeps {
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
   };
+  /**
+   * The assistant whose chat calls the mail tools, with its own mail rules
+   * (`mailTools.ts`, `@t3tools/shared/assistantMail`); null in the person's
+   * own chats. Absent (tests, older wiring): no assistant rules.
+   */
+  readonly mailOwner?: Effect.Effect<MailOwner | null>;
   /**
    * Uno Spark's gateway with a Spark-only token the daemon gets from the
    * console itself (`sparkClient.ts`): mints, caches, renews on 401. Absent

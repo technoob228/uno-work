@@ -24,6 +24,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { AgentMailService } from "../setupTools/AgentMailService.ts";
 import { applyAssistantAccess, readAssistantAccess } from "./assistantAccess.ts";
 import { AssistantTeam, AssistantTeamError, makeAssistantTeam } from "./assistantTeam.ts";
 import { readProfile, writeProfile } from "./localAssistantStore.ts";
@@ -53,6 +54,7 @@ export const AssistantTeamLive = Layer.effect(
     const settingsService = yield* ServerSettingsService;
     const schedules = yield* Effect.serviceOption(AssistantSchedules);
     const inbox = yield* Effect.serviceOption(InboxService);
+    const agentMail = yield* Effect.serviceOption(AgentMailService);
 
     const shell = projections.getShellSnapshot().pipe(
       Effect.map((snapshot) => snapshot.projects),
@@ -187,6 +189,14 @@ export const AssistantTeamLive = Layer.effect(
         Option.isSome(inbox)
           ? inbox.value.post(post).pipe(Effect.asVoid, Effect.ignoreCause({ log: true }))
           : Effect.void,
+      ...(Option.isSome(agentMail)
+        ? {
+            mailboxAddress: () =>
+              agentMail.value.status.pipe(
+                Effect.map((state) => (state.available ? (state.mailbox?.address ?? null) : null)),
+              ),
+          }
+        : {}),
       routinesAvailable: () =>
         Option.isNone(schedules)
           ? Effect.succeed(false)

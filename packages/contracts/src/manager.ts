@@ -680,10 +680,13 @@ export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
 /** Steps of the setup an assistant runs in its chat (one question each). */
 export const ASSISTANT_SETUP_STEP_IDS = [
   "role",
+  "duties",
   "character",
   "channel",
   "access",
   "apps",
+  "mail",
+  "computer",
   "routine",
   "first-task",
 ] as const;
@@ -724,6 +727,73 @@ export const AssistantSetupProgress = Schema.Struct({
 });
 export type AssistantSetupProgress = typeof AssistantSetupProgress.Type;
 
+/** Standing duties: what an assistant is responsible for, one line each (Misha 22.10). */
+export const ASSISTANT_DUTIES_MAX = 12;
+export const ASSISTANT_DUTY_MAX_CHARS = 200;
+
+/**
+ * Who an assistant may write to from its own mailbox: anyone, only the
+ * person (their Uno account's address), or the addresses listed.
+ */
+export const AssistantMailRecipients = Schema.Literals(["anyone", "owner", "list"]);
+export type AssistantMailRecipients = typeof AssistantMailRecipients.Type;
+
+/** The console's limit per mailbox (agent-mail spec 20.10): an assistant's own is at most this. */
+export const ASSISTANT_MAIL_DAILY_MAX = 50;
+export const ASSISTANT_MAIL_ALLOW_MAX = 20;
+
+/**
+ * An assistant's own mail (decisions 20.10, 22.10): on or off, who it may
+ * write to, its own daily limit. Work checks it on every `mail_*` call of
+ * the assistant's chats; the console keeps one mailbox per computer.
+ */
+export const AssistantMailPolicy = Schema.Struct({
+  enabled: Schema.Boolean,
+  recipients: AssistantMailRecipients,
+  /** Addresses for `recipients: "list"` (lowercase, plain addresses). */
+  allow: Schema.Array(Schema.String),
+  dailyLimit: Schema.Number,
+});
+export type AssistantMailPolicy = typeof AssistantMailPolicy.Type;
+
+/** One letter on an assistant's page (newest first). */
+export const ManagerAssistantMailLetter = Schema.Struct({
+  id: Schema.String,
+  direction: Schema.Literals(["in", "out"]),
+  from: Schema.NullOr(Schema.String),
+  to: Schema.Array(Schema.String),
+  subject: Schema.String,
+  snippet: Schema.String,
+  receivedAt: Schema.NullOr(Schema.String),
+  read: Schema.Boolean,
+  suspicious: Schema.Boolean,
+});
+export type ManagerAssistantMailLetter = typeof ManagerAssistantMailLetter.Type;
+
+/**
+ * `GET /api/manager/assistant/mail?projectId=` — its own email as its page
+ * shows it. `available: false` (the account's flag is off, not a cloud
+ * computer): the page shows no Mail block.
+ */
+export const ManagerAssistantMailView = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.NullOr(Schema.String),
+  /** Its own address (Uno: the mailbox's; the others: `local+tag@…`). */
+  address: Schema.NullOr(Schema.String),
+  /** The computer's mailbox address, where its letters go out from. */
+  computerAddress: Schema.NullOr(Schema.String),
+  policy: AssistantMailPolicy,
+  /** The person's Uno account address ("Only you"), when known here. */
+  ownerEmail: Schema.NullOr(Schema.String),
+  sentToday: Schema.Number,
+  letters: Schema.Array(ManagerAssistantMailLetter),
+});
+export type ManagerAssistantMailView = typeof ManagerAssistantMailView.Type;
+
+/** Where the person wants it to work, said in its setup (moving is theirs, on its page). */
+export const AssistantWorksOnWish = Schema.Literals(["here", "cloud", "own"]);
+export type AssistantWorksOnWish = typeof AssistantWorksOnWish.Type;
+
 export const ManagerAssistantTeam = Schema.Struct({
   /** Its name as the person sees it; null = the folder's title. */
   name: Schema.NullOr(Schema.String),
@@ -738,6 +808,11 @@ export const ManagerAssistantTeam = Schema.Struct({
   createdAt: Schema.NullOr(Schema.String),
   setup: AssistantSetupProgress,
   firstTask: Schema.NullOr(Schema.String),
+  /** What it is responsible for, standing (not one-off tasks): "watch CI on fishcode". */
+  duties: Schema.Array(Schema.String),
+  mail: AssistantMailPolicy,
+  /** Where the person said it should work (its setup); null = not asked. */
+  worksOnWish: Schema.NullOr(AssistantWorksOnWish),
   revokedAt: Schema.NullOr(Schema.String),
   pausedAt: Schema.NullOr(Schema.String),
   activity: Schema.Array(AssistantTeamActivity),
@@ -758,6 +833,27 @@ const TeamText = Schema.String.check(Schema.isMaxLength(ASSISTANT_TEAM_TEXT_MAX)
 const TeamList = Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(60))).check(
   Schema.isMaxLength(8),
 );
+const DutyList = Schema.Array(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_DUTY_MAX_CHARS)),
+).check(Schema.isMaxLength(ASSISTANT_DUTIES_MAX));
+const MailAddress = TrimmedNonEmptyString.check(Schema.isMaxLength(254));
+
+/** A change of its mail: any part of it. */
+export const AssistantMailPolicyPatch = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean),
+  recipients: Schema.optional(AssistantMailRecipients),
+  allow: Schema.optional(
+    Schema.Array(MailAddress).check(Schema.isMaxLength(ASSISTANT_MAIL_ALLOW_MAX)),
+  ),
+  dailyLimit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(0),
+      Schema.isLessThanOrEqualTo(ASSISTANT_MAIL_DAILY_MAX),
+    ),
+  ),
+});
+export type AssistantMailPolicyPatch = typeof AssistantMailPolicyPatch.Type;
 
 /** `POST /api/manager/assistant/team` — the person edits who it is (owner session). */
 export const AssistantTeamUpdateInput = Schema.Struct({
@@ -769,6 +865,8 @@ export const AssistantTeamUpdateInput = Schema.Struct({
   character: Schema.optional(TeamText),
   skills: Schema.optional(TeamList),
   channel: Schema.optional(Schema.NullOr(AssistantTeamChannel)),
+  duties: Schema.optional(DutyList),
+  mail: Schema.optional(AssistantMailPolicyPatch),
   /** "done": the person finished or skipped the setup ("Later"). */
   setup: Schema.optional(Schema.Literals(["not-started", "done"])),
   paused: Schema.optional(Schema.Boolean),
@@ -806,6 +904,12 @@ export const ManagerAssistantProfileSetInput = Schema.Struct({
   /** Connector levels by provider id (`gmail`, `google-drive`, `notion`, `github`). */
   apps: Schema.optional(AppLevels),
   firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  /** Its standing duties, the whole list (replaces what is saved). */
+  duties: Schema.optional(DutyList),
+  /** Its own mail — only narrower than now (off, fewer people, a lower limit). */
+  mail: Schema.optional(AssistantMailPolicyPatch),
+  /** Where the person wants it to work; moving is theirs, on its page. */
+  worksOn: Schema.optional(AssistantWorksOnWish),
   /**
    * A repeating task (a morning plan, a weekly report): made with the same
    * schedules as `schedule_create`. Only on a cloud computer — the answer
@@ -842,6 +946,8 @@ export const ManagerAssistantCreateInput = Schema.Struct({
   apps: Schema.optional(AppLevels),
   /** What it should do first; sent to it as its first message. */
   firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
+  /** What it is always responsible for (its standing duties). */
+  duties: Schema.optional(DutyList),
 });
 export type ManagerAssistantCreateInput = typeof ManagerAssistantCreateInput.Type;
 

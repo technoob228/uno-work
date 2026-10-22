@@ -209,6 +209,106 @@ describe("assistant_profile_set: rights only narrow", () => {
   });
 });
 
+describe("assistant_profile_set: duties, its own email, where it works", () => {
+  it("saves its standing duties as a clean list and says so", async () => {
+    const s = stand();
+    s.addAssistant(SCOUT, "Scout");
+    const result = await run(
+      s.team.profileSet(callerOf(SCOUT), {
+        duties: ["Watch CI on fishcode", "  Morning plan at 9 ", "Watch CI on fishcode"],
+        step: "duties",
+      }),
+    );
+    expect(result._tag).toBe("Success");
+    const team = await readTeam(s.stateDir, SCOUT);
+    expect(team.duties).toEqual(["Watch CI on fishcode", "Morning plan at 9"]);
+    expect(team.setup.answered).toEqual(["duties"]);
+    expect(JSON.stringify(result)).toContain("always on you — “Watch CI on fishcode”");
+  });
+
+  it("narrows its mail but never widens it", async () => {
+    const s = stand();
+    s.addAssistant(SCOUT, "Scout");
+    const narrowed = await run(
+      s.team.profileSet(callerOf(SCOUT), {
+        mail: { recipients: "list", allow: ["Ann@Example.com"], dailyLimit: 5 },
+        step: "mail",
+      }),
+    );
+    expect(narrowed._tag).toBe("Success");
+    expect((await readTeam(s.stateDir, SCOUT)).mail).toEqual({
+      enabled: true,
+      recipients: "list",
+      allow: ["ann@example.com"],
+      dailyLimit: 5,
+    });
+    for (const wider of [
+      { recipients: "anyone" },
+      { allow: ["ann@example.com", "bob@example.com"] },
+      { dailyLimit: 20 },
+    ] as const) {
+      const refused = await run(s.team.profileSet(callerOf(SCOUT), { mail: wider }));
+      expect(refused._tag).toBe("Failure");
+      expect((refused as { failure: { status: number } }).failure.status).toBe(403);
+    }
+    // Off, then on again: on is the person's.
+    await run(s.team.profileSet(callerOf(SCOUT), { mail: { enabled: false } }));
+    const back = await run(s.team.profileSet(callerOf(SCOUT), { mail: { enabled: true } }));
+    expect(back._tag).toBe("Failure");
+    // The person widens it on its page.
+    await run(s.team.update({ projectId: SCOUT, mail: { enabled: true, recipients: "anyone" } }));
+    expect((await readTeam(s.stateDir, SCOUT)).mail.recipients).toBe("anyone");
+  });
+
+  it("keeps where the person wants it and says moving is their click; Uno has no such step", async () => {
+    const s = stand();
+    s.addAssistant(SCOUT, "Scout");
+    const result = await run(
+      s.team.profileSet(callerOf(SCOUT), { worksOn: "cloud", step: "computer" }),
+    );
+    expect(result._tag).toBe("Success");
+    expect((await readTeam(s.stateDir, SCOUT)).worksOnWish).toBe("cloud");
+    expect(JSON.stringify(result)).toContain("one click on your page (Works on)");
+    const uno = await run(s.team.profileGet(callerOf(UNO)));
+    const left = (uno as { success: { setup: { left: Array<{ id: string }> } } }).success.setup
+      .left;
+    expect(left.map((step) => step.id)).not.toContain("computer");
+    expect(left.map((step) => step.id)).toContain("mail");
+  });
+
+  it("shows its own address in the computer's mailbox, or says there is none", async () => {
+    const none = stand();
+    none.addAssistant(SCOUT, "Scout");
+    const without = await run(none.team.profileGet(callerOf(SCOUT)));
+    expect(JSON.stringify(without)).toContain('"available":false');
+
+    const s = stand();
+    s.addAssistant(SCOUT, "Scout");
+    const team = makeAssistantTeam({
+      ...s.deps,
+      mailboxAddress: () => Effect.succeed("misha-otter@uno4.me"),
+    });
+    const scout = await run(team.profileGet(callerOf(SCOUT)));
+    expect(JSON.stringify(scout)).toContain("misha-otter+scout@uno4.me");
+    const uno = await run(team.profileGet(callerOf(UNO)));
+    expect(JSON.stringify(uno)).toContain('"address":"misha-otter@uno4.me"');
+  });
+
+  it("a helper gets its creator's mail rules and its own duties", async () => {
+    const s = stand();
+    await updateTeam(s.stateDir, UNO, (current) => ({
+      ...current,
+      mail: { enabled: true, recipients: "owner", allow: [], dailyLimit: 10 },
+    }));
+    await run(
+      s.team.create(callerOf(UNO), { name: "Scout", duties: ["Weekly competitor digest"] }),
+    );
+    const team = await readTeam(s.stateDir, SCOUT);
+    expect(team.mail).toEqual({ enabled: true, recipients: "owner", allow: [], dailyLimit: 10 });
+    expect(team.duties).toEqual(["Weekly competitor digest"]);
+  });
+});
+
 describe("assistant_create: a helper never wider than its creator", () => {
   it("makes it within the creator's rights, links it and tells the person", async () => {
     const s = stand();
@@ -450,7 +550,17 @@ describe("teamStore", () => {
     });
     const now = new Date();
     let team = normalizeTeam(null);
-    for (const step of ["role", "character", "channel", "access", "apps", "routine"] as const) {
+    for (const step of [
+      "role",
+      "duties",
+      "character",
+      "channel",
+      "access",
+      "apps",
+      "mail",
+      "computer",
+      "routine",
+    ] as const) {
       team = withSetupStep(team, step, false, now);
     }
     expect(team.setup.state).toBe("in-progress");

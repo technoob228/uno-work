@@ -5,6 +5,7 @@
  * every chat gets (`../unoWork/`).
  */
 import {
+  ASSISTANT_SETUP_STEP_IDS,
   ASSISTANT_SCHEDULE_DEFAULT_MINUTES,
   ASSISTANT_SCHEDULE_MAX_MINUTES,
   ASSISTANT_SCHEDULE_NAME_MAX_CHARS,
@@ -467,15 +468,15 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "assistant_profile_get",
     description:
-      "Read your own profile: name, role, character, where you talk, your access (preset, projects with ids, a level per app), the person's projects (ids and titles), whether routines run on this computer, and your setup progress (steps answered, skipped, left). Call it first when you set yourself up or continue the setup.",
+      "Read your own profile: name, role, character, your standing duties, where you talk, your access (preset, projects with ids, a level per app), your own email (address and rules, when this computer has mail), where you work, the person's projects (ids and titles), whether routines run on this computer, and your setup progress (steps answered, skipped, left). Call it first when you set yourself up or continue the setup.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (_tools, caller, _args, extras) => withTeam(extras, (team) => team.profileGet(caller)),
   },
   {
     name: "assistant_profile_set",
     description:
-      'Save what the person told you about yourself, right after each answer: name, emoji, roles, character, skills, channel (here | telegram | slack), preset (full | helper | observer), projects (ids from assistant_profile_get, or "all"), apps (a level per app: none | read | write), firstTask, routine (a repeating task — cloud computers only). Pass `step` to mark the setup step this answer belongs to (with skipped: true when the person skipped it), and done: true when the setup is over. ' +
-      'Your rights only NARROW here: a wider preset, more projects or a higher app level is refused — only the person widens them, on your page. Returns `tell`: the line to show the person ("✓ Saved: …").',
+      'Save what the person told you about yourself, right after each answer: name, emoji, roles, character, skills, duties (what you are ALWAYS responsible for, the whole list, one line each), channel (here | telegram | slack), preset (full | helper | observer), projects (ids from assistant_profile_get, or "all"), apps (a level per app: none | read | write), mail (your own email: enabled, recipients anyone | owner | list, allow, dailyLimit), worksOn (here | cloud | own — where the person wants you; moving is their click on your page), firstTask, routine (a repeating task — cloud computers only). Pass `step` to mark the setup step this answer belongs to (with skipped: true when the person skipped it), and done: true when the setup is over. ' +
+      'Your rights only NARROW here: a wider preset, more projects, a higher app level or more mail (on, more people, a higher limit) is refused — only the person widens them, on your page. Returns `tell`: the line to show the person ("✓ Saved: …").',
     inputSchema: {
       type: "object",
       properties: {
@@ -499,6 +500,26 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
           additionalProperties: { type: "string", enum: ["none", "read", "write"] },
         },
         firstTask: { type: "string" },
+        duties: {
+          type: "array",
+          maxItems: 12,
+          description:
+            'What you are always responsible for, one short line each, e.g. ["Watch CI on fishcode", "Morning plan at 9"]. Replaces the saved list.',
+          items: { type: "string", maxLength: 200 },
+        },
+        mail: {
+          type: "object",
+          description:
+            "Your own email: enabled (on/off), recipients (anyone | owner = only the person | list = only `allow`), allow (addresses), dailyLimit (0–50 letters a day). Only narrower than now.",
+          properties: {
+            enabled: { type: "boolean" },
+            recipients: { type: "string", enum: ["anyone", "owner", "list"] },
+            allow: { type: "array", maxItems: 20, items: { type: "string" } },
+            dailyLimit: { type: "integer", minimum: 0, maximum: 50 },
+          },
+          additionalProperties: false,
+        },
+        worksOn: { type: "string", enum: ["here", "cloud", "own"] },
         routine: {
           type: "object",
           properties: {
@@ -510,10 +531,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
           required: ["name", "cron", "prompt"],
           additionalProperties: false,
         },
-        step: {
-          type: "string",
-          enum: ["role", "character", "channel", "access", "apps", "routine", "first-task"],
-        },
+        step: { type: "string", enum: [...ASSISTANT_SETUP_STEP_IDS] },
         skipped: { type: "boolean" },
         done: { type: "boolean" },
       },
@@ -545,6 +563,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
           type: "object",
           additionalProperties: { type: "string", enum: ["none", "read", "write"] },
         },
+        duties: { type: "array", maxItems: 12, items: { type: "string", maxLength: 200 } },
         firstTask: { type: "string" },
       },
       required: ["name"],

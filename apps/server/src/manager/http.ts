@@ -95,6 +95,11 @@ import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
 import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPreset";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
+import { assistantMailView } from "../assistants/assistantMailView.ts";
+import { readMailLedger } from "../assistants/mailLedger.ts";
+import { readTeam } from "../assistants/teamStore.ts";
+import { AgentMailService } from "../setupTools/AgentMailService.ts";
+import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { AssistantSchedules, assistantProjectOfCaller } from "../assistants/schedules.ts";
 import {
   AssistantTeam,
@@ -1317,6 +1322,52 @@ export const managerAssistantAppsGetRouteLayer = HttpRouter.add(
     const config = yield* ServerConfig;
     const access = yield* Effect.promise(() => readAppAccess(config.stateDir, projectId));
     return HttpServerResponse.jsonUnsafe({ ...access, enforcedBy: "computer" }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `GET /api/manager/assistant/mail?projectId=` — its own email for its page:
+ * its address in the computer's mailbox, its rules, what it sent today and
+ * its newest letters. `available: false` when the computer has no mail.
+ */
+export const managerAssistantMailRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/mail",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const config = yield* ServerConfig;
+    const mail = yield* Effect.serviceOption(AgentMailService);
+    const cloud = yield* Effect.serviceOption(UnoCloudService);
+    const state = Option.isSome(mail)
+      ? yield* mail.value.status
+      : { available: false, reason: "not_configured" as const, mailbox: null };
+    // Another assistant's letters are among the mailbox's: a fuller page to filter.
+    const letters =
+      state.available && Option.isSome(mail)
+        ? yield* mail.value.recent(projectId === ASSISTANT_PROJECT_ID ? 5 : 50)
+        : [];
+    const ownerEmail = Option.isSome(cloud)
+      ? yield* cloud.value.getState().pipe(
+          Effect.map((current) => current.account?.email ?? null),
+          Effect.orElseSucceed(() => null),
+        )
+      : null;
+    const team = yield* Effect.promise(() => readTeam(config.stateDir, projectId));
+    const ledger = yield* Effect.promise(() => readMailLedger(config.stateDir, projectId));
+    return HttpServerResponse.jsonUnsafe(
+      assistantMailView({
+        projectId,
+        state,
+        letters,
+        team,
+        ledger,
+        ownerEmail,
+        now: new Date(),
+      }),
+      { status: 200 },
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
