@@ -98,6 +98,7 @@ import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletion
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import { ServerSettingsLive } from "./serverSettings.ts";
 import { CredentialsVaultLive } from "./credentialsVault.ts";
+import { ProjectSyncServiceLive } from "./projectSync/ProjectSyncService.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -458,6 +459,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // App SDK: local App API for apps on this machine (docs/app-sdk.md) —
       // starts tasks through the same engine, forwards chat with the gateway key.
       AppSdkServiceLive,
+      // "On all my computers": projects synced through the Uno cloud, keys
+      // through the Uno vault (projectSync/); listens to agents' turns.
+      ProjectSyncServiceLive,
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,
