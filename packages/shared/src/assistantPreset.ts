@@ -46,7 +46,9 @@ export type AssistantAction =
   /** reminders to the person's own messenger */
   | "remind"
   /** uno-work tools that change something (deploy, save to Drive, …) */
-  | "change-things";
+  | "change-things"
+  /** assistant_create: set up a helper (never wider than itself, checked separately) */
+  | "create-assistant";
 
 const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> = {
   full: new Set<AssistantAction>([
@@ -58,6 +60,7 @@ const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> =
     "resolve-proposals",
     "remind",
     "change-things",
+    "create-assistant",
   ]),
   helper: new Set<AssistantAction>([
     "read-chats",
@@ -66,6 +69,7 @@ const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> =
     "stop-chat",
     "remind",
     "change-things",
+    "create-assistant",
   ]),
   observer: new Set<AssistantAction>(["read-chats", "remind"]),
 };

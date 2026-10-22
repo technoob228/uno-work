@@ -22,6 +22,9 @@ export const WORK_UPDATE_NOTICE_PREFIX = "[Uno Work — work update";
 /** Starts the prompt of a scheduled assistant task (assistant_turn, no person in the chat). */
 export const SCHEDULED_TASK_PREFIX = "[Scheduled task ";
 
+/** Starts the message that opens an assistant's setup chat (it then asks the person). */
+export const ASSISTANT_SETUP_PREFIX = "[Uno Work — setup";
+
 const KNOWN_WORDS: Readonly<Record<string, string>> = {
   API: "API",
   AI: "AI",
@@ -144,6 +147,7 @@ export type UnoWorkNote =
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "work-update"; readonly text: string }
   | { readonly kind: "scheduled-task"; readonly text: string }
+  | { readonly kind: "assistant-setup"; readonly text: string }
   | { readonly kind: "other"; readonly text: string };
 
 const NOTE_LINE_MAX = 200;
@@ -182,6 +186,14 @@ function parseScheduledTask(text: string): UnoWorkNote {
 export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   if (text.startsWith(WORK_UPDATE_NOTICE_PREFIX)) return parseWorkUpdate(text);
   if (text.startsWith(SCHEDULED_TASK_PREFIX)) return parseScheduledTask(text);
+  if (text.startsWith(ASSISTANT_SETUP_PREFIX)) {
+    return {
+      kind: "assistant-setup",
+      text: text.startsWith(`${ASSISTANT_SETUP_PREFIX} (continue)`)
+        ? "Setup goes on where it stopped."
+        : "Setup started: one question at a time, skip any.",
+    };
+  }
   if (!text.startsWith(UNO_WORK_NOTE_PREFIX)) return null;
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const bot =

@@ -136,6 +136,10 @@
       "types": "./src/assistantPreset.ts",
       "import": "./src/assistantPreset.ts"
     },
+    "./assistantTeam": {
+      "types": "./src/assistantTeam.ts",
+      "import": "./src/assistantTeam.ts"
+    },
     "./assistantLlm": {
       "types": "./src/assistantLlm.ts",
       "import": "./src/assistantLlm.ts"

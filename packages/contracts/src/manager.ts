@@ -653,6 +653,216 @@ export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
   shared: false,
 };
 
+// ===============================
+// The team of assistants (decisions 14.10, 16.10)
+// ===============================
+//
+// Who an assistant is beyond its folder: its face, role and character, where
+// it talks, how far its setup went, who set it up and whether it is revoked.
+// Kept by the daemon next to its access (`<stateDir>/assistants/<id>/team.json`,
+// not in the folder the assistant writes). Its rights stay where they are:
+// the preset and projects on its token, the app levels in `apps.json`.
+
+/** Steps of the setup an assistant runs in its chat (one question each). */
+export const ASSISTANT_SETUP_STEP_IDS = [
+  "role",
+  "character",
+  "channel",
+  "access",
+  "apps",
+  "routine",
+  "first-task",
+] as const;
+export const AssistantSetupStepId = Schema.Literals(ASSISTANT_SETUP_STEP_IDS);
+export type AssistantSetupStepId = typeof AssistantSetupStepId.Type;
+
+export const AssistantTeamChannel = Schema.Literals(["here", "telegram", "slack"]);
+export type AssistantTeamChannel = typeof AssistantTeamChannel.Type;
+
+export const ASSISTANT_TEAM_TEXT_MAX = 200;
+export const ASSISTANT_TEAM_ACTIVITY_LIMIT = 200;
+
+export const AssistantTeamActivityKind = Schema.Literals([
+  "teammate",
+  "access",
+  "setup",
+  "note",
+  "denied",
+]);
+export type AssistantTeamActivityKind = typeof AssistantTeamActivityKind.Type;
+
+export const AssistantTeamActivity = Schema.Struct({
+  at: Schema.String,
+  kind: AssistantTeamActivityKind,
+  text: Schema.String,
+  /** "you": the person did it; "auto": its rights let it, nobody asked. */
+  by: Schema.optional(Schema.Literals(["you", "auto"])),
+});
+export type AssistantTeamActivity = typeof AssistantTeamActivity.Type;
+
+export const AssistantSetupProgress = Schema.Struct({
+  state: Schema.Literals(["not-started", "in-progress", "done"]),
+  answered: Schema.Array(AssistantSetupStepId),
+  skipped: Schema.Array(AssistantSetupStepId),
+  /** Its setup chat, so "Set up again" and a restart continue there. */
+  threadId: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+export type AssistantSetupProgress = typeof AssistantSetupProgress.Type;
+
+export const ManagerAssistantTeam = Schema.Struct({
+  /** Its name as the person sees it; null = the folder's title. */
+  name: Schema.NullOr(Schema.String),
+  /** Background tone of its face (`amber`, `teal`, …). */
+  tone: Schema.NullOr(Schema.String),
+  roles: Schema.Array(Schema.String),
+  character: Schema.String,
+  skills: Schema.Array(Schema.String),
+  channel: Schema.NullOr(AssistantTeamChannel),
+  /** The assistant (on this computer) that set it up; null = the person. */
+  createdBy: Schema.NullOr(ProjectId),
+  createdAt: Schema.NullOr(Schema.String),
+  setup: AssistantSetupProgress,
+  firstTask: Schema.NullOr(Schema.String),
+  revokedAt: Schema.NullOr(Schema.String),
+  pausedAt: Schema.NullOr(Schema.String),
+  activity: Schema.Array(AssistantTeamActivity),
+});
+export type ManagerAssistantTeam = typeof ManagerAssistantTeam.Type;
+
+/** The team part of `GET /api/manager/assistants` (absent on older daemons). */
+export const ManagerAssistantTeamView = Schema.Struct({
+  team: ManagerAssistantTeam,
+  apps: Schema.Struct({
+    permissions: Schema.Record(Schema.String, AssistantAppLevel),
+    restricted: Schema.Boolean,
+  }),
+});
+export type ManagerAssistantTeamView = typeof ManagerAssistantTeamView.Type;
+
+const TeamText = Schema.String.check(Schema.isMaxLength(ASSISTANT_TEAM_TEXT_MAX));
+const TeamList = Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(60))).check(
+  Schema.isMaxLength(8),
+);
+
+/** `POST /api/manager/assistant/team` — the person edits who it is (owner session). */
+export const AssistantTeamUpdateInput = Schema.Struct({
+  projectId: ProjectId,
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(60))),
+  emoji: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(16)))),
+  tone: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(20)))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  skills: Schema.optional(TeamList),
+  channel: Schema.optional(Schema.NullOr(AssistantTeamChannel)),
+  /** "done": the person finished or skipped the setup ("Later"). */
+  setup: Schema.optional(Schema.Literals(["not-started", "done"])),
+  paused: Schema.optional(Schema.Boolean),
+});
+export type AssistantTeamUpdateInput = typeof AssistantTeamUpdateInput.Type;
+
+/** `POST /api/manager/assistant/revoke` — revoke (with everything it set up) or bring back. */
+export const AssistantRevokeInput = Schema.Struct({
+  projectId: ProjectId,
+  revoked: Schema.Boolean,
+});
+export type AssistantRevokeInput = typeof AssistantRevokeInput.Type;
+
+/** `POST /api/manager/assistants/:projectId/setup-chat` answer. */
+export const AssistantSetupChatResult = Schema.Struct({ threadId: ThreadId });
+export type AssistantSetupChatResult = typeof AssistantSetupChatResult.Type;
+
+const AppLevels = Schema.Record(Schema.String, AssistantAppLevel);
+
+/**
+ * `assistant_profile_set` (uno-manager, an assistant's own token): the
+ * assistant saves what the person told it in its setup. Rights only narrow
+ * here — widening is the person's, on its page.
+ */
+export const ManagerAssistantProfileSetInput = Schema.Struct({
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(60))),
+  emoji: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(16))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  skills: Schema.optional(TeamList),
+  channel: Schema.optional(AssistantTeamChannel),
+  preset: Schema.optional(AssistantPreset),
+  /** Project ids (from `assistant_profile_get`) or "all". */
+  projects: Schema.optional(ManagerProjectAllowlist),
+  /** Connector levels by provider id (`gmail`, `google-drive`, `notion`, `github`). */
+  apps: Schema.optional(AppLevels),
+  firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  /**
+   * A repeating task (a morning plan, a weekly report): made with the same
+   * schedules as `schedule_create`. Only on a cloud computer — the answer
+   * says so on a laptop.
+   */
+  routine: Schema.optional(
+    Schema.Struct({
+      // The limits of `ManagerScheduleCreateInput` (declared further down).
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+      cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+      prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(2_000)),
+      timezone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+    }),
+  ),
+  /** The setup step this answer belongs to: marked answered (or skipped). */
+  step: Schema.optional(AssistantSetupStepId),
+  skipped: Schema.optional(Schema.Boolean),
+  /** The setup is over (every step answered or skipped). */
+  done: Schema.optional(Schema.Boolean),
+});
+export type ManagerAssistantProfileSetInput = typeof ManagerAssistantProfileSetInput.Type;
+
+/** `assistant_create`: an assistant sets up a helper, never wider than itself. */
+export const ManagerAssistantCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
+  emoji: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(16))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  /** Default: the creator's own preset. */
+  preset: Schema.optional(AssistantPreset),
+  /** Default: the creator's own projects. */
+  projects: Schema.optional(ManagerProjectAllowlist),
+  /** Default: the creator's own levels. */
+  apps: Schema.optional(AppLevels),
+  /** What it should do first; sent to it as its first message. */
+  firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
+});
+export type ManagerAssistantCreateInput = typeof ManagerAssistantCreateInput.Type;
+
+/**
+ * `ask_user`: a question card in the assistant's own conversation (Hermes has
+ * no question events of its own). The answer comes back as the person's next
+ * message, so the assistant ends its turn after asking.
+ */
+export const ManagerAskUserInput = Schema.Struct({
+  header: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+  question: TrimmedNonEmptyString.check(Schema.isMaxLength(300)),
+  options: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        label: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+        description: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+      }),
+    ).check(Schema.isMaxLength(6)),
+  ),
+  multiSelect: Schema.optional(Schema.Boolean),
+  detail: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(400))),
+  input: Schema.optional(
+    Schema.Struct({
+      placeholder: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+      kind: Schema.optional(Schema.Literals(["text", "email", "url", "time"])),
+    }),
+  ),
+  /** A Connect button for one of the person's apps (`gmail`, `github`, …). */
+  connect: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(40))),
+});
+export type ManagerAskUserInput = typeof ManagerAskUserInput.Type;
+
+/** Request ids of `ask_user` cards: answered by the daemon, not the provider. */
+export const ASSISTANT_ASK_REQUEST_PREFIX = "uno-ask:";
+
 export const ManagerAssistantSummary = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -664,6 +874,8 @@ export const ManagerAssistantSummary = Schema.Struct({
   skills: Schema.Array(Schema.String),
   /** Emoji / template from "New assistant"; absent on older daemons. */
   profile: Schema.optional(Schema.NullOr(ManagerAssistantProfile)),
+  /** Who it is on the team, and its app levels (absent on older daemons). */
+  team: Schema.optional(ManagerAssistantTeamView),
 });
 export type ManagerAssistantSummary = typeof ManagerAssistantSummary.Type;
 
