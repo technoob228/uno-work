@@ -7,7 +7,8 @@
  * keeps its own versions of these blocks.
  *
  * What isn't built yet says so in one line: a Uno bot of its own for each
- * assistant, and a computer of its own.
+ * assistant. Who it is, its duties, its own email and where it works are in
+ * `AssistantProfileBlocks.tsx`.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ASSISTANT_PRESET_COPY } from "@t3tools/shared/assistantPreset";
@@ -148,34 +149,6 @@ export function TeamPresetEditor(props: {
           </span>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * Where it lives: next to you. A computer of its own while it stays on this
- * team isn't built yet; moving it to one (its settings page) takes it off
- * this computer's team.
- */
-export function TeamLivesOnLine(props: { readonly member: TeamMember }) {
-  const openSettings = useOpenAssistantSettings();
-  return (
-    <div className="flex flex-col items-start gap-0.5" data-testid="assistant-profile-lives-on">
-      <span className="text-sm">
-        Next to you on {props.member.computerLabel || "this computer"}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        Work checks its limits on every step, but here it can still read your files. A computer of
-        its own while it stays on this team comes later; moving it to one now gives it a page of its
-        own.
-      </span>
-      <button
-        type="button"
-        onClick={() => openSettings(props.member)}
-        className="cursor-pointer text-xs text-primary hover:underline"
-      >
-        Move to its own computer…
-      </button>
     </div>
   );
 }

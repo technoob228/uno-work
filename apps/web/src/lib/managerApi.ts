@@ -11,6 +11,7 @@
  */
 import type {
   AssistantTeamUpdateInput,
+  ManagerAssistantMailView,
   ManagerAssistantTeam,
   AssistantAppAccess,
   AssistantAppLevel,
@@ -246,6 +247,17 @@ export function updateAssistantTeam(
     pathname: "/api/manager/assistant/team",
     method: "POST",
     body,
+  });
+}
+
+/** Its own email for its page: address, rules, today's count, newest letters. */
+export function getAssistantMail(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<ManagerAssistantMailView> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/mail",
+    searchParams: { projectId: input.projectId },
   });
 }
 

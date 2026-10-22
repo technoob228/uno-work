@@ -260,7 +260,16 @@ describe("the team from the daemon", () => {
           skipped: ["channel"],
         },
       }),
-    ).toBe("Setup: 3 of 7 answered — it goes on where it stopped");
+    ).toBe("Setup: 3 of 10 answered — it goes on where it stopped");
+    expect(
+      setupProgressLine(
+        {
+          ...TEAM,
+          setup: { ...TEAM.setup, state: "in-progress", answered: ["role", "computer"] },
+        },
+        { isUno: true },
+      ),
+    ).toBe("Setup: 1 of 9 answered — it goes on where it stopped");
   });
 
   it("who set up whom: the tree from the daemon's parent links", () => {

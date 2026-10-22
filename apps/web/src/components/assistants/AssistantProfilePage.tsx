@@ -25,6 +25,7 @@ import {
   LaptopIcon,
   MessageCircleIcon,
   PauseIcon,
+  PencilIcon,
   PlayIcon,
   RotateCcwIcon,
   SendIcon,
@@ -48,10 +49,10 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { AssistantAvatar } from "./AssistantAvatar";
+import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
 import {
   TeamChannels,
   TeamConnectors,
-  TeamLivesOnLine,
   TeamPresetEditor,
   TeamRoutines,
   TeamRunsOn,
@@ -461,6 +462,7 @@ export function AssistantProfilePage(props: {
   const openSetup = useAssistantOnboarding((state) => state.openFor);
   const openNewAssistant = useAssistantOnboarding((state) => state.openNew);
   const [changingBrain, setChangingBrain] = useState(false);
+  const [editingWho, setEditingWho] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [tab, setTab] = useState<"overview" | "activity">("overview");
   const storeProfiles = useAssistantTeamStore((store) => store.profiles);
@@ -593,7 +595,9 @@ export function AssistantProfilePage(props: {
       at: new Date(threadActivityMs(thread)).toISOString(),
     })),
   );
-  const setupLine = REAL ? setupProgressLine(member.summary?.team?.team ?? null) : null;
+  const setupLine = REAL
+    ? setupProgressLine(member.summary?.team?.team ?? null, { isUno: member.isUno })
+    : null;
   const nameOf = (projectId: string) =>
     team.find((item) => item.environmentId === member.environmentId && item.projectId === projectId)
       ?.profile.name ?? projectId;
@@ -689,6 +693,18 @@ export function AssistantProfilePage(props: {
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl font-semibold leading-tight">{profile.name}</h1>
+                  {REAL && !member.revoked && !editingWho ? (
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Edit name, face, role and character"
+                      title="Edit name, face, role and character"
+                      onClick={() => setEditingWho(true)}
+                      data-testid="assistant-profile-who-edit"
+                    >
+                      <PencilIcon className="size-3.5" />
+                    </Button>
+                  ) : null}
                   {member.revoked ? (
                     <Pill muted>Revoked</Pill>
                   ) : profile.pausedAt ? (
@@ -763,6 +779,10 @@ export function AssistantProfilePage(props: {
               </div>
             </div>
 
+            {REAL && editingWho ? (
+              <TeamWhoEditor member={member} onClose={() => setEditingWho(false)} />
+            ) : null}
+
             <div
               className="-mt-2 flex gap-4 border-b border-border text-sm"
               role="tablist"
@@ -797,7 +817,16 @@ export function AssistantProfilePage(props: {
             ) : (
               <>
                 <div className="grid gap-6 md:grid-cols-2">
-                  <Section title="Now" testId="assistant-profile-now">
+                  <Section
+                    title={REAL ? "Tasks" : "Now"}
+                    testId={REAL ? "assistant-profile-tasks" : "assistant-profile-now"}
+                  >
+                    {REAL ? <TeamDuties member={member} /> : null}
+                    {REAL ? (
+                      <p className="border-t border-border/70 px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Running now
+                      </p>
+                    ) : null}
                     {running.length > 0 ? (
                       running
                         .slice(0, 4)
@@ -809,7 +838,12 @@ export function AssistantProfilePage(props: {
                           />
                         ))
                     ) : (
-                      <p className="px-3 py-2 text-sm text-muted-foreground">
+                      <p
+                        className={cn(
+                          "px-3 py-2 text-muted-foreground",
+                          REAL ? "pt-0 text-xs" : "text-sm",
+                        )}
+                      >
                         Idle — nothing running.
                       </p>
                     )}
@@ -901,21 +935,17 @@ export function AssistantProfilePage(props: {
                       </>
                     )}
                   </Row>
-                  {member.isUno ? null : (
+                  {member.isUno || REAL ? null : (
                     <Row label="Lives on">
-                      {REAL ? (
-                        <TeamLivesOnLine member={member} />
-                      ) : (
-                        <OwnComputerLine
-                          member={member}
-                          onMove={() =>
-                            applyRights(
-                              { ownComputer: ownComputerName(profile.name) },
-                              `${profile.name} moves to its own computer`,
-                            )
-                          }
-                        />
-                      )}
+                      <OwnComputerLine
+                        member={member}
+                        onMove={() =>
+                          applyRights(
+                            { ownComputer: ownComputerName(profile.name) },
+                            `${profile.name} moves to its own computer`,
+                          )
+                        }
+                      />
                     </Row>
                   )}
                   {REAL ? null : (
@@ -929,49 +959,60 @@ export function AssistantProfilePage(props: {
                       </div>
                     </Row>
                   )}
-                  <Row label="Computers">
-                    {profile.ownComputer ? (
-                      <>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <Pill>
-                            <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
-                            {profile.ownComputer}
-                          </Pill>
-                          {otherComputers.map((label) => (
-                            <span
-                              key={label}
-                              title="Starting chats on your computers needs Full"
-                              className="inline-flex h-6 items-center rounded-md border border-dashed border-border px-2 text-xs text-muted-foreground/60"
-                            >
-                              {label} · needs Full
-                            </span>
+                  {REAL ? null : (
+                    <Row label="Computers">
+                      {profile.ownComputer ? (
+                        <>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Pill>
+                              <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+                              {profile.ownComputer}
+                            </Pill>
+                            {otherComputers.map((label) => (
+                              <span
+                                key={label}
+                                title="Starting chats on your computers needs Full"
+                                className="inline-flex h-6 items-center rounded-md border border-dashed border-border px-2 text-xs text-muted-foreground/60"
+                              >
+                                {label} · needs Full
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {profile.projects === "all"
+                              ? "Every project is"
+                              : `${profile.projects.join(", ")} ${profile.projects.length === 1 ? "is" : "are"}`}{" "}
+                            copied to {profile.ownComputer}; nothing else of yours is there.
+                          </p>
+                        </>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {computers.map((label) => (
+                            <Pill key={label}>
+                              <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
+                              {label}
+                            </Pill>
                           ))}
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {profile.projects === "all"
-                            ? "Every project is"
-                            : `${profile.projects.join(", ")} ${profile.projects.length === 1 ? "is" : "are"}`}{" "}
-                          copied to {profile.ownComputer}; nothing else of yours is there.
-                        </p>
-                      </>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {computers.map((label) => (
-                          <Pill key={label}>
-                            <LaptopIcon className="mr-1 size-3 text-muted-foreground" />
-                            {label}
-                          </Pill>
-                        ))}
-                      </div>
-                    )}
-                  </Row>
+                      )}
+                    </Row>
+                  )}
                   <Row label="Role" last={profile.skills.length === 0}>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       {profile.roles.length > 0 ? (
                         profile.roles.map((role) => <Pill key={role}>{role}</Pill>)
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                      {REAL && !member.revoked ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditingWho(true)}
+                          className="ml-1 cursor-pointer text-xs text-primary hover:underline"
+                        >
+                          Edit
+                        </button>
+                      ) : null}
                     </div>
                   </Row>
                   {profile.skills.length > 0 ? (
@@ -986,6 +1027,12 @@ export function AssistantProfilePage(props: {
                     </Row>
                   ) : null}
                 </Section>
+
+                {REAL ? (
+                  <Section title="Works on" testId="assistant-profile-works-on-section">
+                    <TeamWorksOn member={member} />
+                  </Section>
+                ) : null}
 
                 <div className="grid gap-6 md:grid-cols-2">
                   <Section
@@ -1053,6 +1100,17 @@ export function AssistantProfilePage(props: {
                     )}
                   </Section>
                 </div>
+
+                {REAL ? (
+                  <TeamMail
+                    member={member}
+                    section={(body) => (
+                      <Section title="Mail" testId="assistant-profile-mail">
+                        {body}
+                      </Section>
+                    )}
+                  />
+                ) : null}
 
                 <Section
                   title="What it can use"

@@ -10,6 +10,7 @@
  */
 import {
   ASSISTANT_PROJECT_ID,
+  ASSISTANT_SETUP_STEP_IDS,
   type AssistantAppLevel,
   isAssistantProjectId,
   type ManagerAssistantSummary,
@@ -156,11 +157,18 @@ export function projectIdsOf(
 }
 
 /** Setup progress for its page: "3 of 7 answered". */
-export function setupProgressLine(team: ManagerAssistantTeam | null): string | null {
+export function setupProgressLine(
+  team: ManagerAssistantTeam | null,
+  options: { readonly isUno?: boolean } = {},
+): string | null {
   if (team === null || team.setup.state === "not-started") return null;
   if (team.setup.state === "done") return null;
-  const done = team.setup.answered.length + team.setup.skipped.length;
-  return `Setup: ${done} of 7 answered — it goes on where it stopped`;
+  // Uno isn't asked where it works: it is its computer's own.
+  const steps = ASSISTANT_SETUP_STEP_IDS.filter((id) => !(options.isUno && id === "computer"));
+  const done = steps.filter(
+    (id) => team.setup.answered.includes(id) || team.setup.skipped.includes(id),
+  ).length;
+  return `Setup: ${done} of ${steps.length} answered — it goes on where it stopped`;
 }
 
 /** Every app at one level, or a level per app — as `apps.json` keeps it. */
