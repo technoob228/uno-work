@@ -48,7 +48,9 @@ export type AssistantAction =
   /** uno-work tools that change something (deploy, save to Drive, …) */
   | "change-things"
   /** assistant_create: set up a helper (never wider than itself, checked separately) */
-  | "create-assistant";
+  | "create-assistant"
+  /** the keys of its projects (Uno vault → the project's .env): Full and Helper, never Observer */
+  | "read-project-keys";
 
 const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> = {
   full: new Set<AssistantAction>([
@@ -61,6 +63,7 @@ const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> =
     "remind",
     "change-things",
     "create-assistant",
+    "read-project-keys",
   ]),
   helper: new Set<AssistantAction>([
     "read-chats",
@@ -70,6 +73,7 @@ const ALLOWED: Readonly<Record<AssistantPreset, ReadonlySet<AssistantAction>>> =
     "remind",
     "change-things",
     "create-assistant",
+    "read-project-keys",
   ]),
   observer: new Set<AssistantAction>(["read-chats", "remind"]),
 };
@@ -217,6 +221,7 @@ export const ASSISTANT_PRESET_COPY: Readonly<
       "Reads chats and their status in the projects you pick.",
       "Doesn't start, write in, stop or approve chats.",
       "Apps: reading only, whatever level you set.",
+      "Doesn't get your projects' keys.",
       "Its own schedule and reminders still work.",
     ],
   },

@@ -113,6 +113,7 @@ import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegist
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
+import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import {
   BrowserTraceCollector,
@@ -617,6 +618,18 @@ const buildAppUnderTest = (options?: {
           reveal: () => Effect.succeed(null),
           materializeAll: Effect.succeed([]),
           ...options?.layers?.credentialsVault,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectSyncService)({
+          status: Effect.succeed({
+            available: false,
+            unavailableReason: null,
+            projects: [],
+            elsewhere: [],
+          }),
+          opened: () => Effect.void,
+          secretWritten: () => Effect.void,
         }),
       ),
       Layer.provide(

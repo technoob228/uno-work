@@ -502,6 +502,39 @@ describe("approval gate", () => {
     expect(allowed._tag).toBe("Success");
   });
 
+  it("project keys: names for Full/Helper chats, never values; an Observer gets none (22.10)", async () => {
+    const { deps } = makeDeps();
+    const loaded: string[] = [];
+    const view = {
+      synced: true,
+      secrets: [{ name: "OPENAI_API_KEY", inVault: true, inFile: true }],
+      vaultError: null,
+    };
+    const keys = (refusal: string | null) => ({
+      ...deps,
+      projectKeys: {
+        refusal: Effect.succeed(refusal),
+        list: () => Effect.succeed(view),
+        load: (cwd: string) => Effect.sync(() => (loaded.push(cwd), view)),
+      },
+    });
+    const listed = await run("project_keys", keys(null));
+    expect(listed._tag).toBe("Success");
+    if (listed._tag === "Success") {
+      expect(JSON.stringify(listed.success)).toContain("OPENAI_API_KEY");
+      expect(listed.success).toMatchObject({
+        synced: true,
+        keys: [{ name: "OPENAI_API_KEY", inEnvFile: true, travelsWithProject: true }],
+      });
+    }
+    expect((await run("project_keys", keys(null), { load: true }))._tag).toBe("Success");
+    expect(loaded).toEqual([deps.caller.cwd]);
+    const refused = await run("project_keys", keys("Scout is an Observer"), { load: true });
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("Observer");
+    expect(loaded).toHaveLength(1);
+  });
+
   it("asks for a change in Ask mode and runs it once allowed", async () => {
     const { deps, recorded } = makeDeps({ runtimeMode: "approval-required" });
     const result = await run("app_stop", deps, { appId: "notes" });

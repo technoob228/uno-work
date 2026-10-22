@@ -199,6 +199,13 @@ import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { ProjectRenameDialog, type ProjectRenameTarget } from "./sidebar/ProjectRenameDialog";
+import {
+  ProjectSettingsDialog,
+  type ProjectSettingsTarget,
+} from "./projectSync/ProjectSettingsDialog";
+import { ProjectSyncMark, ProjectsElsewhere, mostUrgent } from "./projectSync/ProjectSyncParts";
+import { toggleMenuLabel } from "./projectSync/projectSync.logic";
+import { useProjectSyncStatuses, useRefreshProjectSync } from "./projectSync/useProjectSync";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { setThreadAgentsClosed } from "../agentsAccess";
 import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
@@ -665,6 +672,8 @@ function SidebarDProjectRow(props: {
   onMenu?: ((position: { x: number; y: number }) => void) | null;
   /** Double-click on the name renames the project. */
   onRename?: (() => void) | null;
+  /** "On all my computers": ✓ / ↻ / ⚠ after the name. */
+  sync?: ReactNode;
 }) {
   const { onMenu, onRename } = props;
   return (
@@ -700,6 +709,7 @@ function SidebarDProjectRow(props: {
             />
           </span>
           <span className="min-w-0 truncate">{props.name}</span>
+          {props.sync ?? null}
           {props.computers ? (
             <span className="inline-flex shrink-0 items-center gap-0.5">{props.computers}</span>
           ) : null}
@@ -2918,6 +2928,70 @@ export default function Sidebar() {
   }, [attemptSnooze, snoozePickerTarget, snoozePickerWake]);
   const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRenameTarget | null>(null);
+  // "On all my computers": each computer's daemon syncs its own projects.
+  const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
+    null,
+  );
+  const projectSyncEnvironments = useMemo(
+    () => projects.map((project) => project.environmentId),
+    [projects],
+  );
+  const projectSync = useProjectSyncStatuses(projectSyncEnvironments);
+  const refreshProjectSync = useRefreshProjectSync();
+  const syncEntryOf = useCallback(
+    (project: Project) => projectSync.entries.get(`${project.environmentId}:${project.id}`) ?? null,
+    [projectSync.entries],
+  );
+  const openProjectSettings = useCallback(
+    (project: Project) =>
+      setProjectSettingsTarget({
+        environmentId: project.environmentId,
+        projectId: project.id,
+        name: project.name,
+        cwd: project.cwd,
+      }),
+    [],
+  );
+  const toggleProjectSync = useCallback(
+    async (project: Project) => {
+      const api = readEnvironmentApi(project.environmentId);
+      if (!api) return;
+      const enabled = !(syncEntryOf(project)?.enabled ?? false);
+      const current = syncEntryOf(project);
+      if (enabled) {
+        refreshProjectSync(project.environmentId, {
+          projectId: project.id,
+          enabled: true,
+          name: current?.name ?? null,
+          mode: current?.mode ?? null,
+          state: "syncing",
+          message: "",
+          lastSyncedAt: current?.lastSyncedAt ?? null,
+          conflict: null,
+        });
+      }
+      try {
+        const entry = await api.projectSync.setEnabled({ projectId: project.id, enabled });
+        refreshProjectSync(project.environmentId, entry);
+        if (enabled && entry.state !== "synced" && entry.state !== "empty") {
+          toastManager.add({
+            type: entry.state === "conflict" ? "warning" : "error",
+            title:
+              entry.state === "conflict" ? "Synced with a conflict" : `${project.name} didn't sync`,
+            description: entry.message,
+          });
+        }
+      } catch (error) {
+        refreshProjectSync(project.environmentId);
+        toastManager.add({
+          type: "error",
+          title: enabled ? "Couldn't put it on all your computers" : "Couldn't turn it off",
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [refreshProjectSync, syncEntryOf],
+  );
 
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) =>
@@ -3648,6 +3722,10 @@ export default function Sidebar() {
         target={projectRenameTarget}
         onClose={() => setProjectRenameTarget(null)}
       />
+      <ProjectSettingsDialog
+        target={projectSettingsTarget}
+        onClose={() => setProjectSettingsTarget(null)}
+      />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}
@@ -3731,6 +3809,12 @@ export default function Sidebar() {
   const dNewChatIn = (project: Project) => () => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
+    // On all my computers: bring the other computers' changes before work starts here.
+    if (syncEntryOf(project)?.enabled) {
+      void readEnvironmentApi(project.environmentId)
+        ?.projectSync.opened({ projectId: project.id })
+        .catch(() => undefined);
+    }
     void newThreadContext.handleNewThread(scopeProjectRef(project.environmentId, project.id), {
       envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
     });
@@ -3763,12 +3847,26 @@ export default function Sidebar() {
           label: "Copy path",
           run: (member: Project) => copyPathToClipboard(member.cwd, { path: member.cwd }),
         },
+        {
+          id: "sync",
+          label: "On all my computers",
+          labelFor: (member: Project) => toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
+          run: (member: Project) => void toggleProjectSync(member),
+        },
+        {
+          id: "settings",
+          label: "Project settings…",
+          run: (member: Project) => openProjectSettings(member),
+        },
       ];
       const items: ContextMenuItem<string>[] = actions.map((action) => {
         if (members.length === 1) {
           const only = members[0]!;
           handlers.set(action.id, () => action.run(only));
-          return { id: action.id, label: action.label };
+          return {
+            id: action.id,
+            label: "labelFor" in action ? action.labelFor(only) : action.label,
+          };
         }
         return {
           id: `${action.id}:submenu`,
@@ -3776,9 +3874,10 @@ export default function Sidebar() {
           children: members.map((member) => {
             const id = `${action.id}:${member.environmentId}:${member.id}`;
             handlers.set(id, () => action.run(member));
+            const where = resolveEnvironmentLabel(member.environmentId) ?? member.environmentId;
             return {
               id,
-              label: resolveEnvironmentLabel(member.environmentId) ?? member.environmentId,
+              label: "labelFor" in action && syncEntryOf(member)?.enabled ? `✓ ${where}` : where,
             };
           }),
         };
@@ -3872,6 +3971,28 @@ export default function Sidebar() {
             <SidebarDProjectRow
               name={block.name}
               home={block.isHome}
+              sync={
+                block.isHome ? null : (
+                  <ProjectSyncMark
+                    entry={mostUrgent(
+                      block.members.map(syncEntryOf).filter((entry) => entry !== null),
+                    )}
+                    onOpen={() => {
+                      const member =
+                        block.members.find((item) => {
+                          const state = syncEntryOf(item)?.state;
+                          return (
+                            state === "conflict" ||
+                            state === "blocked" ||
+                            state === "error" ||
+                            state === "too-big"
+                          );
+                        }) ?? block.members[0];
+                      if (member) openProjectSettings(member);
+                    }}
+                  />
+                )
+              }
               computers={dRowChips(block.computers, underComputer)}
               folded={folded}
               mark={foldedProjectMark(
@@ -3951,6 +4072,14 @@ export default function Sidebar() {
             <ul role="list" className="flex flex-col gap-px">
               <SidebarDProjectRow
                 name={group.name}
+                sync={
+                  project ? (
+                    <ProjectSyncMark
+                      entry={syncEntryOf(project)}
+                      onOpen={() => openProjectSettings(project)}
+                    />
+                  ) : null
+                }
                 folded={folded}
                 mark={foldedProjectMark(
                   group.chats.map((thread) =>
@@ -4100,6 +4229,19 @@ export default function Sidebar() {
               />
             )}
             {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
+            {dThisComputer
+              ? (() => {
+                  const here = projectSync.statuses.find(
+                    (item) => item.environmentId === dThisComputer,
+                  );
+                  return here?.status ? (
+                    <ProjectsElsewhere
+                      environmentId={here.environmentId}
+                      projects={here.status.elsewhere}
+                    />
+                  ) : null;
+                })()
+              : null}
             {!dLegacyInbox && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="snoozed"

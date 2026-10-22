@@ -27,8 +27,9 @@
 //
 // Bytes go straight between this computer and storage through links the Uno
 // console signs, with this computer's own key read from the daemon's
-// settings.json — never printed, never written anywhere else. No key (a
-// laptop, a computer not signed in to Uno): the helper says so and stops.
+// settings.json — never printed, never written anywhere else: a cloud
+// computer's machine key, else (a laptop) the account key the person gave
+// Uno Work. No key: the helper says so and stops.
 //
 // Tests only: UNO_GIT_FAKE_STORAGE_DIR=<dir> keeps the "cloud" in a folder
 // (UNO_GIT_FAKE_STORAGE_DELAY_MS=<ms> waits up to that long before each
@@ -75,7 +76,8 @@ export const DEFAULT_CONSOLE_URL = "https://console.uno4.dev";
 /** Where the daemon says its settings.json is (written next to the SDK). */
 export const DAEMON_POINTER = ".uno/sdk/daemon.json";
 
-export const NOT_CLOUD = "uno:: remotes work on Uno cloud computers signed in to Uno.";
+export const NOT_CLOUD =
+  "uno:: remotes need this computer signed in to your Uno account (an Uno cloud computer, or Uno Work with your Uno account key in Settings).";
 export const SHALLOW =
   "This copy is shallow (cloned with --depth). Run git fetch --unshallow first.";
 
@@ -160,8 +162,10 @@ function safeConsoleUrl(/** @type {unknown} */ raw) {
 
 /**
  * This computer's console key, from the daemon's settings.json: the file the
- * daemon names in ~/.uno/sdk/daemon.json, else the usual places. Null when
- * the computer isn't an Uno cloud computer signed in to Uno.
+ * daemon names in ~/.uno/sdk/daemon.json, else the usual places. A cloud
+ * computer's machine key first; on a laptop, the account key in Uno Work's
+ * settings (not an Uno AI key, which the console doesn't take). Null when
+ * there is neither.
  * @param {{ home: string }} where
  * @param {string[]} [fallbacks] where to look when the daemon didn't say
  * @returns {{ token: string, boxId: number | null, consoleUrl: string } | null}
@@ -174,12 +178,14 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
   ].filter((file) => typeof file === "string" && file.length > 0);
   for (const file of candidates) {
     const uno = readJsonFile(/** @type {string} */ (file))?.uno;
-    const token = typeof uno?.boxToken === "string" ? uno.boxToken.trim() : "";
+    const boxToken = typeof uno?.boxToken === "string" ? uno.boxToken.trim() : "";
+    const apiKey = typeof uno?.apiKey === "string" ? uno.apiKey.trim() : "";
+    const token = boxToken || (apiKey.startsWith("unollm_") ? "" : apiKey);
     if (!token) continue;
     const boxId = Number(uno.boxId);
     return {
       token,
-      boxId: Number.isSafeInteger(boxId) && boxId > 0 ? boxId : null,
+      boxId: boxToken && Number.isSafeInteger(boxId) && boxId > 0 ? boxId : null,
       consoleUrl: safeConsoleUrl(pointer?.consoleUrl) ?? DEFAULT_CONSOLE_URL,
     };
   }

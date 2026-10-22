@@ -512,6 +512,12 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
         : "Checked your assistant",
     "Couldn't reach your assistant",
   ],
+  project_keys: [
+    "Looking at the project's keys…",
+    (c) =>
+      c.args.load === true ? "Brought the project's keys here" : "Checked the project's keys",
+    "Couldn't reach the project's keys",
+  ],
   request_secret: [
     "Waiting for you to paste it…",
     (c) => {

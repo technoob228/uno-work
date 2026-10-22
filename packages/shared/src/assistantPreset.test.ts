@@ -47,6 +47,12 @@ describe("assistantPresetAllows", () => {
     expect(allowedBy("observer")).toEqual(["read-chats", "remind"]);
   });
 
+  it("project keys: Full and Helper get their projects' keys, Observer never", () => {
+    expect(assistantPresetAllows("full", "read-project-keys")).toBe(true);
+    expect(assistantPresetAllows("helper", "read-project-keys")).toBe(true);
+    expect(assistantPresetAllows("observer", "read-project-keys")).toBe(false);
+  });
+
   it("each preset allows no more than the one above it", () => {
     for (const action of ACTIONS) {
       if (assistantPresetAllows("observer", action)) {

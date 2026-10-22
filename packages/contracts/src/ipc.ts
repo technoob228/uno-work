@@ -1,4 +1,16 @@
 import type {
+  ProjectSecretRemoveInput,
+  ProjectSecretSetInput,
+  ProjectSecretsList,
+  ProjectSyncEntry,
+  ProjectSyncGetHereInput,
+  ProjectSyncGetHereResult,
+  ProjectSyncProjectInput,
+  ProjectSyncResolveInput,
+  ProjectSyncSetEnabledInput,
+  ProjectSyncSnapshot,
+} from "./projectSync.ts";
+import type {
   SkillsAddInput,
   SkillsAddResult,
   SkillsInstallInput,
@@ -921,6 +933,18 @@ export interface EnvironmentApi {
    * every environment connection because "which machine is the registry" is a
    * setting, not a property of the transport.
    */
+  /** "On all my computers": this computer's projects synced through the Uno cloud, and their keys. */
+  projectSync: {
+    status: () => Promise<ProjectSyncSnapshot>;
+    setEnabled: (input: ProjectSyncSetEnabledInput) => Promise<ProjectSyncEntry>;
+    syncNow: (input: ProjectSyncProjectInput) => Promise<ProjectSyncEntry>;
+    resolve: (input: ProjectSyncResolveInput) => Promise<ProjectSyncEntry>;
+    getHere: (input: ProjectSyncGetHereInput) => Promise<ProjectSyncGetHereResult>;
+    opened: (input: ProjectSyncProjectInput) => Promise<void>;
+    secretsList: (input: ProjectSyncProjectInput) => Promise<ProjectSecretsList>;
+    secretsSet: (input: ProjectSecretSetInput) => Promise<ProjectSecretsList>;
+    secretsRemove: (input: ProjectSecretRemoveInput) => Promise<ProjectSecretsList>;
+  };
   workspace: {
     getState: () => Promise<WorkspaceState>;
     rename: (input: WorkspaceRenameInput) => Promise<WorkspaceState>;
