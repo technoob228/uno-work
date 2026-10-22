@@ -58,6 +58,7 @@ import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts
 import { connectorAccessDecision, readAppAccess } from "../assistants/localAssistantStore.ts";
 import { assistantOfThread } from "../assistants/assistantAccess.ts";
 import { assistantPresetAllows } from "@t3tools/shared/assistantPreset";
+import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
   buildUnoWorkGuide,
@@ -287,7 +288,24 @@ const makeDeps = (input: {
       Effect.orElseSucceed(() => false),
     );
 
+    const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
     const deps: UnoWorkToolDeps = {
+      // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
+      ...(projectSync
+        ? {
+            projectKeys: {
+              refusal: callerAssistant.pipe(
+                Effect.map((owner) =>
+                  owner === null || assistantPresetAllows(owner.preset, "read-project-keys")
+                    ? null
+                    : `${owner.title} is an Observer: it doesn't get the project's keys. The person can change that on the assistant's page.`,
+                ),
+              ),
+              list: (cwd: string) => projectSync.keysForFolder(cwd),
+              load: (cwd: string) => projectSync.loadKeysForFolder(cwd),
+            },
+          }
+        : {}),
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
         Effect.map((owner) =>

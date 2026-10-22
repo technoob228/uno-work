@@ -133,6 +133,17 @@ export interface UnoWorkCaller {
   readonly cwd: string | undefined;
 }
 
+/** What `project_keys` shows: names and where they are, never values. */
+export interface ProjectKeysView {
+  readonly synced: boolean;
+  readonly secrets: ReadonlyArray<{
+    readonly name: string;
+    readonly inVault: boolean;
+    readonly inFile: boolean;
+  }>;
+  readonly vaultError: string | null;
+}
+
 export interface BridgeReply {
   readonly status: number;
   readonly body: unknown;
@@ -146,6 +157,19 @@ export interface UnoWorkToolDeps {
    * assistant rules.
    */
   readonly presetRefusal?: Effect.Effect<string | null>;
+  /**
+   * The keys of the chat's project ("On all my computers": kept in the Uno
+   * vault, written into its `.env` on every computer). `refusal`: the
+   * caller's assistant preset doesn't get project keys (Observer). Absent:
+   * this daemon has no project sync.
+   */
+  readonly projectKeys?: {
+    readonly refusal: Effect.Effect<string | null>;
+    readonly list: (
+      cwd: string,
+    ) => Effect.Effect<ProjectKeysView | null, { readonly message: string }>;
+    readonly load: (cwd: string) => Effect.Effect<ProjectKeysView, { readonly message: string }>;
+  };
   readonly home: string;
   /** `~/.uno/apps` (absolute). */
   readonly manifestDir: string;
@@ -2486,6 +2510,55 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           timeoutMs: 5 * 60_000,
         })
         .pipe(Effect.flatMap(bridgeOk)),
+  },
+
+  {
+    name: "project_keys",
+    group: "person",
+    description:
+      "The keys (API keys, tokens) of this chat's project, by name — never values: which are in its .env here and which travel with the project in the Uno vault (a project On all my computers gets them in its .env on every computer by itself). load: true re-reads the vault's keys into .env now (after the person added one on another computer). Read values from .env; never print them. A missing key: request_secret.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        load: {
+          type: "boolean",
+          description: "true: write the vault's keys into the project's .env now.",
+        },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const keys = deps.projectKeys;
+        if (!keys) return yield* toolError("Project keys aren't available on this computer.");
+        const refusal = yield* keys.refusal;
+        if (refusal !== null) return yield* toolError(refusal);
+        const cwd = deps.caller.cwd;
+        if (!cwd) return yield* toolError("This chat has no project folder.");
+        const view =
+          args.load === true
+            ? yield* keys.load(cwd).pipe(Effect.mapError((error) => toolError(error.message)))
+            : yield* keys.list(cwd).pipe(Effect.mapError((error) => toolError(error.message)));
+        if (view === null) {
+          return {
+            project: null,
+            note: "This chat's folder isn't a project in Uno Work: keys are only in its .env.",
+          };
+        }
+        return {
+          synced: view.synced,
+          keys: view.secrets.map((secret) => ({
+            name: secret.name,
+            inEnvFile: secret.inFile,
+            travelsWithProject: secret.inVault,
+          })),
+          ...(view.vaultError ? { vaultError: view.vaultError } : {}),
+          note: view.synced
+            ? "Keys travel with the project, never in its files. Values are in .env: read them from there, never print them."
+            : "This project isn't On all my computers: its keys stay in this computer's .env.",
+        };
+      }),
   },
 
   {
