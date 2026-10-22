@@ -269,3 +269,39 @@ export function resetOldSidebarsOnce<
     changed: true,
   };
 }
+
+/**
+ * One-time move done by 0.0.153: devices that kept "separate" project
+ * grouping from the old sidebar (each computer's copy of a project its own
+ * row) get one project across computers. The current sidebar has no control
+ * for it, so the old choice silently split every project in two. The legacy
+ * sidebar, where the choice is still offered, keeps it.
+ */
+export const PROJECT_GROUPING_RESET_MARKER = "_oneProjectAcrossComputers0153";
+
+export function groupProjectsAcrossComputersOnce<
+  T extends {
+    readonly featureFlags: Readonly<Record<string, boolean>>;
+    readonly sidebarProjectGroupingMode: string;
+  },
+>(
+  settings: T,
+  acrossComputers: T["sidebarProjectGroupingMode"],
+): { settings: T; changed: boolean } {
+  if (settings.featureFlags[PROJECT_GROUPING_RESET_MARKER] === true) {
+    return { settings, changed: false };
+  }
+  if (readStoredFeatureFlag(settings.featureFlags, "legacySidebar") === true) {
+    return { settings, changed: false };
+  }
+  return {
+    settings: {
+      ...settings,
+      featureFlags: { ...settings.featureFlags, [PROJECT_GROUPING_RESET_MARKER]: true },
+      ...(settings.sidebarProjectGroupingMode === "separate"
+        ? { sidebarProjectGroupingMode: acrossComputers }
+        : {}),
+    },
+    changed: true,
+  };
+}

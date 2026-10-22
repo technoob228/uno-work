@@ -1,4 +1,9 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import { buildSidebarProjectSnapshots } from "./sidebarProjectGrouping";
@@ -240,5 +245,84 @@ describe("buildSidebarProjectSnapshots", () => {
     expect(snapshots).toHaveLength(2);
     expect(snapshots.find((s) => s.id === identified.id)?.groupedProjectCount).toBe(1);
     expect(snapshots.find((s) => s.id === pending.id)?.groupedProjectCount).toBe(1);
+  });
+});
+
+describe("one project across computers (default grouping)", () => {
+  const defaults = {
+    sidebarProjectGroupingMode: DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE,
+    sidebarProjectGroupingOverrides: {},
+  };
+  const inRepo = (
+    input: Pick<Project, "id" | "environmentId" | "name"> & { cwd: string; rootPath: string },
+  ): Project =>
+    makeProject({
+      ...input,
+      repositoryIdentity: {
+        canonicalKey: "uno::notes",
+        locator: { source: "git-remote", remoteName: "uno", remoteUrl: "uno::notes" },
+        rootPath: input.rootPath,
+        displayName: "notes",
+        name: "notes",
+      },
+    });
+
+  it("shows a repository checked out on the laptop and a cloud computer as one row", () => {
+    const groups = buildSidebarProjectSnapshots({
+      projects: [
+        inRepo({
+          id: ProjectId.make("mac"),
+          environmentId: primaryEnvId,
+          name: "notes",
+          cwd: "/Users/misha/notes",
+          rootPath: "/Users/misha/notes",
+        }),
+        inRepo({
+          id: ProjectId.make("cloud"),
+          environmentId: remoteEnvId,
+          name: "notes",
+          cwd: "/home/uno/projects/notes",
+          rootPath: "/home/uno/projects/notes",
+        }),
+      ],
+      settings: defaults,
+      primaryEnvironmentId: primaryEnvId,
+      resolveEnvironmentLabel: resolveLabel,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.environmentPresence).toBe("mixed");
+    expect(groups[0]?.remoteEnvironmentLabels).toEqual(["prod-1"]);
+  });
+
+  it("keeps two folders of one repository as two rows", () => {
+    const groups = buildSidebarProjectSnapshots({
+      projects: [
+        inRepo({
+          id: ProjectId.make("root"),
+          environmentId: primaryEnvId,
+          name: "notes",
+          cwd: "/Users/misha/notes",
+          rootPath: "/Users/misha/notes",
+        }),
+        inRepo({
+          id: ProjectId.make("sub"),
+          environmentId: primaryEnvId,
+          name: "site",
+          cwd: "/Users/misha/notes/site",
+          rootPath: "/Users/misha/notes",
+        }),
+        inRepo({
+          id: ProjectId.make("sub-cloud"),
+          environmentId: remoteEnvId,
+          name: "site",
+          cwd: "/home/uno/projects/notes/site",
+          rootPath: "/home/uno/projects/notes",
+        }),
+      ],
+      settings: defaults,
+      primaryEnvironmentId: primaryEnvId,
+      resolveEnvironmentLabel: resolveLabel,
+    });
+    expect(groups.map((group) => group.groupedProjectCount)).toEqual([1, 2]);
   });
 });
