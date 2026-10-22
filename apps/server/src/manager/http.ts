@@ -22,6 +22,8 @@ import {
   AssistantEditableFileName,
   AssistantInstructionsResolveInput,
   AssistantPresetInput,
+  AssistantRevokeInput,
+  AssistantTeamUpdateInput,
   assistantTokenLabel,
   CHANNEL_NOTIFY_PATH,
   ChannelNotifyInput,
@@ -94,6 +96,11 @@ import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPr
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
 import { AssistantSchedules, assistantProjectOfCaller } from "../assistants/schedules.ts";
+import {
+  AssistantTeam,
+  type AssistantTeamError,
+  type AssistantTeamShape,
+} from "../assistants/assistantTeam.ts";
 import {
   buildAssistantChats,
   fetchGatewayThreadUsage,
@@ -213,11 +220,12 @@ export const managerMcpRouteLayer = HttpRouter.add(
           Effect.orElseSucceed(() => false),
         )
       : true;
+    const team = Option.getOrUndefined(yield* Effect.serviceOption(AssistantTeam));
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       callerWithThread,
       body,
-      schedules ? { schedules } : {},
+      { ...(schedules ? { schedules } : {}), ...(team ? { team } : {}) },
       { assistantsEnabled },
     );
     if (outcome.kind === "accepted") {
@@ -376,7 +384,21 @@ export const managerAssistantsListRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
     const assistants = yield* ManagerAssistantService;
+    const team = yield* Effect.serviceOption(AssistantTeam);
     return yield* assistants.listAssistants().pipe(
+      // Who each one is on the team (face, role, setup, who set it up, app levels).
+      Effect.flatMap((list) =>
+        Option.isNone(team)
+          ? Effect.succeed(list)
+          : team.value.views(list.map((item) => item.projectId)).pipe(
+              Effect.map((views) =>
+                list.map((item) => {
+                  const view = views.get(item.projectId);
+                  return view === undefined ? item : { ...item, team: view };
+                }),
+              ),
+            ),
+      ),
       Effect.map((list) => HttpServerResponse.jsonUnsafe({ assistants: list }, { status: 200 })),
       Effect.catch(respondServerError("assistants:list")),
     );
@@ -771,8 +793,109 @@ export const managerAssistantPresetRouteLayer = HttpRouter.add(
       yield* Effect.logInfo("assistant preset changed").pipe(
         Effect.annotateLogs({ projectId: input.projectId, preset: input.preset }),
       );
-      return HttpServerResponse.jsonUnsafe({ token: Option.getOrNull(updated) }, { status: 200 });
+      // Decision 16.10: what it set up is cut to match, with "who lost what".
+      const losses = yield* cascadeTeamRights(input.projectId);
+      return HttpServerResponse.jsonUnsafe(
+        { token: Option.getOrNull(updated), losses },
+        { status: 200 },
+      );
     }).pipe(Effect.catch(respondServerError("assistant:preset")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** After the person changed an assistant's rights: cut what it set up to match. */
+const cascadeTeamRights = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const team = yield* Effect.serviceOption(AssistantTeam);
+    if (Option.isNone(team)) return [];
+    return yield* team.value.rightsChanged(projectId);
+  });
+
+const respondTeamError = (error: AssistantTeamError) =>
+  Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: error.status }));
+
+const withTeamService = <A, E, R>(
+  run: (team: AssistantTeamShape) => Effect.Effect<A, E, R>,
+): Effect.Effect<A | HttpServerResponse.HttpServerResponse, E, R> =>
+  Effect.gen(function* () {
+    const team = yield* Effect.serviceOption(AssistantTeam);
+    if (Option.isNone(team)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "The team of assistants is not available in this Uno Work." },
+        { status: 501 },
+      );
+    }
+    return yield* run(team.value);
+  });
+
+/**
+ * `POST /api/manager/assistant/team` — the person edits who an assistant is
+ * (name, face, role, character, where it talks, setup done / again).
+ */
+export const managerAssistantTeamUpdateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/team",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantTeamUpdateInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid team payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    return yield* withTeamService((team) =>
+      team.update(input).pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe({ team: result }, { status: 200 })),
+        Effect.catch(respondTeamError),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/revoke` {projectId, revoked} — revoking takes
+ * every assistant it set up along (decision 14.10); bringing back is one at
+ * a time, within its creator's rights.
+ */
+export const managerAssistantRevokeRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/revoke",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantRevokeInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid revoke payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    return yield* withTeamService((team) =>
+      team.revoke(input).pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch(respondTeamError),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistants/:projectId/setup-chat` — the assistant sets
+ * itself up in a chat (Misha 16.10): a conversation that starts with its
+ * first question, or the setup chat already open (it goes on from there).
+ */
+export const managerAssistantSetupChatRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistants/:projectId/setup-chat",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const params = yield* HttpRouter.params;
+    const raw = params.projectId?.trim() ?? "";
+    if (!isAssistantProjectId(raw)) {
+      return yield* new AuthError({ message: "Not an assistant.", status: 400 });
+    }
+    const projectId = ProjectId.make(raw);
+    yield* requireAssistantProject(projectId);
+    return yield* withTeamService((team) =>
+      team.startSetupChat(projectId).pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result, { status: 200 })),
+        Effect.catch(respondTeamError),
+      ),
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
@@ -1128,6 +1251,16 @@ export const managerAssistantDeleteRouteLayer = HttpRouter.add(
     const projectId = yield* assistantProjectIdFromQuery;
     yield* requireAssistantProject(projectId);
     const assistants = yield* ManagerAssistantService;
+    const team = yield* Effect.serviceOption(AssistantTeam);
+    // The team: the helpers it set up go with it (each kept 7 days too).
+    if (Option.isSome(team)) {
+      return yield* team.value.deleteWithHelpers(projectId).pipe(
+        Effect.map((result) =>
+          HttpServerResponse.jsonUnsafe({ ok: true, deleted: result.deleted }, { status: 200 }),
+        ),
+        Effect.catch(respondTeamError),
+      );
+    }
     return yield* assistants.deleteAssistant(projectId).pipe(
       Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
       Effect.catch(respondAssistantError("assistants:delete")),
@@ -1204,7 +1337,11 @@ export const managerAssistantAppsPutRouteLayer = HttpRouter.add(
     yield* Effect.logInfo("assistant app access changed").pipe(
       Effect.annotateLogs({ projectId: input.projectId, permissions: access.permissions }),
     );
-    return HttpServerResponse.jsonUnsafe({ ...access, enforcedBy: "computer" }, { status: 200 });
+    const losses = yield* cascadeTeamRights(input.projectId);
+    return HttpServerResponse.jsonUnsafe(
+      { ...access, enforcedBy: "computer", losses },
+      { status: 200 },
+    );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

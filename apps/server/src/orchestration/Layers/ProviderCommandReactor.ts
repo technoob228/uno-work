@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationThread,
@@ -37,6 +38,11 @@ import {
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import {
+  askCardAnswerText,
+  findAskCardQuestion,
+  isAskCardRequest,
+} from "../../assistants/askCards.ts";
 import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
 import { currentAssistantModelSelection } from "../../manager/assistantEngineSelection.ts";
 import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
@@ -1203,6 +1209,44 @@ const make = Effect.gen(function* () {
     ) {
       const thread = yield* resolveThread(event.payload.threadId);
       if (!thread) {
+        return;
+      }
+      // An assistant's `ask_user` card (Hermes asks no questions itself): the
+      // daemon resolves it and hands the answer to the conversation as the
+      // person's next message — the provider never knew the request.
+      if (isAskCardRequest(event.payload.requestId)) {
+        const question = findAskCardQuestion(thread.activities, event.payload.requestId);
+        if (question === null) return;
+        const createdAt = event.payload.createdAt;
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("ask-card-resolved"),
+          threadId: event.payload.threadId,
+          activity: {
+            id: EventId.make(crypto.randomUUID()),
+            tone: "info",
+            kind: "user-input.resolved",
+            summary: "Answered",
+            payload: { requestId: event.payload.requestId, answers: event.payload.answers },
+            turnId: null,
+            createdAt,
+          },
+          createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: serverCommandId("ask-card-answer"),
+          threadId: event.payload.threadId,
+          message: {
+            messageId: MessageId.make(crypto.randomUUID()),
+            role: "user",
+            text: askCardAnswerText(question, event.payload.answers),
+            attachments: [],
+          },
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          createdAt,
+        });
         return;
       }
       const hasSession = thread.session && thread.session.status !== "stopped";

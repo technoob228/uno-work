@@ -38,6 +38,7 @@ import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
+import { AssistantTeamLive } from "./assistants/assistantTeamLive.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { GithubAccountServiceLive } from "./setupTools/GithubAccountService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
@@ -158,6 +159,9 @@ import {
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
   managerAssistantPresetRouteLayer,
+  managerAssistantTeamUpdateRouteLayer,
+  managerAssistantRevokeRouteLayer,
+  managerAssistantSetupChatRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,
@@ -463,6 +467,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       MaterialsServiceLive,
       // "New assistant": Uno AI drafts the assistant from one sentence.
       AssistantDraftServiceLive,
+      // The team of assistants: their profiles, helpers within their rights,
+      // question cards and the setup chat (manager + Inbox further down).
+      AssistantTeamLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -616,6 +623,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
   managerAssistantPresetRouteLayer,
+  managerAssistantTeamUpdateRouteLayer,
+  managerAssistantRevokeRouteLayer,
+  managerAssistantSetupChatRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,

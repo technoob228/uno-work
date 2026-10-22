@@ -2145,6 +2145,57 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("answers an assistant's ask_user card itself: resolved, and the answer as the person's message", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-ask-card"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-ask-card"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "Waiting for your answer",
+          payload: {
+            requestId: "uno-ask:card-1",
+            questions: [{ id: "answer", header: "My job", question: "What?", options: [] }],
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.user-input.respond",
+        commandId: CommandId.make("cmd-ask-card-respond"),
+        threadId: ThreadId.make("thread-1"),
+        requestId: asApprovalRequestId("uno-ask:card-1"),
+        answers: { answer: "Developer" },
+        createdAt: now,
+      }),
+    );
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      return thread?.messages.some((message) => message.text === "My job: Developer") ?? false;
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.some(
+        (activity) =>
+          activity.kind === "user-input.resolved" &&
+          (activity.payload as { requestId?: string }).requestId === "uno-ask:card-1",
+      ),
+    ).toBe(true);
+    // The provider never knew the request.
+    expect(harness.respondToUserInput).not.toHaveBeenCalled();
+  });
+
   it("normalizes stale Codex approval callbacks without faking approval resolution", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

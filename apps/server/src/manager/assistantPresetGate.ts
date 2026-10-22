@@ -36,6 +36,7 @@ const DENIED: Readonly<Record<AssistantAction, string>> = {
   "resolve-proposals": "approve pending actions",
   remind: "set reminders",
   "change-things": "change things",
+  "create-assistant": "set up other assistants",
 };
 
 /** Why the preset refuses `action` (for the model), or null when allowed. */
