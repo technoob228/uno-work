@@ -263,6 +263,7 @@ import { DEMO, demoHooks, useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import { SidebarAssistants } from "./sidebar/SidebarAssistants";
 import { isTeamConversation } from "./assistants/assistantTeam.logic";
+import { useTeamShown } from "./assistants/useAssistantTeam";
 import {
   type DRowMark,
   dRowMark,
@@ -1724,8 +1725,10 @@ export default function Sidebar() {
   // with the project on each row, computers. Off — the 0.0.137 sidebar.
   const sidebarViewMenu = useFeatureFlag("sidebarViewMenu");
   // Labs "Uno's chats in the sidebar" (w0138 p6–p7): the assistants on top,
-  // each unfolding its chats. Off — the 0.0.137 Uno row.
-  const assistantChatsInSidebar = useFeatureFlag("assistantChatsInSidebar");
+  // each unfolding its chats. Off — the 0.0.137 Uno row. With the team of
+  // assistants on the account (22.10) the block is there regardless.
+  const teamShown = useTeamShown();
+  const assistantChatsInSidebar = useFeatureFlag("assistantChatsInSidebar") || teamShown;
   const environmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
   const machineScope = useMemo(
     () =>

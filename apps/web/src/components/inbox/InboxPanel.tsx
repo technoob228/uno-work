@@ -328,7 +328,8 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const answerInRow = actions.reason !== "other" && !actions.done;
   const canDismiss = actions.done;
   const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
-  const assistantNotice = item.open?.kind === "url" ? assistantPageOfUrl(item.open.url) : null;
+  const assistantNotice =
+    item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
 
   return (
     <li

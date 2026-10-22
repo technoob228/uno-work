@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
+import { DEMO } from "../../demo/demoFlag";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useMachineLabels, useMachineRows } from "../../hooks/useMachineRows";
 import { readAssistantFile } from "../../lib/managerApi";
@@ -47,6 +48,15 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { AssistantAvatar } from "./AssistantAvatar";
+import {
+  TeamChannels,
+  TeamConnectors,
+  TeamLivesOnLine,
+  TeamPresetEditor,
+  TeamRoutines,
+  TeamRunsOn,
+  useOpenAssistantSettings,
+} from "./AssistantProfileReal";
 import { TeammateAccess } from "./TeammateAccess";
 import { useAssistantOnboarding } from "./AssistantOnboarding";
 import {
@@ -76,6 +86,11 @@ import {
 } from "./assistantTeam.logic";
 import { useAssistantTeamStore } from "./assistantTeamStore";
 import { type TeamMember, threadActivityMs, useAssistantTeam } from "./useAssistantTeam";
+import { setupProgressLine } from "./teamFromDaemon.logic";
+import { useTeamActions } from "./useTeamActions";
+
+/** Outside the mock the page reads and changes what the assistant's computer keeps. */
+const REAL = !DEMO;
 
 function Section(props: {
   readonly title: string;
@@ -451,6 +466,9 @@ export function AssistantProfilePage(props: {
   const storeProfiles = useAssistantTeamStore((store) => store.profiles);
   const setRights = useAssistantTeamStore((store) => store.setRights);
   const [pending, setPending] = useState<PendingRights | null>(null);
+  const actions = useTeamActions();
+  const openSettings = useOpenAssistantSettings();
+  const [busy, setBusy] = useState(false);
 
   const back = (
     <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/assistants" })}>
@@ -575,7 +593,64 @@ export function AssistantProfilePage(props: {
       at: new Date(threadActivityMs(thread)).toISOString(),
     })),
   );
+  const setupLine = REAL ? setupProgressLine(member.summary?.team?.team ?? null) : null;
+  const nameOf = (projectId: string) =>
+    team.find((item) => item.environmentId === member.environmentId && item.projectId === projectId)
+      ?.profile.name ?? projectId;
+  const teamTask = async (task: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await task();
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't change it",
+        description: cause instanceof Error ? cause.message : "Its computer didn't answer.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Its setup chat goes on where it stopped (the daemon keeps the progress).
+  const setUpAgain = () => {
+    if (!REAL) {
+      openSetup(member);
+      return;
+    }
+    void teamTask(async () => {
+      const threadId = await actions.startSetup(member);
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams({
+          environmentId: member.environmentId as EnvironmentId,
+          threadId,
+        }),
+      });
+    });
+  };
+  const bringBack = () => {
+    if (!REAL) {
+      restore(member.key);
+      return;
+    }
+    void teamTask(() => actions.restore(member));
+  };
   const doRevoke = () => {
+    if (REAL) {
+      setConfirmRevoke(false);
+      void teamTask(async () => {
+        const more = await actions.revoke(member);
+        toastManager.add({
+          type: "success",
+          title: `${profile.name} is revoked`,
+          description:
+            more > 0
+              ? `And ${more} assistant${more === 1 ? "" : "s"} it set up. Their chats stay.`
+              : "Its chats stay. Bring it back any time.",
+        });
+      });
+      return;
+    }
     const more = revoke(member.key);
     setConfirmRevoke(false);
     toastManager.add({
@@ -640,6 +715,22 @@ export function AssistantProfilePage(props: {
                     Your main assistant — always here, sets up the others.
                   </p>
                 ) : null}
+                {setupLine ? (
+                  <p
+                    className="flex flex-wrap items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+                    data-testid="assistant-profile-setup-progress"
+                  >
+                    {setupLine}
+                    <button
+                      type="button"
+                      onClick={setUpAgain}
+                      disabled={busy}
+                      className="cursor-pointer text-primary hover:underline"
+                    >
+                      Go on
+                    </button>
+                  </p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {profile.character ? `${profile.character} · ` : ""}
                   Takes tasks only from you · lives on{" "}
@@ -650,12 +741,18 @@ export function AssistantProfilePage(props: {
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 {member.revoked ? (
-                  <Button size="sm" variant="outline" onClick={() => restore(member.key)}>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={bringBack}>
                     <RotateCcwIcon className="size-3.5" /> Bring back
                   </Button>
                 ) : (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => openSetup(member)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={setUpAgain}
+                      data-testid="assistant-profile-setup-again"
+                    >
                       Set up again
                     </Button>
                     <Button size="sm" onClick={newChat} data-testid="assistant-profile-new-chat">
@@ -716,7 +813,8 @@ export function AssistantProfilePage(props: {
                         Idle — nothing running.
                       </p>
                     )}
-                    {(profile.schedule ?? []).map((task) => (
+                    {REAL ? <TeamRoutines member={member} machine={homeMachine} /> : null}
+                    {(REAL ? [] : (profile.schedule ?? [])).map((task) => (
                       <div
                         key={task.name}
                         className="flex h-8 items-center gap-2 border-t border-border/70 px-3 text-sm"
@@ -747,78 +845,90 @@ export function AssistantProfilePage(props: {
 
                 <Section title="Access and role" testId="assistant-profile-access">
                   <Row label="Can do">
-                    <div
-                      className="flex flex-wrap gap-1"
-                      role="radiogroup"
-                      aria-label="What it may do"
-                    >
-                      {PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          role="radio"
-                          aria-checked={shownPreset === preset.id}
-                          disabled={member.revoked}
-                          onClick={() => setPreset(preset.id)}
-                          title={preset.line}
-                          className={cn(
-                            "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default",
-                            shownPreset === preset.id
-                              ? "border-primary/50 bg-primary/10 text-foreground"
-                              : "border-border text-muted-foreground hover:bg-accent",
-                          )}
+                    {REAL ? (
+                      <TeamPresetEditor member={member} nameOf={nameOf} />
+                    ) : (
+                      <>
+                        <div
+                          className="flex flex-wrap gap-1"
+                          role="radiogroup"
+                          aria-label="What it may do"
                         >
-                          {preset.name}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {PRESETS.find((preset) => preset.id === shownPreset)?.line}
-                    </p>
-                    {custom ? (
-                      <p
-                        className="mt-1 flex flex-wrap items-center gap-1.5 text-xs"
-                        data-testid="assistant-profile-custom"
-                      >
-                        <span className="font-medium">{presetLabel(shownPreset, true)}</span>
-                        <span className="text-muted-foreground">
-                          — you changed what it can use below.
-                        </span>
-                        {member.revoked ? null : (
-                          <button
-                            type="button"
-                            onClick={() => setPreset(shownPreset)}
-                            className="cursor-pointer text-primary hover:underline"
+                          {PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={shownPreset === preset.id}
+                              disabled={member.revoked}
+                              onClick={() => setPreset(preset.id)}
+                              title={preset.line}
+                              className={cn(
+                                "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default",
+                                shownPreset === preset.id
+                                  ? "border-primary/50 bg-primary/10 text-foreground"
+                                  : "border-border text-muted-foreground hover:bg-accent",
+                              )}
+                            >
+                              {preset.name}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {PRESETS.find((preset) => preset.id === shownPreset)?.line}
+                        </p>
+                        {custom ? (
+                          <p
+                            className="mt-1 flex flex-wrap items-center gap-1.5 text-xs"
+                            data-testid="assistant-profile-custom"
                           >
-                            Reset to {PRESET_NAME[shownPreset]}
-                          </button>
-                        )}
-                      </p>
-                    ) : null}
-                    {pending?.from === "role" ? <div className="mt-2">{warning}</div> : null}
+                            <span className="font-medium">{presetLabel(shownPreset, true)}</span>
+                            <span className="text-muted-foreground">
+                              — you changed what it can use below.
+                            </span>
+                            {member.revoked ? null : (
+                              <button
+                                type="button"
+                                onClick={() => setPreset(shownPreset)}
+                                className="cursor-pointer text-primary hover:underline"
+                              >
+                                Reset to {PRESET_NAME[shownPreset]}
+                              </button>
+                            )}
+                          </p>
+                        ) : null}
+                        {pending?.from === "role" ? <div className="mt-2">{warning}</div> : null}
+                      </>
+                    )}
                   </Row>
                   {member.isUno ? null : (
                     <Row label="Lives on">
-                      <OwnComputerLine
-                        member={member}
-                        onMove={() =>
-                          applyRights(
-                            { ownComputer: ownComputerName(profile.name) },
-                            `${profile.name} moves to its own computer`,
-                          )
-                        }
-                      />
+                      {REAL ? (
+                        <TeamLivesOnLine member={member} />
+                      ) : (
+                        <OwnComputerLine
+                          member={member}
+                          onMove={() =>
+                            applyRights(
+                              { ownComputer: ownComputerName(profile.name) },
+                              `${profile.name} moves to its own computer`,
+                            )
+                          }
+                        />
+                      )}
                     </Row>
                   )}
-                  <Row label="Projects">
-                    <div className="flex flex-wrap gap-1">
-                      {profile.projects === "all" ? (
-                        <Pill>Every project</Pill>
-                      ) : (
-                        profile.projects.map((name) => <Pill key={name}>{name}</Pill>)
-                      )}
-                    </div>
-                  </Row>
+                  {REAL ? null : (
+                    <Row label="Projects">
+                      <div className="flex flex-wrap gap-1">
+                        {profile.projects === "all" ? (
+                          <Pill>Every project</Pill>
+                        ) : (
+                          profile.projects.map((name) => <Pill key={name}>{name}</Pill>)
+                        )}
+                      </div>
+                    </Row>
+                  )}
                   <Row label="Computers">
                     {profile.ownComputer ? (
                       <>
@@ -892,7 +1002,9 @@ export function AssistantProfilePage(props: {
                       )
                     }
                   >
-                    {changingBrain ? (
+                    {REAL ? (
+                      <TeamRunsOn member={member} changing={changingBrain} />
+                    ) : changingBrain ? (
                       <AssistantPowerPicker
                         environmentId={member.environmentId as EnvironmentId}
                         value={profile.brain}
@@ -915,24 +1027,30 @@ export function AssistantProfilePage(props: {
                   </Section>
 
                   <Section title="Where you talk">
-                    <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
-                      <SendIcon className="size-3.5 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {CHANNEL_NAME[profile.channel]}
-                      </span>
-                      {profile.channelHandle ? (
-                        <span className="text-xs text-muted-foreground">
-                          {profile.channelHandle}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-primary">Link</span>
-                      )}
-                    </div>
-                    <div className="flex h-9 items-center gap-2 px-3 text-sm">
-                      <MessageCircleIcon className="size-3.5 text-muted-foreground" />
-                      <span className="min-w-0 flex-1">Here in Uno Work</span>
-                      <span className="text-xs text-muted-foreground">always</span>
-                    </div>
+                    {REAL ? (
+                      <TeamChannels member={member} />
+                    ) : (
+                      <>
+                        <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
+                          <SendIcon className="size-3.5 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate">
+                            {CHANNEL_NAME[profile.channel]}
+                          </span>
+                          {profile.channelHandle ? (
+                            <span className="text-xs text-muted-foreground">
+                              {profile.channelHandle}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-primary">Link</span>
+                          )}
+                        </div>
+                        <div className="flex h-9 items-center gap-2 px-3 text-sm">
+                          <MessageCircleIcon className="size-3.5 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">Here in Uno Work</span>
+                          <span className="text-xs text-muted-foreground">always</span>
+                        </div>
+                      </>
+                    )}
                   </Section>
                 </div>
 
@@ -949,20 +1067,38 @@ export function AssistantProfilePage(props: {
                     </button>
                   }
                 >
-                  <TeammateAccess
-                    name={profile.name}
-                    access={shownAccess}
-                    onChange={member.revoked ? null : setAccess}
-                    place={place}
-                    projects={profile.projects}
-                    foldWhenFull
-                  />
+                  {REAL ? (
+                    <TeamConnectors member={member} place={place} nameOf={nameOf} />
+                  ) : (
+                    <TeammateAccess
+                      name={profile.name}
+                      access={shownAccess}
+                      onChange={member.revoked ? null : setAccess}
+                      place={place}
+                      projects={profile.projects}
+                      foldWhenFull
+                    />
+                  )}
                   {pending?.from === "access" ? (
                     <div className="border-t border-border/70 p-2">{warning}</div>
                   ) : null}
                 </Section>
 
-                <Section title="Memory">
+                <Section
+                  title="Memory"
+                  action={
+                    REAL ? (
+                      <button
+                        type="button"
+                        onClick={() => openSettings(member)}
+                        className="cursor-pointer text-xs text-primary hover:underline"
+                        data-testid="assistant-profile-memory-edit"
+                      >
+                        Edit
+                      </button>
+                    ) : undefined
+                  }
+                >
                   <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
                   <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
                 </Section>
@@ -1003,7 +1139,7 @@ export function AssistantProfilePage(props: {
                     ) : (
                       <p>Set up by you.</p>
                     )}
-                    {member.isUno ? (
+                    {member.isUno && REAL ? null : member.isUno ? (
                       <button
                         type="button"
                         onClick={() => {

@@ -70,6 +70,7 @@ import {
   type ConnectorProvider,
 } from "./assistantTemplates";
 import { createAssistant as createOwnComputerAssistant } from "./createAssistant";
+import { useTeamShown } from "./useAssistantTeam";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -131,6 +132,7 @@ export function LocalAssistantPage({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const teamShown = useTeamShown();
   const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
   const projectId = summary.projectId;
   const name = summary.title;
@@ -295,20 +297,43 @@ export function LocalAssistantPage({
         </Button>
       </div>
 
-      <LocalPresetBlock
-        environmentId={environmentId}
-        projectId={projectId}
-        name={name}
-        current={presetForm}
-        onSaved={refresh}
-      />
+      {teamShown ? (
+        // One place for its access (22.10): the team page, as in the prototype.
+        <Block title={`What ${name} may do`} testId="assistant-local-access-moved">
+          <p className="flex flex-wrap items-center gap-2 py-1 text-sm text-muted-foreground">
+            Full, Helper or Observer, its projects and the apps it uses are on its page.
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() =>
+                void navigate({
+                  to: "/assistants",
+                  search: { view: "profile", env: environmentId, project: projectId },
+                })
+              }
+            >
+              Open its page
+            </Button>
+          </p>
+        </Block>
+      ) : (
+        <>
+          <LocalPresetBlock
+            environmentId={environmentId}
+            projectId={projectId}
+            name={name}
+            current={presetForm}
+            onSaved={refresh}
+          />
 
-      <LocalAppsBlock
-        environmentId={environmentId}
-        projectId={projectId}
-        name={name}
-        preset={presetForm.preset}
-      />
+          <LocalAppsBlock
+            environmentId={environmentId}
+            projectId={projectId}
+            name={name}
+            preset={presetForm.preset}
+          />
+        </>
+      )}
 
       <section
         className={

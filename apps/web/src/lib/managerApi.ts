@@ -10,6 +10,8 @@
  * fails rather than falling back.
  */
 import type {
+  AssistantTeamUpdateInput,
+  ManagerAssistantTeam,
   AssistantAppAccess,
   AssistantAppLevel,
   AssistantInstructionsStatus,
@@ -211,11 +213,50 @@ export function putAssistantApps(
     readonly projectId: string;
     readonly permissions: Readonly<Record<string, AssistantAppLevel>>;
   },
-): Promise<AssistantAppAccess> {
+): Promise<
+  AssistantAppAccess & {
+    readonly losses?: ReadonlyArray<{
+      readonly projectId: string;
+      readonly lost: ReadonlyArray<string>;
+    }>;
+  }
+> {
   const { environmentId, ...body } = input;
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/apps",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * The person edits who an assistant is on the team: name, face, role,
+ * character, where it talks, "setup done" (Later) or "set up again".
+ */
+export function updateAssistantTeam(
+  input: EnvironmentScoped &
+    Omit<AssistantTeamUpdateInput, "projectId"> & {
+      readonly projectId: string;
+    },
+): Promise<{ readonly team: ManagerAssistantTeam }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/team",
+    method: "POST",
+    body,
+  });
+}
+
+/** Revoke an assistant with everything it set up, or bring it back. */
+export function revokeAssistant(
+  input: EnvironmentScoped & { readonly projectId: string; readonly revoked: boolean },
+): Promise<{ readonly affected: ReadonlyArray<string> }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/revoke",
     method: "POST",
     body,
   });
@@ -349,7 +390,11 @@ export function setAssistantPreset(
     readonly preset: AssistantPreset;
     readonly projects: "all" | ReadonlyArray<string>;
   },
-): Promise<{ token: ManagerCapabilityTokenDescriptor | null }> {
+): Promise<{
+  token: ManagerCapabilityTokenDescriptor | null;
+  /** Assistants it set up that were cut to match (daemons with the team). */
+  losses?: ReadonlyArray<{ readonly projectId: string; readonly lost: ReadonlyArray<string> }>;
+}> {
   const { environmentId, ...body } = input;
   return environmentFetchJson({
     environmentId,

@@ -208,7 +208,8 @@ const BellItem = memo(function BellItem({
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
   // "Uno set up assistant Scout": revoke right here (w0138 p7).
-  const assistantNotice = item.open?.kind === "url" ? assistantPageOfUrl(item.open.url) : null;
+  const assistantNotice =
+    item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
   const open = () => {
     onNavigate();
     void openItem(item);

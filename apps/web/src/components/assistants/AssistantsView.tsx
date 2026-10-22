@@ -171,8 +171,13 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
 export function AssistantsView() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
-  // The team page (w0138 p7) is mock-only: the release has Uno alone (Misha 16.10).
-  if (DEMO && search.view === "profile" && search.env && search.project) {
+  // The team page (w0138 p7): with the assistants update on the account, and in the mock.
+  if (
+    (DEMO || availability === "on") &&
+    search.view === "profile" &&
+    search.env &&
+    search.project
+  ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
