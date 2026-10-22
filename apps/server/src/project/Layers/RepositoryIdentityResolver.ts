@@ -1,3 +1,5 @@
+import * as nodePath from "node:path";
+
 import type { RepositoryIdentity } from "@t3tools/contracts";
 import { Cache, Duration, Effect, Exit, Layer } from "effect";
 import {
@@ -27,18 +29,40 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   return remotes;
 }
 
+/** `uno::notes` → `notes`: a project in the person's own Uno cloud (git-remote-uno). */
+function unoProjectNameOf(remoteUrl: string): string | null {
+  const match = /^uno::([a-z0-9][a-z0-9._-]{0,63})\/?$/i.exec(remoteUrl.trim());
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * The remote that names the project the same way on every computer.
+ *
+ * Uno cloud first: a project synced through Uno has its `uno::<name>` remote
+ * on every copy (`uno project sync` adds it, `uno project get` clones from it),
+ * while its GitHub `origin` may exist on only one of them. Then `origin` before
+ * `upstream`: a fork cloned on a second computer usually has only `origin`, so
+ * naming it by `upstream` split one project in two.
+ */
 function pickPrimaryRemote(
   remotes: ReadonlyMap<string, string>,
 ): { readonly remoteName: string; readonly remoteUrl: string } | null {
-  for (const preferredRemoteName of ["upstream", "origin"] as const) {
+  const sorted = [...remotes.entries()].toSorted(([left], [right]) => left.localeCompare(right));
+  const uno =
+    sorted.find(([remoteName, remoteUrl]) => remoteName === "uno" && unoProjectNameOf(remoteUrl)) ??
+    sorted.find(([, remoteUrl]) => unoProjectNameOf(remoteUrl));
+  if (uno) {
+    return { remoteName: uno[0], remoteUrl: uno[1] };
+  }
+
+  for (const preferredRemoteName of ["origin", "upstream"] as const) {
     const remoteUrl = remotes.get(preferredRemoteName);
     if (remoteUrl) {
       return { remoteName: preferredRemoteName, remoteUrl };
     }
   }
 
-  const [remoteName, remoteUrl] =
-    [...remotes.entries()].toSorted(([left], [right]) => left.localeCompare(right))[0] ?? [];
+  const [remoteName, remoteUrl] = sorted[0] ?? [];
   return remoteName && remoteUrl ? { remoteName, remoteUrl } : null;
 }
 
@@ -47,6 +71,22 @@ function buildRepositoryIdentity(input: {
   readonly remoteUrl: string;
   readonly rootPath: string;
 }): RepositoryIdentity {
+  const unoName = unoProjectNameOf(input.remoteUrl);
+  if (unoName) {
+    return {
+      canonicalKey: `uno::${unoName}`,
+      locator: {
+        source: "git-remote",
+        remoteName: input.remoteName,
+        remoteUrl: input.remoteUrl,
+      },
+      rootPath: input.rootPath,
+      displayName: unoName,
+      provider: "uno",
+      name: unoName,
+    };
+  }
+
   const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
   const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);
   const repositoryPath = canonicalKey.split("/").slice(1).join("/");
@@ -101,13 +141,32 @@ async function resolveRepositoryIdentityCacheKey(cwd: string): Promise<string> {
   return cacheKey;
 }
 
+/**
+ * The hidden history Uno keeps for a synced folder that has no git of its own
+ * (`<folder>/.uno-git`, a bare repository whose `uno` remote is the project in
+ * the person's cloud). The person's own `.git` always wins over it.
+ */
+export const UNO_SNAPSHOT_GIT_DIR = ".uno-git";
+
+async function readRemotes(cacheKey: string): ReturnType<typeof runProcess> {
+  const own = await runProcess("git", ["-C", cacheKey, "remote", "-v"], {
+    allowNonZeroExit: true,
+  });
+  if (own.code === 0) {
+    return own;
+  }
+  return runProcess(
+    "git",
+    ["--git-dir", nodePath.join(cacheKey, UNO_SNAPSHOT_GIT_DIR), "remote", "-v"],
+    { allowNonZeroExit: true },
+  );
+}
+
 async function resolveRepositoryIdentityFromCacheKey(
   cacheKey: string,
 ): Promise<RepositoryIdentity | null> {
   try {
-    const remoteResult = await runProcess("git", ["-C", cacheKey, "remote", "-v"], {
-      allowNonZeroExit: true,
-    });
+    const remoteResult = await readRemotes(cacheKey);
     if (remoteResult.code !== 0) {
       return null;
     }
