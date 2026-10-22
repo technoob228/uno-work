@@ -72,13 +72,40 @@ describe("AGENTS.md of assistants made by older versions", () => {
     });
   });
 
-  it("2026-10-21.1: a dispatcher that hands off and ends its turn, status from one work_status", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-21.1");
+  it("2026-10-22.1: a dispatcher that hands off and ends its turn, status from one work_status", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-22.1");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("END YOUR TURN");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — work update");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("call `work_status` once");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toMatch(/call `wait_for_thread`\s*\n?\s*\(several/);
     expect(RELEASED_2026_10_14_1).toContain("<!-- uno-instructions: 2026-10-14.1 -->");
+  });
+
+  it("2026-10-22.1: the assistant sets itself up by asking, and sets up helpers within its rights", () => {
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("## Setting yourself up");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — setup");
+    for (const tool of [
+      "assistant_profile_get",
+      "assistant_profile_set",
+      "ask_user",
+      "assistant_create",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(`\`${tool}\``);
+    }
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("Routines run on a cloud computer");
+  });
+
+  it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    expect(instructionsVersion(branch)).toBe("2026-10-21.1");
+    const plan = planInstructions({
+      current: joinAgentsProfile(branch, profile),
+      base: null,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Setting yourself up");
   });
 
   it("an untouched 2026-10-14.1 file upgrades silently, with or without its base", () => {
@@ -90,7 +117,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
         known: SHIPPED_ASSISTANT_INSTRUCTIONS,
       });
       expect(plan.state).toBe("current");
-      expect(plan.write).toContain("2026-10-21.1");
+      expect(plan.write).toContain("2026-10-22.1");
       expect(plan.write).toContain("Your name is Ana.");
     }
   });
