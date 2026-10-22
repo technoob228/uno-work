@@ -111,6 +111,7 @@ export const DEFAULT_EXCLUDES = [
   "Thumbs.db",
   ".git/",
   ".uno-git/",
+  ".uno-git.*",
 ];
 
 /** Paths a project's own git must not carry for Uno to sync it (keys). */
@@ -311,9 +312,16 @@ function processAlive(/** @type {number} */ pid) {
 
 // ── Where a project's repository is ─────────────────────────────────────
 
-/** The snapshot repository of a folder without git. */
-export function snapshotGitDir(/** @type {string} */ home, /** @type {string} */ name) {
-  return path.join(home, SYNC_DIR, `${name}.git`);
+/** Where a folder without git keeps its hidden history (bare, remote `uno`). */
+export const SNAPSHOT_GIT_DIR = ".uno-git";
+
+/**
+ * The snapshot repository of a folder without git: inside the folder, so
+ * the history moves (and is deleted) with it and every tool finds the
+ * project's identity (`remote.uno.url`) in one place.
+ */
+export function snapshotGitDir(/** @type {string} */ dir) {
+  return path.join(dir, SNAPSHOT_GIT_DIR);
 }
 
 /** The folder's own git (its top, its git dir), or null when it has none. */
@@ -604,12 +612,12 @@ const storageOf = (/** @type {Ctx} */ ctx) =>
  * @param {SyncResult} result
  */
 async function syncSnapshot(input, ctx, result) {
-  const gitDir = snapshotGitDir(ctx.home, input.name);
+  const gitDir = snapshotGitDir(input.dir);
   const host = ctx.hostname ?? os.hostname();
   const fresh = !(await fsp.stat(gitDir).catch(() => null));
   if (fresh) await initSnapshot(gitDir, input.name, ctx);
-  await linkFolder(gitDir, input.dir, input.adopt === true, ctx);
   const env = await gitEnv(ctx, { GIT_DIR: gitDir, GIT_WORK_TREE: input.dir });
+  if (!fresh) await pointAt(gitDir, input.name, { env, cwd: input.dir });
   const at = { env, cwd: input.dir };
   const release = await lock(gitDir);
   if (!release) {
@@ -677,7 +685,7 @@ async function initSnapshot(
   /** @type {Ctx} */ ctx,
 ) {
   await fsp.mkdir(path.dirname(gitDir), { recursive: true });
-  const tmp = `${gitDir}.${process.pid}.tmp`;
+  const tmp = `${gitDir}.${process.pid}-${Date.now()}.tmp`;
   await fsp.rm(tmp, { recursive: true, force: true });
   const env = await gitEnv(ctx);
   const at = { env, cwd: path.dirname(gitDir) };
@@ -703,35 +711,26 @@ async function initSnapshot(
 }
 
 /**
- * The snapshot repository belongs to one folder. A second folder may take
- * it only on purpose (Get it here into a new place, a moved folder); else
- * it's refused — two folders committing into one history would undo each
- * other. Taking it over starts the new folder as new: its files are merged
- * with the project's, never read as "everything was deleted". The old
- * folder's last version stays under refs/uno/previous/.
- * @param {string} gitDir @param {string} dir @param {boolean} adopt @param {Ctx} ctx
+ * The folder now syncs under another name (turned off and on as a new
+ * project): point `uno` there and forget what the old name's cloud had,
+ * so the new name starts from this folder's history alone.
+ * @param {string} gitDir @param {string} name @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
  */
-async function linkFolder(gitDir, dir, adopt, ctx) {
-  const file = path.join(gitDir, "uno-folder");
-  const linked = (await fsp.readFile(file, "utf8").catch(() => "")).trim();
-  if (linked === dir) return;
-  if (linked && !adopt && (await fsp.stat(linked).catch(() => null))) {
-    throw new SyncError(
-      `Another folder on this computer (${linked}) already syncs as this project.`,
-      "blocked",
-    );
+async function pointAt(gitDir, name, at) {
+  const url = `uno::${name}`;
+  const current = (await git(["config", "--get", "remote.uno.url"], at)).stdout.trim();
+  if (current === url) return;
+  await gitOk(["config", "remote.uno.url", url], at, "Couldn't set up syncing");
+  await gitOk(
+    ["config", "remote.uno.fetch", "+refs/heads/*:refs/remotes/uno/*"],
+    at,
+    "Couldn't set up syncing",
+  );
+  const stale = await git(["for-each-ref", "--format=%(refname)", "refs/remotes/uno/"], at);
+  for (const ref of stale.stdout.split("\n").filter(Boolean)) {
+    await git(["update-ref", "-d", ref], at);
   }
-  if (linked) {
-    const at = { env: await gitEnv(ctx, { GIT_DIR: gitDir, GIT_WORK_TREE: dir }), cwd: dir };
-    const old = await revOf("refs/heads/main", at);
-    if (old) {
-      const keep = `refs/uno/previous/${new Date().toISOString().replace(/[:.]/g, "-")}`;
-      await gitOk(["update-ref", keep, old], at, "Couldn't set up syncing");
-      await gitOk(["update-ref", "-d", "refs/heads/main", old], at, "Couldn't set up syncing");
-    }
-    await fsp.rm(path.join(gitDir, "index"), { force: true });
-  }
-  await fsp.writeFile(file, `${dir}\n`);
+  await fsp.rm(conflictFile(gitDir), { force: true });
 }
 
 /**
@@ -1002,7 +1001,7 @@ export async function resolveConflict(input, ctx) {
   if (first.state === "busy") return first;
   const baseEnv = await gitEnv(ctx);
   const own = await ownGit(dir, baseEnv);
-  const gitDir = own ? own.gitDir : snapshotGitDir(ctx.home, input.name);
+  const gitDir = own ? own.gitDir : snapshotGitDir(dir);
   const env = own ? baseEnv : await gitEnv(ctx, { GIT_DIR: gitDir, GIT_WORK_TREE: dir });
   const at = { env, cwd: own ? own.top : dir };
   const record = await readConflict(gitDir);

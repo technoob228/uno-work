@@ -9,7 +9,8 @@ export declare const DEFAULT_EXCLUDES: ReadonlyArray<string>;
 
 export declare function isKeyFile(relative: string): boolean;
 export declare function safeRemoteUrl(raw: unknown): string | null;
-export declare function snapshotGitDir(home: string, name: string): string;
+export declare const SNAPSHOT_GIT_DIR: string;
+export declare function snapshotGitDir(dir: string): string;
 export declare function defaultName(dir: string): string;
 export declare function ensureHelperLauncher(home: string): Promise<string>;
 export declare function ownGit(

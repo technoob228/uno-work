@@ -99,13 +99,19 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     const saved = await sync(laptop, notes);
     expect(saved).toMatchObject({ ok: true, state: "synced", mode: "snapshot", name: "notes" });
     expect(saved.pushed).toBe(true);
-    // No git in the person's folder: the snapshot repository lives elsewhere.
+    // No .git in the person's folder: the hidden history is .uno-git, remote uno.
     expect(exists(path.join(notes, ".git"))).toBe(false);
-    expect(exists(snapshotGitDir(laptop.home, "notes"))).toBe(true);
+    expect(snapshotGitDir(notes)).toBe(path.join(notes, ".uno-git"));
+    expect(
+      gitIn(notes, { ...laptop.env, GIT_DIR: snapshotGitDir(notes) }, "config", "remote.uno.url"),
+    ).toBe("uno::notes");
 
     const got = await getProject({ name: "notes" }, cloudPc);
     expect(got).toMatchObject({ ok: true, state: "synced", pulled: true });
     const there = path.join(cloudPc.home, "projects", "notes");
+    expect(
+      gitIn(there, { ...cloudPc.env, GIT_DIR: snapshotGitDir(there) }, "config", "remote.uno.url"),
+    ).toBe("uno::notes");
     expect(read(path.join(there, "plan.md"))).toBe("plan\n");
     expect(read(path.join(there, "docs", "a.md"))).toBe("a\n");
     expect(read(path.join(there, ".gitignore"))).toBe("private.txt\n");
@@ -196,7 +202,7 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     expect(result.conflict?.kept).toEqual({ "text.md": "theirs" });
     expect(read(path.join(dirA, "text.md"))).toBe("edited on b\n");
     // a's version is in the history, not lost.
-    const gitDir = snapshotGitDir(a.home, "doc");
+    const gitDir = snapshotGitDir(dirA);
     expect(
       gitIn(dirA, { ...a.env, GIT_DIR: gitDir }, "show", `${result.conflict?.mine}:text.md`),
     ).toBe("edited on a");
@@ -276,14 +282,30 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     await sync(a, first, "proj");
     const moved = a.folder("moved");
     write(path.join(moved, "extra.txt"), "extra\n");
-    // Not on purpose: refused while the first folder is still there.
+    // Not on purpose: refused, its history isn't the project's.
     expect((await sync(a, moved, "proj")).state).toBe("blocked");
     expect((await getProject({ name: "proj", dir: moved }, a)).state).toBe("synced");
     expect(read(path.join(moved, "keep.txt"))).toBe("keep\n");
     expect(read(path.join(moved, "extra.txt"))).toBe("extra\n");
     const elsewhere = b.folder("proj");
     await getProject({ name: "proj", dir: elsewhere }, b);
-    expect(fs.readdirSync(elsewhere).toSorted()).toEqual(["extra.txt", "keep.txt"]);
+    expect(fs.readdirSync(elsewhere).toSorted()).toEqual([".uno-git", "extra.txt", "keep.txt"]);
+  });
+
+  it("a folder synced again under a new name starts that name from its own history", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("draft");
+    write(path.join(dir, "x.md"), "x\n");
+    await sync(a, dir, "draft");
+    expect((await sync(a, dir, "draft-2")).state).toBe("synced");
+    const gitDir = snapshotGitDir(dir);
+    expect(gitIn(dir, { ...a.env, GIT_DIR: gitDir }, "config", "remote.uno.url")).toBe(
+      "uno::draft-2",
+    );
+    const got = b.folder("got");
+    await getProject({ name: "draft-2", dir: got }, b);
+    expect(read(path.join(got, "x.md"))).toBe("x\n");
   });
 
   it("says an empty folder has nothing to sync", async () => {
