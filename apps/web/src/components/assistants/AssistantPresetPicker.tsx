@@ -1,6 +1,7 @@
 /**
- * "What {name} may do": Full / Helper / Observer, one plain line each, the
- * details under "Details", and for Helper and Observer the projects it works
+ * "What {name} may do": Full / Helper / Observer as three small chips with
+ * the picked one's line under them (the prototype's row), the details under
+ * "Details", and for Helper and Observer the projects it works
  * in. Used on an assistant's page and in New assistant (assistant on this
  * computer). Work on this computer enforces it; the honest line says what
  * that is worth.
@@ -11,7 +12,7 @@ import {
   ASSISTANT_PRESET_BOUNDARY_LINE,
   ASSISTANT_PRESET_COPY,
 } from "@t3tools/shared/assistantPreset";
-import { CheckIcon, ChevronDownIcon, ShieldIcon } from "lucide-react";
+import { ChevronDownIcon, ShieldIcon } from "lucide-react";
 import { useState } from "react";
 
 import { pickableProjects } from "../assistant/assistantScope.logic";
@@ -53,9 +54,9 @@ export function AssistantPresetPicker({
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <div className="flex flex-col gap-1.5" role="radiogroup" aria-label={`What ${name} may do`}>
+      {/* The prototype's row (w0138 p7): three small chips, one line under them. */}
+      <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`What ${name} may do`}>
         {ASSISTANT_PRESETS.map((preset: AssistantPreset) => {
-          const copy = ASSISTANT_PRESET_COPY[preset];
           const selected = value.preset === preset;
           return (
             <button
@@ -67,29 +68,20 @@ export function AssistantPresetPicker({
               onClick={() => onChange(withPreset(value, preset))}
               data-testid={`${testId}-${preset}`}
               className={cn(
-                "flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-default disabled:opacity-60",
+                "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default disabled:opacity-60",
                 selected
-                  ? "border-primary/60 bg-primary/[0.04] ring-1 ring-primary/30"
-                  : "border-border/70 hover:bg-accent/40",
+                  ? "border-primary/50 bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
-              <span
-                className={cn(
-                  "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border",
-                  selected ? "border-primary bg-primary text-primary-foreground" : "border-border",
-                )}
-                aria-hidden
-              >
-                {selected ? <CheckIcon className="size-3" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">{copy.name}</span>
-                <span className="block text-xs text-muted-foreground">{copy.line}</span>
-              </span>
+              {ASSISTANT_PRESET_COPY[preset].name}
             </button>
           );
         })}
       </div>
+      <p className="-mt-1 text-xs text-muted-foreground" data-testid={`${testId}-line`}>
+        {ASSISTANT_PRESET_COPY[value.preset].line}
+      </p>
 
       <button
         type="button"
