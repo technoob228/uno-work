@@ -20,6 +20,8 @@ export const SOURCES = {
   cli: "packages/app-sdk/src/uno-cli.mjs",
   /** The `uno::<name>` git remote helper (~/.uno/sdk/bin/git-remote-uno runs it). */
   gitRemote: "packages/app-sdk/src/git-remote-uno.mjs",
+  /** "On all my computers": the folder sync engine (daemon + `uno project`). */
+  sync: "packages/app-sdk/src/uno-sync.mjs",
 } as const;
 export const TARGET = "apps/server/src/appSdk/sdkBundle.generated.ts";
 

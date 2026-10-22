@@ -9,6 +9,7 @@
  *   ~/.uno/sdk/bin/uno         (the `uno` shell command → js/uno-cli.mjs; on agents' PATH)
  *   ~/.uno/sdk/bin/git-remote-uno  (git remotes `uno::<name>` in the person's Uno cloud →
  *                               js/git-remote-uno.mjs; gitRemoteUno.ts makes git find it anywhere)
+ *   ~/.uno/sdk/js/uno-sync.mjs (projects "On all my computers": the folder sync engine)
  *   ~/.uno/sdk/daemon.json     (where this daemon's settings.json and console are, for the
  *                               helper to find the computer's key; no secrets in it)
  */
@@ -74,6 +75,9 @@ export function sdkFiles(): ReadonlyArray<readonly [string, string]> {
     [UNO_CLI_BIN, UNO_CLI_LAUNCHER],
     ["js/git-remote-uno.mjs", APP_SDK_BUNDLE.gitRemote],
     [GIT_REMOTE_UNO_BIN, GIT_REMOTE_UNO_LAUNCHER],
+    // "On all my computers" (projectSync/): the daemon imports it from here,
+    // so it runs next to the helper it starts; `uno project` imports it too.
+    ["js/uno-sync.mjs", APP_SDK_BUNDLE.sync],
   ];
 }
 
