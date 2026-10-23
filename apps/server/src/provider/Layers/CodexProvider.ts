@@ -460,13 +460,20 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
-  const probeResult = yield* probe({
+  const runProbe = probe({
     binaryPath: codexSettings.binaryPath,
     homePath: codexSettings.homePath,
     cwd: process.cwd(),
     customModels: codexSettings.customModels,
     environment,
   }).pipe(Effect.timeoutOption(Duration.millis(PROVIDER_PROBE_TIMEOUT_MS)), Effect.result);
+  // A cold `codex app-server` on a busy machine can miss the first window;
+  // one more try before the chat is told Codex is unavailable.
+  const firstProbe = yield* runProbe;
+  const probeResult =
+    Result.isSuccess(firstProbe) && Option.isNone(firstProbe.success)
+      ? yield* runProbe
+      : firstProbe;
 
   if (Result.isFailure(probeResult)) {
     const error = probeResult.failure;
