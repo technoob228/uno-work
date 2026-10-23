@@ -10,7 +10,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { DEMO } from "../../demo/demoFlag";
-import { AssistantAvatar } from "../assistants/AssistantAvatar";
+import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
 import { useAssistantTeam } from "../assistants/useAssistantTeam";
@@ -65,6 +65,7 @@ export function ConnectorsSettings() {
               >
                 <AssistantAvatar
                   emoji={member.profile.emoji}
+                  image={avatarImageOf(member.profile)}
                   tone={member.profile.tone}
                   className="size-6"
                   emojiClassName="text-xs"

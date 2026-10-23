@@ -1,8 +1,9 @@
 /**
- * The preset picker (Full / Helper / Observer, decision 21.10) on the page of
- * an assistant on this computer and in New assistant. The daemon enforces the
- * preset (`@t3tools/shared/assistantPreset` — the same table this file reads);
- * here: the form, what is saved, and how app levels show under the cap.
+ * The mode picker (Misha 23.10: two modes — "Does it itself" / "Asks first",
+ * the daemon's presets Full / Helper underneath) on an assistant's page and
+ * in New assistant. The daemon enforces it (`@t3tools/shared/assistantPreset`
+ * — the same table this file reads); here: the form, what is saved, how app
+ * levels show under the cap, and when "Only selected projects" can hold.
  * Pure.
  */
 import type {
@@ -13,8 +14,11 @@ import type {
 } from "@t3tools/contracts";
 import {
   DEFAULT_ASSISTANT_PRESET,
+  type AssistantMode,
+  assistantModeOf,
   capAppLevel,
   presetConnectorCeiling,
+  presetForMode,
   presetOfScopes,
 } from "@t3tools/shared/assistantPreset";
 
@@ -27,7 +31,7 @@ import type { ConnectorLevel } from "./assistantTemplates";
 
 export interface PresetForm {
   readonly preset: AssistantPreset;
-  /** Full: all projects or ticked ones; Helper and Observer: always the ticked ones. */
+  /** Every project, or the ticked ones — whatever the mode. */
   readonly scope: AssistantScopeForm;
 }
 
@@ -48,25 +52,21 @@ export function presetFormFromToken(
   };
 }
 
-/** Helper and Observer work only in projects the person picks. */
-export function presetNeedsProjects(preset: AssistantPreset): boolean {
-  return preset !== "full";
+/** The mode the picker shows. */
+export function modeOfForm(form: PresetForm): AssistantMode {
+  return assistantModeOf(form.preset);
 }
 
-/** Switching the preset: Helper and Observer start from the ticked projects (none yet = none). */
-export function withPreset(form: PresetForm, preset: AssistantPreset): PresetForm {
-  if (!presetNeedsProjects(preset)) return { ...form, preset };
-  return { preset, scope: { mode: "only", selected: form.scope.selected } };
+/** Picking a mode; its projects stay as they are. */
+export function withMode(form: PresetForm, mode: AssistantMode): PresetForm {
+  return { ...form, preset: presetForMode(mode, form.preset) };
 }
 
 /** What is saved (the daemon adds the assistant's own workspace itself). */
 export function presetAccessFromForm(form: PresetForm): AssistantPresetAccess {
-  const scope: AssistantScopeForm = presetNeedsProjects(form.preset)
-    ? { mode: "only", selected: form.scope.selected }
-    : form.scope;
   return {
     preset: form.preset,
-    projects: allowlistFromScopeForm(scope) as AssistantPresetAccess["projects"],
+    projects: allowlistFromScopeForm(form.scope) as AssistantPresetAccess["projects"],
   };
 }
 
@@ -93,10 +93,32 @@ export function effectiveLevel(level: ConnectorLevel, preset: AssistantPreset): 
 
 /** One line under the picker for the projects part. */
 export function projectsLine(form: PresetForm, name: string): string {
-  if (!presetNeedsProjects(form.preset) && form.scope.mode === "all") {
-    return `${name} works in every project.`;
-  }
+  if (form.scope.mode === "all") return `${name} works in every project.`;
   const count = form.scope.selected.size;
   if (count === 0) return `${name} sees only its own chats. Tick the projects it may work in.`;
   return count === 1 ? `${name} works in 1 project.` : `${name} works in ${count} projects.`;
+}
+
+/**
+ * "Only selected projects" holds where something keeps the assistant out of
+ * the rest: a sandbox on this computer (`assistantSandbox`), or a computer of
+ * its own. Without either, on this computer it sees every file — the picker
+ * says so instead of offering a limit that isn't one.
+ */
+export function projectsChoice(input: {
+  readonly sandbox: boolean;
+  readonly ownComputer: boolean;
+  readonly scope: AssistantScopeForm;
+}): { readonly canPickSome: boolean; readonly note: string | null } {
+  if (input.sandbox || input.ownComputer) return { canPickSome: true, note: null };
+  if (input.scope.mode === "only") {
+    return {
+      canPickSome: true,
+      note: "Chats it starts stay in these projects, but on this computer it can still read every file. For a real limit, give it its own computer.",
+    };
+  }
+  return {
+    canPickSome: false,
+    note: "Sees everything on this computer. Only selected projects needs its own computer.",
+  };
 }

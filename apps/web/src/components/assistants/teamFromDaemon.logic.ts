@@ -121,6 +121,7 @@ export function profileFromDaemon(input: {
     projectId: summary.projectId,
     name: team?.name ?? (isUno ? "Uno" : summary.title),
     emoji: isUno ? null : (summary.profile?.emoji ?? "🙂"),
+    avatar: isUno ? null : (summary.profile?.avatar ?? null),
     tone: tone ?? (isUno ? "violet" : toneFor(summary.projectId)),
     roles: team?.roles ?? (isUno ? ["Personal assistant"] : []),
     character: team?.character ?? "",

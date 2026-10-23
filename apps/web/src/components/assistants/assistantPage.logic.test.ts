@@ -115,7 +115,7 @@ describe("where it works", () => {
     expect(options.map((option) => [option.kind, option.label])).toEqual([
       ["here", "Mikhail's MacBook Air (2)"],
       ["cloud", "uno-product"],
-      ["own", "A new computer of its own"],
+      ["own", "A computer of its own"],
     ]);
   });
 

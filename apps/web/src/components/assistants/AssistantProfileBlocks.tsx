@@ -47,7 +47,6 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { AssistantAvatar } from "./AssistantAvatar";
-import { useOpenAssistantSettings } from "./AssistantProfileReal";
 import {
   DUTY_EXAMPLES,
   editDuties,
@@ -148,7 +147,10 @@ function Chip(props: {
 export function TeamWhoEditor(props: {
   readonly member: TeamMember;
   readonly onClose: () => void;
+  /** The face row (off where the face picker edits it: `AssistantFacePicker.tsx`). */
+  readonly withFace?: boolean;
 }) {
+  const withFace = props.withFace ?? true;
   const { member } = props;
   const { profile } = member;
   const { save, saving } = useTeamSave(member);
@@ -170,10 +172,9 @@ export function TeamWhoEditor(props: {
         ...(member.isUno || name.trim().length === 0 || name.trim() === profile.name
           ? {}
           : { name: name.trim().slice(0, 60) }),
-        ...(member.isUno
+        ...(member.isUno || !withFace
           ? {}
-          : { emoji: emoji.trim().length > 0 ? emoji.trim().slice(0, 16) : null }),
-        tone,
+          : { emoji: emoji.trim().length > 0 ? emoji.trim().slice(0, 16) : null, tone }),
         roles: roleList,
         character: character.trim().slice(0, 200),
       },
@@ -187,7 +188,7 @@ export function TeamWhoEditor(props: {
       className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3"
       data-testid="assistant-profile-who-editor"
     >
-      {member.isUno ? null : (
+      {member.isUno || !withFace ? null : (
         <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Face">
           {AVATARS.map((avatar) => (
             <button
@@ -666,7 +667,6 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const actions = useTeamActions();
-  const openSettings = useOpenAssistantSettings();
   const [confirm, setConfirm] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const here = machines.find((machine) => machine.environmentId === member.environmentId);
@@ -837,8 +837,9 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
                 Move here
               </Button>
             ) : (
-              <Button size="xs" variant="outline" onClick={() => openSettings(member)}>
-                Set up…
+              // A computer of its own is made in My Uno (size, exit IP), then "Move here".
+              <Button size="xs" variant="outline" onClick={() => void navigate({ to: "/my-uno" })}>
+                Make one
               </Button>
             )}
           </div>

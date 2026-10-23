@@ -49,6 +49,7 @@ import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block, EmojiAvatar, LevelPicker } from "./AssistantBits";
+import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
 import { AssistantPresetPicker } from "./AssistantPresetPicker";
 import {
   effectiveLevel,
@@ -301,7 +302,7 @@ export function LocalAssistantPage({
         // One place for its access (22.10): the team page, as in the prototype.
         <Block title={`What ${name} may do`} testId="assistant-local-access-moved">
           <p className="flex flex-wrap items-center gap-2 py-1 text-sm text-muted-foreground">
-            Full, Helper or Observer, its projects and the apps it uses are on its page.
+            Its mode (Does it itself or Asks first), projects and apps are on its page.
             <Button
               size="xs"
               variant="outline"
@@ -559,7 +560,8 @@ function LocalAppsBlock({
               className="pt-1 text-xs text-muted-foreground"
               data-testid="assistant-local-access-cap"
             >
-              {name} is an Observer: it only reads your apps, whatever is set here.
+              {name} only reads (set up before the two modes): it opens your apps for reading,
+              whatever is set here.
             </p>
           ) : null}
           <p
@@ -602,6 +604,7 @@ function LocalPresetBlock({
     queryFn: () => listProjectsForAccessPicker({ environmentId }),
     retry: false,
   });
+  const sandbox = useEnvironmentSupportsAssistantSandbox(environmentId);
   const [draft, setDraft] = useState<PresetForm | null>(null);
   const [saving, setSaving] = useState(false);
   const form = draft ?? current;
@@ -649,6 +652,7 @@ function LocalPresetBlock({
     >
       <div className="py-1">
         <AssistantPresetPicker
+          sandbox={sandbox}
           name={name}
           value={form}
           onChange={setDraft}

@@ -36,6 +36,7 @@ import type { MachineRow } from "../settings/machineRows";
 import { AssistantPowerPicker, cardOf } from "../assistant/AssistantPowerPicker";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
 import { AssistantPresetPicker } from "./AssistantPresetPicker";
 import {
   type PresetForm,
@@ -85,6 +86,7 @@ export function TeamPresetEditor(props: {
       listProjectsForAccessPicker({ environmentId: member.environmentId as EnvironmentId }),
     retry: false,
   });
+  const sandbox = useEnvironmentSupportsAssistantSandbox(member.environmentId);
   const current = presetFormFromToken(member.summary?.token);
   const [draft, setDraft] = useState<PresetForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -123,6 +125,7 @@ export function TeamPresetEditor(props: {
   return (
     <div className="flex flex-col gap-2">
       <AssistantPresetPicker
+        sandbox={sandbox}
         name={name}
         value={form}
         onChange={setDraft}

@@ -34,6 +34,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { EmojiAvatar, LevelPicker, nextEmoji } from "./AssistantBits";
+import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
 import { AssistantPresetPicker } from "./AssistantPresetPicker";
 import {
   DEFAULT_PRESET_FORM,
@@ -533,6 +534,7 @@ function ReviewCard({
   onBack: () => void;
   onCreate: () => void;
 }) {
+  const sandbox = useEnvironmentSupportsAssistantSandbox(environmentId);
   const setLevel = (provider: ConnectorProvider, level: ConnectorLevel) =>
     onChange({ ...plan, connectors: { ...plan.connectors, [provider]: level } });
   const name = plan.name.trim() || "Uno";
@@ -652,6 +654,7 @@ function ReviewCard({
             What {name} may do
           </h2>
           <AssistantPresetPicker
+            sandbox={sandbox}
             name={name}
             value={presetForm}
             onChange={onPresetForm}

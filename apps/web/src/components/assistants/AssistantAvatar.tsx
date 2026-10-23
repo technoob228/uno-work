@@ -1,8 +1,15 @@
 /**
- * An assistant's face: Uno's smile, or the emoji and tone picked in the
- * setup — with the status dot (working / waiting for you / free) the sidebar
- * and the assistant's page show.
+ * An assistant's face: Uno's smile, its picture (Misha 23.10), or the emoji
+ * and tone picked in the setup — with the status dot (working / waiting for
+ * you / free) the sidebar and the assistant's page show.
+ *
+ * The picture comes from the assistant's computer (owner session only), read
+ * once per file name: a new picture has a new name.
  */
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useQuery } from "@tanstack/react-query";
+
+import { fetchAssistantAvatar } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
 import { UnoFace } from "../sidebar/SidebarDParts";
 import { ACTIVITY_LABEL, type AssistantActivity, type AvatarTone } from "./assistantTeam.logic";
@@ -24,8 +31,49 @@ const DOT: Readonly<Record<AssistantActivity, string>> = {
   idle: "bg-success",
 };
 
+/** Where its picture is: its computer, its folder, the file's name. */
+export interface AvatarImageRef {
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly avatar: string;
+}
+
+/** The picture of an assistant whose profile names one; null for its emoji. */
+export function avatarImageOf(profile: {
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly avatar?: string | null | undefined;
+}): AvatarImageRef | null {
+  return profile.avatar
+    ? { environmentId: profile.environmentId, projectId: profile.projectId, avatar: profile.avatar }
+    : null;
+}
+
+export const AVATAR_IMAGE_KEY = ["uno-assistant", "avatar"] as const;
+
+/** Its picture as a `data:` URL; null while it loads or when it can't be read (the emoji shows). */
+export function useAssistantAvatarUrl(image: AvatarImageRef | null | undefined): string | null {
+  const query = useQuery({
+    queryKey: [...AVATAR_IMAGE_KEY, image?.environmentId, image?.projectId, image?.avatar],
+    queryFn: () =>
+      fetchAssistantAvatar({
+        environmentId: image!.environmentId as EnvironmentId,
+        projectId: image!.projectId,
+      }),
+    enabled: Boolean(image),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 30 * 60_000,
+    retry: false,
+  });
+  return image ? (query.data ?? null) : null;
+}
+
 export function AssistantAvatar(props: {
   readonly emoji: string | null;
+  /** Its picture, shown instead of the emoji once it is here. */
+  readonly image?: AvatarImageRef | null | undefined;
+  /** A picture already in hand (a preview in the face picker). */
+  readonly src?: string | null | undefined;
   readonly tone: AvatarTone;
   readonly activity?: AssistantActivity | null | undefined;
   readonly revoked?: boolean | undefined;
@@ -36,6 +84,8 @@ export function AssistantAvatar(props: {
 }) {
   const size = props.className ?? "size-5";
   const dot = props.activity && !props.revoked ? props.activity : null;
+  const fetched = useAssistantAvatarUrl(props.src ? null : props.image);
+  const picture = props.src ?? fetched;
   return (
     <span
       className={cn("relative inline-flex shrink-0", size, props.revoked && "opacity-45 grayscale")}
@@ -44,7 +94,15 @@ export function AssistantAvatar(props: {
       aria-hidden={props.name ? undefined : true}
       data-testid="assistant-avatar"
     >
-      {props.emoji === null ? (
+      {picture ? (
+        <img
+          src={picture}
+          alt=""
+          draggable={false}
+          className="size-full rounded-full object-cover"
+          data-testid="assistant-avatar-image"
+        />
+      ) : props.emoji === null ? (
         <UnoFace className="size-full" />
       ) : (
         <span

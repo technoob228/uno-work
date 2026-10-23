@@ -20,6 +20,7 @@ import type {
   AssistantDraftResult,
   AssistantChatsResult,
   AssistantEditableFileName,
+  AssistantPersona,
   AssistantPreset,
   AssistantPresetAccess,
   EnvironmentId,
@@ -42,7 +43,11 @@ import type {
 } from "@t3tools/contracts";
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 
-import { environmentFetchJson } from "~/environments/http/target";
+import {
+  environmentFetchJson,
+  environmentFetchResponse,
+  isEnvironmentHttpError,
+} from "~/environments/http/target";
 
 export {
   EnvironmentHttpError as ManagerApiError,
@@ -258,6 +263,59 @@ export function getAssistantMail(
     environmentId: input.environmentId,
     pathname: "/api/manager/assistant/mail",
     searchParams: { projectId: input.projectId },
+  });
+}
+
+/** Its picture as a `data:` URL (owner session), or null when it has none. */
+export async function fetchAssistantAvatar(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<string | null> {
+  try {
+    const response = await environmentFetchResponse({
+      environmentId: input.environmentId,
+      pathname: "/api/manager/assistant/avatar",
+      searchParams: { projectId: input.projectId },
+    });
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result)));
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsDataURL(blob);
+    });
+  } catch (cause) {
+    if (isEnvironmentHttpError(cause) && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/** Sets its picture (base64 PNG / JPG / WebP), or back to its emoji with null. */
+export function setAssistantAvatar(
+  input: EnvironmentScoped & { readonly projectId: string; readonly image: string | null },
+): Promise<{ readonly avatar: string | null }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/avatar",
+    method: "POST",
+    body,
+  });
+}
+
+/** A persona portrait drawn by Uno AI (not saved): a `data:` URL. */
+export function generateAssistantAvatar(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly persona: AssistantPersona;
+    readonly seed: number;
+  },
+): Promise<{ readonly image: string }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/avatar/generate",
+    method: "POST",
+    body,
   });
 }
 

@@ -48,7 +48,7 @@ describe("an assistant sets itself up in a chat", () => {
     expect(skipped?.text).toContain("Skipped");
 
     answerSetupChatTurn("t1", "Only here", world);
-    const rights = answerSetupChatTurn("t1", "Observer", world);
+    const rights = answerSetupChatTurn("t1", "Reads only", world);
     // Limited rights: it offers a computer of its own, with the price.
     expect(rights?.question?.id).toBe("own-computer");
     expect(rights?.question?.detail).toContain("$5/mo");

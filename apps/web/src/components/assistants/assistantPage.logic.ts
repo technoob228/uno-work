@@ -118,7 +118,7 @@ export const WORKS_ON_LINE = {
   laptop: "Stops when the laptop sleeps or closes; routines need a cloud computer.",
   cloudHere: "Always on — routines and Telegram answers work while you're away.",
   cloud: "Always on. Your projects arrive there by sync; its chats here stay here.",
-  own: "Lite, from your plan's quota, at most $5/mo, sleeps when idle. Your files stay out of its reach.",
+  own: "Make a computer for it in My Uno — size from your plan, exit-IP country — then move it there. Your files stay out of its reach. Sign in to Claude or Codex there again, unless it runs on Uno AI.",
 } as const;
 
 /**
@@ -165,7 +165,7 @@ export function worksOnOptions(input: {
             : "It's asleep — wake it first.",
     });
   }
-  options.push({ kind: "own", label: "A new computer of its own", line: WORKS_ON_LINE.own });
+  options.push({ kind: "own", label: "A computer of its own", line: WORKS_ON_LINE.own });
   return options;
 }
 

@@ -108,7 +108,7 @@ describe("rightsBeyondParent", () => {
         projects: ["fishcode", "landing"],
         computers: ["mac"],
       }),
-    ).toEqual(["Full access is more than Helper", "landing", "mac"]);
+    ).toEqual(["Does it itself is more than Asks first", "landing", "mac"]);
     expect(
       rightsBeyondParent(helper, { preset: "helper", projects: "all", computers: [] }),
     ).toEqual(["every project"]);
@@ -409,6 +409,6 @@ describe("presets set the blocks", () => {
     expect(isCustomAccess("helper", { ...helper, connectors: { github: "read" } }, false)).toBe(
       true,
     );
-    expect(presetLabel("helper", true)).toBe("Custom (based on Helper)");
+    expect(presetLabel("helper", true)).toBe("Custom (based on Asks first)");
   });
 });
