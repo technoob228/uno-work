@@ -15,6 +15,7 @@ import {
 import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { Effect, Layer, Option } from "effect";
 
+import { BrowserBridge } from "../browserBridge.ts";
 import { ServerConfig } from "../config.ts";
 import { InboxService } from "../inbox/InboxService.ts";
 import { ManagerAssistantService } from "../manager/Services/AssistantService.ts";
@@ -27,7 +28,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { AgentMailService } from "../setupTools/AgentMailService.ts";
 import { applyAssistantAccess, readAssistantAccess } from "./assistantAccess.ts";
 import { AssistantTeam, AssistantTeamError, makeAssistantTeam } from "./assistantTeam.ts";
-import { readProfile, writeProfile } from "./localAssistantStore.ts";
+import { patchProfile } from "./localAssistantStore.ts";
 import { AssistantSchedules } from "./schedules.ts";
 
 const TEAM_ORIGIN = "assistant-team";
@@ -55,6 +56,7 @@ export const AssistantTeamLive = Layer.effect(
     const schedules = yield* Effect.serviceOption(AssistantSchedules);
     const inbox = yield* Effect.serviceOption(InboxService);
     const agentMail = yield* Effect.serviceOption(AgentMailService);
+    const bridge = yield* Effect.serviceOption(BrowserBridge);
 
     const shell = projections.getShellSnapshot().pipe(
       Effect.map((snapshot) => snapshot.projects),
@@ -121,14 +123,7 @@ export const AssistantTeamLive = Layer.effect(
         Effect.gen(function* () {
           const root = yield* projectRoot(projectId);
           if (root === null) return;
-          yield* Effect.promise(async () => {
-            const current = await readProfile(root);
-            await writeProfile(root, {
-              emoji,
-              template: current?.template ?? null,
-              createdAt: current?.createdAt ?? new Date().toISOString(),
-            });
-          });
+          yield* Effect.promise(() => patchProfile(root, { emoji }));
         }),
       createConversation: (projectId, title) =>
         assistants
@@ -195,6 +190,41 @@ export const AssistantTeamLive = Layer.effect(
               agentMail.value.status.pipe(
                 Effect.map((state) => (state.available ? (state.mailbox?.address ?? null) : null)),
               ),
+          }
+        : {}),
+      ...(Option.isSome(bridge)
+        ? {
+            askPerson: ({ title, detail, threadId }) =>
+              Effect.gen(function* () {
+                // The bell too: the person may be looking at another chat.
+                const item = Option.isSome(inbox)
+                  ? yield* inbox.value
+                      .post({
+                        kind: "agent.approval",
+                        source: {
+                          kind: "system",
+                          id: "assistant-create",
+                          name: "Assistants",
+                          icon: null,
+                        },
+                        title,
+                        body: detail,
+                        open: threadId ? { kind: "thread", threadId } : null,
+                        groupKey: null,
+                      })
+                      .pipe(Effect.option)
+                  : Option.none();
+                const outcome = yield* bridge.value.requestToolApproval(
+                  { tool: "assistant_create", title, detail, sensitive: false },
+                  threadId ? { threadId } : undefined,
+                );
+                if (Option.isSome(inbox) && Option.isSome(item)) {
+                  yield* inbox.value
+                    .update({ action: "read", ids: [item.value.id] })
+                    .pipe(Effect.ignore);
+                }
+                return outcome;
+              }),
           }
         : {}),
       routinesAvailable: () =>

@@ -90,6 +90,7 @@ import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
+import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 
@@ -108,7 +109,7 @@ const toolError = (message: string) => new UnoWorkToolError({ message });
 
 /** What an Observer's chat reads when it reaches for a tool that changes something. */
 export const observerRefusal = (assistant: string) =>
-  `${assistant} is an Observer: it reads and reports, and changes nothing. Tell the person what you would change; they can give ${assistant} more access on its page in Uno Work. Don't retry or work around it.`;
+  `${assistant} only reads and reports (its access): it changes nothing. Tell the person what you would change; they can give ${assistant} more access on its page in Uno Work. Don't retry or work around it.`;
 
 /** Any failure with a message → a tool error the model can read. */
 const asToolError = <A, E extends { readonly message: string }, R>(
@@ -158,6 +159,12 @@ export interface UnoWorkToolDeps {
    * assistant rules.
    */
   readonly presetRefusal?: Effect.Effect<string | null>;
+  /**
+   * The calling chat belongs to an assistant in "Asks first" mode: its name
+   * (for the approval card), or null. Outward-acting calls then always wait
+   * for the person's Allow (`asksFirstCategory`). Absent: no assistant rules.
+   */
+  readonly asksFirst?: Effect.Effect<{ readonly name: string } | null>;
   /**
    * The keys of the chat's project ("On all my computers": kept in the Uno
    * vault, written into its `.env` on every computer). `refusal`: the
@@ -2655,7 +2662,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     // Misha 02.10: a plain static site goes up without an Allow (Unpublish is
     // one click in Apps & sites). Opening an app or a port to the internet,
     // removing a password and sending forms to an outside URL still ask.
+    // An "Asks first" assistant asks (the card's title).
     level: "safe",
+    approvalTitle: (args) =>
+      str(args, "slug") ? `Publish site “${str(args, "slug")}”` : "Publish a site",
+    approvalDetail: (args) => str(args, "path"),
     run: (deps, args) =>
       asToolError(
         deps.files.publishSite({
@@ -3377,7 +3388,9 @@ export function runUnoWorkTool(
       if (refusal !== null) return yield* toolError(refusal);
     }
     if (tool.prepare) yield* tool.prepare(deps, args);
-    if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+    const outward = asksFirstCategory(tool.name, args);
+    const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
+    if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
       const appName =
@@ -3388,8 +3401,15 @@ export function runUnoWorkTool(
             )
           : undefined;
       const described = appName ? { ...args, appId: appName } : args;
-      const title = tool.approvalTitle?.(described) ?? tool.name;
-      const detail = tool.approvalDetail?.(described);
+      const title =
+        tool.approvalTitle?.(described) ??
+        (outward !== null ? ASKS_FIRST_CATEGORY_LABEL[outward] : tool.name);
+      const ownDetail = tool.approvalDetail?.(described);
+      // Why it asks although the chat's mode would let it run: say so.
+      const detail =
+        asking !== null
+          ? [ownDetail, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+          : ownDetail;
       const clientAction = tool.approvalClientAction?.(args);
       yield* askPerson(deps, {
         tool: tool.name,
@@ -3508,12 +3528,18 @@ export function connectorMcpTool(
               : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
-        if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+        // An "Asks first" assistant asks before any change in a connected app.
+        const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
+        if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
+          const described = describeConnectorArgs(args);
           yield* askPerson(deps, {
             tool: tool.name,
             level,
             title: `${tool.providerName}: ${tool.name}`,
-            detail: describeConnectorArgs(args),
+            detail:
+              asking !== null
+                ? [described, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+                : described,
           });
         }
         // The console validates the arguments against its own schema.

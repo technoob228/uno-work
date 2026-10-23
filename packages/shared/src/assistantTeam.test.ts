@@ -51,7 +51,7 @@ describe("grantBeyond (child ⊆ parent)", () => {
     expect(grantBeyond(observer, { preset: "observer", projects: "all", apps: {} })).toEqual([]);
     expect(
       grantBeyond(observer, { preset: "helper", projects: "all", apps: { notion: "read" } }),
-    ).toContain("Helper is more than Observer");
+    ).toContain('"Asks first" is more than "Reads only"');
   });
 });
 
@@ -63,7 +63,7 @@ describe("clampGrant (cutting a parent cuts its children)", () => {
     expect(grant.preset).toBe("observer");
     expect(grant.projects).toEqual(["p1"]);
     expect(grant.apps.github).toBe("none");
-    expect(lost).toEqual(["Helper → Observer", "project p2", "GitHub"]);
+    expect(lost).toEqual(['"Asks first" → "Reads only"', "project p2", "GitHub"]);
   });
 
   it("leaves a child already within untouched", () => {

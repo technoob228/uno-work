@@ -52,7 +52,13 @@ const callerOf = (projectId: string, threadId?: string): ManagerCaller => ({
 });
 
 /** A computer with Uno and the person's projects; everything recorded. */
-function stand(options: { readonly routines?: boolean } = {}) {
+function stand(
+  options: {
+    readonly routines?: boolean;
+    /** The person's answer when an "Asks first" assistant asks (default: Allow). */
+    readonly answer?: "approved" | "denied" | "timeout" | "no_client";
+  } = {},
+) {
   const stateDir = tempDir();
   const assistants = new Map<string, string>([[UNO, "Assistant"]]);
   const access = new Map<string, { preset: AssistantPreset; allowlist: ManagerProjectAllowlist }>();
@@ -62,6 +68,7 @@ function stand(options: { readonly routines?: boolean } = {}) {
   const deleted: string[] = [];
   const conversations: Array<{ projectId: string; title: string; threadId: string }> = [];
   const routines: unknown[] = [];
+  const asked: Array<{ title: string; detail: string; threadId: string | null }> = [];
   let tick = 0;
   const deps: AssistantTeamDeps = {
     stateDir,
@@ -117,6 +124,11 @@ function stand(options: { readonly routines?: boolean } = {}) {
     inbox: (post) => Effect.sync(() => void inbox.push(post)),
     routinesAvailable: () => Effect.succeed(options.routines === true),
     createRoutine: (_caller, input) => Effect.sync(() => void routines.push(input)),
+    askPerson: (input) =>
+      Effect.sync(() => {
+        asked.push(input);
+        return options.answer ?? "approved";
+      }),
   };
   const addAssistant = (projectId: string, title: string) => assistants.set(projectId, title);
   return {
@@ -130,6 +142,7 @@ function stand(options: { readonly routines?: boolean } = {}) {
     deleted,
     conversations,
     routines,
+    asked,
     addAssistant,
   };
 }
@@ -173,7 +186,7 @@ describe("assistant_profile_set: rights only narrow", () => {
     expect(result._tag).toBe("Failure");
     const error = (result as { failure: { message: string; status: number } }).failure;
     expect(error.status).toBe(403);
-    expect(error.message).toContain("Full is more than Helper");
+    expect(error.message).toContain('"Does it itself" is more than "Asks first"');
     expect(error.message).toContain("every project");
     expect(s.access.get(SCOUT)?.preset).toBe("helper");
     const team = await readTeam(s.stateDir, SCOUT);
@@ -332,7 +345,7 @@ describe("assistant_create: a helper never wider than its creator", () => {
     expect(s.inbox).toHaveLength(1);
     expect(s.inbox[0]!.title).toBe("Uno set up assistant Scout");
     expect(s.inbox[0]!.body).toContain("landing");
-    expect(s.inbox[0]!.body).toContain("Observer");
+    expect(s.inbox[0]!.body).toContain("Reads only");
     expect(s.inbox[0]!.open).toEqual({ kind: "url", url: "uno://assistant/this/assistant-scout" });
     // Its first task goes to it as a message.
     expect(s.turns.at(-1)?.text).toContain("Every Monday");
@@ -363,7 +376,7 @@ describe("assistant_create: a helper never wider than its creator", () => {
     );
     expect(result._tag).toBe("Failure");
     const message = (result as { failure: { message: string } }).failure.message;
-    expect(message).toContain("Full is more than Helper");
+    expect(message).toContain('"Does it itself" is more than "Asks first"');
     expect(message).toContain("project fishcode");
     expect(message).toContain("changes in GitHub");
     expect(s.inbox).toHaveLength(0);
@@ -374,7 +387,31 @@ describe("assistant_create: a helper never wider than its creator", () => {
     s.access.set(UNO, { preset: "observer", allowlist: [UNO] as never });
     const result = await run(s.team.create(callerOf(UNO), { name: "Scout", preset: "observer" }));
     expect(result._tag).toBe("Failure");
-    expect((result as { failure: { message: string } }).failure.message).toContain("Observer");
+    expect((result as { failure: { message: string } }).failure.message).toContain("Reads only");
+  });
+
+  it('"Asks first": a new assistant waits for the person\'s Allow (Misha 23.10)', async () => {
+    const s = stand();
+    s.access.set(UNO, { preset: "helper", allowlist: "all" });
+    const made = await run(s.team.create(callerOf(UNO, "t-uno"), { name: "Scout" }));
+    expect(made._tag).toBe("Success");
+    expect(s.asked).toEqual([
+      expect.objectContaining({ title: "Set up assistant Scout", threadId: "t-uno" }),
+    ]);
+
+    const denied = stand({ answer: "denied" });
+    denied.access.set(UNO, { preset: "helper", allowlist: "all" });
+    const refused = await run(denied.team.create(callerOf(UNO), { name: "Scout" }));
+    expect(refused._tag).toBe("Failure");
+    expect((refused as { failure: { message: string } }).failure.message).toContain("declined");
+    expect(denied.access.has(SCOUT)).toBe(false);
+    expect(denied.inbox).toHaveLength(0);
+
+    // "Does it itself" sets one up without asking.
+    const full = stand();
+    await run(full.team.create(callerOf(UNO), { name: "Scout" }));
+    expect(full.asked).toEqual([]);
+    expect(full.access.get(SCOUT)?.preset).toBe("full");
   });
 
   it("unknown project ids are refused", async () => {

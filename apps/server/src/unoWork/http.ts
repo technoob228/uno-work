@@ -59,7 +59,7 @@ import { connectorAccessDecision, readAppAccess } from "../assistants/localAssis
 import { assistantOfThread } from "../assistants/assistantAccess.ts";
 import { readMailLedger, recordMailSent } from "../assistants/mailLedger.ts";
 import { readTeam } from "../assistants/teamStore.ts";
-import { assistantPresetAllows } from "@t3tools/shared/assistantPreset";
+import { assistantPresetAllows, presetAsksFirst } from "@t3tools/shared/assistantPreset";
 import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
@@ -332,7 +332,7 @@ const makeDeps = (input: {
                 Effect.map((owner) =>
                   owner === null || assistantPresetAllows(owner.preset, "read-project-keys")
                     ? null
-                    : `${owner.title} is an Observer: it doesn't get the project's keys. The person can change that on the assistant's page.`,
+                    : `${owner.title} only reads (its access): it doesn't get the project's keys. The person can change that on the assistant's page.`,
                 ),
               ),
               list: (cwd: string) => projectSync.keysForFolder(cwd),
@@ -340,6 +340,13 @@ const makeDeps = (input: {
             },
           }
         : {}),
+      // "Asks first" (Helper, and an Observer from before): every outward call
+      // of its chats waits for the person's Allow, whatever the chat's mode.
+      asksFirst: callerAssistant.pipe(
+        Effect.map((owner) =>
+          owner !== null && presetAsksFirst(owner.preset) ? { name: owner.title } : null,
+        ),
+      ),
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
         Effect.map((owner) =>

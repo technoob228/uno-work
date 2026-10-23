@@ -95,7 +95,7 @@ export function grantBeyond(parent: TeamGrant, child: TeamGrant): ReadonlyArray<
   const beyond: string[] = [];
   if (PRESET_RANK[child.preset] > PRESET_RANK[parent.preset]) {
     beyond.push(
-      `${ASSISTANT_PRESET_COPY[child.preset].name} is more than ${ASSISTANT_PRESET_COPY[parent.preset].name}`,
+      `"${ASSISTANT_PRESET_COPY[child.preset].name}" is more than "${ASSISTANT_PRESET_COPY[parent.preset].name}"`,
     );
   }
   if (parent.projects !== "all") {
@@ -131,7 +131,7 @@ export function clampGrant(
   let preset = child.preset;
   if (PRESET_RANK[child.preset] > PRESET_RANK[parent.preset]) {
     lost.push(
-      `${ASSISTANT_PRESET_COPY[child.preset].name} → ${ASSISTANT_PRESET_COPY[parent.preset].name}`,
+      `"${ASSISTANT_PRESET_COPY[child.preset].name}" → "${ASSISTANT_PRESET_COPY[parent.preset].name}"`,
     );
     preset = parent.preset;
   }
@@ -205,7 +205,7 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
   {
     id: "access",
     header: "What I may do",
-    ask: "how much it does on its own (Full / Helper / Observer) and which projects are its",
+    ask: 'how much it does on its own — "Does it itself" (preset full) or "Asks first" (preset helper: asks before email out, sites, deploys, share links, deleting, new databases / computers / assistants) — and which projects are its',
   },
   { id: "apps", header: "Apps", ask: "what it may do in each connected app" },
   {

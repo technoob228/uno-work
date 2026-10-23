@@ -115,6 +115,9 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantChat: true,
       assistantLlm: true,
       assistantConversations: true,
+      // No sandbox for assistants here yet: the sandbox branch turns this on
+      // where bubblewrap can hold an assistant to its projects.
+      assistantSandbox: false,
     },
   } satisfies Omit<
     ExecutionEnvironmentDescriptor,

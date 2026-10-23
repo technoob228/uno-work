@@ -77,6 +77,7 @@ interface Recorded {
   approvals: Array<{
     tool: string;
     title: string;
+    detail?: string;
     sensitive: boolean;
     clientAction?: { kind: string; slug: string };
   }>;
@@ -488,7 +489,7 @@ describe("approval gate", () => {
     const observed = { ...deps, presetRefusal: Effect.succeed(observerRefusal("Scout")) };
     const refused = await run("app_stop", observed, { appId: "notes" });
     expect(refused._tag).toBe("Failure");
-    if (refused._tag === "Failure") expect(refused.failure.message).toContain("Observer");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("only reads");
     expect(recorded.actions).toEqual([]);
     expect(recorded.approvals).toEqual([]);
     const listed = await run("apps_list", observed);
@@ -500,6 +501,47 @@ describe("approval gate", () => {
       { appId: "notes" },
     );
     expect(allowed._tag).toBe("Success");
+  });
+
+  it('"Asks first": outward calls wait for the Allow whatever the mode; own work runs (23.10)', async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "full-access" });
+    const asking = { ...deps, asksFirst: Effect.succeed({ name: "Scout" }) };
+    // Taking an app off the internet isn't outward: it runs.
+    const own = await run("app_stop", asking, { appId: "notes" });
+    expect(own._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
+    // Deleting an app asks, and the card says why.
+    const removed = await run("app_remove", asking, { appId: "notes" });
+    expect(removed._tag).toBe("Success");
+    expect(recorded.approvals).toHaveLength(1);
+    expect(recorded.approvals[0]!.detail).toContain("Scout asks first");
+    // "Does it itself": a site goes up without asking (decision 02.10)…
+    expect(decideUnoWorkGate("safe", "full-access")).toBe("run");
+    // …but for an "Asks first" assistant even a "safe" outward call asks.
+    expect(decideUnoWorkGate("safe", "full-access", true)).toBe("ask");
+    expect(decideUnoWorkGate("change", "auto-accept-edits", true)).toBe("ask");
+  });
+
+  it('"Asks first": a site that would go up on its own waits, and a declined one never does', async () => {
+    const { deps, recorded, home } = makeDeps({ runtimeMode: "full-access", approval: "denied" });
+    const asking = { ...deps, asksFirst: Effect.succeed({ name: "Scout" }) };
+    const refused = await run("site_publish", asking, { path: "~/site", slug: "menu" });
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("declined");
+    expect(recorded.approvals).toEqual([
+      expect.objectContaining({ tool: "site_publish", title: "Publish site “menu”" }),
+    ]);
+    // Not published: the chat that made it was never noted.
+    expect(existsSync(path.join(home, ".uno", "site-chats.json"))).toBe(false);
+    // The person's own chat (no assistant): the usual gate.
+    const mine = await run(
+      "app_stop",
+      { ...deps, asksFirst: Effect.succeed(null) },
+      {
+        appId: "notes",
+      },
+    );
+    expect(mine._tag).toBe("Success");
   });
 
   it("project keys: names for Full/Helper chats, never values; an Observer gets none (22.10)", async () => {
@@ -529,9 +571,9 @@ describe("approval gate", () => {
     }
     expect((await run("project_keys", keys(null), { load: true }))._tag).toBe("Success");
     expect(loaded).toEqual([deps.caller.cwd]);
-    const refused = await run("project_keys", keys("Scout is an Observer"), { load: true });
+    const refused = await run("project_keys", keys("Scout only reads"), { load: true });
     expect(refused._tag).toBe("Failure");
-    if (refused._tag === "Failure") expect(refused.failure.message).toContain("Observer");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("only reads");
     expect(loaded).toHaveLength(1);
   });
 

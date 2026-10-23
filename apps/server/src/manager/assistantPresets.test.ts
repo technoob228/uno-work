@@ -205,7 +205,7 @@ it.layer(NodeServices.layer)("manager tools under assistant presets", (it) => {
           tools.createThread(caller, { projectId: mine, title: "x", prompt: "do it" }),
         );
         expect(create._tag).toBe("ManagerPresetDeniedError");
-        expect(create.message).toContain("Observer");
+        expect(create.message).toContain("Reads only");
         const send = yield* Effect.flip(
           tools.sendTurn(caller, { threadId: askingThread, prompt: "go on" }),
         );
@@ -238,7 +238,7 @@ it.layer(NodeServices.layer)("manager tools under assistant presets", (it) => {
     ),
   );
 
-  it.effect("Helper starts chats at once in its projects, capped at approval-required", () =>
+  it.effect("Helper starts chats at once in its projects, capped at auto-accept-edits", () =>
     run((dispatched) =>
       Effect.gen(function* () {
         const tools = yield* ManagerToolService;
@@ -254,7 +254,8 @@ it.layer(NodeServices.layer)("manager tools under assistant presets", (it) => {
         const create = (yield* Ref.get(dispatched)).find(
           (command) => command.type === "thread.create",
         );
-        expect(create?.type === "thread.create" && create.runtimeMode).toBe("approval-required");
+        // "Asks first" (23.10): edits run, commands ask.
+        expect(create?.type === "thread.create" && create.runtimeMode).toBe("auto-accept-edits");
 
         const outside = yield* Effect.flip(
           tools.createThread(caller, { projectId: foreign, title: "x", prompt: "x" }),
@@ -367,10 +368,12 @@ describe("assistantPresetGate", () => {
   });
 
   it("caps the runtime of chats a Helper starts and refuses steering freer ones", () => {
-    expect(createRuntimeFor(assistantToken("helper"), "full-access")).toBe("approval-required");
+    expect(createRuntimeFor(assistantToken("helper"), "full-access")).toBe("auto-accept-edits");
+    expect(createRuntimeFor(assistantToken("observer"), "full-access")).toBe("approval-required");
     expect(createRuntimeFor(assistantToken("full"), "full-access")).toBe("full-access");
     expect(createRuntimeFor(settingsToken, "full-access")).toBe("full-access");
-    expect(steerDenial(assistantToken("helper"), "auto-accept-edits")).not.toBeNull();
+    expect(steerDenial(assistantToken("helper"), "full-access")).not.toBeNull();
+    expect(steerDenial(assistantToken("helper"), "auto-accept-edits")).toBeNull();
     expect(steerDenial(assistantToken("helper"), "approval-required")).toBeNull();
     expect(steerDenial(assistantToken("full"), "full-access")).toBeNull();
   });

@@ -45,7 +45,11 @@ import {
   mailPolicyBeyond,
   mailPolicyLine,
 } from "@t3tools/shared/assistantMail";
-import { ASSISTANT_PRESET_COPY, assistantPresetAllows } from "@t3tools/shared/assistantPreset";
+import {
+  ASSISTANT_PRESET_COPY,
+  assistantPresetAllows,
+  presetAsksFirst,
+} from "@t3tools/shared/assistantPreset";
 import {
   ASSISTANT_SETUP_STEPS,
   clampGrant,
@@ -65,6 +69,7 @@ import * as nodePath from "node:path";
 
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
+import { refusalMessage } from "../unoWork/policy.ts";
 import { askCardQuestion, newAskCardRequestId } from "./askCards.ts";
 import { assistantOfTokenLabel } from "./assistantAccess.ts";
 import { readAppAccess, writeAppAccess } from "./localAssistantStore.ts";
@@ -161,6 +166,17 @@ export interface AssistantTeamDeps {
    * isn't there (the account's flag is off, not a cloud computer). Absent: no mail.
    */
   readonly mailboxAddress?: () => Effect.Effect<string | null>;
+  /**
+   * The person's Allow for an outward step of an "Asks first" assistant
+   * (`assistant_create`): the same card as the uno-work tools, in the
+   * conversation that asked when known. Absent: nobody can be asked (it is
+   * refused).
+   */
+  readonly askPerson?: (input: {
+    readonly title: string;
+    readonly detail: string;
+    readonly threadId: ThreadId | null;
+  }) => Effect.Effect<"approved" | "denied" | "timeout" | "no_client">;
   /** schedule_create for this caller. */
   readonly createRoutine: (
     caller: ManagerCaller,
@@ -753,6 +769,18 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           `A helper can't get more than you have: ${beyond.join(", ")}. Make it narrower, or ask the person to set it up.`,
           403,
         );
+      }
+      // "Asks first" (Misha 23.10): a new assistant waits for the person's Allow.
+      if (presetAsksFirst(parent.grant.preset)) {
+        const title = `Set up assistant ${input.name}`;
+        const outcome = deps.askPerson
+          ? yield* deps.askPerson({
+              title,
+              detail: `${memberName(parent)} asks first (its mode). Projects: ${projectsLine(child.projects, known)} · ${ASSISTANT_PRESET_COPY[child.preset].name}.`,
+              threadId: caller.callerThreadId ?? null,
+            })
+          : "no_client";
+        if (outcome !== "approved") return yield* fail(refusalMessage(outcome, title), 403);
       }
       const { projectId } = yield* deps.createAssistant({
         name: input.name,

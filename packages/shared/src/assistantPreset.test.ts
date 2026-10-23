@@ -2,7 +2,15 @@ import type { AssistantPreset, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  ASKS_FIRST_CATEGORIES,
+  ASKS_FIRST_CATEGORY_LABEL,
+  ASSISTANT_MODE_COPY,
+  ASSISTANT_MODES,
   ASSISTANT_PRESETS,
+  assistantModeOf,
+  asksFirstCategory,
+  presetAsksFirst,
+  presetForMode,
   allowlistReaches,
   assistantPresetAllows,
   capAppLevel,
@@ -66,13 +74,71 @@ describe("assistantPresetAllows", () => {
 });
 
 describe("runtime ceiling", () => {
-  it("Full keeps the caller's mode; Helper and Observer cap at approval-required", () => {
+  it("Full keeps the caller's mode; Helper edits freely but asks before commands; Observer asks", () => {
     expect(presetRuntimeCeiling("full")).toBeNull();
     expect(capRuntimeToPreset("full-access", "full")).toBe("full-access");
-    expect(capRuntimeToPreset("full-access", "helper")).toBe("approval-required");
-    expect(capRuntimeToPreset("auto-accept-edits", "helper")).toBe("approval-required");
+    expect(capRuntimeToPreset("full-access", "helper")).toBe("auto-accept-edits");
+    expect(capRuntimeToPreset("auto-accept-edits", "helper")).toBe("auto-accept-edits");
     expect(capRuntimeToPreset("approval-required", "helper")).toBe("approval-required");
     expect(capRuntimeToPreset("full-access", "observer")).toBe("approval-required");
+  });
+});
+
+describe("two modes (Misha 23.10)", () => {
+  it("Full is 'Does it itself'; Helper and Observer are 'Asks first'", () => {
+    expect(assistantModeOf("full")).toBe("itself");
+    expect(assistantModeOf("helper")).toBe("asks-first");
+    expect(assistantModeOf("observer")).toBe("asks-first");
+    expect(ASSISTANT_MODES).toEqual(["itself", "asks-first"]);
+  });
+
+  it("a mode maps back to a preset; an old Observer stays read-only under 'Asks first'", () => {
+    expect(presetForMode("itself", "observer")).toBe("full");
+    expect(presetForMode("asks-first", "full")).toBe("helper");
+    expect(presetForMode("asks-first", "helper")).toBe("helper");
+    expect(presetForMode("asks-first", "observer")).toBe("observer");
+  });
+
+  it("only 'Does it itself' acts outward without the person's Allow", () => {
+    expect(presetAsksFirst("full")).toBe(false);
+    expect(presetAsksFirst("helper")).toBe(true);
+    expect(presetAsksFirst("observer")).toBe(true);
+  });
+
+  it("names exactly the outward-acting tools, by category", () => {
+    expect(asksFirstCategory("mail_send", {})).toBe("email");
+    expect(asksFirstCategory("site_publish", {})).toBe("sites");
+    expect(asksFirstCategory("site_unpublish", {})).toBe("sites");
+    expect(asksFirstCategory("app_deploy", {})).toBe("internet");
+    expect(asksFirstCategory("app_show_on_internet", {})).toBe("internet");
+    expect(asksFirstCategory("spark_deploy", {})).toBe("internet");
+    expect(asksFirstCategory("file_share_link", {})).toBe("share");
+    expect(asksFirstCategory("drive_share_link", {})).toBe("share");
+    expect(asksFirstCategory("app_remove", {})).toBe("delete");
+    expect(asksFirstCategory("spark_delete", {})).toBe("delete");
+    expect(asksFirstCategory("db_create", {})).toBe("create");
+    expect(asksFirstCategory("computer_create", {})).toBe("create");
+    expect(asksFirstCategory("assistant_create", {})).toBe("create");
+    // Cleanup deletes only when it applies.
+    expect(asksFirstCategory("computer_cleanup", { apply: true })).toBe("delete");
+    expect(asksFirstCategory("computer_cleanup", {})).toBeNull();
+    // Working on its own things runs.
+    for (const tool of ["files_list", "app_start", "chat_create", "notify", "mail_read"]) {
+      expect(asksFirstCategory(tool, {})).toBeNull();
+    }
+  });
+
+  it("the 'Asks first' copy lists every category the daemon checks, and no payments", () => {
+    const details = ASSISTANT_MODE_COPY["asks-first"].details.join(" ");
+    for (const category of ASKS_FIRST_CATEGORIES) {
+      expect(details).toContain(ASKS_FIRST_CATEGORY_LABEL[category]);
+    }
+    const all = Object.values(ASSISTANT_MODE_COPY)
+      .map((copy) => `${copy.line} ${copy.details.join(" ")}`)
+      .join(" ")
+      .toLowerCase();
+    expect(all).not.toContain("payment");
+    expect(all).not.toContain("money");
   });
 });
 

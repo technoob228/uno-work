@@ -368,7 +368,12 @@ export interface AssistantProfileFile {
   readonly emoji: string | null;
   readonly template: string | null;
   readonly createdAt: string | null;
+  /** Its picture's file in `.uno/` (`assistantAvatar.ts`); null = its emoji. */
+  readonly avatar?: string | null;
 }
+
+/** `avatar-<ms>.<ext>` — the only names an avatar file may have. */
+export const AVATAR_FILE_NAME = /^avatar-\d{1,16}\.(png|jpg|webp)$/;
 
 /** `.uno/profile.json` in the assistant's folder: what "New assistant" picked. */
 export const profilePath = (workspaceRoot: string) =>
@@ -384,11 +389,34 @@ export async function readProfile(workspaceRoot: string): Promise<AssistantProfi
     null,
   );
   if (raw === null) return null;
+  const avatar = profileText(raw.avatar, 40);
   return {
     emoji: profileText(raw.emoji, 16),
     template: profileText(raw.template, 40),
     createdAt: profileText(raw.createdAt, 40),
+    avatar: avatar !== null && AVATAR_FILE_NAME.test(avatar) ? avatar : null,
   };
+}
+
+/** Changes part of `.uno/profile.json`, keeping the rest (its picture too). */
+export function patchProfile(
+  workspaceRoot: string,
+  patch: Partial<AssistantProfileFile>,
+  now: Date = new Date(),
+): Promise<AssistantProfileFile> {
+  const file = profilePath(workspaceRoot);
+  return serialized(file, async () => {
+    const current = await readProfile(workspaceRoot);
+    const next: AssistantProfileFile = {
+      emoji: current?.emoji ?? null,
+      template: current?.template ?? null,
+      createdAt: current?.createdAt ?? now.toISOString(),
+      avatar: current?.avatar ?? null,
+      ...patch,
+    };
+    await writeJson(file, next);
+    return next;
+  });
 }
 
 export function writeProfile(workspaceRoot: string, profile: AssistantProfileFile): Promise<void> {

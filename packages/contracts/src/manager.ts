@@ -214,6 +214,37 @@ export const AssistantPresetInput = Schema.Struct({
 });
 export type AssistantPresetInput = typeof AssistantPresetInput.Type;
 
+/** The biggest picture an assistant's face may be (decoded bytes). */
+export const ASSISTANT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * `POST /api/manager/assistant/avatar` — its picture (png / jpg / webp,
+ * base64 without the `data:` prefix), or null to go back to its emoji.
+ */
+export const AssistantAvatarSetInput = Schema.Struct({
+  projectId: ProjectId,
+  image: Schema.NullOr(
+    Schema.String.check(Schema.isMaxLength(Math.ceil((ASSISTANT_AVATAR_MAX_BYTES * 4) / 3) + 4)),
+  ),
+});
+export type AssistantAvatarSetInput = typeof AssistantAvatarSetInput.Type;
+
+/** What its picture is drawn as (the Persona tab). */
+export const AssistantPersona = Schema.Literals(["human", "animal", "robot", "alien"]);
+export type AssistantPersona = typeof AssistantPersona.Type;
+
+/**
+ * `POST /api/manager/assistant/avatar/generate` — a portrait drawn by Uno AI
+ * (not saved: the person picks it, then it goes through the set route).
+ * `seed` picks a different look for "Another one".
+ */
+export const AssistantAvatarGenerateInput = Schema.Struct({
+  projectId: ProjectId,
+  persona: AssistantPersona,
+  seed: Schema.optional(Schema.Number.check(Schema.isInt())),
+});
+export type AssistantAvatarGenerateInput = typeof AssistantAvatarGenerateInput.Type;
+
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
   /** "New assistant" (0.0.106): its picture and role template, kept in `.uno/profile.json`. */
@@ -253,6 +284,12 @@ export const ManagerAssistantProfile = Schema.Struct({
   emoji: Schema.NullOr(Schema.String),
   template: Schema.NullOr(Schema.String),
   createdAt: Schema.NullOr(Schema.String),
+  /**
+   * Its picture (Misha 23.10): the file in its folder (`.uno/avatar-<ms>.webp`),
+   * served by `GET /api/manager/assistant/avatar`; the name changes with each
+   * new picture. Null / absent: its emoji.
+   */
+  avatar: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ManagerAssistantProfile = typeof ManagerAssistantProfile.Type;
 

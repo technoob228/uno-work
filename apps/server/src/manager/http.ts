@@ -19,6 +19,8 @@ import {
   UNO_GATEWAY_BASE_URL,
   ASSISTANT_PROJECT_ID,
   AssistantAppAccessInput,
+  AssistantAvatarGenerateInput,
+  AssistantAvatarSetInput,
   AssistantEditableFileName,
   AssistantInstructionsResolveInput,
   AssistantPresetInput,
@@ -94,6 +96,16 @@ import {
 import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
 import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPreset";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
+import {
+  AVATAR_CONTENT_TYPE,
+  avatarFormat,
+  checkAvatarImage,
+  clearAvatar,
+  personaPrompt,
+  readAvatar,
+  saveAvatar,
+} from "../assistants/assistantAvatar.ts";
+import { requestGatewayImage } from "../assistants/imageGenerate.ts";
 import { ServerConfig } from "../config.ts";
 import { assistantMailView } from "../assistants/assistantMailView.ts";
 import { readMailLedger } from "../assistants/mailLedger.ts";
@@ -1367,6 +1379,129 @@ export const managerAssistantMailRouteLayer = HttpRouter.add(
         now: new Date(),
       }),
       { status: 200 },
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+// ── Its picture (Misha 23.10) ──────────────────────────────────────────
+
+const assistantWorkspaceRoot = (projectId: ProjectId) =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionSnapshotQuery;
+    const project = yield* projections
+      .getProjectShellById(projectId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    if (Option.isNone(project)) {
+      return yield* new AuthError({ message: "Unknown assistant.", status: 400 });
+    }
+    return project.value.workspaceRoot;
+  });
+
+/** `GET /api/manager/assistant/avatar?projectId=` — its picture (owner session only). */
+export const managerAssistantAvatarGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/avatar",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    const root = yield* assistantWorkspaceRoot(projectId);
+    const avatar = yield* Effect.promise(() => readAvatar(root));
+    if (avatar === null) {
+      return HttpServerResponse.jsonUnsafe({ error: "No picture." }, { status: 404 });
+    }
+    return HttpServerResponse.uint8Array(avatar.bytes, {
+      status: 200,
+      contentType: avatar.contentType,
+      // The file name changes with every new picture: a cached one is right.
+      headers: { "Cache-Control": "private, max-age=86400" },
+    });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** `POST /api/manager/assistant/avatar` {projectId, image} — set its picture, or null for its emoji. */
+export const managerAssistantAvatarSetRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/avatar",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantAvatarSetInput).pipe(
+      Effect.mapError(
+        () => new AuthError({ message: "Use a PNG, JPG or WebP up to 2 MB.", status: 400 }),
+      ),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const root = yield* assistantWorkspaceRoot(input.projectId);
+    if (input.image === null) {
+      yield* Effect.promise(() => clearAvatar(root));
+      return HttpServerResponse.jsonUnsafe({ avatar: null }, { status: 200 });
+    }
+    const checked = checkAvatarImage(input.image);
+    if (!checked.ok) {
+      return HttpServerResponse.jsonUnsafe({ error: checked.problem }, { status: 400 });
+    }
+    const avatar = yield* Effect.promise(() => saveAvatar(root, checked));
+    return HttpServerResponse.jsonUnsafe({ avatar }, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/avatar/generate` {projectId, persona, seed?} →
+ * {image: data URL}: a portrait drawn by Uno AI, not saved (the person picks
+ * it). 503 where pictures aren't available (no Uno AI key, the account
+ * without assistants); the gateway's own refusals as its words.
+ */
+export const managerAssistantAvatarGenerateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/avatar/generate",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantAvatarGenerateInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid persona.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
+    const settings = yield* Effect.serviceOption(ServerSettingsService);
+    const enabled = Option.isSome(settings)
+      ? yield* settings.value.getSettings.pipe(
+          Effect.flatMap((current) => Effect.promise(() => assistantsMvpEnabled(current))),
+          Effect.orElseSucceed(() => false),
+        )
+      : false;
+    if (Option.isNone(gatewayKey) || !enabled) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "Pictures aren't available on this computer." },
+        { status: 503 },
+      );
+    }
+    const apiKey = yield* gatewayKey.value.harnessKey();
+    const prompt = personaPrompt(input.persona, input.seed ?? Date.now());
+    return yield* Effect.tryPromise({
+      try: () =>
+        requestGatewayImage({ baseUrl: UNO_GATEWAY_BASE_URL, apiKey, prompt, size: "1024x1024" }),
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.map((image) => {
+        const format = avatarFormat(image.bytes) ?? "png";
+        const base64 = Buffer.from(image.bytes).toString("base64");
+        return HttpServerResponse.jsonUnsafe(
+          { image: `data:${AVATAR_CONTENT_TYPE[format]};base64,${base64}` },
+          { status: 200 },
+        );
+      }),
+      Effect.catch((cause) =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            {
+              error:
+                cause instanceof Error
+                  ? cause.message.replace(/ Tell the person[^.]*\./, "")
+                  : "Uno AI couldn't draw it.",
+            },
+            { status: 502 },
+          ),
+        ),
+      ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );

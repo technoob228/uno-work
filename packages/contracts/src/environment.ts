@@ -55,6 +55,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       (`/api/manager/assistant/telegram/test`). Absent: clients show the one
       pinned chat and the manual chat-id Telegram setup. */
   assistantConversations: Schema.optionalKey(Schema.Boolean),
+  /** An assistant on this computer can be held to its projects by a sandbox
+      (Linux bubblewrap, feat/assistant-sandbox): it then sees only the
+      projects it was given. False / absent: an assistant here sees every
+      file of the computer; "only selected projects" needs its own computer. */
+  assistantSandbox: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

@@ -4,6 +4,12 @@
  * by the daemon (which enforces it on every call) and the UI (which explains
  * it), so the two can't drift.
  *
+ * The person sees two modes (Misha 23.10, "keep it simple"): "Does it itself"
+ * (Full) and "Asks first" (Helper; an Observer from before reads as "Asks
+ * first" too and keeps its read-only rules). "Asks first" is enforced by the
+ * daemon: every outward-acting tool call of its chats waits for the person's
+ * Allow (`asksFirstCategory`, `unoWork/tools.ts`, `assistant_create`).
+ *
  * The daemon stores an assistant's access as its capability token's
  * `scopes` / `projectAllowlist` / `autoApprove`; the preset is what those
  * scopes say (`presetOfScopes`), and a preset change rewrites them
@@ -85,12 +91,21 @@ export function assistantPresetAllows(preset: AssistantPreset, action: Assistant
 
 /**
  * The widest runtime mode a chat started or steered by this assistant may
- * run in. Helper: every chat it starts asks the person before edits and
- * commands (`approval-required`); it may not steer a chat that runs wider.
+ * run in. Helper ("Asks first", 23.10): the chats it starts edit files
+ * without asking but ask before commands (`auto-accept-edits`) — it works on
+ * files without nagging; what goes out asks anyway (`asksFirstCategory`). It
+ * may not steer a chat that runs wider. Observer: `approval-required`.
  * Null = no ceiling beyond the caller's own mode.
  */
 export function presetRuntimeCeiling(preset: AssistantPreset): RuntimeMode | null {
-  return preset === "full" ? null : "approval-required";
+  switch (preset) {
+    case "full":
+      return null;
+    case "helper":
+      return "auto-accept-edits";
+    case "observer":
+      return "approval-required";
+  }
 }
 
 const RUNTIME_RANK: Readonly<Record<RuntimeMode, number>> = {
@@ -188,6 +203,123 @@ export function allowlistReaches(
   );
 }
 
+// ── The two modes the person sees (Misha 23.10) ──────────────────────────
+
+export type AssistantMode = "itself" | "asks-first";
+
+export const ASSISTANT_MODES: ReadonlyArray<AssistantMode> = ["itself", "asks-first"];
+
+/** Full → "Does it itself"; Helper and Observer → "Asks first". */
+export function assistantModeOf(preset: AssistantPreset): AssistantMode {
+  return preset === "full" ? "itself" : "asks-first";
+}
+
+/**
+ * The preset a mode stands for. "Asks first" is Helper; an Observer set up
+ * before the two modes stays an Observer (it only reads) until the person
+ * picks "Does it itself".
+ */
+export function presetForMode(mode: AssistantMode, current: AssistantPreset): AssistantPreset {
+  if (mode === "itself") return "full";
+  return current === "observer" ? "observer" : "helper";
+}
+
+/** Its outward-acting calls wait for the person's Allow (enforced by the daemon). */
+export function presetAsksFirst(preset: AssistantPreset): boolean {
+  return preset !== "full";
+}
+
+/** What an "Asks first" assistant asks before — exactly what the daemon checks. */
+export type AsksFirstCategory =
+  | "email"
+  | "sites"
+  | "internet"
+  | "share"
+  | "delete"
+  | "create"
+  | "connected-apps";
+
+export const ASKS_FIRST_CATEGORY_LABEL: Readonly<Record<AsksFirstCategory, string>> = {
+  email: "Sending email",
+  sites: "Publishing, changing or taking down a site",
+  internet: "Putting an app or a Spark on the internet",
+  share: "Making a share link",
+  delete: "Deleting apps or Sparks, or cleaning up files",
+  create: "Creating databases, computers or other assistants",
+  "connected-apps": "Changing things in your connected apps (Gmail, Drive, Notion, GitHub)",
+};
+
+export const ASKS_FIRST_CATEGORIES: ReadonlyArray<AsksFirstCategory> = [
+  "email",
+  "sites",
+  "internet",
+  "share",
+  "delete",
+  "create",
+  "connected-apps",
+];
+
+/** `uno-work` tools (and `assistant_create`) that act outward, by category. */
+const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
+  mail_send: "email",
+  site_publish: "sites",
+  site_unpublish: "sites",
+  site_set_password: "sites",
+  site_forms_set: "sites",
+  app_deploy: "internet",
+  app_show_on_internet: "internet",
+  spark_deploy: "internet",
+  file_share_link: "share",
+  drive_share_link: "share",
+  app_remove: "delete",
+  spark_delete: "delete",
+  db_create: "create",
+  computer_create: "create",
+  assistant_create: "create",
+};
+
+/**
+ * The category an "Asks first" assistant asks before for this call, or null
+ * when it runs on its own. `computer_cleanup` deletes only with `apply`.
+ * Connector tools are judged by the caller (`connected-apps` for any that
+ * changes something).
+ */
+export function asksFirstCategory(
+  tool: string,
+  args: Readonly<Record<string, unknown>>,
+): AsksFirstCategory | null {
+  if (tool === "computer_cleanup") return args.apply === true ? "delete" : null;
+  return OUTWARD_TOOLS[tool] ?? null;
+}
+
+/** What the person reads about a mode: a name, one line, and the details. */
+export const ASSISTANT_MODE_COPY: Readonly<
+  Record<
+    AssistantMode,
+    { readonly name: string; readonly line: string; readonly details: ReadonlyArray<string> }
+  >
+> = {
+  itself: {
+    name: "Does it itself",
+    line: "Works on its own, like you in your own chats.",
+    details: [
+      "Starts and writes in chats; they run like your own.",
+      "Can approve what those chats ask for.",
+      "Sends email, publishes sites and deploys without asking.",
+      "Still asks, like any chat: showing an app on the internet, deleting apps or Sparks, share links, new computers or databases.",
+    ],
+  },
+  "asks-first": {
+    name: "Asks first",
+    line: "Works on files and chats by itself. Asks you before anything goes out or gets deleted.",
+    details: [
+      ...ASKS_FIRST_CATEGORIES.map((category) => ASKS_FIRST_CATEGORY_LABEL[category]),
+      "Chats it starts edit files freely and ask before running commands.",
+      "Doesn't approve anything for you.",
+    ],
+  },
+};
+
 /** What the person reads: a name and one plain line per preset. */
 export const ASSISTANT_PRESET_COPY: Readonly<
   Record<
@@ -195,28 +327,13 @@ export const ASSISTANT_PRESET_COPY: Readonly<
     { readonly name: string; readonly line: string; readonly details: ReadonlyArray<string> }
   >
 > = {
-  full: {
-    name: "Full",
-    line: "Does everything by itself, except spending money and deleting computers.",
-    details: [
-      "Starts and writes in chats in its projects; they run like your own.",
-      "Can approve what those chats ask for.",
-      "Opens your apps at the levels you set.",
-    ],
-  },
-  helper: {
-    name: "Helper",
-    line: "Works in the projects you pick. Chats it starts ask you before risky steps.",
-    details: [
-      "Starts and writes in chats only in the projects you pick.",
-      "Those chats ask you before editing files or running commands.",
-      "Can't approve anything for you, and can't write in a chat that runs freer than that.",
-      "Opens your apps at the levels you set.",
-    ],
-  },
+  full: ASSISTANT_MODE_COPY.itself,
+  helper: ASSISTANT_MODE_COPY["asks-first"],
+  // Set up before the two modes: it keeps its read-only rules until the
+  // person picks a mode.
   observer: {
-    name: "Observer",
-    line: "Reads chats in the projects you pick and tells you what it sees. Changes nothing.",
+    name: "Reads only",
+    line: "Only reads chats in its projects and tells you what it sees. Changes nothing.",
     details: [
       "Reads chats and their status in the projects you pick.",
       "Doesn't start, write in, stop or approve chats.",
@@ -227,6 +344,6 @@ export const ASSISTANT_PRESET_COPY: Readonly<
   },
 };
 
-/** The honest line under every preset picker (decision 16.10, 21.10). */
+/** The honest line under every mode picker (decision 16.10, 21.10). */
 export const ASSISTANT_PRESET_BOUNDARY_LINE =
-  "On this computer: protection against accidents. For a real boundary — its own computer.";
+  "On this computer: protection against accidents, not a wall. For a real boundary — its own computer.";
