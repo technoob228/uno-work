@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.153 — 2026-10-23
+
+- **One project across your computers.** The same repository on your laptop and a cloud computer is now one project in the sidebar, with its chats from both, instead of a row per computer. A project is recognised by its own GitHub `origin` (a fork is no longer named after the repository it was forked from) or by its Uno cloud name once it syncs through Uno. Two folders of one repository stay two projects. Devices that kept the old sidebar's "separate" grouping move to this once.
+
 ## v0.0.152 — 2026-10-21
 
 - **Rename a project from the sidebar.** Right-click a project, or its ⋯ button, for Rename project and Copy path; double-click the name to rename it. Only the name in the sidebar changes, the folder keeps its own.
