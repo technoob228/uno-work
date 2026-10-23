@@ -16,6 +16,11 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { sanitizeInheritedHarnessEnvironment } from "../ProviderInstanceEnvironment.ts";
+import {
+  prepareSandboxHost,
+  sandboxedCommand,
+  type HarnessSandboxSpec,
+} from "../../sandbox/harnessSandbox.ts";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -63,6 +68,11 @@ export interface AcpSpawnInput {
    * and custom harnesses set it (ACP_HARNESS_FORCE_KILL_AFTER_MS).
    */
   readonly forceKillAfterMs?: number;
+  /**
+   * A restricted assistant's chat: the agent runs inside the assistant
+   * sandbox (sandbox/harnessSandbox.ts). Never through a shell.
+   */
+  readonly sandbox?: HarnessSandboxSpec;
 }
 
 export interface AcpSessionRuntimeOptions {
@@ -253,16 +263,34 @@ const makeAcpSessionRuntime = (
         ),
       );
 
+    const spawnEnv =
+      options.spawn.inheritProcessEnv === false
+        ? (options.spawn.env ?? sanitizeInheritedHarnessEnvironment(process.env))
+        : options.spawn.env
+          ? { ...process.env, ...options.spawn.env }
+          : undefined;
+    const sandbox = options.spawn.sandbox;
+    if (sandbox) {
+      yield* Effect.try({
+        try: () => prepareSandboxHost(sandbox),
+        catch: (cause) =>
+          new EffectAcpErrors.AcpSpawnError({ command: options.spawn.command, cause }),
+      });
+    }
+    const command = sandbox
+      ? sandboxedCommand(
+          sandbox,
+          options.spawn.command,
+          options.spawn.args,
+          (spawnEnv ?? process.env).PATH,
+        )
+      : { command: options.spawn.command, args: options.spawn.args };
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.spawn.command, [...options.spawn.args], {
+        ChildProcess.make(command.command, [...command.args], {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.inheritProcessEnv === false
-            ? { env: options.spawn.env ?? sanitizeInheritedHarnessEnvironment(process.env) }
-            : options.spawn.env
-              ? { env: { ...process.env, ...options.spawn.env } }
-              : {}),
-          shell: options.spawn.shell ?? process.platform === "win32",
+          ...(spawnEnv ? { env: spawnEnv } : {}),
+          shell: sandbox ? false : (options.spawn.shell ?? process.platform === "win32"),
         }),
       )
       .pipe(

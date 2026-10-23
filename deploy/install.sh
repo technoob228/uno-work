@@ -70,6 +70,20 @@ else
   apt-get install -y -qq curl ca-certificates git ripgrep python3 tar build-essential >/dev/null
 fi
 
+# The assistant sandbox ("Only selected projects", apps/server/src/sandbox/
+# harnessSandbox.ts): a restricted assistant's agent runs inside bubblewrap
+# and sees only its projects. Its own step, also on a self-update (which skips
+# the apt step above), and not fatal: without bwrap the daemon refuses
+# restricted assistants instead of running them open.
+if ! command -v bwrap >/dev/null 2>&1; then
+  log "Installing bubblewrap (assistant sandbox)"
+  if ! { apt-get -o DPkg::Lock::Timeout=120 install -y -qq bubblewrap >/dev/null 2>&1 \
+      || { apt-get -o DPkg::Lock::Timeout=120 update -qq >/dev/null 2>&1 \
+        && apt-get -o DPkg::Lock::Timeout=120 install -y -qq bubblewrap >/dev/null 2>&1; }; }; then
+    log "WARNING: bubblewrap could not be installed; assistants limited to selected projects won't run here"
+  fi
+fi
+
 if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt "${NODE_MAJOR}" ]; then
   log "Installing Node.js ${NODE_MAJOR}"
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null

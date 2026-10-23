@@ -40,6 +40,7 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { gatewayBaseUrlForApp, isAppLabel } from "../../appSdk/appTaskLabel.ts";
+import type { HarnessSandboxSpec } from "../../sandbox/harnessSandbox.ts";
 import {
   ACP_HARNESS_FORCE_KILL_AFTER_MS,
   AcpSessionRuntime,
@@ -68,6 +69,8 @@ export interface HermesAcpRuntimeInput extends Omit<
   readonly environment?: NodeJS.ProcessEnv;
   /** Hermes' provider of this session ({@link hermesProviderIdOf}); the gateway when absent. */
   readonly hermesProvider?: string;
+  /** A restricted assistant's chat: `hermes acp` runs inside the sandbox. */
+  readonly sandbox?: HarnessSandboxSpec;
 }
 
 export interface HermesSpawnEnvironmentInput {
@@ -262,7 +265,10 @@ export const makeHermesAcpRuntime = (
     const acpContext = yield* Layer.build(
       AcpSessionRuntime.layer({
         ...input,
-        spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
+        spawn: {
+          ...buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
+          ...(input.sandbox ? { sandbox: input.sandbox } : {}),
+        },
         // Hermes публикует auth-метод с id = активный провайдер: openai-api
         // (шлюз/ключ через env) или провайдер подписки.
         authMethodId: input.hermesProvider ?? HERMES_GATEWAY_PROVIDER,

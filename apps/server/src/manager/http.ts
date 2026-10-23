@@ -34,6 +34,7 @@ import {
   ManagerConnectorBindingRemoveInput,
   ManagerConnectorBindingUpsertInput,
   ManagerCreateAssistantInput,
+  type ManagerAssistantsList,
   ManagerCreateTokenInput,
   ManagerOwnerResolveProposalInput,
   ManagerProposalStatus,
@@ -92,6 +93,10 @@ import {
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
 import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
+import {
+  assistantSandboxAvailable,
+  requireAssistantSandboxForProjects,
+} from "../assistants/assistantSandboxPolicy.ts";
 import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPreset";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerConfig } from "../config.ts";
@@ -404,7 +409,17 @@ export const managerAssistantsListRouteLayer = HttpRouter.add(
               ),
             ),
       ),
-      Effect.map((list) => HttpServerResponse.jsonUnsafe({ assistants: list }, { status: 200 })),
+      // Whether "Only selected projects" can be held here (the assistant sandbox).
+      Effect.flatMap((list) =>
+        assistantSandboxAvailable.pipe(
+          Effect.map((assistantSandbox) =>
+            HttpServerResponse.jsonUnsafe(
+              { assistants: list, assistantSandbox } satisfies ManagerAssistantsList,
+              { status: 200 },
+            ),
+          ),
+        ),
+      ),
       Effect.catch(respondServerError("assistants:list")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -418,6 +433,10 @@ export const managerAssistantsCreateRouteLayer = HttpRouter.add(
     const assistants = yield* ManagerAssistantService;
     const input = yield* HttpServerRequest.schemaBodyJson(ManagerCreateAssistantInput).pipe(
       Effect.mapError(() => new AuthError({ message: "Invalid assistant payload.", status: 400 })),
+    );
+    yield* requireAssistantSandboxForProjects(
+      input.access?.projects ?? "all",
+      (message) => new AuthError({ message, status: 403 }),
     );
     return yield* assistants
       .createAssistant({
@@ -744,6 +763,10 @@ export const managerAssistantAccessRouteLayer = HttpRouter.add(
     const input = yield* HttpServerRequest.schemaBodyJson(AccessPayload).pipe(
       Effect.mapError(() => new AuthError({ message: "Invalid access payload.", status: 400 })),
     );
+    yield* requireAssistantSandboxForProjects(
+      input.projectAllowlist,
+      (message) => new AuthError({ message, status: 403 }),
+    );
     const config = yield* ServerConfig;
     return yield* Effect.gen(function* () {
       const label = assistantTokenLabel(input.projectId);
@@ -789,6 +812,10 @@ export const managerAssistantPresetRouteLayer = HttpRouter.add(
       Effect.mapError(() => new AuthError({ message: "Invalid preset payload.", status: 400 })),
     );
     yield* requireAssistantProject(input.projectId);
+    yield* requireAssistantSandboxForProjects(
+      input.projects,
+      (message) => new AuthError({ message, status: 403 }),
+    );
     return yield* Effect.gen(function* () {
       const updated = yield* applyAssistantAccess(
         { tokens: tokenRepository, stateDir: config.stateDir },

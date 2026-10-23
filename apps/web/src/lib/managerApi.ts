@@ -25,6 +25,7 @@ import type {
   EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
+  ManagerAssistantsList,
   ManagerCapabilityTokenDescriptor,
   ManagerConnectorBindingKind,
   ManagerConnectorBindingTarget,
@@ -116,9 +117,8 @@ export function revokeManagerToken(
   });
 }
 
-export function listAssistants(input: EnvironmentScoped): Promise<{
-  assistants: ReadonlyArray<ManagerAssistantSummary>;
-}> {
+/** Its assistants, and whether it can hold one to selected projects (`assistantSandbox`). */
+export function listAssistants(input: EnvironmentScoped): Promise<ManagerAssistantsList> {
   return environmentFetchJson({
     environmentId: input.environmentId,
     pathname: "/api/manager/assistants",

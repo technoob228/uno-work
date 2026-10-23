@@ -52,7 +52,7 @@ const callerOf = (projectId: string, threadId?: string): ManagerCaller => ({
 });
 
 /** A computer with Uno and the person's projects; everything recorded. */
-function stand(options: { readonly routines?: boolean } = {}) {
+function stand(options: { readonly routines?: boolean; readonly sandbox?: boolean } = {}) {
   const stateDir = tempDir();
   const assistants = new Map<string, string>([[UNO, "Assistant"]]);
   const access = new Map<string, { preset: AssistantPreset; allowlist: ManagerProjectAllowlist }>();
@@ -116,6 +116,7 @@ function stand(options: { readonly routines?: boolean } = {}) {
     showCard: (input) => Effect.sync(() => void cards.push(input)),
     inbox: (post) => Effect.sync(() => void inbox.push(post)),
     routinesAvailable: () => Effect.succeed(options.routines === true),
+    assistantSandboxAvailable: () => Effect.succeed(options.sandbox !== false),
     createRoutine: (_caller, input) => Effect.sync(() => void routines.push(input)),
   };
   const addAssistant = (projectId: string, title: string) => assistants.set(projectId, title);
@@ -178,6 +179,19 @@ describe("assistant_profile_set: rights only narrow", () => {
     expect(s.access.get(SCOUT)?.preset).toBe("helper");
     const team = await readTeam(s.stateDir, SCOUT);
     expect(team.activity.at(-1)?.kind).toBe("denied");
+  });
+
+  it("can't narrow itself to projects where the sandbox can't hold it (a Mac)", async () => {
+    const s = stand({ sandbox: false });
+    s.addAssistant(SCOUT, "Scout");
+    const result = await run(s.team.profileSet(callerOf(SCOUT), { projects: ["p-landing"] }));
+    expect(result._tag).toBe("Failure");
+    const error = (result as { failure: { message: string; status: number } }).failure;
+    expect(error.status).toBe(409);
+    expect(error.message).toContain("Only selected projects needs its own computer");
+    expect(s.access.get(SCOUT)).toBeUndefined();
+    // Other answers still save.
+    expect((await run(s.team.profileSet(callerOf(SCOUT), { roles: ["x"] })))._tag).toBe("Success");
   });
 
   it("only an assistant's own token may call it", async () => {

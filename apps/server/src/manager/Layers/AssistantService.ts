@@ -52,6 +52,7 @@ import * as os from "node:os";
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
 import { resolveAssistantsDir } from "../../assistants/assistantsDir.ts";
 import { accessForNewToken } from "../../assistants/assistantAccess.ts";
+import { requireAssistantSandboxForProjects } from "../../assistants/assistantSandboxPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
@@ -746,6 +747,11 @@ const makeManagerAssistantService = Effect.gen(function* () {
         );
       }
       if (access !== undefined) {
+        // "Only selected projects" only where it can be held (the sandbox).
+        yield* requireAssistantSandboxForProjects(
+          access.projects,
+          (detail) => new ManagerAssistantError({ detail }),
+        );
         // Before the first token: it is issued with this preset.
         yield* Effect.promise(() =>
           writeStoredAccess(

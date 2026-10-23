@@ -23,6 +23,8 @@ import type {
 import type { Effect } from "effect";
 import type { Stream } from "effect";
 
+import type { HarnessSandboxPlan } from "../../sandbox/harnessSandbox.ts";
+
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
 export interface ProviderAdapterCapabilities {
@@ -36,7 +38,23 @@ export interface ProviderAdapterCapabilities {
    * session. Read by the live-harness cap (`harnessBudget.ts`).
    */
   readonly sharesProcessAcrossSessions?: boolean;
+  /**
+   * The adapter spawns its harness inside the assistant sandbox when
+   * `startSession` gets a `harnessSandbox` plan (sandbox/harnessSandbox.ts).
+   * Absent: a restricted assistant's chat on this harness is refused, never
+   * run open (`ProviderService`).
+   */
+  readonly harnessSandbox?: boolean;
 }
+
+/**
+ * What `ProviderService` hands an adapter's `startSession`: the validated
+ * input, plus — for a restricted assistant's chat — the sandbox the harness
+ * must run in. Server-internal; clients never send it.
+ */
+export type ProviderAdapterStartSessionInput = ProviderSessionStartInput & {
+  readonly harnessSandbox?: HarnessSandboxPlan;
+};
 
 export interface ProviderThreadTurnSnapshot {
   readonly id: TurnId;
@@ -59,7 +77,7 @@ export interface ProviderAdapterShape<TError> {
    * Start a provider-backed session.
    */
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderAdapterStartSessionInput,
   ) => Effect.Effect<ProviderSession, TError>;
 
   /**

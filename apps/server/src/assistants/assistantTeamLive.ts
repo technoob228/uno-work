@@ -26,6 +26,7 @@ import { ManagerCapabilityTokenRepository } from "../persistence/Services/Manage
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AgentMailService } from "../setupTools/AgentMailService.ts";
 import { applyAssistantAccess, readAssistantAccess } from "./assistantAccess.ts";
+import { assistantSandboxAvailable } from "./assistantSandboxPolicy.ts";
 import { AssistantTeam, AssistantTeamError, makeAssistantTeam } from "./assistantTeam.ts";
 import { readProfile, writeProfile } from "./localAssistantStore.ts";
 import { AssistantSchedules } from "./schedules.ts";
@@ -197,6 +198,7 @@ export const AssistantTeamLive = Layer.effect(
               ),
           }
         : {}),
+      assistantSandboxAvailable: () => assistantSandboxAvailable,
       routinesAvailable: () =>
         Option.isNone(schedules)
           ? Effect.succeed(false)
