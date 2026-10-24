@@ -92,6 +92,7 @@ import { buildAssistantContextHint, buildHermesHandoffPrompt } from "../acp/herm
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
+import { hermesSandboxExtras } from "../../sandbox/harnessSandboxExtras.ts";
 import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -746,9 +747,31 @@ export function makeHermesAdapter(
             ...(llmRoute ? applyHermesLlmRoute(baseEnvironment, llmRoute) : baseEnvironment),
             HERMES_HOME: threadHermesHome,
           };
+          // A restricted assistant's chat: `hermes acp` in the sandbox with this
+          // chat's home and the shared one it links into; on the person's
+          // Claude plan Hermes runs Claude Code, so Claude's state comes too.
+          const sandbox = input.harnessSandbox
+            ? {
+                plan: input.harnessSandbox,
+                extras: hermesSandboxExtras({
+                  threadHome: threadHermesHome,
+                  sharedHome: baseHermesHome,
+                  skillsDirs: [sharedSkillsRoot(input.harnessSandbox.home)],
+                  ...(llmProvider === "claude"
+                    ? {
+                        claude: {
+                          claudeHome: input.harnessSandbox.home,
+                          workDirs: input.harnessSandbox.writableDirs,
+                        },
+                      }
+                    : {}),
+                }),
+              }
+            : undefined;
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings: effectiveHermesSettings,
             hermesProvider,
+            ...(sandbox ? { sandbox } : {}),
             ...(Object.keys(sessionEnvironment).length > 0
               ? { environment: sessionEnvironment }
               : {}),
@@ -1447,7 +1470,7 @@ export function makeHermesAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { sessionModelSwitch: "in-session", harnessSandbox: true },
       startSession,
       sendTurn,
       interruptTurn,

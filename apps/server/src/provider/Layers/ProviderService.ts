@@ -36,8 +36,17 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  type ProviderAdapterError,
+  ProviderAdapterRequestError,
+  ProviderValidationError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import {
+  HarnessSandboxPolicy,
+  harnessSandboxSignature,
+  type HarnessSandboxDecision,
+} from "../Services/HarnessSandboxPolicy.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -71,6 +80,15 @@ export interface ProviderServiceLiveOptions {
    */
   readonly maxLiveProcesses?: number | null;
 }
+
+/** A restricted assistant's chat on a harness that can't run in the sandbox. */
+export function harnessNotSandboxableMessage(provider: string): string {
+  return `This assistant works only in its selected projects, and the ${provider} agent can't be held to them on this computer. Start the chat on Claude Code, Codex or Hermes, or give the assistant All projects.`;
+}
+
+/** What a sandbox decision adds to the adapter's start input. */
+const sandboxStartFields = (decision: HarnessSandboxDecision) =>
+  decision._tag === "sandbox" ? { harnessSandbox: decision.plan } : {};
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -215,6 +233,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  // Restricted assistants' chats run in the sandbox (or not at all); see
+  // HarnessSandboxPolicy. Absent (tests): every chat runs as always.
+  const sandboxPolicy = Option.getOrUndefined(yield* Effect.serviceOption(HarnessSandboxPolicy));
+  // The sandbox each live session was started with: a session whose
+  // decision changed since (the person narrowed or widened the assistant's
+  // projects) is restarted before its next turn.
+  const sandboxSignatures = new Map<ThreadId, string>();
 
   // Единая точка, через которую проходит всё, что отдают харнессы: вывод
   // инструментов, текст ассистента, ошибки. Маскируем секреты здесь — до
@@ -251,6 +276,44 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               : "Provider instance id is required.",
           ),
         );
+
+  /**
+   * The sandbox decision for a session about to start: the plan to hand the
+   * adapter (`undefined` = run as always), or the turn's error when a
+   * restricted assistant's chat can't be held to its projects.
+   */
+  const resolveHarnessSandbox = (input: {
+    readonly threadId: ThreadId;
+    readonly cwd: string | undefined;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+  }): Effect.Effect<HarnessSandboxDecision, ProviderAdapterRequestError> =>
+    Effect.gen(function* () {
+      if (sandboxPolicy === undefined) return { _tag: "none" } as const;
+      const decision = yield* sandboxPolicy.decide({ threadId: input.threadId, cwd: input.cwd });
+      if (decision._tag === "refuse") {
+        return yield* new ProviderAdapterRequestError({
+          provider: input.adapter.provider,
+          method: "assistant-sandbox",
+          detail: decision.message,
+        });
+      }
+      if (decision._tag === "sandbox" && input.adapter.capabilities.harnessSandbox !== true) {
+        return yield* new ProviderAdapterRequestError({
+          provider: input.adapter.provider,
+          method: "assistant-sandbox",
+          detail: harnessNotSandboxableMessage(input.adapter.provider),
+        });
+      }
+      if (decision._tag === "sandbox") {
+        yield* Effect.logInfo("provider.session.sandboxed", {
+          threadId: input.threadId,
+          provider: input.adapter.provider,
+          assistant: decision.plan.assistantProjectId,
+          writableDirs: decision.plan.writableDirs,
+        });
+      }
+      return decision;
+    });
 
   const upsertSessionBinding = (
     session: ProviderSession,
@@ -393,6 +456,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
+      const sandbox = yield* resolveHarnessSandbox({
+        threadId: input.binding.threadId,
+        cwd: persistedCwd,
+        adapter,
+      });
       yield* enforceLiveProcessCap({
         threadId: input.binding.threadId,
         instanceId: bindingInstanceId,
@@ -406,7 +474,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
         runtimeMode: input.binding.runtimeMode ?? "full-access",
+        ...sandboxStartFields(sandbox),
       });
+      sandboxSignatures.set(input.binding.threadId, harnessSandboxSignature(sandbox));
       if (resumed.provider !== adapter.provider) {
         return yield* toValidationError(
           input.operation,
@@ -662,13 +732,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        const sandbox = yield* resolveHarnessSandbox({ threadId, cwd: effectiveCwd, adapter });
         yield* enforceLiveProcessCap({ threadId, instanceId: resolvedInstanceId, adapter });
         const session = yield* adapter.startSession({
           ...input,
           providerInstanceId: resolvedInstanceId,
           ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
+          ...sandboxStartFields(sandbox),
         });
+        sandboxSignatures.set(threadId, harnessSandboxSignature(sandbox));
 
         if (session.provider !== adapter.provider) {
           return yield* toValidationError(
@@ -711,6 +784,49 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  /**
+   * Before a turn on a live session: if the chat's sandbox decision changed
+   * since the session started (its assistant's projects were narrowed or
+   * widened), stop it — the turn then resumes it under the new decision. A
+   * chat that may no longer run at all is stopped and the turn refused.
+   */
+  const reconcileHarnessSandbox = Effect.fn("reconcileHarnessSandbox")(function* (
+    threadId: ThreadId,
+  ) {
+    if (sandboxPolicy === undefined) return;
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    if (binding?.providerInstanceId === undefined) return;
+    const adapter = yield* registry.getByInstance(binding.providerInstanceId);
+    if (!(yield* adapter.hasSession(threadId))) return;
+    const live = (yield* adapter.listSessions()).find((session) => session.threadId === threadId);
+    const cwd = live?.cwd ?? readPersistedCwd(binding.runtimePayload);
+    const decision = yield* sandboxPolicy.decide({ threadId, cwd });
+    const started = sandboxSignatures.get(threadId) ?? "none";
+    if (harnessSandboxSignature(decision) === started) return;
+    yield* Effect.logInfo("provider.session.sandbox-changed", {
+      threadId,
+      provider: adapter.provider,
+      from: started === "none" ? "none" : "sandbox",
+      to: decision._tag,
+    });
+    yield* adapter.stopSession(threadId).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider.session.sandbox-restart-stop-failed", {
+          threadId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+    sandboxSignatures.delete(threadId);
+    if (decision._tag === "refuse") {
+      return yield* new ProviderAdapterRequestError({
+        provider: adapter.provider,
+        method: "assistant-sandbox",
+        detail: decision.message,
+      });
+    }
+  });
+
   const sendTurn: ProviderServiceShape["sendTurn"] = Effect.fn("sendTurn")(function* (rawInput) {
     const parsed = yield* decodeInputOrValidationError({
       operation: "ProviderService.sendTurn",
@@ -737,6 +853,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
     return yield* Effect.gen(function* () {
+      yield* reconcileHarnessSandbox(input.threadId);
       const routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
@@ -918,6 +1035,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
+        sandboxSignatures.delete(input.threadId);
         forgetSessionActivity(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,

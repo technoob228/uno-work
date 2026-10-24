@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Exit, Layer, Scope } from "effect";
@@ -71,6 +73,51 @@ describe("ACP harness spawn environment", () => {
     const env = await captureEnv({ command: "x", args: [], env: { FOO: "1" } });
     expect(env?.FOO).toBe("1");
     expect(env?.UNO_WORK_API_KEY).toBeDefined();
+  });
+});
+
+describe("ACP harness in the assistant sandbox", () => {
+  it("runs the agent through bwrap, never a shell, the agent's argv after --", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-sbx-"));
+    const seen: Array<{ command: string; args: ReadonlyArray<string>; shell: unknown }> = [];
+    const spawner = ChildProcessSpawner.make((command) => {
+      if (command._tag === "StandardCommand") {
+        seen.push({ command: command.command, args: command.args, shell: command.options.shell });
+      }
+      return Effect.die("spawn refused in test");
+    });
+    const spawn: AcpSpawnInput = {
+      ...buildHermesAcpSpawnInput(null, "/tmp", { PATH: "/usr/bin" }),
+      shell: true,
+      sandbox: {
+        plan: {
+          bwrapPath: "/usr/bin/bwrap",
+          home: "/home/unowork",
+          cwd: "/home/unowork/projects/shop",
+          writableDirs: ["/home/unowork/projects/shop"],
+          hiddenDirs: [],
+          tmpDir,
+          assistantProjectId: "assistant-ana",
+        },
+        extras: { mounts: [] },
+      },
+    };
+    await Effect.runPromiseExit(
+      Layer.build(
+        AcpSessionRuntime.layer({
+          spawn,
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }).pipe(Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner))),
+      ).pipe(Effect.scoped),
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.command).toBe("/usr/bin/bwrap");
+    expect(seen[0]!.shell).toBe(false);
+    expect(seen[0]!.args.slice(-3)).toEqual(["--", "hermes", "acp"]);
+    expect(seen[0]!.args).toContain("--unshare-pid");
   });
 });
 

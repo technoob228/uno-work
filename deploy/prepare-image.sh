@@ -418,6 +418,14 @@ fi
 [ -x /opt/uno-work/bin/uno-work-daemon ] \
   || die "/opt/uno-work/bin/uno-work-daemon (node link) missing or broken — rerun install.sh"
 
+# 13. Песочница ассистентов («Only selected projects», install.sh): без bwrap
+# ассистент с выбранными проектами на клонах не запустится (демон откажет).
+log "Проверяю bubblewrap (песочница ассистентов)"
+command -v bwrap >/dev/null 2>&1 || die "bubblewrap is not installed — rerun install.sh"
+sudo -u "${SERVICE_USER}" bwrap --unshare-user --unshare-pid --unshare-ipc --unshare-uts \
+  --die-with-parent --new-session --ro-bind / / --proc /proc --dev /dev true >/dev/null 2>&1 \
+  || die "bwrap does not start a sandbox as ${SERVICE_USER} (user namespaces off?) — check sysctl kernel.unprivileged_userns_clone / AppArmor"
+
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable ssh uno-work-sshkeys.service uno-work-hostname.service uno-work-identity.service uno-work-identity.path >/dev/null 2>&1 || true
 

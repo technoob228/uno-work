@@ -1409,6 +1409,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : {}),
           ...(mcpArgs.length > 0 ? { extraArgs: mcpArgs } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          ...(input.harnessSandbox ? { sandbox: input.harnessSandbox } : {}),
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
@@ -1699,6 +1700,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      harnessSandbox: true,
     },
     startSession,
     sendTurn,

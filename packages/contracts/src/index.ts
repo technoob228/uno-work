@@ -24,6 +24,7 @@ export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./orchestration.ts";
 export * from "./manager.ts";
+export * from "./assistantSandbox.ts";
 export * from "./plugins.ts";
 export * from "./transcription.ts";
 export * from "./video.ts";

@@ -72,6 +72,7 @@ import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { refusalMessage } from "../unoWork/policy.ts";
 import { askCardQuestion, newAskCardRequestId } from "./askCards.ts";
 import { assistantOfTokenLabel } from "./assistantAccess.ts";
+import { assistantSandboxGrantDenial } from "./assistantSandboxRules.ts";
 import { readAppAccess, writeAppAccess } from "./localAssistantStore.ts";
 import {
   EMPTY_TEAM,
@@ -161,6 +162,11 @@ export interface AssistantTeamDeps {
   readonly inbox: (post: InboxPost) => Effect.Effect<void>;
   /** Routines (schedules) run here: a cloud computer linked to the console, not a laptop. */
   readonly routinesAvailable: () => Effect.Effect<boolean>;
+  /**
+   * "Only selected projects" can be held here (the assistant sandbox). Absent
+   * (tests): yes. Where it can't, narrowing to projects is refused.
+   */
+  readonly assistantSandboxAvailable?: () => Effect.Effect<boolean>;
   /**
    * The computer's mailbox address (`name-otter@uno4.me`), or null when mail
    * isn't there (the account's flag is off, not a cloud computer). Absent: no mail.
@@ -599,6 +605,16 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           apps:
             input.apps === undefined ? member.grant.apps : { ...member.grant.apps, ...input.apps },
         };
+        if (
+          next.projects !== "all" &&
+          JSON.stringify(next.projects) !== JSON.stringify(member.grant.projects)
+        ) {
+          const sandbox = deps.assistantSandboxAvailable
+            ? yield* deps.assistantSandboxAvailable()
+            : true;
+          const denial = assistantSandboxGrantDenial(next.projects, sandbox);
+          if (denial !== null) return yield* fail(denial, 409);
+        }
         const known = yield* deps.listProjects();
         const wider = readableLost(grantBeyond(member.grant, next), known);
         if (wider.length > 0) {

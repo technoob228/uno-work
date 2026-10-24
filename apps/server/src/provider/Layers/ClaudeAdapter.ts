@@ -6,6 +6,8 @@
  *
  * @module ClaudeAdapterLive
  */
+import * as nodePath from "node:path";
+
 import {
   type CanUseTool,
   query,
@@ -76,6 +78,9 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { isUnoGatewayBillingDetail, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
+import { spawnSandboxedProcess, type HarnessSandboxSpec } from "../../sandbox/harnessSandbox.ts";
+import { claudeSandboxExtras } from "../../sandbox/harnessSandboxExtras.ts";
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -2899,6 +2904,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const claudeBinaryPath = claudeSettings.binaryPath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
+      // A restricted assistant's chat: Claude Code runs inside the sandbox
+      // (sandbox/harnessSandbox.ts) with its own state and sign-in.
+      const sandboxSpec: HarnessSandboxSpec | undefined = input.harnessSandbox
+        ? {
+            plan: input.harnessSandbox,
+            extras: claudeSandboxExtras({
+              claudeHome:
+                claudeSettings.homePath.trim().length > 0
+                  ? nodePath.resolve(expandHomePath(claudeSettings.homePath.trim()))
+                  : input.harnessSandbox.home,
+              workDirs: input.harnessSandbox.writableDirs,
+            }),
+          }
+        : undefined;
       const modelSelection =
         input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
@@ -2981,6 +3000,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         },
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
+        ...(sandboxSpec
+          ? {
+              spawnClaudeCodeProcess: (spawnOptions) =>
+                spawnSandboxedProcess(sandboxSpec, {
+                  ...spawnOptions,
+                  onExit: (code, stderrTail) => {
+                    if (code === 0 || code === null) return;
+                    runFork(
+                      Effect.logWarning("claude.sandbox.exit", {
+                        threadId,
+                        code,
+                        stderr: stderrTail.slice(-1_000),
+                      }),
+                    );
+                  },
+                }),
+            }
+          : {}),
       };
 
       yield* Effect.annotateCurrentSpan({
@@ -3006,6 +3043,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.settings_json": JSON.stringify(settings),
         "claude.query.extra_args_json": JSON.stringify(extraArgs),
         "claude.query.path_to_executable": claudeBinaryPath,
+        "claude.query.sandboxed": sandboxSpec !== undefined,
       });
 
       const queryRuntime = yield* Effect.try({
@@ -3336,6 +3374,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      harnessSandbox: true,
     },
     startSession,
     sendTurn,

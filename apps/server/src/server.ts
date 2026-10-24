@@ -74,6 +74,7 @@ import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRe
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { CustomMcpServersLive } from "./mcp/customMcpServers.ts";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import { AssistantHarnessSandboxPolicyLive } from "./assistants/assistantSandboxPolicy.ts";
 import { currentHarnessBudget } from "./provider/harnessBudget.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
@@ -323,6 +324,11 @@ const ProviderServiceBudgetedLive = Layer.unwrap(
 );
 
 const ProviderLayerLive = ProviderServiceBudgetedLive.pipe(
+  // Restricted assistants' chats run their harness in the sandbox, or not at
+  // all (assistants/assistantSandboxPolicy.ts). Without this layer every chat
+  // would run open: keep it here. Merged: the provider command reactor asks
+  // it too (no harness title runs for sandboxed chats).
+  Layer.provideMerge(AssistantHarnessSandboxPolicyLive),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );

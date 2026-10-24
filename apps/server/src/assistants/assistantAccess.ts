@@ -63,10 +63,16 @@ export function accessViewOf(
 
 /**
  * The live token's access; without one, the stored copy; without that, Full
- * in its own workspace only (a missing token never widens access).
+ * in its own workspace only (a missing token never widens access) — or
+ * `unsetAllowlist` when the caller says otherwise (the sandbox: nothing set
+ * means what a new token gets, All projects; see assistantSandboxPolicy.ts).
  */
 export const readAssistantAccess = (
-  deps: { readonly tokens: TokenReader; readonly stateDir: string },
+  deps: {
+    readonly tokens: TokenReader;
+    readonly stateDir: string;
+    readonly unsetAllowlist?: ManagerProjectAllowlist;
+  },
   projectId: string,
 ): Effect.Effect<AssistantAccessView> =>
   Effect.gen(function* () {
@@ -76,7 +82,7 @@ export const readAssistantAccess = (
     if (Option.isSome(token)) return accessViewOf(projectId, token.value);
     const stored = yield* Effect.promise(() => readStoredAccess(deps.stateDir, projectId));
     if (stored !== null) return accessViewOf(projectId, stored);
-    return { projectId, preset: DEFAULT_ASSISTANT_PRESET, allowlist: [] };
+    return { projectId, preset: DEFAULT_ASSISTANT_PRESET, allowlist: deps.unsetAllowlist ?? [] };
   });
 
 /**
@@ -88,6 +94,7 @@ export const assistantOfThread = (
     readonly tokens: TokenReader;
     readonly stateDir: string;
     readonly threads: ReadonlyArray<OwnedThread>;
+    readonly unsetAllowlist?: ManagerProjectAllowlist;
   },
   threadId: string,
 ): Effect.Effect<AssistantAccessView | null> =>
