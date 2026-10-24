@@ -50,7 +50,7 @@ import {
   type ManagerConnectorBinding,
   type ManagerConnectorBindingView,
 } from "@t3tools/contracts";
-import { Effect, Option, Schema } from "effect";
+import { Data, Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { isDirectLocalRequest } from "../auth/loopbackPeer.ts";
@@ -1385,6 +1385,8 @@ export const managerAssistantMailRouteLayer = HttpRouter.add(
 
 // ── Its picture (Misha 23.10) ──────────────────────────────────────────
 
+class AvatarDrawError extends Data.TaggedError("AvatarDrawError")<{ readonly message: string }> {}
+
 const assistantWorkspaceRoot = (projectId: ProjectId) =>
   Effect.gen(function* () {
     const projections = yield* ProjectionSnapshotQuery;
@@ -1479,7 +1481,10 @@ export const managerAssistantAvatarGenerateRouteLayer = HttpRouter.add(
     return yield* Effect.tryPromise({
       try: () =>
         requestGatewayImage({ baseUrl: UNO_GATEWAY_BASE_URL, apiKey, prompt, size: "1024x1024" }),
-      catch: (cause) => cause,
+      catch: (cause) =>
+        new AvatarDrawError({
+          message: cause instanceof Error ? cause.message : "Uno AI couldn't draw it.",
+        }),
     }).pipe(
       Effect.map((image) => {
         const format = avatarFormat(image.bytes) ?? "png";
@@ -1493,10 +1498,7 @@ export const managerAssistantAvatarGenerateRouteLayer = HttpRouter.add(
         Effect.succeed(
           HttpServerResponse.jsonUnsafe(
             {
-              error:
-                cause instanceof Error
-                  ? cause.message.replace(/ Tell the person[^.]*\./, "")
-                  : "Uno AI couldn't draw it.",
+              error: cause.message.replace(/ Tell the person[^.]*\./, ""),
             },
             { status: 502 },
           ),
