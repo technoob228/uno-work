@@ -14,12 +14,14 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 
-import { BWRAP_PROBE_ARGS } from "./harnessSandbox.ts";
+import { BWRAP_PROBE_ARGS, bwrapInvocation } from "./harnessSandbox.ts";
 
 export interface AssistantSandboxCapability {
   readonly available: boolean;
   /** The bwrap that passed the probe. */
   readonly bwrapPath: string | null;
+  /** What runs it (`setpriv` dropping capabilities), empty for bwrap itself. */
+  readonly launcher?: ReadonlyArray<string>;
   /** Why not, for logs. */
   readonly reason: string | null;
 }
@@ -27,6 +29,8 @@ export interface AssistantSandboxCapability {
 export interface SandboxProbeDeps {
   readonly platform: NodeJS.Platform;
   readonly findBwrap: () => string | null;
+  /** `setpriv` on this computer, or null. */
+  readonly findSetpriv?: () => string | null;
   /** Exit code of `bwrap args`, or null when it could not run / timed out. */
   readonly run: (command: string, args: ReadonlyArray<string>) => Promise<number | null>;
 }
@@ -71,9 +75,29 @@ function runProbe(command: string, args: ReadonlyArray<string>): Promise<number 
   });
 }
 
+const SETPRIV_CANDIDATES = ["/usr/bin/setpriv", "/bin/setpriv"] as const;
+
+function findSetprivOnHost(): string | null {
+  for (const candidate of SETPRIV_CANDIDATES) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // next
+    }
+  }
+  return null;
+}
+
+/** `setpriv` clearing inheritable and ambient capabilities before bwrap. */
+export function setprivLauncher(setprivPath: string): ReadonlyArray<string> {
+  return [setprivPath, "--inh-caps=-all", "--ambient-caps=-all", "--"];
+}
+
 const liveDeps: SandboxProbeDeps = {
   platform: process.platform,
   findBwrap: () => findBwrapOnHost(),
+  findSetpriv: () => findSetprivOnHost(),
   run: runProbe,
 };
 
@@ -87,7 +111,10 @@ export async function probeAssistantSandbox(
   if (bwrapPath === null) {
     return { available: false, bwrapPath: null, reason: "bubblewrap (bwrap) is not installed" };
   }
-  const code = await deps.run(bwrapPath, BWRAP_PROBE_ARGS);
+  const setpriv = deps.findSetpriv?.() ?? null;
+  const launcher = setpriv === null ? [] : setprivLauncher(setpriv);
+  const probe = bwrapInvocation(launcher, bwrapPath, BWRAP_PROBE_ARGS);
+  const code = await deps.run(probe.command, probe.args);
   if (code !== 0) {
     return {
       available: false,
@@ -98,7 +125,7 @@ export async function probeAssistantSandbox(
           : `bwrap exited with ${code} (user namespaces may be disabled)`,
     };
   }
-  return { available: true, bwrapPath, reason: null };
+  return { available: true, bwrapPath, launcher, reason: null };
 }
 
 let cached: { readonly at: number; readonly value: Promise<AssistantSandboxCapability> } | null =

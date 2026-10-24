@@ -128,6 +128,9 @@ export function decideAssistantSandbox(input: SandboxDecisionInput): HarnessSand
     _tag: "sandbox",
     plan: {
       bwrapPath: input.capability.bwrapPath,
+      ...(input.capability.launcher && input.capability.launcher.length > 0
+        ? { launcher: input.capability.launcher }
+        : {}),
       home: nodePath.resolve(input.home),
       cwd,
       writableDirs,

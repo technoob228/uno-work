@@ -23,10 +23,32 @@ describe("probeAssistantSandbox", () => {
     await expect(probeAssistantSandbox(deps({ run }))).resolves.toEqual({
       available: true,
       bwrapPath: "/usr/bin/bwrap",
+      launcher: [],
       reason: null,
     });
     expect(run).toHaveBeenCalledWith("/usr/bin/bwrap", BWRAP_PROBE_ARGS);
     expect(BWRAP_PROBE_ARGS).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid"]));
+  });
+
+  it("runs bwrap through setpriv when it is there (the daemon's ambient port-80 capability)", async () => {
+    const run = vi.fn(async () => 0);
+    const result = await probeAssistantSandbox(
+      deps({ run, findSetpriv: () => "/usr/bin/setpriv" }),
+    );
+    expect(result.available).toBe(true);
+    expect(result.launcher).toEqual([
+      "/usr/bin/setpriv",
+      "--inh-caps=-all",
+      "--ambient-caps=-all",
+      "--",
+    ]);
+    expect(run).toHaveBeenCalledWith("/usr/bin/setpriv", [
+      "--inh-caps=-all",
+      "--ambient-caps=-all",
+      "--",
+      "/usr/bin/bwrap",
+      ...BWRAP_PROBE_ARGS,
+    ]);
   });
 
   it("is not available on a Mac (no probe at all)", async () => {

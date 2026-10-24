@@ -40,6 +40,11 @@ import * as nodePath from "node:path";
 export interface HarnessSandboxPlan {
   /** The bubblewrap binary that passed the capability probe. */
   readonly bwrapPath: string;
+  /**
+   * What runs bwrap (see {@link bwrapInvocation}): `setpriv` dropping the
+   * daemon's capabilities first, or nothing.
+   */
+  readonly launcher?: ReadonlyArray<string>;
   /** The person's home (`$HOME` of the daemon). */
   readonly home: string;
   /** The chat's working folder (one of {@link writableDirs}). */
@@ -333,10 +338,29 @@ export function sandboxedCommand(
           plan: spec.plan,
           extras: { ...spec.extras, mounts: [...extraMounts, ...spec.extras.mounts] },
         };
-  return {
-    command: spec.plan.bwrapPath,
-    args: [...buildBwrapArgs(withCommand, inspect), "--", command, ...args],
-  };
+  return bwrapInvocation(spec.plan.launcher ?? [], spec.plan.bwrapPath, [
+    ...buildBwrapArgs(withCommand, inspect),
+    "--",
+    command,
+    ...args,
+  ]);
+}
+
+/**
+ * bwrap run through `launcher`. The daemon on a cloud computer keeps one
+ * ambient capability (port 80, CAP_NET_BIND_SERVICE); bwrap that is not
+ * setuid refuses to start with any capability ("Unexpected capabilities but
+ * not setuid"), so the launcher is `setpriv` clearing them first. The probe
+ * and the real spawn go the same way.
+ */
+export function bwrapInvocation(
+  launcher: ReadonlyArray<string>,
+  bwrapPath: string,
+  args: ReadonlyArray<string>,
+): { readonly command: string; readonly args: ReadonlyArray<string> } {
+  const [head, ...rest] = launcher;
+  if (head === undefined) return { command: bwrapPath, args };
+  return { command: head, args: [...rest, bwrapPath, ...args] };
 }
 
 /** The last bytes of a sandboxed harness's stderr, for the log when it fails. */

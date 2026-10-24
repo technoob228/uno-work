@@ -280,6 +280,25 @@ describe("sandboxedCommand", () => {
     expect(wrapped.command).toBe("/usr/bin/bwrap");
     expect(wrapped.args.slice(-3)).toEqual(["--", "hermes", "acp"]);
   });
+
+  it("starts bwrap through the plan's launcher (setpriv dropping capabilities)", () => {
+    const launcher = ["/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--"];
+    const wrapped = sandboxedCommand(
+      { plan: { ...PLAN, launcher }, extras: { mounts: [] } },
+      "hermes",
+      ["acp"],
+      undefined,
+      inspect,
+    );
+    expect(wrapped.command).toBe("/usr/bin/setpriv");
+    expect(wrapped.args.slice(0, 4)).toEqual([
+      "--inh-caps=-all",
+      "--ambient-caps=-all",
+      "--",
+      PLAN.bwrapPath,
+    ]);
+    expect(wrapped.args.slice(-3)).toEqual(["--", "hermes", "acp"]);
+  });
 });
 
 const resolveTo = (path: string | null) => () => path;
