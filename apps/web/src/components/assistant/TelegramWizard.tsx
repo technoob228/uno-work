@@ -247,7 +247,7 @@ export function TelegramWizard(props: {
         {step === "bot" ? (
           <div className="flex flex-col gap-2 pl-7 text-sm">
             <p className="text-muted-foreground">
-              Its own bot: its own name and chat in your Telegram. About a minute:
+              Its own bot: its own name and chat in your Telegram.
             </p>
             <ol
               className="flex list-decimal flex-col gap-0.5 pl-5 text-muted-foreground"

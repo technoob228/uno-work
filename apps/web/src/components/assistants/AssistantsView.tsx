@@ -763,7 +763,7 @@ const WHERE_OPTIONS: ReadonlyArray<{
   {
     id: "telegram",
     title: "Telegram",
-    body: "Its own bot: about a minute in @BotFather.",
+    body: "Its own bot, made in @BotFather.",
     icon: <TelegramMark className="size-5" />,
   },
   {

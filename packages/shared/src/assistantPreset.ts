@@ -347,3 +347,7 @@ export const ASSISTANT_PRESET_COPY: Readonly<
 /** The honest line under every mode picker (decision 16.10, 21.10). */
 export const ASSISTANT_PRESET_BOUNDARY_LINE =
   "On this computer: protection against accidents, not a wall. For a real boundary — its own computer.";
+
+/** The same line where the computer holds an assistant to its projects (the sandbox). */
+export const ASSISTANT_PRESET_SANDBOX_LINE =
+  "On this computer, Only selected projects is a real boundary: your other files and keys don't exist for it.";

@@ -125,7 +125,7 @@ export function MemoryFile(props: {
   const lines = (file.data?.content ?? "")
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .filter((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("<!--"))
     .slice(0, open ? undefined : 3);
   return (
     <button

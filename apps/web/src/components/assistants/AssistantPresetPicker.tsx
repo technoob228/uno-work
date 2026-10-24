@@ -11,6 +11,7 @@ import {
   ASSISTANT_MODES,
   ASSISTANT_MODE_COPY,
   ASSISTANT_PRESET_BOUNDARY_LINE,
+  ASSISTANT_PRESET_SANDBOX_LINE,
   ASSISTANT_PRESET_COPY,
   type AssistantMode,
 } from "@t3tools/shared/assistantPreset";
@@ -186,7 +187,7 @@ export function AssistantPresetPicker({
         data-testid={`${testId}-honest`}
       >
         <ShieldIcon className="mt-0.5 size-3.5 shrink-0" />
-        <span>{ASSISTANT_PRESET_BOUNDARY_LINE}</span>
+        <span>{sandbox ? ASSISTANT_PRESET_SANDBOX_LINE : ASSISTANT_PRESET_BOUNDARY_LINE}</span>
       </p>
     </div>
   );

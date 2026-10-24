@@ -103,7 +103,7 @@ function ConnectTelegramCard(props: { readonly member: TeamMember }) {
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium">Connect Telegram</span>
           <span className="block text-xs text-muted-foreground">
-            Talk to {name} from your phone, in a bot of its own. About a minute.
+            Talk to {name} from your phone, in a bot of its own.
           </span>
         </span>
         {open ? null : (
