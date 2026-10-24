@@ -20,5 +20,11 @@ import { ManagerAssistantSummary } from "./manager.ts";
 export const ManagerAssistantsList = Schema.Struct({
   assistants: Schema.Array(ManagerAssistantSummary),
   assistantSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * The account has assistants (`assistants_mvp`), as this computer's daemon
+   * sees it with its own key — for a page opened at the computer's own
+   * address, where the account isn't reachable from the browser.
+   */
+  assistantsEnabled: Schema.optional(Schema.Boolean),
 });
 export type ManagerAssistantsList = typeof ManagerAssistantsList.Type;

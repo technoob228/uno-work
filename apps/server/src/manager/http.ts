@@ -423,14 +423,25 @@ export const managerAssistantsListRouteLayer = HttpRouter.add(
       ),
       // Whether "Only selected projects" can be held here (the assistant sandbox).
       Effect.flatMap((list) =>
-        assistantSandboxAvailable.pipe(
-          Effect.map((assistantSandbox) =>
-            HttpServerResponse.jsonUnsafe(
-              { assistants: list, assistantSandbox } satisfies ManagerAssistantsList,
-              { status: 200 },
-            ),
-          ),
-        ),
+        Effect.gen(function* () {
+          const assistantSandbox = yield* assistantSandboxAvailable;
+          // Whether the account has assistants, by this computer's own key.
+          const settings = yield* Effect.serviceOption(ServerSettingsService);
+          const assistantsEnabled = Option.isSome(settings)
+            ? yield* settings.value.getSettings.pipe(
+                Effect.flatMap((current) => Effect.promise(() => assistantsMvpEnabled(current))),
+                Effect.orElseSucceed(() => false),
+              )
+            : false;
+          return HttpServerResponse.jsonUnsafe(
+            {
+              assistants: list,
+              assistantSandbox,
+              assistantsEnabled,
+            } satisfies ManagerAssistantsList,
+            { status: 200 },
+          );
+        }),
       ),
       Effect.catch(respondServerError("assistants:list")),
     );
