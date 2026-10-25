@@ -61,3 +61,20 @@ describe("a sandboxed assistant's boundary holds for the daemon-side tools", () 
     expect(boundaryDenial("/anywhere", undefined, home)).toBeNull();
   });
 });
+
+describe("mail attachments land where the caller can read them", () => {
+  it("the person's chat: the home folder; a sandboxed assistant: its chat folder, else its first root", async () => {
+    const { attachmentBase } = await import("./mailTools.ts");
+    const open = {
+      threadId: "t",
+      threadTitle: "Chat",
+      runtimeMode: "full-access" as const,
+      cwd: `${home}/x`,
+    };
+    expect(attachmentBase({ home, caller: open })).toBe(home);
+    const inside = { ...open, cwd: `${home}/projects/site`, boundary };
+    expect(attachmentBase({ home, caller: inside })).toBe(`${home}/projects/site`);
+    const outside = { ...open, cwd: `${home}/elsewhere`, boundary };
+    expect(attachmentBase({ home, caller: outside })).toBe(roots[0]);
+  });
+});

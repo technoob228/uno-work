@@ -28,6 +28,7 @@ import { isSecretSiteFileName } from "../files/sitePublish.ts";
 import { mimeTypeForFileName } from "../files/mimeTypes.ts";
 import type { ObjectSchema } from "./argsSchema.ts";
 import type { ConsoleReply } from "./consoleClient.ts";
+import { boundaryDenial } from "./pathBoundary.ts";
 import type { UnoWorkTool, UnoWorkToolDeps, UnoWorkToolError } from "./tools.ts";
 
 type Deps = UnoWorkToolDeps;
@@ -235,6 +236,20 @@ export function fileNameFromContentDisposition(header: string | undefined): stri
 /** `~/Downloads/mail/<message id>` — the message id is already checked against MAIL_ID_PATTERN. */
 export function attachmentFolder(home: string, messageId: string): string {
   return path.join(home, "Downloads", "mail", messageId);
+}
+
+/**
+ * Where saved attachments go for this caller: the home folder — or, for a
+ * sandboxed assistant (whose home is an empty tmpfs), the chat's own folder
+ * inside its boundary (else its first allowed root), so the file it just
+ * saved is one it can open.
+ */
+export function attachmentBase(deps: Pick<UnoWorkToolDeps, "home" | "caller">): string {
+  const boundary = deps.caller.boundary;
+  if (!boundary) return deps.home;
+  const cwd = deps.caller.cwd;
+  if (cwd && boundaryDenial(cwd, boundary, deps.home) === null) return cwd;
+  return boundary.roots[0] ?? deps.home;
 }
 
 /**
@@ -740,7 +755,7 @@ export function mailTools(kit: MailToolKit): ReadonlyArray<UnoWorkTool> {
             fileNameFromContentDisposition(reply.contentDisposition),
             index,
           );
-          const folder = attachmentFolder(deps.home, id);
+          const folder = attachmentFolder(attachmentBase(deps), id);
           const target = yield* Effect.tryPromise({
             try: async () => {
               await fsp.mkdir(folder, { recursive: true });

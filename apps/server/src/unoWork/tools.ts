@@ -16,6 +16,8 @@
 import { randomInt } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+
+import { boundaryDenial } from "./pathBoundary.ts";
 import { promises as fsp } from "node:fs";
 
 import type {
@@ -145,23 +147,7 @@ export interface UnoWorkCaller {
   readonly boundary?: { readonly roots: ReadonlyArray<string>; readonly name: string } | null;
 }
 
-/** `candidate` is `root` or inside it. */
-export function isWithinRoot(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-/** The path is outside every folder the caller's boundary allows (null = allowed). */
-export function boundaryDenial(
-  absolute: string,
-  boundary: UnoWorkCaller["boundary"],
-  home: string,
-): string | null {
-  if (!boundary) return null;
-  const resolved = path.resolve(absolute);
-  if (boundary.roots.some((root) => isWithinRoot(resolved, path.resolve(root)))) return null;
-  return `${boundary.name} works only in its projects: ${displayPath(resolved, home)} is outside them. The person can widen its projects on the assistant's page.`;
-}
+export { boundaryDenial, isWithinRoot } from "./pathBoundary.ts";
 
 /** What `project_keys` shows: names and where they are, never values. */
 export interface ProjectKeysView {
