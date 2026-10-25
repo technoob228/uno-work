@@ -84,6 +84,7 @@ function useNewThreadState() {
         getComposerDraft,
         applyStickyState,
         setModelSelection,
+        setRuntimeMode,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -188,6 +189,9 @@ function useNewThreadState() {
         });
         applyStickyState(draftId);
         if (startOn) setModelSelection(draftId, startOn);
+        // The composer shows the mode the chat will run in (an assistant's
+        // chat: its own mode), not the default it would otherwise start from.
+        if (options?.runtimeMode) setRuntimeMode(draftId, options.runtimeMode);
         useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
 
         await router.navigate({
