@@ -1,88 +1,34 @@
 import { CircleAlertIcon, HourglassIcon, RotateCwIcon, XIcon } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import {
-  BUSY_AUTO_RETRY_COOLDOWN_MS,
-  TURN_ERROR_COPY as COPY,
-  classifyTurnError,
-} from "./turnErrorNotice";
-
-/** When "busy" was last retried by itself, per chat: one automatic retry, then the person decides. */
-const autoRetriedAt = new Map<string, number>();
-
-/** Tests only. */
-export function resetTurnErrorAutoRetries(): void {
-  autoRetriedAt.clear();
-}
+import { TURN_ERROR_COPY as COPY, classifyTurnError } from "./turnErrorNotice";
 
 /**
  * A failed turn above the composer.
  *
  * "AI is busy" and "the model didn't answer" (turnErrorNotice.ts) are calm
  * lines with "Try again": nothing is lost, the person's last message is sent
- * again. "Busy" counts down and retries once by itself. Any other error keeps
- * its own text; with `onRetry` it gets the same button, without it — the old
- * red alert.
+ * again. No countdown and no retry of its own here: the daemon already
+ * continued the turn by itself (turnErrorRetry, up to two times, with or
+ * without a tab open) before such an error reaches the chat — retrying again
+ * from the tab would double it. Any other error keeps its own text; with
+ * `onRetry` it gets the same button, without it — the old red alert.
  */
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
-  errorKey,
-  threadKey,
   onDismiss,
   onRetry,
   retryDisabled = false,
 }: {
   error: string | null;
-  /** Changes when a new error arrives (same text twice is two errors). */
-  errorKey?: string | null;
-  /** The chat, for "one automatic retry per chat". */
-  threadKey?: string | null;
   onDismiss?: () => void;
   /** Sends the person's last message again; absent when there is nothing to resend. */
   onRetry?: (() => void) | undefined;
   retryDisabled?: boolean;
 }) {
   const notice = error ? classifyTurnError(error) : null;
-  const busy = notice?.kind === "busy";
-  const identity = error ? `${threadKey ?? ""}|${errorKey ?? ""}|${error}` : null;
-  const onRetryRef = useRef(onRetry);
-  onRetryRef.current = onRetry;
-
-  // Decided once per error: does this "busy" still have its automatic retry?
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [stillBusy, setStillBusy] = useState(false);
-  useEffect(() => {
-    if (!identity || !busy || !notice) {
-      setCountdown(null);
-      setStillBusy(false);
-      return;
-    }
-    const chat = threadKey ?? "";
-    const last = autoRetriedAt.get(chat);
-    const usedUp = last !== undefined && Date.now() - last < BUSY_AUTO_RETRY_COOLDOWN_MS;
-    setStillBusy(usedUp);
-    setCountdown(usedUp || !onRetryRef.current ? null : notice.retryAfterSeconds);
-    // `notice` is derived from `error`, which is part of `identity`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, busy, threadKey]);
-
-  useEffect(() => {
-    if (countdown === null) return;
-    if (countdown <= 0) {
-      setCountdown(null);
-      if (retryDisabled || !onRetryRef.current) return;
-      autoRetriedAt.set(threadKey ?? "", Date.now());
-      onRetryRef.current();
-      return;
-    }
-    const timer = setTimeout(
-      () => setCountdown((value) => (value === null ? null : value - 1)),
-      1_000,
-    );
-    return () => clearTimeout(timer);
-  }, [countdown, retryDisabled, threadKey]);
 
   if (!error || !notice) return null;
 
@@ -123,21 +69,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   }
 
   const text =
-    notice.kind === "busy"
-      ? stillBusy
-        ? COPY.stillBusy
-        : countdown !== null
-          ? COPY.busyCountdown(countdown)
-          : COPY.busyNoRetry
-      : notice.kind === "no-answer"
-        ? COPY.noAnswer
-        : error;
-  const retryLabel = notice.kind === "busy" && countdown !== null ? COPY.retryNow : COPY.retry;
-  const retry = () => {
-    setCountdown(null);
-    if (notice.kind === "busy") autoRetriedAt.set(threadKey ?? "", Date.now());
-    onRetry?.();
-  };
+    notice.kind === "busy" ? COPY.stillBusy : notice.kind === "no-answer" ? COPY.noAnswer : error;
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">
@@ -157,9 +89,9 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
               type="button"
               data-testid="turn-error-retry"
               disabled={retryDisabled}
-              onClick={retry}
+              onClick={onRetry}
             >
-              {retryLabel}
+              {COPY.retry}
             </Button>
           ) : null}
           {dismiss}

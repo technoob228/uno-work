@@ -37,6 +37,7 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
+import { makeTurnAutoRetryLayer } from "./TurnAutoRetry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -210,7 +211,11 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>;
+    /** How long TurnAutoRetry really waits before continuing a turn. */
+    autoRetryDelayMs?: number;
+  }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -226,7 +231,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const autoRetryDelayMs = options?.autoRetryDelayMs ?? 20;
     const layer = ProviderRuntimeIngestionLive.pipe(
+      Layer.provideMerge(makeTurnAutoRetryLayer({ delayMs: () => autoRetryDelayMs })),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
@@ -351,6 +358,164 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  describe("automatic continuation of a turn Uno AI didn't answer", () => {
+    const UPSTREAM_TIMEOUT =
+      '{"message":"Uno AI didn\'t answer in time — try again.","type":"upstream_timeout","code":"upstream_timeout"}';
+    const isAutoRetryNote = (message: ProviderRuntimeTestMessage) =>
+      message.role === "user" && message.text.startsWith("(Uno Work) Uno AI didn't answer");
+
+    // What OpenCode emits on the gateway's in-stream error: the failed turn,
+    // then the session's runtime.error without a turn id.
+    const failTurn = (harness: Awaited<ReturnType<typeof createHarness>>, turn: string) => {
+      const now = new Date().toISOString();
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-${turn}-started`),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId(turn),
+      });
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-${turn}-failed`),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId(turn),
+        payload: { state: "failed", errorMessage: UPSTREAM_TIMEOUT },
+      });
+      harness.emit({
+        type: "runtime.error",
+        eventId: asEventId(`evt-${turn}-runtime-error`),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        payload: { message: UPSTREAM_TIMEOUT },
+      });
+    };
+
+    it("keeps the thread working, continues it by itself, and settles when the retry succeeds", async () => {
+      const harness = await createHarness({ autoRetryDelayMs: 150 });
+      failTurn(harness, "turn-1");
+      await harness.drain();
+
+      // Waiting for the continuation: working, not "Failed", no error line.
+      let thread = await waitForThread(harness.readModel, (entry) => entry.session !== null);
+      expect(thread.session?.status).toBe("running");
+      expect(thread.session?.activeTurnId).toBeNull();
+      expect(thread.session?.lastError).toBeNull();
+
+      thread = await waitForThread(harness.readModel, (entry) =>
+        entry.messages.some(isAutoRetryNote),
+      );
+      const note = thread.messages.find(isAutoRetryNote);
+      expect(note?.text).toContain("(automatic retry 1 of 2)");
+      expect(note?.text).toContain("Continue the task from where you stopped");
+
+      // The retried turn finishes the task.
+      const now = new Date().toISOString();
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("evt-turn-2-started"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId("turn-2"),
+      });
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-turn-2-completed"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId("turn-2"),
+        payload: { state: "completed" },
+      });
+      thread = await waitForThread(
+        harness.readModel,
+        (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
+      );
+      expect(thread.session?.lastError).toBeNull();
+      expect(thread.messages.filter(isAutoRetryNote)).toHaveLength(1);
+    });
+
+    it("tries twice, then shows the error for the person's Try again", async () => {
+      const harness = await createHarness();
+      failTurn(harness, "turn-1");
+      await waitForThread(
+        harness.readModel,
+        (entry) => entry.messages.filter(isAutoRetryNote).length === 1,
+      );
+      failTurn(harness, "turn-2");
+      const second = await waitForThread(
+        harness.readModel,
+        (entry) => entry.messages.filter(isAutoRetryNote).length === 2,
+      );
+      expect(second.messages.findLast(isAutoRetryNote)?.text).toContain("(automatic retry 2 of 2)");
+      failTurn(harness, "turn-3");
+      const thread = await waitForThread(
+        harness.readModel,
+        (entry) => entry.session?.status === "error",
+      );
+      expect(thread.session?.lastError).toBe(UPSTREAM_TIMEOUT);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const after = await waitForThread(harness.readModel, () => true);
+      expect(after.messages.filter(isAutoRetryNote)).toHaveLength(2);
+    });
+
+    it("does not continue a turn the person stopped while it waited", async () => {
+      const harness = await createHarness({ autoRetryDelayMs: 300 });
+      failTurn(harness, "turn-1");
+      await harness.drain();
+      await waitForThread(harness.readModel, (entry) => entry.session?.status === "running");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-person-stop"),
+          threadId: asThreadId("thread-1"),
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const thread = await waitForThread(harness.readModel, () => true);
+      expect(thread.messages.some(isAutoRetryNote)).toBe(false);
+    });
+
+    it("shows other errors at once", async () => {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("evt-turn-1-started"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId("turn-1"),
+      });
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-turn-1-failed"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId: asTurnId("turn-1"),
+        payload: {
+          state: "failed",
+          errorMessage: "Your AI hours are used up. Top up at https://console.uno4.dev/billing",
+        },
+      });
+      const thread = await waitForThread(
+        harness.readModel,
+        (entry) => entry.session?.status === "error",
+      );
+      expect(thread.session?.lastErrorClass).toBe("billing_error");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const after = await waitForThread(harness.readModel, () => true);
+      expect(after.messages.some(isAutoRetryNote)).toBe(false);
+    });
   });
 
   it("applies provider session.state.changed transitions directly", async () => {
