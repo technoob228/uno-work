@@ -105,7 +105,7 @@ describe("Uno Work environment brief", () => {
     const brief = buildUnoWorkBrief();
     expect(brief).toContain("request_secret");
     expect(brief).toMatch(/Never ask for passwords, API keys or tokens in the chat/);
-    expect(brief).toMatch(/Free: .* Small: .* Plus and up: an always-on cloud Uno Work computer/s);
+    expect(brief).toMatch(/Free: .* Small: .* Plus and up: a cloud Uno Work computer that can stay on/s);
   });
 
   it("task rules: do what was asked, finish with Done / Checked / Your call", () => {
