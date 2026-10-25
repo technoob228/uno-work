@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   FEATURE_FLAGS,
+  PROJECT_GROUPING_RESET_MARKER,
   SIDEBAR_RESET_MARKER,
   featureFlagDefault,
+  groupProjectsAcrossComputersOnce,
   resetOldSidebarsOnce,
   migrateFeatureFlagOverrides,
   readStoredFeatureFlag,
@@ -123,5 +125,46 @@ describe("stage defaults (w0139)", () => {
   it("leaves the other flags as they were on the stage", () => {
     expect(resolveFeatureFlag({}, "navLayouts", true)).toBe(false);
     expect(resolveFeatureFlag({}, "vault", true)).toBe(true);
+  });
+});
+
+describe("groupProjectsAcrossComputersOnce", () => {
+  it("turns the old separate grouping into one project across computers, once", () => {
+    const first = groupProjectsAcrossComputersOnce(
+      { featureFlags: { vault: false }, sidebarProjectGroupingMode: "separate" },
+      "repository_path",
+    );
+    expect(first.changed).toBe(true);
+    expect(first.settings.sidebarProjectGroupingMode).toBe("repository_path");
+    expect(first.settings.featureFlags).toEqual({
+      vault: false,
+      [PROJECT_GROUPING_RESET_MARKER]: true,
+    });
+
+    // Chosen again later (legacy sidebar), it stays.
+    const again = groupProjectsAcrossComputersOnce(
+      { ...first.settings, sidebarProjectGroupingMode: "separate" },
+      "repository_path",
+    );
+    expect(again.changed).toBe(false);
+    expect(again.settings.sidebarProjectGroupingMode).toBe("separate");
+  });
+
+  it("keeps any other grouping and only leaves the marker", () => {
+    const { settings, changed } = groupProjectsAcrossComputersOnce(
+      { featureFlags: {}, sidebarProjectGroupingMode: "repository" },
+      "repository_path",
+    );
+    expect(changed).toBe(true);
+    expect(settings.sidebarProjectGroupingMode).toBe("repository");
+  });
+
+  it("leaves the legacy sidebar's choice alone while it is on", () => {
+    const { settings, changed } = groupProjectsAcrossComputersOnce(
+      { featureFlags: { legacySidebar: true }, sidebarProjectGroupingMode: "separate" },
+      "repository_path",
+    );
+    expect(changed).toBe(false);
+    expect(settings.sidebarProjectGroupingMode).toBe("separate");
   });
 });

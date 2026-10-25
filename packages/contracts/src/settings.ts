@@ -32,7 +32,9 @@ export const SidebarProjectGroupingMode = Schema.Literals([
   "separate",
 ]);
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
-export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
+// One project across computers: the same repository and the same folder in it
+// is one row wherever it is checked out; two folders of one repository stay two.
+export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository_path";
 
 /** Sidebar D groups chats by these, in this order; none — one list, newest first. */
 export const SidebarGroupLevel = Schema.Literals(["computer", "project", "status"]);

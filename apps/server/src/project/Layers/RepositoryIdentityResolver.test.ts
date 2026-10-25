@@ -97,24 +97,100 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
-  it.effect("prefers upstream over origin when both remotes are configured", () =>
+  it.effect("prefers origin over upstream so a fork reads the same on every computer", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const withUpstream = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-upstream-test-",
+      });
+      const originOnly = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-origin-only-test-",
+      });
+
+      yield* git(withUpstream, ["init"]);
+      yield* git(withUpstream, ["remote", "add", "origin", "git@github.com:julius/t3code.git"]);
+      yield* git(withUpstream, ["remote", "add", "upstream", "git@github.com:T3Tools/t3code.git"]);
+      yield* git(originOnly, ["init"]);
+      yield* git(originOnly, ["remote", "add", "origin", "https://github.com/julius/t3code"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const laptop = yield* resolver.resolve(withUpstream);
+      const cloud = yield* resolver.resolve(originOnly);
+
+      expect(laptop?.locator.remoteName).toBe("origin");
+      expect(laptop?.canonicalKey).toBe("github.com/julius/t3code");
+      expect(laptop?.displayName).toBe("julius/t3code");
+      expect(cloud?.canonicalKey).toBe(laptop?.canonicalKey);
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("names a project synced through the Uno cloud by its uno:: remote", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      // Computer A: its own GitHub origin, then "On all my computers" added `uno`.
+      const computerA = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-uno-a-",
+      });
+      // Computer B: `uno project get` cloned it with `-o uno`, no origin.
+      const computerB = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-uno-b-",
+      });
+
+      yield* git(computerA, ["init"]);
+      yield* git(computerA, ["remote", "add", "origin", "git@github.com:misha/notes.git"]);
+      yield* git(computerA, ["remote", "add", "uno", "uno::Notes"]);
+      yield* git(computerB, ["init"]);
+      yield* git(computerB, ["remote", "add", "uno", "uno::notes"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const a = yield* resolver.resolve(computerA);
+      const b = yield* resolver.resolve(computerB);
+
+      expect(a?.canonicalKey).toBe("uno::notes");
+      expect(a?.locator.remoteName).toBe("uno");
+      expect(a?.name).toBe("notes");
+      expect(a?.displayName).toBe("notes");
+      expect(a?.provider).toBe("uno");
+      expect(b?.canonicalKey).toBe("uno::notes");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("ignores a remote called uno that is not an Uno cloud project", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-repository-identity-upstream-test-",
+        prefix: "t3-repository-identity-foreign-uno-",
       });
 
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/t3code.git"]);
-      yield* git(cwd, ["remote", "add", "upstream", "git@github.com:T3Tools/t3code.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@github.com:misha/notes.git"]);
+      yield* git(cwd, ["remote", "add", "uno", "https://example.com/misha/notes.git"]);
 
       const resolver = yield* RepositoryIdentityResolver;
       const identity = yield* resolver.resolve(cwd);
 
-      expect(identity).not.toBeNull();
-      expect(identity?.locator.remoteName).toBe("upstream");
-      expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
-      expect(identity?.displayName).toBe("t3tools/t3code");
+      expect(identity?.canonicalKey).toBe("github.com/misha/notes");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("reads a folder without git through the hidden history Uno keeps for it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const folder = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-snapshot-",
+      });
+      const snapshotGitDir = `${folder}/.uno-git`;
+
+      yield* Effect.promise(() => runProcess("git", ["init", "--bare", "-q", snapshotGitDir]));
+      yield* Effect.promise(() =>
+        runProcess("git", ["--git-dir", snapshotGitDir, "remote", "add", "uno", "uno::finances"]),
+      );
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve(folder);
+
+      expect(identity?.canonicalKey).toBe("uno::finances");
+      expect(normalizeResolvedPath(identity?.rootPath ?? "")).toBe(normalizeResolvedPath(folder));
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 

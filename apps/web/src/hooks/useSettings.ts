@@ -18,7 +18,7 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   UnifiedSettings,
 } from "@t3tools/contracts/settings";
-import { resetOldSidebarsOnce } from "~/featureFlags";
+import { groupProjectsAcrossComputersOnce, resetOldSidebarsOnce } from "~/featureFlags";
 import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
@@ -74,8 +74,12 @@ async function hydrateClientSettings(): Promise<void> {
         ? { ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings }
         : clientSettingsSnapshot;
       const reset = resetOldSidebarsOnce(loaded, DEFAULT_CLIENT_SETTINGS.sidebarEnvironmentScope);
-      if (reset.changed) {
-        persistClientSettings(reset.settings);
+      const grouped = groupProjectsAcrossComputersOnce(
+        reset.settings,
+        DEFAULT_CLIENT_SETTINGS.sidebarProjectGroupingMode,
+      );
+      if (reset.changed || grouped.changed) {
+        persistClientSettings(grouped.settings);
       } else if (persistedSettings) {
         replaceClientSettingsSnapshot(loaded);
       }
