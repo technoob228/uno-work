@@ -23,6 +23,7 @@ import {
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Option, PubSub, Ref, Schema, SchemaIssue, Stream } from "effect";
 
@@ -87,6 +88,13 @@ export function harnessNotSandboxableMessage(provider: string): string {
 }
 
 /** What a sandbox decision adds to the adapter's start input. */
+/** approval-required < auto-accept-edits < full-access (as in @t3tools/shared/assistantPreset). */
+const RUNTIME_RANK: Readonly<Record<RuntimeMode, number>> = {
+  "approval-required": 0,
+  "auto-accept-edits": 1,
+  "full-access": 2,
+};
+
 const sandboxStartFields = (decision: HarnessSandboxDecision) =>
   decision._tag === "sandbox" ? { harnessSandbox: decision.plan } : {};
 
@@ -315,6 +323,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       return decision;
     });
 
+  /**
+   * The mode the request asked for, narrowed to the ceiling of the assistant
+   * the chat belongs to ("Asks first" = auto-accept-edits). The person's own
+   * chats and "Does it itself" assistants: unchanged. Logged when it bites,
+   * so a chat that says "Full access" in the app but asks is explained.
+   */
+  const capRuntimeMode = (threadId: ThreadId, requested: RuntimeMode) =>
+    Effect.gen(function* () {
+      if (sandboxPolicy === undefined) return requested;
+      const ceiling = yield* sandboxPolicy.runtimeCeiling({ threadId });
+      if (ceiling === null || RUNTIME_RANK[requested] <= RUNTIME_RANK[ceiling]) return requested;
+      yield* Effect.logInfo("provider.runtime_mode.capped", {
+        threadId,
+        requested,
+        applied: ceiling,
+      });
+      return ceiling;
+    });
+
   const upsertSessionBinding = (
     session: ProviderSession,
     threadId: ThreadId,
@@ -473,7 +500,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-        runtimeMode: input.binding.runtimeMode ?? "full-access",
+        runtimeMode: yield* capRuntimeMode(
+          input.binding.threadId,
+          input.binding.runtimeMode ?? "full-access",
+        ),
         ...sandboxStartFields(sandbox),
       });
       sandboxSignatures.set(input.binding.threadId, harnessSandboxSignature(sandbox));
@@ -736,6 +766,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* enforceLiveProcessCap({ threadId, instanceId: resolvedInstanceId, adapter });
         const session = yield* adapter.startSession({
           ...input,
+          runtimeMode: yield* capRuntimeMode(threadId, input.runtimeMode),
           providerInstanceId: resolvedInstanceId,
           ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
@@ -865,7 +896,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
-      const turn = yield* routed.adapter.sendTurn(input);
+      const turn = yield* routed.adapter.sendTurn({
+        ...input,
+        runtimeMode: yield* capRuntimeMode(input.threadId, input.runtimeMode),
+      });
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

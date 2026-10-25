@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import type { OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
+import { presetRuntimeCeiling } from "@t3tools/shared/assistantPreset";
 import { Effect, Layer, Option } from "effect";
 
 import { ServerConfig } from "../config.ts";
@@ -82,6 +83,23 @@ export const AssistantHarnessSandboxPolicyLive = Layer.effect(
         return chain;
       });
     return {
+      runtimeCeiling: ({ threadId }) =>
+        Effect.gen(function* () {
+          const chain = yield* threadChain(threadId);
+          const owner = yield* assistantOfThread(
+            { tokens, stateDir: config.stateDir, threads: chain, unsetAllowlist: "all" },
+            threadId,
+          );
+          return owner === null ? null : presetRuntimeCeiling(owner.preset);
+        }).pipe(
+          // Can't tell whose chat it is: no ceiling here — the sandbox decision
+          // above already fails closed for the same read-model trouble.
+          Effect.catchCause((cause) =>
+            Effect.logWarning("assistant runtime ceiling unknown", { threadId, cause }).pipe(
+              Effect.as(null),
+            ),
+          ),
+        ),
       decide: ({ threadId, cwd }) =>
         Effect.gen(function* () {
           const chain = yield* threadChain(threadId);

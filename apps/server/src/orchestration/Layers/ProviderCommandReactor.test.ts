@@ -334,7 +334,10 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(
         sandboxDecision === undefined
           ? Layer.empty
-          : Layer.succeed(HarnessSandboxPolicy, { decide: () => Effect.succeed(sandboxDecision) }),
+          : Layer.succeed(HarnessSandboxPolicy, {
+              decide: () => Effect.succeed(sandboxDecision),
+              runtimeCeiling: () => Effect.succeed(null),
+            }),
       ),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),

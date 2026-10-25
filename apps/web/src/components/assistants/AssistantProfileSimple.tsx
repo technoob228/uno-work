@@ -46,6 +46,8 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
+
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
@@ -286,10 +288,12 @@ export function AssistantProfileSimple(props: {
         threadId: thread.id as ThreadId,
       }),
     });
+  // Its chat opens in its own mode ("Asks first" = edit files, ask before
+  // commands); the daemon caps the harness to it anyway.
   const newChat = () =>
     void handleNewThread(
       scopeProjectRef(member.environmentId as EnvironmentId, member.projectId as ProjectId),
-      { envMode: "local" },
+      { envMode: "local", runtimeMode: assistantOwnRuntimeMode(member.profile.preset) },
     );
   const running = [...member.chats.work, ...member.chats.conversations].filter((thread) => {
     const status = resolveSidebarThreadStatus(thread);

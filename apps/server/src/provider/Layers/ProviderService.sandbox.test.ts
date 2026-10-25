@@ -8,6 +8,7 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderTurnStartResult,
+  RuntimeMode,
 } from "@t3tools/contracts";
 import { ProviderDriverKind, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -111,7 +112,7 @@ function makeFakeAdapter(provider: ProviderDriverKind, harnessSandbox: boolean) 
   return { adapter, startSession, stopSession };
 }
 
-function setup(policy: { current: HarnessSandboxDecision } | null) {
+function setup(policy: { current: HarnessSandboxDecision; ceiling?: RuntimeMode | null } | null) {
   const claude = makeFakeAdapter(CLAUDE, true);
   const cursor = makeFakeAdapter(CURSOR, false);
   const registry = makeAdapterRegistryMock({ [CLAUDE]: claude.adapter, [CURSOR]: cursor.adapter });
@@ -133,6 +134,7 @@ function setup(policy: { current: HarnessSandboxDecision } | null) {
           Layer.provide(
             Layer.succeed(HarnessSandboxPolicy, {
               decide: () => Effect.sync(() => policy.current),
+              runtimeCeiling: () => Effect.sync(() => policy.ceiling ?? null),
             }),
           ),
         );
@@ -154,6 +156,22 @@ const startOn = (instance: ProviderInstanceId, provider: ProviderDriverKind) =>
 const sendTurn = Effect.gen(function* () {
   const service = yield* ProviderService;
   return yield* service.sendTurn({ threadId: thread, input: "hi", attachments: [] });
+});
+
+it.effect("an Asks-first assistant's chat runs at its ceiling, whatever the request asked", () => {
+  const { claude, layer } = setup({ current: { _tag: "none" }, ceiling: "auto-accept-edits" });
+  return Effect.gen(function* () {
+    yield* startOn(claudeInstance, CLAUDE);
+    assert.equal(claude.startSession.mock.calls[0]![0].runtimeMode, "auto-accept-edits");
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("no ceiling (the person's chat, Does it itself): the requested mode stands", () => {
+  const { claude, layer } = setup({ current: { _tag: "none" }, ceiling: null });
+  return Effect.gen(function* () {
+    yield* startOn(claudeInstance, CLAUDE);
+    assert.equal(claude.startSession.mock.calls[0]![0].runtimeMode, "full-access");
+  }).pipe(Effect.provide(layer));
 });
 
 it.effect("without a policy every session starts as before (no sandbox)", () => {
