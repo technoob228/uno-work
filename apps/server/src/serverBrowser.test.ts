@@ -19,6 +19,7 @@ import {
   personTabPageKey,
   proxyConfigProblem,
   SERVER_BROWSER_EXECUTABLE_ENV,
+  SERVER_BROWSER_UNWATCHED_RELEASE_ENV,
   ServerBrowser,
   ServerBrowserLive,
 } from "./serverBrowser.ts";
@@ -406,6 +407,77 @@ it.live.skipIf(!hasChromium)(
 
       yield* serverBrowser.shutdown;
     }).pipe(Effect.provide(testLayer)),
+  120_000,
+);
+
+it.live.skipIf(!hasChromium)(
+  "agent flow 25.10: the agent's page stays the agent's; a page nobody watches goes back to it",
+  () => {
+    const saved = process.env[SERVER_BROWSER_UNWATCHED_RELEASE_ENV];
+    process.env[SERVER_BROWSER_UNWATCHED_RELEASE_ENV] = "300";
+    const restore = () => {
+      if (saved === undefined) delete process.env[SERVER_BROWSER_UNWATCHED_RELEASE_ENV];
+      else process.env[SERVER_BROWSER_UNWATCHED_RELEASE_ENV] = saved;
+    };
+    const layer = ServerBrowserLive.pipe(
+      Layer.provide(
+        Layer.succeed(ServerConfig, {
+          stateDir: mkdtempSync(join(tmpdir(), "t3-server-browser-release-")),
+        } as ServerConfigShape),
+      ),
+    );
+    const controlOf = (pageId: string) =>
+      Effect.map(
+        ServerBrowser.asEffect().pipe(Effect.flatMap((browser) => browser.live.state)),
+        (state) => state.pages.find((candidate) => candidate.pageId === pageId)?.control,
+      );
+    return Effect.gen(function* () {
+      const serverBrowser = yield* ServerBrowser;
+
+      // The app carries the agent's open_in_panel over (its localhost): the
+      // agent keeps driving — no "You're in control", its next step goes through.
+      const agentContext = { threadId: "agent-open-thread" };
+      const carried = yield* serverBrowser.live.open(agentContext, "", undefined, true);
+      assert.equal(yield* controlOf(carried.pageId), "agent");
+      const next = yield* serverBrowser.execute(
+        { command: "navigate", url: PAGE_URL, timeoutMs: 5_000 },
+        agentContext,
+      );
+      assert.isTrue(next.ok, next.error);
+
+      // The person opens a page and never looks at it (the panel closed):
+      // it goes back to the agent.
+      const personContext = { threadId: "person-open-thread" };
+      const mine = yield* serverBrowser.live.open(personContext, "");
+      assert.equal(yield* controlOf(mine.pageId), "human");
+      yield* Effect.sleep("700 millis");
+      assert.equal(yield* controlOf(mine.pageId), "agent");
+
+      // Taken while watching: stays the person's while they watch…
+      const frames = yield* serverBrowser.live
+        .frames(mine.pageId)
+        .pipe(Stream.runDrain, Effect.forkChild);
+      yield* Effect.sleep("100 millis");
+      yield* serverBrowser.live.setControl(mine.pageId, "human");
+      yield* Effect.sleep("700 millis");
+      assert.equal(yield* controlOf(mine.pageId), "human");
+      // …and the agent's waiting command goes through once they close the tab.
+      const waiting = yield* serverBrowser
+        .execute({ command: "navigate", url: PAGE_URL, timeoutMs: 10_000 }, personContext)
+        .pipe(Effect.forkChild);
+      yield* Fiber.interrupt(frames);
+      const done = yield* Fiber.join(waiting);
+      assert.isTrue(done.ok, done.error);
+      assert.equal(yield* controlOf(mine.pageId), "agent");
+
+      // The person's own panel tab is theirs for good, watched or not.
+      const own = yield* serverBrowser.live.open({}, "", "dev1.browser-9");
+      yield* Effect.sleep("700 millis");
+      assert.equal(yield* controlOf(own.pageId), "human");
+
+      yield* serverBrowser.shutdown;
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(restore)));
+  },
   120_000,
 );
 

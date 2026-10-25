@@ -36,8 +36,17 @@ export function useChatBrowser(): {
   /** Where "Browser" opens a page now. */
   readonly defaultSource: BrowserSource;
   readonly openChatBrowser: () => void;
-  /** Open `url` (or a blank page) in a given source. */
-  readonly openInSource: (source: BrowserSource, url?: string) => void;
+  /**
+   * Open `url` (or a blank page) in a given source. `forAgent` — it is the
+   * agent's own open_in_panel carried over (the computer's localhost this
+   * device can't show): the agent keeps driving the computer's page, and the
+   * panel follows the agent's rules (no popping open on a phone).
+   */
+  readonly openInSource: (
+    source: BrowserSource,
+    url?: string,
+    options?: { readonly forAgent?: boolean },
+  ) => void;
 } {
   const {
     currentChatEnvironmentId,
@@ -71,7 +80,8 @@ export function useChatBrowser(): {
   });
 
   const openOnComputer = useCallback(
-    (url: string) => {
+    (url: string, forAgent: boolean) => {
+      const opener = forAgent ? "agent" : "person";
       if (!currentChatEnvironmentId) {
         openUrl(url || undefined);
         return;
@@ -89,6 +99,7 @@ export function useChatBrowser(): {
             page: existing,
             projectKey: currentProjectKey,
           }),
+          opener,
         );
         // The chat has one page on the computer: a new address goes there.
         if (url === "") return;
@@ -115,9 +126,10 @@ export function useChatBrowser(): {
           target,
           "chat",
           makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
+          opener,
         );
       }
-      setOpen(true);
+      if (!forAgent) setOpen(true);
       void api.browserLive
         .open({
           context: {
@@ -125,6 +137,7 @@ export function useChatBrowser(): {
             ...(currentChatProjectCwd ? { cwd: currentChatProjectCwd } : {}),
           },
           url,
+          ...(forAgent ? { forAgent: true } : {}),
         })
         .then((result) => {
           const next = afterComputerBrowserOpen({
@@ -136,6 +149,7 @@ export function useChatBrowser(): {
               target,
               "chat",
               makeBrowserSetupFile({ environmentId, projectKey: currentProjectKey }),
+              opener,
             );
             return;
           }
@@ -148,6 +162,7 @@ export function useChatBrowser(): {
                 page: next.page,
                 projectKey: currentProjectKey,
               }),
+              opener,
             );
             closeFile(setupTabId);
           }
@@ -184,9 +199,9 @@ export function useChatBrowser(): {
   );
 
   const openInSource = useCallback(
-    (source: BrowserSource, url?: string) => {
+    (source: BrowserSource, url?: string, options?: { readonly forAgent?: boolean }) => {
       if (source === "computer") {
-        openOnComputer(url ?? "");
+        openOnComputer(url ?? "", options?.forAgent === true);
         return;
       }
       openUrl(url || undefined);

@@ -86,6 +86,7 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
 import { ComposerBrowserHelpPanel } from "../preview/BrowserHelpCard";
+import { ComposerPanelNewsChip } from "../preview/PanelNewsChip";
 import { ComposerToolApprovalPanel } from "./ComposerToolApprovalPanel";
 import {
   PersonalAiPanel,
@@ -3060,6 +3061,9 @@ export const ChatComposer = memo(
         className="mx-auto w-full min-w-0 max-w-208"
         data-chat-composer-form="true"
       >
+        {/* Outside the surface: a tap there expands the phone composer and
+            would shift the chip from under the finger. */}
+        <ComposerPanelNewsChip />
         <div
           className={cn(
             "group rounded-[22px] p-px transition-colors duration-200",

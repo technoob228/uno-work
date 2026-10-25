@@ -197,6 +197,13 @@ export const BrowserLiveOpenInput = Schema.Struct({
    * chat's page (`context`), as before.
    */
   tab: Schema.optional(Schema.String),
+  /**
+   * The app carries the agent's own open_in_panel here (this device can't show
+   * the computer's localhost, so it opens in the computer's browser): the agent
+   * keeps driving the page — the person isn't put "in control" (agent flow
+   * 25.10). Absent — the person opened it and drives it, as before.
+   */
+  forAgent: Schema.optional(Schema.Boolean),
 });
 export type BrowserLiveOpenInput = typeof BrowserLiveOpenInput.Type;
 

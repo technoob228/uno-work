@@ -88,11 +88,15 @@ export interface ServerBrowserLiveShape {
     control: BrowserLiveControl,
   ) => Effect.Effect<BrowserLiveState, BrowserLiveError>;
   readonly navigate: (input: BrowserLiveNavigateInput) => Effect.Effect<void, BrowserLiveError>;
-  /** `tab` — the person's own panel tab (see BrowserLiveOpenInput.tab), else the chat's page. */
+  /**
+   * `tab` — the person's own panel tab (see BrowserLiveOpenInput.tab), else the
+   * chat's page. `forAgent` — see BrowserLiveOpenInput.forAgent.
+   */
   readonly open: (
     context: BrowserBridgeRequestContext,
     url: string,
     tab?: string,
+    forAgent?: boolean,
   ) => Effect.Effect<{ readonly pageId: string }, BrowserLiveError>;
   readonly close: (pageId: string) => Effect.Effect<void, BrowserLiveError>;
   readonly resize: (
@@ -147,6 +151,17 @@ export class ServerBrowser extends Context.Service<ServerBrowser, ServerBrowserS
 export const SERVER_BROWSER_EXECUTABLE_ENV = "UNO_WORK_BROWSER_EXECUTABLE";
 /** `1` — всегда headless, даже когда есть Xvfb (тесты, слабые машины). */
 export const SERVER_BROWSER_HEADLESS_ENV = "UNO_WORK_BROWSER_HEADLESS";
+
+/**
+ * A chat's page the person took and then stopped watching (closed the tab or
+ * the panel, the app went away) goes back to the agent after this long — the
+ * person can't be "in control" of a page nobody sees (agent flow 25.10: the
+ * agent's next open_in_panel failed with "the person is using the browser").
+ * Under the agent's 30 s command wait, so a waiting command goes through.
+ */
+export const UNWATCHED_RELEASE_MS = 10_000;
+/** Test knob: the release delay in ms instead of {@link UNWATCHED_RELEASE_MS}. */
+export const SERVER_BROWSER_UNWATCHED_RELEASE_ENV = "UNO_WORK_BROWSER_UNWATCHED_RELEASE_MS";
 
 const VIEWPORT = { width: 1280, height: 800 } as const;
 const MIN_VIEWPORT = { width: 360, height: 400 } as const;
@@ -269,6 +284,15 @@ interface PageEntry {
   lastFrame: BrowserLiveFrame | null;
   cdp: CDPSession | null;
   screencasting: boolean;
+  /** Pending hand-back of a page the person took and nobody watches (UNWATCHED_RELEASE_MS). */
+  releaseTimer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Cancel a pending hand-back of an unwatched page (someone looks again, or it closed). */
+function disarmUnwatchedRelease(entry: PageEntry) {
+  if (entry.releaseTimer === null) return;
+  clearTimeout(entry.releaseTimer);
+  entry.releaseTimer = null;
 }
 
 async function runCommand(page: Page, input: BrowserAutomationCommandInput): Promise<unknown> {
@@ -526,6 +550,10 @@ export const makeServerBrowser = Effect.gen(function* () {
   // memory snapshot starts with the image's hostname (`img-208-warm`) and
   // gets its own a moment later. A service name never reaches the person.
   const machineName = () => personMachineName(hostname()) ?? "this computer";
+  const unwatchedReleaseMs = (() => {
+    const raw = Number(process.env[SERVER_BROWSER_UNWATCHED_RELEASE_ENV]);
+    return Number.isFinite(raw) && raw > 0 ? raw : UNWATCHED_RELEASE_MS;
+  })();
 
   // Ленивый запуск под мьютексом. Не Effect.cached: он навсегда мемоизировал
   // бы неудачный запуск, а нужен ретрай на следующей команде.
@@ -583,6 +611,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       readonly context: BrowserBridgeRequestContext;
       readonly url: string;
       readonly tab?: { readonly id: string; readonly key: string };
+      readonly forAgent?: boolean;
     }
   >();
 
@@ -650,7 +679,39 @@ export const makeServerBrowser = Effect.gen(function* () {
     for (const wake of entry.controlWaiters) wake();
     entry.controlWaiters.clear();
     entry.frameListeners.clear();
+    disarmUnwatchedRelease(entry);
     emitState();
+  };
+
+  /** The agent drives again: its own viewport (coordinates and screenshots don't jump), waiters wake. */
+  const handBackToAgent = (entry: PageEntry) =>
+    Effect.gen(function* () {
+      disarmUnwatchedRelease(entry);
+      entry.control = "agent";
+      if (entry.viewport.width !== VIEWPORT.width || entry.viewport.height !== VIEWPORT.height) {
+        entry.viewport = { ...VIEWPORT };
+        yield* Effect.promise(() => entry.page.setViewportSize(VIEWPORT).catch(() => undefined));
+      }
+      for (const wake of entry.controlWaiters) wake();
+    });
+
+  /**
+   * A chat's page in the person's hands with nobody watching it: hand it back
+   * to the agent after UNWATCHED_RELEASE_MS, unless someone looks again. The
+   * person's own panel tab (`tab`) is theirs for good and stays.
+   */
+  const armUnwatchedRelease = (entry: PageEntry) => {
+    if (entry.tab !== undefined || entry.control !== "human" || entry.frameListeners.size > 0) {
+      return;
+    }
+    disarmUnwatchedRelease(entry);
+    entry.releaseTimer = setTimeout(() => {
+      entry.releaseTimer = null;
+      if (pagesById.get(entry.pageId) !== entry || entry.page.isClosed()) return;
+      if (entry.control !== "human" || entry.frameListeners.size > 0) return;
+      void Effect.runPromise(handBackToAgent(entry)).then(emitState);
+    }, unwatchedReleaseMs);
+    entry.releaseTimer.unref?.();
   };
 
   const ensureCdp = async (entry: PageEntry): Promise<CDPSession> => {
@@ -720,6 +781,7 @@ export const makeServerBrowser = Effect.gen(function* () {
       lastFrame: null,
       cdp: null,
       screencasting: false,
+      releaseTimer: null,
     };
     pagesById.set(entry.pageId, entry);
     const refreshTitle = () => {
@@ -1130,11 +1192,16 @@ export const makeServerBrowser = Effect.gen(function* () {
    * Со `tab` — страница его своей вкладки панели: она уже на экране, так что
    * без attention (иначе приложение открыло бы рядом вторую вкладку), и тот
    * же адрес не перезагружается.
+   *
+   * `forAgent` — the app only carries the agent's own open_in_panel here (its
+   * device can't show the computer's localhost): the agent keeps driving, the
+   * person isn't put "in control" (agent flow 25.10).
    */
   const openForPerson = (
     context: BrowserBridgeRequestContext,
     target: string,
     tab?: { readonly id: string; readonly key: string },
+    forAgent = false,
   ) =>
     Effect.gen(function* () {
       if (tab) yield* trimPersonTabPages(tab.key);
@@ -1142,7 +1209,11 @@ export const makeServerBrowser = Effect.gen(function* () {
         Effect.mapError((error) => liveError(error.message)),
       );
       entry.lastSeen = Date.now();
-      entry.control = "human";
+      if (!forAgent || tab) {
+        entry.control = "human";
+        // Opened but never looked at (the panel closed meanwhile) — not held forever.
+        armUnwatchedRelease(entry);
+      }
       if (!tab) entry.attention += 1;
       emitState();
       if (target !== "" && !(tab && entry.page.url() === target)) {
@@ -1198,6 +1269,7 @@ export const makeServerBrowser = Effect.gen(function* () {
                   Queue.offerUnsafe(queue, frame);
                 };
                 entry.frameListeners.add(listener);
+                disarmUnwatchedRelease(entry);
                 entry.lastSeen = Date.now();
                 if (entry.lastFrame) Queue.offerUnsafe(queue, entry.lastFrame);
                 void startScreencast(entry);
@@ -1206,7 +1278,10 @@ export const makeServerBrowser = Effect.gen(function* () {
               (listener) =>
                 Effect.sync(() => {
                   entry.frameListeners.delete(listener);
-                  if (entry.frameListeners.size === 0) stopScreencast(entry);
+                  if (entry.frameListeners.size === 0) {
+                    stopScreencast(entry);
+                    armUnwatchedRelease(entry);
+                  }
                 }),
             ),
           ).pipe(Stream.buffer({ capacity: 2, strategy: "sliding" })),
@@ -1259,19 +1334,11 @@ export const makeServerBrowser = Effect.gen(function* () {
     setControl: (pageId, control) =>
       Effect.gen(function* () {
         const entry = yield* requirePage(pageId);
-        entry.control = control;
         if (control === "agent") {
-          // Агент работает в своём размере: координаты и скриншоты не прыгают.
-          if (
-            entry.viewport.width !== VIEWPORT.width ||
-            entry.viewport.height !== VIEWPORT.height
-          ) {
-            entry.viewport = { ...VIEWPORT };
-            yield* Effect.promise(() =>
-              entry.page.setViewportSize(VIEWPORT).catch(() => undefined),
-            );
-          }
-          for (const wake of entry.controlWaiters) wake();
+          yield* handBackToAgent(entry);
+        } else {
+          entry.control = control;
+          armUnwatchedRelease(entry);
         }
         emitState();
         return snapshot();
@@ -1301,7 +1368,7 @@ export const makeServerBrowser = Effect.gen(function* () {
           }
         });
       }),
-    open: (context, url, tabId) =>
+    open: (context, url, tabId, forAgent = false) =>
       Effect.gen(function* () {
         const target = url.trim();
         if (target !== "" && !/^https?:\/\//i.test(target)) {
@@ -1325,11 +1392,12 @@ export const makeServerBrowser = Effect.gen(function* () {
               context,
               url: target,
               ...(tab ? { tab } : {}),
+              ...(forAgent ? { forAgent } : {}),
             });
             return { pageId: BROWSER_LIVE_SETUP_PAGE_ID };
           }
         }
-        return { pageId: yield* openForPerson(context, target, tab) };
+        return { pageId: yield* openForPerson(context, target, tab, forAgent) };
       }),
     close: (pageId) =>
       Effect.gen(function* () {
@@ -1447,7 +1515,9 @@ export const makeServerBrowser = Effect.gen(function* () {
       pendingOpens.clear();
       for (const pending of opens) {
         void Effect.runPromise(
-          openForPerson(pending.context, pending.url, pending.tab).pipe(Effect.ignore),
+          openForPerson(pending.context, pending.url, pending.tab, pending.forAgent).pipe(
+            Effect.ignore,
+          ),
         );
       }
     });
