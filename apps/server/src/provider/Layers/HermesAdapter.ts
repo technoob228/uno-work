@@ -139,15 +139,21 @@ export interface HermesAdapterLiveOptions {
    * The failure is a sentence for the person ("No xAI key on this computer…").
    * Absent (tests): the static environment decides.
    */
-  /** This chat's MCP servers: built-in uno-work + settings.mcpServers, read per session. */
+  /**
+   * This chat's MCP servers: built-in uno-work + settings.mcpServers, read per
+   * session. `sandboxed`: a restricted assistant's chat — the owner's own
+   * servers (their keys, their reach) stay out of it.
+   */
   readonly extraMcpServers?: (context: {
     readonly threadId: string;
     readonly cwd: string;
+    readonly sandboxed?: boolean;
   }) => ReadonlyArray<EffectAcpSchema.McpServer>;
   /** Tool-call timeouts (seconds) of those servers by name — written to config.yaml. */
   readonly extraMcpToolTimeoutsSec?: (context: {
     readonly threadId: string;
     readonly cwd: string;
+    readonly sandboxed?: boolean;
   }) => Readonly<Record<string, number>>;
   readonly resolveLlmRoute?: (input: {
     readonly threadId: ThreadId;
@@ -626,9 +632,13 @@ export function makeHermesAdapter(
           const workspaceMcpNames = new Set(workspaceMcpServers.map((server) => server.name));
           const mcpServers = [
             ...workspaceMcpServers,
-            ...(options?.extraMcpServers?.({ threadId: input.threadId, cwd }) ?? []).filter(
-              (server) => !workspaceMcpNames.has(server.name),
-            ),
+            ...(
+              options?.extraMcpServers?.({
+                threadId: input.threadId,
+                cwd,
+                sandboxed: input.harnessSandbox !== undefined,
+              }) ?? []
+            ).filter((server) => !workspaceMcpNames.has(server.name)),
           ];
 
           // Per-thread HERMES_HOME: серверы MCP и дефолтная модель зашиваются
@@ -663,7 +673,11 @@ export function makeHermesAdapter(
                     ...(workspaceMcpNames.has(MANAGER_MCP_SERVER_NAME)
                       ? { [MANAGER_MCP_SERVER_NAME]: MANAGER_WAIT_MAX_TIMEOUT_SEC + 60 }
                       : {}),
-                    ...options?.extraMcpToolTimeoutsSec?.({ threadId: input.threadId, cwd }),
+                    ...options?.extraMcpToolTimeoutsSec?.({
+                      threadId: input.threadId,
+                      cwd,
+                      sandboxed: input.harnessSandbox !== undefined,
+                    }),
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
                   ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),

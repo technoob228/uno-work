@@ -1393,7 +1393,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const mcpArgs = codexMcpConfigArgs(
           sessionMcpServers({
             bridgeEnvironment: sessionEnvironment,
-            custom: options?.customMcpServers?.(),
+            // A sandboxed assistant's chat: uno-work only, not the owner's servers.
+            custom: input.harnessSandbox ? [] : options?.customMcpServers?.(),
           }),
         );
         const runtimeInput: CodexSessionRuntimeOptions = {

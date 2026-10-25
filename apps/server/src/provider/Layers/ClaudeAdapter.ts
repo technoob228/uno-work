@@ -2957,9 +2957,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // This chat's MCP servers: the built-in uno-work server (per-thread
       // token) and the owner's own (settings.mcpServers), read per query.
       // uno-work asks the person itself, so Claude doesn't prompt for it.
+      // A sandboxed assistant's chat gets uno-work only: the owner's own
+      // servers carry the owner's keys and reach past the assistant's projects.
       const sessionMcp = sessionMcpServers({
         bridgeEnvironment: sessionBridgeEnvironment,
-        custom: options?.customMcpServers?.(),
+        custom: input.harnessSandbox ? [] : options?.customMcpServers?.(),
       });
       // Entries reference the token and addresses as ${VAR} (they end up in
       // `ps` via --mcp-config); the values ride in the env below.

@@ -896,10 +896,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
-      const turn = yield* routed.adapter.sendTurn({
-        ...input,
-        runtimeMode: yield* capRuntimeMode(input.threadId, input.runtimeMode),
-      });
+      const turn = yield* routed.adapter.sendTurn(input);
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

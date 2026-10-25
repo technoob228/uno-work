@@ -278,7 +278,8 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           acpMcpServers(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              // A sandboxed assistant's chat: uno-work only, not the owner's servers.
+              custom: context.sandboxed ? [] : customMcpServers(),
             }),
           ),
         // ACP can't carry a tool timeout: without it Hermes cut uno-work calls
@@ -287,7 +288,8 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           mcpToolTimeoutsSec(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              // A sandboxed assistant's chat: uno-work only, not the owner's servers.
+              custom: context.sandboxed ? [] : customMcpServers(),
             }),
           ),
         assistantsEnabled: serverSettingsService.getSettings.pipe(
