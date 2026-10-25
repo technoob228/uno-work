@@ -18,14 +18,19 @@ import {
   type AssistantPreset,
   type ManagerCapabilityTokenDescriptor,
   type ManagerProjectAllowlist,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import {
+  assistantOwnRuntimeMode,
   DEFAULT_ASSISTANT_PRESET,
   presetOfScopes,
   presetTokenAccess,
   type AssistantTokenAccess,
 } from "@t3tools/shared/assistantPreset";
 import { Effect, Option } from "effect";
+
+import { ServerConfig } from "../config.ts";
+import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 
 import type { ManagerRepositoryError } from "../persistence/Errors.ts";
 import type { ManagerCapabilityTokenRepositoryShape } from "../persistence/Services/ManagerCapabilityTokens.ts";
@@ -84,6 +89,37 @@ export const readAssistantAccess = (
     if (stored !== null) return accessViewOf(projectId, stored);
     return { projectId, preset: DEFAULT_ASSISTANT_PRESET, allowlist: deps.unsetAllowlist ?? [] };
   });
+
+/**
+ * The mode this assistant's own chats run in — see
+ * {@link assistantOwnRuntimeMode}. Read where the daemon starts or realigns
+ * such a chat (conversations, Telegram / Slack, scheduled turns), so "Asks
+ * first" holds for the harness's own shell and file tools, not only for the
+ * manager and uno-work tools.
+ */
+export const readAssistantRuntimeMode = (
+  deps: { readonly tokens: TokenReader; readonly stateDir: string },
+  projectId: string,
+): Effect.Effect<RuntimeMode> =>
+  readAssistantAccess(deps, projectId).pipe(
+    Effect.map((view) => assistantOwnRuntimeMode(view.preset)),
+  );
+
+/**
+ * What `readAssistantRuntimeMode` needs from the layer's context, when it is
+ * there: the daemon's runtime always has both; a test layer built without the
+ * token repository gets null and keeps the default mode.
+ */
+export const assistantAccessDepsOption: Effect.Effect<{
+  readonly tokens: TokenReader;
+  readonly stateDir: string;
+} | null> = Effect.gen(function* () {
+  const tokens = yield* Effect.serviceOption(ManagerCapabilityTokenRepository);
+  const config = yield* Effect.serviceOption(ServerConfig);
+  return Option.isSome(tokens) && Option.isSome(config)
+    ? { tokens: tokens.value, stateDir: config.value.stateDir }
+    : null;
+});
 
 /**
  * The assistant a chat belongs to (its workspace, a chat it started, a chat

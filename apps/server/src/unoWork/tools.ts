@@ -133,6 +133,34 @@ export interface UnoWorkCaller {
   readonly runtimeMode: RuntimeMode;
   /** The chat's working folder, when known. */
   readonly cwd: string | undefined;
+  /**
+   * The chat belongs to an assistant held to selected projects (the sandbox):
+   * the folders it may reach (its projects, its own folder, the chat's cwd)
+   * and its name. These tools run in the daemon, outside the sandbox, so
+   * every path they take is checked against the same boundary here — else
+   * `files_list`, `site_publish`, `file_share_link` or a mail attachment would
+   * reach what the sandbox hides. Absent / null: the person's own chat, or an
+   * assistant that sees everything.
+   */
+  readonly boundary?: { readonly roots: ReadonlyArray<string>; readonly name: string } | null;
+}
+
+/** `candidate` is `root` or inside it. */
+export function isWithinRoot(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/** The path is outside every folder the caller's boundary allows (null = allowed). */
+export function boundaryDenial(
+  absolute: string,
+  boundary: UnoWorkCaller["boundary"],
+  home: string,
+): string | null {
+  if (!boundary) return null;
+  const resolved = path.resolve(absolute);
+  if (boundary.roots.some((root) => isWithinRoot(resolved, path.resolve(root)))) return null;
+  return `${boundary.name} works only in its projects: ${displayPath(resolved, home)} is outside them. The person can widen its projects on the assistant's page.`;
 }
 
 /** What `project_keys` shows: names and where they are, never values. */
@@ -547,10 +575,20 @@ const readDiskUsage = (
 /** `~/x`, `/abs` or a path relative to the chat's folder (then home). */
 export function resolveUserPath(raw: string, deps: Pick<UnoWorkToolDeps, "home" | "caller">) {
   const value = raw.trim();
-  if (value === "~") return deps.home;
-  if (value.startsWith("~/")) return path.join(deps.home, value.slice(2));
-  if (path.isAbsolute(value)) return path.normalize(value);
-  return path.resolve(deps.caller.cwd ?? deps.home, value);
+  const absolute =
+    value === "~"
+      ? deps.home
+      : value.startsWith("~/")
+        ? path.join(deps.home, value.slice(2))
+        : path.isAbsolute(value)
+          ? path.normalize(value)
+          : path.resolve(deps.caller.cwd ?? deps.home, value);
+  // A sandboxed assistant's boundary holds for the daemon-side tools too.
+  // Thrown (not returned): every tool resolves paths inline; the MCP runner
+  // turns a thrown UnoWorkToolError into the text the model reads.
+  const denial = boundaryDenial(absolute, deps.caller.boundary, deps.home);
+  if (denial !== null) throw new UnoWorkToolError({ message: denial });
+  return absolute;
 }
 
 /** Spell a path for a person: `~/projects/notes`. */
@@ -3575,7 +3613,15 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
           tool.group === "account" ||
           tool.group === "mail",
       },
-      run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
+      run: (deps: UnoWorkToolDeps, args: unknown) =>
+        runUnoWorkTool(tool, deps, args).pipe(
+          // A path outside a sandboxed assistant's boundary is thrown where
+          // the path is resolved (`resolveUserPath`): the model reads it as
+          // the tool's error, like any other refusal.
+          Effect.catchDefect((defect) =>
+            defect instanceof UnoWorkToolError ? Effect.fail(defect) : Effect.die(defect),
+          ),
+        ),
     };
   }),
   errorText: (error) => error.message,

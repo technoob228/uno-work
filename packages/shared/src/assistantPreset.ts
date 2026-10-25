@@ -120,6 +120,17 @@ export function capRuntimeToPreset(mode: RuntimeMode, preset: AssistantPreset): 
   return ceiling !== null && RUNTIME_RANK[mode] > RUNTIME_RANK[ceiling] ? ceiling : mode;
 }
 
+/**
+ * The mode the assistant's OWN chats run in (its conversations, its Telegram /
+ * Slack chats, scheduled turns): the ceiling of its preset. "Does it itself"
+ * runs full-access; "Asks first" (Helper) edits files but asks before
+ * commands; an Observer asks before everything. Enforced by the daemon when it
+ * creates or realigns those threads — not by the prompt (Misha 23.10).
+ */
+export function assistantOwnRuntimeMode(preset: AssistantPreset): RuntimeMode {
+  return capRuntimeToPreset("full-access", preset);
+}
+
 /** The highest app (connector) level the preset allows: Observer only reads. */
 export function presetConnectorCeiling(preset: AssistantPreset): AssistantAppLevel {
   return preset === "observer" ? "read" : "write";
@@ -350,4 +361,4 @@ export const ASSISTANT_PRESET_BOUNDARY_LINE =
 
 /** The same line where the computer holds an assistant to its projects (the sandbox). */
 export const ASSISTANT_PRESET_SANDBOX_LINE =
-  "On this computer, Only selected projects is a real boundary: your other files and keys don't exist for it.";
+  "On this computer, Only selected projects is a real boundary: your other projects, SSH keys and Uno settings don't exist for it. It still signs in to its AI with your login.";

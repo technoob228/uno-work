@@ -12,7 +12,7 @@ import {
   type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
-import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
+import { assistantOwnRuntimeMode, presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { Effect, Layer, Option } from "effect";
 
 import { BrowserBridge } from "../browserBridge.ts";
@@ -27,6 +27,7 @@ import { ManagerCapabilityTokenRepository } from "../persistence/Services/Manage
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AgentMailService } from "../setupTools/AgentMailService.ts";
 import { applyAssistantAccess, readAssistantAccess } from "./assistantAccess.ts";
+import { realignAssistantThreadModes } from "./assistantThreadModes.ts";
 import { assistantSandboxAvailable } from "./assistantSandboxPolicy.ts";
 import { AssistantTeam, AssistantTeamError, makeAssistantTeam } from "./assistantTeam.ts";
 import { patchProfile } from "./localAssistantStore.ts";
@@ -98,7 +99,18 @@ export const AssistantTeamLive = Layer.effect(
           { tokens, stateDir: config.stateDir },
           projectId,
           presetTokenAccess(preset, projects as never, projectId),
-        ).pipe(Effect.asVoid, Effect.orDie),
+        ).pipe(
+          // Its own chats follow the mode at once ("Asks first" narrows the harness).
+          Effect.andThen(
+            realignAssistantThreadModes(
+              { projections, engine },
+              projectId,
+              assistantOwnRuntimeMode(preset),
+            ),
+          ),
+          Effect.asVoid,
+          Effect.orDie,
+        ),
       createAssistant: (input) =>
         assistants
           .createAssistant({

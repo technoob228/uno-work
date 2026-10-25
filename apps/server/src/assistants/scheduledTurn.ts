@@ -40,6 +40,7 @@ import { assistantCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistantAccess.ts";
 import { assistantProjectOfCaller } from "./schedules.ts";
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */
@@ -87,6 +88,12 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const turns = yield* ProjectionTurnRepository;
     const engine = yield* OrchestrationEngineService;
     const notify = yield* ConnectorNotifyService;
+    const accessDeps = yield* assistantAccessDepsOption;
+    /** The assistant's own mode: "Asks first" runs narrower than full access. */
+    const ownRuntimeMode = (projectId: ProjectId) =>
+      accessDeps === null
+        ? Effect.succeed(ASSISTANT_THREAD_RUNTIME_MODE)
+        : readAssistantRuntimeMode(accessDeps, projectId);
     const pollMs = options?.pollMs ?? POLL_MS;
 
     /** The thread a scheduled turn of `projectId` runs in (created if needed). */
@@ -116,7 +123,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             projectId,
             title: SCHEDULED_THREAD_TITLE,
             modelSelection: yield* currentAssistantModelSelection(projections),
-            runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
+            runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: "default",
             branch: null,
             worktreePath: null,
@@ -227,11 +234,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               }),
               attachments: [],
             },
-            // The assistant's own mode (full access by Misha's decision for
-            // assistants) — never widened here.
-            runtimeMode: Option.isSome(shell)
-              ? shell.value.runtimeMode
-              : ASSISTANT_THREAD_RUNTIME_MODE,
+            // The assistant's own mode ("Does it itself" = full access,
+            // "Asks first" = auto-accept-edits) — never widened here.
+            runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: Option.isSome(shell) ? shell.value.interactionMode : "default",
             createdAt: requestedAtIso,
           },

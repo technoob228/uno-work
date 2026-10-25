@@ -103,6 +103,10 @@ import {
 } from "../../persistence/Services/ManagerConnectors.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import {
+  assistantAccessDepsOption,
+  readAssistantRuntimeMode,
+} from "../../assistants/assistantAccess.ts";
+import {
   bindingOnConnector,
   decideThreadRouting,
   isPrivateTelegramChat,
@@ -360,6 +364,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const serverConfig = yield* ServerConfig;
+  const accessDeps = yield* assistantAccessDepsOption;
   const serverSettingsService = yield* ServerSettingsService;
 
   // Non-image incoming files land here; the harness reads them by absolute
@@ -650,6 +655,11 @@ const makeTelegramConnector = Effect.gen(function* () {
           projectModelSelection: project.value.defaultModelSelection,
           inheritedModes,
           forcedRuntimeMode,
+          // "Asks first" holds for the harness itself: its chats run narrower.
+          assistantRuntimeMode:
+            target.kind === "assistant" && accessDeps !== null
+              ? yield* readAssistantRuntimeMode(accessDeps, target.projectId)
+              : null,
         });
       });
 

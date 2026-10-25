@@ -774,6 +774,15 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
             : teamGrant({ preset: "full", allowlist: input.projects, apps: {} }).projects,
         apps: { ...parent.grant.apps, ...input.apps },
       };
+      // Selected projects are a boundary only where the sandbox runs (same
+      // check as the person's page and `assistant_access_set`).
+      if (child.projects !== "all") {
+        const sandbox = deps.assistantSandboxAvailable
+          ? yield* deps.assistantSandboxAvailable()
+          : true;
+        const denial = assistantSandboxGrantDenial(child.projects, sandbox);
+        if (denial !== null) return yield* fail(denial, 409);
+      }
       const known = yield* deps.listProjects();
       const beyond = readableLost(grantBeyond(parent.grant, child), known);
       if (beyond.length > 0) {

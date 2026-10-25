@@ -14,6 +14,7 @@ import {
   allowlistReaches,
   assistantPresetAllows,
   capAppLevel,
+  assistantOwnRuntimeMode,
   capRuntimeToPreset,
   presetOfScopes,
   presetRuntimeCeiling,
@@ -81,6 +82,12 @@ describe("runtime ceiling", () => {
     expect(capRuntimeToPreset("auto-accept-edits", "helper")).toBe("auto-accept-edits");
     expect(capRuntimeToPreset("approval-required", "helper")).toBe("approval-required");
     expect(capRuntimeToPreset("full-access", "observer")).toBe("approval-required");
+  });
+
+  it("an assistant's own chats run at its ceiling: Does it itself = full, Asks first = edits only", () => {
+    expect(assistantOwnRuntimeMode("full")).toBe("full-access");
+    expect(assistantOwnRuntimeMode("helper")).toBe("auto-accept-edits");
+    expect(assistantOwnRuntimeMode("observer")).toBe("approval-required");
   });
 });
 

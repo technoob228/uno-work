@@ -95,11 +95,17 @@ import {
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
 import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
+import { realignAssistantThreadModes } from "../assistants/assistantThreadModes.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import {
   assistantSandboxAvailable,
   requireAssistantSandboxForProjects,
 } from "../assistants/assistantSandboxPolicy.ts";
-import { presetTokenAccess, withOwnWorkspace } from "@t3tools/shared/assistantPreset";
+import {
+  assistantOwnRuntimeMode,
+  presetTokenAccess,
+  withOwnWorkspace,
+} from "@t3tools/shared/assistantPreset";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import {
   AVATAR_CONTENT_TYPE,
@@ -831,6 +837,8 @@ export const managerAssistantPresetRouteLayer = HttpRouter.add(
     yield* authenticateOwnerSession;
     const tokenRepository = yield* ManagerCapabilityTokenRepository;
     const config = yield* ServerConfig;
+    const projections = yield* ProjectionSnapshotQuery;
+    const engine = yield* OrchestrationEngineService;
     const input = yield* HttpServerRequest.schemaBodyJson(AssistantPresetInput).pipe(
       Effect.mapError(() => new AuthError({ message: "Invalid preset payload.", status: 400 })),
     );
@@ -847,6 +855,13 @@ export const managerAssistantPresetRouteLayer = HttpRouter.add(
       );
       yield* Effect.logInfo("assistant preset changed").pipe(
         Effect.annotateLogs({ projectId: input.projectId, preset: input.preset }),
+      );
+      // Its own chats follow the mode at once: "Asks first" narrows the
+      // harness itself, not only the manager tools (Misha 23.10).
+      yield* realignAssistantThreadModes(
+        { projections, engine },
+        input.projectId,
+        assistantOwnRuntimeMode(input.preset),
       );
       // Decision 16.10: what it set up is cut to match, with "who lost what".
       const losses = yield* cascadeTeamRights(input.projectId);

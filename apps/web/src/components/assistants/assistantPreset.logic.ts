@@ -114,7 +114,7 @@ export function projectsChoice(input: {
   if (input.scope.mode === "only") {
     return {
       canPickSome: true,
-      note: "Chats it starts stay in these projects, but on this computer it can still read every file. For a real limit, give it its own computer.",
+      note: "This computer can't hold it to these projects (no sandbox here), so its chats won't run until it sees everything or gets its own computer.",
     };
   }
   return {

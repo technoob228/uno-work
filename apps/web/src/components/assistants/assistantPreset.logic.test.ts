@@ -111,6 +111,6 @@ describe("only selected projects", () => {
   it("an assistant already limited here keeps its list, with the honest line", () => {
     const choice = projectsChoice({ sandbox: false, ownComputer: false, scope: some });
     expect(choice.canPickSome).toBe(true);
-    expect(choice.note).toContain("can still read every file");
+    expect(choice.note).toContain("can't hold it to these projects");
   });
 });

@@ -486,7 +486,11 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         character: { type: "string" },
         skills: { type: "array", items: { type: "string" } },
         channel: { type: "string", enum: ["here", "telegram", "slack"] },
-        preset: { type: "string", enum: ["full", "helper", "observer"] },
+        preset: {
+          type: "string",
+          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          enum: ["full", "helper"],
+        },
         projects: {
           description: 'Project ids, or "all".',
           anyOf: [
@@ -551,7 +555,11 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         emoji: { type: "string" },
         roles: { type: "array", items: { type: "string" } },
         character: { type: "string" },
-        preset: { type: "string", enum: ["full", "helper", "observer"] },
+        preset: {
+          type: "string",
+          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          enum: ["full", "helper"],
+        },
         projects: {
           description: 'Project ids, or "all".',
           anyOf: [

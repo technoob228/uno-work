@@ -57,6 +57,7 @@ import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
 import { connectorAccessDecision, readAppAccess } from "../assistants/localAssistantStore.ts";
 import { assistantOfThread } from "../assistants/assistantAccess.ts";
+import { isRestrictedAllowlist } from "../assistants/assistantSandboxRules.ts";
 import { readMailLedger, recordMailSent } from "../assistants/mailLedger.ts";
 import { readTeam } from "../assistants/teamStore.ts";
 import { assistantPresetAllows, presetAsksFirst } from "@t3tools/shared/assistantPreset";
@@ -281,6 +282,27 @@ const makeDeps = (input: {
       }).pipe(Effect.orElseSucceed(() => null)),
     );
     const thread = Option.getOrNull(shell);
+    // An assistant held to selected projects (the sandbox) reaches the same
+    // folders through these tools and nothing else: its projects, its own
+    // folder and the chat's folder — what `decideAssistantSandbox` makes
+    // writable. Can't tell (no projection yet): the boundary is the chat's
+    // own folder, never the whole computer.
+    const callerBoundary = Effect.gen(function* () {
+      const owner = yield* callerAssistant;
+      if (owner === null || !isRestrictedAllowlist(owner.allowlist)) return null;
+      const snapshot = yield* projections.getShellSnapshot().pipe(Effect.orElseSucceed(() => null));
+      const allowed = new Set<string>([
+        owner.projectId,
+        ...(owner.allowlist === "all" ? [] : owner.allowlist),
+      ]);
+      const roots = new Set<string>();
+      for (const project of snapshot?.projects ?? []) {
+        if (allowed.has(project.id)) roots.add(project.workspaceRoot);
+      }
+      const cwd = input.cwd ?? Option.getOrNull(shell)?.worktreePath ?? null;
+      if (cwd) roots.add(cwd);
+      return { roots: [...roots], name: owner.title };
+    }).pipe(Effect.orElseSucceed(() => null));
     const home = os.homedir();
     const manifestDir = resolveManifestDir(home);
     const context = { threadId: input.threadId, ...(input.cwd ? { cwd: input.cwd } : {}) };
@@ -362,6 +384,7 @@ const makeDeps = (input: {
         // safe default when we can't tell what the person chose.
         runtimeMode: thread?.runtimeMode ?? "approval-required",
         cwd: input.cwd ?? thread?.worktreePath ?? undefined,
+        boundary: yield* callerBoundary,
       },
       home,
       manifestDir,
