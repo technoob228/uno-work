@@ -1391,6 +1391,32 @@ const assistOps = {
   },
   mainChatOf: (key: MachineKey, projectId: string) =>
     assistDaemonHooks.ensureChat(MACHINES[key], projectId).threadId,
+  toolCall: (
+    key: MachineKey,
+    threadId: string,
+    call: { server: string; tool: string; input: Record<string, unknown>; output: unknown },
+  ) => {
+    const machine = MACHINES[key];
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    const turnId = ensureRunning(machine, thread);
+    const name = `mcp__${call.server}__${call.tool}`;
+    (thread.activities as Array<Record<string, unknown>>).push({
+      id: `${threadId}-tool-${Date.now().toString(36)}`,
+      tone: "tool",
+      kind: "tool.completed",
+      summary: name,
+      // The shape a harness reports an MCP call in (toolResultPresentation.ts reads it).
+      payload: {
+        status: "completed",
+        data: { toolName: name, input: call.input, rawOutput: call.output },
+      },
+      turnId,
+      createdAt: new Date().toISOString(),
+    });
+    touch(modelFor(machine));
+    publishThread(machine, threadId);
+  },
 };
 
 /** Its chats run in its new mode from the next turn, as the daemon does. */
