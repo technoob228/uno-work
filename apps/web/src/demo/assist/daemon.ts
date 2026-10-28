@@ -80,7 +80,7 @@ function addRecord(machine: MachineKey, persona: DemoPersona) {
   ).toISOString();
   records.set(recordKey(machine, persona.projectId), {
     persona,
-    preset: world.mode === "asks-first" ? "helper" : "full",
+    preset: persona.preset ?? (world.mode === "asks-first" ? "helper" : "full"),
     projects: "all",
     // Uno on uno-work is the one Telegram talks to.
     telegram:
@@ -203,7 +203,7 @@ function connectorsList() {
     reason: null,
     connectors: CONNECTOR_PROVIDERS.map((provider) => {
       const state = connectorState(provider);
-      // "expired" is listed as connected: the console learns it on the next call.
+      // "expired": still connected, but the console marks it to sign in again.
       const connected = state !== "off";
       return {
         provider,
@@ -213,6 +213,8 @@ function connectorsList() {
         account: connected ? CONNECTOR_META[provider].account : null,
         connectedAt: connected ? new Date(Date.now() - 86_400_000 * 12).toISOString() : null,
         toolCount: connected ? 12 : 0,
+        // The console's answer when the app ended the sign-in (the token expired).
+        needsReconnect: state === "expired",
       };
     }),
   };
@@ -246,6 +248,30 @@ export function asksFirst(machine: MachineKey, projectId: string): boolean {
 
 export function telegramLinked(machine: MachineKey, projectId: string): boolean {
   return recordOf(machine, projectId)?.telegram === true;
+}
+
+/** Its mode changed from a script (the first-run card "Does it itself / Asks first"). */
+export function setPreset(machine: MachineKey, projectId: string, preset: AssistantPreset) {
+  const record = recordOf(machine, projectId);
+  if (record) record.preset = preset;
+}
+
+/** Still on the team (not removed) — a removed one's running script stops. */
+export function assistantAlive(machine: MachineKey, projectId: string): boolean {
+  const record = recordOf(machine, projectId);
+  return record !== null && record.revokedAt === null;
+}
+
+type RevokedListener = (machine: MachineKey, persona: DemoPersona) => void;
+const revokedListeners: RevokedListener[] = [];
+/** Variant C: Uno takes over what a removed teammate was doing. */
+export function onAssistantRevoked(listener: RevokedListener) {
+  revokedListeners.push(listener);
+}
+function revokeRecord(machine: MachineKey, record: AssistantRecord) {
+  if (record.revokedAt !== null) return;
+  record.revokedAt = new Date().toISOString();
+  for (const listener of revokedListeners) listener(machine, record.persona);
 }
 
 export function setTelegram(machine: MachineKey, projectId: string, linked: boolean) {
@@ -370,8 +396,9 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       return json({ projectId });
     }),
     http.delete("*/api/manager/assistants", ({ request }) => {
-      const record = recordOf(machineOf(request).key, projectParam(request));
-      if (record) record.revokedAt = new Date().toISOString();
+      const machine = machineOf(request).key;
+      const record = recordOf(machine, projectParam(request));
+      if (record) revokeRecord(machine, record);
       return json({ ok: true });
     }),
     http.get("*/api/manager/assistant", ({ request }) =>
@@ -409,6 +436,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
         team.setup = { ...team.setup, state: "in-progress", answered: [], skipped: [] };
       if (typeof body.emoji === "string") record.persona = { ...record.persona, emoji: body.emoji };
       if (typeof body.name === "string") record.persona = { ...record.persona, name: body.name };
+      // Its scripts speak in its role and character (variant C: it writes first in character).
+      if (Array.isArray(body.roles))
+        record.persona = { ...record.persona, roles: body.roles as string[] };
+      if (typeof body.character === "string")
+        record.persona = { ...record.persona, character: body.character };
+      if (typeof body.tone === "string") record.persona = { ...record.persona, tone: body.tone };
       return json({ team: record.team });
     }),
     http.post("*/api/manager/assistant/preset", async ({ request }) => {
@@ -456,9 +489,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     }),
     http.post("*/api/manager/assistant/revoke", async ({ request }) => {
       const body = await bodyOf(request);
-      const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
-      if (record) record.revokedAt = new Date().toISOString();
-      return json({ ok: true });
+      const machine = machineOf(request).key;
+      const record = recordOf(machine, String(body.projectId ?? ""));
+      if (record && body.revoked === false) record.revokedAt = null;
+      else if (record) revokeRecord(machine, record);
+      return json({ affected: record ? [record.persona.projectId] : [] });
     }),
     http.post("*/api/manager/assistant/telegram/pair", async ({ request }) => {
       const machine = machineOf(request);

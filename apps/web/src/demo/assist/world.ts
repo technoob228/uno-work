@@ -32,6 +32,13 @@ export interface AssistWorld {
   /** Work in the browser on uno-work, or the desktop app on the Mac. */
   readonly platform: "cloud" | "desktop";
   readonly connectors: Readonly<Record<ConnectorProvider, ConnectorState>>;
+  /**
+   * Variant C: your own assistants under Uno — `some` (Mia and Bolt, live),
+   * `many` (12, the "10+ assistants" edge), `none`.
+   */
+  readonly team: "none" | "some" | "many";
+  /** Drawing a face (Persona) works, or fails (the "face generation failed" edge). */
+  readonly face: "ok" | "fail";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -49,6 +56,8 @@ export const LIVE_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "on", "google-drive": "on", notion: "off", github: "on" },
+  team: "some",
+  face: "ok",
 };
 
 export const NEW_WORLD: AssistWorld = {
@@ -59,6 +68,8 @@ export const NEW_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "off", "google-drive": "off", notion: "off", github: "off" },
+  team: "none",
+  face: "ok",
 };
 
 const KEY = "demo:assist-world";
@@ -103,6 +114,8 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     mode: take("mode", ["itself", "asks-first"] as const) ?? start.mode,
     platform: take("platform", ["cloud", "desktop"] as const) ?? start.platform,
     connectors,
+    team: take("team", ["none", "some", "many"] as const) ?? start.team,
+    face: take("face", ["ok", "fail"] as const) ?? start.face,
   };
   return touched ? next : null;
 }

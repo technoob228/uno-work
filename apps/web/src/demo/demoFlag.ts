@@ -38,6 +38,14 @@ export const DEMO: boolean = DEMO_MODE !== null;
 export const DEMO_PROTOTYPE: boolean = DEMO_MODE === "w0138";
 /** The assistants base: real assistant screens, fake daemons (demo/assist). */
 export const DEMO_ASSIST: boolean = DEMO_MODE === "assist";
+/**
+ * Variant C of the assistants (28.10, branch demo/assistants-c-1028): one Uno
+ * on the account (on the cloud computer that stays on), Uno works on every
+ * computer without a setup there, and your own assistants live under Uno —
+ * it hands them tasks and their reports come through it. The real components
+ * read this to show the variant; off everywhere outside the assistants demo.
+ */
+export const VARIANT_C: boolean = DEMO_ASSIST;
 
 /**
  * The switches of the mock: where Misha compares two ways of the same thing.

@@ -89,6 +89,10 @@ export interface ChatOps {
   /** Ask first (Helper/Observer) or does it itself (Full) — its daemon's preset. */
   readonly asksFirst: (machine: MachineKey, projectId: string) => boolean;
   readonly telegramLinked: (machine: MachineKey, projectId: string) => boolean;
+  /** Its mode set by a script (variant C's first-run card). */
+  readonly setPreset: (machine: MachineKey, projectId: string, preset: "full" | "helper") => void;
+  /** Still on the team: a removed assistant's script stops at its next step. */
+  readonly alive: (machine: MachineKey, projectId: string) => boolean;
 }
 
 // ── Scripts ───────────────────────────────────────────────────────────────
@@ -172,6 +176,8 @@ const keyOf = (machine: MachineKey, threadId: string) => `${machine}:${threadId}
 async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
   const { ops, machine, threadId } = ctx;
   for (const step of script) {
+    // Removed from the team mid-task: it stops here (variant C — Uno takes it over).
+    if (!ops.alive(machine, ctx.persona.projectId)) return;
     if ("say" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? replyDelay(step.say));
@@ -202,16 +208,18 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
         declined: step.declined,
       });
       ops.askApproval(machine, threadId, step.act.command, step.act.why);
-      const viaTelegram = ops.telegramLinked(machine, ctx.persona.projectId);
+      // Variant C: one Telegram — Uno's; a teammate's ask goes through Uno.
+      const isUno = ctx.persona.projectId === "assistant-home";
+      const viaTelegram = ops.telegramLinked("work", "assistant-home");
       ops.addInbox({
         id: `i-allow-${threadId}-${Date.now()}`,
         machine,
         kind: "agent.approval",
         chat: threadId,
-        title: `${ctx.persona.name} asks: ${step.act.command}`,
+        title: `${ctx.persona.name}${isUno ? "" : " (via Uno)"} asks: ${step.act.command}`,
         body: viaTelegram
           ? `${step.act.why} Also sent to your Telegram — answer there or here.`
-          : `${step.act.why} It waits for you here.`,
+          : `${step.act.why} Waits here until you answer. Link Telegram to answer from your phone.`,
       });
       return;
     } else if ("elsewhere" in step) {

@@ -35,6 +35,8 @@ export interface DemoPersona {
   readonly setUp: boolean;
   /** Its own chats (the first is its main one; Telegram talks to that one). */
   readonly chats: ReadonlyArray<ChatSpec>;
+  /** Its own mode (variant C: a teammate may differ from Uno); default: the world's. */
+  readonly preset?: "full" | "helper";
 }
 
 /**

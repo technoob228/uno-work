@@ -44,14 +44,17 @@ import {
   asksFirst,
   connectorState,
   daemonHandlers,
+  assistantAlive,
   machineAwake,
   personaOf,
   presetOf,
+  setPreset,
   setTelegram,
   startDaemons,
   telegramLinked,
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
+import { avatarHandlers } from "./assist/variantC/avatarDaemon";
 import { WORLD, worldStamp } from "./assist/world";
 import "./assist/variant";
 import {
@@ -1370,6 +1373,8 @@ const assistOps = {
     return thread ? String(thread.projectId) : null;
   },
   setTelegram,
+  setPreset,
+  alive: assistantAlive,
   connectorState,
   asksFirst,
   telegramLinked,
@@ -1483,7 +1488,9 @@ export async function startDemo(): Promise<void> {
       }),
     ),
     // The assistants base: its daemons and account answer first (assist/daemon.ts).
-    ...(DEMO_ASSIST ? [...daemonHandlers(assistDaemonHooks), ...accountHandlers()] : []),
+    ...(DEMO_ASSIST
+      ? [...avatarHandlers(), ...daemonHandlers(assistDaemonHooks), ...accountHandlers()]
+      : []),
     http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
     http.post("*/api/observability/v1/traces", () => new HttpResponse(null, { status: 204 })),
     http.get("*/api/self-update/status", () =>
