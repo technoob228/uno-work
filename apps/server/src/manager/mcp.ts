@@ -6,6 +6,8 @@
  */
 import {
   ASSISTANT_SETUP_STEP_IDS,
+  AUTOMATION_INSTRUCTION_MAX_CHARS,
+  AUTOMATION_NAME_MAX_CHARS,
   ASSISTANT_SCHEDULE_DEFAULT_MINUTES,
   ASSISTANT_SCHEDULE_MAX_MINUTES,
   ASSISTANT_SCHEDULE_NAME_MAX_CHARS,
@@ -40,6 +42,8 @@ import {
 } from "../mcp/mcpJsonRpc.ts";
 import type { AssistantScheduleError, AssistantSchedulesShape } from "../assistants/schedules.ts";
 import type { AssistantTeamError, AssistantTeamShape } from "../assistants/assistantTeam.ts";
+import type { AutomationsServiceShape } from "../automations/AutomationsService.ts";
+import type { AutomationClientError } from "../automations/consoleClient.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
@@ -48,13 +52,16 @@ export interface ManagerMcpExtras {
   readonly schedules?: AssistantSchedulesShape;
   /** The team of assistants: profile, helpers, question cards. */
   readonly team?: AssistantTeamShape;
+  /** Automations (the console's): on a schedule or on an event. */
+  readonly automations?: AutomationsServiceShape;
 }
 
 type ManagerMcpToolError =
   | ManagerToolError
   | Schema.SchemaError
   | AssistantScheduleError
-  | AssistantTeamError;
+  | AssistantTeamError
+  | AutomationClientError;
 
 export const MANAGER_MCP_SERVER_INFO = {
   name: "uno-manager",
@@ -90,6 +97,57 @@ const withTeam = <A>(
   run: (team: AssistantTeamShape) => Effect.Effect<A, AssistantTeamError>,
 ): Effect.Effect<A | { readonly error: string }, AssistantTeamError> =>
   extras.team ? run(extras.team) : Effect.succeed({ error: TEAM_UNAVAILABLE });
+
+const AUTOMATIONS_UNAVAILABLE =
+  "Automations are not available in this Uno Work. Tell the person what you wanted to set up; do NOT fall back to cron or a sleep loop.";
+
+const withAutomations = <A>(
+  extras: ManagerMcpExtras,
+  run: (automations: AutomationsServiceShape) => Effect.Effect<A, AutomationClientError>,
+): Effect.Effect<A | { readonly error: string }, AutomationClientError> =>
+  extras.automations ? run(extras.automations) : Effect.succeed({ error: AUTOMATIONS_UNAVAILABLE });
+
+/** The trigger of `automation_create` / `automation_update`, as a JSON Schema. */
+const AUTOMATION_TRIGGER_JSON_SCHEMA = {
+  description:
+    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (at most once an hour), the person\'s IANA time zone, and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. After each call your notetaker joins: {"kind":"call.ended"}.',
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["schedule"] },
+        cron: { type: "string" },
+        timezone: { type: "string" },
+        label: { type: "string" },
+      },
+      required: ["kind", "cron", "timezone", "label"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["github.pull_request"] },
+        repo: { type: "string", description: "owner/name" },
+        actions: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["opened", "reopened", "synchronize", "ready_for_review"],
+          },
+        },
+        drafts: { type: "boolean" },
+      },
+      required: ["kind", "repo"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { kind: { type: "string", enum: ["call.ended"] } },
+      required: ["kind"],
+      additionalProperties: false,
+    },
+  ],
+} as const;
 
 const decodeArgs = <S extends Schema.Top>(schema: S, args: unknown) =>
   Schema.decodeUnknownEffect(schema)(args ?? {});
@@ -409,7 +467,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "schedule_create",
     description:
-      "Schedule recurring work for yourself (the ONLY way to do things on a schedule — never cron, systemd timers or sleep loops). " +
+      "OLDER way to schedule recurring work (Routines): for NEW recurring work use automation_create. Keep it for schedules made before. Never cron, systemd timers or sleep loops. " +
       "At each cron time Uno wakes this computer and gives you `prompt` as a new message; your final answer is sent to the person's Telegram/Slack (answer exactly NO_REPLY when there is nothing worth telling). " +
       "The person sees and can stop every schedule. Write `prompt` self-contained: future-you won't see this conversation. " +
       `maxMinutes (default ${ASSISTANT_SCHEDULE_DEFAULT_MINUTES}, max ${ASSISTANT_SCHEDULE_MAX_MINUTES}) bounds one run.`,
@@ -466,6 +524,75 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
       withSchedules(extras, (schedules) => schedules.remove(caller, args)),
   },
   {
+    name: "automation_create",
+    description:
+      'Set up an automation of YOURS — the way to do work on a schedule ("every weekday at 9 …") or every time something happens ("each time a PR comes into owner/x, review it"; "after each call …"). Never cron, systemd timers, sleep loops or Hermes\' own cron. ' +
+      "Uno's console keeps it, wakes this computer when it fires and gives you the instruction with what happened as a new message; your answer goes to the person's Telegram/Slack. " +
+      "The person sees it on the Automations page and can pause or change it. Write `instruction` self-contained: future-you won't see this conversation. Returns `tell`: say it to the person in one line (with the link when it has one).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          maxLength: AUTOMATION_NAME_MAX_CHARS,
+          description: 'Short name the person sees, e.g. "Review PRs in getuno/x".',
+        },
+        instruction: {
+          type: "string",
+          maxLength: AUTOMATION_INSTRUCTION_MAX_CHARS,
+          description:
+            'What to do each time, in the person\'s words: "Review the PR and leave a comment".',
+        },
+        trigger: AUTOMATION_TRIGGER_JSON_SCHEMA,
+        enabled: { type: "boolean" },
+      },
+      required: ["instruction", "trigger"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withAutomations(extras, (automations) => automations.toolCreate(caller, args)),
+  },
+  {
+    name: "automation_list",
+    description:
+      "List your automations: id, name, when (in words), instruction, on/off, status (ok | needs_github_repo | needs_github_permission | github_not_connected, with manageUrl), next and last run. Check it before creating one so you don't duplicate.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (_tools, caller, _args, extras) =>
+      withAutomations(extras, (automations) => automations.toolList(caller)),
+  },
+  {
+    name: "automation_update",
+    description:
+      "Change one of your automations by its id (from automation_list): pause or resume it (enabled), rename it, change the instruction or when it runs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "integer", minimum: 1 },
+        enabled: { type: "boolean" },
+        name: { type: "string", maxLength: AUTOMATION_NAME_MAX_CHARS },
+        instruction: { type: "string", maxLength: AUTOMATION_INSTRUCTION_MAX_CHARS },
+        trigger: AUTOMATION_TRIGGER_JSON_SCHEMA,
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withAutomations(extras, (automations) => automations.toolUpdate(caller, args)),
+  },
+  {
+    name: "automation_delete",
+    description:
+      "Delete one of your automations by its id (from automation_list), when the person asks to stop it for good (to pause, use automation_update with enabled: false).",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", minimum: 1 } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withAutomations(extras, (automations) => automations.toolDelete(caller, args)),
+  },
+  {
     name: "assistant_profile_get",
     description:
       "Read your own profile: name, role, character, your standing duties, where you talk, your access (preset, projects with ids, a level per app), your own email (address and rules, when this computer has mail), where you work, the person's projects (ids and titles), whether routines run on this computer, and your setup progress (steps answered, skipped, left). Call it first when you set yourself up or continue the setup.",
@@ -475,7 +602,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "assistant_profile_set",
     description:
-      'Save what the person told you about yourself, right after each answer: name, emoji, roles, character, skills, duties (what you are ALWAYS responsible for, the whole list, one line each), channel (here | telegram | slack), preset (full | helper | observer), projects (ids from assistant_profile_get, or "all"), apps (a level per app: none | read | write), mail (your own email: enabled, recipients anyone | owner | list, allow, dailyLimit), worksOn (here | cloud | own — where the person wants you; moving is their click on your page), firstTask, routine (a repeating task — cloud computers only). Pass `step` to mark the setup step this answer belongs to (with skipped: true when the person skipped it), and done: true when the setup is over. ' +
+      'Save what the person told you about yourself, right after each answer: name, emoji, roles, character, skills, duties (what you are ALWAYS responsible for, the whole list, one line each), channel (here | telegram | slack), preset (full | helper | observer), projects (ids from assistant_profile_get, or "all"), apps (a level per app: none | read | write), mail (your own email: enabled, recipients anyone | owner | list, allow, dailyLimit), worksOn (here | cloud | own — where the person wants you; moving is their click on your page), firstTask. (A repeating task is not part of the setup any more: it is an automation — automation_create, when the person asks for one.) Pass `step` to mark the setup step this answer belongs to (with skipped: true when the person skipped it), and done: true when the setup is over. ' +
       'Your rights only NARROW here: a wider preset, more projects, a higher app level or more mail (on, more people, a higher limit) is refused — only the person widens them, on your page. Returns `tell`: the line to show the person ("✓ Saved: …").',
     inputSchema: {
       type: "object",
@@ -660,7 +787,10 @@ const MANAGER_MCP_SERVER: McpServerDefinition<ManagerMcpContext, ManagerMcpToolE
  */
 /** Tools that need the console's assistants (ASSISTANTS_MVP): schedules and the team. */
 export const isAssistantsOnlyManagerTool = (name: string) =>
-  name.startsWith("schedule_") || name.startsWith("assistant_") || name === "ask_user";
+  name.startsWith("schedule_") ||
+  name.startsWith("automation_") ||
+  name.startsWith("assistant_") ||
+  name === "ask_user";
 
 /** The same server where the account has no new assistants: without their tools. */
 const MANAGER_MCP_SERVER_BASIC: McpServerDefinition<ManagerMcpContext, ManagerMcpToolError> = {

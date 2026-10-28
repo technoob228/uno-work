@@ -2434,3 +2434,121 @@ describe("the agent's own mailbox (mail_*)", () => {
     });
   });
 });
+
+describe("github_pr_comment (Automations, 28.10)", () => {
+  const linked = (deps: UnoWorkToolDeps, boxId: number | null = 2531): UnoWorkToolDeps => ({
+    ...deps,
+    settings: deps.settings.pipe(
+      Effect.map(
+        (settings) =>
+          ({
+            ...settings,
+            uno: { ...settings.uno, boxToken: "uno_agt_x", boxId },
+          }) as ServerSettings,
+      ),
+    ),
+  });
+  const args = {
+    repo: "getuno/x",
+    number: 12,
+    body: "LGTM overall.\n\n- nit: rename foo\n- nit: tests",
+  };
+
+  it('"Does it itself": posts at once on this computer\'s box', async () => {
+    const { deps, recorded } = makeDeps({
+      runtimeMode: "full-access",
+      console: () => ({
+        status: 201,
+        body: { id: 5, html_url: "https://github.com/getuno/x/pull/12#issuecomment-5" },
+      }),
+    });
+    const result = await run("github_pr_comment", linked(deps), args);
+    expect(result._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
+    expect(recorded.console).toEqual([
+      {
+        method: "POST",
+        path: "/api/v1/boxes/2531/work/git/github/pr-comment",
+        body: args,
+      },
+    ]);
+    if (result._tag === "Success") {
+      expect(result.success).toMatchObject({
+        ok: true,
+        commentUrl: "https://github.com/getuno/x/pull/12#issuecomment-5",
+      });
+    }
+  });
+
+  it('Ask mode and "Asks first" wait for the Allow with the PR and the start of the text', async () => {
+    const ask = makeDeps({ runtimeMode: "approval-required" });
+    await run("github_pr_comment", linked(ask.deps), args);
+    expect(ask.recorded.approvals).toEqual([
+      expect.objectContaining({
+        tool: "github_pr_comment",
+        title: "Comment on PR #12 in getuno/x",
+        detail: "LGTM overall.\n- nit: rename foo\n- nit: tests",
+      }),
+    ]);
+    const helper = makeDeps({ runtimeMode: "full-access", approval: "denied" });
+    const refused = await run(
+      "github_pr_comment",
+      { ...linked(helper.deps), asksFirst: Effect.succeed({ name: "Ada" }) },
+      args,
+    );
+    expect(refused._tag).toBe("Failure");
+    expect(helper.recorded.approvals[0]!.detail).toContain("Ada asks first");
+    expect(helper.recorded.console).toEqual([]);
+  });
+
+  it("an assistant's own conversation may post (not a worker tool)", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "full-access", orchestrator: true });
+    const result = await run("github_pr_comment", linked(deps), args);
+    expect(result._tag).toBe("Success");
+    expect(recorded.console).toHaveLength(1);
+  });
+
+  it("a missing permission: the link to fix it, no other way", async () => {
+    const { deps } = makeDeps({
+      runtimeMode: "full-access",
+      console: () => ({
+        status: 409,
+        body: {
+          error: "GITHUB_PR_PERMISSION_MISSING",
+          code: "GITHUB_PR_PERMISSION_MISSING",
+          manage_url: "https://github.com/settings/installations/42",
+        },
+      }),
+    });
+    const result = await run("github_pr_comment", linked(deps), args);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain("one more permission");
+      expect(result.failure.message).toContain("https://github.com/settings/installations/42");
+    }
+  });
+
+  it("off a cloud computer, or GitHub read-only for the assistant: refused before asking", async () => {
+    const laptop = makeDeps({ runtimeMode: "full-access" });
+    const off = await run("github_pr_comment", linked(laptop.deps, null), args);
+    expect(off._tag).toBe("Failure");
+    expect(laptop.recorded.console).toEqual([]);
+
+    const readOnly = makeDeps({ runtimeMode: "approval-required" });
+    const refused = await run(
+      "github_pr_comment",
+      {
+        ...linked(readOnly.deps),
+        connectors: {
+          call: () => Effect.die("unused"),
+          access: () => Effect.succeed({ decision: "read-only" as const, assistant: "Ada" }),
+        },
+      },
+      args,
+    );
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure")
+      expect(refused.failure.message).toContain("may only read GitHub");
+    expect(readOnly.recorded.approvals).toEqual([]);
+  });
+});

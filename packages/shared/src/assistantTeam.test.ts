@@ -104,6 +104,10 @@ describe("teamDescendants", () => {
 });
 
 describe("setupStepsLeft", () => {
+  it("has no routine step any more (28.10: recurring work is an automation)", () => {
+    expect(setupStepsLeft({ answered: [], skipped: [] })).not.toContain("routine");
+  });
+
   it("keeps the order and drops answered and skipped steps", () => {
     expect(setupStepsLeft({ answered: ["role", "apps"], skipped: ["channel"] })).toEqual([
       "duties",
@@ -111,7 +115,6 @@ describe("setupStepsLeft", () => {
       "access",
       "mail",
       "computer",
-      "routine",
       "first-task",
     ]);
   });

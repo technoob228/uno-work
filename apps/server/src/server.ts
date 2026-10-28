@@ -41,6 +41,8 @@ import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { assistantCallsRouteLayers } from "./assistants/assistantCallsHttp.ts";
 import { AssistantCallsServiceLive } from "./assistants/AssistantCallsService.ts";
+import { automationsRouteLayers } from "./automations/http.ts";
+import { AutomationEventLoopLive } from "./automations/eventLoop.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { AssistantTeamLive } from "./assistants/assistantTeamLive.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
@@ -501,6 +503,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // calls (Google Calendar → the App Store app → events back over the
       // App API, which finds it through appSdk/appCallsBridge.ts).
       AssistantCallsServiceLive,
+      // Automations: pulls this computer's queue of events from the console
+      // (machine token, long-poll) and wakes the assistant for each one.
+      AutomationEventLoopLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -734,6 +739,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   warmStatusRouteLayer,
   ...setupToolsRouteLayers,
   ...assistantCallsRouteLayers,
+  ...automationsRouteLayers,
 ).pipe(
   Layer.provide(browserApiCorsLayer),
   // Provided last, so built first: the outermost global middleware. A request

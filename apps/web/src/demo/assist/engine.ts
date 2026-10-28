@@ -96,6 +96,17 @@ export interface ChatOps {
   readonly setMode: (machine: MachineKey, projectId: string, mode: "itself" | "asks-first") => void;
   /** Its main chat on that computer (made now if there is none). */
   readonly mainChatOf: (machine: MachineKey, projectId: string) => string;
+  /** It called a tool (an MCP one, e.g. `uno-manager` `automation_create`) and got `output`. */
+  readonly toolCall: (
+    machine: MachineKey,
+    threadId: string,
+    call: {
+      readonly server: string;
+      readonly tool: string;
+      readonly input: Record<string, unknown>;
+      readonly output: unknown;
+    },
+  ) => void;
 }
 
 // ── Scripts ───────────────────────────────────────────────────────────────

@@ -86,6 +86,14 @@ export interface AssistantEventTurnInput {
   readonly source: string;
 }
 
+/**
+ * An event turn's outcome, plus the answer itself (automations keep it as
+ * the run's summary): null on a timeout, `NO_REPLY` as it came.
+ */
+export type AssistantEventTurnResult = ManagerAssistantTurnResult & {
+  readonly reply: string | null;
+};
+
 export interface AssistantScheduledTurnsShape {
   readonly run: (
     caller: ManagerCaller,
@@ -93,7 +101,7 @@ export interface AssistantScheduledTurnsShape {
   ) => Effect.Effect<ManagerAssistantTurnResult, AssistantTurnError>;
   readonly runEvent: (
     input: AssistantEventTurnInput,
-  ) => Effect.Effect<ManagerAssistantTurnResult, AssistantTurnError>;
+  ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
 }
 
 export class AssistantScheduledTurns extends Context.Service<
@@ -243,7 +251,10 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           timeoutSec: input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60,
           logName: input.name ?? null,
           failurePrefix: "The scheduled task could not finish",
-        });
+        }).pipe(
+          // The CLI's answer stays what it was: the status, not the text.
+          Effect.map(({ reply: _reply, ...result }) => result),
+        );
       });
 
     const runEvent: AssistantScheduledTurnsShape["runEvent"] = (input) =>
@@ -310,10 +321,10 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           input.failurePrefix,
         );
         if (reply === null) {
-          return { status: "timeout" as const, threadId, delivered: 0 };
+          return { status: "timeout" as const, threadId, delivered: 0, reply: null };
         }
         if (isNoReply(reply.text)) {
-          return { status: "no_reply" as const, threadId, delivered: 0 };
+          return { status: "no_reply" as const, threadId, delivered: 0, reply: reply.text };
         }
         const text = reply.text.trim().length > 0 ? reply.text : "Done.";
         const chats = yield* notify.resolveChats({
@@ -330,6 +341,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           status: sent.delivered > 0 ? ("delivered" as const) : ("undelivered" as const),
           threadId,
           delivered: sent.delivered,
+          reply: text,
         };
       }).pipe(
         // Engine / projection failures are the daemon's, not the request's.

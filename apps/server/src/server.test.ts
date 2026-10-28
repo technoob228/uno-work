@@ -143,6 +143,7 @@ import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
 import { AssistantCallsService } from "./assistants/AssistantCallsService.ts";
+import { AutomationsService, makeAutomationsService } from "./automations/AutomationsService.ts";
 import { GithubAccountService } from "./setupTools/GithubAccountService.ts";
 import { AgentMailService, type AgentMailServiceShape } from "./setupTools/AgentMailService.ts";
 import { ConnectorsError } from "./setupTools/connectors.ts";
@@ -743,6 +744,11 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(AssistantDraftService)({}),
           Layer.mock(AssistantCallsService)({}),
+          // The real service on a computer without a machine token (a laptop).
+          Layer.effect(AutomationsService, makeAutomationsService()).pipe(
+            Layer.provide(ServerSettingsService.layerTest({})),
+            Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
+          ),
           Layer.mock(InboxService)({ ...options?.layers?.inbox }),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
@@ -1340,6 +1346,41 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       assert.equal(tokensWithManagerToken.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "serves automations to the owner only; a laptop says they run on a cloud computer",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const anonymous = yield* HttpClient.get("/api/manager/automations");
+        assert.equal(anonymous.status, 401);
+
+        const cookie = yield* getAuthenticatedSessionCookieHeader();
+        const listed = yield* HttpClient.get("/api/manager/automations", { headers: { cookie } });
+        assert.equal(listed.status, 200);
+        assert.deepEqual(yield* listed.json, {
+          available: false,
+          reason: "not_cloud_computer",
+          automations: [],
+        });
+        const repos = yield* HttpClient.get("/api/manager/automations/github/repos?q=x", {
+          headers: { cookie },
+        });
+        assert.equal(repos.status, 409);
+        const runs = yield* HttpClient.get("/api/manager/automations/7/runs", {
+          headers: { cookie },
+        });
+        assert.equal(runs.status, 409);
+        assert.equal(
+          ((yield* runs.json) as { error: { code: string } }).error.code,
+          "NOT_CLOUD_COMPUTER",
+        );
+        const bad = yield* HttpClient.get("/api/manager/automations/abc/runs", {
+          headers: { cookie },
+        });
+        assert.equal(bad.status, 400);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("serves an assistant's manager token only to agents on this machine", () =>

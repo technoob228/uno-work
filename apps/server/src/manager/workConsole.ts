@@ -79,10 +79,12 @@ export const callWorkConsole = (input: {
  */
 export const callMachineConsole = (input: {
   readonly identity: WorkMachineIdentity;
-  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly path: string;
   readonly body?: unknown;
   readonly fetchImpl?: FetchLike;
+  /** Default 20 s; a long-poll asks for more. */
+  readonly timeoutMs?: number;
 }): Effect.Effect<WorkConsoleResponse, WorkConsoleUnreachable> =>
   Effect.tryPromise({
     try: async () => {
@@ -94,7 +96,7 @@ export const callMachineConsole = (input: {
           ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
         },
         ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
-        signal: AbortSignal.timeout(CONSOLE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(input.timeoutMs ?? CONSOLE_TIMEOUT_MS),
       });
       const text = await response.text().catch(() => "");
       let body: unknown = null;

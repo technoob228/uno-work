@@ -2,6 +2,7 @@ import { Layer } from "effect";
 
 import { AssistantScheduledTurnsLive } from "../assistants/scheduledTurn.ts";
 import { AssistantSchedulesLive } from "../assistants/schedules.ts";
+import { AutomationsServiceLive } from "../automations/AutomationsService.ts";
 import { ManagerActionProposalRepositoryLive } from "../persistence/Layers/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepositoryLive } from "../persistence/Layers/ManagerConnectorBindings.ts";
@@ -53,6 +54,8 @@ export const ManagerLayerLive = Layer.mergeAll(
   AssistantSchedulesLive,
   // `uno-work assistant-turn`: a scheduled turn, answered to the chats.
   AssistantScheduledTurnsLive,
+  // Automations (the console keeps them): the web routes, automation_* tools.
+  AutomationsServiceLive,
 ).pipe(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.

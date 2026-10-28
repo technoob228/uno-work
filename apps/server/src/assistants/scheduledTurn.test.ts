@@ -203,6 +203,37 @@ describe("scheduled assistant turn", () => {
     });
   });
 
+  it("the CLI's answer is the status only; an event turn also returns the answer (automations)", async () => {
+    const world = freshWorld("Reviewed PR #12: two nits.");
+    const cli = await runTurn(
+      world,
+      { mainChat: true, projectId: "assistant-home" },
+      "assistant:assistant-home",
+    );
+    expect(cli._tag === "Success" && "reply" in cli.success).toBe(false);
+    const event = await Effect.runPromise(
+      Effect.gen(function* () {
+        const turns = yield* AssistantScheduledTurns;
+        return yield* turns.runEvent({
+          projectId: ProjectId.make("assistant-home"),
+          prompt: "[Automation …]",
+          header: "⚙️ Review PRs\n\n",
+          threadTitle: "Automations",
+          source: "automation",
+          timeoutSec: 30,
+        });
+      }).pipe(
+        Effect.provide(
+          makeLayer(freshWorld("Reviewed PR #12: two nits."), {
+            mainChat: true,
+            projectId: "assistant-home",
+          }),
+        ),
+      ),
+    );
+    expect(event).toMatchObject({ status: "delivered", reply: "Reviewed PR #12: two nits." });
+  });
+
   it("stays silent on NO_REPLY", async () => {
     const world = freshWorld("NO_REPLY");
     const result = await runTurn(

@@ -124,6 +124,7 @@ import { readTeam } from "../assistants/teamStore.ts";
 import { AgentMailService } from "../setupTools/AgentMailService.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { AssistantSchedules, assistantProjectOfCaller } from "../assistants/schedules.ts";
+import { AutomationsService } from "../automations/AutomationsService.ts";
 import {
   AssistantTeam,
   type AssistantTeamError,
@@ -249,11 +250,16 @@ export const managerMcpRouteLayer = HttpRouter.add(
         )
       : true;
     const team = Option.getOrUndefined(yield* Effect.serviceOption(AssistantTeam));
+    const automations = Option.getOrUndefined(yield* Effect.serviceOption(AutomationsService));
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       callerWithThread,
       body,
-      { ...(schedules ? { schedules } : {}), ...(team ? { team } : {}) },
+      {
+        ...(schedules ? { schedules } : {}),
+        ...(team ? { team } : {}),
+        ...(automations ? { automations } : {}),
+      },
       { assistantsEnabled },
     );
     if (outcome.kind === "accepted") {

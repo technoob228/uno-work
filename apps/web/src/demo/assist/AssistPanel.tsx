@@ -82,6 +82,24 @@ const ROWS: ReadonlyArray<{
       { id: "desktop", name: "Десктоп" },
     ],
   },
+  {
+    key: "automations",
+    label: "Автоматиз.",
+    options: [
+      { id: "some", name: "Есть" },
+      { id: "none", name: "Нет" },
+    ],
+  },
+  {
+    key: "gh",
+    label: "GitHub app",
+    options: [
+      { id: "ok", name: "Видит" },
+      { id: "norepo", name: "Нет репо" },
+      { id: "noperm", name: "Нет прав" },
+      { id: "off", name: "Нет" },
+    ],
+  },
 ];
 
 const CONNECTOR_LABEL: Record<ConnectorProvider, string> = {

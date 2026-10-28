@@ -48,6 +48,8 @@ import {
   type CallView,
 } from "./assistantCalls.ts";
 import { AssistantScheduledTurns } from "./scheduledTurn.ts";
+import { AutomationsService } from "../automations/AutomationsService.ts";
+import { afterCallAutomationsText } from "../automations/prompt.ts";
 
 export type NotetakerState = "running" | "installing" | "failed" | "missing" | "unknown";
 
@@ -117,6 +119,7 @@ export const makeAssistantCallsService = (options?: {
     const inbox = yield* Effect.serviceOption(InboxService);
     const computer = yield* Effect.serviceOption(UnoComputerService);
     const turns = yield* Effect.serviceOption(AssistantScheduledTurns);
+    const automations = yield* Effect.serviceOption(AutomationsService);
     const context = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(context);
     const runFork = Effect.runForkWith(context);
@@ -304,24 +307,32 @@ export const makeAssistantCallsService = (options?: {
         );
       }
       if (effects.turn && Option.isSome(turns) && state.projectId) {
+        const projectId = state.projectId;
+        const turn = effects.turn;
+        // The person's "after a call" automations of this assistant ride the
+        // same turn (Automations, 28.10): no run of their own in the console.
+        const afterCall = Option.isSome(automations)
+          ? automations.value.afterCall(projectId).pipe(Effect.map(afterCallAutomationsText))
+          : Effect.succeed("");
         runFork(
-          turns.value
-            .runEvent({
-              projectId: state.projectId as ProjectId,
-              prompt: effects.turn.prompt,
-              header: effects.turn.header,
-              threadTitle: CALLS_THREAD_TITLE,
-              source: CALLS_SOURCE,
-              timeoutSec: 20 * 60,
-            })
-            .pipe(
-              Effect.tap((result) =>
-                Effect.logInfo("assistant calls: notes turn").pipe(
-                  Effect.annotateLogs({ status: result.status, delivered: result.delivered }),
-                ),
-              ),
-              Effect.ignoreCause({ log: true }),
+          afterCall.pipe(
+            Effect.flatMap((extra) =>
+              turns.value.runEvent({
+                projectId: projectId as ProjectId,
+                prompt: `${turn.prompt}${extra}`,
+                header: turn.header,
+                threadTitle: CALLS_THREAD_TITLE,
+                source: CALLS_SOURCE,
+                timeoutSec: 20 * 60,
+              }),
             ),
+            Effect.tap((result) =>
+              Effect.logInfo("assistant calls: notes turn").pipe(
+                Effect.annotateLogs({ status: result.status, delivered: result.delivered }),
+              ),
+            ),
+            Effect.ignoreCause({ log: true }),
+          ),
         );
       }
     };

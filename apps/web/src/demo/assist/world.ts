@@ -6,7 +6,8 @@
  *
  * Where it comes from, first wins:
  *   1. the page address: `?world=new&tier=free&mac=asleep&tg=on&mode=asks-first
- *      &gmail=expired&drive=off&notion=on&github=on&platform=desktop`
+ *      &gmail=expired&drive=off&notion=on&github=on&platform=desktop
+ *      &automations=none&gh=norepo`
  *      (any subset; Playwright uses this), saved for the next reload;
  *   2. what the panel saved in this browser (`demo:assist-world`);
  *   3. the defaults below (the "live" account).
@@ -32,6 +33,13 @@ export interface AssistWorld {
   /** Work in the browser on uno-work, or the desktop app on the Mac. */
   readonly platform: "cloud" | "desktop";
   readonly connectors: Readonly<Record<ConnectorProvider, ConnectorState>>;
+  /** Automations (28.10): a few made already, or none yet. */
+  readonly automations: "none" | "some";
+  /**
+   * The Uno GitHub app for automations: sees the repos (`ok`), doesn't see
+   * getuno/web (`norepo`), lacks "Pull requests: write" (`noperm`), not installed (`off`).
+   */
+  readonly gh: "ok" | "norepo" | "noperm" | "off";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -49,6 +57,8 @@ export const LIVE_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "on", "google-drive": "on", notion: "off", github: "on" },
+  automations: "some",
+  gh: "ok",
 };
 
 export const NEW_WORLD: AssistWorld = {
@@ -59,6 +69,8 @@ export const NEW_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "off", "google-drive": "off", notion: "off", github: "off" },
+  automations: "none",
+  gh: "off",
 };
 
 const KEY = "demo:assist-world";
@@ -103,6 +115,8 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     mode: take("mode", ["itself", "asks-first"] as const) ?? start.mode,
     platform: take("platform", ["cloud", "desktop"] as const) ?? start.platform,
     connectors,
+    automations: take("automations", ["none", "some"] as const) ?? start.automations,
+    gh: take("gh", ["ok", "norepo", "noperm", "off"] as const) ?? start.gh,
   };
   return touched ? next : null;
 }

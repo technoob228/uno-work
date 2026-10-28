@@ -18,6 +18,10 @@ import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ConnectorsError } from "../setupTools/connectors.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { AssistantCallsService, makeAssistantCallsService } from "./AssistantCallsService.ts";
+import {
+  AutomationsService,
+  type AutomationsServiceShape,
+} from "../automations/AutomationsService.ts";
 import { AssistantScheduledTurns, type AssistantEventTurnInput } from "./scheduledTurn.ts";
 
 const NOTETAKER: AppApiCaller = {
@@ -44,6 +48,8 @@ interface World {
   inbox: InboxPost[];
   turns: AssistantEventTurnInput[];
   boxId: number | null;
+  /** The assistants' "after a call" automations (Automations, 28.10). */
+  afterCall: Record<string, Array<{ name: string; instruction: string }>>;
 }
 
 const world = (): World => ({
@@ -56,6 +62,7 @@ const world = (): World => ({
   inbox: [],
   turns: [],
   boxId: 2531,
+  afterCall: {},
 });
 
 function layer(w: World, dir = mkdtempSync(join(tmpdir(), "assistant-calls-"))) {
@@ -154,6 +161,11 @@ function layer(w: World, dir = mkdtempSync(join(tmpdir(), "assistant-calls-"))) 
           return Effect.succeed({} as never);
         },
       }),
+    ),
+    Layer.provide(
+      Layer.succeed(AutomationsService, {
+        afterCall: (assistant: string) => Effect.succeed(w.afterCall[assistant] ?? []),
+      } as unknown as AutomationsServiceShape),
     ),
     Layer.provide(
       Layer.mock(AssistantScheduledTurns)({
@@ -348,6 +360,35 @@ describe("AssistantCallsService", () => {
       header: "📝 Pilot sync\n\n",
     });
     expect(w.turns[0]?.prompt).toContain("- [ ] Oleg: send the contract");
+  });
+
+  it("the assistant's after-call automations ride the notes turn", async () => {
+    const w = world();
+    w.installed = "running";
+    w.afterCall = {
+      "assistant-ada": [{ name: "Follow-up", instruction: "Draft the follow-up email" }],
+      "assistant-bob": [{ name: "Not hers", instruction: "nope" }],
+    };
+    await run(
+      w,
+      Effect.gen(function* () {
+        const calls = yield* AssistantCallsService;
+        yield* calls.enable({ projectId: "assistant-ada" });
+        yield* Effect.promise(() =>
+          appCallsBridge.event(NOTETAKER, {
+            id: "n-auto",
+            kind: "meeting.notes",
+            meeting_id: "m3",
+            title: "Pilot sync",
+          }),
+        );
+        yield* Effect.promise(flush);
+      }),
+    );
+    expect(w.turns).toHaveLength(1);
+    expect(w.turns[0]!.prompt).toContain("the person's automations for after a call");
+    expect(w.turns[0]!.prompt).toContain("- Follow-up: Draft the follow-up email");
+    expect(w.turns[0]!.prompt).not.toContain("Not hers");
   });
 
   it("notes of a call still reach the assistant after the switch went off", async () => {

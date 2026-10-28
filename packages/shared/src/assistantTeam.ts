@@ -184,6 +184,9 @@ export function teamDescendants(
  * The setup an assistant runs in its chat (Misha 16.10, "like Grok's
  * companions"): one question at a time, each answer saved at once, any one
  * skippable. The instructions list these; its page shows how far it got.
+ * No "routine" step since 28.10 (Misha): recurring work is an automation,
+ * made later on the Automations page or by asking (the id stays known so
+ * older saved progress still reads).
  */
 export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
   readonly id: AssistantSetupStepId;
@@ -217,11 +220,6 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
     id: "computer",
     header: "Where I work",
     ask: "where it should work: this computer (stops when a laptop sleeps), one of their cloud computers (always on) or a new computer of its own — moving is the person's click on its page",
-  },
-  {
-    id: "routine",
-    header: "Routine",
-    ask: "a repeating task, if any (a morning plan, a weekly report)",
   },
   { id: "first-task", header: "First task", ask: "its first task" },
 ];
