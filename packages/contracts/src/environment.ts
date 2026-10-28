@@ -61,6 +61,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       (`/api/manager/assistant/telegram/test`). Absent: clients show the one
       pinned chat and the manual chat-id Telegram setup. */
   assistantConversations: Schema.optionalKey(Schema.Boolean),
+  /** Server answers `uno.computer.planLimits` (Home's "AI plan limits",
+      0.0.157). Absent: clients don't offer the widget for this computer. */
+  planLimits: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

@@ -296,6 +296,7 @@ export const HOME_WIDGET_IDS = [
   "cloud",
   "sites",
   "ai-spend",
+  "plan-limits",
 ] as const;
 
 export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];

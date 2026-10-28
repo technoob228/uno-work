@@ -55,6 +55,7 @@ import {
   CloudUsageLink,
   CloudWidget,
   FilesWidget,
+  PlanLimitsWidget,
   SitesWidget,
 } from "./HomeWidgetBodies";
 import {
@@ -87,8 +88,9 @@ import {
 } from "./homeLayout";
 import { HOME_WIDGET_IDS, attentionThreads, greeting, type HomeWidgetId } from "./homeModel";
 import { useDevMode } from "../../../devMode";
-import { usePersonFirstName } from "./useHomeInfo";
+import { usePersonFirstName, usePlanLimitsAvailable } from "./useHomeInfo";
 import { useHomeStarters } from "./useHomeStarters";
+import { useBuiltInWidgetsOnHome } from "./useBuiltInWidgetsOnHome";
 import {
   selectBootstrapCompleteForActiveEnvironment,
   selectProjectsAcrossEnvironments,
@@ -255,6 +257,10 @@ export function HomeStart({
     return true;
   };
   const firstName = usePersonFirstName(environmentId);
+  // "AI plan limits" comes with Home (also on layouts saved before it), and
+  // shows only where Claude Code or Codex is signed in.
+  useBuiltInWidgetsOnHome(layout);
+  const planLimitsAvailable = usePlanLimitsAvailable(environmentId);
   // "A new version of Uno Work is ready · Update" (cloud computers, 0.0.113+).
   const updateNotice = isWebLite ? null : <SelfUpdateCard environmentId={environmentId} />;
   const homeStarters = useHomeStarters({ environmentId, threads, now });
@@ -296,10 +302,13 @@ export function HomeStart({
     () => [
       ...HOME_FIXED_BLOCKS,
       ...HOME_WIDGET_IDS.filter(
-        (id) => (id !== "sites" || accountReachable()) && (id !== "computer" || computer !== null),
+        (id) =>
+          (id !== "sites" || accountReachable()) &&
+          (id !== "computer" || computer !== null) &&
+          (id !== "plan-limits" || planLimitsAvailable),
       ),
     ],
-    [computer],
+    [computer, planLimitsAvailable],
   );
   const shown = layout.blocks.filter((id) =>
     isAppWidgetBlockId(id) ? widgetApps.has(appIdOfBlock(id)) : available.includes(id),
@@ -396,6 +405,8 @@ export function HomeStart({
         return { body: <SitesWidget /> };
       case "ai-spend":
         return { body: <AiSpendWidget environmentId={environmentId} /> };
+      case "plan-limits":
+        return { body: <PlanLimitsWidget environmentId={environmentId} /> };
     }
   };
 

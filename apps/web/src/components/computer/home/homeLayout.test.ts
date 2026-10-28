@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { HomeWidgetId } from "./homeModel";
+
 import {
   DEFAULT_HOME_LAYOUT,
   addableBlocks,
@@ -12,8 +14,10 @@ import {
   inProgressShown,
   isAppWidgetBlockId,
   migrateHomeLayout,
+  newBuiltInWidgetBlocks,
   normalizeHomeLayout,
   showInProgress,
+  type HomeBlockId,
 } from "./homeLayout";
 
 describe("migrateHomeLayout", () => {
@@ -36,20 +40,16 @@ describe("migrateHomeLayout", () => {
     expect(migrateHomeLayout(["files", "composer"], ["apps"])).toEqual(["files", "composer"]);
   });
 
-  it("gives the default with nothing saved: no widgets (01.10)", () => {
+  it("gives the default with nothing saved: only AI plan limits (0.0.157)", () => {
     expect(migrateHomeLayout(undefined, undefined)).toEqual([...DEFAULT_HOME_LAYOUT]);
-    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue"]);
+    expect(DEFAULT_HOME_LAYOUT).toEqual(["greeting", "composer", "continue", "plan-limits"]);
   });
 
   it("moves an untouched old default to the new one, keeps an arranged layout", () => {
     expect(
       migrateHomeLayout(["greeting", "composer", "continue", "files", "apps"], undefined),
-    ).toEqual(["greeting", "composer", "continue"]);
-    expect(migrateHomeLayout(undefined, ["files", "apps"])).toEqual([
-      "greeting",
-      "composer",
-      "continue",
-    ]);
+    ).toEqual([...DEFAULT_HOME_LAYOUT]);
+    expect(migrateHomeLayout(undefined, ["files", "apps"])).toEqual([...DEFAULT_HOME_LAYOUT]);
     expect(
       migrateHomeLayout(["greeting", "composer", "continue", "apps", "files"], undefined),
     ).toEqual(["greeting", "composer", "continue", "apps", "files"]);
@@ -180,5 +180,58 @@ describe("In progress on Home (Misha 08.10: a widget you can hide)", () => {
     );
     expect(layout).toContain("files");
     expect(inProgressShown(layout)).toBe(true);
+  });
+});
+
+describe("built-in widgets that come with Home (0.0.157: AI plan limits)", () => {
+  const saved = ["greeting", "composer", "continue", "files"] as const;
+  const land = (
+    blocks: ReadonlyArray<HomeBlockId>,
+    seen: ReadonlyArray<string> | null,
+    seeded?: ReadonlyArray<HomeWidgetId>,
+  ) => {
+    const next = newBuiltInWidgetBlocks({ blocks, seen, ...(seeded ? { seeded } : {}) });
+    return {
+      blocks: next.add.reduce<HomeBlockId[]>(
+        (state, id) => homeLayoutReducer(state, { type: "add", id }),
+        [...blocks],
+      ),
+      seen: next.seen,
+    };
+  };
+
+  it("lands once on a layout saved before it existed", () => {
+    expect(newBuiltInWidgetBlocks({ blocks: saved, seen: null })).toEqual({
+      add: ["plan-limits"],
+      seen: ["plan-limits"],
+    });
+    const first = land(saved, null);
+    expect(first.blocks).toEqual([...saved, "plan-limits"]);
+    expect(land(first.blocks, first.seen)).toEqual(first);
+  });
+
+  it("is only recorded where Home already has it (a new device's default)", () => {
+    expect(newBuiltInWidgetBlocks({ blocks: DEFAULT_HOME_LAYOUT, seen: null })).toEqual({
+      add: [],
+      seen: ["plan-limits"],
+    });
+  });
+
+  it("stays away once the person removed it", () => {
+    const first = land(saved, null);
+    const removed = homeLayoutReducer(first.blocks, { type: "remove", id: "plan-limits" });
+    expect(land(removed, first.seen).blocks).toEqual([...saved]);
+    // Reset is the person's choice too: it brings the default back.
+    expect(homeLayoutReducer(removed, { type: "reset" })).toContain("plan-limits");
+  });
+
+  it("brings a later built-in once, keeping what a newer version recorded", () => {
+    expect(
+      newBuiltInWidgetBlocks({
+        blocks: saved,
+        seen: ["plan-limits", "from-a-newer-version"],
+        seeded: ["plan-limits", "cloud"],
+      }),
+    ).toEqual({ add: ["cloud"], seen: ["plan-limits", "from-a-newer-version", "cloud"] });
   });
 });
