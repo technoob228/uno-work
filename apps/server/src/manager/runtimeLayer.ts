@@ -13,6 +13,7 @@ import { ManagerAssistantLlmLive } from "./Layers/AssistantLlmService.ts";
 import { ManagerAccountDefaultAiLive } from "./Layers/AccountDefaultAi.ts";
 import { ConnectorEventsForwarderLive } from "./Layers/ConnectorEventsForwarder.ts";
 import { ConnectorNotifyServiceLive } from "./Layers/ConnectorNotify.ts";
+import { TaskDoneNotifyLive } from "./Layers/TaskDoneNotify.ts";
 import { ManagerApprovalServiceLive } from "./Layers/ManagerApprovalService.ts";
 import { ManagerBudgetServiceLive } from "./Layers/ManagerBudgetService.ts";
 import { ManagerTokenAuthServiceLive } from "./Layers/ManagerTokenAuth.ts";
@@ -43,6 +44,8 @@ export const ManagerLayerLive = Layer.mergeAll(
   // Pushes thread events (errors, approvals, opt-in completions) to bound
   // chats; consumes the notify service and the engine provided below.
   ConnectorEventsForwarderLive,
+  // "Your agent finished": a long task ends with no Uno Work open → Uno's bot / email.
+  TaskDoneNotifyLive,
   // The assistant's engine: Hermes install + which LLM the Uno chat uses.
   ManagerAssistantLlmLive,
   // schedule_* tools: the console's scheduled tasks on this computer.
