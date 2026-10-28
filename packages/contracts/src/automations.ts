@@ -164,6 +164,13 @@ export const AutomationListResult = Schema.Struct({
   available: Schema.Boolean,
   reason: Schema.NullOr(AutomationsUnavailableReason),
   automations: Schema.Array(Automation),
+  /**
+   * The console's last word on automations for this account, remembered by
+   * the daemon: true — switched on (a 2xx), false — AUTOMATIONS_DISABLED;
+   * absent — never heard (a laptop, or not asked yet). Work shows anything
+   * of Automations only where some computer says true (gating, 28.10).
+   */
+  consoleEnabled: Schema.optional(Schema.Boolean),
 });
 export type AutomationListResult = typeof AutomationListResult.Type;
 

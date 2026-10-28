@@ -480,6 +480,13 @@ export type ClaimOutcome = "claimed" | "already_claimed";
 export interface AutomationsClient {
   /** Never fails: an unavailable console is an answer (`available: false`). */
   readonly list: Effect.Effect<AutomationListResult>;
+  /**
+   * The console's last word on automations for this account (gating, 28.10):
+   * true after a 2xx of an automations route, false after
+   * AUTOMATIONS_DISABLED, null — never heard (a laptop, not asked yet). A
+   * console that didn't answer changes nothing.
+   */
+  readonly consoleEnabled: () => boolean | null;
   readonly create: (
     input: AutomationCreateBody,
   ) => Effect.Effect<Automation, AutomationClientError>;
@@ -534,7 +541,19 @@ export function unavailableReasonOf(error: AutomationClientError): AutomationsUn
   }
 }
 
+/** What an answer of the console says about automations being on (null: nothing). */
+export function verdictOfAnswer(subpath: string, response: WorkConsoleResponse): boolean | null {
+  if (!subpath.startsWith("automations")) return null;
+  if (ok(response.status)) return true;
+  return consoleRefusal(response).code === "AUTOMATIONS_DISABLED" ? false : null;
+}
+
 export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsClient {
+  let consoleOn: boolean | null = null;
+  const remember = (subpath: string, response: WorkConsoleResponse) => {
+    const verdict = verdictOfAnswer(subpath, response);
+    if (verdict !== null) consoleOn = verdict;
+  };
   const call = (
     method: "GET" | "POST" | "PATCH" | "DELETE",
     subpath: string,
@@ -551,7 +570,10 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
         ...(body !== undefined ? { body } : {}),
         ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-      }).pipe(Effect.mapError((cause) => unreachable(cause.message)));
+      }).pipe(
+        Effect.tap((response) => Effect.sync(() => remember(subpath, response))),
+        Effect.mapError((cause) => unreachable(cause.message)),
+      );
     });
 
   /** 2xx → the body; anything else → the console's refusal. */
@@ -580,6 +602,8 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
       : Effect.succeed(parsed);
   };
 
+  const withVerdict = (result: AutomationListResult): AutomationListResult =>
+    consoleOn === null ? result : { ...result, consoleEnabled: consoleOn };
   const list: AutomationsClient["list"] = expectOk("GET", "automations").pipe(
     Effect.map(
       (body): AutomationListResult => ({
@@ -595,10 +619,12 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
         automations: [],
       }),
     ),
+    Effect.map(withVerdict),
   );
 
   return {
     list,
+    consoleEnabled: () => consoleOn,
     create: (input) =>
       expectOk("POST", "automations", createBodyToConsole(input)).pipe(
         Effect.flatMap(oneAutomation),

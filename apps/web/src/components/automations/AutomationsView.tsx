@@ -4,7 +4,7 @@
  * choice of who does it. The same cards as on an assistant's page.
  */
 import type { Automation } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Navigate, useNavigate } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
   CloudIcon,
@@ -23,7 +23,7 @@ import { AutomationCard } from "./AutomationCard";
 import { AutomationDialog } from "./AutomationDialog";
 import { choiceOfMember } from "./AutomationsSection";
 import { emptyHint, groupByAssistant, unavailableLine } from "./automations.logic";
-import { useAutomationsAcross } from "./useAutomations";
+import { useAutomationsAcross, useAutomationsGate } from "./useAutomations";
 
 export interface AutomationsRouteSearch {
   /** Light up this one (the "Open" of the chat card). */
@@ -35,7 +35,18 @@ export function parseAutomationsSearch(search: Record<string, unknown>): Automat
   return Number.isInteger(id) && id > 0 ? { id } : {};
 }
 
+/**
+ * Gating (28.10): the screen is there only with the assistants update and the
+ * console's AUTOMATIONS on; a link to it elsewhere goes to the start screen.
+ */
 export function AutomationsView(props: { readonly search: AutomationsRouteSearch }) {
+  const gate = useAutomationsGate();
+  if (gate === "off") return <Navigate to="/" replace />;
+  if (gate === "loading") return null;
+  return <AutomationsScreen search={props.search} />;
+}
+
+function AutomationsScreen(props: { readonly search: AutomationsRouteSearch }) {
   const navigate = useNavigate();
   const team = useAssistantTeam();
   const members = useMemo(() => team.filter((member) => !member.revoked), [team]);

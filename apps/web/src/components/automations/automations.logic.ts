@@ -5,6 +5,7 @@
  */
 import {
   type Automation,
+  type AutomationListResult,
   type AutomationCadence,
   type AutomationRun,
   type AutomationTrigger,
@@ -374,4 +375,25 @@ export function automationFromToolResult(raw: string | undefined): Automation | 
     return null;
   }
   return candidate as unknown as Automation;
+}
+
+// ── Gating (28.10) ───────────────────────────────────────────────────────
+
+/** What the console said, on one computer: on (a 2xx, now or before), or not known/off. */
+export function automationsConsoleOn(data: AutomationListResult | undefined): boolean {
+  return data?.available === true || data?.consoleEnabled === true;
+}
+
+/**
+ * Whether anything of Automations shows (the sidebar's icon, `/automations`,
+ * the section on an assistant's page, the dialog): only with the assistants
+ * update on the account AND the console's AUTOMATIONS on — some computer of
+ * the account heard it say so. A laptop alone never hears it (automations run
+ * on a cloud computer), so it shows nothing.
+ */
+export function automationsShown(input: {
+  readonly teamShown: boolean;
+  readonly computers: ReadonlyArray<AutomationListResult | undefined>;
+}): boolean {
+  return input.teamShown && input.computers.some(automationsConsoleOn);
 }

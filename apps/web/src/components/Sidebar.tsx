@@ -1802,7 +1802,8 @@ export default function Sidebar() {
   // Assistants D (Misha 28.10): the chats an assistant started sit in the
   // common list with "started by <name>"; with one computer in view, the
   // ones started on the other computers come along with their computer.
-  const dStartedByInList = !railLayout && assistantChatsInSidebar;
+  // Gating (28.10): only with the assistants update — not for Labs alone.
+  const dStartedByInList = !railLayout && teamShown;
   const startedBy = useStartedBy(dStartedByInList);
   const startedByOutOfView = useMemo(
     () =>
@@ -3011,9 +3012,10 @@ export default function Sidebar() {
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
     null,
   );
+  // Gating (28.10): "On all my computers" is part of the assistants update.
   const projectSyncEnvironments = useMemo(
-    () => projects.map((project) => project.environmentId),
-    [projects],
+    () => (teamShown ? projects.map((project) => project.environmentId) : []),
+    [projects, teamShown],
   );
   const projectSync = useProjectSyncStatuses(projectSyncEnvironments);
   const refreshProjectSync = useRefreshProjectSync();
@@ -3884,7 +3886,10 @@ export default function Sidebar() {
     projectComputers: ReadonlyArray<string> | null,
   ) =>
     // A chat an assistant started on another computer, while one is in view.
-    (!dMultiComputer && dThisComputer !== null && thread.environmentId !== dThisComputer) ||
+    (dStartedByInList &&
+      !dMultiComputer &&
+      dThisComputer !== null &&
+      thread.environmentId !== dThisComputer) ||
     chatRowShowsComputer({
       chatComputer: thread.environmentId,
       thisComputer: dThisComputer,
@@ -3933,17 +3938,22 @@ export default function Sidebar() {
           label: "Copy path",
           run: (member: Project) => copyPathToClipboard(member.cwd, { path: member.cwd }),
         },
-        {
-          id: "sync",
-          label: "On all my computers",
-          labelFor: (member: Project) => toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
-          run: (member: Project) => void toggleProjectSync(member),
-        },
-        {
-          id: "settings",
-          label: "Project settings…",
-          run: (member: Project) => openProjectSettings(member),
-        },
+        ...(teamShown
+          ? [
+              {
+                id: "sync",
+                label: "On all my computers",
+                labelFor: (member: Project) =>
+                  toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
+                run: (member: Project) => void toggleProjectSync(member),
+              },
+              {
+                id: "settings",
+                label: "Project settings…",
+                run: (member: Project) => openProjectSettings(member),
+              },
+            ]
+          : []),
       ];
       const items: ContextMenuItem<string>[] = actions.map((action) => {
         if (members.length === 1) {

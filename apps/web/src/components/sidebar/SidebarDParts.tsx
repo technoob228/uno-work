@@ -52,6 +52,7 @@ import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useTeamShown } from "../assistants/useAssistantTeam";
+import { useAutomationsShown } from "../automations/useAutomations";
 import { InboxCountBadge } from "./SidebarInboxRow";
 import {
   SidebarDAccountTrigger,
@@ -320,6 +321,34 @@ function PlaceIcon(props: {
   );
 }
 
+function PlaceRow(props: {
+  icon: ReactNode;
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  testId: string;
+  tour?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      className={cn(
+        "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
+        props.active
+          ? "bg-sidebar-row-active font-medium text-foreground"
+          : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-foreground",
+      )}
+      data-testid={props.testId}
+      data-tour={props.tour}
+      aria-current={props.active ? "page" : undefined}
+    >
+      {props.icon}
+      <span className="min-w-0 flex-1 truncate">{props.label}</span>
+    </button>
+  );
+}
+
 const PLACE_ICON_CLASS =
   "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
 const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
@@ -377,12 +406,12 @@ function NeedsYouPopover(props: {
  * Needs you only when something waits for the person — as icons in one row,
  * the name on hover.
  */
-export const SidebarDPlaces = memo(function SidebarDPlaces() {
+const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
-  const assistants = useTeamShown();
+  const automations = useAutomationsShown();
   return (
     <nav
       aria-label="Uno Work"
@@ -416,7 +445,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-apps"
         tour="apps"
       />
-      {assistants ? (
+      {automations ? (
         <PlaceIcon
           icon={<WorkflowIcon />}
           label="Automations"
@@ -453,6 +482,72 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
       ) : null}
     </nav>
   );
+});
+
+/**
+ * The places as rows (v0.0.156): what an account without the assistants
+ * update (`assistants_mvp`) keeps seeing — Home, Files, Apps & sites, and
+ * Needs you only when something waits.
+ */
+const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const open = useOpenPlace();
+  const goHome = useGoHome();
+  const { shown } = useNeedsYouBadge();
+  return (
+    <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
+      <PlaceRow
+        icon={<HouseIcon />}
+        label="Home"
+        active={isHomePath(pathname)}
+        onClick={() => {
+          sidebarDPanel.closeNow();
+          goHome();
+        }}
+        testId="sidebar-nav-home"
+        tour="home"
+      />
+      <PlaceRow
+        icon={<FolderIcon />}
+        label="Files"
+        active={pathname.startsWith("/files")}
+        onClick={() => open("/files")}
+        testId="sidebar-nav-files"
+        tour="files"
+      />
+      <PlaceRow
+        icon={<LayoutGridIcon />}
+        label="Apps & sites"
+        active={pathname.startsWith("/sites")}
+        onClick={() => open("/sites")}
+        testId="sidebar-nav-apps"
+        tour="apps"
+      />
+      {shown ? (
+        <NeedsYouPopover
+          side="right"
+          trigger={(badge) => (
+            <PopoverTrigger
+              className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-sidebar-foreground/85 outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-4 [&_svg]:shrink-0"
+              data-testid="sidebar-needs-you"
+            >
+              <InboxIcon />
+              <span className="min-w-0 flex-1 truncate">Needs you</span>
+              <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
+            </PopoverTrigger>
+          )}
+        />
+      ) : null}
+    </nav>
+  );
+});
+
+/**
+ * Home, Files, Apps & sites (+ Needs you): icons in one row with the
+ * assistants update (28.10), else the v0.0.156 rows.
+ */
+export const SidebarDPlaces = memo(function SidebarDPlaces() {
+  return useTeamShown() ? <SidebarDPlaceIcons /> : <SidebarDPlaceRows />;
 });
 
 function RailButton(props: {
@@ -509,7 +604,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
   const { shown } = useNeedsYouBadge();
-  const assistants = useTeamShown();
+  const automations = useAutomationsShown();
   const hover = {
     onPointerEnter: () => sidebarDPanel.enterTrigger(),
     onPointerLeave: () => sidebarDPanel.leave(),
@@ -564,7 +659,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         >
           <LayoutGridIcon />
         </RailButton>
-        {assistants ? (
+        {automations ? (
           <RailButton
             label="Automations"
             active={pathname.startsWith("/automations")}

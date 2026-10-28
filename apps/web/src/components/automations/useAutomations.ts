@@ -11,6 +11,7 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import {
   createAutomation,
@@ -20,7 +21,9 @@ import {
   runAutomationNow,
   updateAutomation,
 } from "../../lib/automationsApi";
-import { runIsActive } from "./automations.logic";
+import { useAssistantsAvailability } from "../assistants/useAssistants";
+import { useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
+import { automationsShown, runIsActive } from "./automations.logic";
 
 export const AUTOMATIONS_KEY = ["uno-automations"] as const;
 
@@ -124,4 +127,38 @@ export function useAutomationActions(environmentId: string) {
       return run;
     },
   };
+}
+
+/**
+ * The one answer of the web to "are Automations here" (gating, 28.10): the
+ * assistants update on the account and some computer of its assistants says
+ * the console has AUTOMATIONS on (`automationsShown`). Without the update no
+ * computer is asked at all. "loading" until that is known.
+ */
+export function useAutomationsGate(): "loading" | "on" | "off" {
+  const availability = useAssistantsAvailability();
+  const teamShown = useTeamShown();
+  const team = useAssistantTeam();
+  const environmentIds = useMemo(
+    () =>
+      teamShown
+        ? [
+            ...new Set(
+              team.filter((member) => !member.revoked).map((member) => member.environmentId),
+            ),
+          ].toSorted()
+        : [],
+    [team, teamShown],
+  );
+  const computers = useAutomationsAcross(environmentIds);
+  if (automationsShown({ teamShown, computers: computers.map((computer) => computer.data) })) {
+    return "on";
+  }
+  if (!teamShown) return availability === "loading" ? "loading" : "off";
+  return computers.some((computer) => computer.loading) ? "loading" : "off";
+}
+
+/** Anything of Automations shows (see `useAutomationsGate`). */
+export function useAutomationsShown(): boolean {
+  return useAutomationsGate() === "on";
 }

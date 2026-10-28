@@ -15,7 +15,7 @@ import { Button } from "../ui/button";
 import { AutomationCard } from "./AutomationCard";
 import { AutomationDialog, type AutomationAssistantChoice } from "./AutomationDialog";
 import { emptyHint, unavailableLine } from "./automations.logic";
-import { useAutomationsOn } from "./useAutomations";
+import { useAutomationsOn, useAutomationsShown } from "./useAutomations";
 
 export function choiceOfMember(
   member: TeamMember,
@@ -33,7 +33,12 @@ export function choiceOfMember(
   };
 }
 
+/** Gating (28.10): nothing of it without the console's AUTOMATIONS (`useAutomationsShown`). */
 export function AutomationsSection(props: { readonly member: TeamMember }) {
+  return useAutomationsShown() ? <AutomationsSectionBody member={props.member} /> : null;
+}
+
+function AutomationsSectionBody(props: { readonly member: TeamMember }) {
   const { member } = props;
   const navigate = useNavigate();
   const list = useAutomationsOn(member.environmentId);
