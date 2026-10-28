@@ -19,9 +19,9 @@ async function toWhereItWorks(page, name) {
 export default flow("d-own-create", async ({ page, url, step, shot }) => {
   await step("Plus: where it works → a computer of its own → the offer", async () => {
     await openDemo(page, url, { world: "live", tier: "plus" });
-    await toWhereItWorks(page, "Mia");
+    await toWhereItWorks(page, "Ada");
     await page.getByTestId("own-computer-offer").waitFor({ timeout: 10_000 });
-    await page.getByText("mia-computer").first().waitFor();
+    await page.getByText("ada-computer").first().waitFor();
   });
   await shot("offer");
   await step("Create its computer → Creating / Starting / Connecting", async () => {
@@ -29,9 +29,14 @@ export default flow("d-own-create", async ({ page, url, step, shot }) => {
     await page.getByTestId("own-computer-progress").waitFor({ timeout: 5_000 });
   });
   await shot("progress");
-  await step("ready: the assistant lives on mia-computer", async () => {
-    await page.getByTestId("own-computer-ready").waitFor({ timeout: 40_000 });
-    await page.getByTestId("own-computer-ready").getByText("mia-computer").waitFor();
+  await step("ready: the assistant lives on ada-computer", async () => {
+    // The wizard either keeps the card ("Ada will live on ada-computer") or
+    // switches "Where it works" to the new computer right away.
+    const ready = page.getByTestId("own-computer-ready").getByText("ada-computer");
+    const picked = page.locator(
+      '[data-testid="persona-works-on-env-demo-assistant-own"][aria-pressed="true"]',
+    );
+    await ready.or(picked).first().waitFor({ timeout: 40_000 });
   });
   await shot("ready");
 });
