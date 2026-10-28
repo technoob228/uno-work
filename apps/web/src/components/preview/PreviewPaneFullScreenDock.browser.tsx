@@ -59,14 +59,20 @@ function Chat() {
         open README
       </button>
       {mode === "minimized" ? (
-        <button type="button" data-testid="mini-pill" onClick={() => setMode("peek")}>
+        <button
+          type="button"
+          data-testid="mini-pill"
+          className="fixed right-4 bottom-4 z-[70]"
+          onClick={() => setMode("peek")}
+        >
           Show chat
         </button>
       ) : null}
       <div
         ref={setDock}
         data-testid="dock"
-        className={focus ? "fixed right-0 bottom-0 left-0" : undefined}
+        // Like ChatView's composer: above the full-screen pane (z-50).
+        className={focus ? "fixed right-0 bottom-0 left-0 z-[70]" : undefined}
         style={{ height: DOCK_HEIGHT, display: mode === "minimized" ? "none" : undefined }}
       >
         {focus ? (
