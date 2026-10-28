@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect, Layer, Schema } from "effect";
-import { beforeEach } from "vitest";
+import { beforeEach, describe, expect, it as vitestIt } from "vitest";
 
 import { OpenCodeSettings } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
@@ -15,6 +15,7 @@ import {
 import {
   checkOpenCodeProviderStatus,
   clearOpenCodeVersionCache,
+  orderOpenCodeModels,
   type ProviderPresentation,
 } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
@@ -401,4 +402,38 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
       );
     }),
   );
+});
+
+describe("orderOpenCodeModels", () => {
+  const model = (slug: string, name: string) =>
+    ({ slug, name, isCustom: false, capabilities: null }) as never;
+
+  vitestIt("puts Uno AI first: Smart, Fast, then the gateway's order; the rest by name", () => {
+    const ordered = orderOpenCodeModels([
+      model("opencode/zen-free", "Big Pickle (Free)"),
+      model("uno/anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5"),
+      model("opencode/grok-code", "Grok Code Fast (Free)"),
+      model("uno/openai/gpt-5.5", "GPT-5.5"),
+      model("uno/uno/fast", "Fast"),
+      model("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5"),
+      model("uno/uno/smart", "Smart"),
+    ]).map((entry) => (entry as { slug: string }).slug);
+    expect(ordered).toEqual([
+      "uno/uno/smart",
+      "uno/uno/fast",
+      "uno/anthropic/claude-sonnet-5.5",
+      "uno/openai/gpt-5.5",
+      "opencode/zen-free",
+      "anthropic/claude-sonnet-5.5",
+      "opencode/grok-code",
+    ]);
+  });
+
+  vitestIt("without Uno AI keeps the plain name order", () => {
+    const ordered = orderOpenCodeModels([
+      model("opencode/b", "Beta"),
+      model("opencode/a", "Alpha"),
+    ]).map((entry) => (entry as { slug: string }).slug);
+    expect(ordered).toEqual(["opencode/a", "opencode/b"]);
+  });
 });

@@ -30,6 +30,28 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   return msg ? `${label} — ${kind}. ${msg}` : `${label} — ${kind}.`;
 }
 
+/**
+ * The word under a rail icon (agent-flow pass 25.10, item 7: seven icons
+ * without names, OpenCode a black square — people guessed for ~40 s). The
+ * whole name when it is short ("OpenCode", "Hermes"), else its first word
+ * ("Claude Code" → "Claude", "Uno Hermes" → "Hermes"); custom instances keep their own name, cut by
+ * the rail.
+ */
+export function modelPickerRailLabel(displayName: string): string {
+  const name = displayName.trim();
+  if (name.length <= 9) return name;
+  const words = name.split(/\s+/u);
+  // "Uno Hermes" → "Hermes": the brand word doesn't tell Uno's harnesses apart.
+  if (words[0] === "Uno" && words.length > 1) return words.slice(1).join(" ");
+  const first = words[0] ?? name;
+  return first.length >= 3 ? first : name;
+}
+
+const RAIL_BUTTON_CLASS =
+  "relative isolate flex w-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded px-0.5 pt-1.5 pb-1 transition-colors hover:bg-muted";
+const RAIL_LABEL_CLASS =
+  "block w-full truncate text-center text-[9px] leading-tight text-muted-foreground";
+
 const SELECTED_BUTTON_CLASS = "bg-background text-foreground shadow-sm";
 const SELECTED_INDICATOR_CLASS =
   "pointer-events-none absolute -right-1 top-1/2 z-10 h-5 w-0.5 -translate-y-1/2 rounded-l-full bg-primary";
@@ -97,7 +119,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     <ScrollArea
       hideScrollbars
       scrollFade
-      className="w-12 shrink-0 border-r bg-muted/30"
+      className="w-15 shrink-0 border-r bg-muted/30"
       data-model-picker-sidebar="true"
     >
       <div className="flex min-h-full flex-col gap-1 p-1">
@@ -113,7 +135,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   render={
                     <button
                       className={cn(
-                        "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded transition-colors hover:bg-muted",
+                        RAIL_BUTTON_CLASS,
                         props.selectedInstanceId === "favorites" && SELECTED_BUTTON_CLASS,
                       )}
                       onClick={() => handleSelect("favorites")}
@@ -122,6 +144,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                       aria-label="Favorites"
                     >
                       <StarIcon className="size-5 fill-current shrink-0" aria-hidden />
+                      <span className={RAIL_LABEL_CLASS} aria-hidden>
+                        Favorites
+                      </span>
                     </button>
                   }
                 />
@@ -164,7 +189,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             <button
               data-model-picker-provider={entry.instanceId}
               className={cn(
-                "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded transition-colors hover:bg-muted",
+                RAIL_BUTTON_CLASS,
                 isSelected && SELECTED_BUTTON_CLASS,
                 isDisabled && "opacity-50 cursor-not-allowed hover:bg-transparent",
               )}
@@ -192,6 +217,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 className="size-6"
                 iconClassName="size-5"
               />
+              <span
+                className={cn(RAIL_LABEL_CLASS, isSelected && "text-foreground")}
+                data-model-picker-rail-label
+                aria-hidden
+              >
+                {modelPickerRailLabel(entry.displayName)}
+              </span>
               {stateBadge ? (
                 <span className={STATE_BADGE_CLASS} aria-hidden>
                   <StateBadgeIcon badge={stateBadge} />
