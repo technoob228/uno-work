@@ -11,9 +11,11 @@
 
 import type {
   OrchestrationAssistantCommandOrigin,
+  OrchestrationCommandOrigin,
   OrchestrationCommandOriginConnectorKind,
   OrchestrationConnectorCommandOrigin,
   OrchestrationSystemCommandOrigin,
+  ThreadStartedBy,
 } from "@t3tools/contracts";
 
 export const connectorCommandOrigin = (
@@ -58,4 +60,34 @@ export const systemCommandOrigin = (
     component,
     ...(trimmedReason.length > 0 ? { reason: trimmedReason } : {}),
   };
+};
+
+/** The person did it: here (no origin) or through Telegram / Slack. */
+export const isPersonOrigin = (origin: OrchestrationCommandOrigin | undefined): boolean =>
+  origin === undefined || origin.kind === "connector";
+
+/**
+ * Who started a chat, from the origin of the command that created it (see
+ * ThreadStartedBy). Migration 051 backfills with the same table.
+ */
+export const startedByFromOrigin = (
+  origin: OrchestrationCommandOrigin | undefined,
+): ThreadStartedBy | null => {
+  switch (origin?.kind) {
+    case undefined:
+    case "connector":
+    case "peer":
+      return null;
+    case "agent":
+      return "agent";
+    case "manager":
+    case "assistant":
+      return "assistant";
+    case "app":
+    case "plugin":
+      return "app";
+    case "system":
+      // The daemon opens the person's first chat for them.
+      return null;
+  }
 };

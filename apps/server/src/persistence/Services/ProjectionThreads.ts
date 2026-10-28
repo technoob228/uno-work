@@ -16,6 +16,7 @@ import {
   ThreadAssistantRole,
   ThreadController,
   ThreadId,
+  ThreadStartedBy,
   TurnId,
 } from "@t3tools/contracts";
 import { Option, Schema, Context } from "effect";
@@ -55,6 +56,13 @@ export const ProjectionThread = Schema.Struct({
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Assistant chat / chat started by the assistant (migration 048).
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
+  // Who the chat answers to (migration 051, see ThreadStartedBy in the
+  // contracts). Optional for the same reason; absent persists as NULL.
+  startedBy: Schema.optional(Schema.NullOr(ThreadStartedBy)),
+  latestPersonMessageAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

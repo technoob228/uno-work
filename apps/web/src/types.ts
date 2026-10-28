@@ -18,6 +18,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ThreadAssistantRole,
+  ThreadStartedBy,
   ThreadController,
 } from "@t3tools/contracts";
 
@@ -228,6 +229,14 @@ export interface SidebarThreadSummary {
   agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
+  /** Who created the chat when it was not the person (see threadOwner.ts); absent on older servers. */
+  startedBy?: ThreadStartedBy | null | undefined;
+  /** The person's own latest message (not an agent's or Uno's). */
+  latestPersonMessageAt?: string | null | undefined;
+  /** An agent called the person into this chat; cleared when it says they are not needed. */
+  personCalledAt?: string | null | undefined;
+  personCalledByThreadId?: ThreadId | null | undefined;
+  personCallReason?: string | null | undefined;
 }
 
 export interface ThreadSession {

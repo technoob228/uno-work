@@ -121,6 +121,39 @@ describe("isYourTurn", () => {
     expect(isYourTurn(makeThread({ spawnedByThreadId: ThreadId.make("parent") }), NOW)).toBe(false);
   });
 
+  it("lights an agent's chat that called the person or answers them", () => {
+    const agentChat = { startedBy: "agent" as const, spawnedByThreadId: ThreadId.make("parent") };
+    // Called after the person had pressed Read: the call still counts.
+    expect(
+      isYourTurn(
+        makeThread({ ...agentChat, readAt: ago(30 * MINUTE_MS), personCalledAt: ago(MINUTE_MS) }),
+        NOW,
+      ),
+    ).toBe(true);
+    // Answers the person's own message.
+    expect(
+      isYourTurn(
+        makeThread({
+          ...agentChat,
+          latestPersonMessageAt: ago(HOUR_MS + MINUTE_MS),
+          latestUserMessageAt: ago(HOUR_MS + MINUTE_MS),
+        }),
+        NOW,
+      ),
+    ).toBe(true);
+    // An agent wrote the latest message: it reports back to that agent.
+    expect(
+      isYourTurn(
+        makeThread({
+          ...agentChat,
+          latestPersonMessageAt: ago(DAY_MS),
+          latestUserMessageAt: ago(HOUR_MS + MINUTE_MS),
+        }),
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
   it("stays quiet while snoozed", () => {
     // Snoozed after the turn finished: nothing raised its hand since.
     expect(

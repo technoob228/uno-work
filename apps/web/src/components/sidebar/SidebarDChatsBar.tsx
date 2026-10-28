@@ -9,8 +9,9 @@
  * Its menu (critics 16.10, on `ui/menu`): four ready ways — One list, By
  * project, By status, By computer — and "Customize…" for Misha's Group by
  * with the order of levels (icp3/sidebar-v2); Projects and Computers as
- * submenus with checkboxes. A filter is said in the title only, with × next
- * to it to clear.
+ * submenus with checkboxes; Only mine (Misha 28.10) hides the chats agents,
+ * Uno or apps run on their own (Sidebar.owner). A filter is said in the title
+ * only, with × next to it to clear.
  *
  * Where grouping is picked is a switch of the mock (`sidebarViewSwitch`):
  * "header" — in this menu; "settings" — only in Settings (the menu says so and
@@ -311,6 +312,9 @@ export function SidebarDChatsBar(props: {
   computers: ReadonlyArray<SidebarDPickOption>;
   pickedComputers: ReadonlyArray<string> | null;
   onComputersChange: (picked: ReadonlyArray<string> | null) => void;
+  /** Only the chats that are the person's now; off — every chat (the default). */
+  onlyMine: boolean;
+  onOnlyMineChange: (onlyMine: boolean) => void;
   onClearFilters: () => void;
   onNewChat: (event: ReactMouseEvent) => void;
   /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
@@ -320,7 +324,8 @@ export function SidebarDChatsBar(props: {
   const open = useSidebarDViewMenu((state) => state.open);
   const setOpen = useSidebarDViewMenu((state) => state.setOpen);
   const showComputers = props.multiComputer && props.computers.length > 1;
-  const filtered = props.pickedProjects !== null || props.pickedComputers !== null;
+  const filtered =
+    props.onlyMine || props.pickedProjects !== null || props.pickedComputers !== null;
   const levels = props.multiComputer
     ? props.levels
     : props.levels.filter((level) => level !== "computer");
@@ -403,6 +408,18 @@ export function SidebarDChatsBar(props: {
               </MenuItem>
             )}
             <MenuSeparator />
+            <MenuCheckboxItem
+              checked={props.onlyMine}
+              onCheckedChange={(checked) => props.onOnlyMineChange(checked)}
+              data-testid="sidebar-d-only-mine"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">Only mine</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  Hide chats agents run on their own
+                </span>
+              </span>
+            </MenuCheckboxItem>
             <PickSubmenu
               label="Projects"
               allLabel="All projects"

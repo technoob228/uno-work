@@ -64,6 +64,7 @@ import Migration0047 from "./Migrations/047_FileShareAccess.ts";
 import Migration0048 from "./Migrations/048_ThreadAssistantRole.ts";
 import Migration0049 from "./Migrations/049_ThreadAgentsClosed.ts";
 import Migration0050 from "./Migrations/050_ManagerConnectorPendingReplies.ts";
+import Migration0051 from "./Migrations/051_ThreadOwner.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -126,6 +127,7 @@ export const migrationEntries = [
   [48, "ThreadAssistantRole", Migration0048],
   [49, "ThreadAgentsClosed", Migration0049],
   [50, "ManagerConnectorPendingReplies", Migration0050],
+  [51, "ThreadOwner", Migration0051],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

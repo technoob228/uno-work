@@ -139,3 +139,28 @@ export const agentThreadsReleaseRouteLayer = HttpRouter.add(
     return respond(yield* handlers.releaseThread(authorization, { threadId: params["threadId"] }));
   }),
 );
+
+export const agentThreadsCallPersonRouteLayer = HttpRouter.add(
+  "POST",
+  `${AGENT_THREADS_PATH}/:threadId/call-person`,
+  Effect.gen(function* () {
+    const { request, handlers, authorization } = yield* makeRequestContext;
+    const params = yield* HttpRouter.params;
+    const body = authorization === null ? null : yield* readJsonBody(request);
+    return respond(
+      yield* handlers.callPerson(authorization, { threadId: params["threadId"], body }),
+    );
+  }),
+);
+
+export const agentThreadsPersonNotNeededRouteLayer = HttpRouter.add(
+  "POST",
+  `${AGENT_THREADS_PATH}/:threadId/person-not-needed`,
+  Effect.gen(function* () {
+    const { handlers, authorization } = yield* makeRequestContext;
+    const params = yield* HttpRouter.params;
+    return respond(
+      yield* handlers.personNotNeeded(authorization, { threadId: params["threadId"] }),
+    );
+  }),
+);

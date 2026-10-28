@@ -9,6 +9,12 @@ import { isAssistantProjectId } from "@t3tools/contracts";
 import { isLatestTurnSettled } from "../session-logic";
 import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
+import {
+  isAgentStartedChat,
+  isAnsweringPerson,
+  isPersonCallPending,
+  type ThreadOwnerInput,
+} from "./Sidebar.owner";
 import { isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
 
 /**
@@ -19,10 +25,7 @@ import { isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
 export const YOUR_TURN_SINCE = "2026-09-29T00:00:00.000Z";
 const YOUR_TURN_SINCE_MS = Date.parse(YOUR_TURN_SINCE);
 
-export type YourTurnInput = Pick<
-  SidebarThreadSummary,
-  "hasPendingApprovals" | "hasPendingUserInput" | "latestTurn" | "session"
-> &
+export type YourTurnInput = ThreadOwnerInput &
   Partial<
     Pick<
       SidebarThreadSummary,
@@ -38,10 +41,16 @@ export type YourTurnInput = Pick<
   >;
 
 export function isYourTurn(thread: YourTurnInput, now: string): boolean {
-  // Assistant chats answer in Telegram/Slack or the Uno chat; chats another
-  // agent started report back to that agent's chat, which is the one to answer.
-  if (thread.projectId != null && isAssistantProjectId(thread.projectId)) return false;
-  if (thread.spawnedByThreadId != null) return false;
+  // A chat an agent or Uno started reports back to the chat that started it,
+  // which is the one to answer, unless it called the person in or answers
+  // their own message (Sidebar.owner). The person's other assistant chats
+  // answer in Telegram/Slack or the Uno chat.
+  const calledIn = isPersonCallPending(thread);
+  if (isAgentStartedChat(thread)) {
+    if (!calledIn && !isAnsweringPerson(thread)) return false;
+  } else if (thread.projectId != null && isAssistantProjectId(thread.projectId)) {
+    return false;
+  }
   // An approval or a question has its own, louder status.
   if (threadNeedsUser(thread)) return false;
   const session = thread.session;
@@ -59,6 +68,8 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   // The person already wrote again: that turn is on its way, not on them.
   const userMessageMs = Date.parse(thread.latestUserMessageAt ?? "");
   if (!Number.isNaN(userMessageMs) && userMessageMs > completedAtMs) return false;
+  // Called in after the turn finished: Read or Done before the call does not count.
+  if (calledIn) return !isThreadSnoozed(thread, now);
   // Done for this turn. A later turn wakes the chat (the server also clears the
   // settle on activity; this covers the moment before that event arrives).
   if (thread.settledOverride === "settled") {

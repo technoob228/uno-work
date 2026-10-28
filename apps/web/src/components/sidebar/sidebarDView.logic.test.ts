@@ -15,6 +15,7 @@ import {
   projectRowComputers,
   resolveGroupLevels,
   sidebarDTitle,
+  hiddenAgentChatsLabel,
   toggleFilter,
   toggleLevel,
 } from "./sidebarDView.logic";
@@ -73,6 +74,16 @@ describe("title, presets, place", () => {
     expect(sidebarDTitle({ projectNames: ["a", "b"], computerNames: ["MacBook"] })).toBe(
       "Chats · 2 projects · MacBook",
     );
+  });
+  it("says My chats while Only mine is on, and how many agent chats it hides", () => {
+    expect(sidebarDTitle({ projectNames: null, computerNames: null, onlyMine: true })).toBe(
+      "My chats",
+    );
+    expect(sidebarDTitle({ projectNames: ["landing"], computerNames: null, onlyMine: true })).toBe(
+      "My chats · landing",
+    );
+    expect(hiddenAgentChatsLabel(1)).toBe("1 agent chat hidden");
+    expect(hiddenAgentChatsLabel(4)).toBe("4 agent chats hidden");
   });
   it("knows the four ready ways, anything else is custom", () => {
     expect(headerPresetOf([])).toBe("list");

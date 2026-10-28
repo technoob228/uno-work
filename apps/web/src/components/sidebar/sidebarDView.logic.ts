@@ -164,14 +164,17 @@ export function passes(picked: ReadonlyArray<string> | null, id: string): boolea
 /**
  * The title over the list says which chats it shows (critics 16.10: it is a
  * button, and "All projects" lied — it lists chats): "All chats", "Chats ·
- * landing", "Chats · 2 projects", "Chats · landing · MacBook". The grouping
- * is seen in the list itself; the filter is said here only (no second chip).
+ * landing", "Chats · 2 projects", "Chats · landing · MacBook"; with Only mine
+ * (Misha 28.10) "My chats", "My chats · landing". The grouping is seen in the
+ * list itself; the filter is said here only (no second chip).
  */
 export function sidebarDTitle(input: {
   /** Names of the picked projects; null = all. */
   readonly projectNames: ReadonlyArray<string> | null;
   /** Names of the picked computers; null = all. */
   readonly computerNames: ReadonlyArray<string> | null;
+  /** Only the chats that are the person's now (Sidebar.owner). */
+  readonly onlyMine?: boolean;
 }): string {
   const parts: string[] = [];
   const { projectNames, computerNames } = input;
@@ -183,7 +186,15 @@ export function sidebarDTitle(input: {
       computerNames.length === 1 ? computerNames[0]! : `${computerNames.length} computers`,
     );
   }
+  if (input.onlyMine === true) {
+    return parts.length === 0 ? "My chats" : `My chats · ${parts.join(" · ")}`;
+  }
   return parts.length === 0 ? "All chats" : `Chats · ${parts.join(" · ")}`;
+}
+
+/** "3 agent chats hidden": the line under the list while Only mine is on. */
+export function hiddenAgentChatsLabel(count: number): string {
+  return `${count} agent ${count === 1 ? "chat" : "chats"} hidden`;
 }
 
 /**
@@ -218,8 +229,9 @@ export function headerPresetOf(
 /**
  * What a chat row still has to say about its place (Misha 16.10: "в режиме
  * без сортинга надо показывать плашку… и в инбоксе"): the project when the
- * list is not grouped by project, the computer when several are in view and
- * the list is not grouped by computer.
+ * list is not grouped by project (since 28.10 its icon before the title, as
+ * in T3 Code), the computer when several are in view and the list is not
+ * grouped by computer.
  */
 export function placeShown(
   levels: ReadonlyArray<SidebarGroupLevel>,

@@ -35,8 +35,10 @@ describe("Uno Work environment brief", () => {
     // uno.place, the agent didn't know Spark and said "order Small"; the
     // details are uno_guide("spark")); ~60 for "Deploying to Uno / uno.place"
     // (Misha 19.10: a Codex chat asked to deploy on uno.place went to click
-    // the site and hit the sign-in page instead of reading llms.txt).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1900);
+    // the site and hit the sign-in page instead of reading llms.txt); ~15 for
+    // `chat_call_person` / `chat_person_not_needed` (Misha 28.10: chats agents
+    // start can be hidden, so an agent has to call the person into one).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1915);
   });
 
   it("deploying to uno.place: tools or llms.txt first, never a browser sign-in", () => {

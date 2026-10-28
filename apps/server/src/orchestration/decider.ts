@@ -6,6 +6,7 @@ import type {
   OrchestrationReadModel,
   OrchestrationThread,
 } from "@t3tools/contracts";
+import { PERSON_CALL_REASON_MAX_CHARS } from "@t3tools/contracts";
 import { Effect } from "effect";
 import {
   coerceAssistantModelSelection,
@@ -828,6 +829,61 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           reason: command.reason,
           updatedAt: alreadyActive ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.person.call": {
+      // Any agent may call the person into any chat it can reach (itself,
+      // the chat that started it, its children, a peer — the bridge checks
+      // the project scope), Uno too. A later call replaces the earlier one.
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      const reason = command.reason?.slice(0, PERSON_CALL_REASON_MAX_CHARS) ?? null;
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.person-called",
+        payload: {
+          threadId: command.threadId,
+          calledAt: occurredAt,
+          calledByThreadId: origin?.kind === "agent" ? origin.threadId : null,
+          reason,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.person.release": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Idempotent: nobody called the person, nothing to take back.
+      if ((thread.personCalledAt ?? null) === null) {
+        return [];
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.person-released",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: occurredAt,
         },
       };
     }

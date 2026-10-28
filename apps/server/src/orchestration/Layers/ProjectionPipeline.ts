@@ -38,6 +38,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
+import { isPersonOrigin, startedByFromOrigin } from "../commandOrigin.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -585,6 +586,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             controlChangedAt: null,
             agentsClosedAt: null,
             assistantRole: event.payload.assistantRole ?? null,
+            startedBy: startedByFromOrigin(event.metadata.origin),
+            latestPersonMessageAt: null,
+            personCalledAt: null,
+            personCalledByThreadId: null,
+            personCallReason: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -732,6 +738,40 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.person-called": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            personCalledAt: event.payload.calledAt,
+            personCalledByThreadId: event.payload.calledByThreadId,
+            personCallReason: event.payload.reason,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.person-released": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            personCalledAt: null,
+            personCalledByThreadId: null,
+            personCallReason: null,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.runtime-mode-set": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -778,7 +818,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
-        case "thread.message-sent":
+        case "thread.message-sent": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // The person's own message (not an agent's, Uno's or an app's):
+          // what the chat does next answers them.
+          const personWrote =
+            event.payload.role === "user" &&
+            isPersonOrigin(event.metadata.origin) &&
+            (existingRow.value.latestPersonMessageAt ?? "") < event.payload.createdAt;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            ...(personWrote ? { latestPersonMessageAt: event.payload.createdAt } : {}),
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
         case "thread.approval-response-requested":

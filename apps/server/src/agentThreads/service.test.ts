@@ -669,7 +669,7 @@ describe("agent threads bridge: driving children", () => {
       const { handlers, dispatched } = makeFixture();
       const reply = yield* handlers.releaseThread(scoped(), { threadId: CHILD });
       assert.deepStrictEqual(reply, { status: 200, body: { ok: true, controller: "human" } });
-      assert.strictEqual(dispatched.length, 1);
+      assert.strictEqual(dispatched.length, 2);
       const command = dispatched[0]?.command as Extract<
         OrchestrationCommand,
         { type: "thread.control.set" }
@@ -678,6 +678,76 @@ describe("agent threads bridge: driving children", () => {
       assert.strictEqual(command.threadId, CHILD);
       assert.strictEqual(command.controller, "human");
       assert.deepStrictEqual(dispatched[0]?.origin, { kind: "agent", threadId: CALLER });
+      // Handing the chat over also calls the person into it.
+      assert.strictEqual(dispatched[1]?.command.type, "thread.person.call");
+      assert.strictEqual((dispatched[1]?.command as any).threadId, CHILD);
+    }),
+  );
+});
+
+describe("agent threads bridge: calling the person", () => {
+  it.effect("calls the person into the caller itself, with a trimmed reason", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture();
+      const reply = yield* handlers.callPerson(scoped(), {
+        threadId: "self",
+        body: { reason: `  ${"глянь лендинг ".repeat(30)}` },
+      });
+      assert.deepStrictEqual(reply, {
+        status: 200,
+        body: { ok: true, threadId: CALLER, owner: "person" },
+      });
+      const command = dispatched[0]?.command as Extract<
+        OrchestrationCommand,
+        { type: "thread.person.call" }
+      >;
+      assert.strictEqual(command.type, "thread.person.call");
+      assert.strictEqual(command.threadId, CALLER);
+      assert.isTrue((command.reason ?? "").length <= 200);
+      assert.isTrue((command.reason ?? "").startsWith("глянь лендинг"));
+      assert.deepStrictEqual(dispatched[0]?.origin, { kind: "agent", threadId: CALLER });
+
+      const byId = yield* handlers.callPerson(scoped(), { threadId: CALLER, body: {} });
+      assert.strictEqual(byId.status, 200);
+      assert.isNull((dispatched[1]?.command as any).reason);
+    }),
+  );
+
+  it.effect("reaches other chats like messaging does; rejects a bad reason", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture({
+        threads: [
+          threadShell(CALLER),
+          threadShell(CHILD, { spawnedByThreadId: CALLER, controller: "agent" }),
+          threadShell("thread-elsewhere" as ThreadId, { projectId: OTHER_PROJECT }),
+        ],
+      });
+      const peer = yield* handlers.callPerson(scoped(), { threadId: CHILD, body: null });
+      assert.strictEqual(peer.status, 200);
+      assert.strictEqual((dispatched[0]?.command as any).threadId, CHILD);
+
+      const elsewhere = yield* handlers.callPerson(scoped(), {
+        threadId: "thread-elsewhere",
+        body: {},
+      });
+      assert.strictEqual(elsewhere.status, 404);
+
+      const bad = yield* handlers.callPerson(scoped(), { threadId: "self", body: { reason: 5 } });
+      assert.strictEqual(bad.status, 400);
+      assert.strictEqual(dispatched.length, 1);
+    }),
+  );
+
+  it.effect("person-not-needed dispatches thread.person.release", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture();
+      const reply = yield* handlers.personNotNeeded(scoped(), { threadId: CHILD });
+      assert.deepStrictEqual(reply, { status: 200, body: { ok: true, threadId: CHILD } });
+      assert.strictEqual(dispatched[0]?.command.type, "thread.person.release");
+      assert.strictEqual((dispatched[0]?.command as any).threadId, CHILD);
+
+      const unauthorized = yield* handlers.personNotNeeded(null, { threadId: CHILD });
+      assert.notStrictEqual(unauthorized.status, 200);
     }),
   );
 });
