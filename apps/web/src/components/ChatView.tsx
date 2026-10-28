@@ -4114,8 +4114,6 @@ export default function ChatView(props: ChatViewProps) {
                 ? null
                 : activeThread.error
             }
-            errorKey={activeThread.session?.updatedAt ?? null}
-            threadKey={activeThread.id}
             onDismiss={() => setThreadError(activeThread.id, null)}
             // "Try again" sends the person's last message again (flows v2, I1).
             onRetry={

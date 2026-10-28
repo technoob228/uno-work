@@ -32,6 +32,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { TurnAutoRetry } from "../Services/TurnAutoRetry.ts";
 import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
@@ -644,6 +645,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const turnAutoRetry = yield* TurnAutoRetry;
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1291,6 +1293,33 @@ const make = Effect.gen(function* () {
             return true;
         }
       })();
+      // A failed turn the daemon continues by itself ("busy" / "didn't
+      // answer", TurnAutoRetry): the thread stays "working" — no "Failed" on
+      // Home, no error line — until the continuation runs or is called off.
+      const failedTurnError =
+        event.type === "turn.completed" &&
+        shouldApplyThreadLifecycle &&
+        normalizeRuntimeTurnState(event.payload.state) === "failed"
+          ? (event.payload.errorMessage ?? thread.session?.lastError ?? "Turn failed")
+          : null;
+      const autoRetryScheduled =
+        failedTurnError !== null &&
+        (yield* turnAutoRetry.onTurnFailed({ threadId: thread.id, error: failedTurnError })).retry;
+      if (
+        event.type === "turn.completed" &&
+        shouldApplyThreadLifecycle &&
+        normalizeRuntimeTurnState(event.payload.state) === "completed"
+      ) {
+        yield* turnAutoRetry.onTurnSucceeded(thread.id);
+      }
+      // OpenCode reports the session's error right after the failed turn
+      // (session.error → turn.completed, then runtime.error): it must not
+      // turn the waiting thread red.
+      const suppressedByAutoRetry =
+        (event.type === "runtime.error" ||
+          (event.type === "session.state.changed" && event.payload.state === "error")) &&
+        (yield* turnAutoRetry.isPending(thread.id));
+
       const acceptedTurnStartedSourcePlan =
         event.type === "turn.started" && shouldApplyThreadLifecycle
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
@@ -1319,9 +1348,11 @@ const make = Effect.gen(function* () {
             case "session.exited":
               return "stopped";
             case "turn.completed":
-              return normalizeRuntimeTurnState(event.payload.state) === "failed"
-                ? "error"
-                : "ready";
+              return autoRetryScheduled
+                ? "running"
+                : normalizeRuntimeTurnState(event.payload.state) === "failed"
+                  ? "error"
+                  : "ready";
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -1329,8 +1360,9 @@ const make = Effect.gen(function* () {
               return activeTurnId !== null ? "running" : "ready";
           }
         })();
-        const rawLastError =
-          event.type === "session.state.changed" && event.payload.state === "error"
+        const rawLastError = autoRetryScheduled
+          ? null
+          : event.type === "session.state.changed" && event.payload.state === "error"
             ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
             : event.type === "turn.completed" &&
                 normalizeRuntimeTurnState(event.payload.state) === "failed"
@@ -1342,7 +1374,7 @@ const make = Effect.gen(function* () {
         const lastErrorClass =
           lastError === null ? null : classifyOrchestrationErrorDetail(rawLastError);
 
-        if (shouldApplyThreadLifecycle) {
+        if (shouldApplyThreadLifecycle && !suppressedByAutoRetry) {
           if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
             yield* markSourceProposedPlanImplemented(
               acceptedTurnStartedSourcePlan.sourceThreadId,
@@ -1627,9 +1659,13 @@ const make = Effect.gen(function* () {
       if (event.type === "runtime.error") {
         const runtimeErrorMessage = normalizeUnoBillingErrorMessage(event.payload.message);
 
-        const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
-          ? true
-          : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+        const shouldApplyRuntimeError =
+          !suppressedByAutoRetry &&
+          (!STRICT_PROVIDER_LIFECYCLE_GUARD
+            ? true
+            : activeTurnId === null ||
+              eventTurnId === undefined ||
+              sameId(activeTurnId, eventTurnId));
 
         if (shouldApplyRuntimeError) {
           yield* orchestrationEngine.dispatch({
@@ -1739,6 +1775,7 @@ const make = Effect.gen(function* () {
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
+      yield* turnAutoRetry.start();
       yield* Effect.forkScoped(
         Stream.runForEach(providerService.streamEvents, (event) =>
           worker.enqueue({ source: "runtime", event }),

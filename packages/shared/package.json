@@ -151,6 +151,10 @@
     "./secretRequestCopy": {
       "types": "./src/secretRequestCopy.ts",
       "import": "./src/secretRequestCopy.ts"
+    },
+    "./turnErrorRetry": {
+      "types": "./src/turnErrorRetry.ts",
+      "import": "./src/turnErrorRetry.ts"
     }
   },
   "scripts": {
