@@ -229,6 +229,7 @@ import type {
   UnoAiSpend,
   UnoAiStatus,
 } from "./appSdk.ts";
+import type { PlanLimits, PlanLimitsInput } from "./planLimits.ts";
 import type {
   UnoComputerResources,
   UnoDiskCleanInput,
@@ -1011,6 +1012,8 @@ export interface EnvironmentApi {
     appAiSpend: () => Promise<UnoAiSpend>;
     /** Uno AI hours right now — polled while a chat works (the busy notice). */
     appAiStatus: () => Promise<UnoAiStatus>;
+    /** Home's "AI plan limits": this computer's Claude / ChatGPT plan sign-ins and their limits. */
+    planLimits: (input: PlanLimitsInput) => Promise<PlanLimits>;
     /** The person's sites on Uno Hosting, read by this computer's daemon. */
     workSites: () => Promise<UnoWorkSites>;
     /** Take one of the person's sites off the internet (their click, with a confirm). */

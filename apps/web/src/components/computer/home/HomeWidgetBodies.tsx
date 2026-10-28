@@ -1,9 +1,15 @@
 /**
  * What the built-in widgets show. Each reads what the rest of the app already
  * reads — the daemon's file list and cloud state, the account's sites, the
- * computer's programs — plus the daemon's Uno AI spend ledger.
+ * computer's programs — plus the daemon's Uno AI spend ledger and its reading
+ * of the person's own Claude / ChatGPT plan limits.
  */
-import type { EnvironmentId, UnoMachineApp } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PlanLimitsAccount,
+  PlanLimitsWindow,
+  UnoMachineApp,
+} from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -16,6 +22,7 @@ import {
 import { useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { ClaudeAI, OpenAI } from "../../Icons";
 import { openInNewTab } from "../../../navigation/useOpenApp";
 import { CloudUsageBar, formatQuota } from "../../files/CloudBrowser";
 import { cloudStateQueryOptions, filesListQueryOptions } from "../../files/filesApi";
@@ -38,7 +45,18 @@ import { useStartingAppId } from "../useAppPrimaryAction";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { aiSpendDays, formatUsdShort, type SpendDay } from "./homeInfo";
 import { recentHomeEntries } from "./homeModel";
-import { useAiHours, useAiSpend } from "./useHomeInfo";
+import {
+  planAccountTitle,
+  planHasNoLimits,
+  planProblemText,
+  planResetText,
+  planStaleText,
+  planUsageTone,
+  planUsedPercent,
+  planWindowTitle,
+  type PlanUsageTone,
+} from "./planLimitsModel";
+import { planLimitsQueryOptions, useAiHours, useAiSpend } from "./useHomeInfo";
 import {
   aiFastLine,
   aiHoursCaption,
@@ -495,6 +513,115 @@ export function AiSpendWidget({ environmentId }: { environmentId: EnvironmentId 
           <span className="block">Days fill in as this computer keeps count.</span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+const PLAN_TONE_CLASS: Record<PlanUsageTone, string> = {
+  ok: "bg-sky-500",
+  high: "bg-amber-500",
+  full: "bg-destructive",
+};
+
+/** One limit: what it is and when it resets, then a bar with the percent used. */
+function PlanLimitRow({
+  window,
+  now,
+  scoped,
+}: {
+  window: PlanLimitsWindow;
+  now: number;
+  scoped: boolean;
+}) {
+  const percent = planUsedPercent(window);
+  const reset = planResetText(window.resetsAt, now);
+  return (
+    <div className="flex flex-col gap-1" data-testid={`home-plan-limit-${window.id}`}>
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className={cn("truncate", scoped ? "text-muted-foreground" : "font-medium")}>
+          {planWindowTitle(window)}
+        </span>
+        {reset ? <span className="shrink-0 text-[11px] text-muted-foreground">{reset}</span> : null}
+      </div>
+      <div className="flex items-center gap-2">
+        <div
+          className={cn("w-full overflow-hidden rounded-full bg-muted", scoped ? "h-1" : "h-1.5")}
+        >
+          <div
+            className={cn("h-full rounded-full", PLAN_TONE_CLASS[planUsageTone(window)])}
+            style={{ width: `${Math.max(2, percent)}%` }}
+          />
+        </div>
+        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+          {percent}% used
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PlanLimitsAccountBlock({ account, now }: { account: PlanLimitsAccount; now: number }) {
+  const Icon = account.provider === "claude" ? ClaudeAI : OpenAI;
+  const stale = planStaleText(account, now);
+  const problem = planProblemText(account);
+  const note = [stale, problem].filter(Boolean).join(". ");
+  return (
+    <section className="flex flex-col gap-2" data-testid={`home-plan-account-${account.provider}`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="shrink-0 text-sm font-medium">{planAccountTitle(account)}</span>
+        {account.email ? (
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+            {account.email}
+          </span>
+        ) : null}
+      </div>
+      {account.windows.length > 0 ? (
+        <div className={cn("flex flex-col gap-2", account.stale && "opacity-60")}>
+          {account.windows.map((window) => (
+            <PlanLimitRow
+              key={window.id}
+              window={window}
+              now={now}
+              scoped={window.scope !== undefined}
+            />
+          ))}
+        </div>
+      ) : null}
+      {planHasNoLimits(account) ? (
+        <p className="text-xs text-muted-foreground">No usage limits to show for this plan.</p>
+      ) : note ? (
+        <p className="text-xs text-muted-foreground">{note}</p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * The person's own Claude and ChatGPT plans on this computer: the 5-hour and
+ * weekly limits (and per-model ones), how much is used, when each resets.
+ * Home only offers it where Claude Code or Codex is signed in.
+ */
+export function PlanLimitsWidget({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const query = useQuery(planLimitsQueryOptions(environmentId, { signInsOnly: false }));
+  const clock = useMinuteClock();
+  const now = Math.max(Date.parse(clock), Date.now());
+  if (query.isPending) return <Skeleton className="h-24 rounded-xl" />;
+  const accounts = query.data?.accounts ?? [];
+  if (accounts.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {query.isError
+          ? "Couldn't read limits just now."
+          : "Sign in to Claude or Codex on this computer to see your plan's limits here."}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4" data-testid="home-plan-limits">
+      {accounts.map((account) => (
+        <PlanLimitsAccountBlock key={account.id} account={account} now={now} />
+      ))}
     </div>
   );
 }

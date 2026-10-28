@@ -60,6 +60,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       projects it was given. False / absent: an assistant here sees every
       file of the computer; "only selected projects" needs its own computer. */
   assistantSandbox: Schema.optionalKey(Schema.Boolean),
+  /** Server answers `uno.computer.planLimits` (Home's "AI plan limits",
+      0.0.157). Absent: clients don't offer the widget for this computer. */
+  planLimits: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
