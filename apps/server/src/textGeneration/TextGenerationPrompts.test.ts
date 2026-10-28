@@ -115,6 +115,13 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).not.toContain("Attachment metadata:");
   });
 
+  it("asks for the person's words, never a description of the message (P12, 28.10)", () => {
+    const result = buildThreadTitlePrompt({ message: "Hi there, how are you doing today?" });
+    expect(result.prompt).not.toContain("coding conversations");
+    expect(result.prompt).toContain("Never describe the message itself");
+    expect(result.prompt).toContain("return it as written");
+  });
+
   it("includes attachment metadata when attachments are provided", () => {
     const result = buildThreadTitlePrompt({
       message: "Name this thread from the screenshot",

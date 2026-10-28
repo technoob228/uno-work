@@ -203,6 +203,22 @@ export function providerErrorLabelFromInstanceHint(input: {
   );
 }
 
+/**
+ * A first message that already reads as a title — one short line, nothing
+ * attached ("Hi", "Fix login", "Привет") — stays the title as typed: the title
+ * model only made it worse ("Hi" → "Greeting with no coding request", P12,
+ * 28.10) and cost a model call.
+ */
+export function messageIsItsOwnTitle(
+  text: string,
+  attachments: ReadonlyArray<unknown> | undefined,
+): boolean {
+  if (attachments !== undefined && attachments.length > 0) return false;
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > 30 || /[\r\n]/.test(trimmed)) return false;
+  return trimmed.split(/\s+/).length <= 3;
+}
+
 function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
   const trimmedCurrentTitle = currentTitle.trim();
   if (trimmedCurrentTitle === DEFAULT_THREAD_TITLE) {
@@ -927,7 +943,8 @@ const make = Effect.gen(function* () {
         canReplaceThreadTitle(thread.title, event.payload.titleSeed) &&
         // The pinned Uno chat is shown as "Uno" / "Main conversation" whatever
         // its title: a title call would be spent for nothing.
-        thread.assistantRole !== "chat"
+        thread.assistantRole !== "chat" &&
+        !messageIsItsOwnTitle(message.text, message.attachments)
       ) {
         const generateTitle = maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
