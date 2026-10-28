@@ -60,8 +60,8 @@ import * as nodePath from "node:path";
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
-  buildTranscriptMessageText,
-  isTranscribableMedia,
+  isGatingSpeechMedia,
+  mediaToText,
   transcribeTelegramAudio,
 } from "../telegramTranscription.ts";
 import {
@@ -138,7 +138,7 @@ import {
   isImageLikeMedia,
   pickTelegramUploadMethod,
   toNormalizedMessage,
-  TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES,
+  mediaLimitReply,
   TELEGRAM_BOT_UPLOAD_LIMIT_BYTES,
   TELEGRAM_SEND_FILE_HINT,
   type TelegramIncomingMessage,
@@ -163,6 +163,7 @@ import {
 } from "../connectorSenders.ts";
 import {
   callTelegramBotMethod,
+  isAssistantBotRelay,
   isRelayCredential,
   parseRouteCredential,
   redactConnectorSecrets,
@@ -259,6 +260,11 @@ export const telegramSendOutcome = (errorCode: number | undefined): SendOutcome 
 export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: TelegramIncomingMessage;
+  /**
+   * Set by Uno's assistant bot relay (`tga_`) on a `/start <code>` the
+   * console already answered ("Connected to …"): link locally, say nothing.
+   */
+  readonly uno_linked?: boolean;
 }
 
 /** Shape check for an inbox payload replayed after a restart. */
@@ -731,10 +737,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const target = input.media.find(
-        (descriptor) =>
-          isTranscribableMedia(descriptor) &&
-          (descriptor.sizeBytes === null ||
-            descriptor.sizeBytes <= TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES),
+        (descriptor) => isGatingSpeechMedia(descriptor) && mediaLimitReply(descriptor) === null,
       );
       if (target === undefined) {
         return null;
@@ -875,6 +878,55 @@ const makeTelegramConnector = Effect.gen(function* () {
       });
     });
 
+  // Store image bytes as a chat attachment (harnesses see it as a vision
+  // input). Null when it does not fit or cannot be written: the caller falls
+  // back to a saved file.
+  const storeImageAttachment = (input: {
+    readonly threadId: ThreadId;
+    readonly chatId: string;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly bytes: Uint8Array;
+  }): Effect.Effect<ChatImageAttachment | null> =>
+    Effect.gen(function* () {
+      if (
+        input.bytes.byteLength === 0 ||
+        input.bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+      ) {
+        return null;
+      }
+      const attachmentId = createAttachmentId(input.threadId);
+      if (attachmentId === null) return null;
+      const attachment = {
+        type: "image" as const,
+        id: attachmentId,
+        name: input.name,
+        mimeType: input.mimeType.toLowerCase(),
+        sizeBytes: input.bytes.byteLength,
+      } satisfies ChatImageAttachment;
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (attachmentPath === null) return null;
+      const stored = yield* Effect.tryPromise({
+        try: async () => {
+          await fsPromises.mkdir(nodePath.dirname(attachmentPath), { recursive: true });
+          await fsPromises.writeFile(attachmentPath, input.bytes);
+        },
+        catch: (cause) => new TelegramConnectorError({ message: String(cause) }),
+      }).pipe(
+        Effect.map(() => true),
+        Effect.catch((cause) =>
+          Effect.logWarning("telegram image attachment write failed").pipe(
+            Effect.annotateLogs({ chatId: input.chatId, cause }),
+            Effect.map(() => false),
+          ),
+        ),
+      );
+      return stored ? attachment : null;
+    });
+
   // Download every media payload of an incoming message. Images become chat
   // attachments (the harness sees them as vision inputs); everything else is
   // saved under `telegram-files/<chatId>/` and described to the harness as a
@@ -895,18 +947,6 @@ const makeTelegramConnector = Effect.gen(function* () {
       const attachments: Array<ChatImageAttachment> = [];
       const notes: Array<string> = [];
       for (const descriptor of input.media) {
-        if (
-          descriptor.sizeBytes !== null &&
-          descriptor.sizeBytes > TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES
-        ) {
-          notes.push(
-            buildMediaFailureNote(
-              descriptor,
-              "the file exceeds the 20 MB Telegram bot download limit; ask the user to share it another way (e.g. a link)",
-            ),
-          );
-          continue;
-        }
         const downloaded = yield* downloadTelegramFile(input.botToken, descriptor.fileId).pipe(
           Effect.map((bytes) => ({ ok: true as const, bytes })),
           Effect.catch((cause) =>
@@ -925,44 +965,18 @@ const makeTelegramConnector = Effect.gen(function* () {
         if (
           isImageLikeMedia(descriptor) &&
           descriptor.mimeType !== null &&
-          bytes.byteLength > 0 &&
-          bytes.byteLength <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES &&
           attachments.length < PROVIDER_SEND_TURN_MAX_ATTACHMENTS
         ) {
-          const attachmentId = createAttachmentId(input.threadId);
-          if (attachmentId !== null) {
-            const attachment = {
-              type: "image" as const,
-              id: attachmentId,
-              name: descriptor.fileName,
-              mimeType: descriptor.mimeType.toLowerCase(),
-              sizeBytes: bytes.byteLength,
-            } satisfies ChatImageAttachment;
-            const attachmentPath = resolveAttachmentPath({
-              attachmentsDir: serverConfig.attachmentsDir,
-              attachment,
-            });
-            if (attachmentPath !== null) {
-              const stored = yield* Effect.tryPromise({
-                try: async () => {
-                  await fsPromises.mkdir(nodePath.dirname(attachmentPath), { recursive: true });
-                  await fsPromises.writeFile(attachmentPath, bytes);
-                },
-                catch: (cause) => new TelegramConnectorError({ message: String(cause) }),
-              }).pipe(
-                Effect.map(() => true),
-                Effect.catch((cause) =>
-                  Effect.logWarning("telegram image attachment write failed").pipe(
-                    Effect.annotateLogs({ chatId: input.chatId, cause }),
-                    Effect.map(() => false),
-                  ),
-                ),
-              );
-              if (stored) {
-                attachments.push(attachment);
-                continue;
-              }
-            }
+          const attachment = yield* storeImageAttachment({
+            threadId: input.threadId,
+            chatId: input.chatId,
+            name: descriptor.fileName,
+            mimeType: descriptor.mimeType,
+            bytes,
+          });
+          if (attachment !== null) {
+            attachments.push(attachment);
+            continue;
           }
         }
 
@@ -991,38 +1005,51 @@ const makeTelegramConnector = Effect.gen(function* () {
           continue;
         }
 
-        // Голосовые/кружки транскрибируем через гейтвей: транскрипт попадает
-        // в текст сообщения (виден в диалоге приложения и любому харнессу).
-        // Нет ключа / гейтвей недоступен — деградация в заметку с путём.
-        if (isTranscribableMedia(descriptor)) {
+        // Голос и аудио — в текст через гейтвей, видео и кружки — описание
+        // (речь + что на экране). Текст попадает в сообщение (виден в
+        // диалоге приложения и любому харнессу); ошибка шлюза — пометка
+        // «could not transcribe» и путь к файлу, ход всё равно идёт.
+        const settings = yield* serverSettingsService.getSettings.pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+        const converted = yield* mediaToText({
+          descriptor,
+          bytes,
+          savedPath,
+          baseUrl: UNO_GATEWAY_BASE_URL,
+          apiKey: settings?.uno.apiKey?.trim() ?? "",
           // Reuse the transcript computed during addressing gating, if any.
-          let transcript = input.precomputedTranscripts?.get(descriptor.fileId) ?? null;
-          if (transcript === null) {
-            const settings = yield* serverSettingsService.getSettings.pipe(
-              Effect.orElseSucceed(() => undefined),
+          precomputedTranscript: input.precomputedTranscripts?.get(descriptor.fileId) ?? null,
+        });
+        if (converted !== null) {
+          notes.push(converted.text);
+          if (
+            converted.thumbnailFileId !== null &&
+            attachments.length < PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+          ) {
+            const thumbnailFileId = converted.thumbnailFileId;
+            const frame = yield* downloadTelegramFile(input.botToken, thumbnailFileId).pipe(
+              Effect.flatMap((frameBytes) =>
+                storeImageAttachment({
+                  threadId: input.threadId,
+                  chatId: input.chatId,
+                  name: "video-frame.jpg",
+                  mimeType: "image/jpeg",
+                  bytes: frameBytes,
+                }),
+              ),
+              Effect.catch(() => Effect.succeed(null)),
             );
-            const unoApiKey = settings?.uno.apiKey?.trim() ?? "";
-            if (unoApiKey.length > 0) {
-              transcript = yield* transcribeTelegramAudio({
-                baseUrl: UNO_GATEWAY_BASE_URL,
-                apiKey: unoApiKey,
-                bytes,
-                fileName: descriptor.fileName,
-                mimeType: descriptor.mimeType,
-              }).pipe(
-                Effect.catch((cause) =>
-                  Effect.logWarning("telegram voice transcription failed").pipe(
-                    Effect.annotateLogs({ chatId: input.chatId, savedPath, cause: cause.message }),
-                    Effect.as(null),
-                  ),
-                ),
+            if (frame !== null) {
+              attachments.push(frame);
+              notes.push(
+                `[The attached image is a preview frame of this ${
+                  descriptor.kind === "video_note" ? "video message" : "video"
+                }.]`,
               );
             }
           }
-          if (transcript !== null) {
-            notes.push(buildTranscriptMessageText({ descriptor, transcript, savedPath }));
-            continue;
-          }
+          continue;
         }
 
         notes.push(buildMediaNote(descriptor, savedPath));
@@ -1144,6 +1171,7 @@ const makeTelegramConnector = Effect.gen(function* () {
     projectId: ProjectId,
     config: ManagerTelegramConnectorConfig,
     message: TelegramIncomingMessage,
+    options: { readonly silent: boolean },
   ) =>
     Effect.gen(function* () {
       const chatId = String(message.chat?.id);
@@ -1195,8 +1223,10 @@ const makeTelegramConnector = Effect.gen(function* () {
         }
       }
       yield* Effect.logInfo("telegram chat linked by code").pipe(
-        Effect.annotateLogs({ projectId, chatId, toMainConversation }),
+        Effect.annotateLogs({ projectId, chatId, toMainConversation, silent: options.silent }),
       );
+      // The console already said hello for Uno's assistant bot.
+      if (options.silent) return;
       yield* sendTelegramText(
         projectId,
         config.botToken,
@@ -1227,6 +1257,7 @@ const makeTelegramConnector = Effect.gen(function* () {
     holderConfig: ManagerTelegramConnectorConfig,
     assistantId: ProjectId,
     message: TelegramIncomingMessage,
+    options: { readonly silent: boolean },
   ) =>
     Effect.gen(function* () {
       const chatId = String(message.chat?.id);
@@ -1276,6 +1307,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       yield* Effect.logInfo("telegram chat linked by code to a routed assistant").pipe(
         Effect.annotateLogs({ holder, assistantId, chatId, target: target.kind }),
       );
+      if (options.silent) return;
       yield* sendTelegramText(
         holder,
         holderConfig.botToken,
@@ -1336,10 +1368,13 @@ const makeTelegramConnector = Effect.gen(function* () {
             }
             return;
           }
+          // Uno's assistant bot answers the person itself (`uno_linked`);
+          // honoured only on that bot's relay, never on an own bot.
+          const silent = update.uno_linked === true && isAssistantBotRelay(config.botToken);
           if (linkFor === projectId) {
-            yield* linkChat(projectId, config, message);
+            yield* linkChat(projectId, config, message, { silent });
           } else {
-            yield* linkRoutedChat(projectId, config, linkFor, message);
+            yield* linkRoutedChat(projectId, config, linkFor, message, { silent });
           }
           return;
         }
@@ -1446,7 +1481,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         !decision.addressed &&
         !normalized.isDirectMessage &&
         addressing.smartWake &&
-        media.some(isTranscribableMedia)
+        media.some(isGatingSpeechMedia)
       ) {
         const gating = yield* transcribeAudioForGating({ botToken: config.botToken, media });
         if (gating !== null) {
@@ -1481,6 +1516,34 @@ const makeTelegramConnector = Effect.gen(function* () {
 
       if (!decision.addressed) {
         yield* Effect.logDebug("telegram message not addressed to the bot; ignored").pipe(
+          Effect.annotateLogs({ projectId, chatId }),
+        );
+        return;
+      }
+
+      // --- Limits, before anything is downloaded: over Telegram's 20 MB bot
+      // download limit, or longer than the assistant takes. The person hears
+      // why; the turn runs only if something else is left (text, caption,
+      // another file).
+      const replyTo = message.message_id === undefined ? null : String(message.message_id);
+      const takenMedia: Array<TelegramMediaDescriptor> = [];
+      const refusedNotes: Array<string> = [];
+      for (const descriptor of media) {
+        const refusal = mediaLimitReply(descriptor);
+        if (refusal === null) {
+          takenMedia.push(descriptor);
+          continue;
+        }
+        refusedNotes.push(`[Not passed to you: ${refusal} The user was told so.]`);
+        yield* sendTelegramText(projectId, config.botToken, chatId, refusal, { replyTo });
+      }
+      if (
+        refusedNotes.length > 0 &&
+        text.length === 0 &&
+        nonFileLines.length === 0 &&
+        takenMedia.length === 0
+      ) {
+        yield* Effect.logInfo("telegram media over the limits; no turn").pipe(
           Effect.annotateLogs({ projectId, chatId }),
         );
         return;
@@ -1559,16 +1622,16 @@ const makeTelegramConnector = Effect.gen(function* () {
         },
       );
       const ingested =
-        media.length > 0
+        takenMedia.length > 0
           ? yield* ingestIncomingMedia({
               botToken: config.botToken,
               threadId,
               chatId,
-              media,
+              media: takenMedia,
               precomputedTranscripts,
             })
           : { attachments: [], notes: [] };
-      const bodyParts = [text, ...nonFileLines, ...ingested.notes].filter(
+      const bodyParts = [text, ...nonFileLines, ...ingested.notes, ...refusedNotes].filter(
         (part) => part.length > 0,
       );
       if (bodyParts.length === 0) {
@@ -1581,7 +1644,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         connectorProjectId: projectId,
         replyKey,
         chatId,
-        replyTo: message.message_id === undefined ? null : String(message.message_id),
+        replyTo,
         replyThread: null,
         threadId,
         language: detectReplyLanguage(effectiveText, message.from?.language_code),

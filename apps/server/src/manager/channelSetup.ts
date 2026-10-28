@@ -2,7 +2,8 @@
  * One-click chat channels for a cloud computer (onboarding v3, "Message
  * your computer from anywhere"): the logic behind
  *
- * - `POST /api/manager/assistant/telegram/shared` — Uno's shared Telegram bot;
+ * - `POST /api/manager/assistant/telegram/shared` — Uno's Telegram bot (the
+ *   default assistant only: @uno_work_bot, else the older @get_uno_bot);
  * - `POST|GET|DELETE /api/manager/assistant/slack/install` — Uno's Slack app.
  *
  * Both talk to the console as the machine itself (`workConsole.ts`), store
@@ -18,6 +19,7 @@
  * @module manager/channelSetup
  */
 import {
+  ASSISTANT_PROJECT_ID,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ManagerChannelSetupErrorCode,
@@ -33,6 +35,7 @@ import { ManagerConnectorRepository } from "../persistence/Services/ManagerConne
 import { assignSlackChannels } from "./slackAssistants.ts";
 import {
   callTelegramBotMethod,
+  isAssistantBotRelay,
   isRelayCredential,
   isRouteCredential,
   parseRelayCredential,
@@ -109,6 +112,57 @@ const decodeSlackRow = (config: unknown) => {
 // Telegram: Uno's shared bot
 // ---------------------------------------------------------------------------
 
+/** The console's code for "Uno's assistant bot is not set up on this console". */
+const ASSISTANT_BOT_NOT_CONFIGURED = "TELEGRAM_ASSISTANT_BOT_NOT_CONFIGURED";
+
+/** `?bot=assistant` for a relay of Uno's assistant bot, nothing for the old shared bot. */
+const relaySubpath = (credential: string | null): string =>
+  credential !== null && isAssistantBotRelay(credential)
+    ? "telegram/relay?bot=assistant"
+    : "telegram/relay";
+
+/**
+ * Mint (rotate) this computer's Telegram relay: Uno's assistant bot
+ * (`{"bot":"assistant"}` → `tga_…`) when asked, falling back to the old
+ * shared bot (`{}` → `tgr_…`) when the console has no assistant bot
+ * (503 `TELEGRAM_ASSISTANT_BOT_NOT_CONFIGURED`) or does not know the field
+ * yet (an older console answering 400).
+ */
+const mintTelegramRelay = (input: {
+  readonly identity: WorkMachineIdentity;
+  readonly preferAssistantBot: boolean;
+  readonly fetchImpl?: FetchLike;
+}) =>
+  Effect.gen(function* () {
+    const fetchOption = input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {};
+    if (input.preferAssistantBot) {
+      const minted = yield* askConsole({
+        identity: input.identity,
+        method: "POST",
+        subpath: "telegram/relay",
+        body: { bot: "assistant" },
+        ...fetchOption,
+      });
+      const fallBack =
+        minted !== null &&
+        (minted.status === 400 ||
+          (minted.status === 503 &&
+            (consoleString(minted.body, "code") === ASSISTANT_BOT_NOT_CONFIGURED ||
+              consoleString(minted.body, "error") === ASSISTANT_BOT_NOT_CONFIGURED)));
+      if (!fallBack) return minted;
+      yield* Effect.logInfo("Uno's assistant bot is not available; using the shared bot").pipe(
+        Effect.annotateLogs({ status: minted.status }),
+      );
+    }
+    return yield* askConsole({
+      identity: input.identity,
+      method: "POST",
+      subpath: "telegram/relay",
+      body: {},
+      ...fetchOption,
+    });
+  });
+
 /**
  * Switch the assistant's Telegram connector to Uno's shared bot and issue a
  * link code: mint (rotate) the relay at the console, store it in the row
@@ -130,11 +184,30 @@ export const connectSharedTelegram = (input: {
     }
     const repository = yield* ManagerConnectorRepository;
     const telegram = yield* ManagerTelegramService;
+    const rows = yield* repository.listByKind("telegram");
+
+    // Uno's bot is Uno's (decision 28.10): one per account, for the default
+    // assistant only. Every other assistant gets a bot of its own
+    // (@BotFather) or Slack. One that already talks through Uno's bot keeps
+    // it — a new link code for it is not a new connection.
+    if (input.projectId !== ASSISTANT_PROJECT_ID) {
+      const own = rows.find((row) => row.projectId === input.projectId);
+      const ownConfig = own === undefined ? null : decodeTelegramRow(own.config);
+      const alreadyShared =
+        ownConfig !== null &&
+        (isRelayCredential(ownConfig.botToken) || isRouteCredential(ownConfig.botToken));
+      if (!alreadyShared) {
+        return fail(
+          409,
+          "shared_bot_uno_only",
+          "Uno's Telegram bot talks only to Uno. Give this assistant a bot of its own (@BotFather) or use Slack.",
+        );
+      }
+    }
 
     // One relay per computer: when another assistant of this computer holds
     // Uno's bot already, this one routes through it instead of minting a new
     // relay (which would rotate the holder's token away and silence it).
-    const rows = yield* repository.listByKind("telegram");
     const holder = pickRelayHolder(
       rows.flatMap((row) => {
         const config = decodeTelegramRow(row.config);
@@ -148,11 +221,19 @@ export const connectSharedTelegram = (input: {
       return yield* routeThroughHolder({ projectId: input.projectId, holder });
     }
 
-    const minted = yield* askConsole({
+    const existing = yield* repository.get({ projectId: input.projectId, kind: "telegram" });
+    const previous = Option.isSome(existing) ? decodeTelegramRow(existing.value.config) : null;
+    // Uno's assistant bot (@uno_work_bot) first. An assistant already on the
+    // older shared bot (@get_uno_bot) stays there: its linked chats — and
+    // those of assistants routed through it — live on that bot, and a new
+    // link code must not move them to a bot they never pressed Start on.
+    const onOldSharedBot =
+      previous !== null &&
+      isRelayCredential(previous.botToken) &&
+      !isAssistantBotRelay(previous.botToken);
+    const minted = yield* mintTelegramRelay({
       identity: input.identity,
-      method: "POST",
-      subpath: "telegram/relay",
-      body: {},
+      preferAssistantBot: !onOldSharedBot,
       ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
     });
     if (minted !== null && minted.status === 503) {
@@ -165,8 +246,6 @@ export const connectSharedTelegram = (input: {
     }
     const botUsername = consoleString(minted.body, "bot_username");
 
-    const existing = yield* repository.get({ projectId: input.projectId, kind: "telegram" });
-    const previous = Option.isSome(existing) ? decodeTelegramRow(existing.value.config) : null;
     const config = {
       botToken: relayCredential(relayToken),
       allowedChatIds: previous?.allowedChatIds ?? [],
@@ -403,7 +482,7 @@ export const afterTelegramConfigSaved = (input: {
     const deleted = yield* askConsole({
       identity: input.identity,
       method: "DELETE",
-      subpath: "telegram/relay",
+      subpath: relaySubpath(previous.botToken),
       ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
     });
     if (deleted === null || (!isSuccess(deleted) && deleted.status !== 404)) {

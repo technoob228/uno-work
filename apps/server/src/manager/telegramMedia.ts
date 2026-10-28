@@ -80,11 +80,14 @@ export interface TelegramIncomingMessage {
     readonly mime_type?: string;
     readonly file_name?: string;
     readonly file_size?: number;
+    /** Telegram's preview frame. */
+    readonly thumbnail?: TelegramFileSize;
   };
   readonly video_note?: {
     readonly file_id?: string;
     readonly duration?: number;
     readonly file_size?: number;
+    readonly thumbnail?: TelegramFileSize;
   };
   readonly document?: {
     readonly file_id?: string;
@@ -134,12 +137,77 @@ export interface TelegramMediaDescriptor {
   readonly mimeType: string | null;
   readonly durationSec: number | null;
   readonly sizeBytes: number | null;
+  /** Telegram's preview frame of a video / video message, when it sent one. */
+  readonly thumbnailFileId?: string;
 }
 
 // Telegram Bot API refuses `getFile` for anything above 20 MB.
 export const TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 // Bot uploads are capped at 50 MB.
 export const TELEGRAM_BOT_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+
+/** Longest voice message / audio file the assistant takes (transcribed). */
+export const TELEGRAM_AUDIO_MAX_SECONDS = 30 * 60;
+/** Longest video / video message the assistant takes (described). */
+export const TELEGRAM_VIDEO_MAX_SECONDS = 10 * 60;
+
+/** `0:42`, `12:40`, `1:02:05` — a Telegram duration as people read it. */
+export function formatMediaDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = String(seconds % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
+}
+
+const SPEECH_LABEL: Partial<Record<TelegramMediaKind, string>> = {
+  voice: "voice",
+  audio: "audio",
+  video: "video",
+  video_note: "video message",
+};
+
+/**
+ * The bracket label of a transcribed / described media message, without the
+ * brackets: `voice, 0:42`, `audio "song.mp3", 3:10`, `video, 0:35`,
+ * `video message, 0:12`.
+ */
+export function mediaLabel(descriptor: TelegramMediaDescriptor): string {
+  const kind = SPEECH_LABEL[descriptor.kind] ?? HUMAN_KIND_LABEL[descriptor.kind];
+  const name = descriptor.kind === "audio" ? ` "${descriptor.fileName}"` : "";
+  const duration =
+    descriptor.durationSec !== null ? `, ${formatMediaDuration(descriptor.durationSec)}` : "";
+  return `${kind}${name}${duration}`;
+}
+
+const LIMIT_NOUN: Partial<Record<TelegramMediaKind, string>> = {
+  voice: "voice message",
+  audio: "audio",
+  video: "video",
+  video_note: "video message",
+};
+
+/**
+ * What to tell the person instead of taking a media file, or null when it
+ * fits: over Telegram's 20 MB bot download limit (never downloaded), or
+ * longer than the assistant takes (30 minutes of audio, 10 of video).
+ */
+export function mediaLimitReply(descriptor: TelegramMediaDescriptor): string | null {
+  if (descriptor.sizeBytes !== null && descriptor.sizeBytes > TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES) {
+    const megabytes = Math.ceil(descriptor.sizeBytes / (1024 * 1024));
+    return `This file is ${megabytes} MB — Telegram lets bots download up to 20 MB. Send a shorter clip or a link.`;
+  }
+  if (descriptor.durationSec === null) return null;
+  const isVideo = descriptor.kind === "video" || descriptor.kind === "video_note";
+  const isAudio = descriptor.kind === "voice" || descriptor.kind === "audio";
+  if (!isVideo && !isAudio) return null;
+  const limit = isVideo ? TELEGRAM_VIDEO_MAX_SECONDS : TELEGRAM_AUDIO_MAX_SECONDS;
+  if (descriptor.durationSec <= limit) return null;
+  const noun = LIMIT_NOUN[descriptor.kind] ?? "file";
+  return `This ${noun} is too long (${formatMediaDuration(descriptor.durationSec)}). I can take up to ${
+    limit / 60
+  } minutes of ${isVideo ? "video" : "audio"}.`;
+}
 
 const HUMAN_KIND_LABEL: Record<TelegramMediaKind, string> = {
   photo: "photo",
@@ -207,6 +275,9 @@ export function collectTelegramMedia(
       mimeType: "video/mp4",
       durationSec: message.video_note.duration ?? null,
       sizeBytes: message.video_note.file_size ?? null,
+      ...(message.video_note.thumbnail?.file_id !== undefined
+        ? { thumbnailFileId: message.video_note.thumbnail.file_id }
+        : {}),
     });
   }
 
@@ -229,6 +300,9 @@ export function collectTelegramMedia(
       mimeType: message.video.mime_type ?? "video/mp4",
       durationSec: message.video.duration ?? null,
       sizeBytes: message.video.file_size ?? null,
+      ...(message.video.thumbnail?.file_id !== undefined
+        ? { thumbnailFileId: message.video.thumbnail.file_id }
+        : {}),
     });
   }
 

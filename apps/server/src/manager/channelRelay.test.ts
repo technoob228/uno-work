@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  isAssistantBotRelay,
   isRelayCredential,
   parseRelayCredential,
   redactConnectorSecrets,
@@ -16,6 +17,7 @@ import {
 const CONSOLE = "https://console.example.test";
 const TGR = "tgr_0123456789abcdef0123456789abcdef";
 const SLR = "slr_fedcba9876543210fedcba9876543210";
+const TGA = "tga_00112233445566778899aabbccddeeff";
 
 describe("relay credentials", () => {
   it("recognises only `unorelay:<token>` as a relay credential", () => {
@@ -24,6 +26,13 @@ describe("relay credentials", () => {
     expect(parseRelayCredential("123456:ABC-own-bot")).toBeNull();
     expect(parseRelayCredential("xoxb-1-2-3")).toBeNull();
     expect(parseRelayCredential("unorelay:")).toBeNull();
+  });
+
+  it("tells Uno's assistant bot relay (`tga_`) from the old shared bot and own bots", () => {
+    expect(isAssistantBotRelay(relayCredential(TGA))).toBe(true);
+    expect(isAssistantBotRelay(relayCredential(TGR))).toBe(false);
+    expect(isAssistantBotRelay("123456:tga_looks-like-own-bot")).toBe(false);
+    expect(isAssistantBotRelay("unoroute:assistant-home")).toBe(false);
   });
 });
 
@@ -87,10 +96,12 @@ describe("redactConnectorSecrets", () => {
       "https://api.telegram.org/bot123:own-secret/getMe",
       `stored unorelay:${SLR}`,
       `bare ${SLR}`,
+      `bare ${TGA}`,
     ].join("\n");
     const redacted = redactConnectorSecrets(text);
     expect(redacted).not.toContain(TGR);
     expect(redacted).not.toContain(SLR);
+    expect(redacted).not.toContain(TGA);
     expect(redacted).not.toContain("own-secret");
   });
 });
