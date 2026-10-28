@@ -5,7 +5,12 @@
  * the browser tests use). Nothing leaves the browser. Grown from the w0115
  * sidebar prototype (fix/w0115-sidebar-proto: protoBoot.ts).
  */
-import { ORCHESTRATION_WS_METHODS, WS_METHODS, type InboxItem } from "@t3tools/contracts";
+import {
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+  isAssistantProjectId,
+  type InboxItem,
+} from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { HttpResponse, delay, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
@@ -101,11 +106,38 @@ type Model = {
   updatedAt: string;
 };
 
+/**
+ * `&world=new` — a fresh account: only the home folder and Uno's folder, no
+ * chats; `&world=one` — the same with one project of the person's own (the
+ * sidebar's Add a project, 28.10). Anything else — the full fixtures.
+ */
+function demoWorld(): "new" | "one" | null {
+  try {
+    const world = new URLSearchParams(location.search).get("world");
+    return world === "new" || world === "one" ? world : null;
+  } catch {
+    return null;
+  }
+}
+
+function freshAccount(model: Model, keepOneProject: boolean): Model {
+  let kept = 0;
+  const projects = model.projects.filter((project) => {
+    const id = String(project.id);
+    if (isAssistantProjectId(id) || project.title === "Home folder") return true;
+    kept += 1;
+    return keepOneProject && kept === 1;
+  });
+  return { ...model, projects, threads: [] };
+}
+
 const models = new Map<string, Model>();
 function modelFor(machine: DemoMachine): Model {
   let model = models.get(machine.environmentId);
   if (!model) {
     model = readModelFor(machine) as unknown as Model;
+    const world = demoWorld();
+    if (world !== null) model = freshAccount(model, world === "one");
     models.set(machine.environmentId, model);
   }
   return model;
