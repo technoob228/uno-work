@@ -5,32 +5,34 @@
  * 1. A gallery of ready characters, each with a role, a line in its voice and
  *    its character tags — or "Build your own".
  * 2. Make it yours: face (emoji / a drawn portrait / a picture), name, role,
- *    character with sliders and tags (never a prompt), its mode (the two
- *    modes) and where it may look. Create → its chat, where it writes first.
- *
- * It lives on the account's cloud computer next to Uno and shares Uno's
- * memory, apps and Telegram. A limit to some projects is a real lock only on
- * that computer (sandbox): a MacBook project is marked as a note, not a lock.
+ *    character with sliders and tags (never a prompt).
+ * 3. Where it works (this computer, another computer of the account, a new
+ *    one), what it thinks with (the one AI picker), where it can look (a
+ *    project limit is a real lock only where its commands run in a sandbox)
+ *    and its mode — "Does it itself" / "Asks first".
+ * 4. What should it do? Development / Accounts / Tasks (`PersonaJob.tsx`).
+ *    Create.
+ * 5. Where you talk: its own Telegram bot, Slack, or here (Uno's shared bot
+ *    is Uno's only, Misha 28.10). Then its chat, with the first message made
+ *    from the answers — it hands the work to chats on your computers.
  */
-import type { AssistantPersona, EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { isAssistantProjectId } from "@t3tools/contracts";
+import {
+  type AssistantPersona,
+  type EnvironmentId,
+  type ProjectId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
-  CloudIcon,
-  HandIcon,
   ImageUpIcon,
-  LaptopIcon,
   LoaderCircleIcon,
-  LockIcon,
+  MessageCircleIcon,
   PlusIcon,
   RefreshCwIcon,
-  TriangleAlertIcon,
-  ZapIcon,
 } from "lucide-react";
-import { type ReactNode, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useMemo, useRef, useState } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
 import { useMachineRows } from "../../hooks/useMachineRows";
@@ -38,6 +40,7 @@ import {
   createAssistant,
   ensureAssistantChat,
   generateAssistantAvatar,
+  putAssistantApps,
   setAssistantAvatar,
   setAssistantPreset,
   updateAssistantTeam,
@@ -45,16 +48,31 @@ import {
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
+import { AssistantSlackPanel, AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { readFile, squarePicture } from "./AssistantFacePicker";
 import { avatarFileProblem, base64OfDataUrl, PERSONAS } from "./assistantAvatar.logic";
+import {
+  EMPTY_JOB,
+  type JobDraft,
+  dutyOf,
+  firstMessage,
+  jobOf,
+  jobProblem,
+} from "./assistantJob.logic";
+import { sendFirstMessage } from "./assistantStart";
 import type { AvatarTone } from "./assistantTeam.logic";
 import { ASSISTANT_NAME_MAX } from "./assistantEntity";
+import { PersonaJob, useJobTools } from "./PersonaJob";
+import type { AssistantMode } from "./PersonaMode";
+import { Chip, Label, ModeCard, ModePicker, WhereItLooks, WhereItWorks } from "./PersonaParts";
 import {
   BLANK,
   GALLERY,
@@ -65,8 +83,8 @@ import {
   SLIDERS,
   TAGS,
   characterLine,
+  isAsleep,
   nameProblem,
-  projectLockOn,
   toggleTag,
 } from "./personaChannels";
 import { useAssistantTeam } from "./useAssistantTeam";
@@ -74,7 +92,7 @@ import { LOCAL_ASSISTANTS_KEY } from "./useAssistants";
 
 type FaceTab = "emoji" | "portrait" | "upload";
 
-/** The cloud computer the personas live on: the account's box, else this one. */
+/** The cloud computer the personas live on by default: the account's box, else this one. */
 function usePersonaHome(): { environmentId: EnvironmentId | null; label: string } {
   const rows = useMachineRows();
   const cloud =
@@ -164,47 +182,14 @@ function Gallery(props: { readonly onPick: (persona: GalleryPersona) => void }) 
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Every helper works next to Uno: same memory, same apps, same Telegram. Each has its own
-        face, role and mode.
+        Every helper works next to Uno and shares its memory. Each has its own face, role, mode and
+        channel — and hands the work to chats on your computers.
       </p>
     </div>
   );
 }
 
-// ── Step 2: make it yours ────────────────────────────────────────────────
-
-function Label(props: { readonly children: ReactNode; readonly hint?: ReactNode }) {
-  return (
-    <div className="mb-1.5 flex items-baseline gap-2">
-      <span className="text-[13px] font-semibold">{props.children}</span>
-      {props.hint ? <span className="text-xs text-muted-foreground">{props.hint}</span> : null}
-    </div>
-  );
-}
-
-function Chip(props: {
-  readonly on: boolean;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-  readonly testId?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      aria-pressed={props.on}
-      data-testid={props.testId}
-      className={cn(
-        "cursor-pointer rounded-full border px-2.5 py-1 text-xs transition-colors",
-        props.on
-          ? "border-primary bg-primary/10 font-medium text-primary"
-          : "border-border text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {props.children}
-    </button>
-  );
-}
+// ── Step 2: the face ─────────────────────────────────────────────────────
 
 interface FaceState {
   readonly emoji: string;
@@ -217,6 +202,8 @@ function FacePicker(props: {
   readonly face: FaceState;
   readonly onChange: (face: FaceState) => void;
   readonly environmentId: EnvironmentId | null;
+  /** After the first step: just the face. */
+  readonly readOnly?: boolean;
 }) {
   const { face } = props;
   const [tab, setTab] = useState<FaceTab>("emoji");
@@ -264,6 +251,19 @@ function FacePicker(props: {
     }
   };
 
+  if (props.readOnly) {
+    return (
+      <div className="flex flex-col items-center gap-3" data-testid="persona-face">
+        <AssistantAvatar
+          emoji={face.emoji}
+          tone={face.tone}
+          src={face.picture}
+          className="size-24"
+          emojiClassName="text-5xl"
+        />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center gap-3" data-testid="persona-face">
       <span className="relative">
@@ -395,138 +395,107 @@ function FacePicker(props: {
   );
 }
 
-interface ProjectOption {
-  readonly key: string;
-  readonly environmentId: string;
+// ── Steps 2–5 ────────────────────────────────────────────────────────────
+
+type Step = "who" | "setup" | "job" | "channel";
+const STEP_NUMBER: Record<Step, number> = { who: 2, setup: 3, job: 4, channel: 5 };
+
+interface Made {
+  readonly environmentId: EnvironmentId;
   readonly projectId: string;
-  readonly title: string;
-  readonly machine: string;
-  readonly lock: "sandbox" | "note";
+  /** The first message from the answers (null: no job — it greets by itself). */
+  readonly text: string | null;
 }
 
-function WhereItLooks(props: {
+type Talk = "here" | "telegram" | "slack";
+
+function Channel(props: {
   readonly name: string;
-  readonly homeEnvironmentId: string | null;
-  readonly homeLabel: string;
-  readonly limited: boolean;
-  readonly onLimited: (limited: boolean) => void;
-  readonly picked: ReadonlySet<string>;
-  readonly onToggle: (key: string) => void;
+  readonly made: Made;
+  readonly busy: boolean;
+  readonly onOpen: () => void;
 }) {
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const rows = useMachineRows();
-  const labelOf = (environmentId: string) =>
-    rows.find((row) => row.environmentId === environmentId)?.label ?? "a computer";
-  const options: ProjectOption[] = projects
-    .filter((project) => !isAssistantProjectId(project.id) && !/^home folder$/i.test(project.name))
-    .map((project) => ({
-      key: `${project.environmentId}:${project.id}`,
-      environmentId: project.environmentId,
-      projectId: project.id,
-      title: project.name,
-      machine: labelOf(project.environmentId),
-      lock: projectLockOn({
-        projectEnvironmentId: project.environmentId,
-        personaEnvironmentId: props.homeEnvironmentId ?? "",
-      }),
-    }))
-    .toSorted((a, b) => (a.lock === b.lock ? 0 : a.lock === "sandbox" ? -1 : 1));
-  const notes = options.filter((option) => option.lock === "note" && props.picked.has(option.key));
-  const who = props.name.trim() || "it";
+  const { made } = props;
+  const [talk, setTalk] = useState<Talk>("here");
   return (
-    <div className="flex flex-col gap-2" data-testid="persona-where">
-      <div className="grid gap-2 sm:grid-cols-2">
+    <div className="flex flex-col gap-5" data-testid="persona-channel">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Where do you talk to {props.name}?</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Here in Uno Work always. Add its own Telegram bot or Slack for when you're away.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
         <ModeCard
-          on={!props.limited}
-          onClick={() => props.onLimited(false)}
-          title="All my projects"
-          line="Like Uno: every project, new ones too."
-          testId="persona-where-all"
+          on={talk === "here"}
+          onClick={() => setTalk("here")}
+          title={
+            <>
+              <MessageCircleIcon className="size-4 text-primary" /> Here in Uno Work
+            </>
+          }
+          line="Its chat in the sidebar."
+          testId="persona-channel-here"
         />
         <ModeCard
-          on={props.limited}
-          onClick={() => props.onLimited(true)}
-          title="Only some projects"
-          line="Pick them below."
-          testId="persona-where-some"
+          on={talk === "telegram"}
+          onClick={() => setTalk("telegram")}
+          title={
+            <>
+              <TelegramMark className="size-4" /> Its own Telegram bot
+            </>
+          }
+          line="Make a bot in @BotFather, paste its token."
+          testId="persona-channel-telegram"
+        />
+        <ModeCard
+          on={talk === "slack"}
+          onClick={() => setTalk("slack")}
+          title={
+            <>
+              <SlackBrandMark className="size-4" /> Slack
+            </>
+          }
+          line="Mention it in your workspace."
+          testId="persona-channel-slack"
         />
       </div>
-      {props.limited ? (
-        <div className="flex flex-col rounded-xl border border-border">
-          {options.map((option) => (
-            <label
-              key={option.key}
-              className="flex cursor-pointer items-center gap-2 border-t border-border/70 px-3 py-2 text-sm first:border-t-0"
-              data-testid={`persona-project-${option.projectId}`}
-            >
-              <input
-                type="checkbox"
-                className="accent-primary"
-                checked={props.picked.has(option.key)}
-                onChange={() => props.onToggle(option.key)}
-              />
-              <span className="min-w-0 flex-1 truncate">{option.title}</span>
-              <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-                {option.lock === "sandbox" ? (
-                  <>
-                    <CloudIcon className="size-3" /> {option.machine} ·
-                    <LockIcon className="size-3 text-success" /> locked
-                  </>
-                ) : (
-                  <>
-                    <LaptopIcon className="size-3" /> {option.machine} · a note, not a lock
-                  </>
-                )}
-              </span>
-            </label>
-          ))}
+      {talk === "telegram" ? (
+        <div className="rounded-xl border border-border p-4">
+          <AssistantTelegramPanel
+            environmentId={made.environmentId}
+            projectId={made.projectId as ProjectId}
+            initialMode="own"
+          />
+        </div>
+      ) : talk === "slack" ? (
+        <div className="rounded-xl border border-border p-4">
+          <AssistantSlackPanel
+            environmentId={made.environmentId}
+            projectId={made.projectId as ProjectId}
+          />
         </div>
       ) : null}
-      {notes.length > 0 ? (
-        <div
-          className="flex gap-2 rounded-xl border border-warning/40 bg-warning/[0.06] px-3 py-2.5 text-xs leading-snug"
-          data-testid="persona-lock-note"
-        >
-          <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
-          <span>
-            <b className="font-semibold">On your {notes[0]!.machine} this is a note, not a lock.</b>{" "}
-            {who} lives on {props.homeLabel}. Chats {who} starts on the {notes[0]!.machine} can
-            still open other folders there — we'll only ask it to stay in{" "}
-            {notes.map((note) => note.title).join(", ")}. A real lock: pick projects on{" "}
-            {props.homeLabel}, or give {who} a computer of its own later.
+      {made.text ? (
+        <div className="flex flex-col gap-1" data-testid="persona-first-message">
+          <span className="text-xs font-medium text-muted-foreground">
+            It starts with this message from you
           </span>
+          <p className="max-h-40 overflow-y-auto rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap">
+            {made.text}
+          </p>
         </div>
-      ) : props.limited && props.picked.size > 0 ? (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <LockIcon className="size-3 text-success" /> Locked by a sandbox on {props.homeLabel}:{" "}
-          {who} can't open anything else there.
-        </p>
       ) : null}
+      <div className="flex items-center gap-2">
+        <Button onClick={props.onOpen} disabled={props.busy} data-testid="persona-open">
+          {props.busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
+          Open {props.name}'s chat
+        </Button>
+        {talk !== "here" ? (
+          <span className="text-xs text-muted-foreground">You can link it later on its page.</span>
+        ) : null}
+      </div>
     </div>
-  );
-}
-
-function ModeCard(props: {
-  readonly on: boolean;
-  readonly onClick: () => void;
-  readonly title: ReactNode;
-  readonly line: string;
-  readonly testId: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      aria-pressed={props.on}
-      data-testid={props.testId}
-      className={cn(
-        "flex cursor-pointer flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
-        props.on ? "border-primary bg-primary/[0.06]" : "border-border hover:bg-accent/50",
-      )}
-    >
-      <span className="flex items-center gap-1.5 text-sm font-semibold">{props.title}</span>
-      <span className="text-xs text-muted-foreground">{props.line}</span>
-    </button>
   );
 }
 
@@ -536,6 +505,8 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   const queryClient = useQueryClient();
   const team = useAssistantTeam();
   const home = usePersonaHome();
+  const rows = useMachineRows();
+  const [step, setStep] = useState<Step>("who");
   const [name, setName] = useState(start.name);
   const [role, setRole] = useState(start.role);
   const [ownRole, setOwnRole] = useState(
@@ -548,11 +519,21 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
     tone: start.tone,
     picture: null,
   });
-  const [asks, setAsks] = useState(true);
+  const [mode, setMode] = useState<AssistantMode>("asks-first");
+  /** undefined: its home (the cloud computer); null: a computer of its own (made first). */
+  const [where, setWhere] = useState<string | null | undefined>(undefined);
   const [limited, setLimited] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [job, setJob] = useState<JobDraft>(EMPTY_JOB);
+  const [made, setMade] = useState<Made | null>(null);
   const [busy, setBusy] = useState(false);
   const [tried, setTried] = useState(false);
+
+  const environmentId = where === undefined ? home.environmentId : where;
+  const row = rows.find((item) => item.environmentId === environmentId);
+  const computer = row?.label ?? home.label;
+  const asleep = row ? isAsleep(row.status) : false;
+  const tools = useJobTools(environmentId);
 
   const taken = useMemo(
     () => team.filter((member) => !member.revoked).map((member) => member.profile.name),
@@ -561,57 +542,131 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   const problem = nameProblem(name, taken);
   const finalRole = role === "Something else" ? ownRole.trim() : role;
   const shown = name.trim() || "your helper";
+  const whereProblem =
+    environmentId === null
+      ? "Make its computer in My Uno first, or pick one above."
+      : asleep
+        ? `${computer} is asleep — wake it first, or pick another computer.`
+        : null;
+  const doProblem = environmentId === null ? null : jobProblem(job, { environmentId, computer });
+
+  const next = () => {
+    if (step === "who") {
+      setTried(true);
+      if (problem) return;
+      setStep("setup");
+    } else if (step === "setup") {
+      if (whereProblem) return;
+      setStep("job");
+    }
+  };
 
   const create = async () => {
     setTried(true);
-    if (problem || !home.environmentId) return;
+    if (problem || whereProblem || doProblem || environmentId === null) return;
     setBusy(true);
-    const environmentId = home.environmentId;
+    const env = environmentId as EnvironmentId;
     try {
-      const made = await createAssistant({ environmentId, name: name.trim(), emoji: face.emoji });
-      const projectId = made.projectId;
       const projects = limited
         ? [...picked]
-            .filter((key) => key.startsWith(`${environmentId}:`))
-            .map((key) => key.slice(environmentId.length + 1))
-        : "all";
+            .filter((key) => key.startsWith(`${env}:`))
+            .map((key) => key.slice(env.length + 1))
+        : ("all" as const);
+      const preset = mode === "itself" ? "full" : "helper";
+      const theJob = jobOf(job, tools);
+      const created = await createAssistant({
+        environmentId: env,
+        name: name.trim(),
+        emoji: face.emoji,
+        access: { preset, projects: projects as never },
+      });
+      const projectId = created.projectId;
       await Promise.all([
         updateAssistantTeam({
-          environmentId,
+          environmentId: env,
           projectId,
           tone: face.tone,
           roles: finalRole ? [finalRole] : [],
           character: characterLine(tags, sliders),
           setup: "done",
+          ...(theJob ? { duties: [dutyOf(theJob)] } : {}),
         }),
-        setAssistantPreset({
-          environmentId,
-          projectId,
-          preset: asks ? "helper" : "full",
-          projects: limited ? (projects as ReadonlyArray<string>) : "all",
-        }),
+        setAssistantPreset({ environmentId: env, projectId, preset, projects }),
         face.picture
           ? setAssistantAvatar({
-              environmentId,
+              environmentId: env,
               projectId,
               image: base64OfDataUrl(face.picture),
             })
           : Promise.resolve(null),
+        theJob?.kind === "tasks" && job.appsOff.length > 0
+          ? putAssistantApps({
+              environmentId: env,
+              projectId,
+              permissions: Object.fromEntries(
+                tools.apps.map((app) => [
+                  app.provider,
+                  job.appsOff.includes(app.provider) ? ("none" as const) : ("write" as const),
+                ]),
+              ),
+            })
+          : Promise.resolve(null),
       ]);
-      await waitForProject(environmentId, projectId);
+      await waitForProject(env, projectId);
       await queryClient.invalidateQueries({ queryKey: LOCAL_ASSISTANTS_KEY });
-      // Its chat: it writes first, in its voice.
-      const chat = await ensureAssistantChat({ environmentId, projectId: projectId as ProjectId });
-      await waitForThreadInStore(environmentId, chat.threadId, 5_000);
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams({ environmentId, threadId: chat.threadId }),
+      setMade({
+        environmentId: env,
+        projectId,
+        text: theJob
+          ? firstMessage({
+              name: name.trim(),
+              role: finalRole,
+              computer,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+              job: theJob,
+            })
+          : null,
       });
+      setStep("channel");
     } catch (cause) {
       toastManager.add({
         type: "error",
         title: `Couldn't make ${shown}`,
-        description: errorText(cause, "Your cloud computer didn't answer. Nothing was made."),
+        description: errorText(cause, `${computer} didn't answer. Nothing was made.`),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const open = async () => {
+    if (!made) return;
+    setBusy(true);
+    try {
+      const chat = await ensureAssistantChat({
+        environmentId: made.environmentId,
+        projectId: made.projectId as ProjectId,
+      });
+      await waitForThreadInStore(made.environmentId, chat.threadId, 5_000);
+      if (made.text) {
+        await sendFirstMessage({
+          environmentId: made.environmentId,
+          threadId: chat.threadId as ThreadId,
+          text: made.text,
+        });
+      }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams({
+          environmentId: made.environmentId,
+          threadId: chat.threadId,
+        }),
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't open ${shown}'s chat`,
+        description: errorText(cause, `${computer} didn't answer. It's in the sidebar.`),
       });
     } finally {
       setBusy(false);
@@ -619,166 +674,222 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   };
 
   return (
-    <div className="flex flex-col gap-5" data-testid="persona-builder">
+    <div className="flex flex-col gap-5" data-testid="persona-builder" data-step={step}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          {start.id === "own" ? "Build your own" : `Make ${start.name} yours`}
+          {step === "channel"
+            ? `${shown} is ready`
+            : start.id === "own"
+              ? "Build your own"
+              : `Make ${start.name} yours`}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Step 2 of 2. You can change all of it later.
+          Step {STEP_NUMBER[step]} of 5. You can change all of it later.
         </p>
       </div>
-      <div className="grid gap-6 md:grid-cols-[13rem_1fr]">
-        <FacePicker face={face} onChange={setFace} environmentId={home.environmentId} />
-        <div className="flex min-w-0 flex-col gap-5">
-          <div>
-            <Label
-              hint={
-                name.length >= ASSISTANT_NAME_MAX - 5
-                  ? `${name.length}/${ASSISTANT_NAME_MAX}`
-                  : null
-              }
-            >
-              Name
-            </Label>
-            <Input
-              value={name}
-              maxLength={ASSISTANT_NAME_MAX}
-              placeholder="Mia, Bolt, Ms. Pepper…"
-              onChange={(event) => setName(event.target.value)}
-              data-testid="persona-name"
-              aria-invalid={tried && problem !== null}
-            />
-            {tried && problem ? (
-              <p className="mt-1 text-xs text-destructive" data-testid="persona-name-problem">
-                {problem}
-              </p>
-            ) : null}
-          </div>
-          <div>
-            <Label>Role</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {[...ROLES, "Something else"].map((item) => (
-                <Chip
-                  key={item}
-                  on={
-                    role === item ||
-                    (item === "Something else" && role !== "" && !ROLES.includes(role))
-                  }
-                  onClick={() => setRole(item)}
-                  testId={`persona-role-${item.toLowerCase().replace(/\s+/g, "-")}`}
-                >
-                  {item}
-                </Chip>
-              ))}
-            </div>
-            {role === "Something else" || (role !== "" && !ROLES.includes(role)) ? (
-              <Input
-                className="mt-2"
-                value={ownRole}
-                maxLength={30}
-                placeholder="Bookkeeper, recruiter, tutor…"
-                onChange={(event) => setOwnRole(event.target.value)}
-                data-testid="persona-role-own"
-              />
-            ) : null}
-          </div>
-          <div>
-            <Label hint={`up to ${MAX_TAGS} tags`}>Character</Label>
-            <div className="flex flex-col gap-1.5">
-              {SLIDERS.map(([low, high], index) => (
-                <label
-                  key={low}
-                  className="grid grid-cols-[4.5rem_1fr_4.5rem] items-center gap-2 text-xs"
-                >
-                  <span className="text-muted-foreground">{low}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={sliders[index]}
-                    onChange={(event) => {
-                      const next = [...sliders] as [number, number, number];
-                      next[index] = Number(event.target.value);
-                      setSliders(next);
-                    }}
-                    aria-label={`${low} or ${high}`}
-                    className="accent-primary"
+      {step === "channel" && made ? (
+        <Channel name={shown} made={made} busy={busy} onOpen={() => void open()} />
+      ) : (
+        <div className="grid gap-6 md:grid-cols-[13rem_1fr]">
+          <FacePicker
+            face={face}
+            onChange={setFace}
+            environmentId={environmentId as EnvironmentId | null}
+            readOnly={step !== "who"}
+          />
+          <div className="flex min-w-0 flex-col gap-5">
+            {step === "who" ? (
+              <>
+                <div>
+                  <Label
+                    hint={
+                      name.length >= ASSISTANT_NAME_MAX - 5
+                        ? `${name.length}/${ASSISTANT_NAME_MAX}`
+                        : null
+                    }
+                  >
+                    Name
+                  </Label>
+                  <Input
+                    value={name}
+                    maxLength={ASSISTANT_NAME_MAX}
+                    placeholder="Mia, Bolt, Ms. Pepper…"
+                    onChange={(event) => setName(event.target.value)}
+                    data-testid="persona-name"
+                    aria-invalid={tried && problem !== null}
                   />
-                  <span className="text-right text-muted-foreground">{high}</span>
-                </label>
-              ))}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {TAGS.map((tag) => (
-                <Chip
-                  key={tag}
-                  on={tags.includes(tag)}
-                  onClick={() => setTags(toggleTag(tags, tag))}
+                  {tried && problem ? (
+                    <p className="mt-1 text-xs text-destructive" data-testid="persona-name-problem">
+                      {problem}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <Label>Role</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...ROLES, "Something else"].map((item) => (
+                      <Chip
+                        key={item}
+                        on={
+                          role === item ||
+                          (item === "Something else" && role !== "" && !ROLES.includes(role))
+                        }
+                        onClick={() => setRole(item)}
+                        testId={`persona-role-${item.toLowerCase().replace(/\s+/g, "-")}`}
+                      >
+                        {item}
+                      </Chip>
+                    ))}
+                  </div>
+                  {role === "Something else" || (role !== "" && !ROLES.includes(role)) ? (
+                    <Input
+                      className="mt-2"
+                      value={ownRole}
+                      maxLength={30}
+                      placeholder="Bookkeeper, recruiter, tutor…"
+                      onChange={(event) => setOwnRole(event.target.value)}
+                      data-testid="persona-role-own"
+                    />
+                  ) : null}
+                </div>
+                <div>
+                  <Label hint={`up to ${MAX_TAGS} tags`}>Character</Label>
+                  <div className="flex flex-col gap-1.5">
+                    {SLIDERS.map(([low, high], index) => (
+                      <label
+                        key={low}
+                        className="grid grid-cols-[4.5rem_1fr_4.5rem] items-center gap-2 text-xs"
+                      >
+                        <span className="text-muted-foreground">{low}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={sliders[index]}
+                          onChange={(event) => {
+                            const value = [...sliders] as [number, number, number];
+                            value[index] = Number(event.target.value);
+                            setSliders(value);
+                          }}
+                          aria-label={`${low} or ${high}`}
+                          className="accent-primary"
+                        />
+                        <span className="text-right text-muted-foreground">{high}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {TAGS.map((tag) => (
+                      <Chip
+                        key={tag}
+                        on={tags.includes(tag)}
+                        onClick={() => setTags(toggleTag(tags, tag))}
+                      >
+                        {tag}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : step === "setup" ? (
+              <>
+                <div>
+                  <Label>Where it works</Label>
+                  <WhereItWorks
+                    homeEnvironmentId={home.environmentId}
+                    value={environmentId}
+                    onChange={(next) => {
+                      setWhere(next);
+                      setPicked(new Set());
+                    }}
+                  />
+                </div>
+                {environmentId !== null ? (
+                  <AssistantAiChoice
+                    environmentId={environmentId}
+                    name={name}
+                    computer={computer}
+                  />
+                ) : null}
+                <div>
+                  <Label>Where it can look</Label>
+                  <WhereItLooks
+                    name={name}
+                    homeEnvironmentId={environmentId}
+                    homeLabel={computer}
+                    limited={limited}
+                    onLimited={setLimited}
+                    picked={picked}
+                    onToggle={(key) => {
+                      const value = new Set(picked);
+                      if (value.has(key)) value.delete(key);
+                      else value.add(key);
+                      setPicked(value);
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>How it works</Label>
+                  <ModePicker mode={mode} onChange={setMode} testIdPrefix="persona-mode" />
+                </div>
+                {whereProblem ? (
+                  <p className="text-xs text-destructive" data-testid="persona-where-problem">
+                    {whereProblem}
+                  </p>
+                ) : null}
+              </>
+            ) : environmentId !== null ? (
+              <PersonaJob
+                name={name}
+                environmentId={environmentId}
+                computer={computer}
+                projects={limited ? picked : "all"}
+                draft={job}
+                onChange={(draft) => {
+                  // Accounts act outside: "Asks first" unless the person chose otherwise.
+                  if (draft.kind === "accounts" && job.kind !== "accounts") setMode("asks-first");
+                  setJob(draft);
+                }}
+                problem={tried ? doProblem : null}
+              />
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {step === "job" ? (
+                <Button
+                  onClick={() => void create()}
+                  disabled={busy || whereProblem !== null}
+                  data-testid="persona-create"
                 >
-                  {tag}
-                </Chip>
-              ))}
-            </div>
-          </div>
-          <div>
-            <Label>How it works</Label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <ModeCard
-                on={!asks}
-                onClick={() => setAsks(false)}
-                title={
-                  <>
-                    <ZapIcon className="size-4 text-amber-500" /> Does it itself
-                  </>
+                  {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
+                  {busy ? `Making ${shown}…` : `Create ${name.trim() || "it"}`}
+                </Button>
+              ) : (
+                <Button
+                  onClick={next}
+                  disabled={step === "setup" && whereProblem !== null}
+                  data-testid="persona-next"
+                >
+                  Next
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  step === "who" ? props.onBack() : setStep(step === "job" ? "setup" : "who")
                 }
-                line="Acts and tells you after."
-                testId="persona-mode-itself"
-              />
-              <ModeCard
-                on={asks}
-                onClick={() => setAsks(true)}
-                title={
-                  <>
-                    <HandIcon className="size-4 text-amber-500" /> Asks first
-                  </>
-                }
-                line="Waits for your Allow before it sends, pays or deletes."
-                testId="persona-mode-asks"
-              />
+                disabled={busy}
+              >
+                {step === "who" ? "Back to characters" : "Back"}
+              </Button>
+              {step === "job" && job.kind === null ? (
+                <span className="text-xs text-muted-foreground">
+                  Lives on {computer}. {mode === "itself" ? "Does it itself" : "Asks first"}.
+                </span>
+              ) : null}
             </div>
-          </div>
-          <div>
-            <Label>Where it can look</Label>
-            <WhereItLooks
-              name={name}
-              homeEnvironmentId={home.environmentId}
-              homeLabel={home.label}
-              limited={limited}
-              onLimited={setLimited}
-              picked={picked}
-              onToggle={(key) => {
-                const next = new Set(picked);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                setPicked(next);
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Shares Uno's memory, apps and Telegram. Lives on {home.label}.
-          </p>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => void create()} disabled={busy} data-testid="persona-create">
-              {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
-              {busy ? `Making ${shown}…` : `Create ${name.trim() || "it"}`}
-            </Button>
-            <Button variant="ghost" onClick={props.onBack} disabled={busy}>
-              Back to characters
-            </Button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -21,6 +21,11 @@ export const Route = createFileRoute("/_chat/assistants")({
       const environmentId = typeof env === "string" ? /^[\w.:-]+/.exec(env)?.[0] : undefined;
       return projectId && environmentId ? { view, project: projectId, env: environmentId } : {};
     }
+    if (view === "uno-setup") {
+      // Uno's first-run screen (assistants D); without `env`: the active computer.
+      const environmentId = typeof env === "string" ? /^[\w.:-]+/.exec(env)?.[0] : undefined;
+      return environmentId ? { view, env: environmentId } : { view };
+    }
     if (view === "local") {
       return typeof project === "string" && project.startsWith("assistant-")
         ? { view, project }

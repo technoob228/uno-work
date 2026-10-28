@@ -15,13 +15,21 @@
  *   answer and list its tools), then handed to every agent in new chats
  *   (`settings.mcpServers`, see customMcpServers.ts on the daemon).
  */
-import { UNO_MCP_SERVER_NAME_PATTERN, type UnoMcpServer } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  UNO_MCP_SERVER_NAME_PATTERN,
+  type UnoMcpServer,
+} from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2Icon, MailIcon, ServerIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import {
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../../environments/settings/serverSettings";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
   changeAgentMailAddress,
@@ -581,11 +589,20 @@ function ProviderRow({
 
 function McpServers({
   environmentId,
+  scoped = false,
 }: {
   environmentId: ReturnType<typeof usePrimaryEnvironmentId>;
+  /** The servers of that computer (an assistant's), not of the one serving this page. */
+  scoped?: boolean;
 }) {
-  const servers = useSettings((settings) => settings.mcpServers);
-  const { updateSettings } = useUpdateSettings();
+  const pageServers = useSettings((settings) => settings.mcpServers);
+  const { updateSettings: updatePageSettings } = useUpdateSettings();
+  const scopedSettings = useEnvironmentSettings(scoped ? environmentId : null);
+  const { updateSettings: updateScopedSettings } = useUpdateEnvironmentSettings(
+    scoped ? environmentId : null,
+  );
+  const servers = scoped ? (scopedSettings?.mcpServers ?? []) : pageServers;
+  const updateSettings = scoped ? updateScopedSettings : updatePageSettings;
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -833,8 +850,19 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
  * by this step and by Settings → Connectors (the place to manage them since
  * 16.10), so both show the same thing.
  */
-export function ConnectorsList(props: { readonly className?: string } = {}) {
-  const environmentId = usePrimaryEnvironmentId();
+export function ConnectorsList(
+  props: {
+    readonly className?: string;
+    /**
+     * The computer they connect on (an assistant's, Misha 28.10: connectors
+     * belong to the machine the assistant works on); the page's own when absent.
+     */
+    readonly environmentId?: EnvironmentId | null;
+  } = {},
+) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const scoped = props.environmentId !== undefined && props.environmentId !== primaryEnvironmentId;
+  const environmentId = props.environmentId ?? primaryEnvironmentId;
   const { connectors, byProvider, pending, connect, disconnect } =
     useConnectorActions(environmentId);
   const githubConnector = byProvider.get("github");
@@ -866,7 +894,7 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
           />
         ),
       )}
-      <McpServers environmentId={environmentId} />
+      <McpServers environmentId={environmentId} scoped={scoped} />
     </div>
   );
 }

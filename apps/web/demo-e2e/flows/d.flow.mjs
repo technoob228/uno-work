@@ -30,6 +30,18 @@ async function openGallery(page) {
   await page.getByTestId("persona-gallery").waitFor({ timeout: 10_000 });
 }
 
+/** Through the setup steps to "Create", then "Open its chat" (no channel). */
+export async function createPersona(page) {
+  for (let i = 0; i < 3; i += 1) {
+    const at = await page.getByTestId("persona-builder").getAttribute("data-step");
+    if (at === "job") break;
+    await page.getByTestId("persona-next").click();
+  }
+  await page.getByTestId("persona-create").click();
+  await page.getByTestId("persona-channel").waitFor({ timeout: 15_000 });
+  await page.getByTestId("persona-open").click();
+}
+
 async function approve(page) {
   await page
     .getByRole("button", { name: /^(Approve|Allow)/ })
@@ -192,7 +204,7 @@ export const flows = [
     });
     await shot("make-it-yours");
     await step("Create → Leo writes first, in his voice", async () => {
-      await page.getByTestId("persona-create").click();
+      await createPersona(page);
       await seeText(page, "Leo here ✨", 25_000);
       await sidebarRow(page, "assistant-leo").waitFor();
       await sidebarRow(page, "assistant-leo").getByText("Marketer").waitFor();
@@ -215,11 +227,12 @@ export const flows = [
       await page.getByRole("button", { name: "Formal", exact: true }).click();
       await page.getByRole("slider", { name: "Brief or Chatty" }).fill("15");
       await page.getByRole("button", { name: "Face 🦁" }).click();
+      await page.getByTestId("persona-next").click();
       await page.getByTestId("persona-mode-itself").click();
     });
     await shot("built");
     await step("Create → she greets in character", async () => {
-      await page.getByTestId("persona-create").click();
+      await createPersona(page);
       await seeText(page, "Good day. I'm Ms. Pepper, your bookkeeper", 25_000);
       await sidebarRow(page, "assistant-ms-pepper").getByText("Bookkeeper").waitFor();
     });
@@ -489,7 +502,7 @@ export const flows = [
     });
     await shot("field");
     await step("create → the sidebar and header cut it neatly", async () => {
-      await page.getByTestId("persona-create").click();
+      await createPersona(page);
       await seeText(page, "your researcher", 25_000);
     });
     await shot("sidebar-header");
@@ -508,7 +521,7 @@ export const flows = [
     await shot("failed");
     await step("still creates with the emoji", async () => {
       await page.getByTestId("persona-name").fill("Mia Two");
-      await page.getByTestId("persona-create").click();
+      await createPersona(page);
       await seeText(page, "Mia Two", 25_000);
     });
   }),
@@ -534,6 +547,7 @@ export const flows = [
       await openGallery(page);
       await page.getByTestId("persona-card-bolt").click();
       await page.getByTestId("persona-name").fill("Bolt Mac");
+      await page.getByTestId("persona-next").click();
       await page.getByTestId("persona-where-some").click();
       await page.getByTestId("persona-project-p-mac-deck").click();
       await page.getByTestId("persona-lock-note").waitFor();

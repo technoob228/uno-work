@@ -51,7 +51,7 @@ import { Button } from "../../ui/button";
 import { QRCodeSvg } from "../../ui/qr-code";
 import { toastManager } from "../../ui/toast";
 import { SlackBrandMark, TelegramMark } from "../brandMarks";
-import { ConnectedBadge, SetupHeading, SetupNote, SetupShell, SoonBadge } from "../SetupShell";
+import { ConnectedBadge, SetupHeading, SetupNote, SetupShell } from "../SetupShell";
 import { SlackGuide } from "../SlackGuide";
 import { SlackChannelsPicker } from "../../assistants/SlackChannelsPicker";
 import { useAssistantsAvailability } from "../../assistants/useAssistants";
@@ -583,6 +583,15 @@ function SlackCard({
   }
 
   const available = state?.available === true;
+  // Uno's Slack app isn't there yet: no grey "Add to Slack — SOON" dead end
+  // (audit 27.10 #14), straight to connecting your own Slack app.
+  if (install.isFetched && !available) {
+    return (
+      <div className="rounded-xl border border-border p-3" data-testid="setup-slack-own-app">
+        <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
@@ -604,23 +613,12 @@ function SlackCard({
           )}
           {installing ? "Waiting for Slack…" : "Add to Slack"}
         </button>
-        {install.isFetched && !available ? <SoonBadge /> : null}
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-      {ownApp || (install.isFetched && !available) ? (
-        ownApp ? (
-          <div className="rounded-xl border border-border p-3">
-            <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="self-start text-xs text-primary hover:underline"
-            onClick={() => setOwnApp(true)}
-          >
-            Connect your own Slack app now
-          </button>
-        )
+      {ownApp ? (
+        <div className="rounded-xl border border-border p-3">
+          <SlackGuide environmentId={environmentId} summary={summary} onChanged={onChanged} />
+        </div>
       ) : null}
     </div>
   );

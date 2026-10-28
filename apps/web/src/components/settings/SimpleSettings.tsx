@@ -47,7 +47,7 @@ import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "../chat/AssistantEngine";
-import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { AssistantAiChoice } from "../assistants/AssistantAiChoice";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
 import { resolveProviderPaneKind } from "../chat/modelPickerProviderPane";
@@ -229,7 +229,11 @@ function DefaultAiSection({ environmentId }: { readonly environmentId: Environme
               <AssistantModelPicker environmentId={environmentId} testId="settings-ai-uno" />
             }
           />
-          <AssistantPowerPicker environmentId={environmentId} className="px-4 pb-3 sm:px-5" />
+          <AssistantAiChoice
+            environmentId={environmentId}
+            computer="this computer"
+            className="px-4 pb-3 sm:px-5"
+          />
         </>
       ) : null}
       {assistantProject && work ? (

@@ -11,6 +11,7 @@
  *   On the MacBook nothing locks the chats it starts there yet (seatbelt is
  *   later, Misha 23.10): the UI says so instead of pretending.
  */
+import { type WorksOnMachine, type WorksOnOption, worksOnOptions } from "./assistantPage.logic";
 import type { AvatarTone } from "./assistantTeam.logic";
 
 export interface GalleryPersona {
@@ -184,4 +185,48 @@ export function nameProblem(name: string, taken: ReadonlyArray<string>): string 
   if (taken.some((other) => other.toLowerCase() === trimmed.toLowerCase()))
     return `You already have a ${trimmed}. Pick another name.`;
   return null;
+}
+
+/** Asleep or off: it can't take a new assistant until it wakes. */
+export function isAsleep(status: string): boolean {
+  return status === "offline" || status === "sleeping";
+}
+
+export type PersonaWorksOn = WorksOnOption & {
+  /** The environment it would live in (null: a new computer, made in My Uno first). */
+  readonly target: string | null;
+  /** Why it can't be picked now (asleep, not opened in Work yet), or null. */
+  readonly why: string | null;
+  readonly laptop: boolean;
+};
+
+/**
+ * "Where it works" for a new assistant: its home (the cloud computer by
+ * default), the account's other cloud computers this app is connected to, or
+ * a computer of its own. One that can't take it now says why.
+ */
+export function personaWorksOn(input: {
+  readonly homeEnvironmentId: string | null;
+  readonly machines: ReadonlyArray<WorksOnMachine>;
+}): ReadonlyArray<PersonaWorksOn> {
+  const { homeEnvironmentId } = input;
+  if (homeEnvironmentId === null) return [];
+  const home = input.machines.find((machine) => machine.environmentId === homeEnvironmentId);
+  return worksOnOptions({
+    isUno: false,
+    hereEnvironmentId: homeEnvironmentId,
+    hereLabel: home?.label ?? null,
+    machines: input.machines,
+  }).map((option) =>
+    option.kind === "here"
+      ? {
+          ...option,
+          target: homeEnvironmentId,
+          why: home && isAsleep(home.status) ? `${home.label} is asleep — wake it first.` : null,
+          laptop: home === undefined || home.kind === "computer",
+        }
+      : option.kind === "cloud"
+        ? { ...option, target: option.environmentId, why: option.blocked, laptop: false }
+        : { ...option, target: null, why: null, laptop: false },
+  );
 }
