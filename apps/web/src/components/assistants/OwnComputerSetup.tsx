@@ -125,9 +125,7 @@ async function readAccountViaComputer(environmentId: EnvironmentId | null): Prom
   if (environmentId === null) return unavailable;
   try {
     const state = await ensureEnvironmentApi(environmentId).unoCloud.getState({});
-    // No key at all → sign in. A key that can't read the account (`/auth/me`)
-    // is still the machine's own token, which creates computers: offer Create.
-    if (!state.connected && state.error === null) {
+    if (!state.connected) {
       return {
         ...none,
         decision: { kind: "signin", message: "Sign in with Uno to give it a computer of its own." },
