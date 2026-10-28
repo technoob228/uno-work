@@ -36,6 +36,7 @@ import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { toastManager } from "../../ui/toast";
 import { GmailMark, GoogleCalendarMark, GoogleDriveMark, NotionMark } from "../brandMarks";
+import { connectorSignedIn } from "../connectorSignIn.logic";
 import { ConnectedBadge, SetupHeading, SetupShell, SoonBadge } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { maskServerUrl } from "../../connectors/connectorsCatalog.logic";
@@ -232,7 +233,7 @@ function ProviderRow({
   onDisconnect: () => void;
 }) {
   const available = connector?.available === true;
-  const connected = connector?.connected === true && connector.needsReconnect !== true;
+  const connected = connectorSignedIn(connector);
   let side: ReactNode;
   if (!available) side = <SoonBadge />;
   else if (connected) {
@@ -486,7 +487,8 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
   }, [pending, queryClient]);
   useEffect(() => {
     if (pending?.action !== "connect") return;
-    if (byProvider.get(pending.provider)?.connected) {
+    // Reconnect: the expired grant is listed as connected until the new one lands.
+    if (connectorSignedIn(byProvider.get(pending.provider))) {
       toastManager.add({
         type: "success",
         title: `${PROVIDERS.find((meta) => meta.provider === pending.provider)?.name} connected`,
