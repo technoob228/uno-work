@@ -61,6 +61,7 @@ import {
 } from "./appAiProviders.ts";
 import { type StoredApp, hashAppToken, newAppToken, openAppAiStore } from "./appAiStore.ts";
 import { type AppApiCaller, type AppApiCore, makeAppApiHandler } from "./appApiHttp.ts";
+import { appCallsBridge } from "./appCallsBridge.ts";
 import {
   type AppKeyEndpoints,
   appKeyDir,
@@ -197,9 +198,9 @@ export function effectiveStorageLimitBytes(
   return Math.round(gb * GB);
 }
 
-/** An app gets a token when its manifest asks for AI, cloud storage or notifications. */
+/** An app gets a token when its manifest asks for AI, cloud storage, notifications or calls. */
 export function wantsAppToken(manifest: AppManifest | undefined): boolean {
-  return Boolean(manifest?.ai || manifest?.storage || manifest?.notify);
+  return Boolean(manifest?.ai || manifest?.storage || manifest?.notify || manifest?.calls);
 }
 
 export const makeAppSdkService = (
@@ -351,6 +352,7 @@ export const makeAppSdkService = (
             }
           : null,
         notify: manifest.notify === true,
+        calls: manifest.calls === true,
         appIcon: manifest.icon,
       };
     };
@@ -586,6 +588,7 @@ export const makeAppSdkService = (
       },
       stopTask: (caller, task) => runPromise(tasks.stopTask(caller, task)),
       storage: appStorage,
+      calls: appCallsBridge,
       notify: async (caller, notification) => {
         const item = await runPromise(
           inbox.post({

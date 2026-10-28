@@ -142,6 +142,7 @@ import { FilesRecentService } from "./files/FilesRecentService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
+import { AssistantCallsService } from "./assistants/AssistantCallsService.ts";
 import { GithubAccountService } from "./setupTools/GithubAccountService.ts";
 import { AgentMailService, type AgentMailServiceShape } from "./setupTools/AgentMailService.ts";
 import { ConnectorsError } from "./setupTools/connectors.ts";
@@ -741,6 +742,7 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.materials,
           }),
           Layer.mock(AssistantDraftService)({}),
+          Layer.mock(AssistantCallsService)({}),
           Layer.mock(InboxService)({ ...options?.layers?.inbox }),
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
@@ -1408,6 +1410,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     connected: true,
                     account: "Acme",
                     connectedAt: "2026-09-25T10:00:00Z",
+                    needsReconnect: false,
                     toolCount: 4,
                   },
                 ],

@@ -3,6 +3,7 @@ import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
 import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { connectorSignedIn } from "../setup/connectorSignIn.logic";
 import { useConnectorActions } from "../setup/steps/ConnectorsStep";
+import { InlineJoinCalls } from "../assistants/JoinCallsSection";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { type PendingUserInput } from "../../session-logic";
@@ -93,6 +94,33 @@ function InlineAnswer(props: {
 
 /** "Connect GitHub" inside the question: the app's own page opens, the card answers itself. */
 function InlineConnect(props: {
+  readonly connect: NonNullable<UserInputQuestion["connect"]>;
+  readonly disabled: boolean;
+  readonly onConnected: () => void;
+}) {
+  // "Join my calls" (`calls:<assistant project>`): Google Calendar + the notetaker in one click.
+  if (props.connect.provider.startsWith("calls:")) return <InlineJoinCallsCard {...props} />;
+  return <InlineConnectApp {...props} />;
+}
+
+function InlineJoinCallsCard(props: {
+  readonly connect: NonNullable<UserInputQuestion["connect"]>;
+  readonly disabled: boolean;
+  readonly onConnected: () => void;
+}) {
+  const environmentId = usePrimaryEnvironmentId();
+  if (!environmentId) return null;
+  return (
+    <InlineJoinCalls
+      environmentId={environmentId}
+      projectId={props.connect.provider.slice("calls:".length)}
+      disabled={props.disabled}
+      onDone={props.onConnected}
+    />
+  );
+}
+
+function InlineConnectApp(props: {
   readonly connect: NonNullable<UserInputQuestion["connect"]>;
   readonly disabled: boolean;
   readonly onConnected: () => void;

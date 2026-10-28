@@ -28,7 +28,11 @@ const CONNECT_NAMES: Readonly<Record<string, string>> = {
   "google-drive": "Google Drive",
   notion: "Notion",
   github: "GitHub",
+  calls: "Join my calls",
 };
+
+/** The card's answer once "Join my calls" is on. */
+export const ASK_CARD_CALLS_ON = "Joining your calls";
 
 export const ASK_CARD_CONNECTED = "Connected";
 
@@ -47,7 +51,7 @@ export function askCardQuestion(input: ManagerAskUserInput): UserInputQuestion {
       ? {
           provider: input.connect,
           name: CONNECT_NAMES[input.connect] ?? input.connect,
-          doneLabel: ASK_CARD_CONNECTED,
+          doneLabel: input.connect === "calls" ? ASK_CARD_CALLS_ON : ASK_CARD_CONNECTED,
         }
       : undefined;
   return {

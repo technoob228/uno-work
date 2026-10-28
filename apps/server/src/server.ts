@@ -37,6 +37,8 @@ import { warmStatusRouteLayer } from "./warmStatus.ts";
 import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
+import { assistantCallsRouteLayers } from "./assistants/assistantCallsHttp.ts";
+import { AssistantCallsServiceLive } from "./assistants/AssistantCallsService.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { AssistantTeamLive } from "./assistants/assistantTeamLive.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
@@ -491,6 +493,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // question cards and the setup chat (manager + Inbox further down);
       // the mailbox address for each assistant's own email.
       AssistantTeamLive.pipe(Layer.provide(AgentMailServiceLive)),
+      // "Join my calls": an assistant sends the Notetaker to the person's
+      // calls (Google Calendar → the App Store app → events back over the
+      // App API, which finds it through appSdk/appCallsBridge.ts).
+      AssistantCallsServiceLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
@@ -720,6 +726,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   ...unoWorkRouteLayers,
   warmStatusRouteLayer,
   ...setupToolsRouteLayers,
+  ...assistantCallsRouteLayers,
 ).pipe(
   Layer.provide(browserApiCorsLayer),
   // Provided last, so built first: the outermost global middleware. A request

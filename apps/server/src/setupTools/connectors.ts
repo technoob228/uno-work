@@ -33,6 +33,8 @@ export interface ConsoleConnector {
   readonly connected: boolean;
   readonly account: string | null;
   readonly connectedAt: string | null;
+  /** The sign-in expired or was revoked (the console's `needs_reconnect`). */
+  readonly needsReconnect: boolean;
   readonly tools: ReadonlyArray<ConnectorToolDescriptor>;
 }
 
@@ -45,6 +47,8 @@ export interface ManagerConnectorView {
   readonly connected: boolean;
   readonly account: string | null;
   readonly connectedAt: string | null;
+  /** Shown as "Reconnect" (the web's `connectorSignedIn`). */
+  readonly needsReconnect: boolean;
   readonly toolCount: number;
 }
 
@@ -154,6 +158,7 @@ export function parseConsoleConnectors(raw: unknown): ReadonlyArray<ConsoleConne
       connected: record["connected"] === true,
       account: strOrNull(record["account"]),
       connectedAt: strOrNull(record["connected_at"]),
+      needsReconnect: record["needs_reconnect"] === true,
       tools,
     });
   }
@@ -169,6 +174,7 @@ export function toManagerConnectorView(connector: ConsoleConnector): ManagerConn
     connected: connector.connected,
     account: connector.account,
     connectedAt: connector.connectedAt,
+    needsReconnect: connector.needsReconnect,
     toolCount: connector.tools.length,
   };
 }

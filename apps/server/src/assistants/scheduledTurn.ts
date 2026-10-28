@@ -68,10 +68,31 @@ export function wrapScheduledPrompt(input: { readonly name?: string; readonly pr
 
 export { isNoReply };
 
+/**
+ * A turn the daemon itself starts for an assistant on an event (the notes
+ * of a call it sent the notetaker to — assistants/assistantCalls.ts): the
+ * same thread rules, waiting, mode and delivery as a scheduled turn, with its
+ * own thread title for assistants other than Uno and the prompt as given.
+ */
+export interface AssistantEventTurnInput {
+  readonly projectId: ProjectId;
+  readonly prompt: string;
+  /** Put before the answer in Telegram/Slack ("📝 Pilot sync"). */
+  readonly header: string;
+  /** The thread of a non-default assistant ("Meetings"). */
+  readonly threadTitle: string;
+  readonly timeoutSec?: number;
+  /** Who started it, for the command origin ("notetaker"). */
+  readonly source: string;
+}
+
 export interface AssistantScheduledTurnsShape {
   readonly run: (
     caller: ManagerCaller,
     input: ManagerAssistantTurnInput,
+  ) => Effect.Effect<ManagerAssistantTurnResult, AssistantTurnError>;
+  readonly runEvent: (
+    input: AssistantEventTurnInput,
   ) => Effect.Effect<ManagerAssistantTurnResult, AssistantTurnError>;
 }
 
@@ -97,7 +118,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const pollMs = options?.pollMs ?? POLL_MS;
 
     /** The thread a scheduled turn of `projectId` runs in (created if needed). */
-    const targetThread = (projectId: ProjectId, tokenId: string) =>
+    const targetThread = (projectId: ProjectId, tokenId: string, title = SCHEDULED_THREAD_TITLE) =>
       Effect.gen(function* () {
         const snapshot = yield* projections.getShellSnapshot();
         if (projectId === ASSISTANT_PROJECT_ID) {
@@ -106,9 +127,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         }
         const existing = snapshot.threads.find(
           (thread) =>
-            thread.projectId === projectId &&
-            thread.title === SCHEDULED_THREAD_TITLE &&
-            thread.archivedAt === null,
+            thread.projectId === projectId && thread.title === title && thread.archivedAt === null,
         );
         if (existing !== undefined) return existing.id;
         if (!snapshot.projects.some((project) => project.id === projectId)) {
@@ -121,7 +140,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             commandId: CommandId.make(`assistant-schedule:${crypto.randomUUID()}`),
             threadId,
             projectId,
-            title: SCHEDULED_THREAD_TITLE,
+            title,
             modelSelection: yield* currentAssistantModelSelection(projections),
             runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: "default",
@@ -166,6 +185,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
       messageId: MessageId,
       requestedAtIso: string,
       deadlineMs: number,
+      failurePrefix = "The scheduled task could not finish",
     ) =>
       Effect.gen(function* () {
         let knownTurnId: string | null = null;
@@ -199,7 +219,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               return { text: verdict.partial ?? stoppedText("en") };
             case "lost":
             case "failed":
-              return { text: `The scheduled task could not finish: ${verdict.reason}` };
+              return { text: `${failurePrefix}: ${verdict.reason}` };
           }
         }
         return null;
@@ -211,9 +231,48 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         if (projectId === null) {
           return yield* turnError(403, "Only an assistant's own token can run its schedule.");
         }
-        const timeoutMs = (input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60) * 1_000;
-        const deadlineMs = Date.now() + timeoutMs;
-        const threadId = yield* targetThread(projectId, caller.tokenId);
+        return yield* runIn({
+          projectId,
+          tokenId: caller.tokenId,
+          threadTitle: SCHEDULED_THREAD_TITLE,
+          text: wrapScheduledPrompt({
+            ...(input.name ? { name: input.name } : {}),
+            prompt: input.prompt,
+          }),
+          header: input.name ? `⏰ ${input.name}\n\n` : "",
+          timeoutSec: input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60,
+          logName: input.name ?? null,
+          failurePrefix: "The scheduled task could not finish",
+        });
+      });
+
+    const runEvent: AssistantScheduledTurnsShape["runEvent"] = (input) =>
+      runIn({
+        projectId: input.projectId,
+        tokenId: input.source,
+        threadTitle: input.threadTitle,
+        text: input.prompt,
+        header: input.header,
+        timeoutSec: input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60,
+        logName: input.source,
+        failurePrefix: "The assistant could not finish",
+      });
+
+    const runIn = (input: {
+      readonly projectId: ProjectId;
+      readonly tokenId: string;
+      readonly threadTitle: string;
+      readonly text: string;
+      readonly header: string;
+      readonly timeoutSec: number;
+      readonly logName: string | null;
+      readonly failurePrefix: string;
+    }) =>
+      Effect.gen(function* () {
+        const { projectId } = input;
+        const caller = { tokenId: input.tokenId };
+        const deadlineMs = Date.now() + input.timeoutSec * 1_000;
+        const threadId = yield* targetThread(projectId, caller.tokenId, input.threadTitle);
         yield* waitUntilIdle(threadId);
         const shell = yield* projections
           .getThreadShellById(threadId)
@@ -228,10 +287,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             message: {
               messageId,
               role: "user",
-              text: wrapScheduledPrompt({
-                ...(input.name ? { name: input.name } : {}),
-                prompt: input.prompt,
-              }),
+              text: input.text,
               attachments: [],
             },
             // The assistant's own mode ("Does it itself" = full access,
@@ -243,10 +299,16 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           { origin: assistantCommandOrigin({ assistantKey: projectId, tokenId: caller.tokenId }) },
         );
         yield* Effect.logInfo("assistant scheduled turn started").pipe(
-          Effect.annotateLogs({ projectId, threadId, name: input.name ?? null }),
+          Effect.annotateLogs({ projectId, threadId, name: input.logName }),
         );
 
-        const reply = yield* awaitReply(threadId, messageId, requestedAtIso, deadlineMs);
+        const reply = yield* awaitReply(
+          threadId,
+          messageId,
+          requestedAtIso,
+          deadlineMs,
+          input.failurePrefix,
+        );
         if (reply === null) {
           return { status: "timeout" as const, threadId, delivered: 0 };
         }
@@ -260,8 +322,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           includeAssistantFallback: true,
           includeSlack: true,
         });
-        const header = input.name ? `⏰ ${input.name}\n\n` : "";
-        const sent = yield* notify.sendToChats(chats, `${header}${text}`);
+        const sent = yield* notify.sendToChats(chats, `${input.header}${text}`);
         yield* Effect.logInfo("assistant scheduled turn answered").pipe(
           Effect.annotateLogs({ projectId, threadId, delivered: sent.delivered }),
         );
@@ -284,7 +345,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         ),
       );
 
-    return { run } satisfies AssistantScheduledTurnsShape;
+    return { run, runEvent } satisfies AssistantScheduledTurnsShape;
   });
 
 export const AssistantScheduledTurnsLive = Layer.effect(

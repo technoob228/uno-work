@@ -42,6 +42,7 @@ const CONSOLE_LIST = {
       connected: false,
       account: null,
       connected_at: null,
+      needs_reconnect: true,
       tools: [{ name: "notion_search", description: "Search.", input_schema: { type: "object" } }],
     },
     { provider: "../evil", name: "x", tools: [] },
@@ -121,6 +122,7 @@ describe("connectors client", () => {
           connected: true,
           account: "mikhail@uno4.dev",
           connectedAt: "2026-09-25T09:00:00Z",
+          needsReconnect: false,
           toolCount: 2,
         },
         {
@@ -131,6 +133,8 @@ describe("connectors client", () => {
           connected: false,
           account: null,
           connectedAt: null,
+          // The console's needs_reconnect reaches the UI ("Reconnect").
+          needsReconnect: true,
           toolCount: 1,
         },
       ],
