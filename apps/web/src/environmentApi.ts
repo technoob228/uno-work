@@ -1,6 +1,6 @@
 import type { EnvironmentId, EnvironmentApi } from "@t3tools/contracts";
 
-import { interfaceUnoCloud } from "./account/unoAccount";
+import { accountTransport, interfaceUnoCloud } from "./account/unoAccount";
 import type { WsRpcClient } from "./rpc/wsRpcClient";
 import { readEnvironmentConnection } from "./environments/runtime";
 
@@ -134,9 +134,20 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       installStatus: rpcClient.customHarness.installStatus,
     },
     // The Uno account belongs to the interface (the signed-in person), not to
-    // whichever machine this is: see account/unoAccount.ts. The daemon's own
-    // uno.cloud.* RPCs are no longer used by this client.
-    unoCloud: interfaceUnoCloud,
+    // whichever machine this is: see account/unoAccount.ts. Opened straight at
+    // a cloud computer's own address there is no account in the page; making
+    // a computer (an assistant's own, from the wizard) then goes through this
+    // computer, whose own token may create computers (console scope
+    // machines:create) — the console still decides the plan.
+    unoCloud:
+      accountTransport() === "none"
+        ? {
+            ...interfaceUnoCloud,
+            createBox: rpcClient.unoCloud.createBox,
+            createBoxStatus: rpcClient.unoCloud.createBoxStatus,
+            connectBox: rpcClient.unoCloud.connectBox,
+          }
+        : interfaceUnoCloud,
     unoComputer: {
       getState: (input) => rpcClient.unoComputer.getState(input),
       metrics: (input) => rpcClient.unoComputer.metrics(input),
