@@ -564,6 +564,30 @@ export function WorkspaceSettings() {
               )}
             </div>
           ) : null}
+          {!unlinkedLocalDaemon && localDaemonDiscovery.heldForPermission ? (
+            // P5 (28.10): the browser is asked only from here, after the reason.
+            <div
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2"
+              data-testid="look-for-this-computer"
+            >
+              <LaptopIcon className="size-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">Uno Work app on this computer?</div>
+                <p className="text-xs text-muted-foreground">
+                  This browser can use it to run projects and agents here. To find it, the page
+                  needs to reach apps on this computer — your browser will ask you to allow that.
+                </p>
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={localDaemonDiscovery.isProbing}
+                onClick={() => void localDaemonDiscovery.lookWithPermission()}
+              >
+                Look for it
+              </Button>
+            </div>
+          ) : null}
           {rows.length === 0 && !unlinkedLocalDaemon ? (
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <p className="text-sm text-foreground">No machines yet.</p>

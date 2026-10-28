@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   discoverLocalDaemon,
   localDaemonHttpBaseUrl,
+  loopbackProbeWithoutPrompt,
   parseLocalDaemonDescriptor,
 } from "./localDaemonDiscovery";
 
@@ -121,5 +122,38 @@ describe("discoverLocalDaemon", () => {
 
     await expect(discoverLocalDaemon({ fetch: fetchMock, enabled: false })).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("loopbackProbeWithoutPrompt (P5, 28.10)", () => {
+  const permissionsWith = (states: Record<string, PermissionState>) => ({
+    query: async ({ name }: { name: string }) => {
+      const state = states[name];
+      if (state === undefined) throw new TypeError(`Unknown permission ${name}`);
+      return { state } as PermissionStatus;
+    },
+  });
+
+  it("looks on its own only once the person allowed it", async () => {
+    expect(
+      await loopbackProbeWithoutPrompt(permissionsWith({ "local-network-access": "granted" })),
+    ).toBe(true);
+    expect(
+      await loopbackProbeWithoutPrompt(permissionsWith({ "local-network-access": "prompt" })),
+    ).toBe(false);
+    expect(
+      await loopbackProbeWithoutPrompt(permissionsWith({ "local-network-access": "denied" })),
+    ).toBe(false);
+  });
+
+  it("knows the newer split name too", async () => {
+    expect(await loopbackProbeWithoutPrompt(permissionsWith({ "loopback-network": "prompt" }))).toBe(
+      false,
+    );
+  });
+
+  it("a browser without such a permission doesn't ask — looking is fine", async () => {
+    expect(await loopbackProbeWithoutPrompt(permissionsWith({}))).toBe(true);
+    expect(await loopbackProbeWithoutPrompt(undefined)).toBe(true);
   });
 });

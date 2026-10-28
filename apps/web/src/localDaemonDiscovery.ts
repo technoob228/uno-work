@@ -127,6 +127,35 @@ async function probePort(
 }
 
 /**
+ * Chromium's Local Network Access names: the window "<site> wants to access
+ * other apps and services on this device" comes on the first loopback request
+ * from a page (P5, 28.10: it popped up on the very first screen of Work in the
+ * browser, before anything needed it). Newer versions split the permission.
+ */
+const LOOPBACK_PERMISSION_NAMES = ["loopback-network", "local-network-access", "local-network"];
+
+/**
+ * May the page look for the desktop app without making the browser ask?
+ * Yes when the person already allowed it, or when the browser has no such
+ * permission at all (it doesn't ask then). No while the browser would show
+ * its window, or after the person blocked it.
+ */
+export async function loopbackProbeWithoutPrompt(
+  permissions: Pick<Permissions, "query"> | undefined = globalThis.navigator?.permissions,
+): Promise<boolean> {
+  if (!permissions) return true;
+  for (const name of LOOPBACK_PERMISSION_NAMES) {
+    try {
+      const status = await permissions.query({ name } as unknown as PermissionDescriptor);
+      return status.state === "granted";
+    } catch {
+      // This browser doesn't know the name; try the next one.
+    }
+  }
+  return true;
+}
+
+/**
  * Resolves to the local daemon's descriptor, or null when there is none (or
  * when this build must not look). Never throws.
  */

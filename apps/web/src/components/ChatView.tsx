@@ -116,7 +116,7 @@ import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, WifiOffIcon } from "lucide-react";
+import { BellIcon, ChevronDownIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatElapsedAgoLabel } from "../timestampFormat";
@@ -226,6 +226,7 @@ import { ChatMiniWindow } from "./chat/ChatMiniWindow";
 import { FullscreenChatDockHeader, LegacyFocusChatPreview } from "./chat/FullscreenChatDock";
 import { chatDockStatus, type ChatDockMode } from "./chat/chatDock.logic";
 import { useChatDockInset } from "./chat/useChatDockInset";
+import { useNotificationSoftAsk } from "../inbox/systemNotifications";
 import { useDemoSwitch } from "~/demo/demoFlag";
 import { useFeatureFlag } from "~/hooks/useFeatureFlags";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
@@ -1436,6 +1437,30 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  // P5 (28.10): the browser's "Show notifications" window comes after a line
+  // that says what for, at the moment it is useful — Uno works, the person may
+  // switch tabs — not on the first click of the first screen.
+  const notificationSoftAsk = useNotificationSoftAsk(isWorking && !isEmbedded);
+  const notificationSoftAskBanner: ComposerBannerStackItem | null = notificationSoftAsk.visible
+    ? {
+        id: "notifications-soft-ask",
+        variant: "info",
+        icon: <BellIcon />,
+        title: "Get a ping when Uno needs you",
+        description:
+          "Uno keeps working while you're in another tab. Turn on notifications to hear when it asks you something or finishes — your browser will ask to allow them.",
+        actions: (
+          <>
+            <Button size="xs" variant="ghost" onClick={notificationSoftAsk.notNow}>
+              Not now
+            </Button>
+            <Button size="xs" onClick={() => void notificationSoftAsk.turnOn()}>
+              Turn on
+            </Button>
+          </>
+        ),
+      }
+    : null;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -4301,7 +4326,14 @@ export default function ChatView(props: ChatViewProps) {
                     isWorking && (selectedProvider === "uno" || selectedProvider === "hermes")
                   }
                 />
-                <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                <ComposerBannerStack
+                  className="relative z-0"
+                  items={
+                    notificationSoftAskBanner && selfUpdate.view?.kind !== "updating"
+                      ? [...composerBannerItems, notificationSoftAskBanner]
+                      : composerBannerItems
+                  }
+                />
                 {selfUpdate.dialog}
                 <div className="relative z-10">
                   <ChatComposer
