@@ -65,7 +65,10 @@ import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
 import { homeAttachmentsFromFiles } from "./homeAttachments";
 import { homeStartModelSelection } from "./homeStartModel";
-import { AGENT_PICK_KEY, parseAgentDriver } from "./agentStart";
+import { AGENT_PICK_KEY, noSignInAgent, parseAgentDriver } from "./agentStart";
+import { useAccountDefaultAi } from "../../../assistant/useAccountDefaultAi";
+import { isWebLite } from "../../../lite/webLite";
+import { arrivedAgent } from "../../../unoai/arrivedAgent";
 import { useOwnAgentGoal } from "./HomeAgentSignIn";
 import { useSetupProgress } from "../../setup/useSetupProgress";
 import { useSetupHandoff } from "../../setup/useSetupHome";
@@ -105,6 +108,13 @@ export function useHomeModelPicker(
   // Uno's own harness (Settings' pickers keep the plain default).
   const ownAgentGoal = useOwnAgentGoal() && options.ownAgentStart === true;
   const pickedAgent = parseAgentDriver(useSetupProgress().answers?.[AGENT_PICK_KEY]);
+  // OpenCode / Uno AI picked before Work (the configurator saves the account's
+  // default AI): OpenCode starts first; Uno AI keeps the machine's own default.
+  const noSignIn = noSignInAgent({
+    arrived: arrivedAgent(),
+    saved: pickedAgent,
+    accountDefaultAi: useAccountDefaultAi(ownAgentGoal && !isWebLite),
+  });
   const stickyActiveProvider = useComposerDraftStore((store) => store.stickyActiveProvider);
   const stickyModelSelectionByProvider = useComposerDraftStore(
     (store) => store.stickyModelSelectionByProvider,
@@ -143,9 +153,13 @@ export function useHomeModelPicker(
       stickyModelSelectionByProvider,
       providers,
       settings,
-      ownAgent: ownAgentGoal ? { picked: pickedAgent } : null,
+      ownAgent:
+        ownAgentGoal && noSignIn !== "uno"
+          ? { picked: pickedAgent, openCodeFirst: noSignIn === "opencode" }
+          : null,
     });
   }, [
+    noSignIn,
     ownAgentGoal,
     picked,
     pickedAgent,

@@ -46,6 +46,7 @@ import {
   AGENT_SIGNED_IN_SENT_KEY,
   AGENT_SIGN_IN_PROMPTED_KEY,
   agentDriverFromAccountDefault,
+  noSignInAgent,
   parseAgentDriver,
   pickAgentDriver,
   shouldAutoOpenAgentSignIn,
@@ -78,17 +79,23 @@ export interface AgentOnComputer {
   readonly signedIn: boolean;
   /** Claude Code or Codex — whichever — signed in with the person's own account. */
   readonly anySignedIn: boolean;
+  /**
+   * The person's agent has no sign-in (OpenCode / Uno AI picked before Work):
+   * it is ready as is, nothing to ask for.
+   */
+  readonly noSignIn: boolean;
 }
 
 /** The person's agent on this computer and whether it is signed in. */
 export function useAgentOnComputer(ownAgentGoal: boolean): AgentOnComputer {
   const progress = useSetupProgress();
   const providers = useServerProviders();
-  const accountDefault = agentDriverFromAccountDefault(
-    useAccountDefaultAi(ownAgentGoal && !isWebLite),
-  );
+  const accountDefaultAi = useAccountDefaultAi(ownAgentGoal && !isWebLite);
+  const accountDefault = agentDriverFromAccountDefault(accountDefaultAi);
   const saved = parseAgentDriver(progress.answers[AGENT_PICK_KEY]);
-  const driver = pickAgentDriver({ arrived: arrivedAgent(), saved, accountDefault });
+  const arrived = arrivedAgent();
+  const driver = pickAgentDriver({ arrived, saved, accountDefault });
+  const noSignIn = noSignInAgent({ arrived, saved, accountDefaultAi }) !== null;
   return useMemo(() => {
     const byId = (id: ProviderAuthDriver) =>
       providers.find((entry) => entry.instanceId === ProviderInstanceId.make(id)) ?? null;
@@ -100,8 +107,9 @@ export function useAgentOnComputer(ownAgentGoal: boolean): AgentOnComputer {
       signedIn: signedInWithOwnAccount(provider),
       anySignedIn:
         signedInWithOwnAccount(byId("claudeAgent")) || signedInWithOwnAccount(byId("codex")),
+      noSignIn,
     };
-  }, [driver, providers]);
+  }, [driver, noSignIn, providers]);
 }
 
 /** The person came for their own agent: the account's goal, or the one picked here. */
@@ -162,7 +170,8 @@ export function HomeAgentSignIn() {
   // Signed in (here, in Settings or a terminal): the account hears it once —
   // it closes "Sign in to your agent" for the console too.
   useEffect(() => {
-    if (!ownAgentGoal || !settingsReady || !agent.anySignedIn) return;
+    // An agent with no sign-in (OpenCode / Uno AI) is ready as is.
+    if (!ownAgentGoal || !settingsReady || !(agent.anySignedIn || agent.noSignIn)) return;
     if (answers[AGENT_SIGNED_IN_SENT_KEY]) return;
     trackFunnel("next_step_clicked", {
       goal: "own_agent",
@@ -171,7 +180,7 @@ export function HomeAgentSignIn() {
     void update((current) =>
       withAnswer(current, AGENT_SIGNED_IN_SENT_KEY, new Date().toISOString()),
     );
-  }, [agent.anySignedIn, answers, ownAgentGoal, settingsReady, update]);
+  }, [agent.anySignedIn, agent.noSignIn, answers, ownAgentGoal, settingsReady, update]);
 
   // A sign-in finished in this dialog: new chats start on that agent.
   const job = openDriver ? setup.authJobs[openDriver] : undefined;

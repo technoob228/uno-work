@@ -71,9 +71,28 @@ export function ownAgentStartSelection(input: {
   readonly picked: ProviderAuthDriver | null;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
+  /** OpenCode picked before Work (account default AI): it goes first. */
+  readonly openCodeFirst?: boolean;
 }): ModelSelection | null {
   const byDriver = (driver: string) =>
     input.providers.find((candidate) => candidate.instanceId === driver);
+  const openCodeSmart = (): ModelSelection | null => {
+    const opencode = byDriver("opencode");
+    if (!opencode || !isUsableDefaultProvider(opencode)) return null;
+    const model = resolveAppModelSelectionForInstance(
+      opencode.instanceId,
+      input.settings,
+      input.providers,
+      opencode.models.some((entry) => entry.slug === OPENCODE_SMART_MODEL)
+        ? OPENCODE_SMART_MODEL
+        : null,
+    );
+    return model ? { instanceId: opencode.instanceId, model } : null;
+  };
+  if (input.openCodeFirst) {
+    const first = openCodeSmart();
+    if (first) return first;
+  }
   const order: ReadonlyArray<ProviderAuthDriver> = [
     ...(input.picked ? [input.picked] : []),
     "claudeAgent",
@@ -90,19 +109,7 @@ export function ownAgentStartSelection(input: {
     );
     if (model) return { instanceId: provider.instanceId, model };
   }
-  const opencode = byDriver("opencode");
-  if (opencode && isUsableDefaultProvider(opencode)) {
-    const model = resolveAppModelSelectionForInstance(
-      opencode.instanceId,
-      input.settings,
-      input.providers,
-      opencode.models.some((entry) => entry.slug === OPENCODE_SMART_MODEL)
-        ? OPENCODE_SMART_MODEL
-        : null,
-    );
-    if (model) return { instanceId: opencode.instanceId, model };
-  }
-  return null;
+  return openCodeSmart();
 }
 
 export function homeStartModelSelection(input: {
@@ -111,7 +118,10 @@ export function homeStartModelSelection(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
   /** The person came for their own agent: start there unless they picked otherwise. */
-  readonly ownAgent?: { readonly picked: ProviderAuthDriver | null } | null;
+  readonly ownAgent?: {
+    readonly picked: ProviderAuthDriver | null;
+    readonly openCodeFirst?: boolean;
+  } | null;
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
@@ -134,6 +144,7 @@ export function homeStartModelSelection(input: {
         picked: input.ownAgent.picked,
         providers: input.providers,
         settings: input.settings,
+        ...(input.ownAgent.openCodeFirst ? { openCodeFirst: true } : {}),
       })
     : null;
   return ownAgent ?? pickUsableDefaultModelSelection(input.providers);

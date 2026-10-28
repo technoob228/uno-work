@@ -93,7 +93,8 @@ export function useNextStep(): HomeNextStepState {
   const channels = useAssistantChannels(usePrimaryEnvironmentId(), agentPlan);
   const doneHere = agentPlan
     ? agentStartDoneHere({
-        agentSignedIn: agent.anySignedIn,
+        // OpenCode / Uno AI picked before Work: no sign-in to ask for.
+        agentSignedIn: agent.anySignedIn || agent.noSignIn,
         progress,
         channelOn: channels.telegram === "on" || channels.slack === "on",
       })

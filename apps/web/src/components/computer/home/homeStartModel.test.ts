@@ -308,6 +308,29 @@ describe("Home for someone who came for their own agent (goal own_agent)", () =>
     ).toEqual({ instanceId: "hermes", model: "uno/fast" });
   });
 
+  it("OpenCode picked in the configurator: OpenCode · Smart first, even with Claude Code signed in", () => {
+    const providers = [hermes, opencode, claudeOwn, codexOut];
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: null,
+        stickyModelSelectionByProvider: {},
+        providers,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+        ownAgent: { picked: null, openCodeFirst: true },
+      }),
+    ).toEqual({ instanceId: "opencode", model: "uno/uno/smart" });
+    // No OpenCode on this computer: the agent they signed in with.
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: null,
+        stickyModelSelectionByProvider: {},
+        providers: [hermes, claudeOwn],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+        ownAgent: { picked: null, openCodeFirst: true },
+      })?.instanceId,
+    ).toBe("claudeAgent");
+  });
+
   it("no OpenCode and no agent of theirs: the usual default", () => {
     expect(start([hermes, uno], { picked: "claudeAgent" })?.instanceId).toBe("hermes");
   });

@@ -7,6 +7,8 @@ import {
   agentDriverFromAccountDefault,
   agentStartDoneHere,
   nextStepIdForSetupStep,
+  noSignInAgent,
+  noSignInAgentFromAccountDefault,
   parseAgentDriver,
   pickAgentDriver,
   shouldAutoOpenAgentSignIn,
@@ -168,5 +170,38 @@ describe("agentStartDoneHere", () => {
     expect(nextStepIdForSetupStep("connectors")).toBe("connect_tools");
     expect(nextStepIdForSetupStep("channels")).toBe("connect_channel");
     expect(nextStepIdForSetupStep("project")).toBeNull();
+  });
+});
+
+describe("noSignInAgent (28.10: OpenCode picked in the configurator → Home asked to sign in to Claude Code)", () => {
+  it("OpenCode or Uno AI as the account's default AI needs no sign-in", () => {
+    expect(noSignInAgentFromAccountDefault("opencode")).toBe("opencode");
+    expect(noSignInAgentFromAccountDefault("uno")).toBe("uno");
+    expect(noSignInAgentFromAccountDefault("claude")).toBeNull();
+    expect(noSignInAgentFromAccountDefault("codex")).toBeNull();
+    expect(noSignInAgentFromAccountDefault("byok")).toBeNull();
+    expect(noSignInAgentFromAccountDefault(null)).toBeNull();
+    expect(noSignInAgent({ arrived: null, saved: null, accountDefaultAi: "opencode" })).toBe(
+      "opencode",
+    );
+  });
+
+  it("Claude Code or Codex named on the entry link or saved here still wins", () => {
+    expect(
+      noSignInAgent({ arrived: "claudeAgent", saved: null, accountDefaultAi: "opencode" }),
+    ).toBeNull();
+    expect(
+      noSignInAgent({ arrived: null, saved: "codex", accountDefaultAi: "opencode" }),
+    ).toBeNull();
+  });
+
+  it("closes the sign-in step: the card moves on to the project", () => {
+    const done = agentStartDoneHere({
+      agentSignedIn:
+        noSignInAgent({ arrived: null, saved: null, accountDefaultAi: "opencode" }) !== null,
+      progress: EMPTY_SETUP_PROGRESS,
+      channelOn: false,
+    });
+    expect([...done]).toEqual([AGENT_START_STEP.connectAgent]);
   });
 });

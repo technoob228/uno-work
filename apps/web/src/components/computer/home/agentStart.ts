@@ -74,6 +74,32 @@ export function agentDriverFromAccountDefault(value: unknown): ProviderAuthDrive
   return value === "claude" ? "claudeAgent" : value === "codex" ? "codex" : null;
 }
 
+/**
+ * Account `default_ai` that is an agent with no CLI sign-in — OpenCode or
+ * Uno AI, picked in the landing's configurator (/agent). They run on the
+ * plan's Uno AI credit: nothing to sign in, so Home must not ask for Claude
+ * Code (28.10: OpenCode picked → "Sign in to Claude Code" on Home).
+ */
+export type NoSignInAgent = "opencode" | "uno";
+
+export function noSignInAgentFromAccountDefault(value: unknown): NoSignInAgent | null {
+  return value === "opencode" || value === "uno" ? value : null;
+}
+
+/**
+ * The person's agent needs no sign-in: nothing named Claude Code or Codex
+ * (entry link, a pick saved here), and the account's default AI is OpenCode
+ * or Uno AI.
+ */
+export function noSignInAgent(input: {
+  readonly arrived: ProviderAuthDriver | null;
+  readonly saved: ProviderAuthDriver | null;
+  readonly accountDefaultAi: unknown;
+}): NoSignInAgent | null {
+  if (input.arrived || input.saved) return null;
+  return noSignInAgentFromAccountDefault(input.accountDefaultAi);
+}
+
 export const AGENT_LABEL: Readonly<Record<ProviderAuthDriver, string>> = {
   claudeAgent: "Claude Code",
   codex: "Codex",
