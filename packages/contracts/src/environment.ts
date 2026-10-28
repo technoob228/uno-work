@@ -60,6 +60,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       projects it was given. False / absent: an assistant here sees every
       file of the computer; "only selected projects" needs its own computer. */
   assistantSandbox: Schema.optionalKey(Schema.Boolean),
+  /** The daemon cleans chat copies (worktrees) itself: `storageCleanup` in
+      server settings, `uno.computer.worktreeCleanup*` RPCs, and the copy of a
+      deleted chat is removed on the server (0.0.157). Absent: clients hide
+      the cleanup settings and keep asking "Delete the worktree too?". */
+  worktreeCleanup: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

@@ -34,6 +34,7 @@ import type {
   InboxOpenTarget,
   RuntimeMode,
   ServerSettings,
+  StorageCleanupReport,
   UnoBoxCreateJobStatus,
   UnoCloudCreateBoxResult,
   UnoCloudState,
@@ -243,6 +244,16 @@ export interface UnoWorkToolDeps {
     readonly clean: (input: {
       readonly id: string;
     }) => Effect.Effect<UnoDiskCleanResult, { readonly message: string }>;
+    /** Chat copies (git worktrees) Uno Work cleans by itself (worktreeCleanup/). */
+    readonly chatCopies?: {
+      readonly onDisk: Effect.Effect<{
+        readonly worktreesDir: string;
+        readonly copies: number;
+        readonly bytes: number | null;
+      }>;
+      readonly lastReport: Effect.Effect<StorageCleanupReport | null>;
+      readonly runNow: Effect.Effect<StorageCleanupReport>;
+    };
   };
   readonly computerState: Effect.Effect<UnoComputerState>;
   readonly files: {
@@ -568,6 +579,8 @@ const strArray = (args: Record<string, unknown>, key: string): string[] | undefi
     : undefined;
 
 /** Clean-up targets an agent never empties: Trash holds files the person deleted. */
+/** `computer_cleanup` id of the chat copies (git worktrees under `<baseDir>/worktrees`). */
+const CHAT_COPIES_ID = "chat-copies";
 const CLEANUP_NEVER: ReadonlySet<string> = new Set(["trash"]);
 
 /**
@@ -1241,7 +1254,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "computer_cleanup",
     group: "computer",
     description:
-      "Free disk space on this computer. Without apply: what fills the home folder (biggest folders) and the caches that can be emptied safely, with sizes — npm/Bun/pip/uv/Yarn/Go caches, old logs, unused Docker images and build cache; they refill themselves when needed. With apply: empties those caches (or only the ids you name) and says how much was freed. The person's files and Trash are never touched: big files they keep belong in Uno Drive (drive_save), and deleting their files needs their yes. Use it when computer_status warns the disk is almost full, and before big installs, builds, docker images or downloads.",
+      "Free disk space on this computer. Without apply: what fills the home folder (biggest folders) and the caches that can be emptied safely, with sizes — npm/Bun/pip/uv/Yarn/Go caches, old logs, unused Docker images and build cache; they refill themselves when needed — plus the chat copies (git worktrees, id chat-copies) and what their automatic cleanup did last. With apply: empties those caches (or only the ids you name), runs the chat-copy cleanup now (idle Done, archived and deleted chats; uncommitted changes are saved and come back on the chat's next message) and says how much was freed. The person's files and Trash are never touched: big files they keep belong in Uno Drive (drive_save), and deleting their files needs their yes. Use it when computer_status warns the disk is almost full, and before big installs, builds, docker images or downloads.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1256,7 +1269,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: (args) => (bool(args, "apply") === true ? "change" : "safe"),
-    approvalTitle: () => "Empty build and package caches",
+    approvalTitle: () => "Empty build and package caches, clean old chat copies",
     run: (deps, args) =>
       Effect.gen(function* () {
         const disk = deps.disk;
@@ -1272,9 +1285,34 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             freeGb: v.freeGb,
             totalGb: v.totalGb,
           }));
+        const chatCopies = disk.chatCopies;
         if (bool(args, "apply") !== true) {
+          const copies = chatCopies ? yield* chatCopies.onDisk : null;
+          const last = chatCopies ? yield* chatCopies.lastReport : null;
           return {
             disk: free(usage.volumes),
+            ...(copies
+              ? {
+                  chatCopies: {
+                    id: CHAT_COPIES_ID,
+                    folder: displayPath(copies.worktreesDir, deps.home),
+                    copies: copies.copies,
+                    size: copies.bytes === null ? "too big to measure quickly" : formatBytes(copies.bytes),
+                    cleanedAutomatically:
+                      "Uno Work removes copies of deleted chats, of Done or archived chats quiet for 3 days and of any chat unused for 14 days (sooner when the disk is nearly full). Changes are saved first and the copy comes back on the chat's next message, without node_modules or build output.",
+                    ...(last
+                      ? {
+                          lastCleanup: {
+                            at: last.finishedAt,
+                            removed: last.counts.removed,
+                            freed: formatBytes(last.bytesFreed),
+                            kept: last.counts.kept,
+                          },
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             cleanable: cleanable.map((item) => ({
               id: item.id,
               what: item.label,
@@ -1295,6 +1333,14 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         );
         const cleaned: Array<{ id: string; freed: string } | { id: string; error: string }> = [];
         let freedBytes = 0;
+        if (chatCopies && (wanted === undefined || wanted.includes(CHAT_COPIES_ID))) {
+          const report = yield* chatCopies.runNow;
+          freedBytes += report.bytesFreed;
+          cleaned.push({
+            id: CHAT_COPIES_ID,
+            freed: `${formatBytes(report.bytesFreed)} (${report.counts.removed} removed, ${report.counts.kept} kept)`,
+          });
+        }
         for (const item of targets) {
           const outcome = yield* disk.clean({ id: item.id }).pipe(Effect.result);
           if (outcome._tag === "Success") {
@@ -1309,7 +1355,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           freed: formatBytes(freedBytes),
           cleaned,
           disk: free(after.volumes),
-          ...(targets.length === 0 ? { note: "Nothing to clean: the caches are empty." } : {}),
+          ...(targets.length === 0 && cleaned.length === 0
+            ? { note: "Nothing to clean: the caches are empty." }
+            : {}),
         };
       }),
   },

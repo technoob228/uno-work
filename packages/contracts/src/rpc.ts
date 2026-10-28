@@ -284,7 +284,12 @@ import {
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
-import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
+import {
+  ServerSettings,
+  ServerSettingsError,
+  ServerSettingsPatch,
+  StorageCleanupStatus,
+} from "./settings.ts";
 import {
   BrowserLiveCloseInput,
   BrowserLiveCaptureInput,
@@ -536,6 +541,9 @@ export const WS_METHODS = {
   unoComputerResources: "uno.computer.resources",
   unoComputerDiskUsage: "uno.computer.diskUsage",
   unoComputerDiskClean: "uno.computer.diskClean",
+  // Chat-copy (worktree) cleanup: last report, and a pass now.
+  unoComputerWorktreeCleanupStatus: "uno.computer.worktreeCleanupStatus",
+  unoComputerWorktreeCleanupRun: "uno.computer.worktreeCleanupRun",
   unoComputerResourceAction: "uno.computer.resourceAction",
 
   // Files — the computer's file manager (/files) and its public share links
@@ -2182,6 +2190,26 @@ export const WsUnoComputerDiskCleanRpc = Rpc.make(WS_METHODS.unoComputerDiskClea
   error: UnoCloudRpcError,
 });
 
+/** Chat copies: the last cleanup report (Settings → Computer). */
+export const WsUnoComputerWorktreeCleanupStatusRpc = Rpc.make(
+  WS_METHODS.unoComputerWorktreeCleanupStatus,
+  {
+    payload: Schema.Struct({}),
+    success: StorageCleanupStatus,
+    error: UnoCloudRpcError,
+  },
+);
+
+/** "Clean up now": a pass with the current settings; answers with its report. */
+export const WsUnoComputerWorktreeCleanupRunRpc = Rpc.make(
+  WS_METHODS.unoComputerWorktreeCleanupRun,
+  {
+    payload: Schema.Struct({}),
+    success: StorageCleanupStatus,
+    error: UnoCloudRpcError,
+  },
+);
+
 /** Quit a process of this user, or stop / start / restart a group the daemon found. */
 export const WsUnoComputerResourceActionRpc = Rpc.make(WS_METHODS.unoComputerResourceAction, {
   payload: UnoResourceActionInput,
@@ -2294,6 +2322,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoComputerResourcesRpc,
   WsUnoComputerDiskUsageRpc,
   WsUnoComputerDiskCleanRpc,
+  WsUnoComputerWorktreeCleanupStatusRpc,
+  WsUnoComputerWorktreeCleanupRunRpc,
   WsUnoComputerResourceActionRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallStatusRpc,

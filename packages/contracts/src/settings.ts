@@ -747,6 +747,79 @@ export const AppsAiSettings = Schema.Struct({
 });
 export type AppsAiSettings = typeof AppsAiSettings.Type;
 
+/** Days before an idle chat's copy goes; null = never. */
+export const WorktreeRetentionDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+);
+/** Days after Done / archive; 0 = right away, null = never. */
+export const SettledWorktreeRetentionDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3650 })),
+);
+
+/**
+ * Settings → Computer → Advanced: automatic cleanup of chat copies (the git
+ * worktrees under `<baseDir>/worktrees`). On by default — a Uno cloud disk is
+ * about 10 GB and every copy can carry its own node_modules. Uncommitted work
+ * is saved before a copy goes and comes back with it on the next message
+ * (UNO_FORK.md, "Worktree cleanup"). Field names follow upstream T3 Code's
+ * `storageCleanup` where the meaning matches.
+ */
+export const StorageCleanupSettings = Schema.Struct({
+  /** Remove the copy when its chat is deleted. */
+  worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Done (by hand or idle 3 days) or archived chats, after this many days. */
+  worktreeSettledAfterDays: SettledWorktreeRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(3)),
+  ),
+  /** Any chat idle this many days. */
+  worktreeAfterDays: WorktreeRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
+  /** Disk nearly full: Done/archived/deleted right away, idle after 3 days. */
+  worktreeLowDisk: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Save uncommitted changes and `.env*` files, then remove. Off = keep copies with changes. */
+  worktreeSaveChanges: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+});
+export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
+
+export const StorageCleanupReportEntry = Schema.Struct({
+  kind: Schema.Literal("worktree"),
+  outcome: Schema.Literals(["removed", "kept", "failed"]),
+  reason: Schema.String,
+  path: Schema.NullOr(Schema.String),
+  projectPath: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
+  threadTitle: Schema.NullOr(Schema.String),
+  bytes: Schema.NullOr(Schema.Number),
+  /** Uncommitted work was saved and comes back on the next message. */
+  saved: Schema.Boolean,
+});
+export type StorageCleanupReportEntry = typeof StorageCleanupReportEntry.Type;
+
+export const StorageCleanupReport = Schema.Struct({
+  trigger: Schema.Literals(["automatic", "manual"]),
+  startedAt: Schema.String,
+  finishedAt: Schema.String,
+  /** Disk was nearly full, so the short limits applied. */
+  lowDisk: Schema.Boolean,
+  entries: Schema.Array(StorageCleanupReportEntry),
+  counts: Schema.Struct({
+    removed: Schema.Number,
+    kept: Schema.Number,
+    failed: Schema.Number,
+  }),
+  omittedCount: Schema.Number,
+  bytesFreed: Schema.Number,
+});
+export type StorageCleanupReport = typeof StorageCleanupReport.Type;
+
+/** `uno.computer.worktreeCleanup*`: the last report plus what is on disk now. */
+export const StorageCleanupStatus = Schema.Struct({
+  report: Schema.NullOr(StorageCleanupReport),
+  /** `<baseDir>/worktrees` — where chat copies live. */
+  worktreesDir: Schema.String,
+  running: Schema.Boolean,
+});
+export type StorageCleanupStatus = typeof StorageCleanupStatus.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
@@ -819,6 +892,7 @@ export const ServerSettings = Schema.Struct({
   browser: ServerBrowserSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   uno: UnoAccountSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   appsAi: AppsAiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  storageCleanup: StorageCleanupSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -940,6 +1014,15 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       chatModel: Schema.optionalKey(Schema.String),
       taskModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+    }),
+  ),
+  storageCleanup: Schema.optionalKey(
+    Schema.Struct({
+      worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+      worktreeSettledAfterDays: Schema.optionalKey(SettledWorktreeRetentionDays),
+      worktreeAfterDays: Schema.optionalKey(WorktreeRetentionDays),
+      worktreeLowDisk: Schema.optionalKey(Schema.Boolean),
+      worktreeSaveChanges: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   uno: Schema.optionalKey(

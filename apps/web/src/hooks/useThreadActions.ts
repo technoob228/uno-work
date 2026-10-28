@@ -20,6 +20,8 @@ import {
 import { useTerminalStateStore } from "../terminalStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import { readEnvironmentServerConfig } from "../environments/settings/serverSettings";
+import { readEnvironmentSupportsWorktreeCleanup } from "../environments/worktreeCleanupSupport";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
 
@@ -135,7 +137,14 @@ export function useThreadActions() {
       const displayWorktreePath = orphanedWorktreePath
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;
-      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== undefined;
+      // Daemons that clean chat copies themselves remove this one on delete
+      // (saving any changes first): no question, no removal from here.
+      const daemonRemovesWorktree =
+        readEnvironmentSupportsWorktreeCleanup(threadRef.environmentId) &&
+        readEnvironmentServerConfig(threadRef.environmentId)?.settings.storageCleanup
+          ?.worktreeOnDelete !== false;
+      const canDeleteWorktree =
+        !daemonRemovesWorktree && orphanedWorktreePath !== null && threadProject !== undefined;
       const localApi = readLocalApi();
       const shouldDeleteWorktree =
         canDeleteWorktree &&
