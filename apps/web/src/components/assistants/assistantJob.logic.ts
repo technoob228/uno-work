@@ -1,6 +1,6 @@
 /**
  * "What should it do?" (Misha 28.10) — the pure part: the three jobs of a new
- * assistant, the account form's checks, the schedule line and the first
+ * assistant, the account form's checks and the first
  * message the assistant gets from the answers.
  *
  * Every assistant works like Uno: it answers fast and hands the real work —
@@ -19,7 +19,6 @@ import {
   type AssistantJob,
   type AssistantJobAccount,
   type AssistantJobKind,
-  type AssistantJobRepeat,
   type CredentialInput,
 } from "@t3tools/contracts";
 
@@ -32,7 +31,7 @@ export const JOB_COPY: Readonly<
   },
   accounts: {
     title: "Accounts",
-    line: "Works in your accounts — socials, shops, admin panels — signed in in a browser.",
+    line: "Works in your accounts — socials, shops, admin panels — signed in through a browser.",
   },
   tasks: {
     title: "Tasks",
@@ -123,45 +122,6 @@ export function jobAccountOf(row: AccountDraft): AssistantJobAccount {
   };
 }
 
-// ── Repeat ───────────────────────────────────────────────────────────────
-
-export const WEEKDAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-] as const;
-
-function hourMinute(time: string): readonly [number, number] | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  return hour <= 23 && minute <= 59 ? [hour, minute] : null;
-}
-
-/** Five-field cron of a repeat; null for "once" or a bad time. */
-export function cronOf(repeat: AssistantJobRepeat): string | null {
-  if (repeat.kind === "once") return null;
-  const at = hourMinute(repeat.time);
-  if (!at) return null;
-  const [hour, minute] = at;
-  if (repeat.kind === "daily") return `${minute} ${hour} * * *`;
-  const day = Math.trunc(repeat.weekday);
-  return day >= 0 && day <= 6 ? `${minute} ${hour} * * ${day}` : null;
-}
-
-/** "once", "every day at 09:00", "every Monday at 09:00". */
-export function repeatLine(repeat: AssistantJobRepeat): string {
-  if (repeat.kind === "once") return "once, now";
-  const time = repeat.time.trim();
-  if (repeat.kind === "daily") return `every day at ${time}`;
-  return `every ${WEEKDAYS[repeat.weekday] ?? "week"} at ${time}`;
-}
-
 // ── The first message ────────────────────────────────────────────────────
 
 export interface FirstMessageInput {
@@ -169,8 +129,6 @@ export interface FirstMessageInput {
   readonly role: string;
   /** Where its chats run: the label of its computer ("uno-work", "MacBook"). */
   readonly computer: string;
-  /** The person's time zone for a schedule (IANA). */
-  readonly timeZone: string;
   readonly job: AssistantJob;
 }
 
@@ -216,22 +174,14 @@ export function firstMessage(input: FirstMessageInput): string {
     const logins = job.accounts.map(
       (account) => `browser_command {"login": "${account.site}"} for ${account.service}`,
     );
-    const cron = cronOf(job.repeat);
-    const lines = [
+    return [
       hello,
       `Your job: work in my accounts — ${list(sites)}.`,
       `Their passwords are saved in the password vault on ${computer}. Never ask me for a password in chat.`,
       `Start a chat on ${computer} for this (chat_create) — signing in and the work happen there, not in our chat. In that chat, sign in with ${list(logins)} — it types the saved password itself. If a site asks for a 2FA code or a captcha, ask me with requestHelp and wait for me.`,
       task ? `Then: ${task}` : "Then: tell me what you see there and what you'd do first.",
-    ];
-    if (cron) {
-      lines.push(
-        `Do it now, then make it regular — ${repeatLine(job.repeat)} (${input.timeZone}): create a schedule with schedule_create, cron "${cron}", timezone "${input.timeZone}", that does the same and tells me the result.`,
-      );
-    } else {
-      lines.push("This is a one-time task: do it now and tell me the result.");
-    }
-    return lines.join("\n\n");
+      "Tell me the result in a few lines.",
+    ].join("\n\n");
   }
 
   const tools = list([...job.apps, ...job.servers.map((server) => `${server} (my own tool)`)]);
@@ -257,9 +207,9 @@ function dutyText(job: AssistantJob): string {
   }
   if (job.kind === "accounts") {
     const services = list(job.accounts.map((account) => account.service));
+    const sites = list(job.accounts.map((account) => account.site));
     const task = job.task.trim();
-    const when = job.repeat.kind === "once" ? "" : ` · ${repeatLine(job.repeat)}`;
-    return `Works in ${services}${task ? `: ${task}` : ""}${when}`;
+    return `Works in ${services} (${sites}), signed in from the vault in a chat it starts${task ? `: ${task}` : ""}`;
   }
   const tools = list([...job.apps, ...job.servers]);
   return tools ? `Helps with tasks using ${tools}` : "Helps with tasks";
@@ -269,7 +219,13 @@ function dutyText(job: AssistantJob): string {
 
 /** "What should it do?" while it's being answered (no passwords: they went to the vault). */
 export interface JobDraft {
-  readonly kind: AssistantJobKind | null;
+  /** Set by the role picked in the gallery (no second choice of the same). */
+  readonly kind: AssistantJobKind;
+  /**
+   * "ask" (default): it's made and waits for your message; "now": the first
+   * message with the task goes at once. Regular tasks are Automations, later.
+   */
+  readonly start: JobStart;
   /** Development: project names it leads. */
   readonly devProjects: ReadonlyArray<string>;
   /** Development: repos to clone, as typed (comma / space / line separated). */
@@ -279,21 +235,32 @@ export interface JobDraft {
   readonly accounts: ReadonlyArray<AssistantJobAccount>;
   /** The computer those logins were saved on. */
   readonly accountsOn: string | null;
-  readonly repeat: AssistantJobRepeat;
   /** Tasks: connected apps it should NOT use (provider ids). */
   readonly appsOff: ReadonlyArray<string>;
 }
 
-export const EMPTY_JOB: JobDraft = {
-  kind: null,
-  devProjects: [],
-  repos: "",
-  task: "",
-  accounts: [],
-  accountsOn: null,
-  repeat: { kind: "once" },
-  appsOff: [],
+export type JobStart = "ask" | "now";
+
+export const START_COPY: Readonly<
+  Record<JobStart, { readonly label: string; readonly line: string }>
+> = {
+  ask: { label: "Only when I ask", line: "It's made and waits for your message." },
+  now: { label: "Start now", line: "It gets the task below right away." },
 };
+
+/** The step's starting answers for a role. */
+export function emptyJob(kind: AssistantJobKind): JobDraft {
+  return {
+    kind,
+    start: "ask",
+    devProjects: [],
+    repos: "",
+    task: "",
+    accounts: [],
+    accountsOn: null,
+    appsOff: [],
+  };
+}
 
 /** `owner/name`, `github.com/owner/name` or an https/ssh git address. */
 export function parseRepos(text: string): {
@@ -325,19 +292,19 @@ export function jobProblem(
     return null;
   }
   if (draft.kind === "accounts") {
-    if (draft.accounts.length === 0) return "Add at least one account.";
+    // To start now it needs one; "only when I ask" can wait for them.
+    if (draft.accounts.length === 0) {
+      return draft.start === "now" ? "Add at least one account." : null;
+    }
     if (draft.accountsOn !== null && draft.accountsOn !== input.environmentId) {
       return `Those logins are saved on another computer. Add them again for ${input.computer}.`;
-    }
-    if (draft.repeat.kind !== "once" && cronOf(draft.repeat) === null) {
-      return "Pick a time like 09:00.";
     }
     return null;
   }
   return null;
 }
 
-/** The job from the draft (null: no job picked — it just greets). */
+/** The job from the draft. */
 export function jobOf(
   draft: JobDraft,
   tools: {
@@ -345,7 +312,7 @@ export function jobOf(
     readonly apps: ReadonlyArray<{ readonly provider: string; readonly name: string }>;
     readonly servers: ReadonlyArray<string>;
   },
-): AssistantJob | null {
+): AssistantJob {
   switch (draft.kind) {
     case "development":
       return {
@@ -355,7 +322,7 @@ export function jobOf(
         task: draft.task,
       };
     case "accounts":
-      return { kind: "accounts", accounts: draft.accounts, task: draft.task, repeat: draft.repeat };
+      return { kind: "accounts", accounts: draft.accounts, task: draft.task };
     case "tasks":
       return {
         kind: "tasks",
@@ -365,7 +332,14 @@ export function jobOf(
         servers: tools.servers,
         task: draft.task,
       };
-    default:
-      return null;
   }
+}
+
+/** The first message, only when the person said "Start now" (else it waits for them). */
+export function firstMessageOf(
+  draft: JobDraft,
+  job: AssistantJob,
+  input: Omit<FirstMessageInput, "job">,
+): string | null {
+  return draft.start === "now" ? firstMessage({ ...input, job }) : null;
 }

@@ -172,7 +172,12 @@ function opener(persona: DemoPersona): string {
 /** What it offers to do first, by its role. */
 function firstOffer(persona: DemoPersona): { line: string; yes: string } {
   const role = roleOf(persona).toLowerCase();
-  if (role.includes("secret") || role.includes("assist"))
+  if (role.includes("account"))
+    return {
+      line: "Give me the accounts in the safe window and I'll sign in from a chat on your cloud computer — 2FA comes to you.",
+      yes: "Look at my accounts",
+    };
+  if (role.includes("secret") || role.includes("assist") || role.includes("helper"))
     return {
       line: "Uno's notes say Acme is 5 days late with #1042, and Dana is at 15:00. I'll keep your inbox tidy and draft replies.",
       yes: "Start with today's mail",
@@ -689,8 +694,6 @@ function firstJob(ctx: ScriptContext, text: string): Script {
       (match) => match[1] ?? "",
     );
     const site = sites[0] ?? "the site";
-    const cron = /cron "([^"]+)"/.exec(text)?.[1] ?? null;
-    const when = /make it regular — (.+?) \(/.exec(text)?.[1] ?? null;
     return [
       {
         work: `On it — a chat on ${where} signs in to ${sites.join(", ") || site}. The password stays in its vault; I never see it.`,
@@ -708,18 +711,7 @@ function firstJob(ctx: ScriptContext, text: string): Script {
           result: `Signed in to ${site} and did it: 2 posts drafted, 5 new comments answered.`,
         },
       },
-      ...(cron && when
-        ? ([
-            {
-              act: {
-                command: `schedule_create · cron "${cron}" · ${when}`,
-                why: "Make it a regular task — the console wakes the computer for it.",
-              },
-              allowed: [{ say: `Scheduled: ${when}. You'll get the result each time.` }],
-              declined: [{ say: "OK — no schedule. Just this once." }],
-            },
-          ] satisfies Script)
-        : [{ say: "Done for now. Say when you want it again." }]),
+      { say: `Done on ${site}: 2 posts drafted, 5 comments answered. Say when you want more.` },
     ];
   }
   if (/Your job: lead development/.test(text)) {

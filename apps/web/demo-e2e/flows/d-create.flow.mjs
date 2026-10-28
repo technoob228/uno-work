@@ -93,10 +93,10 @@ export default flow("dc-uno-setup", async ({ page, url, step, shot }) => {
 
 export const flows = [
   flow("dc-development", async ({ page, url, step, shot }) => {
-    await step("open live → gallery → Bolt", async () => {
+    await step("open live → gallery → Developer (Bolt)", async () => {
       await openDemo(page, url);
       await openGallery(page);
-      await page.getByTestId("persona-card-bolt").click();
+      await page.getByTestId("persona-card-developer").click();
       await page.getByTestId("persona-name").fill("Dev Lead");
     });
     await step("where it works + AI + projects + mode", async () => {
@@ -107,12 +107,15 @@ export const flows = [
     });
     await shot("setup");
     await step(
-      "What should it do? → Development: a project + a repo + the first task",
+      "What should it do? → (Developer) a project + a repo, Start now with a task",
       async () => {
         await page.getByTestId("persona-next").click();
-        await page.getByTestId("persona-job-development").click();
+        await page.getByTestId("persona-job-development-form").waitFor();
+        if ((await page.getByTestId("persona-job-accounts").count()) > 0)
+          throw new Error("a second choice of what it does is still there");
         await page.getByTestId("persona-dev-project-p-work-landing").click();
         await page.getByTestId("persona-dev-repos").fill("misha-demo/checkout");
+        await page.getByTestId("persona-start-now").click();
         await page.getByTestId("persona-job-task").fill("Get the checkout tests green");
       },
     );
@@ -132,14 +135,13 @@ export const flows = [
   }),
 
   flow("dc-accounts", async ({ page, url, step, shot }) => {
-    await step("open live → gallery → Leo · Marketer", async () => {
+    await step("open live → gallery → Accounts manager (Leo)", async () => {
       await openDemo(page, url, { mode: "asks-first" });
       await openGallery(page);
-      await page.getByTestId("persona-card-leo").click();
+      await page.getByTestId("persona-card-accounts-manager").click();
       await toJob(page);
     });
-    await step("Accounts → the form in a window", async () => {
-      await page.getByTestId("persona-job-accounts").click();
+    await step("accounts → the form in a window", async () => {
       await page.getByTestId("persona-accounts-add").click();
       await page.getByTestId("persona-accounts-dialog").waitFor();
     });
@@ -164,44 +166,37 @@ export const flows = [
         throw new Error(`vault: ${JSON.stringify(vault)}`);
       await passwordNowhere(page);
     });
-    await step("the task, every Monday at 09:00", async () => {
+    await step("Start now with a task (no schedules here)", async () => {
+      if ((await page.getByTestId("persona-repeat").count()) > 0)
+        throw new Error("schedules are still in the setup");
+      await page.getByTestId("persona-start-now").click();
       await page.getByTestId("persona-job-task").fill("Post the weekly update");
-      await page.getByTestId("persona-repeat-weekly").click();
-      await page.getByTestId("persona-repeat-weekday").selectOption("1");
-      await page.getByTestId("persona-repeat-time").fill("09:00");
     });
     await shot("job");
     await step("Create → first message says how to sign in, no password", async () => {
       await createAndOpen(page);
       await seeText(page, 'browser_command {"login": "instagram.com"}');
-      await seeText(page, 'cron "0 9 * * 1"');
       await passwordNowhere(page);
     });
     await shot("channel");
-    await step("its chat: a chat signs in, then the schedule waits for Allow", async () => {
+    await step("its chat: a chat signs in and does it", async () => {
       await page.getByTestId("persona-open").click();
       await seeText(page, "Signed in to instagram.com", 30_000);
-      await seeText(page, "schedule_create", 30_000);
-      await page
-        .getByRole("button", { name: /^(Approve|Allow)/ })
-        .first()
-        .click();
-      await seeText(page, "Scheduled: every Monday at 09:00", 20_000);
+      await seeText(page, "Done on instagram.com", 30_000);
       await passwordNowhere(page);
     });
-    await shot("scheduled");
+    await shot("done");
   }),
 
   flow("dc-tasks", async ({ page, url, step, shot }) => {
-    await step("open live → gallery → Mia", async () => {
+    await step("open live → gallery → Helper (Mia)", async () => {
       await openDemo(page, url, { notion: "off" });
       await openGallery(page);
-      await page.getByTestId("persona-card-mia").click();
+      await page.getByTestId("persona-card-helper").click();
       await page.getByTestId("persona-name").fill("Mia Tasks");
       await toJob(page);
     });
-    await step("Tasks → connect Notion on its computer + own MCP server", async () => {
-      await page.getByTestId("persona-job-tasks").click();
+    await step("connect Notion on its computer + own MCP server", async () => {
       await connect(page, "notion");
       await page
         .getByTestId("setup-connector-notion")
@@ -215,7 +210,8 @@ export const flows = [
     });
     await shot("tools");
     await step("Create → the message names the apps and the own tool", async () => {
-      await page.getByTestId("persona-job-task").fill("Sum up new mail every morning");
+      await page.getByTestId("persona-start-now").click();
+      await page.getByTestId("persona-job-task").fill("Sum up today's new mail");
       await createAndOpen(page);
       await seeText(page, "Notion");
       await seeText(page, "(my own tool)");
@@ -227,20 +223,54 @@ export const flows = [
     await shot("chat");
   }),
 
-  flow("dc-edge-long-name-channel", async ({ page, url, step, shot }) => {
-    await step("open live → Build your own, a very long name", async () => {
+  flow("dc-only-when-asked", async ({ page, url, step, shot }) => {
+    await step("open live → gallery: three roles only", async () => {
       await openDemo(page, url);
       await openGallery(page);
-      await page.getByTestId("persona-card-own").click();
+      const cards = await page.locator('[data-testid^="persona-card-"]').count();
+      if (cards !== 3) throw new Error(`${cards} cards in the gallery`);
+    });
+    await shot("gallery");
+    await step("Accounts manager, defaults: Only when I ask — no accounts needed yet", async () => {
+      await page.getByTestId("persona-card-accounts-manager").click();
+      await page.getByTestId("persona-name").fill("Leo Waits");
+      await toJob(page);
+      await page
+        .getByTestId("persona-start-ask")
+        .and(page.locator('[aria-pressed="true"]'))
+        .waitFor();
+      if ((await page.getByTestId("persona-job-task").count()) > 0)
+        throw new Error("a task field while it waits to be asked");
+    });
+    await shot("waits");
+    await step("Create → Open: it greets, nothing was sent for you", async () => {
+      await createAndOpen(page);
+      if ((await page.getByTestId("persona-first-message").count()) > 0)
+        throw new Error("a first message without Start now");
+      await page.getByTestId("persona-open").click();
+      await seeText(page, "Leo Waits here ✨", 25_000);
+      if ((await page.getByText("Your job:", { exact: false }).count()) > 0)
+        throw new Error("a job message was sent");
+    });
+    await shot("greets");
+  }),
+
+  flow("dc-edge-long-name-channel", async ({ page, url, step, shot }) => {
+    await step("open live → Developer, a very long name", async () => {
+      await openDemo(page, url);
+      await openGallery(page);
+      await page.getByTestId("persona-card-developer").click();
       await page
         .getByTestId("persona-name")
         .fill("Maximiliana-Alexandra the Extremely Thorough Research Assistant of Everything");
       const value = await page.getByTestId("persona-name").inputValue();
       if (value.length > 40) throw new Error(`name is ${value.length} long`);
     });
-    await step("no job → Create; the channel step offers its own bot", async () => {
+    await step("Only when I ask → Create; no first message; its own bot offered", async () => {
       await toJob(page);
       await createAndOpen(page);
+      if ((await page.getByTestId("persona-first-message").count()) > 0)
+        throw new Error("a first message without Start now");
       await page.getByTestId("persona-channel-telegram").click();
       await seeText(page, "BotFather", 15_000);
     });
@@ -251,7 +281,7 @@ export const flows = [
     await step("open live, MacBook asleep", async () => {
       await openDemo(page, url, { mac: "asleep" });
       await openGallery(page);
-      await page.getByTestId("persona-card-own").click();
+      await page.getByTestId("persona-card-helper").click();
       await page.getByTestId("persona-name").fill("Night Owl");
       await page.getByTestId("persona-next").click();
       await page.getByTestId("persona-works-on").waitFor();
