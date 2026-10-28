@@ -12,6 +12,7 @@ import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { answerFileRpc } from "./demoFiles";
+import { addSecretRequest } from "../secretRequestStore";
 import {
   demoBrowserLiveInitial,
   demoBrowserLiveUnary,
@@ -1070,6 +1071,7 @@ export async function startDemo(): Promise<void> {
     demoAgentWorksIn,
     demoAgentAsksApprovalIn,
     demoResetChatIn,
+    addSecretRequest,
   };
   seedLocalStorage();
   seedAssistantTeam({ addInbox: addDemoInbox });
