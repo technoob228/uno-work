@@ -26,6 +26,7 @@ import type {
   EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
+  ManagerStartedByList,
   ManagerAssistantsList,
   ManagerCapabilityTokenDescriptor,
   ManagerConnectorBindingKind,
@@ -742,5 +743,17 @@ export function setSlackChannels(
     pathname: "/api/manager/assistant/slack/channels",
     method: "POST",
     body,
+  });
+}
+
+/**
+ * Chats of that computer an assistant started — here or from another computer
+ * (assistants D, 28.10). An older daemon answers 404: callers fall back to
+ * what the store can tell (`spawnedByThreadId` chains into an assistant).
+ */
+export function listStartedBy(input: EnvironmentScoped): Promise<ManagerStartedByList> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/started-by",
   });
 }

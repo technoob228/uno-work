@@ -1717,3 +1717,81 @@ export const AssistantChatsResult = Schema.Struct({
   gateway: Schema.Literals(["metered", "unavailable", "no-key", "unknown"]),
 });
 export type AssistantChatsResult = typeof AssistantChatsResult.Type;
+
+// ===============================
+// Assistants D (28.10): chats an assistant started, here or on another computer
+// ===============================
+
+/**
+ * Who started a chat of this computer: an assistant of this computer (its
+ * conversation or a chat one of those started), or an assistant living on
+ * another computer of the account that asked this daemon over
+ * `POST /api/manager/remote-chats`. The sidebar puts these chats in the
+ * common list with "started by <name>" and one filter to hide them.
+ */
+export const ManagerStartedByEntry = Schema.Struct({
+  threadId: ThreadId,
+  /** The assistant's name as the person sees it ("Uno", "Ada"). */
+  assistantName: TrimmedNonEmptyString,
+  /** Its project on ITS computer (an `assistant-…` id); null when unknown. */
+  assistantProjectId: Schema.NullOr(Schema.String),
+  /** False: the assistant lives on another computer (`fromComputerName`). */
+  local: Schema.Boolean,
+  /** The other computer's name ("stage-work", "MacBook"); null when local. */
+  fromComputerName: Schema.NullOr(Schema.String),
+  /** The other computer's box id, when it is a cloud computer. */
+  fromBoxId: Schema.NullOr(Schema.Number),
+  startedAt: IsoDateTime,
+});
+export type ManagerStartedByEntry = typeof ManagerStartedByEntry.Type;
+
+/** `GET /api/manager/started-by` (owner session). */
+export const ManagerStartedByList = Schema.Struct({
+  items: Schema.Array(ManagerStartedByEntry),
+});
+export type ManagerStartedByList = typeof ManagerStartedByList.Type;
+
+/**
+ * `POST /api/manager/remote-chats` (owner session of the calling daemon,
+ * paired through the console's `work/session`): an assistant on another
+ * computer of the same account starts a chat here.
+ */
+export const ManagerRemoteChatCreateInput = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  title: Schema.optional(Schema.String),
+  /** Folder on THIS computer; absent: the default project of this computer. */
+  cwd: Schema.optional(Schema.String),
+  projectId: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  /** Runtime mode cap: never more than the calling assistant has. */
+  runtimeMode: Schema.optional(RuntimeMode),
+  startedBy: Schema.Struct({
+    assistantName: TrimmedNonEmptyString,
+    assistantProjectId: Schema.NullOr(Schema.String),
+    fromComputerName: Schema.String,
+    fromBoxId: Schema.NullOr(Schema.Number),
+    /** The caller's thread on its computer (for the done push back). */
+    fromThreadId: Schema.String,
+  }),
+});
+export type ManagerRemoteChatCreateInput = typeof ManagerRemoteChatCreateInput.Type;
+
+export const ManagerRemoteChatResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: Schema.String,
+});
+export type ManagerRemoteChatResult = typeof ManagerRemoteChatResult.Type;
+
+/** `GET /api/manager/remote-chats/:threadId` — one line of the status summary. */
+export const ManagerRemoteChatStatus = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  /** running | waiting-for-you | done | failed | idle */
+  state: Schema.String,
+  /** The last assistant message, trimmed (≤ 600 chars); null while nothing yet. */
+  lastMessage: Schema.NullOr(Schema.String),
+  updatedAt: IsoDateTime,
+});
+export type ManagerRemoteChatStatus = typeof ManagerRemoteChatStatus.Type;
