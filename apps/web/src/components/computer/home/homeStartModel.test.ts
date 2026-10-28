@@ -335,3 +335,64 @@ describe("Home for someone who came for their own agent (goal own_agent)", () =>
     expect(start([hermes, uno], { picked: "claudeAgent" })?.instanceId).toBe("hermes");
   });
 });
+
+describe("New chat for someone who picked only OpenCode in the configurator (28.10, 0.0.155)", () => {
+  // Account 2707's walk: default_ai=opencode, goal own_agent; the project was
+  // seeded with the machine default (Uno · Smart) before anything was picked.
+  const hermes = provider({ provider: "hermes", models: ["uno/smart", "uno/fast"] });
+  const opencode = provider({
+    provider: "opencode",
+    models: ["uno/uno/smart", "uno/uno/fast", "opencode/big-pickle"],
+  });
+  const claudeOnUnoAi = {
+    ...provider({ provider: "claudeAgent", models: ["claude-sonnet-5"] }),
+    auth: { status: "authenticated", type: "unoAi" },
+  } as ServerProvider;
+  const onlyOpenCode = { picked: null, openCodeFirst: true } as const;
+  const projectDefault = { instanceId: id("hermes"), model: "uno/smart" };
+  const newChat = (
+    ownAgent: { picked: null; openCodeFirst?: boolean } | null,
+    stickyActiveProvider: string | null = null,
+  ) =>
+    newThreadStartSelection({
+      stickyActiveProvider: stickyActiveProvider ? id(stickyActiveProvider) : null,
+      projectDefault,
+      providers: [hermes, uno, opencode, claudeOnUnoAi],
+      settings: DEFAULT_UNIFIED_SETTINGS,
+      ownAgent,
+    });
+
+  it("opens on OpenCode · Smart, not on the project's seeded uno · Smart", () => {
+    expect(newChat(onlyOpenCode)).toEqual({ instanceId: "opencode", model: "uno/uno/smart" });
+    // Home's box agrees.
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: null,
+        stickyModelSelectionByProvider: {},
+        providers: [hermes, uno, opencode, claudeOnUnoAi],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+        ownAgent: onlyOpenCode,
+      }),
+    ).toEqual({ instanceId: "opencode", model: "uno/uno/smart" });
+  });
+
+  it("everyone else keeps the project's start (null: the draft's own)", () => {
+    expect(newChat(null)).toBeNull();
+  });
+
+  it("a pick the person made in a chat still wins", () => {
+    expect(newChat(onlyOpenCode, "hermes")).toBeNull();
+  });
+
+  it("OpenCode not usable here: the old behaviour", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault,
+        providers: [hermes, uno],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+        ownAgent: onlyOpenCode,
+      }),
+    ).toBeNull();
+  });
+});

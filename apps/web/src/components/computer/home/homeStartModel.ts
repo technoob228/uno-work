@@ -112,16 +112,19 @@ export function ownAgentStartSelection(input: {
   return openCodeSmart();
 }
 
+/** The person came for their own agent (useOwnAgentStart): where their chats start. */
+export interface OwnAgentStart {
+  readonly picked: ProviderAuthDriver | null;
+  readonly openCodeFirst?: boolean;
+}
+
 export function homeStartModelSelection(input: {
   readonly stickyActiveProvider: ProviderInstanceId | null;
   readonly stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
   /** The person came for their own agent: start there unless they picked otherwise. */
-  readonly ownAgent?: {
-    readonly picked: ProviderAuthDriver | null;
-    readonly openCodeFirst?: boolean;
-  } | null;
+  readonly ownAgent?: OwnAgentStart | null;
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
@@ -168,9 +171,25 @@ export function newThreadStartSelection(input: {
   readonly projectDefault: ModelSelection | null;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
+  /**
+   * The person came for their own agent: with no pick of theirs yet, a new
+   * chat starts there, not on the project's default (the machine's own
+   * harness, seeded before they picked anything) — 28.10, 0.0.155: OpenCode
+   * picked in the configurator, New chat opened on "uno · Smart".
+   */
+  readonly ownAgent?: OwnAgentStart | null;
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
+  if (input.ownAgent && input.stickyActiveProvider === null) {
+    const ownAgent = ownAgentStartSelection({
+      picked: input.ownAgent.picked,
+      providers: input.providers,
+      settings: input.settings,
+      ...(input.ownAgent.openCodeFirst ? { openCodeFirst: true } : {}),
+    });
+    if (ownAgent) return ownAgent;
+  }
   const opensOn = input.stickyActiveProvider ?? input.projectDefault?.instanceId ?? null;
   if (opensOn === null || input.providers.length === 0) return null;
   const provider = input.providers.find((candidate) => candidate.instanceId === opensOn);

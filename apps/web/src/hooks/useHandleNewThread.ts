@@ -27,7 +27,11 @@ import {
   readEnvironmentServerConfig,
   useEnvironmentProviders,
 } from "../environments/settings/serverSettings";
-import { newThreadStartSelection } from "../components/computer/home/homeStartModel";
+import {
+  newThreadStartSelection,
+  type OwnAgentStart,
+} from "../components/computer/home/homeStartModel";
+import { useOwnAgentStart } from "../components/computer/home/useOwnAgentStart";
 import { createStarterProject } from "../starterProject";
 import { useDefaultEnvironment } from "./useDefaultEnvironment";
 import { getClientSettings, useSettings } from "./useSettings";
@@ -42,6 +46,7 @@ import { getClientSettings, useSettings } from "./useSettings";
 function newChatStartSelection(
   projectRef: ScopedProjectRef,
   projectDefault: ModelSelection | null,
+  ownAgent: OwnAgentStart | null,
 ): ModelSelection | null {
   if (isAssistantProjectId(projectRef.projectId)) return null;
   const config = readEnvironmentServerConfig(projectRef.environmentId);
@@ -50,6 +55,7 @@ function newChatStartSelection(
     projectDefault,
     providers: config?.providers ?? [],
     settings: { ...DEFAULT_UNIFIED_SETTINGS, ...config?.settings, ...getClientSettings() },
+    ownAgent,
   });
 }
 
@@ -60,6 +66,8 @@ function useNewThreadState() {
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   }));
   const router = useRouter();
+  // Came for their own agent (OpenCode picked in the configurator…): new chats start there.
+  const ownAgent = useOwnAgentStart();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
@@ -90,7 +98,11 @@ function useNewThreadState() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
-      const startOn = newChatStartSelection(projectRef, project?.defaultModelSelection ?? null);
+      const startOn = newChatStartSelection(
+        projectRef,
+        project?.defaultModelSelection ?? null,
+        ownAgent,
+      );
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
@@ -193,7 +205,7 @@ function useNewThreadState() {
         });
       })();
     },
-    [getCurrentRouteTarget, projectGroupingSettings, router, projects],
+    [getCurrentRouteTarget, ownAgent, projectGroupingSettings, router, projects],
   );
 }
 
