@@ -84,7 +84,7 @@ describe("runtime ceiling", () => {
     expect(capRuntimeToPreset("full-access", "observer")).toBe("approval-required");
   });
 
-  it("an assistant's own chats run at its ceiling: Does it itself = full, Asks first = edits only", () => {
+  it("an assistant's own chats run at its ceiling: Autonomous = full, Cautious = edits only", () => {
     expect(assistantOwnRuntimeMode("full")).toBe("full-access");
     expect(assistantOwnRuntimeMode("helper")).toBe("auto-accept-edits");
     expect(assistantOwnRuntimeMode("observer")).toBe("approval-required");
@@ -92,21 +92,21 @@ describe("runtime ceiling", () => {
 });
 
 describe("two modes (Misha 23.10)", () => {
-  it("Full is 'Does it itself'; Helper and Observer are 'Asks first'", () => {
+  it("Full is 'Autonomous'; Helper and Observer are 'Cautious'", () => {
     expect(assistantModeOf("full")).toBe("itself");
     expect(assistantModeOf("helper")).toBe("asks-first");
     expect(assistantModeOf("observer")).toBe("asks-first");
     expect(ASSISTANT_MODES).toEqual(["itself", "asks-first"]);
   });
 
-  it("a mode maps back to a preset; an old Observer stays read-only under 'Asks first'", () => {
+  it("a mode maps back to a preset; an old Observer stays read-only under 'Cautious'", () => {
     expect(presetForMode("itself", "observer")).toBe("full");
     expect(presetForMode("asks-first", "full")).toBe("helper");
     expect(presetForMode("asks-first", "helper")).toBe("helper");
     expect(presetForMode("asks-first", "observer")).toBe("observer");
   });
 
-  it("only 'Does it itself' acts outward without the person's Allow", () => {
+  it("only 'Autonomous' acts outward without the person's Allow", () => {
     expect(presetAsksFirst("full")).toBe(false);
     expect(presetAsksFirst("helper")).toBe(true);
     expect(presetAsksFirst("observer")).toBe(true);
@@ -135,7 +135,7 @@ describe("two modes (Misha 23.10)", () => {
     }
   });
 
-  it("the 'Asks first' copy lists every category the daemon checks, and no payments", () => {
+  it("the 'Cautious' copy lists every category the daemon checks, and no payments", () => {
     const details = ASSISTANT_MODE_COPY["asks-first"].details.join(" ");
     for (const category of ASKS_FIRST_CATEGORIES) {
       expect(details).toContain(ASKS_FIRST_CATEGORY_LABEL[category]);

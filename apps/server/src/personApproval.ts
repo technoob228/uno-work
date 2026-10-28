@@ -1,7 +1,7 @@
 /**
  * The person's Allow for one step an agent wants to take — the `uno-work`
- * tools in Ask mode / "Asks first", and an "Asks first" assistant setting up
- * a helper (audit 27.10 #3: "Asks first" refused whenever Uno Work wasn't
+ * tools in Ask mode / "Cautious", and an "Cautious" assistant setting up
+ * a helper (audit 27.10 #3: "Cautious" refused whenever Uno Work wasn't
  * open, and the Inbox row was marked read at once).
  *
  * Now:

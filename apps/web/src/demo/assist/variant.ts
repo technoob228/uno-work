@@ -256,18 +256,21 @@ function personaHello(ctx: ScriptContext): Script {
 function modeCard(ctx: ScriptContext, after: Script): Script {
   return [
     {
-      ask: "Last thing. When I'm about to send, pay or delete something — should I ask you first?",
+      ask: "Last thing — my permission level. Before I send, publish, share or delete something, should I ask you?",
       question: {
         id: "mode",
-        header: "How I work",
-        question: "Before I send, pay or delete",
+        header: "Permission level",
+        question: "Before I send, publish, share or delete",
         options: [
-          { label: "Ask me first", description: "I wait for your Allow — here or in Telegram" },
-          { label: "Just do it", description: "I act and tell you after" },
+          {
+            label: "Cautious",
+            description: "I ask first and wait for your Allow — here or in Telegram",
+          },
+          { label: "Autonomous", description: "I work without asking for permission" },
         ],
       },
       then: (answer, inner) => {
-        const asks = /ask/i.test(answer);
+        const asks = /cautious/i.test(answer);
         return [
           {
             run: () =>
@@ -279,8 +282,8 @@ function modeCard(ctx: ScriptContext, after: Script): Script {
           },
           {
             say: asks
-              ? "Done — I'll ask first. You can switch it any time at the top of this chat."
-              : "Done — I'll act and tell you after. You can switch it any time at the top of this chat.",
+              ? "Done — Cautious: I'll ask first. You can switch it any time at the top of this chat."
+              : "Done — Autonomous: I'll work and tell you after. You can switch it any time at the top of this chat.",
           },
           ...after,
         ];
@@ -689,7 +692,8 @@ addTrigger({
 
 function firstJob(ctx: ScriptContext, text: string): Script {
   const where = machineName(ctx.machine);
-  if (/Your job: work in my accounts/.test(text)) {
+  // Any of the three parts may be on; the demo answers for the first it sees.
+  if (/work in my accounts/i.test(text) && /browser_command \{"login"/.test(text)) {
     const sites = [...text.matchAll(/browser_command \{"login": "([^"]+)"\}/g)].map(
       (match) => match[1] ?? "",
     );
@@ -714,8 +718,8 @@ function firstJob(ctx: ScriptContext, text: string): Script {
       { say: `Done on ${site}: 2 posts drafted, 5 comments answered. Say when you want more.` },
     ];
   }
-  if (/Your job: lead development/.test(text)) {
-    const what = /lead development of (.+?)\./.exec(text)?.[1] ?? "your projects";
+  if (/lead development/i.test(text)) {
+    const what = /lead development of (.+?)\./i.exec(text)?.[1] ?? "your projects";
     return [
       { work: `Starting a chat on ${where} for ${what}.` },
       {
@@ -733,7 +737,7 @@ function firstJob(ctx: ScriptContext, text: string): Script {
       },
     ];
   }
-  const tools = /using (.+?)\. They're connected/.exec(text)?.[1] ?? null;
+  const tools = /help me with tasks using (.+?)\.\n/i.exec(text)?.[1] ?? null;
   return [
     {
       say: tools
@@ -745,7 +749,7 @@ function firstJob(ctx: ScriptContext, text: string): Script {
 
 addTrigger({
   id: "d-first-job",
-  match: /Your job: (lead development|work in my accounts|help me with)/i,
+  match: /Your job:/,
   script: firstJob,
 });
 

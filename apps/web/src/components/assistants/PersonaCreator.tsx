@@ -10,7 +10,7 @@
  * 3. Where it works (this computer, another computer of the account, a new
  *    one), what it thinks with (the one AI picker), where it can look (a
  *    project limit is a real lock only where its commands run in a sandbox)
- *    and its mode — "Does it itself" / "Asks first".
+ *    and its mode — "Autonomous" / "Cautious".
  * 4. What should it do? — what its role needs (`PersonaJob.tsx`), and when
  *    it starts: only when you ask (default) or now. Create.
  * 5. Where you talk: its own Telegram bot, Slack, or here (Uno's shared bot
@@ -585,7 +585,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
               image: base64OfDataUrl(face.picture),
             })
           : Promise.resolve(null),
-        theJob.kind === "tasks" && job.appsOff.length > 0
+        theJob.tasks !== null && job.appsOff.length > 0
           ? putAssistantApps({
               environmentId: env,
               projectId,
@@ -782,7 +782,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
                   />
                 </div>
                 <div>
-                  <Label>How it works</Label>
+                  <Label>Permission level</Label>
                   <ModePicker mode={mode} onChange={setMode} testIdPrefix="persona-mode" />
                 </div>
                 {whereProblem ? (

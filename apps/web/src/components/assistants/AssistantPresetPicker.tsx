@@ -1,6 +1,6 @@
 /**
- * "What {name} may do" (Misha 23.10): two modes — "Does it itself" and "Asks
- * first" — as two small chips with the picked one's line under them, the
+ * "What {name} may do" (Misha 23.10): two modes — "Autonomous" and "Cautious"
+ *  — as two small chips with the picked one's line under them, the
  * exact list of what it asks before under "Details", and its projects: every
  * project, or only the ticked ones where that limit holds (a sandbox here,
  * or a computer of its own — `projectsChoice`). Used on an assistant's page
@@ -117,7 +117,7 @@ export function AssistantPresetPicker({
               <li key={line}>· {line}</li>
             ),
           )}
-          {readOnly ? <li>· Set up before the two modes. Pick a mode to change it.</li> : null}
+          {readOnly ? <li>· Set up before the two levels. Pick one to change it.</li> : null}
         </ul>
       ) : null}
 

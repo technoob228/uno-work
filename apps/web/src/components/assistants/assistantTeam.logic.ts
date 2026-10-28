@@ -29,7 +29,7 @@ export const DEFAULT_CHANNEL: AssistantChannel = "uno-bot";
 
 /**
  * The presets as the mock's setup chat offers them. The names and lines are
- * the shared ones (Misha 23.10: "Does it itself" / "Asks first"; an old
+ * the shared ones (Misha 23.10: "Autonomous" / "Cautious"; an old
  * Observer reads "Reads only") — the same words the real page shows, and
  * nothing the daemon doesn't enforce (no payments: there is no payment tool).
  */

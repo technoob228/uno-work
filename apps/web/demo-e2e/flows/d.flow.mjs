@@ -88,11 +88,11 @@ export default flow("d-first-run", async ({ page, url, step, shot }) => {
     await seeText(page, "Linked: @uno_team_bot", 20_000);
   });
   await step("the mode: two plain choices", async () => {
-    await seeText(page, "should I ask you first", 20_000);
+    await seeText(page, "my permission level", 20_000);
     await shot("mode-card");
-    await pick(page, "Ask me first");
-    await seeText(page, "Done — I'll ask first", 20_000);
-    await page.getByTestId("assistant-mode-chip").filter({ hasText: "Asks first" }).waitFor();
+    await pick(page, "Cautious");
+    await seeText(page, "Done — Cautious: I'll ask first", 20_000);
+    await page.getByTestId("assistant-mode-chip").filter({ hasText: "Cautious" }).waitFor();
   });
   await step("Free said honestly, helpers offered, then work", async () => {
     await seeText(page, "on Free your cloud computer sleeps", 20_000);
@@ -117,7 +117,7 @@ export const flows = [
   }),
 
   flow("d-asks-first-allow", async ({ page, url, step, shot }) => {
-    await step("open live, Asks first", () => openDemo(page, url, { mode: "asks-first" }));
+    await step("open live, Cautious", () => openDemo(page, url, { mode: "asks-first" }));
     await step("Mia needs a decision in her channel", async () => {
       await scene(page, "d-mia-decision");
       await seeText(page, "Needs your decision", 25_000);
@@ -142,7 +142,7 @@ export const flows = [
   }),
 
   flow("d-asks-first-decline", async ({ page, url, step, shot }) => {
-    await step("open live, Asks first", () => openDemo(page, url, { mode: "asks-first" }));
+    await step("open live, Cautious", () => openDemo(page, url, { mode: "asks-first" }));
     await step("a Telegram message asks Uno to send the reminder", async () => {
       await scene(page, "telegram-message");
       await seeText(page, "Send an email to billing@acme.example", 25_000);
@@ -159,7 +159,7 @@ export const flows = [
   }),
 
   flow("d-itself-no-card", async ({ page, url, step, shot }) => {
-    await step("open live, Does it itself", () => openDemo(page, url, { mode: "itself" }));
+    await step("open live, Autonomous", () => openDemo(page, url, { mode: "itself" }));
     await step("Mia's channel from the sidebar", async () => {
       await sidebarRow(page, MIA).getByTestId("sidebar-assistant-open").click();
       await page.getByTestId("teammate-headline").filter({ hasText: "Mia" }).waitFor();
@@ -170,7 +170,7 @@ export const flows = [
       await pick(page, "Agree to 5%");
       await seeText(page, "Sent. I'll tell you when the money lands", 20_000);
       if (await page.getByRole("button", { name: /^Approve/ }).count()) {
-        throw new Error("an Allow card showed in Does it itself");
+        throw new Error("an Allow card showed in Autonomous");
       }
     });
     await shot("sent-without-asking");
@@ -276,7 +276,7 @@ export const flows = [
         .click();
       await sidebarRow(page, MIA).getByText("Mila", { exact: true }).waitFor({ timeout: 20_000 });
     });
-    await step("mode: Does it itself", async () => {
+    await step("mode: Autonomous", async () => {
       await page.getByTestId("assistant-mode-switch-itself").click();
       await page
         .locator('[data-testid="assistant-mode-switch-itself"][aria-pressed="true"]')
@@ -360,7 +360,7 @@ export const flows = [
   }),
 
   flow("d-edge-ask-while-closed", async ({ page, url, step, shot }) => {
-    await step("open live, Asks first", () => openDemo(page, url, { mode: "asks-first" }));
+    await step("open live, Cautious", () => openDemo(page, url, { mode: "asks-first" }));
     await step("the 16:00 reminder fires with no chat open", async () => {
       await scene(page, "reminder-closed");
       await page.evaluate(() => {
@@ -409,7 +409,7 @@ export const flows = [
   }),
 
   flow("d-edge-telegram-off", async ({ page, url, step, shot }) => {
-    await step("open live, Asks first, no Telegram", () =>
+    await step("open live, Cautious, no Telegram", () =>
       openDemo(page, url, { mode: "asks-first", tg: "off" }),
     );
     await step("Mia's Allow waits here (no Telegram to send it to)", async () => {
@@ -474,15 +474,15 @@ export const flows = [
   }),
 
   flow("d-edge-mode-mid-task", async ({ page, url, step, shot }) => {
-    await step("open live, Does it itself", () => openDemo(page, url, { mode: "itself" }));
+    await step("open live, Autonomous", () => openDemo(page, url, { mode: "itself" }));
     await step("Mia starts a long task", async () => {
       await scene(page, "d-mia-long");
       await seeText(page, "Reading 14 client threads", 20_000);
     });
-    await step("switch Mia to Asks first in the middle", async () => {
+    await step("switch Mia to Cautious in the middle", async () => {
       await page.getByTestId("assistant-mode-chip").click();
       await page.getByTestId("assistant-mode-asks-first").click();
-      await page.getByTestId("assistant-mode-chip").filter({ hasText: "Asks first" }).waitFor();
+      await page.getByTestId("assistant-mode-chip").filter({ hasText: "Cautious" }).waitFor();
     });
     await shot("switched");
     await step("the send now waits for Allow", async () => {

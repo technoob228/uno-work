@@ -3,7 +3,7 @@
  * `/assistants?view=uno-setup&env=<environmentId>` — one short screen:
  *
  * 1. What Uno thinks with — the one AI picker (`AssistantAiChoice`).
- * 2. Its mode — "Does it itself" / "Asks first" (its token's preset:
+ * 2. Its mode — "Autonomous" / "Cautious" (its token's preset:
  *    full / helper; the daemon enforces it, not a prompt).
  * 3. Apps — Gmail, Drive, Notion, GitHub and your own MCP server, connected
  *    on the computer Uno lives on (the chats it starts there use them).
@@ -159,7 +159,7 @@ export function UnoSetupPage(props: { readonly environmentId?: string | undefine
                 </Section>
                 <Section
                   n={2}
-                  title="Mode"
+                  title="Permission level"
                   line="Before it sends, pays or deletes something."
                   testId="uno-setup-mode"
                 >

@@ -302,7 +302,7 @@ export function LocalAssistantPage({
         // One place for its access (22.10): the team page, as in the prototype.
         <Block title={`What ${name} may do`} testId="assistant-local-access-moved">
           <p className="flex flex-wrap items-center gap-2 py-1 text-sm text-muted-foreground">
-            Its mode (Does it itself or Asks first), projects and apps are on its page.
+            Its mode (Autonomous or Cautious), projects and apps are on its page.
             <Button
               size="xs"
               variant="outline"

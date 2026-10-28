@@ -92,7 +92,7 @@ export interface ChatOps {
   /** Ask first (Helper/Observer) or does it itself (Full) — its daemon's preset. */
   readonly asksFirst: (machine: MachineKey, projectId: string) => boolean;
   readonly telegramLinked: (machine: MachineKey, projectId: string) => boolean;
-  /** Its mode, from a chat card (variant D's first run: "Ask me first" / "Just do it"). */
+  /** Its mode, from a chat card (variant D's first run: "Cautious" / "Autonomous"). */
   readonly setMode: (machine: MachineKey, projectId: string, mode: "itself" | "asks-first") => void;
   /** Its main chat on that computer (made now if there is none). */
   readonly mainChatOf: (machine: MachineKey, projectId: string) => string;
@@ -121,7 +121,7 @@ export type Step =
       readonly delay?: number;
     }
   /**
-   * An outward action. "Does it itself": done at once. "Asks first": the
+   * An outward action. "Autonomous": done at once. "Cautious": the
    * Allow card in the chat + an Inbox card (+ Telegram when linked); it waits
    * there — even with no Work open — and never refuses by itself.
    */

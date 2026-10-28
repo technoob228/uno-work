@@ -243,7 +243,7 @@ export function personaOf(machine: MachineKey, projectId: string): DemoPersona |
   return recordOf(machine, projectId)?.persona ?? null;
 }
 
-/** Its preset (Full = "Does it itself", Helper/Observer = "Asks first"); null: not an assistant. */
+/** Its preset (Full = "Autonomous", Helper/Observer = "Cautious"); null: not an assistant. */
 /** Assistants the person set up on the setup screen (`setup: "done"` from the page). */
 const setUpByPerson = new Set<string>();
 
@@ -276,7 +276,7 @@ export function setTelegram(machine: MachineKey, projectId: string, linked: bool
   if (record) record.telegram = linked;
 }
 
-/** Its mode from a chat card: "Does it itself" = Full, "Asks first" = Helper. */
+/** Its mode from a chat card: "Autonomous" = Full, "Cautious" = Helper. */
 export function setMode(machine: MachineKey, projectId: string, mode: "itself" | "asks-first") {
   const record = recordOf(machine, projectId);
   if (record) record.preset = mode === "asks-first" ? "helper" : "full";

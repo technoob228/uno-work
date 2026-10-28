@@ -8,7 +8,7 @@
  *   other computer knows nothing of them. A real boundary, not a promise in
  *   the prompt (Misha 23.10), so the start is refused with plain words.
  * - The chat there runs in at most the asking chat's own mode (narrowed to
- *   the assistant's preset): "Asks first" stays "asks first" on the other
+ *   the assistant's preset): "Cautious" stays "asks first" on the other
  *   computer too.
  * - A project of THIS computer named by id is sent as its folder (projects
  *   synced between computers keep the same folder under the home).

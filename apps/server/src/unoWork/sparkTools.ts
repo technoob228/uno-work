@@ -233,7 +233,7 @@ export function sparkTools(kit: SparkToolKit): ReadonlyArray<UnoWorkTool> {
         additionalProperties: false,
       },
       // Like site_publish (decision 02.10): free, and spark_delete takes it down.
-      // An "Asks first" assistant asks (the card's title).
+      // An "Cautious" assistant asks (the card's title).
       level: "safe",
       approvalTitle: (args) => `Put ${sparkAppUrl(String(args.name ?? ""))} on the internet`,
       run: (deps, args) =>

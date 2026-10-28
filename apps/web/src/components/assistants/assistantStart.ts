@@ -8,7 +8,7 @@
  *   in the RPC request only; the answer is metadata without it. Nothing is
  *   kept in a store or a log.
  * - {@link sendFirstMessage}: the first message into its chat, as the person —
- *   in the chat's own runtime mode, so "Asks first" stays asks-first.
+ *   in the chat's own runtime mode, so "Cautious" stays asks-first.
  */
 import type { CredentialMetadata, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";

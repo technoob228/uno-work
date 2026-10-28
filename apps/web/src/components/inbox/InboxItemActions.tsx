@@ -55,7 +55,7 @@ export function WithInboxItemActions({
 }) {
   const threadId = itemThreadId(item);
   if (item.kind === "agent.approval" && threadId === null) {
-    // An "Asks first" request with no chat: answered by the row itself.
+    // An "Cautious" request with no chat: answered by the row itself.
     const actions = resolveInboxItemActions({
       kind: item.kind,
       hasThread: false,
@@ -127,7 +127,7 @@ export function InboxActionButtons({
   const question = pending ? approvalQuestion(pending) : null;
   const [answering, setAnswering] = useState(false);
   const responding = (approval?.responding ?? false) || answering;
-  // No card in the chat for it: the row answers it (assistants D, "Asks first" waits).
+  // No card in the chat for it: the row answers it (assistants D, "Cautious" waits).
   const byRow = pending === null && actions.reason === "approval";
   const answer = async (approved: boolean) => {
     if (pending) {

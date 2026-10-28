@@ -2,10 +2,11 @@
  * Assistants D (28.10): "What should it do?" — the answers of a new persona's
  * setup the web turns into its first message (`assistantJob.logic.ts`).
  *
- * Three roles, three jobs (Misha 28.10): Developer leads development
- * (projects / repos), Accounts manager works in accounts (signs in in a
- * browser), Helper helps with tasks through connectors or an MCP server of
- * your own. It starts only when asked, or at once with a first task — regular
+ * Three parts, any of them together (Misha 28.10): development (projects /
+ * repos it leads), accounts (it signs in through a browser) and tasks
+ * (connectors or an MCP server of your own). The role picked in the gallery
+ * (Developer / Accounts manager / Helper) only turns its part on first. It
+ * starts only when asked, or at once with a first task — regular
  * tasks are a separate feature (Automations), not part of the setup. Every
  * assistant hands the real work to chats on the person's computers and tells
  * the result — the first message asks for that, never "do it yourself".
@@ -35,28 +36,36 @@ export const AssistantJobAccount = Schema.Struct({
 });
 export type AssistantJobAccount = typeof AssistantJobAccount.Type;
 
-export const AssistantJob = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("development"),
-    /** Project names on its computer it leads. */
-    projects: Schema.Array(TrimmedNonEmptyString),
-    /** Repositories to clone first (owner/name or a URL). */
-    repos: Schema.Array(TrimmedNonEmptyString),
-    /** What to lead first, in the person's words. */
-    task: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("accounts"),
-    accounts: Schema.Array(AssistantJobAccount),
-    task: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("tasks"),
-    /** Connector names it was given ("Gmail & Calendar", "Notion"). */
-    apps: Schema.Array(TrimmedNonEmptyString),
-    /** MCP servers of the person's own, by name. */
-    servers: Schema.Array(TrimmedNonEmptyString),
-    task: Schema.String,
-  }),
-]);
+/** Development: projects it leads and repos to clone first. */
+export const AssistantJobDevelopment = Schema.Struct({
+  /** Project names on its computer it leads. */
+  projects: Schema.Array(TrimmedNonEmptyString),
+  /** Repositories to clone first (owner/name or a URL). */
+  repos: Schema.Array(TrimmedNonEmptyString),
+});
+export type AssistantJobDevelopment = typeof AssistantJobDevelopment.Type;
+
+/** Accounts: where it signs in (the passwords are in the vault). */
+export const AssistantJobAccounts = Schema.Struct({
+  accounts: Schema.Array(AssistantJobAccount),
+});
+export type AssistantJobAccounts = typeof AssistantJobAccounts.Type;
+
+/** Tasks: the connected apps and own MCP servers it uses. */
+export const AssistantJobTasks = Schema.Struct({
+  /** Connector names it was given ("Gmail & Calendar", "Notion"). */
+  apps: Schema.Array(TrimmedNonEmptyString),
+  /** MCP servers of the person's own, by name. */
+  servers: Schema.Array(TrimmedNonEmptyString),
+});
+export type AssistantJobTasks = typeof AssistantJobTasks.Type;
+
+/** What it does: each part on (an object) or off (null), plus the first task. */
+export const AssistantJob = Schema.Struct({
+  development: Schema.NullOr(AssistantJobDevelopment),
+  accounts: Schema.NullOr(AssistantJobAccounts),
+  tasks: Schema.NullOr(AssistantJobTasks),
+  /** What to do first, in the person's words ("" — it asks what's first). */
+  task: Schema.String,
+});
 export type AssistantJob = typeof AssistantJob.Type;

@@ -379,7 +379,7 @@ const makeDeps = (input: {
             },
           }
         : {}),
-      // "Asks first" (Helper, and an Observer from before): every outward call
+      // "Cautious" (Helper, and an Observer from before): every outward call
       // of its chats waits for the person's Allow, whatever the chat's mode.
       asksFirst: callerAssistant.pipe(
         Effect.map((owner) =>

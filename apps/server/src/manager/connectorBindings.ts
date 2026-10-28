@@ -35,7 +35,7 @@ import { readAssistantLlmProvider } from "@t3tools/shared/assistantLlm";
  * in the app.
  */
 export const ASSISTANT_THREAD_RUNTIME_MODE: RuntimeMode = "full-access";
-// ^ The default for "Does it itself". An "Asks first" assistant's chats run
+// ^ The default for "Autonomous". An "Cautious" assistant's chats run
 // narrower: the daemon passes `assistantRuntimeMode` (its preset's ceiling).
 
 export const defaultBindingTarget = (
@@ -304,8 +304,8 @@ export interface ThreadRoutingInput {
   readonly forcedRuntimeMode?: RuntimeMode | null;
   /**
    * The mode the assistant's own chats run in (`assistant` targets): the
-   * ceiling of its preset — full-access for "Does it itself",
-   * auto-accept-edits for "Asks first" (`readAssistantRuntimeMode`). Unset
+   * ceiling of its preset — full-access for "Autonomous",
+   * auto-accept-edits for "Cautious" (`readAssistantRuntimeMode`). Unset
    * means {@link ASSISTANT_THREAD_RUNTIME_MODE}.
    */
   readonly assistantRuntimeMode?: RuntimeMode | null;

@@ -85,7 +85,7 @@ export function ModeCard(props: {
   );
 }
 
-/** "Does it itself" / "Asks first" — the two modes, side by side. */
+/** "Autonomous" / "Cautious" — the two modes, side by side. */
 export function ModePicker(props: {
   readonly mode: AssistantMode;
   readonly onChange: (mode: AssistantMode) => void;

@@ -175,7 +175,7 @@ export interface AssistantTeamDeps {
    */
   readonly mailboxAddress?: () => Effect.Effect<string | null>;
   /**
-   * The person's Allow for an outward step of an "Asks first" assistant
+   * The person's Allow for an outward step of an "Cautious" assistant
    * (`assistant_create`): the same card as the uno-work tools, in the
    * conversation that asked when known. Absent: nobody can be asked (it is
    * refused).
@@ -880,7 +880,7 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           note: "The person got a notice in their Inbox. They can change or revoke it on its page.",
         };
       });
-      // "Asks first" (Misha 23.10): a new assistant waits for the person's
+      // "Cautious" (Misha 23.10): a new assistant waits for the person's
       // Allow. Nobody answering at once doesn't hold this turn: the request
       // stays open, and a late Allow sets it up and tells the conversation.
       if (presetAsksFirst(parent.grant.preset)) {
@@ -893,7 +893,7 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
         const outcome = deps.askPerson
           ? yield* deps.askPerson({
               title,
-              detail: `${memberName(parent)} asks first (its mode). Projects: ${projectsLine(child.projects, known)} · ${ASSISTANT_PRESET_COPY[child.preset].name}.`,
+              detail: `${memberName(parent)} is Cautious, so it asks first. Projects: ${projectsLine(child.projects, known)} · ${ASSISTANT_PRESET_COPY[child.preset].name}.`,
               threadId: conversation,
               later: (late) =>
                 late !== "approved"

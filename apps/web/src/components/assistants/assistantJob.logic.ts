@@ -1,7 +1,8 @@
 /**
- * "What should it do?" (Misha 28.10) — the pure part: the three jobs of a new
- * assistant, the account form's checks and the first
- * message the assistant gets from the answers.
+ * "What should it do?" (Misha 28.10) — the pure part: the three parts of a
+ * new assistant's job (development, accounts, tasks — any of them together;
+ * the role only turns its own part on first), the account form's checks and
+ * the first message the assistant gets from the answers.
  *
  * Every assistant works like Uno: it answers fast and hands the real work —
  * code, edits, signing in and working in an account — to chats on the
@@ -35,7 +36,7 @@ export const JOB_COPY: Readonly<
   },
   tasks: {
     title: "Tasks",
-    line: "Helps with mail, docs and notes through apps you connect.",
+    line: "Helps with mail, docs and notes through apps you connect or your own MCP server.",
   },
 };
 
@@ -137,62 +138,69 @@ function list(items: ReadonlyArray<string>): string {
   return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
+/** Each part that's on, as "what it does" — in the order of the step. */
+function jobLines(job: AssistantJob): ReadonlyArray<string> {
+  const lines: string[] = [];
+  if (job.development) {
+    const what = list([...job.development.projects, ...job.development.repos]);
+    lines.push(what ? `lead development of ${what}` : "lead development of my projects");
+  }
+  if (job.accounts) {
+    const sites = job.accounts.accounts.map((account) => `${account.service} (${account.site})`);
+    lines.push(sites.length > 0 ? `work in my accounts — ${list(sites)}` : "work in my accounts");
+  }
+  if (job.tasks) {
+    const tools = list([
+      ...job.tasks.apps,
+      ...job.tasks.servers.map((server) => `${server} (my own tool)`),
+    ]);
+    lines.push(tools ? `help me with tasks using ${tools}` : "help me with everyday tasks");
+  }
+  return lines;
+}
+
 /**
- * The first message to a new assistant, from the answers: who it is, the job,
- * and that the work goes to chats on its computer. Never a password — the
- * account rows here carry none.
+ * The first message to a new assistant, from the answers: who it is, every
+ * part of the job that's on, and that the work goes to chats on its computer.
+ * Never a password — the account rows here carry none.
  */
 export function firstMessage(input: FirstMessageInput): string {
   const { job, computer } = input;
   const role = input.role.trim();
   const hello = role ? `Hi ${input.name}! You're my ${role.toLowerCase()}.` : `Hi ${input.name}!`;
-  const handOff = `Don't do the work yourself: start a chat on ${computer} for it (chat_create), keep an eye on it, and tell me the result in a few lines.`;
-  const task = job.task.trim();
-
-  if (job.kind === "development") {
-    const what = list([...job.projects, ...job.repos]);
-    const lines = [
-      hello,
-      what
-        ? `Your job: lead development of ${what}.`
-        : "Your job: lead development of my projects.",
-    ];
-    if (job.repos.length > 0) {
-      lines.push(`Clone ${list(job.repos)} on ${computer} first if it isn't there yet.`);
-    }
+  const parts = jobLines(job);
+  const lines = [hello];
+  if (parts.length === 1) lines.push(`Your job: ${parts[0]}.`);
+  else if (parts.length > 1) {
     lines.push(
-      task
-        ? `First: ${task}`
-        : `First: look at ${what || "them"} and tell me in a few lines where things stand.`,
-      handOff,
+      `Your job:\n${parts.map((part) => `- ${part[0]!.toUpperCase()}${part.slice(1)}.`).join("\n")}`,
     );
-    return lines.join("\n\n");
   }
 
-  if (job.kind === "accounts") {
-    const sites = job.accounts.map((account) => `${account.service} (${account.site})`);
-    const logins = job.accounts.map(
+  if (job.development && job.development.repos.length > 0) {
+    lines.push(`Clone ${list(job.development.repos)} on ${computer} first if it isn't there yet.`);
+  }
+  if (job.accounts && job.accounts.accounts.length > 0) {
+    const logins = job.accounts.accounts.map(
       (account) => `browser_command {"login": "${account.site}"} for ${account.service}`,
     );
-    return [
-      hello,
-      `Your job: work in my accounts — ${list(sites)}.`,
+    lines.push(
       `Their passwords are saved in the password vault on ${computer}. Never ask me for a password in chat.`,
-      `Start a chat on ${computer} for this (chat_create) — signing in and the work happen there, not in our chat. In that chat, sign in with ${list(logins)} — it types the saved password itself. If a site asks for a 2FA code or a captcha, ask me with requestHelp and wait for me.`,
-      task ? `Then: ${task}` : "Then: tell me what you see there and what you'd do first.",
-      "Tell me the result in a few lines.",
-    ].join("\n\n");
+      `Signing in and the work in those accounts happen in a chat you start on ${computer}, not in ours. There, sign in with ${list(logins)} — it types the saved password itself. If a site asks for a 2FA code or a captcha, ask me with requestHelp and wait for me.`,
+    );
+  }
+  if (job.tasks && job.tasks.apps.length + job.tasks.servers.length > 0) {
+    lines.push(`Those apps are connected on ${computer}; the chats you start there can use them.`);
   }
 
-  const tools = list([...job.apps, ...job.servers.map((server) => `${server} (my own tool)`)]);
-  return [
-    hello,
-    tools
-      ? `Your job: help me with tasks using ${tools}. They're connected on ${computer}; the chats you start there can use them.`
-      : "Your job: help me with everyday tasks.",
-    task ? `First: ${task}` : "First: tell me in two lines what you can do for me with them.",
-    handOff,
-  ].join("\n\n");
+  const task = job.task.trim();
+  lines.push(
+    task
+      ? `First: ${task}`
+      : "First: look around and tell me in a few lines where things stand and what you'd do first.",
+    `Don't do the work yourself: start a chat on ${computer} for it (chat_create), keep an eye on it, and tell me the result in a few lines.`,
+  );
+  return lines.join("\n\n");
 }
 
 /** The standing duty saved on its page (what it does, in one line). */
@@ -201,26 +209,36 @@ export function dutyOf(job: AssistantJob): string {
 }
 
 function dutyText(job: AssistantJob): string {
-  if (job.kind === "development") {
-    const what = list([...job.projects, ...job.repos]);
-    return what ? `Leads development of ${what}` : "Leads development";
+  const parts: string[] = [];
+  if (job.development) {
+    const what = list([...job.development.projects, ...job.development.repos]);
+    parts.push(what ? `Leads development of ${what}` : "Leads development");
   }
-  if (job.kind === "accounts") {
-    const services = list(job.accounts.map((account) => account.service));
-    const sites = list(job.accounts.map((account) => account.site));
-    const task = job.task.trim();
-    return `Works in ${services} (${sites}), signed in from the vault in a chat it starts${task ? `: ${task}` : ""}`;
+  if (job.accounts) {
+    const services = list(job.accounts.accounts.map((account) => account.service));
+    const sites = list(job.accounts.accounts.map((account) => account.site));
+    parts.push(
+      services
+        ? `Works in ${services} (${sites}), signed in from the vault in a chat it starts`
+        : "Works in your accounts, signed in from the vault in a chat it starts",
+    );
   }
-  const tools = list([...job.apps, ...job.servers]);
-  return tools ? `Helps with tasks using ${tools}` : "Helps with tasks";
+  if (job.tasks) {
+    const tools = list([...job.tasks.apps, ...job.tasks.servers]);
+    parts.push(tools ? `Helps with tasks using ${tools}` : "Helps with tasks");
+  }
+  if (parts.length === 0) return "Helps when you ask";
+  return parts
+    .map((part, index) => (index === 0 ? part : `${part[0]!.toLowerCase()}${part.slice(1)}`))
+    .join("; ");
 }
 
 // ── The step's draft ─────────────────────────────────────────────────────
 
 /** "What should it do?" while it's being answered (no passwords: they went to the vault). */
 export interface JobDraft {
-  /** Set by the role picked in the gallery (no second choice of the same). */
-  readonly kind: AssistantJobKind;
+  /** The parts that are on — any of the three; the role turns its own on first. */
+  readonly on: Readonly<Record<AssistantJobKind, boolean>>;
   /**
    * "ask" (default): it's made and waits for your message; "now": the first
    * message with the task goes at once. Regular tasks are Automations, later.
@@ -239,6 +257,8 @@ export interface JobDraft {
   readonly appsOff: ReadonlyArray<string>;
 }
 
+export const JOB_KINDS: ReadonlyArray<AssistantJobKind> = ["development", "accounts", "tasks"];
+
 export type JobStart = "ask" | "now";
 
 export const START_COPY: Readonly<
@@ -248,10 +268,14 @@ export const START_COPY: Readonly<
   now: { label: "Start now", line: "It gets the task below right away." },
 };
 
-/** The step's starting answers for a role. */
+/** The step's starting answers for a role: its own part on, the rest off. */
 export function emptyJob(kind: AssistantJobKind): JobDraft {
   return {
-    kind,
+    on: {
+      development: kind === "development",
+      accounts: kind === "accounts",
+      tasks: kind === "tasks",
+    },
     start: "ask",
     devProjects: [],
     repos: "",
@@ -260,6 +284,11 @@ export function emptyJob(kind: AssistantJobKind): JobDraft {
     accountsOn: null,
     appsOff: [],
   };
+}
+
+/** Turns one part on or off; what was filled in it stays for when it's back on. */
+export function togglePart(draft: JobDraft, kind: AssistantJobKind): JobDraft {
+  return { ...draft, on: { ...draft.on, [kind]: !draft.on[kind] } };
 }
 
 /** `owner/name`, `github.com/owner/name` or an https/ssh git address. */
@@ -281,30 +310,27 @@ export function parseRepos(text: string): {
   return { repos: [...new Set(repos)], bad };
 }
 
-/** Why the step can't finish yet, said plainly; null when it can. */
+/** Why the step can't finish yet, said plainly; null when it can. Off parts don't count. */
 export function jobProblem(
   draft: JobDraft,
   input: { readonly environmentId: string; readonly computer: string },
 ): string | null {
-  if (draft.kind === "development") {
+  if (draft.on.development) {
     const { bad } = parseRepos(draft.repos);
     if (bad.length > 0) return `“${bad[0]}” isn't a repo address. Use owner/name or a git URL.`;
-    return null;
   }
-  if (draft.kind === "accounts") {
+  if (draft.on.accounts) {
     // To start now it needs one; "only when I ask" can wait for them.
     if (draft.accounts.length === 0) {
-      return draft.start === "now" ? "Add at least one account." : null;
-    }
-    if (draft.accountsOn !== null && draft.accountsOn !== input.environmentId) {
+      if (draft.start === "now") return "Add at least one account, or turn Accounts off.";
+    } else if (draft.accountsOn !== null && draft.accountsOn !== input.environmentId) {
       return `Those logins are saved on another computer. Add them again for ${input.computer}.`;
     }
-    return null;
   }
   return null;
 }
 
-/** The job from the draft. */
+/** The job from the draft: the parts that are on. */
 export function jobOf(
   draft: JobDraft,
   tools: {
@@ -313,26 +339,21 @@ export function jobOf(
     readonly servers: ReadonlyArray<string>;
   },
 ): AssistantJob {
-  switch (draft.kind) {
-    case "development":
-      return {
-        kind: "development",
-        projects: draft.devProjects,
-        repos: parseRepos(draft.repos).repos,
-        task: draft.task,
-      };
-    case "accounts":
-      return { kind: "accounts", accounts: draft.accounts, task: draft.task };
-    case "tasks":
-      return {
-        kind: "tasks",
-        apps: tools.apps
-          .filter((app) => !draft.appsOff.includes(app.provider))
-          .map((app) => app.name),
-        servers: tools.servers,
-        task: draft.task,
-      };
-  }
+  return {
+    development: draft.on.development
+      ? { projects: draft.devProjects, repos: parseRepos(draft.repos).repos }
+      : null,
+    accounts: draft.on.accounts ? { accounts: draft.accounts } : null,
+    tasks: draft.on.tasks
+      ? {
+          apps: tools.apps
+            .filter((app) => !draft.appsOff.includes(app.provider))
+            .map((app) => app.name),
+          servers: tools.servers,
+        }
+      : null,
+    task: draft.task,
+  };
 }
 
 /** The first message, only when the person said "Start now" (else it waits for them). */

@@ -22,7 +22,7 @@
  * `~/Downloads/mail/` are `safe`; sending (`mail_send`) is a `change`
  * (spec 20.10: asks in Ask mode).
  *
- * An assistant in "Asks first" mode (Misha 23.10) adds one rule on top:
+ * An assistant in "Cautious" mode (Misha 23.10) adds one rule on top:
  * every call that acts outward (`asksFirstCategory` in
  * `@t3tools/shared/assistantPreset`: email out, sites, putting things on the
  * internet, share links, deleting, creating databases / computers /
@@ -40,7 +40,7 @@ export type UnoWorkGateDecision = "run" | "ask";
 export function decideUnoWorkGate(
   level: UnoWorkToolLevel,
   runtimeMode: RuntimeMode,
-  /** The call acts outward and the chat's assistant is in "Asks first" mode. */
+  /** The call acts outward and the chat's assistant is in "Cautious" mode. */
   asksFirstOutward = false,
 ): UnoWorkGateDecision {
   if (asksFirstOutward) return "ask";

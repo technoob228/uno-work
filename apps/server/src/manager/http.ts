@@ -857,7 +857,7 @@ export const managerAssistantPresetRouteLayer = HttpRouter.add(
       yield* Effect.logInfo("assistant preset changed").pipe(
         Effect.annotateLogs({ projectId: input.projectId, preset: input.preset }),
       );
-      // Its own chats follow the mode at once: "Asks first" narrows the
+      // Its own chats follow the mode at once: "Cautious" narrows the
       // harness itself, not only the manager tools (Misha 23.10).
       yield* realignAssistantThreadModes(
         { projections, engine },

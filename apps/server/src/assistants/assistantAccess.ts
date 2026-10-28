@@ -93,8 +93,8 @@ export const readAssistantAccess = (
 /**
  * The mode this assistant's own chats run in — see
  * {@link assistantOwnRuntimeMode}. Read where the daemon starts or realigns
- * such a chat (conversations, Telegram / Slack, scheduled turns), so "Asks
- * first" holds for the harness's own shell and file tools, not only for the
+ * such a chat (conversations, Telegram / Slack, scheduled turns), so "Cautious"
+ *  holds for the harness's own shell and file tools, not only for the
  * manager and uno-work tools.
  */
 export const readAssistantRuntimeMode = (

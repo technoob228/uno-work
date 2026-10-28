@@ -205,7 +205,7 @@ export const ASSISTANT_SETUP_STEPS: ReadonlyArray<{
   {
     id: "access",
     header: "What I may do",
-    ask: 'how much it does on its own — "Does it itself" (preset full) or "Asks first" (preset helper: asks before email out, sites, deploys, share links, deleting, new databases / computers / assistants) — and which projects are its',
+    ask: 'how much it does on its own — "Autonomous" (preset full) or "Cautious" (preset helper: asks before email out, sites, deploys, share links, deleting, new databases / computers / assistants) — and which projects are its',
   },
   { id: "apps", header: "Apps", ask: "what it may do in each connected app" },
   {

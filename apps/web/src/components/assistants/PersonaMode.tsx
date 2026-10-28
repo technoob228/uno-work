@@ -1,6 +1,6 @@
 /**
  * Variant D (28.10): the two modes of an assistant (Misha 23.10, 27.10 —
- * exactly two: "Does it itself" / "Asks first"), shown where the person
+ * exactly two: "Autonomous" / "Cautious"), shown where the person
  * meets them — at the top of its chat and on its page — not folded in
  * Advanced. Each persona has its own; switching counts from its next step
  * (the daemon rewrites its token), also in the middle of a task.
@@ -10,6 +10,7 @@
  * Work opens, Telegram messages wait — with the way to Plus.
  */
 import { type EnvironmentId, isAssistantProjectId } from "@t3tools/contracts";
+import { ASSISTANT_MODE_COPY } from "@t3tools/shared/assistantPreset";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, HandIcon, MoonIcon, ZapIcon } from "lucide-react";
 import { useState } from "react";
@@ -27,13 +28,14 @@ import { useTeamActions } from "./useTeamActions";
 
 export type AssistantMode = "itself" | "asks-first";
 
+/** The permission level (Misha 28.10): Autonomous / Cautious — one copy with the daemon's. */
 export const MODE_COPY: Readonly<
   Record<AssistantMode, { readonly label: string; readonly line: string }>
 > = {
-  itself: { label: "Does it itself", line: "Acts and tells you after." },
+  itself: { label: ASSISTANT_MODE_COPY.itself.name, line: ASSISTANT_MODE_COPY.itself.line },
   "asks-first": {
-    label: "Asks first",
-    line: "Waits for your Allow before it sends, pays or deletes.",
+    label: ASSISTANT_MODE_COPY["asks-first"].name,
+    line: ASSISTANT_MODE_COPY["asks-first"].line,
   },
 };
 
@@ -68,7 +70,7 @@ export function useSetMode(member: TeamMember | null) {
     } catch (cause) {
       toastManager.add({
         type: "error",
-        title: "Couldn't switch the mode",
+        title: "Couldn't change the permission level",
         description: cause instanceof Error ? cause.message : "Its computer didn't answer.",
       });
     } finally {
@@ -80,7 +82,7 @@ export function useSetMode(member: TeamMember | null) {
 
 const ICON: Record<AssistantMode, typeof ZapIcon> = { itself: ZapIcon, "asks-first": HandIcon };
 
-/** The chip at the top of its chat: "✋ Asks first ▾". */
+/** The chip at the top of its chat: "✋ Cautious ▾". */
 export function AssistantModeChip(props: { readonly member: TeamMember }) {
   const { member } = props;
   const mode = modeOf(member);
@@ -124,7 +126,7 @@ export function AssistantModeChip(props: { readonly member: TeamMember }) {
           );
         })}
         <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
-          Only {member.profile.name}'s mode. Counts from its next step.
+          Only {member.profile.name}'s permission level. Counts from its next step.
         </p>
       </MenuPopup>
     </Menu>

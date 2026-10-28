@@ -31,13 +31,13 @@ describe("mode picker form", () => {
     );
   });
 
-  it("shows two modes: Full is 'Does it itself', Helper and Observer 'Asks first'", () => {
+  it("shows two modes: Full is 'Autonomous', Helper and Observer 'Cautious'", () => {
     expect(modeOfForm(DEFAULT_PRESET_FORM)).toBe("itself");
     expect(modeOfForm({ ...DEFAULT_PRESET_FORM, preset: "helper" })).toBe("asks-first");
     expect(modeOfForm({ ...DEFAULT_PRESET_FORM, preset: "observer" })).toBe("asks-first");
   });
 
-  it("'Asks first' saves Helper on every project; an old Observer stays one", () => {
+  it("'Cautious' saves Helper on every project; an old Observer stays one", () => {
     expect(presetAccessFromForm(withMode(DEFAULT_PRESET_FORM, "asks-first"))).toEqual({
       preset: "helper",
       projects: "all",

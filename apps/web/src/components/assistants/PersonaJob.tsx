@@ -1,5 +1,6 @@
 /**
- * "What should it do?" (Misha 28.10) — what the role picked in the gallery needs:
+ * "What should it do?" (Misha 28.10) — three parts, any of them together (the
+ * role picked in the gallery only turns its own on first):
  *
  * - Developer: the projects it leads on its computer, repos to clone first
  *   (its chat clones them), the first thing to lead.
@@ -10,11 +11,19 @@
  * - Helper: Gmail, Drive, Notion… connected on its computer (the same cards as
  *   Settings → Connectors) or an MCP server of your own; which of them it uses.
  *
- * Then when it starts: only when you ask (default) or now, with a task.
+ * A part that's off keeps what was filled, and isn't in the job. Then when it
+ * starts: only when you ask (default) or now, with a task.
  * Regular tasks are a separate feature (Automations) — not here.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
-import { KeyRoundIcon, LoaderCircleIcon, LockIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import type { AssistantJobKind, EnvironmentId } from "@t3tools/contracts";
+import {
+  CheckIcon,
+  KeyRoundIcon,
+  LoaderCircleIcon,
+  LockIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../environments/settings/serverSettings";
@@ -37,6 +46,8 @@ import {
   type AccountProblems,
   EMPTY_ACCOUNT,
   HANDS_WORK_LINE,
+  JOB_COPY,
+  JOB_KINDS,
   type JobDraft,
   type JobStart,
   START_COPY,
@@ -44,6 +55,7 @@ import {
   filledAccounts,
   hasProblems,
   jobAccountOf,
+  togglePart,
 } from "./assistantJob.logic";
 import { saveLoginsToVault } from "./assistantStart";
 import { Chip, Label, ModeCard, usePersonaProjects } from "./PersonaParts";
@@ -257,6 +269,48 @@ function StartPicker(props: {
   );
 }
 
+/** One part of the job: a switch with its line; what it needs shows when it's on. */
+function Part(props: {
+  readonly kind: AssistantJobKind;
+  readonly on: boolean;
+  readonly onToggle: () => void;
+  readonly children: React.ReactNode;
+}) {
+  const copy = JOB_COPY[props.kind];
+  return (
+    <div
+      className={cn(
+        "rounded-xl border transition-colors",
+        props.on ? "border-primary/50 bg-primary/[0.03]" : "border-border",
+      )}
+      data-testid={`persona-part-${props.kind}`}
+    >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={props.on}
+        onClick={props.onToggle}
+        className="flex w-full cursor-pointer items-start gap-3 px-3 py-2.5 text-left"
+        data-testid={`persona-part-${props.kind}-toggle`}
+      >
+        <span
+          className={cn(
+            "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
+            props.on ? "border-primary bg-primary text-primary-foreground" : "border-input",
+          )}
+        >
+          {props.on ? <CheckIcon className="size-3" /> : null}
+        </span>
+        <span className="flex flex-col">
+          <span className="text-sm font-medium">{copy.title}</span>
+          <span className="text-xs text-muted-foreground">{copy.line}</span>
+        </span>
+      </button>
+      {props.on ? <div className="px-3 pt-1 pb-3">{props.children}</div> : null}
+    </div>
+  );
+}
+
 // ── The step ─────────────────────────────────────────────────────────────
 
 export function PersonaJob(props: {
@@ -287,7 +341,11 @@ export function PersonaJob(props: {
         <h2 className="text-lg font-semibold tracking-tight">What should {who} do?</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{HANDS_WORK_LINE}</p>
       </div>
-      {draft.kind === "development" ? (
+      <Part
+        kind="development"
+        on={draft.on.development}
+        onToggle={() => onChange(togglePart(draft, "development"))}
+      >
         <div className="flex flex-col gap-4" data-testid="persona-job-development-form">
           <div>
             <Label hint={`on ${props.computer}`}>Projects it leads</Label>
@@ -327,9 +385,13 @@ export function PersonaJob(props: {
             />
           </div>
         </div>
-      ) : null}
+      </Part>
 
-      {draft.kind === "accounts" ? (
+      <Part
+        kind="accounts"
+        on={draft.on.accounts}
+        onToggle={() => onChange(togglePart(draft, "accounts"))}
+      >
         <div className="flex flex-col gap-4" data-testid="persona-job-accounts-form">
           <div>
             <Label hint={`passwords stay on ${props.computer}`}>Accounts</Label>
@@ -394,9 +456,9 @@ export function PersonaJob(props: {
             />
           ) : null}
         </div>
-      ) : null}
+      </Part>
 
-      {draft.kind === "tasks" ? (
+      <Part kind="tasks" on={draft.on.tasks} onToggle={() => onChange(togglePart(draft, "tasks"))}>
         <div className="flex flex-col gap-4" data-testid="persona-job-tasks-form">
           <div>
             <Label hint={`connected on ${props.computer}`}>Apps and tools</Label>
@@ -426,7 +488,7 @@ export function PersonaJob(props: {
             </div>
           ) : null}
         </div>
-      ) : null}
+      </Part>
 
       <div>
         <Label>When it starts</Label>
@@ -436,7 +498,7 @@ export function PersonaJob(props: {
         <TaskField
           value={draft.task}
           onChange={(task) => set({ task })}
-          {...TASK_FIELD[draft.kind]}
+          placeholder={TASK_PLACEHOLDER[JOB_KINDS.find((kind) => draft.on[kind]) ?? "tasks"]}
         />
       ) : null}
       {props.problem ? (
@@ -452,27 +514,20 @@ export function PersonaJob(props: {
   );
 }
 
-const TASK_FIELD: Record<JobDraft["kind"], { label: string; placeholder: string }> = {
-  development: {
-    label: "What to lead first",
-    placeholder: "Get the checkout tests green and open a PR",
-  },
-  accounts: {
-    label: "What it does there",
-    placeholder: "Post the weekly update and answer new comments",
-  },
-  tasks: { label: "First task", placeholder: "Sum up today's new mail and meetings" },
+const TASK_PLACEHOLDER: Record<AssistantJobKind, string> = {
+  development: "Get the checkout tests green and open a PR",
+  accounts: "Post the weekly update and answer new comments",
+  tasks: "Sum up today's new mail and meetings",
 };
 
 function TaskField(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
-  readonly label: string;
   readonly placeholder: string;
 }) {
   return (
     <div>
-      <Label hint="optional">{props.label}</Label>
+      <Label hint="optional">First task</Label>
       <Textarea
         value={props.value}
         maxLength={500}

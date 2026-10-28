@@ -1,5 +1,5 @@
 /**
- * The mode picker (Misha 23.10: two modes — "Does it itself" / "Asks first",
+ * The mode picker (Misha 23.10: two modes — "Autonomous" / "Cautious",
  * the daemon's presets Full / Helper underneath) on an assistant's page and
  * in New assistant. The daemon enforces it (`@t3tools/shared/assistantPreset`
  * — the same table this file reads); here: the form, what is saved, how app

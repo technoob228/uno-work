@@ -166,7 +166,7 @@ it.effect("an Asks-first assistant's chat runs at its ceiling, whatever the requ
   }).pipe(Effect.provide(layer));
 });
 
-it.effect("no ceiling (the person's chat, Does it itself): the requested mode stands", () => {
+it.effect("no ceiling (the person's chat, Autonomous): the requested mode stands", () => {
   const { claude, layer } = setup({ current: { _tag: "none" }, ceiling: null });
   return Effect.gen(function* () {
     yield* startOn(claudeInstance, CLAUDE);

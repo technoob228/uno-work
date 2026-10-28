@@ -747,8 +747,8 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly title: string;
     readonly config: ManagerSlackConnectorConfig;
     /**
-     * Owner: the assistant's own mode (full-access for "Does it itself",
-     * auto-accept-edits for "Asks first"). Members: approval-required.
+     * Owner: the assistant's own mode (full-access for "Autonomous",
+     * auto-accept-edits for "Cautious"). Members: approval-required.
      */
     readonly runtimeMode: RuntimeMode;
   }) =>

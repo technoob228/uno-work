@@ -109,7 +109,7 @@ export const AssistantTeamLive = Layer.effect(
           projectId,
           presetTokenAccess(preset, projects as never, projectId),
         ).pipe(
-          // Its own chats follow the mode at once ("Asks first" narrows the harness).
+          // Its own chats follow the mode at once ("Cautious" narrows the harness).
           Effect.andThen(
             realignAssistantThreadModes(
               { projections, engine },

@@ -4,9 +4,9 @@
  * by the daemon (which enforces it on every call) and the UI (which explains
  * it), so the two can't drift.
  *
- * The person sees two modes (Misha 23.10, "keep it simple"): "Does it itself"
- * (Full) and "Asks first" (Helper; an Observer from before reads as "Asks
- * first" too and keeps its read-only rules). "Asks first" is enforced by the
+ * The person sees two modes (Misha 23.10, "keep it simple"): "Autonomous"
+ * (Full) and "Cautious" (Helper; an Observer from before reads as "Cautious"
+ *  too and keeps its read-only rules). "Cautious" is enforced by the
  * daemon: every outward-acting tool call of its chats waits for the person's
  * Allow (`asksFirstCategory`, `unoWork/tools.ts`, `assistant_create`).
  *
@@ -91,7 +91,7 @@ export function assistantPresetAllows(preset: AssistantPreset, action: Assistant
 
 /**
  * The widest runtime mode a chat started or steered by this assistant may
- * run in. Helper ("Asks first", 23.10): the chats it starts edit files
+ * run in. Helper ("Cautious", 23.10): the chats it starts edit files
  * without asking but ask before commands (`auto-accept-edits`) — it works on
  * files without nagging; what goes out asks anyway (`asksFirstCategory`). It
  * may not steer a chat that runs wider. Observer: `approval-required`.
@@ -122,8 +122,8 @@ export function capRuntimeToPreset(mode: RuntimeMode, preset: AssistantPreset): 
 
 /**
  * The mode the assistant's OWN chats run in (its conversations, its Telegram /
- * Slack chats, scheduled turns): the ceiling of its preset. "Does it itself"
- * runs full-access; "Asks first" (Helper) edits files but asks before
+ * Slack chats, scheduled turns): the ceiling of its preset. "Autonomous"
+ * runs full-access; "Cautious" (Helper) edits files but asks before
  * commands; an Observer asks before everything. Enforced by the daemon when it
  * creates or realigns those threads — not by the prompt (Misha 23.10).
  */
@@ -220,15 +220,15 @@ export type AssistantMode = "itself" | "asks-first";
 
 export const ASSISTANT_MODES: ReadonlyArray<AssistantMode> = ["itself", "asks-first"];
 
-/** Full → "Does it itself"; Helper and Observer → "Asks first". */
+/** Full → "Autonomous"; Helper and Observer → "Cautious". */
 export function assistantModeOf(preset: AssistantPreset): AssistantMode {
   return preset === "full" ? "itself" : "asks-first";
 }
 
 /**
- * The preset a mode stands for. "Asks first" is Helper; an Observer set up
+ * The preset a mode stands for. "Cautious" is Helper; an Observer set up
  * before the two modes stays an Observer (it only reads) until the person
- * picks "Does it itself".
+ * picks "Autonomous".
  */
 export function presetForMode(mode: AssistantMode, current: AssistantPreset): AssistantPreset {
   if (mode === "itself") return "full";
@@ -240,7 +240,7 @@ export function presetAsksFirst(preset: AssistantPreset): boolean {
   return preset !== "full";
 }
 
-/** What an "Asks first" assistant asks before — exactly what the daemon checks. */
+/** What an "Cautious" assistant asks before — exactly what the daemon checks. */
 export type AsksFirstCategory =
   | "email"
   | "sites"
@@ -290,7 +290,7 @@ const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
 };
 
 /**
- * The category an "Asks first" assistant asks before for this call, or null
+ * The category an "Cautious" assistant asks before for this call, or null
  * when it runs on its own. `computer_cleanup` deletes only with `apply`.
  * Connector tools are judged by the caller (`connected-apps` for any that
  * changes something).
@@ -311,8 +311,8 @@ export const ASSISTANT_MODE_COPY: Readonly<
   >
 > = {
   itself: {
-    name: "Does it itself",
-    line: "Works on its own, like you in your own chats.",
+    name: "Autonomous",
+    line: "Works without asking for permission.",
     details: [
       "Starts and writes in chats; they run like your own.",
       "Can approve what those chats ask for.",
@@ -321,8 +321,8 @@ export const ASSISTANT_MODE_COPY: Readonly<
     ],
   },
   "asks-first": {
-    name: "Asks first",
-    line: "Works on files and chats by itself. Asks you before anything goes out or gets deleted.",
+    name: "Cautious",
+    line: "Asks before it sends, publishes, shares or deletes anything.",
     details: [
       ...ASKS_FIRST_CATEGORIES.map((category) => ASKS_FIRST_CATEGORY_LABEL[category]),
       "Chats it starts edit files freely and ask before running commands.",

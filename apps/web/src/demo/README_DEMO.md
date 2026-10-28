@@ -35,7 +35,7 @@ Uno greets first.
 
 A script is a list of steps: `say`, `work` (a line while still running), `ask`
 (quiz card; `connect` gives the real Connect button), `act` (outward action —
-"Does it itself" runs it, "Asks first" shows the real Allow card + an Inbox card,
+"Autonomous" runs it, "Cautious" shows the real Allow card + an Inbox card,
 "also sent to Telegram" when linked, waits without refusing), `elsewhere` (a chat
 on another computer with steps, result back + Inbox), `fail`, `inbox`, `run`.
 Triggers match the person's words per persona (or any); scenes are things that

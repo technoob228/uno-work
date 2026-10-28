@@ -661,7 +661,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           projectModelSelection: project.value.defaultModelSelection,
           inheritedModes,
           forcedRuntimeMode,
-          // "Asks first" holds for the harness itself: its chats run narrower.
+          // "Cautious" holds for the harness itself: its chats run narrower.
           assistantRuntimeMode:
             target.kind === "assistant" && accessDeps !== null
               ? yield* readAssistantRuntimeMode(accessDeps, target.projectId)

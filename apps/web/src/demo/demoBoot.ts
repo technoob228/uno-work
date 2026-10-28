@@ -153,7 +153,7 @@ function modelFor(machine: DemoMachine): Model {
   let model = models.get(machine.environmentId);
   if (!model) {
     model = readModelFor(machine) as unknown as Model;
-    // An assistant's chats run in its own mode (Asks first → asks), as the daemon does.
+    // An assistant's chats run in its own mode (Cautious → asks), as the daemon does.
     if (DEMO_ASSIST) {
       for (const thread of model.threads) {
         thread.runtimeMode = assistantRuntimeMode(machine.key, String(thread.projectId));

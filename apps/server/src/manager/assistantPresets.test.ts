@@ -254,7 +254,7 @@ it.layer(NodeServices.layer)("manager tools under assistant presets", (it) => {
         const create = (yield* Ref.get(dispatched)).find(
           (command) => command.type === "thread.create",
         );
-        // "Asks first" (23.10): edits run, commands ask.
+        // "Cautious" (23.10): edits run, commands ask.
         expect(create?.type === "thread.create" && create.runtimeMode).toBe("auto-accept-edits");
 
         const outside = yield* Effect.flip(

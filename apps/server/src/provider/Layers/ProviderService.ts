@@ -325,8 +325,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   /**
    * The mode the request asked for, narrowed to the ceiling of the assistant
-   * the chat belongs to ("Asks first" = auto-accept-edits). The person's own
-   * chats and "Does it itself" assistants: unchanged. Logged when it bites,
+   * the chat belongs to ("Cautious" = auto-accept-edits). The person's own
+   * chats and "Autonomous" assistants: unchanged. Logged when it bites,
    * so a chat that says "Full access" in the app but asks is explained.
    */
   const capRuntimeMode = (threadId: ThreadId, requested: RuntimeMode) =>

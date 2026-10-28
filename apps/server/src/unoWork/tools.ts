@@ -176,7 +176,7 @@ export interface UnoWorkToolDeps {
    */
   readonly presetRefusal?: Effect.Effect<string | null>;
   /**
-   * The calling chat belongs to an assistant in "Asks first" mode: its name
+   * The calling chat belongs to an assistant in "Cautious" mode: its name
    * (for the approval card), or null. Outward-acting calls then always wait
    * for the person's Allow (`asksFirstCategory`). Absent: no assistant rules.
    */
@@ -2718,7 +2718,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     // Misha 02.10: a plain static site goes up without an Allow (Unpublish is
     // one click in Apps & sites). Opening an app or a port to the internet,
     // removing a password and sending forms to an outside URL still ask.
-    // An "Asks first" assistant asks (the card's title).
+    // An "Cautious" assistant asks (the card's title).
     level: "safe",
     approvalTitle: (args) =>
       str(args, "slug") ? `Publish site “${str(args, "slug")}”` : "Publish a site",
@@ -3470,7 +3470,7 @@ export function runUnoWorkTool(
       // Why it asks although the chat's mode would let it run: say so.
       const detail =
         asking !== null
-          ? [ownDetail, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+          ? [ownDetail, `${asking.name} is Cautious, so it asks first.`].filter(Boolean).join(" · ")
           : ownDetail;
       const clientAction = tool.approvalClientAction?.(args);
       const outcome = yield* askPerson(deps, {
@@ -3691,7 +3691,7 @@ export function connectorMcpTool(
               : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
-        // An "Asks first" assistant asks before any change in a connected app.
+        // An "Cautious" assistant asks before any change in a connected app.
         const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
         // The console validates the arguments against its own schema.
         const call = Effect.gen(function* () {
@@ -3712,7 +3712,9 @@ export function connectorMcpTool(
             title,
             detail:
               asking !== null
-                ? [described, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+                ? [described, `${asking.name} is Cautious, so it asks first.`]
+                    .filter(Boolean)
+                    .join(" · ")
                 : described,
             later: lateRun(deps, title, call),
           });

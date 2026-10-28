@@ -1,9 +1,9 @@
 /**
  * Keeps an assistant's own chats in the mode its preset allows.
  *
- * "Asks first" is enforced by the daemon (Misha 23.10): the harness of an
+ * "Cautious" is enforced by the daemon (Misha 23.10): the harness of an
  * Asks-first assistant runs `auto-accept-edits` (files yes, commands and
- * everything outward ask), "Does it itself" runs `full-access`. New chats get
+ * everything outward ask), "Autonomous" runs `full-access`. New chats get
  * the mode when they are created (`readAssistantRuntimeMode`); when the person
  * switches the mode, the chats that already exist are realigned here, so the
  * next turn — from Telegram, Slack, a schedule or the app — already runs

@@ -5,7 +5,7 @@
  *
  * - A persona lives on the account's cloud computer (the one that doesn't
  *   sleep on Plus), shares Uno's memory, connectors and Telegram bot, and has
- *   its own mode ("Does it itself" / "Asks first").
+ *   its own mode ("Autonomous" / "Cautious").
  * - A project limit is a real lock only where the persona's commands run in a
  *   sandbox — its cloud computer (bubblewrap) — or on a computer of its own.
  *   On the MacBook nothing locks the chats it starts there yet (seatbelt is

@@ -499,7 +499,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         channel: { type: "string", enum: ["here", "telegram", "slack"] },
         preset: {
           type: "string",
-          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          description: 'The permission level: "full" = Autonomous, "helper" = Cautious.',
           enum: ["full", "helper"],
         },
         projects: {
@@ -558,7 +558,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "assistant_create",
     description:
-      'Set up another assistant for the person, on this computer (the person gets an Inbox notice and sees it in the sidebar; in "Asks first" mode it waits for their Allow). It can never get more than you have: preset, projects and app levels default to yours and may only be narrower — anything wider is refused. Give it a name, optionally an emoji or a drawn face, roles, character, a narrower preset / projects / apps, and its first task. Do this only when the person asked for one or clearly needs one.',
+      'Set up another assistant for the person, on this computer (the person gets an Inbox notice and sees it in the sidebar; as "Cautious" it waits for their Allow). It can never get more than you have: preset, projects and app levels default to yours and may only be narrower — anything wider is refused. Give it a name, optionally an emoji or a drawn face, roles, character, a narrower preset / projects / apps, and its first task. Do this only when the person asked for one or clearly needs one.',
     inputSchema: {
       type: "object",
       properties: {
@@ -568,7 +568,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         character: { type: "string" },
         preset: {
           type: "string",
-          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          description: 'The permission level: "full" = Autonomous, "helper" = Cautious.',
           enum: ["full", "helper"],
         },
         projects: {

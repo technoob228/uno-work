@@ -32,8 +32,8 @@ export interface HarnessSandboxPolicyShape {
   }) => Effect.Effect<HarnessSandboxDecision>;
   /**
    * The widest mode this chat's harness may run in, from the preset of the
-   * assistant the chat belongs to ("Asks first" → auto-accept-edits), or null
-   * for the person's own chats and "Does it itself" assistants. ProviderService
+   * assistant the chat belongs to ("Cautious" → auto-accept-edits), or null
+   * for the person's own chats and "Autonomous" assistants. ProviderService
    * narrows every session start and turn to it, whatever the request said —
    * so the mode holds for a chat the person opened in the assistant's project
    * from the app as much as for its Telegram chat (Misha 23.10).

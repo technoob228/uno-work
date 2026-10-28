@@ -59,7 +59,7 @@ export interface InboxActionsInput {
   readonly approvalPhase?: ApprovalPhase | null;
   /**
    * Approvals only: the row itself can be answered (`POST
-   * /api/uno-work/approval/from-inbox`) — an "Asks first" request that waits
+   * /api/uno-work/approval/from-inbox`) — an "Cautious" request that waits
    * with no chat card to answer (assistants D). Only while the row is unread:
    * the daemon keeps it unread until the person answers.
    */

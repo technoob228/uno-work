@@ -72,7 +72,7 @@ export default flow("dc-uno-setup", async ({ page, url, step, shot }) => {
   await step("one AI picker: Uno AI selected, the same line as everywhere", async () => {
     await seeText(page, "One choice for every assistant on");
   });
-  await step("mode: Asks first", async () => {
+  await step("mode: Cautious", async () => {
     await page.getByTestId("uno-setup-mode-asks").click();
   });
   await step("apps: Connect Gmail on its computer", async () => {
@@ -83,10 +83,10 @@ export default flow("dc-uno-setup", async ({ page, url, step, shot }) => {
       .waitFor({ timeout: 15_000 });
   });
   await shot("filled");
-  await step("Start → its one chat, mode Asks first", async () => {
+  await step("Start → its one chat, mode Cautious", async () => {
     await page.getByTestId("uno-setup-start").click();
     await seeText(page, "what's burning today", 25_000);
-    await page.getByTestId("assistant-mode-chip").filter({ hasText: "Asks first" }).waitFor();
+    await page.getByTestId("assistant-mode-chip").filter({ hasText: "Cautious" }).waitFor();
   });
   await shot("chat");
 });
@@ -111,8 +111,18 @@ export const flows = [
       async () => {
         await page.getByTestId("persona-next").click();
         await page.getByTestId("persona-job-development-form").waitFor();
-        if ((await page.getByTestId("persona-job-accounts").count()) > 0)
-          throw new Error("a second choice of what it does is still there");
+        // Its own part is on; the other two are there to turn on, off by default.
+        await page
+          .getByTestId("persona-part-development-toggle")
+          .and(page.locator('[aria-checked="true"]'))
+          .waitFor();
+        for (const kind of ["accounts", "tasks"]) {
+          if (
+            (await page.getByTestId(`persona-part-${kind}-toggle`).getAttribute("aria-checked")) !==
+            "false"
+          )
+            throw new Error(`${kind} is on for a Developer`);
+        }
         await page.getByTestId("persona-dev-project-p-work-landing").click();
         await page.getByTestId("persona-dev-repos").fill("misha-demo/checkout");
         await page.getByTestId("persona-start-now").click();
@@ -221,6 +231,65 @@ export const flows = [
       await seeText(page, "Got it — I'll use", 25_000);
     });
     await shot("chat");
+  }),
+
+  flow("dc-all-parts", async ({ page, url, step, shot }) => {
+    await step("open live → Developer, then turn Accounts and Tasks on too", async () => {
+      await openDemo(page, url);
+      await openGallery(page);
+      await page.getByTestId("persona-card-developer").click();
+      await page.getByTestId("persona-name").fill("Max All");
+      await toJob(page);
+      await page.getByTestId("persona-part-accounts-toggle").click();
+      await page.getByTestId("persona-part-tasks-toggle").click();
+      await page.getByTestId("persona-job-development-form").waitFor();
+      await page.getByTestId("persona-job-accounts-form").waitFor();
+      await page.getByTestId("persona-job-tasks-form").waitFor();
+    });
+    await step("a project + an account (password in the window only)", async () => {
+      await page.getByTestId("persona-dev-project-p-work-landing").click();
+      await page.getByTestId("persona-accounts-add").click();
+      await page.getByTestId("persona-account-service").fill("Instagram");
+      await page.getByTestId("persona-account-site").fill("instagram.com");
+      await page.getByTestId("persona-account-username").fill("max@shop.example");
+      await page.getByTestId("persona-account-password").fill(PASSWORD);
+      await page.getByTestId("persona-accounts-save").click();
+      await page.getByTestId("persona-accounts-dialog").waitFor({ state: "detached" });
+    });
+    await step(
+      "edge: Start now with Accounts on but its account removed → asks for one",
+      async () => {
+        await page.getByTestId("persona-start-now").click();
+        await page.getByRole("button", { name: "Remove Instagram" }).click();
+        await page.getByTestId("persona-create").click();
+        await seeText(page, "Add at least one account, or turn Accounts off.");
+        if ((await page.getByTestId("persona-channel").count()) > 0)
+          throw new Error("made without the account it needs");
+        await page.getByTestId("persona-accounts-add").click();
+        await page.getByTestId("persona-account-service").fill("Instagram");
+        await page.getByTestId("persona-account-site").fill("instagram.com");
+        await page.getByTestId("persona-account-username").fill("max@shop.example");
+        await page.getByTestId("persona-account-password").fill(PASSWORD);
+        await page.getByTestId("persona-accounts-save").click();
+        await page.getByTestId("persona-accounts-dialog").waitFor({ state: "detached" });
+        await page.getByTestId("persona-job-task").fill("Ship the landing and post about it");
+      },
+    );
+    await shot("all-parts");
+    await step("Create → one first message with all three parts", async () => {
+      await createAndOpen(page);
+      await seeText(page, "- Lead development of landing.");
+      await seeText(page, "- Work in my accounts — Instagram (instagram.com).");
+      await seeText(page, "- Help me with");
+      await seeText(page, 'browser_command {"login": "instagram.com"}');
+      await passwordNowhere(page);
+    });
+    await shot("channel");
+    await step("Open → it starts on it", async () => {
+      await page.getByTestId("persona-open").click();
+      await seeText(page, "Done on instagram.com", 30_000);
+      await passwordNowhere(page);
+    });
   }),
 
   flow("dc-only-when-asked", async ({ page, url, step, shot }) => {

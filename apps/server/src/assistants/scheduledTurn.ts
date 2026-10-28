@@ -110,7 +110,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const engine = yield* OrchestrationEngineService;
     const notify = yield* ConnectorNotifyService;
     const accessDeps = yield* assistantAccessDepsOption;
-    /** The assistant's own mode: "Asks first" runs narrower than full access. */
+    /** The assistant's own mode: "Cautious" runs narrower than full access. */
     const ownRuntimeMode = (projectId: ProjectId) =>
       accessDeps === null
         ? Effect.succeed(ASSISTANT_THREAD_RUNTIME_MODE)
@@ -290,8 +290,8 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               text: input.text,
               attachments: [],
             },
-            // The assistant's own mode ("Does it itself" = full access,
-            // "Asks first" = auto-accept-edits) — never widened here.
+            // The assistant's own mode ("Autonomous" = full access,
+            // "Cautious" = auto-accept-edits) — never widened here.
             runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: Option.isSome(shell) ? shell.value.interactionMode : "default",
             createdAt: requestedAtIso,

@@ -15,6 +15,7 @@ import {
   jobProblem,
   parseRepos,
   siteOf,
+  togglePart,
   vaultInputOf,
 } from "./assistantJob.logic";
 import { isAsleep, personaWorksOn } from "./personaChannels";
@@ -79,23 +80,23 @@ describe("the account form", () => {
   });
 });
 
+const NONE = { development: null, accounts: null, tasks: null, task: "" } as const;
+
 describe("firstMessage", () => {
   it("accounts: signs in with the vault in a chat on its computer — never the password", () => {
     const text = firstMessage({
       ...BASE,
-      job: {
-        kind: "accounts",
-        accounts: [jobAccountOf(ROW)],
-        task: "Post the weekly update",
-      },
+      job: { ...NONE, accounts: { accounts: [jobAccountOf(ROW)] }, task: "Post the weekly update" },
     });
     expect(text).not.toContain(PASSWORD);
     expect(text).not.toContain("leo@shop.example");
     expect(text).toContain("Hi Leo! You're my accounts manager.");
+    expect(text).toContain("Your job: work in my accounts — Instagram (instagram.com).");
     expect(text).toContain('browser_command {"login": "instagram.com"}');
-    expect(text).toContain("Start a chat on uno-work for this (chat_create)");
+    expect(text).toContain("happen in a chat you start on uno-work, not in ours");
     expect(text).toContain("requestHelp");
-    expect(text).toContain("Then: Post the weekly update");
+    expect(text).toContain("First: Post the weekly update");
+    expect(text).toContain("start a chat on uno-work for it (chat_create)");
     // Regular tasks are Automations, not the setup.
     expect(text).not.toContain("schedule_create");
     expect(text).not.toContain("cron");
@@ -103,7 +104,7 @@ describe("firstMessage", () => {
   it("only when I ask (the default): no first message at all", () => {
     const draft = emptyJob("accounts");
     expect(draft.start).toBe("ask");
-    const job = { kind: "accounts" as const, accounts: [jobAccountOf(ROW)], task: "" };
+    const job = { ...NONE, accounts: { accounts: [jobAccountOf(ROW)] } };
     expect(firstMessageOf(draft, job, BASE)).toBeNull();
     expect(firstMessageOf({ ...draft, start: "now" }, job, BASE)).toContain("Your job:");
   });
@@ -111,49 +112,73 @@ describe("firstMessage", () => {
     const text = firstMessage({
       ...BASE,
       role: "Developer",
-      job: { kind: "development", projects: ["landing"], repos: ["acme/shop"], task: "" },
+      job: { ...NONE, development: { projects: ["landing"], repos: ["acme/shop"] } },
     });
     expect(text).toContain("Your job: lead development of landing and acme/shop.");
     expect(text).toContain("Clone acme/shop on uno-work first");
-    expect(text).toContain("tell me in a few lines where things stand");
+    expect(text).toContain("where things stand");
     expect(text).toContain("Don't do the work yourself: start a chat on uno-work");
+    expect(text).not.toContain("browser_command");
   });
   it("tasks: the apps it was given and the person's own tools", () => {
     const text = firstMessage({
       ...BASE,
       role: "",
-      job: { kind: "tasks", apps: ["Notion"], servers: ["crm"], task: "Sum up new mail" },
+      job: { ...NONE, tasks: { apps: ["Notion"], servers: ["crm"] }, task: "Sum up new mail" },
     });
     expect(text.startsWith("Hi Leo!\n\n")).toBe(true);
     expect(text).toContain("using Notion and crm (my own tool)");
     expect(text).toContain("First: Sum up new mail");
   });
+  it("all three parts at once: one message with each of them", () => {
+    const text = firstMessage({
+      ...BASE,
+      role: "Developer",
+      job: {
+        development: { projects: ["landing"], repos: [] },
+        accounts: { accounts: [jobAccountOf(ROW)] },
+        tasks: { apps: ["Notion"], servers: [] },
+        task: "Ship the landing and post about it",
+      },
+    });
+    expect(text).toContain(
+      "Your job:\n- Lead development of landing.\n- Work in my accounts — Instagram (instagram.com).\n- Help me with tasks using Notion.",
+    );
+    expect(text).toContain('browser_command {"login": "instagram.com"}');
+    expect(text).toContain("Those apps are connected on uno-work");
+    expect(text).toContain("First: Ship the landing and post about it");
+    expect(text).not.toContain(PASSWORD);
+  });
 });
 
 describe("the step's draft", () => {
   const where = { environmentId: "env-cloud", computer: "uno-work" };
-  it("accounts need one saved on this computer", () => {
-    expect(jobProblem({ ...EMPTY_JOB, kind: "accounts", start: "now" }, where)).toBe(
-      "Add at least one account.",
+  const accountsOn = { ...EMPTY_JOB.on, development: false, accounts: true };
+  it("the role only turns its own part on; the others can be turned on too", () => {
+    expect(emptyJob("accounts").on).toEqual({ development: false, accounts: true, tasks: false });
+    const all = togglePart(togglePart(emptyJob("accounts"), "development"), "tasks");
+    expect(all.on).toEqual({ development: true, accounts: true, tasks: true });
+    expect(togglePart(all, "accounts").on.accounts).toBe(false);
+  });
+  it("accounts need one saved on this computer (to start now)", () => {
+    expect(jobProblem({ ...EMPTY_JOB, on: accountsOn, start: "now" }, where)).toBe(
+      "Add at least one account, or turn Accounts off.",
     );
-    expect(jobProblem({ ...EMPTY_JOB, kind: "accounts" }, where)).toBeNull();
+    expect(jobProblem({ ...EMPTY_JOB, on: accountsOn }, where)).toBeNull();
     expect(
       jobProblem(
-        { ...EMPTY_JOB, kind: "accounts", accounts: [jobAccountOf(ROW)], accountsOn: "env-mac" },
+        { ...EMPTY_JOB, on: accountsOn, accounts: [jobAccountOf(ROW)], accountsOn: "env-mac" },
         where,
       ),
     ).toContain("saved on another computer");
     expect(
       jobProblem(
-        {
-          ...EMPTY_JOB,
-          kind: "accounts",
-          accounts: [jobAccountOf(ROW)],
-          accountsOn: "env-cloud",
-        },
+        { ...EMPTY_JOB, on: accountsOn, accounts: [jobAccountOf(ROW)], accountsOn: "env-cloud" },
         where,
       ),
     ).toBeNull();
+    // Off: no accounts needed.
+    expect(jobProblem({ ...EMPTY_JOB, start: "now" }, where)).toBeNull();
   });
   it("repos: owner/name or a git address", () => {
     expect(
@@ -163,21 +188,26 @@ describe("the step's draft", () => {
       bad: [],
     });
     expect(parseRepos("just-a-word").bad).toEqual(["just-a-word"]);
-    expect(jobProblem({ ...EMPTY_JOB, kind: "development", repos: "oops" }, where)).toContain(
-      "isn't a repo address",
-    );
+    expect(jobProblem({ ...EMPTY_JOB, repos: "oops" }, where)).toContain("isn't a repo address");
+    // A part that's off doesn't hold the step.
+    expect(
+      jobProblem(
+        { ...EMPTY_JOB, on: { ...EMPTY_JOB.on, development: false }, repos: "oops" },
+        where,
+      ),
+    ).toBeNull();
   });
-  it("the role decides the job", () => {
+  it("only the parts that are on make the job", () => {
     expect(jobOf(emptyJob("development"), { apps: [], servers: [] })).toEqual({
-      kind: "development",
-      projects: [],
-      repos: [],
+      development: { projects: [], repos: [] },
+      accounts: null,
+      tasks: null,
       task: "",
     });
   });
   it("tasks: apps switched off are left out", () => {
     const job = jobOf(
-      { ...EMPTY_JOB, kind: "tasks", appsOff: ["gmail"] },
+      { ...emptyJob("tasks"), appsOff: ["gmail"] },
       {
         apps: [
           { provider: "gmail", name: "Gmail & Calendar" },
@@ -186,18 +216,24 @@ describe("the step's draft", () => {
         servers: ["crm"],
       },
     );
-    expect(job).toEqual({ kind: "tasks", apps: ["Notion"], servers: ["crm"], task: "" });
+    expect(job).toEqual({ ...NONE, tasks: { apps: ["Notion"], servers: ["crm"] } });
   });
-  it("the duty line stays within the limit", () => {
-    const duty = dutyOf({
-      kind: "accounts",
-      accounts: [jobAccountOf(ROW)],
-      task: "x".repeat(400),
-    });
+  it("the duty line names every part and stays within the limit", () => {
+    const many = Array.from({ length: 20 }, (_, index) => ({
+      ...jobAccountOf(ROW),
+      service: `Instagram ${index}`,
+    }));
+    const duty = dutyOf({ ...NONE, accounts: { accounts: many } });
     expect(duty.length).toBeLessThanOrEqual(200);
-    expect(duty.startsWith("Works in Instagram (instagram.com), signed in from the vault")).toBe(
-      true,
-    );
+    expect(duty.startsWith("Works in Instagram 0")).toBe(true);
+    expect(
+      dutyOf({
+        ...NONE,
+        development: { projects: ["landing"], repos: [] },
+        tasks: { apps: ["Notion"], servers: [] },
+      }),
+    ).toBe("Leads development of landing; helps with tasks using Notion");
+    expect(dutyOf(NONE)).toBe("Helps when you ask");
   });
 });
 

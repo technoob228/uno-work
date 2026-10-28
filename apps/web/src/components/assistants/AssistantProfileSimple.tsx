@@ -8,7 +8,7 @@
  *   Start in Telegram) until a bot is linked; Slack and its email are small
  *   rows under it;
  * - its chats and what is on it now, its memory;
- * - Advanced, folded: its mode (Does it itself / Asks first) and projects,
+ * - Advanced, folded: its mode (Autonomous / Cautious) and projects,
  *   where it works, the apps it may open, the AI (one per computer), its
  *   email rules, role, routines, the team and "Set up again".
  *
@@ -262,7 +262,9 @@ function Advanced(props: { readonly children: ReactNode }) {
       >
         <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
         Advanced
-        <span className="font-normal">· mode, projects, where it works, apps, AI, email</span>
+        <span className="font-normal">
+          · permission level, projects, where it works, apps, AI, email
+        </span>
       </button>
       {open ? props.children : null}
     </section>
@@ -325,7 +327,7 @@ export function AssistantProfileSimple(props: {
         threadId: thread.id as ThreadId,
       }),
     });
-  // Its chat opens in its own mode ("Asks first" = edit files, ask before
+  // Its chat opens in its own mode ("Cautious" = edit files, ask before
   // commands); the daemon caps the harness to it anyway.
   const newChat = () =>
     void handleNewThread(
@@ -534,7 +536,7 @@ export function AssistantProfileSimple(props: {
             ) : null}
 
             {/* Variant D: its mode and where it looks, in plain sight. */}
-            <Section title="How it works" testId="assistant-profile-mode">
+            <Section title="Permission level" testId="assistant-profile-mode">
               <div className="p-2">
                 <AssistantModeSwitch member={member} />
               </div>

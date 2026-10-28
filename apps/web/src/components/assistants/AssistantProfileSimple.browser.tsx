@@ -192,10 +192,10 @@ describe("its page", () => {
     await screen.getByTestId("assistant-advanced-toggle").click();
     await expect
       .element(screen.getByTestId("assistant-profile-preset-itself"))
-      .toHaveTextContent("Does it itself");
+      .toHaveTextContent("Autonomous");
     await expect
       .element(screen.getByTestId("assistant-profile-preset-asks-first"))
-      .toHaveTextContent("Asks first");
+      .toHaveTextContent("Cautious");
     // No sandbox here: "Only selected projects" waits for its own computer.
     await expect
       .element(screen.getByTestId("assistant-profile-preset-projects-only"))

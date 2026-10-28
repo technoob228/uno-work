@@ -511,7 +511,7 @@ describe("approval gate", () => {
     expect(allowed._tag).toBe("Success");
   });
 
-  it('"Asks first": outward calls wait for the Allow whatever the mode; own work runs (23.10)', async () => {
+  it('"Cautious": outward calls wait for the Allow whatever the mode; own work runs (23.10)', async () => {
     const { deps, recorded } = makeDeps({ runtimeMode: "full-access" });
     const asking = { ...deps, asksFirst: Effect.succeed({ name: "Scout" }) };
     // Taking an app off the internet isn't outward: it runs.
@@ -522,15 +522,15 @@ describe("approval gate", () => {
     const removed = await run("app_remove", asking, { appId: "notes" });
     expect(removed._tag).toBe("Success");
     expect(recorded.approvals).toHaveLength(1);
-    expect(recorded.approvals[0]!.detail).toContain("Scout asks first");
-    // "Does it itself": a site goes up without asking (decision 02.10)…
+    expect(recorded.approvals[0]!.detail).toContain("Scout is Cautious");
+    // "Autonomous": a site goes up without asking (decision 02.10)…
     expect(decideUnoWorkGate("safe", "full-access")).toBe("run");
-    // …but for an "Asks first" assistant even a "safe" outward call asks.
+    // …but for an "Cautious" assistant even a "safe" outward call asks.
     expect(decideUnoWorkGate("safe", "full-access", true)).toBe("ask");
     expect(decideUnoWorkGate("change", "auto-accept-edits", true)).toBe("ask");
   });
 
-  it('"Asks first": a site that would go up on its own waits, and a declined one never does', async () => {
+  it('"Cautious": a site that would go up on its own waits, and a declined one never does', async () => {
     const { deps, recorded, home } = makeDeps({ runtimeMode: "full-access", approval: "denied" });
     const asking = { ...deps, asksFirst: Effect.succeed({ name: "Scout" }) };
     const refused = await run("site_publish", asking, { path: "~/site", slug: "menu" });

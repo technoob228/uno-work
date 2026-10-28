@@ -56,7 +56,7 @@ function stand(
   options: {
     readonly routines?: boolean;
     readonly sandbox?: boolean;
-    /** The person's answer when an "Asks first" assistant asks (default: Allow). */
+    /** The person's answer when an "Cautious" assistant asks (default: Allow). */
     readonly answer?: "approved" | "denied" | "timeout" | "queued";
   } = {},
 ) {
@@ -188,7 +188,7 @@ describe("assistant_profile_set: rights only narrow", () => {
     expect(result._tag).toBe("Failure");
     const error = (result as { failure: { message: string; status: number } }).failure;
     expect(error.status).toBe(403);
-    expect(error.message).toContain('"Does it itself" is more than "Asks first"');
+    expect(error.message).toContain('"Autonomous" is more than "Cautious"');
     expect(error.message).toContain("every project");
     expect(s.access.get(SCOUT)?.preset).toBe("helper");
     const team = await readTeam(s.stateDir, SCOUT);
@@ -391,7 +391,7 @@ describe("assistant_create: a helper never wider than its creator", () => {
     );
     expect(result._tag).toBe("Failure");
     const message = (result as { failure: { message: string } }).failure.message;
-    expect(message).toContain('"Does it itself" is more than "Asks first"');
+    expect(message).toContain('"Autonomous" is more than "Cautious"');
     expect(message).toContain("project fishcode");
     expect(message).toContain("changes in GitHub");
     expect(s.inbox).toHaveLength(0);
@@ -405,7 +405,7 @@ describe("assistant_create: a helper never wider than its creator", () => {
     expect((result as { failure: { message: string } }).failure.message).toContain("Reads only");
   });
 
-  it('"Asks first": a new assistant waits for the person\'s Allow (Misha 23.10)', async () => {
+  it('"Cautious": a new assistant waits for the person\'s Allow (Misha 23.10)', async () => {
     const s = stand();
     s.access.set(UNO, { preset: "helper", allowlist: "all" });
     const made = await run(s.team.create(callerOf(UNO, "t-uno"), { name: "Scout" }));
@@ -422,14 +422,14 @@ describe("assistant_create: a helper never wider than its creator", () => {
     expect(denied.access.has(SCOUT)).toBe(false);
     expect(denied.inbox).toHaveLength(0);
 
-    // "Does it itself" sets one up without asking.
+    // "Autonomous" sets one up without asking.
     const full = stand();
     await run(full.team.create(callerOf(UNO), { name: "Scout" }));
     expect(full.asked).toEqual([]);
     expect(full.access.get(SCOUT)?.preset).toBe("full");
   });
 
-  it('"Asks first" with nobody answering yet: the turn isn\'t held; a late Allow sets it up', async () => {
+  it('"Cautious" with nobody answering yet: the turn isn\'t held; a late Allow sets it up', async () => {
     const s = stand({ answer: "queued" });
     s.access.set(UNO, { preset: "helper", allowlist: "all" });
     const made = await run(s.team.create(callerOf(UNO, "t-uno"), { name: "Scout" }));

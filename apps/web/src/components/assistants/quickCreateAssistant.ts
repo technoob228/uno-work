@@ -4,7 +4,7 @@
  *
  * - a name of its own and a random persona face (a person, an animal, a
  *   robot, an alien — never a generic smiley), both editable on its page;
- * - "Does it itself" on every project of this computer (Full);
+ * - "Autonomous" on every project of this computer (Full);
  * - every app the person connected (nothing restricted) and its own email
  *   where the computer has mail (on by default, `DEFAULT_ASSISTANT_MAIL_POLICY`);
  * - "set up": its first click opens a chat, not a setup.
