@@ -775,6 +775,13 @@ export const ServerSettings = Schema.Struct({
   harnessUnoCredits: Schema.Record(Schema.String, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  // One-time upgrade (28.10), per harness: a machine where it already ran on
+  // Uno credits before the question existed gets `harnessUnoCredits` on, so
+  // nothing changes for it. Set once checked — never re-run, so a choice
+  // turned off in Settings stays off.
+  harnessUnoCreditsMigrated: Schema.Record(Schema.String, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -915,6 +922,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   harnessUnoCredits: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
+  harnessUnoCreditsMigrated: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({

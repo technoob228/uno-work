@@ -8,12 +8,18 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ClaudeSettings,
+  DEFAULT_SERVER_SETTINGS,
   ProviderInstanceId,
+  type ServerSettings,
+  type ServerSettingsPatch,
   ThreadId,
   isUnoCreditsChoiceRequiredText,
 } from "@t3tools/contracts";
 import { Effect, Exit, Layer, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as NodeFs from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import { BrowserBridgeTest } from "../../browserBridge.ts";
@@ -28,6 +34,12 @@ import {
   claudeUnoCreditsAllowed,
   makeUnoCreditsGuard,
 } from "./ClaudeDriver.ts";
+import {
+  claudeConfigDir,
+  claudeRanOnUnoGateway,
+  isUnoGatewayTranscriptRecord,
+  migrateUnoCreditsConsent,
+} from "./claudeUnoCreditsMigration.ts";
 
 const GATEWAY = { ANTHROPIC_BASE_URL: "https://api.getuno.xyz", ANTHROPIC_AUTH_TOKEN: "unollm_k" };
 
@@ -149,6 +161,8 @@ function claudeCliLayer(loggedIn: boolean) {
 function driverLayer(input: {
   readonly loggedIn: boolean;
   readonly harnessUnoCredits: Record<string, boolean>;
+  readonly harnessUnoCreditsMigrated?: Record<string, boolean>;
+  readonly home?: string;
 }) {
   return ServerConfig.layerTest(process.cwd(), { prefix: "claude-uno-credits-test" }).pipe(
     Layer.provideMerge(NodeServices.layer),
@@ -157,7 +171,11 @@ function driverLayer(input: {
     Layer.provideMerge(UnoGatewayKeyTest("unollm_machine_key")),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(
-      ServerSettingsService.layerTest({ harnessUnoCredits: input.harnessUnoCredits }),
+      ServerSettingsService.layerTest({
+        harnessUnoCredits: input.harnessUnoCredits,
+        // An upgraded machine by default: the first-start check is its own test.
+        harnessUnoCreditsMigrated: input.harnessUnoCreditsMigrated ?? { claudeAgent: true },
+      }),
     ),
   );
 }
@@ -169,23 +187,29 @@ const withDriver =
     effect.pipe(Effect.provide(Layer.merge(driverLayer(input), claudeCliLayer(input.loggedIn))));
 
 /** Starts a Claude session on a fresh instance; the snapshot is checked first. */
-const startOnFreshInstance = Effect.gen(function* () {
-  const instance = yield* ClaudeDriver.create({
-    instanceId: ProviderInstanceId.make("claudeAgent"),
-    displayName: undefined,
-    environment: [],
-    enabled: true,
-    // Not a real binary: the CLI answers come from the spawner above, and the
-    // SDK's capabilities probe fails fast instead of starting a real Claude.
-    config: Schema.decodeSync(ClaudeSettings)({ binaryPath: "/nonexistent/claude-uno-credits" }),
+const startOnInstance = (home?: string) =>
+  Effect.gen(function* () {
+    const instance = yield* ClaudeDriver.create({
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      displayName: undefined,
+      environment: [],
+      enabled: true,
+      // Not a real binary: the CLI answers come from the spawner above, and the
+      // SDK's capabilities probe fails fast instead of starting a real Claude.
+      config: Schema.decodeSync(ClaudeSettings)({
+        binaryPath: "/nonexistent/claude-uno-credits",
+        ...(home ? { homePath: home } : {}),
+      }),
+    });
+    yield* instance.snapshot.refresh;
+    const threadId = ThreadId.make("thread-uno-credits");
+    const started = yield* Effect.exit(
+      instance.adapter.sendTurn({ threadId, input: "hello" } as never),
+    );
+    const settings = yield* (yield* ServerSettingsService).getSettings;
+    return { started, settings };
   });
-  yield* instance.snapshot.refresh;
-  const threadId = ThreadId.make("thread-uno-credits");
-  const started = yield* Effect.exit(
-    instance.adapter.sendTurn({ threadId, input: "hello" } as never),
-  );
-  return { started };
-});
+const startOnFreshInstance = startOnInstance();
 
 const failureDetail = (exit: Exit.Exit<unknown, unknown>): string | null => {
   if (!Exit.isFailure(exit)) return null;
@@ -234,5 +258,195 @@ describe("ClaudeDriver — Uno credits only by choice", () => {
         assert.isFalse(isUnoCreditsChoiceRequiredText(failureDetail(started)));
       }),
     ).pipe(withDriver({ loggedIn: true, harnessUnoCredits: {} })),
+  );
+});
+
+// ── First start of this version: keep machines that already used it ────
+
+const GATEWAY_ANSWER = {
+  type: "assistant",
+  entrypoint: "sdk-ts",
+  message: { id: "gen-1790000000-abc", model: "claude-sonnet-5", role: "assistant" },
+};
+const ANTHROPIC_ANSWER = {
+  type: "assistant",
+  requestId: "req_011Cg9ozwdSaCYb7CERoPmkK",
+  message: { id: "msg_011Cg9ozwr5wqV6kMXtPHZCM", model: "claude-opus-5-5" },
+};
+const LOCAL_ERROR = {
+  type: "assistant",
+  message: { id: "3dbca30e-1", model: "<synthetic>" },
+};
+
+/** A HOME whose Claude Code has one session transcript with these lines. */
+function homeWithTranscript(lines: ReadonlyArray<unknown>): string {
+  const home = NodeFs.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-uno-history-"));
+  const dir = NodePath.join(home, ".claude", "projects", "-home-unowork-project");
+  NodeFs.mkdirSync(dir, { recursive: true });
+  NodeFs.writeFileSync(
+    NodePath.join(dir, "8da56484-3967-4882-bfa7-daafb3ad7523.jsonl"),
+    [{ type: "user", message: { role: "user", content: "hi" } }, ...lines]
+      .map((line) => JSON.stringify(line))
+      .join("\n"),
+  );
+  return home;
+}
+
+describe("Claude Code's own transcripts tell the way a turn went", () => {
+  it("gateway answers: upstream id, no request id; Anthropic: msg_/req_", () => {
+    assert.isTrue(isUnoGatewayTranscriptRecord(GATEWAY_ANSWER));
+    assert.isTrue(
+      isUnoGatewayTranscriptRecord({
+        type: "assistant",
+        message: { id: "msg_uno_stream", model: "x" },
+      }),
+    );
+    assert.isFalse(isUnoGatewayTranscriptRecord(ANTHROPIC_ANSWER));
+    assert.isFalse(isUnoGatewayTranscriptRecord(LOCAL_ERROR));
+    assert.isFalse(isUnoGatewayTranscriptRecord({ type: "user", message: { id: "gen-1" } }));
+  });
+
+  it("scans the config dir's projects", async () => {
+    const used = homeWithTranscript([ANTHROPIC_ANSWER, GATEWAY_ANSWER]);
+    const never = homeWithTranscript([ANTHROPIC_ANSWER, LOCAL_ERROR]);
+    const env = {};
+    assert.isTrue(
+      await claudeRanOnUnoGateway({
+        configDir: claudeConfigDir({ homePath: used, environment: env }),
+      }),
+    );
+    assert.isFalse(
+      await claudeRanOnUnoGateway({
+        configDir: claudeConfigDir({ homePath: never, environment: env }),
+      }),
+    );
+    assert.isFalse(await claudeRanOnUnoGateway({ configDir: "/nonexistent/claude-config" }));
+    assert.strictEqual(
+      claudeConfigDir({ homePath: used, environment: { CLAUDE_CONFIG_DIR: "/srv/claude" } }),
+      "/srv/claude",
+    );
+  });
+});
+
+describe("migrateUnoCreditsConsent", () => {
+  const run = (
+    settings: Pick<ServerSettings, "harnessUnoCredits" | "harnessUnoCreditsMigrated">,
+    ranOnUno: boolean,
+  ) => {
+    const patches: ServerSettingsPatch[] = [];
+    let scans = 0;
+    return migrateUnoCreditsConsent({
+      driver: "claudeAgent",
+      getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, ...settings }),
+      updateSettings: (patch) => Effect.sync(() => patches.push(patch)),
+      ranOnUno: async () => {
+        scans += 1;
+        return ranOnUno;
+      },
+    }).pipe(Effect.map((result) => ({ result, patches, scans: () => scans })));
+  };
+
+  it.effect("used Claude on Uno AI before: allowed once, marked", () =>
+    Effect.gen(function* () {
+      const { result, patches } = yield* run(
+        { harnessUnoCredits: {}, harnessUnoCreditsMigrated: {} },
+        true,
+      );
+      assert.strictEqual(result, "allowed");
+      assert.deepStrictEqual(patches, [
+        {
+          harnessUnoCreditsMigrated: { claudeAgent: true },
+          harnessUnoCredits: { claudeAgent: true },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("never did: asks, marked so it isn't checked again", () =>
+    Effect.gen(function* () {
+      const { result, patches } = yield* run(
+        { harnessUnoCredits: {}, harnessUnoCreditsMigrated: {} },
+        false,
+      );
+      assert.strictEqual(result, "ask");
+      assert.deepStrictEqual(patches, [{ harnessUnoCreditsMigrated: { claudeAgent: true } }]);
+    }),
+  );
+
+  it.effect("checked before: no files read, nothing written", () =>
+    Effect.gen(function* () {
+      const out = yield* run(
+        { harnessUnoCredits: {}, harnessUnoCreditsMigrated: { claudeAgent: true } },
+        true,
+      );
+      assert.strictEqual(out.result, "skipped");
+      assert.deepStrictEqual(out.patches, []);
+      assert.strictEqual(out.scans(), 0);
+    }),
+  );
+
+  it.effect("a choice already made (turned off) is never changed", () =>
+    Effect.gen(function* () {
+      const out = yield* run(
+        { harnessUnoCredits: { claudeAgent: false }, harnessUnoCreditsMigrated: {} },
+        true,
+      );
+      assert.strictEqual(out.result, "skipped");
+      assert.deepStrictEqual(out.patches, [{ harnessUnoCreditsMigrated: { claudeAgent: true } }]);
+      assert.strictEqual(out.scans(), 0);
+    }),
+  );
+});
+
+describe("ClaudeDriver — first start after the upgrade", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 503 })),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const historyHome = homeWithTranscript([GATEWAY_ANSWER]);
+  const cleanHome = homeWithTranscript([ANTHROPIC_ANSWER]);
+
+  it.live("machine that ran Claude on Uno AI: allowed by itself, no refusal", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { started, settings } = yield* startOnInstance(historyHome);
+        assert.isFalse(isUnoCreditsChoiceRequiredText(failureDetail(started)));
+        assert.deepStrictEqual(settings.harnessUnoCredits, { claudeAgent: true });
+        assert.deepStrictEqual(settings.harnessUnoCreditsMigrated, { claudeAgent: true });
+      }),
+    ).pipe(withDriver({ loggedIn: false, harnessUnoCredits: {}, harnessUnoCreditsMigrated: {} })),
+  );
+
+  it.live("machine without that history: asked (the turn is refused)", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { started, settings } = yield* startOnInstance(cleanHome);
+        assert.isTrue(isUnoCreditsChoiceRequiredText(failureDetail(started)));
+        assert.deepStrictEqual(settings.harnessUnoCredits, {});
+        assert.deepStrictEqual(settings.harnessUnoCreditsMigrated, { claudeAgent: true });
+      }),
+    ).pipe(withDriver({ loggedIn: false, harnessUnoCredits: {}, harnessUnoCreditsMigrated: {} })),
+  );
+
+  it.live("turned off in Settings, then restarted: stays off despite the history", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { started, settings } = yield* startOnInstance(historyHome);
+        assert.isTrue(isUnoCreditsChoiceRequiredText(failureDetail(started)));
+        assert.deepStrictEqual(settings.harnessUnoCredits, { claudeAgent: false });
+      }),
+    ).pipe(
+      withDriver({
+        loggedIn: false,
+        harnessUnoCredits: { claudeAgent: false },
+        harnessUnoCreditsMigrated: { claudeAgent: true },
+      }),
+    ),
   );
 });

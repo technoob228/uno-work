@@ -14,13 +14,14 @@
  */
 import {
   ClaudeSettings,
+  defaultInstanceIdForDriver,
   ProviderDriverKind,
   UNO_GATEWAY_BASE_URL,
   unoCreditsChoiceRequiredText,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
-import { Cache, Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Cache, Deferred, Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
@@ -41,6 +42,11 @@ import {
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeUnoClaudeAvailability } from "./unoClaudeAvailability.ts";
+import {
+  claudeConfigDir,
+  claudeRanOnUnoGateway,
+  migrateUnoCreditsConsent,
+} from "./claudeUnoCreditsMigration.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -56,6 +62,8 @@ const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CLAUDE_CODE_LABEL = "Claude Code";
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+/** A turn that arrives during the first start's history check waits this long for it. */
+const UNO_CREDITS_MIGRATION_WAIT = Duration.seconds(20);
 
 export type ClaudeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -199,6 +207,43 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+
+      // First start of this version: a machine where Claude Code already ran
+      // on Uno credits keeps doing so (claudeUnoCreditsMigration.ts). Once per
+      // machine, by the default instance; a turn meanwhile waits for it.
+      const unoCreditsMigrated = yield* Deferred.make<void>();
+      if (instanceId === defaultInstanceIdForDriver(DRIVER_KIND)) {
+        yield* migrateUnoCreditsConsent({
+          driver: DRIVER_KIND,
+          getSettings: serverSettings.getSettings,
+          updateSettings: serverSettings.updateSettings,
+          ranOnUno: () =>
+            claudeRanOnUnoGateway({
+              configDir: claudeConfigDir({
+                homePath: effectiveConfig.homePath,
+                environment: processEnv,
+              }),
+            }),
+        }).pipe(
+          Effect.tap((result) =>
+            Effect.gen(function* () {
+              if (result === "allowed") unoCreditsAllowed = true;
+              if (result !== "skipped") {
+                yield* Effect.logInfo("Claude Code on Uno credits: first-start check", {
+                  result,
+                });
+              }
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Claude Code on Uno credits: first-start check failed", cause),
+          ),
+          Effect.ensuring(Deferred.succeed(unoCreditsMigrated, undefined)),
+          Effect.forkScoped,
+        );
+      } else {
+        yield* Deferred.succeed(unoCreditsMigrated, undefined);
+      }
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       const stampIdentity = withInstanceIdentity({
         instanceId,
@@ -299,7 +344,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // next 5-minute check, so look again before saying no.
       const requireUnoCreditsChoice = makeUnoCreditsGuard({
         pending: () => authMode === "uno" && unoOverlay !== null && !unoCreditsAllowed,
-        recheck: snapshot.refresh,
+        recheck: Deferred.await(unoCreditsMigrated).pipe(
+          Effect.timeoutOption(UNO_CREDITS_MIGRATION_WAIT),
+          Effect.andThen(snapshot.refresh),
+        ),
         harnessLabel: CLAUDE_CODE_LABEL,
       });
       const guardedAdapter: typeof adapter = {
