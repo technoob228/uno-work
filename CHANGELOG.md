@@ -8,6 +8,16 @@
 
 ---
 
+## v0.0.157 — 2026-10-28
+
+- **Your computer's apps and widgets open inside Uno Work.** An app the agent builds on your cloud computer opens in the panel and in its own window right inside Work, not in the agent's browser stream; its widget appears on Home by itself. The agent registers the app and opens it for you in one step.
+- **Claude by default after you sign in, once.** With a Claude plan, Home and New chat start on Claude, and Home shows the model and reasoning. One sign-in to Claude anywhere is enough: new chats and the Uno assistant switch to your Claude plan.
+- **Claude Code asks before it spends Uno credits.** Not signed in to Claude Code? You get "Sign in" or "Use Uno credits" before the first message; Settings → Agents has the switch. Computers where Claude Code already ran on Uno credits keep working as before.
+- **Submitting the Claude sign-in code shows progress** ("Checking the code with Claude…") and says when the code didn't work, instead of silence.
+- **No more "Runtime warning" noise** from Claude Code's service messages.
+- **Panel:** closing the panel ends full screen and brings the chat back; the mini chat at the bottom shows formatted text. Apps & sites shows Uno Drive, Terminal and the App Store first.
+- No browser permission windows over the first screen (notifications are offered with a line while Uno works); the secret field no longer offers a saved password; a short first message like "Hi" stays the chat's title.
+
 ## v0.0.156 — 2026-10-28
 
 - **Big sites publish without timing out, and a password protects them from the first second.** site_publish sends the password (or an IP allowlist) with the upload and waits while Uno finishes publishing in the background.
