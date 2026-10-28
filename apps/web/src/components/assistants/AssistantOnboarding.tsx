@@ -39,7 +39,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { create } from "zustand";
 
 import { useAssistantChat } from "../../assistant/useAssistantChat";
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useMachineRows } from "../../hooks/useMachineRows";
@@ -365,7 +365,7 @@ function TeamOnboardingDialog() {
 
   const later = () => {
     if (target.kind === "existing") {
-      if (DEMO) {
+      if (DEMO_PROTOTYPE) {
         patchProfile(assistantKeyOf(target.environmentId, target.projectId), {
           setUpAt: new Date().toISOString(),
         });
@@ -402,7 +402,7 @@ function TeamOnboardingDialog() {
       const now = new Date().toISOString();
       // Its profile starts with the defaults; the chat fills in the rest,
       // one answer at a time — on its computer (outside the mock).
-      if (!DEMO) {
+      if (!DEMO_PROTOTYPE) {
         await actions
           .update(
             { environmentId: homeEnvironmentId, projectId },
@@ -535,7 +535,7 @@ function TeamOnboardingDialog() {
               What does {name || "it"} run on?
             </span>
             {homeEnvironmentId ? (
-              DEMO ? (
+              DEMO_PROTOTYPE ? (
                 <AssistantPowerPicker
                   environmentId={homeEnvironmentId as EnvironmentId}
                   value={draft.brain}

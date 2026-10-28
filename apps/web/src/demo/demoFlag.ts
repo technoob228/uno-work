@@ -10,19 +10,34 @@
  */
 import { create } from "zustand";
 
-function readDemo(): boolean {
-  if (import.meta.env.VITE_DEMO === "w0138") return true;
+/**
+ * Which demo: `w0138` — the 16.10 mock (its own assistants prototype in this
+ * browser); `assist` — the assistants base (28.10): every assistant screen is
+ * the real one, its daemon answered by `demo/assist/*` (README_DEMO.md).
+ */
+export type DemoMode = "w0138" | "assist";
+const DEMO_MODES: ReadonlySet<string> = new Set(["w0138", "assist"]);
+
+function readDemoMode(): DemoMode | null {
+  const built = import.meta.env.VITE_DEMO;
+  if (built && DEMO_MODES.has(built)) return built as DemoMode;
   // `?demo=` only on the dev server: in a real build the link must not swap
   // the person's saved computers for demo ones (demoBoot clears storage).
-  if (!import.meta.env.DEV || typeof location === "undefined") return false;
+  if (!import.meta.env.DEV || typeof location === "undefined") return null;
   try {
-    return new URLSearchParams(location.search).get("demo") === "w0138";
+    const asked = new URLSearchParams(location.search).get("demo");
+    return asked && DEMO_MODES.has(asked) ? (asked as DemoMode) : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export const DEMO: boolean = readDemo();
+export const DEMO_MODE: DemoMode | null = readDemoMode();
+export const DEMO: boolean = DEMO_MODE !== null;
+/** The 16.10 mock: assistants from the prototype store, not from a daemon. */
+export const DEMO_PROTOTYPE: boolean = DEMO_MODE === "w0138";
+/** The assistants base: real assistant screens, fake daemons (demo/assist). */
+export const DEMO_ASSIST: boolean = DEMO_MODE === "assist";
 
 /**
  * The switches of the mock: where Misha compares two ways of the same thing.

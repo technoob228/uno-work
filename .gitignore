@@ -29,3 +29,7 @@ squashfs-root/
 .vercel
 *.zip
 dist-tarball/
+
+# Assistants demo build and its flow screenshots (28.10)
+apps/web/dist-demo
+apps/web/demo-e2e/shots

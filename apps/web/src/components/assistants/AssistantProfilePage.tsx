@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useMachineLabels, useMachineRows } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
@@ -83,7 +83,7 @@ import { setupProgressLine } from "./teamFromDaemon.logic";
 import { useTeamActions } from "./useTeamActions";
 
 /** Outside the mock the page reads and changes what the assistant's computer keeps. */
-const REAL = !DEMO;
+const REAL = !DEMO_PROTOTYPE;
 
 type RightsPatch = Partial<
   Pick<AssistantProfile, "preset" | "projects" | "computers" | "access" | "ownComputer">
