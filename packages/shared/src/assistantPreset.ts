@@ -287,6 +287,7 @@ const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
   db_create: "create",
   computer_create: "create",
   assistant_create: "create",
+  github_pr_comment: "connected-apps",
 };
 
 /**

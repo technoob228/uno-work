@@ -601,6 +601,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     },
     "The email wasn't sent",
   ],
+  github_pr_comment: [
+    "Commenting on the pull request…",
+    (c) =>
+      named(
+        "Commented on pull request",
+        typeof c.args.number === "number" ? `#${c.args.number}` : undefined,
+        "Commented on the pull request",
+      ),
+    "The comment wasn't posted",
+  ],
   db_list: [
     "Looking at your databases…",
     (c) => countOf(c, "databases", "databases"),

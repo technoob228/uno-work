@@ -89,6 +89,7 @@ import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
 import { mailTools, type MailOwner } from "./mailTools.ts";
+import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
@@ -3246,6 +3247,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     displayPath: (absolute, home) => displayPath(absolute, home),
     fail: toolError,
   }),
+
+  // A comment on a GitHub pull request as the Uno GitHub app (Automations, 28.10)
+  githubPrCommentTool({ fail: toolError }),
 
   // Account
   {
