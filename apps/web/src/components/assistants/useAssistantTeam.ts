@@ -20,7 +20,7 @@ import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { DEMO, DEMO_PROTOTYPE } from "../../demo/demoFlag";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import { useMachineLabels } from "../../hooks/useMachineRows";
 import { listAssistants } from "../../lib/managerApi";
 import { toSortableTimestamp } from "../../lib/threadSort";
@@ -104,13 +104,29 @@ function fallbackProfile(
 const ORDER = (member: TeamMember) => (member.isUno ? 0 : 1);
 
 /**
+ * The assistants update on this account (`assistants_mvp` in the console's
+ * features): "loading" until the console answers. Everything new since
+ * 0.0.156 (assistants D, Automations, project sync, Connectors and Skills in
+ * Settings, the agent's email…) shows only when "on"; otherwise Work looks
+ * and behaves as 0.0.156 (Misha 28.10). The 16.10 mock (`?demo=w0138`)
+ * always has it; the assistants demo (`VITE_DEMO=assist`) asks its world
+ * (`?assistants=off`).
+ */
+export type AssistantsUpdate = "loading" | "on" | "off";
+
+export function useAssistantsUpdate(): AssistantsUpdate {
+  const availability = useAssistantsAvailability();
+  if (DEMO_PROTOTYPE || availability === "on") return "on";
+  return availability === "loading" ? "loading" : "off";
+}
+
+/**
  * Whether the team of assistants (its block in the sidebar, "New assistant",
- * their pages, access and Activity) is shown: for an account with the
- * assistants update (`assistants_mvp`, 22.10), and in the mock.
+ * their pages, access and Activity) — and the rest of the assistants update —
+ * is shown: `useAssistantsUpdate() === "on"` (false while it is loading).
  */
 export function useTeamShown(): boolean {
-  const availability = useAssistantsAvailability();
-  return DEMO || availability === "on";
+  return useAssistantsUpdate() === "on";
 }
 
 /** The daemon's list of assistants, per computer. */
@@ -228,7 +244,8 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
     // the one the person talked to last.
     const unos = members.filter((member) => member.isUno);
     const mainUno = pickAccountUno(unos, {
-      homeEnvironmentId,
+      // Without the update: the one the person talked to last (0.0.156).
+      homeEnvironmentId: teamShown ? homeEnvironmentId : null,
       lastTalkMs: (member) =>
         member.chats.conversations[0] ? threadActivityMs(member.chats.conversations[0]) : -1,
     });

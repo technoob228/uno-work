@@ -135,3 +135,29 @@ describe("simple settings (01.10)", () => {
     expect(isSimpleSettingsPath("/settings/app/general")).toBe(false);
   });
 });
+
+describe("gating 28.10: Connectors and Skills only with the assistants update", () => {
+  const labels = (assistantsUpdate: boolean) =>
+    buildSettingsNavGroups({
+      isWebApp: false,
+      isFlagEnabled: () => true,
+      machine: null,
+      mode: "simple",
+      assistantsUpdate,
+    })[0]!.entries.map((entry) => entry.label);
+
+  it("without it the simple entries are those of 0.0.156", () => {
+    expect(labels(false)).toEqual([
+      "Account & plan",
+      "AI",
+      "Assistants & phone",
+      "Computer",
+      "Developer",
+    ]);
+  });
+
+  it("with it Connectors and Skills are there", () => {
+    expect(labels(true)).toContain("Connectors");
+    expect(labels(true)).toContain("Skills");
+  });
+});

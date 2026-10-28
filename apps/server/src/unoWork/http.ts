@@ -484,11 +484,13 @@ const makeDeps = (input: {
         }),
       // The assistant's own conversation orchestrates: heavy work goes to a
       // chat it starts (Misha 28.10), enforced in runUnoWorkTool.
+      // Gating (28.10): only with the assistants update (ASSISTANTS_MVP); without
+      // it Uno's own chat keeps every tool, as in 0.0.156.
       orchestratorOnly: callerAssistant.pipe(
-        Effect.map((owner) =>
+        Effect.flatMap((owner) =>
           owner !== null && thread !== null && isAssistantConversationThread(thread)
-            ? { name: owner.title }
-            : null,
+            ? assistantsEnabled.pipe(Effect.map((on) => (on ? { name: owner.title } : null)))
+            : Effect.succeed(null),
         ),
       ),
       machineApps: { list: machineApps.list, action: machineApps.action },

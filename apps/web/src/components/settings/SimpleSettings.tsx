@@ -47,7 +47,9 @@ import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { AssistantModelPicker } from "../chat/AssistantEngine";
+import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { AssistantAiChoice } from "../assistants/AssistantAiChoice";
+import { useTeamShown } from "../assistants/useAssistantTeam";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
 import { resolveProviderPaneKind } from "../chat/modelPickerProviderPane";
@@ -208,6 +210,7 @@ const AGENTS_RECHECK_MS = 10_000;
 function DefaultAiSection({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const picker = useHomeModelPicker(environmentId);
   const assistantLlm = useAssistantLlm(environmentId);
+  const teamShown = useTeamShown();
   const assistantProject = useStore((state) =>
     selectProjectByRef(state, scopeProjectRef(environmentId, ASSISTANT_PROJECT_ID)),
   );
@@ -229,11 +232,15 @@ function DefaultAiSection({ environmentId }: { readonly environmentId: Environme
               <AssistantModelPicker environmentId={environmentId} testId="settings-ai-uno" />
             }
           />
-          <AssistantAiChoice
-            environmentId={environmentId}
-            computer="this computer"
-            className="px-4 pb-3 sm:px-5"
-          />
+          {teamShown ? (
+            <AssistantAiChoice
+              environmentId={environmentId}
+              computer="this computer"
+              className="px-4 pb-3 sm:px-5"
+            />
+          ) : (
+            <AssistantPowerPicker environmentId={environmentId} className="px-4 pb-3 sm:px-5" />
+          )}
         </>
       ) : null}
       {assistantProject && work ? (
@@ -783,6 +790,7 @@ export function DeveloperSettings() {
   const { environmentId } = useActiveMachine();
   const rows = useMachineRows();
   const flagOverrides = useFeatureFlagOverrides();
+  const assistantsUpdate = useTeamShown();
   const groups = useMemo(() => {
     const label = rows.find((row) => row.environmentId === environmentId)?.label ?? "This computer";
     return buildSettingsNavGroups({
@@ -790,8 +798,9 @@ export function DeveloperSettings() {
       isFlagEnabled: (flag) => flag === undefined || resolveFeatureFlag(flagOverrides, flag),
       machine: environmentId ? { environmentId, label } : null,
       mode: "classic",
+      assistantsUpdate,
     });
-  }, [environmentId, flagOverrides, rows]);
+  }, [assistantsUpdate, environmentId, flagOverrides, rows]);
   return (
     <SettingsPageContainer>
       <SettingsSection title="Developer">

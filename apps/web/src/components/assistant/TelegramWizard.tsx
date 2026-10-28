@@ -38,6 +38,7 @@ import {
   upsertConnectorBinding,
 } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
+import { useTeamShown } from "../assistants/useAssistantTeam";
 import { describeTelegramStatus, parseTelegramChatId } from "../helper/telegramPageLogic";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { Button } from "../ui/button";
@@ -83,6 +84,8 @@ export function TelegramWizard(props: {
   const telegram = summary.telegram;
   const navigate = useNavigate();
   const supportsPairing = useEnvironmentSupportsAssistantConversations(environmentId);
+  // Without the assistants update: the 0.0.156 words.
+  const teamShown = useTeamShown();
   // The assistant this wizard sets up (several per computer since 0.0.106);
   // only the computer's default one has the pinned main conversation.
   const projectId = summary.projectId;
@@ -248,6 +251,7 @@ export function TelegramWizard(props: {
           <div className="flex flex-col gap-2 pl-7 text-sm">
             <p className="text-muted-foreground">
               Its own bot: its own name and chat in your Telegram.
+              {teamShown ? null : " About a minute:"}
             </p>
             <ol
               className="flex list-decimal flex-col gap-0.5 pl-5 text-muted-foreground"

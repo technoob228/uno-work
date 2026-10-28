@@ -72,13 +72,14 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
 import { AssistantPage } from "./AssistantPage";
 import { AssistantProfilePage } from "./AssistantProfilePage";
-import { DEMO } from "../../demo/demoFlag";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
 import { PersonaCreatorPage } from "./PersonaCreator";
 import { UnoSetupPage } from "./UnoSetupPage";
 import { AssistantAiChoice } from "./AssistantAiChoice";
+import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { useTeamShown } from "./useAssistantTeam";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -174,21 +175,18 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
 export function AssistantsView() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
+  // The assistants update on the account, or the 16.10 mock (useAssistantsUpdate).
+  const teamShown = useTeamShown();
   // The team page (w0138 p7): with the assistants update on the account, and in the mock.
-  if (
-    (DEMO || availability === "on") &&
-    search.view === "profile" &&
-    search.env &&
-    search.project
-  ) {
+  if (teamShown && search.view === "profile" && search.env && search.project) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
   }
   // Variant D: Uno's first click when it isn't set up — AI, mode, apps, then its chat.
-  if ((DEMO || availability === "on") && search.view === "uno-setup") {
+  if (teamShown && search.view === "uno-setup") {
     return <UnoSetupPage environmentId={search.env} />;
   }
   // Variant D: a new assistant is a persona from the gallery (Grok-style), next to Uno.
-  if ((DEMO || availability === "on") && search.view === "new") {
+  if (teamShown && search.view === "new") {
     return <PersonaCreatorPage />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
@@ -810,6 +808,8 @@ function CreateAssistant({
   const [saving, setSaving] = useState(false);
   const assistantChat = useAssistantChat();
   const connected = model.entity?.telegramOn === true || model.entity?.slackOn === true;
+  // Without the assistants update: the 0.0.156 words and AI picker.
+  const teamShown = useTeamShown();
 
   const saveProfile = async () => {
     setSaving(true);
@@ -898,7 +898,11 @@ function CreateAssistant({
               value={about}
               maxLength={ASSISTANT_ABOUT_MAX}
               rows={2}
-              placeholder="For example: keeps my calendar and sends me a plan for the day"
+              placeholder={
+                teamShown
+                  ? "For example: keeps my calendar and sends me a plan for the day"
+                  : "For example: answers my customers' questions about prices and opening hours"
+              }
               onChange={(event) => setAbout(event.currentTarget.value)}
               data-testid="assistants-about"
             />
@@ -949,7 +953,11 @@ function CreateAssistant({
                       </span>
                     ) : null}
                   </span>
-                  <span className="block text-xs text-muted-foreground">{option.body}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {option.id === "telegram" && !teamShown
+                      ? "Its own bot: about a minute in @BotFather."
+                      : option.body}
+                  </span>
                 </span>
               </button>
             ))}
@@ -968,12 +976,20 @@ function CreateAssistant({
               </p>
             )}
           </div>
-          <AssistantAiChoice
-            environmentId={environmentId}
-            name={name.trim() || DEFAULT_ASSISTANT_NAME}
-            computer={machineLabel}
-            className="rounded-2xl border border-border p-4"
-          />
+          {teamShown ? (
+            <AssistantAiChoice
+              environmentId={environmentId}
+              name={name.trim() || DEFAULT_ASSISTANT_NAME}
+              computer={machineLabel}
+              className="rounded-2xl border border-border p-4"
+            />
+          ) : (
+            <AssistantPowerPicker
+              environmentId={environmentId}
+              heading={`What powers ${name.trim() || DEFAULT_ASSISTANT_NAME}`}
+              className="rounded-2xl border border-border p-4"
+            />
+          )}
           <div className="flex items-center justify-between gap-2">
             <Button variant="ghost" onClick={() => setStep(1)}>
               Back

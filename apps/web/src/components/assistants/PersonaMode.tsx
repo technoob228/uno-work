@@ -23,7 +23,7 @@ import { cn } from "../../lib/utils";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
-import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
+import { type TeamMember, useAssistantTeam, useTeamShown } from "./useAssistantTeam";
 import { useTeamActions } from "./useTeamActions";
 
 export type AssistantMode = "itself" | "asks-first";
@@ -85,10 +85,12 @@ const ICON: Record<AssistantMode, typeof ZapIcon> = { itself: ZapIcon, "asks-fir
 /** The chip at the top of its chat: "✋ Cautious ▾". */
 export function AssistantModeChip(props: { readonly member: TeamMember }) {
   const { member } = props;
+  const teamShown = useTeamShown();
   const mode = modeOf(member);
   const { set, saving } = useSetMode(member);
   const Icon = ICON[mode];
-  if (member.revoked) return null;
+  // Gating (28.10): only with the assistants update; without it, the 0.0.156 header.
+  if (member.revoked || !teamShown) return null;
   return (
     <Menu>
       <MenuTrigger
@@ -201,6 +203,7 @@ export function CloudSleepsBanner(props: {
   readonly environmentId: string;
   readonly threadId: string;
 }) {
+  const teamShown = useTeamShown();
   const plan = useCloudPlan();
   const projectId = useStore(
     (state) =>
@@ -209,7 +212,13 @@ export function CloudSleepsBanner(props: {
       )?.projectId ?? null,
   );
   const [hidden, setHidden] = useState(false);
-  if (plan !== "free" || hidden || projectId === null || !isAssistantProjectId(projectId)) {
+  if (
+    !teamShown ||
+    plan !== "free" ||
+    hidden ||
+    projectId === null ||
+    !isAssistantProjectId(projectId)
+  ) {
     return null;
   }
   return (

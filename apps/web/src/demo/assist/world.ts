@@ -40,6 +40,11 @@ export interface AssistWorld {
    * getuno/web (`norepo`), lacks "Pull requests: write" (`noperm`), not installed (`off`).
    */
   readonly gh: "ok" | "norepo" | "noperm" | "off";
+  /**
+   * The console's assistants update (`assistants_mvp`, gating 28.10): `off` —
+   * an account without it, Work looks as 0.0.156.
+   */
+  readonly assistants?: "on" | "off";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -117,6 +122,7 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     connectors,
     automations: take("automations", ["none", "some"] as const) ?? start.automations,
     gh: take("gh", ["ok", "norepo", "noperm", "off"] as const) ?? start.gh,
+    assistants: take("assistants", ["on", "off"] as const) ?? start.assistants ?? "on",
   };
   return touched ? next : null;
 }

@@ -195,11 +195,23 @@ export function buildSettingsNavGroups(input: {
    * then everything. "classic" (default): everything, as before 01.10.
    */
   readonly mode?: "classic" | "simple" | "developer";
+  /**
+   * The account has the assistants update (gating 28.10). Off: Connectors
+   * and Skills aren't in the simple entries, as in 0.0.156.
+   */
+  readonly assistantsUpdate?: boolean;
 }): ReadonlyArray<SettingsNavGroup> {
   const simpleGroup: SettingsNavGroup = {
     kind: "simple",
     heading: SIMPLE_NAV_GROUP_HEADING,
-    entries: SIMPLE_NAV_ENTRIES,
+    entries:
+      input.assistantsUpdate === false
+        ? SIMPLE_NAV_ENTRIES.filter(
+            (entry) =>
+              entry.to !== SIMPLE_SETTINGS_PATHS.connectors &&
+              entry.to !== SIMPLE_SETTINGS_PATHS.skills,
+          )
+        : SIMPLE_NAV_ENTRIES,
   };
   if (input.mode === "simple") return [simpleGroup];
   const appEntries: SettingsNavEntry[] = [

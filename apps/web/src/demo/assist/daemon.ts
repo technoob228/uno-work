@@ -426,7 +426,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       const list = [...records.values()]
         .filter((record) => record.persona.machine === machine.key)
         .map((record) => summaryOf(machine, record));
-      return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
+      return json({
+        assistants: list,
+        assistantSandbox: true,
+        assistantsEnabled: world.assistants !== "off",
+      });
     }),
     http.get("*/api/manager/assistants/deleted", () => json({ deleted: [] })),
     http.get("*/api/manager/started-by", ({ request }) =>
@@ -755,7 +759,7 @@ export function accountHandlers(): HttpHandler[] {
         llm_balance: 0,
         one_wallet: true,
         role: "user",
-        features: ["assistants_mvp"],
+        features: world.assistants === "off" ? [] : ["assistants_mvp"],
       }),
     ),
     http.get("*/_account/api/v1/boxes", () => HttpResponse.json({ boxes: boxes() })),

@@ -17,6 +17,7 @@ import {
   statusProblem,
   triggerOf,
   unavailableLine,
+  automationsShown,
 } from "./automations.logic";
 
 const run = (over: Partial<AutomationRun> = {}): AutomationRun =>
@@ -250,5 +251,14 @@ describe("the Automations screen and the chat card", () => {
     expect(automationFromToolResult("Created it")).toBeNull();
     expect(automationFromToolResult(JSON.stringify({ error: { code: "X" } }))).toBeNull();
     expect(automationFromToolResult(undefined)).toBeNull();
+  });
+});
+
+describe("automationsShown (gating 28.10)", () => {
+  const on = { available: true, automations: [] } as never;
+  it("needs the assistants update and a console that has AUTOMATIONS on", () => {
+    expect(automationsShown({ teamShown: false, computers: [on] })).toBe(false);
+    expect(automationsShown({ teamShown: true, computers: [undefined] })).toBe(false);
+    expect(automationsShown({ teamShown: true, computers: [on] })).toBe(true);
   });
 });
