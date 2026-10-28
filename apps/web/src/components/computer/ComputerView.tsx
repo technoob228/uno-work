@@ -490,6 +490,7 @@ export function ComputerView() {
                 tiles={tiles}
                 machineApps={machineAppsQuery.data?.apps ?? []}
                 appsLoading={machineAppsQuery.isPending}
+                machineAppsLoaded={machineAppsQuery.isSuccess}
                 onOpenTile={openTile}
                 onTileDetails={(tile) => {
                   resetTileMutations();

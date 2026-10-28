@@ -118,3 +118,10 @@ export function portPreviewUrlToLocalUrl(rawUrl: string): string | null {
   if (!host) return null;
   return `http://localhost:${host.port}${url.pathname}${url.search}${url.hash}`;
 }
+
+/**
+ * Uno Work's own page for one app of the computer (`/app?app=<app id>`): it
+ * opens the app inside Work — from its port's address on a cloud computer.
+ * The agent's tools hand this link out instead of a localhost address.
+ */
+export const WORK_APP_LINK_PATH = "/app";

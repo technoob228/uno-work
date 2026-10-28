@@ -28,6 +28,7 @@ import { resolveAppApiPort } from "./appSdk/appApiPort.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig } from "./config.ts";
+import { isNewWorkHost, rememberWorkHost, workHostOf } from "./workAddress.ts";
 import {
   portPreviewPublicHost,
   type PortPreviewTarget,
@@ -145,6 +146,22 @@ const handlePortPreview = (
   });
 
 /**
+ * The person's own Uno Work address (workAddress.ts), from a request that is
+ * really theirs: checked only when the host is new, so it costs nothing on
+ * every other request.
+ */
+const noteWorkAddress = (
+  request: HttpServerRequest.HttpServerRequest,
+  auth: (typeof ServerAuth)["Service"],
+) =>
+  Effect.gen(function* () {
+    const host = workHostOf(request.headers);
+    if (host === null || !isNewWorkHost(host)) return;
+    const session = yield* auth.authenticateHttpRequest(request).pipe(Effect.option);
+    if (Option.isSome(session)) rememberWorkHost(host);
+  });
+
+/**
  * Outermost of the router's global middleware: provide it after (outside)
  * the CORS layer, so a port's page never gets Work's CORS answers.
  */
@@ -168,7 +185,10 @@ export const portPreviewLayer = HttpRouter.middleware(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const rawPort = request.headers[PORT_PREVIEW_HEADER];
-        if (rawPort === undefined) return yield* httpApp;
+        if (rawPort === undefined) {
+          yield* noteWorkAddress(request, auth);
+          return yield* httpApp;
+        }
         return yield* handlePortPreview(request, rawPort, deps);
       });
   }),

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import * as Schema from "effect/Schema";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { getLocalStorageItem, useLocalStorage } from "../../../hooks/useLocalStorage";
 import { accountReachable } from "../../myuno/myUnoQueries";
@@ -66,6 +66,7 @@ import {
   type WidgetMeta,
 } from "./HomeWidgets";
 import {
+  HOME_APP_WIDGETS_SEEN_KEY,
   HOME_FIXED_BLOCKS,
   HOME_LAYOUT_KEY,
   HOME_LAYOUT_V2_KEY,
@@ -80,6 +81,7 @@ import {
   isAppWidgetBlockId,
   isHomeFixedBlockId,
   migrateHomeLayout,
+  newAppWidgetBlocks,
   normalizeHomeLayout,
   showInProgress,
   type HomeBlockId,
@@ -144,6 +146,10 @@ export const HOME_PLACE_LINE =
 
 /** The layout (per device) and the Customize mode. */
 export function useHomeLayout() {
+  // Was there a Home layout on this device before this visit? (App widgets
+  // land on Home by themselves — but on an updated device not the ones that
+  // already existed: see newAppWidgetBlocks.)
+  const [layoutSaved] = useState(() => hasStored(HOME_LAYOUT_KEY));
   // Migration from the 0.0.82 layout (or the 0.0.81 widget list) happens once,
   // when there's no v3 layout yet.
   const [initial] = useState(() =>
@@ -165,7 +171,43 @@ export function useHomeLayout() {
   );
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
-  return { blocks, dispatch, editing, setEditing, adding, setAdding };
+  return { blocks, dispatch, editing, setEditing, adding, setAdding, layoutSaved };
+}
+
+function hasStored(key: string): boolean {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(key) !== null;
+  } catch {
+    return true;
+  }
+}
+
+const SEEN_SCHEMA = Schema.NullOr(Schema.Array(Schema.String));
+
+/**
+ * New app widgets land on Home by themselves, once per device
+ * (newAppWidgetBlocks). Runs once the computer's apps are known.
+ */
+function useNewAppWidgetsOnHome(input: {
+  readonly layout: HomeLayout;
+  readonly widgetAppIds: ReadonlyArray<string>;
+  readonly ready: boolean;
+}) {
+  const { layout, widgetAppIds, ready } = input;
+  const [seen, setSeen] = useLocalStorage<
+    ReadonlyArray<string> | null,
+    ReadonlyArray<string> | null
+  >(HOME_APP_WIDGETS_SEEN_KEY, null, SEEN_SCHEMA);
+  const idsKey = widgetAppIds.join(",");
+  const { dispatch, layoutSaved } = layout;
+  useEffect(() => {
+    if (!ready) return;
+    const next = newAppWidgetBlocks({ widgetAppIds, seen, layoutSaved });
+    for (const id of next.add) dispatch({ type: "add", id });
+    if (seen === null || next.seen.length !== seen.length) setSeen(next.seen);
+    // widgetAppIds by value (idsKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, idsKey, seen, layoutSaved, dispatch, setSeen]);
 }
 
 function readStored(key: string): ReadonlyArray<string> | null {
@@ -193,6 +235,7 @@ export function HomeStart({
   tiles,
   machineApps,
   appsLoading,
+  machineAppsLoaded = false,
   onOpenTile,
   onTileDetails,
   hiddenApps,
@@ -211,6 +254,8 @@ export function HomeStart({
   /** This computer's apps as the daemon reports them (widgets come from their manifests). */
   machineApps: ReadonlyArray<UnoMachineApp>;
   appsLoading: boolean;
+  /** The daemon answered with this computer's apps (not loading, not failed). */
+  machineAppsLoaded?: boolean;
   onOpenTile: (tile: ProgramTile) => void;
   onTileDetails: (tile: ProgramTile) => void;
   /** Found programs hidden from Home, listed under the Apps widget with "Show on Home". */
@@ -291,6 +336,12 @@ export function HomeStart({
     }
     return out;
   }, [machineApps]);
+
+  useNewAppWidgetsOnHome({
+    layout,
+    widgetAppIds: [...widgetApps.keys()],
+    ready: machineAppsLoaded,
+  });
 
   const available = useMemo<HomeBlockId[]>(
     () => [
@@ -403,7 +454,10 @@ export function HomeStart({
     if (isAppWidgetBlockId(id)) {
       const app = widgetApps.get(appIdOfBlock(id));
       return app
-        ? { body: <HomeAppWidget app={app} />, action: <HomeAppWidgetOpen app={app} /> }
+        ? {
+            body: <HomeAppWidget app={app} environmentId={environmentId} />,
+            action: <HomeAppWidgetOpen app={app} environmentId={environmentId} />,
+          }
         : { body: null };
     }
     switch (id) {

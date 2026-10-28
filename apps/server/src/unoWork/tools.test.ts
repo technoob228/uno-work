@@ -25,6 +25,7 @@ import {
   BOT_WAITING_FOR_TOKEN_NEXT,
   UNO_WORK_MCP_SERVER,
   UNO_WORK_TOOLS,
+  appLocalAddress,
   runUnoWorkTool,
   toolLevel,
   type UnoWorkTool,
@@ -773,6 +774,62 @@ describe("apps and widgets", () => {
     expect(outside._tag).toBe("Failure");
   });
 
+  it("registers an app with its widget in one call; the widget lands on Home by itself", async () => {
+    const { deps, home } = makeDeps({ hostedMachine: true });
+    const withLink: UnoWorkToolDeps = {
+      ...deps,
+      workAddress: () => "https://3csvnrcm77.uno4.work",
+    };
+    const result = await run("app_register", withLink, {
+      id: "plan-limits",
+      name: "Plan limits",
+      icon: "📊",
+      port: 8471,
+      command: "python3 app.py",
+      cwd: "~/projects/plan-limits",
+      widget: { path: "/widget", size: "small" },
+    });
+    if (result._tag !== "Success") throw new Error("app_register failed");
+    const manifest = JSON.parse(
+      readFileSync(path.join(home, ".uno", "apps", "plan-limits.json"), "utf8"),
+    );
+    expect(manifest.widget).toEqual({ path: "/widget", size: "small" });
+    const text = JSON.stringify(result.success);
+    expect(text).toContain("appears there by itself");
+    expect(text).toContain('open_in_panel with appId \\"manifest:plan-limits\\"');
+    expect(text).toContain("https://3csvnrcm77.uno4.work/app?app=manifest%3Aplan-limits");
+    expect(text).not.toContain("Customize");
+    const schema = tool("app_register").inputSchema;
+    expect(validateArgs(schema, { id: "x", name: "X", widget: { path: "https://x" } })).toContain(
+      "must match",
+    );
+  });
+
+  it("app_add_widget says the widget is on Home already, not 'add it by hand'", async () => {
+    const { deps } = makeDeps();
+    await run("app_register", deps, { id: "w", name: "W", port: 3000, command: "node s.js" });
+    const result = await run("app_add_widget", deps, { appId: "w", path: "/widget" });
+    const text = result._tag === "Success" ? JSON.stringify(result.success) : "";
+    expect(text).toContain("appears on the person's Home by itself");
+    expect(text).not.toContain("Customize");
+  });
+
+  it("lists the link that opens each web app in the person's Uno Work", async () => {
+    const { deps } = makeDeps({ hostedMachine: true });
+    const result = await run(
+      "apps_list",
+      { ...deps, workAddress: () => "https://3csvnrcm77.uno4.work" },
+      {},
+    );
+    if (result._tag !== "Success") throw new Error("apps_list failed");
+    expect((result.success as { apps: Array<{ link?: string }> }).apps[0]?.link).toBe(
+      "https://3csvnrcm77.uno4.work/app?app=manifest%3Anotes",
+    );
+    const local = await run("apps_list", { ...deps, hostedMachine: false }, {});
+    if (local._tag !== "Success") throw new Error("apps_list failed");
+    expect((local.success as { apps: Array<{ link?: string }> }).apps[0]?.link).toBeUndefined();
+  });
+
   it("tells the model a repeated widget call is already done", async () => {
     const { deps } = makeDeps();
     await run("app_register", deps, { id: "w", name: "W", port: 3000, command: "node s.js" });
@@ -847,25 +904,113 @@ describe("telling and showing", () => {
     expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/widget" } });
   });
 
-  it("shows an app with a public address as the app, not in the computer's browser", async () => {
+  it("puts a page path on the app's port, never under the app's own page (P16: /widget/widget)", async () => {
+    const { deps, recorded } = makeDeps({
+      apps: [app({ port: 8471, localUrl: "http://localhost:8471/widget" })],
+    });
+    await run("open_in_panel", deps, { appId: "notes", path: "/widget" });
+    expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:8471/widget" } });
+    await run("open_in_panel", deps, { appId: "notes" });
+    expect(recorded.bridge[1]).toMatchObject({ body: { url: "http://localhost:8471/widget" } });
+    expect(appLocalAddress({ port: 8471, localUrl: null }, "settings")).toBe(
+      "http://localhost:8471/settings",
+    );
+  });
+
+  it("shows an app of this computer inside Uno Work even when it is also on the internet", async () => {
     const { deps, recorded } = makeDeps({
       hostedMachine: true,
       apps: [app({ publication: { url: "http://203.0.113.5:31080/", forwards: [] } as never })],
     });
+    await run("open_in_panel", deps, { appId: "notes" });
+    expect(recorded.appPanel).toEqual([]);
+    expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/" } });
+  });
+
+  it("shows an app hosted somewhere else as the app", async () => {
+    const { deps, recorded } = makeDeps({
+      hostedMachine: true,
+      apps: [app({ port: null, http: false, localUrl: null, url: "https://notes.example/" })],
+    });
     const result = await run("open_in_panel", deps, { appId: "notes" });
     expect(result).toMatchObject({
       _tag: "Success",
-      success: { opened: "http://203.0.113.5:31080/", where: "app panel" },
+      success: { opened: "https://notes.example/", where: "app panel" },
     });
-    expect(recorded.appPanel).toEqual([{ url: "http://203.0.113.5:31080/", name: "Notes" }]);
+    expect(recorded.appPanel).toEqual([{ url: "https://notes.example/", name: "Notes" }]);
     expect(recorded.bridge).toEqual([]);
   });
 
-  it("tells the agent the person can't open a localhost app on a cloud computer", async () => {
-    const { deps, recorded } = makeDeps({ hostedMachine: true });
-    const result = await run("open_in_panel", deps, { appId: "notes" });
+  it("an app shown in the person's panel: done, with the link to it in their Uno Work", async () => {
+    const { deps } = makeDeps({ hostedMachine: true });
+    const panelDeps: UnoWorkToolDeps = {
+      ...deps,
+      workAddress: () => "https://3csvnrcm77.uno4.work",
+      personWindowOpen: Effect.succeed(true),
+      bridge: () => Effect.succeed({ status: 200, body: { ok: true, where: "panel" } }),
+    };
+    const result = await run("open_in_panel", panelDeps, { appId: "notes" });
     if (result._tag !== "Success") throw new Error("open_in_panel failed");
-    expect((result.success as { note?: string }).note).toContain("app_show_on_internet");
+    expect(result.success).toMatchObject({
+      opened: "Notes",
+      where: "the person's panel, inside Uno Work",
+      link: "https://3csvnrcm77.uno4.work/app?app=manifest%3Anotes",
+    });
+    const note = (result.success as { note: string }).note;
+    expect(note).not.toContain("app_show_on_internet");
+    expect(note).toContain("no address to ask for");
+  });
+
+  it("never falls back to the computer's own browser when Uno Work isn't open", async () => {
+    const { deps, recorded } = makeDeps({ hostedMachine: true });
+    const closed: UnoWorkToolDeps = {
+      ...deps,
+      workAddress: () => "https://3csvnrcm77.uno4.work",
+      personWindowOpen: Effect.succeed(false),
+    };
+    const result = await run("open_in_panel", closed, { appId: "notes" });
+    if (result._tag !== "Success") throw new Error("open_in_panel failed");
+    expect(recorded.bridge).toEqual([]);
+    expect(result.success).toMatchObject({
+      opened: null,
+      link: "https://3csvnrcm77.uno4.work/app?app=manifest%3Anotes",
+    });
+    const unknown = await run(
+      "open_in_panel",
+      { ...closed, workAddress: () => null },
+      {
+        appId: "notes",
+      },
+    );
+    if (unknown._tag !== "Success") throw new Error("open_in_panel failed");
+    const note = (unknown.success as { note: string }).note;
+    expect(note).toContain("Apps & sites");
+    expect(note).toContain("Don't ask them for any address");
+  });
+
+  it("waits for an app Uno is about to start before showing it", async () => {
+    let calls = 0;
+    const { deps, recorded } = makeDeps({ hostedMachine: true });
+    const starting: UnoWorkToolDeps = {
+      ...deps,
+      appStartWaitMs: 500,
+      machineApps: {
+        ...deps.machineApps,
+        list: Effect.sync(() => {
+          calls += 1;
+          return {
+            apps: [app({ status: calls >= 3 ? "running" : "stopped", canStart: true })],
+            manifestDir: "~/.uno/apps",
+            scannedAt: "",
+            publishBlockedReason: null,
+            warnings: [],
+          };
+        }),
+      },
+    };
+    const result = await run("open_in_panel", starting, { appId: "notes" });
+    expect(result._tag).toBe("Success");
+    expect(calls).toBeGreaterThanOrEqual(3);
     expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/" } });
   });
 

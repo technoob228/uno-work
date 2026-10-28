@@ -101,6 +101,25 @@ describe("Uno Work environment brief", () => {
     }
   });
 
+  it("an app or a widget: one path inside Uno Work, never publish it or ask for an address (P16)", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toContain(
+      "`open_in_panel` with its `appId` shows it inside the person's Uno Work",
+    );
+    expect(brief).toContain("never publish it or ask for an address");
+    expect(brief).toContain(
+      '`widget: {"path": "/widget"}` in `app_register`: it lands on Home by itself',
+    );
+    expect(brief).not.toMatch(/To let them open an app themselves, use `app_show_on_internet`/);
+    const widgets = buildUnoWorkGuide("widgets");
+    expect(widgets).toContain('`widget: {"path": "/widget"}`');
+    expect(widgets).toContain("the widget appears on the person's Home by itself");
+    expect(widgets).not.toContain("Customize");
+    const apps = buildUnoWorkGuide("apps");
+    expect(apps).toContain("never ask the person for their address");
+    expect(apps).not.toMatch(/To give them their own link, use `app_show_on_internet`/);
+  });
+
   it("keeps the safety rules and the plan ladder", () => {
     const brief = buildUnoWorkBrief();
     expect(brief).toContain("request_secret");

@@ -194,7 +194,7 @@ export function buildUnoWorkGuide(
       ].join("\n\n");
     case "widgets":
       return [
-        "Add the widget with `app_add_widget` (it updates the manifest below).",
+        "One way: `widget` in `app_register` (or `app_add_widget` for an app registered earlier) — both write the manifest below — then `open_in_panel` with the app's `appId`.",
         section(apps, "Home widgets"),
       ].join("\n\n");
     case "storage":

@@ -12,8 +12,9 @@
  *
  * `/app?app=<tile key>` opens one of the computer's apps by its tile, like a
  * PC (Misha 16.10): "Starting…" while it starts, then the app — framed when
- * this browser reaches its address, else in the computer's own browser
- * (ComputerAppPage). Its settings are the ⚙ in the bar.
+ * this browser reaches its address; an app only the computer reaches comes
+ * from its port's address (ComputerAppFrame, P16 28.10 — never the agent's
+ * browser by itself). Its settings are the ⚙ in the bar.
  */
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import {
@@ -47,7 +48,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppFrame } from "./AppFrame";
-import { ComputerAppPage } from "./ComputerAppPage";
+import { ComputerAppFrame } from "./ComputerAppFrame";
 import { appHost, belongsToComputer } from "./appAddress";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
@@ -194,7 +195,13 @@ export function AppView() {
         ) : null}
       </Notice>
     ) : onComputer && url && machine.environmentId ? (
-      <ComputerAppPage environmentId={machine.environmentId} url={url} name={name} />
+      <ComputerAppFrame
+        environmentId={machine.environmentId}
+        url={url}
+        name={name}
+        icon={icon}
+        reloadKey={reloadKey}
+      />
     ) : !url ? (
       <Notice title="No app to open">Pick an app in the sidebar or on your Home screen.</Notice>
     ) : !known && loading ? (
@@ -220,7 +227,7 @@ export function AppView() {
       <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} firstSrc={firstSrc} />
     );
 
-  if (fullscreen && app && known && !onComputer) {
+  if (fullscreen && app && known) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
         <div className="fixed inset-0 z-50 bg-background">
@@ -239,9 +246,11 @@ export function AppView() {
               />
               <span className="max-w-[10rem] truncate">{name}</span>
             </span>
-            <PillButton label="Open in a new tab" onClick={() => openInNewTab(app.url)}>
-              <ExternalLinkIcon />
-            </PillButton>
+            {onComputer ? null : (
+              <PillButton label="Open in a new tab" onClick={() => openInNewTab(app.url)}>
+                <ExternalLinkIcon />
+              </PillButton>
+            )}
             <PillButton label="Exit full screen" onClick={() => setFullscreen(false)}>
               <Minimize2Icon />
             </PillButton>
@@ -282,25 +291,27 @@ export function AppView() {
               </div>
             ) : null}
           </div>
-          {openSettings && !(app && known && !onComputer) ? (
+          {openSettings && !(app && known) ? (
             <BarButton label="Settings" onClick={openSettings}>
               <SettingsIcon />
             </BarButton>
           ) : null}
-          {app && known && !onComputer ? (
+          {app && known ? (
             <div className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
               <BarButton label="Reload" onClick={() => setReloadKey((key) => key + 1)}>
                 <RotateCwIcon />
               </BarButton>
-              <BarButton
-                label={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-                active={pinned}
-                onClick={() =>
-                  toggle({ kind: "app", title: name, target: app.url, icon: icon ?? null })
-                }
-              >
-                {pinned ? <PinOffIcon /> : <PinIcon />}
-              </BarButton>
+              {onComputer ? null : (
+                <BarButton
+                  label={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
+                  active={pinned}
+                  onClick={() =>
+                    toggle({ kind: "app", title: name, target: app.url, icon: icon ?? null })
+                  }
+                >
+                  {pinned ? <PinOffIcon /> : <PinIcon />}
+                </BarButton>
+              )}
               <BarButton
                 label="Open beside a chat"
                 className="max-md:hidden"
@@ -308,12 +319,14 @@ export function AppView() {
               >
                 <PanelRightIcon />
               </BarButton>
-              <BarButton
-                label="Open in a new tab (if the app can't keep you signed in here)"
-                onClick={() => openInNewTab(app.url)}
-              >
-                <ExternalLinkIcon />
-              </BarButton>
+              {onComputer ? null : (
+                <BarButton
+                  label="Open in a new tab (if the app can't keep you signed in here)"
+                  onClick={() => openInNewTab(app.url)}
+                >
+                  <ExternalLinkIcon />
+                </BarButton>
+              )}
               <BarButton label="Full screen" onClick={() => setFullscreen(true)}>
                 <Maximize2Icon />
               </BarButton>

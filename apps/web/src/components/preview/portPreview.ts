@@ -19,11 +19,12 @@ import {
   computerLocalPort,
   isComputerLocalUrl,
   isPreviewablePort,
+  localUrlToPortPreviewUrl,
   urlPathAndQuery,
 } from "@t3tools/shared/portPreview";
 import { useEffect, useMemo, useState } from "react";
 
-import { accountRequest, accountTransport } from "../../account/unoAccount";
+import { AccountHttpError, accountRequest, accountTransport } from "../../account/unoAccount";
 import {
   readPrimaryEnvironmentDescriptor,
   usePrimaryEnvironmentDescriptor,
@@ -95,19 +96,140 @@ function parseLink(body: unknown, port: number): PortPreviewLink | null {
   return { url, origin, port };
 }
 
-/** A fresh link for a computer-local address; null — not available (open it on the computer). */
-export async function mintPortPreviewLink(input: {
+// ------------------------------------------------------- port sessions --
+//
+// The one-time link sets the port's cookie (`__Host-uno_port`, 12 h, one per
+// port address — whichever computer it was minted for). While it lives, a
+// frame can load the port's address straight away: no new link, and no new
+// "Opened a preview of port N" line in Security for every Home visit
+// (P16, 28.10). Only on the web, where every frame of Work shares the
+// cookie; the desktop's webviews keep their own jars and always mint.
+
+export const PORT_SESSIONS_KEY = "uno-work:port-sessions:v1";
+/** A little under the cookie's 12 h, so a reused session never just expired. */
+export const PORT_SESSION_REUSE_MS = 11 * 60 * 60 * 1000;
+
+export interface PortSessionRecord {
+  readonly origin: string;
+  readonly boxId: number;
+  readonly at: number;
+}
+
+type PortSessionStore = Pick<Storage, "getItem" | "setItem">;
+
+function readSessions(store: PortSessionStore): Record<string, PortSessionRecord> {
+  try {
+    const parsed: unknown = JSON.parse(store.getItem(PORT_SESSIONS_KEY) ?? "{}");
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, PortSessionRecord>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The port's live session for this computer, if this browser has one. */
+export function readPortSession(
+  store: PortSessionStore,
+  input: { readonly port: number; readonly boxId: number; readonly now: number },
+): PortSessionRecord | null {
+  const record = readSessions(store)[String(input.port)];
+  if (!record || typeof record.origin !== "string" || record.boxId !== input.boxId) return null;
+  if (!(input.now - record.at >= 0 && input.now - record.at < PORT_SESSION_REUSE_MS)) return null;
+  return record;
+}
+
+export function rememberPortSession(
+  store: PortSessionStore,
+  input: {
+    readonly port: number;
+    readonly boxId: number;
+    readonly origin: string;
+    readonly now: number;
+  },
+): void {
+  try {
+    const sessions = readSessions(store);
+    sessions[String(input.port)] = { origin: input.origin, boxId: input.boxId, at: input.now };
+    store.setItem(PORT_SESSIONS_KEY, JSON.stringify(sessions));
+  } catch {
+    // storage full or blocked: the next frame mints a link, as before
+  }
+}
+
+export function forgetPortSession(store: PortSessionStore, port: number): void {
+  try {
+    const sessions = readSessions(store);
+    if (!(String(port) in sessions)) return;
+    delete sessions[String(port)];
+    store.setItem(PORT_SESSIONS_KEY, JSON.stringify(sessions));
+  } catch {
+    // nothing to forget
+  }
+}
+
+function sessionStore(): PortSessionStore | null {
+  if (accountTransport() !== "work-proxy") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget a port's session (its frame said the cookie is gone). */
+export function forgetPortSessionHere(port: number): void {
+  const store = sessionStore();
+  if (store) forgetPortSession(store, port);
+}
+
+/**
+ * Why there is no link: `disabled` — this account doesn't show computer
+ * pages in its own browser yet (the console's WORK_PORT_PREVIEW);
+ * `unavailable` — anything else (no account here, the computer isn't
+ * reachable, a network error).
+ */
+export type PortLinkFailure = "disabled" | "unavailable";
+
+export type PortLinkResult =
+  | { readonly ok: true; readonly link: PortPreviewLink }
+  | { readonly ok: false; readonly reason: PortLinkFailure };
+
+function failureOf(cause: unknown): PortLinkFailure {
+  if (cause instanceof AccountHttpError && cause.status === 404) {
+    const body = cause.body as { error?: unknown } | null;
+    if (body && typeof body === "object" && body.error === "port_preview_disabled") {
+      return "disabled";
+    }
+  }
+  return "unavailable";
+}
+
+/**
+ * A way into a computer-local address from this browser: the port's
+ * address straight away while this browser holds its session, else a fresh
+ * one-time link. `fresh` skips the remembered session.
+ */
+export async function requestPortPreviewLink(input: {
   readonly localUrl: string;
   readonly computer: CloudComputer;
-}): Promise<PortPreviewLink | null> {
+  readonly fresh?: boolean;
+}): Promise<PortLinkResult> {
   const port = computerLocalPort(input.localUrl);
-  if (port === null || !isPreviewablePort(port)) return null;
+  if (port === null || !isPreviewablePort(port)) return { ok: false, reason: "unavailable" };
   const transport = accountTransport();
-  if (transport === "none") return null;
+  if (transport === "none") return { ok: false, reason: "unavailable" };
+  const store = sessionStore();
+  const boxId = input.computer.boxId;
+  if (store && boxId !== null && input.fresh !== true) {
+    const session = readPortSession(store, { port, boxId, now: Date.now() });
+    const direct = session ? localUrlToPortPreviewUrl(input.localUrl, session.origin) : null;
+    if (session && direct) return { ok: true, link: { url: direct, origin: session.origin, port } };
+  }
   const body = {
     port,
     path: urlPathAndQuery(input.localUrl),
-    ...(input.computer.boxId !== null ? { box_id: input.computer.boxId } : {}),
+    ...(boxId !== null ? { box_id: boxId } : {}),
   };
   try {
     const answer = await accountRequest(
@@ -115,10 +237,39 @@ export async function mintPortPreviewLink(input: {
       transport === "desktop" ? "/api/v1/work/port-preview" : "/port-preview",
       body,
     );
-    return parseLink(answer, port);
-  } catch {
-    return null;
+    const link = parseLink(answer, port);
+    if (!link) return { ok: false, reason: "unavailable" };
+    if (store && boxId !== null) {
+      rememberPortSession(store, { port, boxId, origin: link.origin, now: Date.now() });
+    }
+    return { ok: true, link };
+  } catch (cause) {
+    return { ok: false, reason: failureOf(cause) };
   }
+}
+
+/** A fresh link for a computer-local address; null — not available (open it on the computer). */
+export async function mintPortPreviewLink(input: {
+  readonly localUrl: string;
+  readonly computer: CloudComputer;
+}): Promise<PortPreviewLink | null> {
+  const result = await requestPortPreviewLink(input);
+  return result.ok ? result.link : null;
+}
+
+/**
+ * What a port's "Open this page from Uno Work" answer tells the frame's
+ * parent (the console's 401 page, P16): the cookie is gone — forget the
+ * session and come in with a fresh link.
+ */
+export const PORT_PREVIEW_REENTER_MESSAGE = "uno-port-preview:reenter";
+
+export function isPortReenterMessage(data: unknown): boolean {
+  return (
+    !!data &&
+    typeof data === "object" &&
+    (data as { __unoPortPreview?: unknown }).__unoPortPreview === PORT_PREVIEW_REENTER_MESSAGE
+  );
 }
 
 export type PortPreviewState =
@@ -126,38 +277,44 @@ export type PortPreviewState =
   | { readonly kind: "off" }
   | { readonly kind: "minting"; readonly port: number }
   | { readonly kind: "ready"; readonly link: PortPreviewLink }
-  /** No link: the page belongs in the computer's browser. */
-  | { readonly kind: "failed"; readonly port: number | null };
+  /** No link: the page can't be shown in this browser (the panel says so). */
+  | { readonly kind: "failed"; readonly port: number | null; readonly reason: PortLinkFailure };
 
 /**
  * The tab's "Your site" state: a link per port, kept while the tab stays on
  * that port (later pages of it load from the link's origin, the port's
- * cookie is already there).
+ * cookie is already there). `attempt` bumps to try again after a failure.
  */
 export function usePortPreview(input: {
   readonly url: string;
   readonly computer: CloudComputer | null;
   readonly enabled: boolean;
+  readonly attempt?: number;
 }): PortPreviewState {
   const { url, computer, enabled } = input;
+  const attempt = input.attempt ?? 0;
   const applies = enabled && computer !== null && url !== "" && isComputerLocalUrl(url);
   const port = applies ? computerLocalPort(url) : null;
   const boxId = computer?.boxId ?? null;
   const [state, setState] = useState<{
     readonly key: string;
     readonly link: PortPreviewLink | null;
-    readonly failed: boolean;
+    readonly failure: PortLinkFailure | null;
   } | null>(null);
-  const key = `${boxId ?? "this"}:${port ?? ""}`;
+  const key = `${boxId ?? "this"}:${port ?? ""}:${attempt}`;
 
   useEffect(() => {
     if (!applies || port === null || computer === null) return;
-    if (state?.key === key && (state.link !== null || state.failed)) return;
+    if (state?.key === key && (state.link !== null || state.failure !== null)) return;
     let cancelled = false;
-    setState({ key, link: null, failed: false });
-    void mintPortPreviewLink({ localUrl: url, computer }).then((link) => {
+    setState({ key, link: null, failure: null });
+    void requestPortPreviewLink({ localUrl: url, computer, fresh: attempt > 0 }).then((result) => {
       if (cancelled) return;
-      setState({ key, link, failed: link === null });
+      setState(
+        result.ok
+          ? { key, link: result.link, failure: null }
+          : { key, link: null, failure: result.reason },
+      );
     });
     return () => {
       cancelled = true;
@@ -167,8 +324,72 @@ export function usePortPreview(input: {
   }, [applies, key]);
 
   if (!applies) return { kind: "off" };
-  if (port === null || !isPreviewablePort(port)) return { kind: "failed", port };
-  if (state?.key !== key || (state.link === null && !state.failed))
+  if (port === null || !isPreviewablePort(port)) {
+    return { kind: "failed", port, reason: "unavailable" };
+  }
+  if (state?.key !== key || (state.link === null && state.failure === null))
     return { kind: "minting", port };
-  return state.link ? { kind: "ready", link: state.link } : { kind: "failed", port };
+  return state.link
+    ? { kind: "ready", link: state.link }
+    : { kind: "failed", port, reason: state.failure ?? "unavailable" };
+}
+
+export type PortFrameState =
+  | { readonly kind: "off" }
+  | { readonly kind: "opening" }
+  /**
+   * `firstSrc` — what the frame loads first (the one-time link, or the
+   * port's address when this browser already holds its session); `url` —
+   * the port's address itself, for reloads.
+   */
+  | { readonly kind: "ready"; readonly firstSrc: string; readonly url: string }
+  | { readonly kind: "failed"; readonly reason: PortLinkFailure };
+
+/**
+ * A computer-local page of a cloud computer as a frame of this browser (an
+ * app's window, its Home widget, an app tab in the panel): the same port
+ * address as "Your site". A frame that comes back with "Open this page from
+ * Uno Work" (the cookie is gone) gets a fresh link by itself.
+ */
+export function usePortFrame(input: {
+  readonly localUrl: string | null;
+  readonly computer: CloudComputer | null;
+}): { readonly state: PortFrameState; readonly retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const preview = usePortPreview({
+    url: input.localUrl ?? "",
+    computer: input.computer,
+    enabled: input.localUrl !== null,
+    attempt,
+  });
+  const link = preview.kind === "ready" ? preview.link : null;
+  useEffect(() => {
+    if (!link) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== link.origin || !isPortReenterMessage(event.data)) return;
+      forgetPortSessionHere(link.port);
+      setAttempt((value) => value + 1);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [link]);
+  const retry = useMemo(() => () => setAttempt((value) => value + 1), []);
+  const state: PortFrameState = useMemo(() => {
+    switch (preview.kind) {
+      case "off":
+        return { kind: "off" };
+      case "minting":
+        return { kind: "opening" };
+      case "failed":
+        return { kind: "failed", reason: preview.reason };
+      case "ready": {
+        const url =
+          input.localUrl !== null
+            ? (localUrlToPortPreviewUrl(input.localUrl, preview.link.origin) ?? preview.link.url)
+            : preview.link.url;
+        return { kind: "ready", firstSrc: preview.link.url, url };
+      }
+    }
+  }, [preview, input.localUrl]);
+  return { state, retry };
 }
