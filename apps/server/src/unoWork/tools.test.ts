@@ -2454,7 +2454,7 @@ describe("github_pr_comment (Automations, 28.10)", () => {
     body: "LGTM overall.\n\n- nit: rename foo\n- nit: tests",
   };
 
-  it('Autonomous: posts at once on this computer\'s box', async () => {
+  it("Autonomous: posts at once on this computer's box", async () => {
     const { deps, recorded } = makeDeps({
       runtimeMode: "full-access",
       console: () => ({
@@ -2480,7 +2480,7 @@ describe("github_pr_comment (Automations, 28.10)", () => {
     }
   });
 
-  it('Ask mode and Cautious wait for the Allow with the PR and the start of the text', async () => {
+  it("Ask mode and Cautious wait for the Allow with the PR and the start of the text", async () => {
     const ask = makeDeps({ runtimeMode: "approval-required" });
     await run("github_pr_comment", linked(ask.deps), args);
     expect(ask.recorded.approvals).toEqual([

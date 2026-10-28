@@ -118,7 +118,7 @@ export const WORKS_ON_LINE = {
   laptop: "Stops when the laptop sleeps or closes; routines need a cloud computer.",
   cloudHere: "Always on — routines and Telegram answers work while you're away.",
   cloud: "Always on. Your projects arrive there by sync; its chats here stay here.",
-  own: "Make a computer for it in My Uno — size from your plan, exit-IP country — then move it there. Your files stay out of its reach. Sign in to Claude or Codex there again, unless it runs on Uno AI.",
+  own: "A new computer just for it, sized by your plan. Your files stay out of its reach. Sign in to Claude or Codex there again, unless it runs on Uno AI.",
 } as const;
 
 /**

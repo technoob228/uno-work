@@ -4,7 +4,6 @@
  * can look (a project limit is a real lock only on its own computer).
  */
 import { isAssistantProjectId } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import {
   CloudIcon,
   HandIcon,
@@ -24,6 +23,7 @@ import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { Button } from "../ui/button";
 
 import { MODE_COPY, type AssistantMode } from "./PersonaMode";
+import { OwnComputerSetup } from "./OwnComputerSetup";
 import { type PersonaWorksOn, personaWorksOn, projectLockOn } from "./personaChannels";
 
 export function Label(props: { readonly children: ReactNode; readonly hint?: ReactNode }) {
@@ -140,10 +140,12 @@ export function useWorksOn(homeEnvironmentId: string | null): ReadonlyArray<Pers
 export function WhereItWorks(props: {
   readonly homeEnvironmentId: string | null;
   readonly value: string | null;
-  /** `null`: "a computer of its own" (made in My Uno first). */
+  /** `null`: "a computer of its own" (made right here, OwnComputerSetup). */
   readonly onChange: (environmentId: string | null) => void;
+  /** Names the new computer (`<name>-computer`). */
+  readonly assistantName?: string;
+  readonly emoji?: string;
 }) {
-  const navigate = useNavigate();
   const options = useWorksOn(props.homeEnvironmentId);
   const own = props.value === null;
   return (
@@ -153,7 +155,7 @@ export function WhereItWorks(props: {
           const Icon = option.why ? MoonIcon : option.laptop ? LaptopIcon : CloudIcon;
           return (
             <ModeCard
-              key={`${option.kind}:${option.target ?? "own"}`}
+              key={`${option.kind}:${option.target ?? option.label}`}
               on={
                 option.kind === "own"
                   ? own
@@ -173,14 +175,11 @@ export function WhereItWorks(props: {
         })}
       </div>
       {own ? (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="min-w-0 flex-1">
-            Make the computer in My Uno first; when it's on, pick it here.
-          </span>
-          <Button size="xs" variant="outline" onClick={() => void navigate({ to: "/my-uno" })}>
-            Open My Uno
-          </Button>
-        </div>
+        <OwnComputerSetup
+          assistantName={props.assistantName ?? ""}
+          {...(props.emoji ? { emoji: props.emoji } : {})}
+          onReady={({ environmentId }) => props.onChange(environmentId)}
+        />
       ) : null}
     </div>
   );

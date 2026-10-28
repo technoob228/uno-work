@@ -530,7 +530,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   const shown = name.trim() || "your helper";
   const whereProblem =
     environmentId === null
-      ? "Make its computer in My Uno first, or pick one above."
+      ? "Create its computer above, or pick one."
       : asleep
         ? `${computer} is asleep — wake it first, or pick another computer.`
         : null;
@@ -751,6 +751,8 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
                   <WhereItWorks
                     homeEnvironmentId={home.environmentId}
                     value={environmentId}
+                    assistantName={name.trim()}
+                    emoji={face.emoji}
                     onChange={(next) => {
                       setWhere(next);
                       setPicked(new Set());

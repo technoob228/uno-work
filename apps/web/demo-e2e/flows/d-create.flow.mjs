@@ -357,7 +357,7 @@ export const flows = [
     });
     await step("a computer of its own: Create waits for it, honestly", async () => {
       await page.getByTestId("persona-works-on-own").click();
-      await seeText(page, "Make its computer in My Uno first");
+      await seeText(page, "Create its computer above");
       if (await page.getByTestId("persona-next").isEnabled())
         throw new Error("Next is enabled without a computer");
     });
