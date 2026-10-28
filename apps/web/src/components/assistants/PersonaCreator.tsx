@@ -55,6 +55,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { useAccountHomeEnvironmentId } from "./accountUno";
 import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { readFile, squarePicture } from "./AssistantFacePicker";
@@ -92,16 +93,13 @@ import { LOCAL_ASSISTANTS_KEY } from "./useAssistants";
 
 type FaceTab = "emoji" | "portrait" | "upload";
 
-/** The cloud computer the personas live on by default: the account's box, else this one. */
+/** Where the personas live by default: the account's home computer, next to Uno. */
 function usePersonaHome(): { environmentId: EnvironmentId | null; label: string } {
+  const environmentId = useAccountHomeEnvironmentId();
   const rows = useMachineRows();
-  const cloud =
-    rows.find((row) => row.kind === "uno_box" && row.environmentId && row.status !== "offline") ??
-    rows.find((row) => row.isPrimary && row.environmentId) ??
-    null;
   return {
-    environmentId: cloud?.environmentId ?? null,
-    label: cloud?.label ?? "your cloud computer",
+    environmentId,
+    label: rows.find((row) => row.environmentId === environmentId)?.label ?? "your cloud computer",
   };
 }
 

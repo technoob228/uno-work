@@ -18,7 +18,6 @@ import { ArrowLeftIcon, LoaderCircleIcon, MoonIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
-import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { ensureAssistantChat, setAssistantPreset, updateAssistantTeam } from "../../lib/managerApi";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -27,6 +26,7 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { useAccountHomeEnvironmentId } from "./accountUno";
 import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { HANDS_WORK_LINE } from "./assistantJob.logic";
@@ -62,8 +62,9 @@ function Section(props: {
 export function UnoSetupPage(props: { readonly environmentId?: string | undefined }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const active = useActiveMachine().environmentId;
-  const environmentId = (props.environmentId ?? active ?? null) as EnvironmentId | null;
+  // Without `env`: the account's home computer, where Uno lives (accountUno.ts).
+  const home = useAccountHomeEnvironmentId();
+  const environmentId = (props.environmentId ?? home ?? null) as EnvironmentId | null;
   const rows = useMachineRows();
   const row = rows.find((item) => item.environmentId === environmentId);
   const computer = row?.label ?? "this computer";

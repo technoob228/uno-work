@@ -188,7 +188,7 @@ export function firstMessage(input: FirstMessageInput): string {
   const { job, computer } = input;
   const role = input.role.trim();
   const hello = role ? `Hi ${input.name}! You're my ${role.toLowerCase()}.` : `Hi ${input.name}!`;
-  const handOff = `Don't do the work yourself: start a chat on ${computer} for it, keep an eye on it, and tell me the result in a few lines.`;
+  const handOff = `Don't do the work yourself: start a chat on ${computer} for it (chat_create), keep an eye on it, and tell me the result in a few lines.`;
   const task = job.task.trim();
 
   if (job.kind === "development") {
@@ -221,7 +221,7 @@ export function firstMessage(input: FirstMessageInput): string {
       hello,
       `Your job: work in my accounts — ${list(sites)}.`,
       `Their passwords are saved in the password vault on ${computer}. Never ask me for a password in chat.`,
-      `Start a chat on ${computer} for this. In that chat, sign in with ${list(logins)} — it types the saved password itself. If a site asks for a 2FA code or a captcha, ask me with requestHelp and wait for me.`,
+      `Start a chat on ${computer} for this (chat_create) — signing in and the work happen there, not in our chat. In that chat, sign in with ${list(logins)} — it types the saved password itself. If a site asks for a 2FA code or a captcha, ask me with requestHelp and wait for me.`,
       task ? `Then: ${task}` : "Then: tell me what you see there and what you'd do first.",
     ];
     if (cron) {
