@@ -75,10 +75,10 @@ async function readAccount(): Promise<AccountRead> {
       subscription: undefined,
       catalog: null,
       names: [],
-      // Opened at this computer's own address: no account in the page to read
-      // the plan from, but this computer can make one (environmentApi); the
-      // console decides, and a plan limit comes back as the upgrade card.
-      decision: decideOwnComputer({ subscription: undefined, catalog: null }),
+      decision: {
+        kind: "unavailable",
+        message: "Computers are made in the Uno Work app or at app.uno4.work.",
+      },
     };
   }
   const [subscription, catalog, computers] = await Promise.allSettled([
