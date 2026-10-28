@@ -269,6 +269,12 @@ import {
 import { DEMO, demoHooks, useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import { SidebarAssistants } from "./sidebar/SidebarAssistants";
+import { StartedByFace, type StartedByView, useStartedBy } from "./sidebar/useStartedBy";
+import {
+  passesAssistantChatsFilter,
+  startedByElsewhere,
+  startedByKey,
+} from "./sidebar/startedBy.logic";
 import { isTeamConversation } from "./assistants/assistantTeam.logic";
 import { useTeamShown } from "./assistants/useAssistantTeam";
 import {
@@ -338,6 +344,7 @@ const HELPER_SCOPE = "helper";
 const ALL_SCOPE = "all";
 
 const EMPTY_THREADS: readonly SidebarThreadSummary[] = [];
+const NO_PROJECTS: readonly Project[] = [];
 
 function threadKeyOf(thread: Pick<SidebarThreadSummary, "environmentId" | "id">): string {
   return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -561,6 +568,8 @@ const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
 /** The title menu's filters, choices of this device (null — all). */
 const SIDEBAR_D_PROJECT_FILTER_KEY = "uno-work:sidebar:project-filter";
 const SIDEBAR_D_COMPUTER_FILTER_KEY = "uno-work:sidebar:computer-filter";
+/** "Assistants' chats" off in the title menu (28.10): only the person's own chats. */
+const SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY = "uno-work:sidebar:hide-assistant-chats";
 
 /** Sidebar D: "Projects", "Recents" — quiet labels between the groups. */
 function SidebarDSectionLabel(props: { label: string }) {
@@ -817,6 +826,11 @@ interface SidebarThreadRowProps {
   nested?: boolean;
   /** Sidebar D: started by Uno — its small face before the title. */
   fromUno?: boolean;
+  /**
+   * Sidebar D with the assistants (28.10): who started the chat — its face
+   * before the title, "Started by Mia" on hover. Wins over `fromUno`.
+   */
+  startedBy?: StartedByView | null;
   /** Sidebar D: whether the computer's mark shows (default: on any other computer). */
   showMachine?: boolean;
   /**
@@ -1237,7 +1251,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
             className={cn("flex min-w-0 flex-1 items-center gap-2", hasActions && D_ROW_FADE)}
           >
-            {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
+            {props.startedBy ? (
+              <StartedByFace startedBy={props.startedBy} threadId={thread.id} />
+            ) : props.fromUno ? (
+              <UnoFace className="size-3.5" title="Started by Uno" />
+            ) : null}
             {isRenaming ? (
               title
             ) : (
@@ -1771,7 +1789,7 @@ export default function Sidebar() {
           ),
     ),
   );
-  const threads = useStore(
+  const scopeThreads = useStore(
     useShallow((store) =>
       machineScope.kind === "all-environments"
         ? selectSidebarThreadsAcrossEnvironments(store)
@@ -1780,6 +1798,38 @@ export default function Sidebar() {
             machineScope.kind === "environment" ? machineScope.environmentId : null,
           ),
     ),
+  );
+  // Assistants D (Misha 28.10): the chats an assistant started sit in the
+  // common list with "started by <name>"; with one computer in view, the
+  // ones started on the other computers come along with their computer.
+  const dStartedByInList = !railLayout && assistantChatsInSidebar;
+  const startedBy = useStartedBy(dStartedByInList);
+  const startedByOutOfView = useMemo(
+    () =>
+      dStartedByInList
+        ? startedByElsewhere({
+            threads: startedBy.threads,
+            startedBy: startedBy.byKey,
+            inView: machineScope.kind === "environment" ? machineScope.environmentId : null,
+          })
+        : EMPTY_THREADS,
+    [dStartedByInList, machineScope, startedBy],
+  );
+  const threads = useMemo(
+    () =>
+      startedByOutOfView.length === 0 ? scopeThreads : [...scopeThreads, ...startedByOutOfView],
+    [scopeThreads, startedByOutOfView],
+  );
+  // Their projects name them (the list's own projects stay this computer's).
+  const allProjectsForOutOfView = useStore(
+    useShallow((store) =>
+      startedByOutOfView.length > 0 ? selectProjectsAcrossEnvironments(store) : NO_PROJECTS,
+    ),
+  );
+  const [dHideAssistantChats, setDHideAssistantChats] = useLocalStorage(
+    SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY,
+    false,
+    Schema.Boolean,
   );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
@@ -1851,10 +1901,19 @@ export default function Sidebar() {
       ),
     [assistantChatId, threads],
   );
-  const projectByKey = useMemo(
-    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
-    [projects],
-  );
+  const projectByKey = useMemo(() => {
+    const map = new Map<string, Project>(
+      projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
+    );
+    if (startedByOutOfView.length > 0) {
+      const wanted = new Set(startedByOutOfView.map(projectKeyOf));
+      for (const project of allProjectsForOutOfView) {
+        const key = `${project.environmentId}:${project.id}`;
+        if (wanted.has(key) && !map.has(key)) map.set(key, project);
+      }
+    }
+    return map;
+  }, [allProjectsForOutOfView, projects, startedByOutOfView]);
   const projectDisplayNameByKey = useMemo(() => {
     const map = new Map<string, string>();
     for (const group of projectGroups) {
@@ -1979,6 +2038,18 @@ export default function Sidebar() {
       if (thread.archivedAt !== null) return false;
       // A chat Uno opened by itself that nobody wrote in yet is noise.
       if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
+      const byAssistant =
+        dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
+      if (
+        !passesAssistantChatsFilter({
+          hidden: dStartedByInList && dHideAssistantChats,
+          startedByAssistant: byAssistant,
+          isOpen: threadKeyOf(thread) === routeThreadKey,
+          pinned: thread.pinnedAt != null,
+        })
+      ) {
+        return false;
+      }
       // The Uno chat is pinned on top of the sidebar, never in the list.
       if (assistantChatId !== null && thread.id === assistantChatId) return false;
       const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
@@ -1989,6 +2060,8 @@ export default function Sidebar() {
         // A conversation with Uno shows under the Uno row (unfolded while
         // it is open), never twice.
         if (showAssistantRow && isTeamConversation(thread)) return false;
+        // A chat an assistant started in its own folder: in the list, "started by".
+        if (byAssistant) return true;
         return threadKeyOf(thread) === routeThreadKey;
       }
       // The open chat stays listed even when the scope is another project.
@@ -2007,12 +2080,15 @@ export default function Sidebar() {
     };
   }, [
     assistantChatId,
+    dHideAssistantChats,
+    dStartedByInList,
     isHelperScope,
     now,
     routeThreadKey,
     showAssistantRow,
     scopedProjectKeys,
     sidebarThreadSortOrder,
+    startedBy.byKey,
     threads,
   ]);
 
@@ -2176,8 +2252,10 @@ export default function Sidebar() {
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
     // Uno's running chats may live in the assistant's own folder, which the
     // main list keeps out: they still show under Uno while they run.
+    // With the assistants (28.10) they are in the list instead, "started by".
     const unoRunningElsewhere = threads.filter(
       (thread) =>
+        !dStartedByInList &&
         thread.archivedAt === null &&
         thread.id !== assistantChatId &&
         !activeKeys.has(threadKeyOf(thread)) &&
@@ -2187,7 +2265,7 @@ export default function Sidebar() {
     );
     return groupChatsForSidebarD({
       chats: [...activeThreads, ...unoRunningElsewhere],
-      isFromUno: (thread) => isFromAssistant(thread, assistantChatId),
+      isFromUno: (thread) => !dStartedByInList && isFromAssistant(thread, assistantChatId),
       isRunning: (thread) => isRunningStatus(resolveSidebarThreadStatus(thread)),
       projectOf: sidebarViewMenu
         ? dGroupOf
@@ -2219,6 +2297,7 @@ export default function Sidebar() {
     activeThreads,
     assistantChatId,
     dGroupOf,
+    dStartedByInList,
     dHomeFolderPath,
     dProjectInfo,
     pinnedThreads,
@@ -3577,6 +3656,11 @@ export default function Sidebar() {
             ? isFromAssistant(thread, assistantChatId)
             : false
         }
+        startedBy={
+          options?.d === true && dStartedByInList
+            ? (startedBy.byKey.get(startedByKey(thread.environmentId, thread.id)) ?? null)
+            : null
+        }
         section={section}
         isActive={routeThreadKey === threadKey}
         jumpLabel={showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
@@ -3799,6 +3883,8 @@ export default function Sidebar() {
     underComputer: boolean,
     projectComputers: ReadonlyArray<string> | null,
   ) =>
+    // A chat an assistant started on another computer, while one is in view.
+    (!dMultiComputer && dThisComputer !== null && thread.environmentId !== dThisComputer) ||
     chatRowShowsComputer({
       chatComputer: thread.environmentId,
       thisComputer: dThisComputer,
@@ -4202,6 +4288,7 @@ export default function Sidebar() {
                 title={sidebarDTitle({
                   projectNames: dPickedProjectNames,
                   computerNames: dPickedComputerNames,
+                  assistantChatsHidden: dStartedByInList && dHideAssistantChats,
                 })}
                 groupInHeader={dGroupInHeader}
                 levels={dLevelsChosen}
@@ -4222,7 +4309,13 @@ export default function Sidebar() {
                 onClearFilters={() => {
                   setDProjectPicks(null);
                   setDComputerPicks(null);
+                  setDHideAssistantChats(false);
                 }}
+                assistantChatsFilter={
+                  dStartedByInList
+                    ? { hidden: dHideAssistantChats, onChange: setDHideAssistantChats }
+                    : null
+                }
                 onNewChat={handleNewThreadClick}
                 newChatShortcutLabel={newChatShortcutLabel}
                 onAddProject={handleAddProject}

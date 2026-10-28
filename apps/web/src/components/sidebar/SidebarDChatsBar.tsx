@@ -23,6 +23,7 @@
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  BotIcon,
   ChevronDownIcon,
   CircleDashedIcon,
   FolderIcon,
@@ -312,6 +313,14 @@ export function SidebarDChatsBar(props: {
   pickedComputers: ReadonlyArray<string> | null;
   onComputersChange: (picked: ReadonlyArray<string> | null) => void;
   onClearFilters: () => void;
+  /**
+   * "Assistants' chats" (Misha 28.10): one switch that hides the chats an
+   * assistant started; null — no assistants on the account, no switch.
+   */
+  assistantChatsFilter?: {
+    readonly hidden: boolean;
+    readonly onChange: (hidden: boolean) => void;
+  } | null;
   onNewChat: (event: ReactMouseEvent) => void;
   /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
   newChatShortcutLabel: string | null;
@@ -320,7 +329,11 @@ export function SidebarDChatsBar(props: {
   const open = useSidebarDViewMenu((state) => state.open);
   const setOpen = useSidebarDViewMenu((state) => state.setOpen);
   const showComputers = props.multiComputer && props.computers.length > 1;
-  const filtered = props.pickedProjects !== null || props.pickedComputers !== null;
+  const assistantChats = props.assistantChatsFilter ?? null;
+  const filtered =
+    props.pickedProjects !== null ||
+    props.pickedComputers !== null ||
+    assistantChats?.hidden === true;
   const levels = props.multiComputer
     ? props.levels
     : props.levels.filter((level) => level !== "computer");
@@ -420,6 +433,21 @@ export function SidebarDChatsBar(props: {
                 picked={props.pickedComputers}
                 onChange={props.onComputersChange}
               />
+            ) : null}
+            {assistantChats ? (
+              <>
+                <MenuSeparator />
+                <MenuCheckboxItem
+                  checked={!assistantChats.hidden}
+                  onCheckedChange={(checked) => assistantChats.onChange(!checked)}
+                  data-testid="sidebar-d-assistant-chats"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <BotIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">Chats assistants started</span>
+                  </span>
+                </MenuCheckboxItem>
+              </>
             ) : null}
           </MenuPopup>
         </Menu>

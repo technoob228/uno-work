@@ -41,6 +41,7 @@ import {
   assistantKeyOf,
   chatsOfAssistant,
 } from "./assistantTeam.logic";
+import { pickAccountUno, useAccountHomeEnvironmentId } from "./accountUno";
 import { useAssistantTeamStore } from "./assistantTeamStore";
 import { isConfigured, profileFromDaemon } from "./teamFromDaemon.logic";
 import { LOCAL_ASSISTANTS_KEY, useAssistantsAvailability } from "./useAssistants";
@@ -127,6 +128,7 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const storeProfiles = useAssistantTeamStore((state) => state.profiles);
   const labels = useMachineLabels();
+  const homeEnvironmentId = useAccountHomeEnvironmentId();
   // Outside the mock the team is what each computer's daemon keeps.
   const fromDaemon = teamShown && !DEMO_PROTOTYPE;
   const environmentIds = useMemo(
@@ -221,12 +223,15 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
         ),
       });
     }
-    // Every computer has a Uno of its own: the team shows one — the one the
-    // person talks to (latest conversation), else the first.
+    // Every computer has a Uno folder of its own: the team shows one — the
+    // account's, on the home computer (assistants D, 28.10); without it there,
+    // the one the person talked to last.
     const unos = members.filter((member) => member.isUno);
-    const lastTalk = (member: TeamMember) =>
-      member.chats.conversations[0] ? threadActivityMs(member.chats.conversations[0]) : -1;
-    const mainUno = unos.toSorted((a, b) => lastTalk(b) - lastTalk(a))[0];
+    const mainUno = pickAccountUno(unos, {
+      homeEnvironmentId,
+      lastTalkMs: (member) =>
+        member.chats.conversations[0] ? threadActivityMs(member.chats.conversations[0]) : -1,
+    });
     return members
       .filter((member) => !member.isUno || member === mainUno)
       .toSorted(
@@ -235,7 +240,16 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
           a.profile.createdAt.localeCompare(b.profile.createdAt) ||
           a.key.localeCompare(b.key),
       );
-  }, [daemon.summaries, fromDaemon, labels, profiles, projects, teamShown, threads]);
+  }, [
+    daemon.summaries,
+    fromDaemon,
+    homeEnvironmentId,
+    labels,
+    profiles,
+    projects,
+    teamShown,
+    threads,
+  ]);
 }
 
 export function useTeamMember(environmentId: string, projectId: string): TeamMember | null {

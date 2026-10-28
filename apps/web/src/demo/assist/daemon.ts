@@ -22,6 +22,7 @@ import { HttpResponse, http, type HttpHandler } from "msw";
 
 import { MACHINES, PROJECTS, type DemoMachine, type MachineKey } from "../heavyFixtures";
 import { type DemoPersona, assistantsOn } from "./fixtures";
+import { startedByOn } from "./startedBy";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -417,6 +418,9 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
     }),
     http.get("*/api/manager/assistants/deleted", () => json({ deleted: [] })),
+    http.get("*/api/manager/started-by", ({ request }) =>
+      json({ items: startedByOn(machineOf(request).key) }),
+    ),
     http.post("*/api/manager/assistants/:projectId/setup-chat", ({ request, params }) =>
       json({ threadId: hooks.setupChat(machineOf(request), String(params.projectId)) }),
     ),

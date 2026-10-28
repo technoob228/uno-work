@@ -172,6 +172,8 @@ export function sidebarDTitle(input: {
   readonly projectNames: ReadonlyArray<string> | null;
   /** Names of the picked computers; null = all. */
   readonly computerNames: ReadonlyArray<string> | null;
+  /** The chats assistants started are hidden (28.10). */
+  readonly assistantChatsHidden?: boolean;
 }): string {
   const parts: string[] = [];
   const { projectNames, computerNames } = input;
@@ -182,6 +184,9 @@ export function sidebarDTitle(input: {
     parts.push(
       computerNames.length === 1 ? computerNames[0]! : `${computerNames.length} computers`,
     );
+  }
+  if (input.assistantChatsHidden) {
+    return parts.length === 0 ? "Your chats" : `Your chats · ${parts.join(" · ")}`;
   }
   return parts.length === 0 ? "All chats" : `Chats · ${parts.join(" · ")}`;
 }

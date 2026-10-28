@@ -76,10 +76,20 @@ afterEach(() => {
 });
 
 describe("sidebar D places", () => {
-  it("shows Files and Apps & sites, and no Needs you when nothing waits", async () => {
+  it("shows Home, Files and Apps & sites as icons in one row, no Needs you when nothing waits", async () => {
     const screen = await mount(<SidebarDPlaces />);
-    await expect.element(screen.getByTestId("sidebar-nav-files")).toHaveTextContent("Files");
-    await expect.element(screen.getByTestId("sidebar-nav-apps")).toHaveTextContent("Apps & sites");
+    // Icons, named for the screen reader and on hover (Misha 28.10).
+    await expect
+      .element(screen.getByTestId("sidebar-nav-files"))
+      .toHaveAttribute("aria-label", "Files");
+    await expect
+      .element(screen.getByTestId("sidebar-nav-apps"))
+      .toHaveAttribute("aria-label", "Apps & sites");
+    await expect.element(screen.getByTestId("sidebar-nav-files")).not.toHaveTextContent("Files");
+    const tops = ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(
+      (id) => screen.getByTestId(id).element().getBoundingClientRect().top,
+    );
+    expect(new Set(tops).size).toBe(1);
     expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
     // No Assistants and no Sites row of their own any more.
     expect(screen.getByText("Assistants").query()).toBeNull();
@@ -102,11 +112,19 @@ describe("sidebar D places", () => {
     expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
   });
 
+  it("names a place on hover", async () => {
+    const screen = await mount(<SidebarDPlaces />);
+    await userEvent.hover(screen.getByTestId("sidebar-nav-apps"));
+    await expect.element(page.getByText("Apps & sites")).toBeVisible();
+  });
+
   it("counts what waits on Needs you", async () => {
     unread = 2;
     needsYou = 2;
     const again = await mount(<SidebarDPlaces />);
-    await expect.element(again.getByTestId("sidebar-needs-you")).toHaveTextContent("Needs you");
+    await expect
+      .element(again.getByTestId("sidebar-needs-you"))
+      .toHaveAttribute("aria-label", "Needs you");
     await expect.element(again.getByTestId("sidebar-needs-you")).toHaveTextContent("2");
   });
 

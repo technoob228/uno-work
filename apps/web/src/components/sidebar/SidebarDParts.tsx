@@ -6,7 +6,7 @@
  * - the places: Home (the start screen — Misha 08.10: "no way back to Home
  *   once you left it"), Files, Apps & sites, and "Needs you" only when an
  *   approval or a question waits (it replaces the bell — the same panel
- *   opens from it);
+ *   opens from it); since 28.10 they are icons in one row, named on hover;
  * - the collapsed rail: the same places as icons (Home first), Uno and Chats slide the
  *   chats panel out (see sidebarD.hover.ts), expand and the account at the
  *   bottom;
@@ -283,43 +283,46 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
   );
 });
 
-function PlaceRow(props: {
+/**
+ * A place as an icon in the one row on top (Misha 28.10: "Home / Files / Apps
+ * & sites — icons in one line, the name on hover; they shouldn't get in the
+ * way"). The active one is lit.
+ */
+function PlaceIcon(props: {
   icon: ReactNode;
   label: string;
   active: boolean;
-  onClick?: () => void;
+  onClick: () => void;
   testId: string;
   tour?: string;
-  trailing?: ReactNode;
-  render?: (className: string, children: ReactNode) => ReactNode;
 }) {
-  const className = cn(
-    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
-    props.active
-      ? "bg-sidebar-row-active font-medium text-foreground"
-      : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-foreground",
-  );
-  const children = (
-    <>
-      {props.icon}
-      <span className="min-w-0 flex-1 truncate">{props.label}</span>
-      {props.trailing}
-    </>
-  );
-  if (props.render) return <>{props.render(className, children)}</>;
   return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className={className}
-      data-testid={props.testId}
-      data-tour={props.tour}
-      aria-current={props.active ? "page" : undefined}
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={props.label}
+            onClick={props.onClick}
+            data-testid={props.testId}
+            data-tour={props.tour}
+            aria-current={props.active ? "page" : undefined}
+            className={cn(PLACE_ICON_CLASS, props.active ? PLACE_ICON_ACTIVE : PLACE_ICON_IDLE)}
+          />
+        }
+      >
+        {props.icon}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+    </Tooltip>
   );
 }
+
+const PLACE_ICON_CLASS =
+  "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
+const PLACE_ICON_IDLE =
+  "text-sidebar-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground data-[popup-open]:bg-sidebar-row-hover";
 
 function useOpenPlace() {
   const navigate = useNavigate();
@@ -367,15 +370,22 @@ function NeedsYouPopover(props: {
   );
 }
 
-/** Home, Files, Apps & sites, and Needs you (only when something waits for the person). */
+/**
+ * Home, Files, Apps & sites — and Needs you only when something waits for the
+ * person — as icons in one row, the name on hover.
+ */
 export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
   return (
-    <nav aria-label="Uno Work" className="flex flex-col gap-px" data-testid="sidebar-places">
-      <PlaceRow
+    <nav
+      aria-label="Uno Work"
+      className="flex items-center gap-0.5 px-0.5"
+      data-testid="sidebar-places"
+    >
+      <PlaceIcon
         icon={<HouseIcon />}
         label="Home"
         active={isHomePath(pathname)}
@@ -386,7 +396,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-home"
         tour="home"
       />
-      <PlaceRow
+      <PlaceIcon
         icon={<FolderIcon />}
         label="Files"
         active={pathname.startsWith("/files")}
@@ -394,7 +404,7 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-files"
         tour="files"
       />
-      <PlaceRow
+      <PlaceIcon
         icon={<LayoutGridIcon />}
         label="Apps & sites"
         active={pathname.startsWith("/sites")}
@@ -404,16 +414,27 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
       />
       {shown ? (
         <NeedsYouPopover
-          side="right"
+          side="bottom"
           trigger={(badge) => (
-            <PopoverTrigger
-              className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-sidebar-foreground/85 outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-4 [&_svg]:shrink-0"
-              data-testid="sidebar-needs-you"
-            >
-              <InboxIcon />
-              <span className="min-w-0 flex-1 truncate">Needs you</span>
-              <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
-            </PopoverTrigger>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <PopoverTrigger
+                    aria-label="Needs you"
+                    className={cn(PLACE_ICON_CLASS, PLACE_ICON_IDLE)}
+                    data-testid="sidebar-needs-you"
+                  />
+                }
+              >
+                <InboxIcon />
+                <InboxCountBadge
+                  unread={badge.needsYou}
+                  needsYou={badge.needsYou}
+                  className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Needs you</TooltipPopup>
+            </Tooltip>
           )}
         />
       ) : null}
