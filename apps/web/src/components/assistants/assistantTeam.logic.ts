@@ -659,6 +659,16 @@ export function chatsOfAssistant<T extends TeamThread>(
   const isHome = assistant.projectId === ASSISTANT_PROJECT_ID;
   const work = live.filter((thread) => {
     if (ids.has(thread.id)) return false;
+    // A task handed to it (in its own folder) is its work, whoever started it;
+    // one in another assistant's folder is that assistant's (variant C, 28.10:
+    // Uno gives Mia a task — it's Mia's, not Uno's).
+    if (
+      thread.environmentId === assistant.environmentId &&
+      thread.projectId === assistant.projectId
+    )
+      return true;
+    if (isAssistantProjectId(thread.projectId) && thread.projectId !== assistant.projectId)
+      return false;
     if (thread.spawnedByThreadId != null) return ids.has(thread.spawnedByThreadId);
     return (
       isHome &&

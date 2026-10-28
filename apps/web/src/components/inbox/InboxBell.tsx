@@ -7,6 +7,8 @@
  * the rest. "Done" is the same Done as on Home's Continue cards
  * (`inboxDone.ts`), so both agree.
  */
+import { VARIANT_C } from "../../demo/demoFlag";
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { BellIcon, BellOffIcon, CheckCheckIcon, InboxIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
@@ -176,6 +178,8 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
                       key={`${item.environmentId}:${item.id}`}
                       item={item}
                       title={
+                        // Variant C: Uno's notices keep their own line ("Uno: your morning summary").
+                        !VARIANT_C &&
                         assistantChatId !== null &&
                         item.open?.kind === "thread" &&
                         item.open.threadId === assistantChatId
@@ -207,6 +211,9 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
+  const machineLabels = useMachineLabels();
+  const machineLabel =
+    machineLabels.size > 1 ? (machineLabels.get(item.environmentId) ?? null) : null;
   // "Uno set up assistant Scout": revoke right here (w0138 p7).
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
@@ -250,9 +257,18 @@ const BellItem = memo(function BellItem({
                 {item.body}
               </span>
             ) : null}
-            {item.source.kind === "app" || item.count > 1 ? (
+            {item.source.kind === "app" || item.count > 1 || machineLabel ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
                 {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
+                {/* Which computer, once there's more than one (audit 27.10 #9). */}
+                {machineLabel ? (
+                  <span
+                    className="inline-flex items-center rounded bg-muted px-1 py-px text-[10px] text-muted-foreground"
+                    data-testid="inbox-item-machine"
+                  >
+                    {machineLabel}
+                  </span>
+                ) : null}
                 {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
               </span>
             ) : null}

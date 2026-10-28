@@ -29,6 +29,11 @@ import { UnoFace } from "../sidebar/SidebarDParts";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { AssistantMemoryChip } from "./AssistantMemoryChip";
 import { cn } from "../../lib/utils";
+import { VARIANT_C } from "../../demo/demoFlag";
+import { useAssistantTeam } from "../assistants/useAssistantTeam";
+import { ModeChip } from "../assistants/variantC/ModeChip";
+import { useUnoHands } from "../assistants/variantC/useUnoHands";
+import { useUnoPlan } from "../assistants/variantC/useUnoPlan";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -58,6 +63,7 @@ export function AssistantChatHeadline({
   title: string;
 }) {
   const channels = useAssistantChannels(environmentId);
+  const cLine = useUnoHomeLine(environmentId);
   return (
     <div className="flex min-w-0 items-center gap-2.5" data-testid="uno-headline">
       <span className="relative shrink-0">
@@ -72,11 +78,34 @@ export function AssistantChatHeadline({
           {title}
         </h2>
         <p className="truncate text-[11px] text-muted-foreground" data-testid="uno-status-line">
-          {assistantStatusLine(channels)}
+          {cLine ?? assistantStatusLine(channels)}
         </p>
       </div>
     </div>
   );
+}
+
+/**
+ * Variant C: where Uno lives and whether it sleeps — "Lives on uno-work ·
+ * always on" on Plus; on Free, honestly, that it sleeps when you leave.
+ */
+function useUnoHomeLine(environmentId: EnvironmentId): string | null {
+  const hands = useUnoHands();
+  const plan = useUnoPlan();
+  if (!VARIANT_C) return null;
+  const home = hands.find((hand) => hand.environmentId === environmentId);
+  const where = home ? `Lives on ${home.label}` : "Lives on your cloud computer";
+  const others = hands.filter((hand) => hand.environmentId !== environmentId).length;
+  const reach = others > 0 ? ` · works on all ${hands.length} computers` : "";
+  return plan === "free"
+    ? `${where} · sleeps when you leave (Free)`
+    : `${where} · always on${reach}`;
+}
+
+/** Variant C: Uno's own mode, top of its chat. */
+function UnoModeChip() {
+  const uno = useAssistantTeam().find((member) => member.isUno && !member.revoked) ?? null;
+  return uno ? <ModeChip member={uno} /> : null;
 }
 
 export function AssistantChatHeaderActions({ environmentId }: { environmentId: EnvironmentId }) {
@@ -100,6 +129,7 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
 
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-testid="uno-header-actions">
+      {VARIANT_C ? <UnoModeChip /> : null}
       {devMode ? <AssistantModelPicker environmentId={environmentId} /> : null}
       {devMode && runsOnHermes ? (
         <Tooltip>

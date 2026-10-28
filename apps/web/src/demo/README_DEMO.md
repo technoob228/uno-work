@@ -66,3 +66,18 @@ else the system Chrome. Typecheck: `cd apps/web && tsc --noEmit`.
   and the Free computer is only in the account's list (never connected).
 - Onboarding (first run) is skipped in both worlds (`onboardingCompleted: true`).
 - Avatars/pictures, Slack, the assistant's own mail are stubs (empty answers).
+
+## Variant C (branch demo/assistants-c-1028)
+
+One Uno on the account (lives on uno-work, the cloud computer that stays on),
+Uno works on every computer with nothing to set up there, your own assistants
+("teammates") live under Uno. Flag `VARIANT_C` (demoFlag.ts) in the real
+components: sidebar (`SidebarUnoC` — Uno, "Works on your computers", Team),
+chat header (where Uno lives + `ModeChip`), Inbox (computer chip, "Inbox"
+always in reach), computer switcher ("Uno here · …"), the assistant page
+(`variantC/ProfileBlocksC.tsx`), `/assistants?view=new` (`NewTeammateGallery`),
+the first open (index route → Uno's chat), Free banner (`UnoFreeBanner`),
+Connectors "Sign-in expired" (`needsReconnect`).
+Worlds added: `team=none|some|many`, `face=ok|fail`. Scenes: `c-morning`,
+`c-free-wake` (auto on Free), `c-delegate`, `c-mia-slow`, `c-mac-fails`,
+`c-investor`. Flows: `demo-e2e/flows/c.flow.mjs`, `c-create.flow.mjs`.

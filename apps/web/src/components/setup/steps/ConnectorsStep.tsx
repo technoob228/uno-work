@@ -568,7 +568,18 @@ function ProviderRow({
             Connected{connector?.account ? ` · ${connector.account}` : ""}
           </ConnectedBadge>
         ) : connector?.needsReconnect ? (
-          "It stopped working. Sign in again to keep it."
+          <span
+            className="flex flex-wrap items-center gap-1.5"
+            data-testid={`connector-expired-${meta.provider}`}
+          >
+            <span className="inline-flex h-5 items-center rounded-full bg-warning/12 px-2 text-[11px] font-medium text-warning">
+              Sign-in expired
+            </span>
+            <span>
+              {connector.account ? `${connector.account} · ` : ""}Uno can't use it until you sign in
+              again.
+            </span>
+          </span>
         ) : (
           meta.description
         )
@@ -784,7 +795,9 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
   }, [pending, queryClient]);
   useEffect(() => {
     if (pending?.action !== "connect") return;
-    if (byProvider.get(pending.provider)?.connected) {
+    // An expired one is still "connected": done only once it's signed in again.
+    const state = byProvider.get(pending.provider);
+    if (state?.connected && state.needsReconnect !== true) {
       toastManager.add({
         type: "success",
         title: `${PROVIDERS.find((meta) => meta.provider === pending.provider)?.name} connected`,

@@ -15,7 +15,7 @@ import { assistDemo } from "../demoBoot";
 import type { MachineKey } from "../heavyFixtures";
 import { listScenes, play } from "./engine";
 import { personaOf } from "./daemon";
-import { VARIANT } from "./variant";
+import { AUTO_SCENE, VARIANT } from "./variant";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -158,6 +158,12 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
       environmentOf: assistDemo.environmentOf,
       switchWorld,
     };
+  }, [router]);
+  // The variant's scene that happens by itself when the page opens (C: Free's catch-up).
+  useEffect(() => {
+    if (!AUTO_SCENE) return;
+    const timer = setTimeout(() => void runScene(router, AUTO_SCENE!), 1500);
+    return () => clearTimeout(timer);
   }, [router]);
   useEffect(() => {
     if (!open) return;

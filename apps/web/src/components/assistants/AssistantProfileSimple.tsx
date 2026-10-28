@@ -64,6 +64,15 @@ import { setupProgressLine } from "./teamFromDaemon.logic";
 import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
 import { useQuickCreateAssistant } from "./useQuickCreateAssistant";
 import { useTeamActions } from "./useTeamActions";
+import { VARIANT_C } from "../../demo/demoFlag";
+import {
+  ModeCards,
+  RemoveFromTeam,
+  TeamUnderUno,
+  ThroughUno,
+  UnoWorksOn,
+} from "./variantC/ProfileBlocksC";
+import { useUnoPlan } from "./variantC/useUnoPlan";
 
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
@@ -255,6 +264,7 @@ export function AssistantProfileSimple(props: {
   const [faceOpen, setFaceOpen] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [busy, setBusy] = useState(false);
+  const plan = useUnoPlan();
 
   const back = (
     <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/assistants" })}>
@@ -430,9 +440,18 @@ export function AssistantProfileSimple(props: {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {member.isUno ? "Your main assistant · " : ""}
-                  Takes tasks only from you · lives on {member.computerLabel || "this computer"}
+                <p className="text-xs text-muted-foreground" data-testid="assistant-profile-line">
+                  {VARIANT_C
+                    ? member.isUno
+                      ? `Your main assistant · lives on ${member.computerLabel || "your cloud computer"} · ${
+                          plan === "free" ? "sleeps when you leave (Free)" : "always on"
+                        }`
+                      : `${member.profile.roles[0] ?? "Teammate"} · reports to Uno · works on ${
+                          member.computerLabel || "this computer"
+                        }`
+                    : `${member.isUno ? "Your main assistant · " : ""}Takes tasks only from you · lives on ${
+                        member.computerLabel || "this computer"
+                      }`}
                 </p>
                 {setupLine ? (
                   <p
@@ -483,8 +502,23 @@ export function AssistantProfileSimple(props: {
             ) : null}
 
             {/* The one next step, then the other ways to reach it. */}
-            {!member.revoked && !telegramLinked ? <ConnectTelegramCard member={member} /> : null}
-            <WhereYouTalk member={member} />
+            {VARIANT_C && !member.isUno ? (
+              <ThroughUno member={member} />
+            ) : (
+              <>
+                {!member.revoked && !telegramLinked ? (
+                  <ConnectTelegramCard member={member} />
+                ) : null}
+                <WhereYouTalk member={member} />
+              </>
+            )}
+            {VARIANT_C && !member.revoked ? <ModeCards member={member} /> : null}
+            {VARIANT_C && member.isUno ? (
+              <>
+                <UnoWorksOn />
+                <TeamUnderUno />
+              </>
+            ) : null}
 
             <div className="grid gap-6 md:grid-cols-2">
               <Section title={`Chats · ${member.chats.conversations.length}`}>
@@ -533,6 +567,8 @@ export function AssistantProfileSimple(props: {
               <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
               <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
             </Section>
+
+            {VARIANT_C ? <RemoveFromTeam member={member} /> : null}
 
             <Advanced>
               <Section title="What it may do" testId="assistant-profile-access">
@@ -616,7 +652,11 @@ export function AssistantProfileSimple(props: {
                 action={
                   <button
                     type="button"
-                    onClick={() => void quick.create()}
+                    onClick={() =>
+                      VARIANT_C
+                        ? void navigate({ to: "/assistants", search: { view: "new" } })
+                        : void quick.create()
+                    }
                     disabled={quick.creating}
                     className="cursor-pointer text-xs text-primary hover:underline"
                     data-testid="assistant-profile-new-assistant"

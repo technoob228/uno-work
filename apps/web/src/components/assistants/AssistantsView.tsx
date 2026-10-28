@@ -72,7 +72,8 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
 import { AssistantPage } from "./AssistantPage";
 import { AssistantProfilePage } from "./AssistantProfilePage";
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO, VARIANT_C } from "../../demo/demoFlag";
+import { NewTeammateGallery } from "./variantC/NewTeammateGallery";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
@@ -180,6 +181,8 @@ export function AssistantsView() {
   ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
   }
+  // Variant C (28.10): a new teammate under Uno — the gallery of characters.
+  if (VARIANT_C && search.view === "new") return <NewTeammateGallery />;
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;
 }

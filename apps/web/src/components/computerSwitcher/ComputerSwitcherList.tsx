@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import { accountTransport } from "../../account/unoAccount";
+import { VARIANT_C } from "../../demo/demoFlag";
+import { handLine, useUnoHands } from "../assistants/variantC/useUnoHands";
 import { cn } from "../../lib/utils";
 import { MACHINE_KIND_GROUP_LABELS } from "../../plainLanguage";
 import { AddEnvModal } from "../AddEnvModal";
@@ -35,6 +37,15 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
     useThisComputer,
     openAddComputer,
   } = switcher;
+  // Variant C: what Uno does on each computer, right in the list.
+  const hands = useUnoHands();
+  const unoLine = (environmentId: string | null) => {
+    if (!VARIANT_C) return null;
+    const hand = hands.find(
+      (item) => item.environmentId !== null && item.environmentId === environmentId,
+    );
+    return hand ? `Uno here · ${handLine(hand)}` : null;
+  };
   return (
     <div className="flex flex-col" data-testid="computer-switcher-list">
       {groups.map((group) => (
@@ -76,6 +87,14 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
                       ) : null}
                     </div>
                     <div className="truncate text-[10px] text-muted-foreground">{env.meta}</div>
+                    {unoLine(env.id) ? (
+                      <div
+                        className="truncate text-[10px] text-primary/80"
+                        data-testid="computer-switcher-uno"
+                      >
+                        {unoLine(env.id)}
+                      </div>
+                    ) : null}
                   </div>
                   {isActive ? (
                     <CheckIcon className="size-3.5 shrink-0 text-primary" />
@@ -143,6 +162,14 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
                   <div className="truncate text-[10px] text-muted-foreground">
                     {busy && connecting ? connecting.label : row.detail || "Click to open"}
                   </div>
+                  {VARIANT_C ? (
+                    <div
+                      className="truncate text-[10px] text-muted-foreground"
+                      data-testid="computer-switcher-uno"
+                    >
+                      Asleep · Uno uses it when it wakes
+                    </div>
+                  ) : null}
                 </div>
                 {busy ? (
                   <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />

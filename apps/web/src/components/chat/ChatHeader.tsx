@@ -52,6 +52,8 @@ import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
+import { VARIANT_C } from "../../demo/demoFlag";
+import { ModeChip } from "../assistants/variantC/ModeChip";
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
@@ -299,7 +301,7 @@ export const ChatHeader = memo(function ChatHeader({
             projectName={activeProjectName}
             projectCwd={activeProjectCwd}
           />
-        ) : activeProjectName && !isMobile ? (
+        ) : activeProjectName && !isMobile && !(VARIANT_C && teammate) ? (
           // A phone has no room for it: squeezed, it was an empty pill. Short
           // of room it leaves whole (it's in the sidebar), never as "H.".
           <Foldable id="project" folded={folded}>
@@ -368,6 +370,8 @@ export const ChatHeader = memo(function ChatHeader({
             compact={isMobile}
           />
         )}
+        {/* Variant C: a teammate's own mode, top of its chat (Uno's is in its actions). */}
+        {VARIANT_C && teammate ? <ModeChip member={teammate} /> : null}
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
         {isAssistantChat ? (

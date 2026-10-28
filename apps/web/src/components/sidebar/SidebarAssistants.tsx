@@ -45,6 +45,14 @@ import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/u
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { VARIANT_C } from "../../demo/demoFlag";
+import { resolveSidebarThreadStatus } from "../Sidebar.logic";
+import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
+import { MACHINE_KIND_ICON } from "../machineKindIcons";
+import { threadActivityMs } from "../assistants/useAssistantTeam";
+import { type UnoHand, handAwake, handLine, useUnoHands } from "../assistants/variantC/useUnoHands";
+import { useUnoPlan } from "../assistants/variantC/useUnoPlan";
+import { useShallow } from "zustand/react/shallow";
 import { assistantsHeaderState } from "./sidebarAssistants.logic";
 import { sidebarDPanel } from "./sidebarDState";
 
@@ -124,6 +132,10 @@ const AssistantRow = memo(function AssistantRow(props: {
   readonly routeThreadKey: string | null;
   readonly extraChats: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+  /** Variant C: a short line after the name (Uno: where it lives; a teammate: its role). */
+  readonly meta?: string | null;
+  /** Variant C: a teammate sits under Uno (indented). */
+  readonly nested?: boolean;
 }) {
   const { member } = props;
   const navigate = useNavigate();
@@ -196,7 +208,7 @@ const AssistantRow = memo(function AssistantRow(props: {
 
   return (
     <li
-      className="group/assistant list-none"
+      className={cn("group/assistant list-none", props.nested && "pl-3")}
       data-testid="sidebar-assistant"
       data-assistant={member.projectId}
     >
@@ -236,7 +248,17 @@ const AssistantRow = memo(function AssistantRow(props: {
           data-testid="sidebar-assistant-open"
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          <span className="min-w-0 truncate text-sm font-medium text-foreground" title={name}>
+            {name}
+          </span>
+          {props.meta ? (
+            <span
+              className="ml-auto min-w-0 shrink truncate pr-1 text-[11px] text-sidebar-muted-foreground/70"
+              data-testid="sidebar-assistant-meta"
+            >
+              {props.meta}
+            </span>
+          ) : null}
           {/* One signal for "waits for you": the dot (the Inbox counts it too). */}
           {!member.configured ? (
             <span className="shrink-0 text-xs text-primary">Set up</span>
@@ -329,6 +351,15 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly unoRunning: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
 }) {
+  if (VARIANT_C) return <SidebarUnoC {...props} />;
+  return <SidebarAssistantsTeam {...props} />;
+});
+
+const SidebarAssistantsTeam = memo(function SidebarAssistantsTeam(props: {
+  readonly routeThreadKey: string | null;
+  readonly unoRunning: ReadonlyArray<SidebarThreadSummary>;
+  readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+}) {
   const team = useAssistantTeam();
   const teamShown = useTeamShown();
   const unfolded = useUnfoldedStore((state) => state.keys);
@@ -384,6 +415,233 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
           />
         ))}
         {live.length === 0 ? <UnoFallbackRow /> : null}
+      </ul>
+      <AssistantOnboardingDialog />
+    </li>
+  );
+});
+
+// ── Variant C (28.10): one Uno, its computers, your team under it ─────────
+
+/** Teammates shown before "Show N more" (the 10+ edge). */
+const TEAM_PREVIEW = 4;
+
+function CaptionRow(props: { readonly children: ReactNode; readonly action?: ReactNode }) {
+  return (
+    <li className="flex h-6 list-none items-center justify-between pr-1 pl-6">
+      <span className="text-[11px] text-sidebar-muted-foreground/60">{props.children}</span>
+      {props.action}
+    </li>
+  );
+}
+
+/** "Uno on <computer>": a row per computer — awake or not, what runs there; unfolds its chats. */
+function HandRow(props: {
+  readonly hand: UnoHand;
+  readonly unfolded: boolean;
+  readonly onToggle: () => void;
+  readonly chats: ReadonlyArray<SidebarThreadSummary>;
+  readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+}) {
+  const { hand } = props;
+  const Icon = MACHINE_KIND_ICON[hand.kind];
+  const awake = handAwake(hand);
+  const busy = hand.running.length > 0 || hand.waiting.length > 0;
+  return (
+    <li className="list-none" data-testid="sidebar-uno-hand" data-machine={hand.label}>
+      <button
+        type="button"
+        onClick={props.onToggle}
+        disabled={props.chats.length === 0}
+        aria-expanded={props.unfolded}
+        title={`Uno on ${hand.label}`}
+        className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 pl-6 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
+      >
+        <Icon
+          className={cn(
+            "size-3.5 shrink-0",
+            awake ? "text-sidebar-foreground/70" : "text-sidebar-muted-foreground/40",
+          )}
+        />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-[13px]",
+            awake ? "text-sidebar-foreground" : "text-sidebar-muted-foreground/60",
+          )}
+        >
+          {hand.label}
+        </span>
+        <span
+          className={cn(
+            "flex shrink-0 items-center gap-1 text-[11px]",
+            hand.waiting.length > 0
+              ? "text-warning"
+              : busy
+                ? "text-sky-600 dark:text-sky-400"
+                : "text-sidebar-muted-foreground/60",
+          )}
+          data-testid="sidebar-uno-hand-state"
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 rounded-full",
+              !awake
+                ? "bg-muted-foreground/30"
+                : hand.waiting.length > 0
+                  ? "bg-warning"
+                  : busy
+                    ? "bg-sky-500"
+                    : "bg-success",
+            )}
+          />
+          {handLine(hand)}
+        </span>
+      </button>
+      {props.unfolded && props.chats.length > 0 ? (
+        <ul role="list" className="flex flex-col gap-px pl-4">
+          {props.chats.slice(0, 3).map((thread) => props.renderChat(thread))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+const SidebarUnoC = memo(function SidebarUnoC(props: {
+  readonly routeThreadKey: string | null;
+  readonly unoRunning: ReadonlyArray<SidebarThreadSummary>;
+  readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+}) {
+  const team = useAssistantTeam();
+  const hands = useUnoHands();
+  const navigate = useNavigate();
+  const unfolded = useUnfoldedStore((state) => state.keys);
+  const setUnfolded = useUnfoldedStore((state) => state.set);
+  const [showAll, setShowAll] = useState(false);
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const live = team.filter((member) => !member.revoked);
+  const uno = live.find((member) => member.isUno) ?? null;
+  const mates = live.filter((member) => !member.isUno);
+  const shownMates = showAll ? mates : mates.slice(0, TEAM_PREVIEW);
+  const free = useUnoPlan() === "free";
+  const newTeammate = () => void navigate({ to: "/assistants", search: { view: "new" } });
+  const unoHome = hands.find((hand) => hand.environmentId === uno?.environmentId);
+  const chatsOn = (environmentId: string | null) =>
+    threads
+      .filter(
+        (thread) =>
+          environmentId !== null &&
+          thread.environmentId === environmentId &&
+          !String(thread.projectId).startsWith("assistant-") &&
+          thread.archivedAt === null,
+      )
+      .toSorted((a, b) => threadActivityMs(b) - threadActivityMs(a));
+
+  return (
+    <li className="list-none pb-1" data-testid="sidebar-assistants">
+      <div
+        className="flex h-6 items-center justify-between pr-1 pl-2.5"
+        data-testid="sidebar-assistants-header"
+      >
+        <span className="text-xs font-medium text-sidebar-muted-foreground/70">Uno</span>
+      </div>
+      <ul role="list" className="flex flex-col gap-px">
+        {uno ? (
+          <AssistantRow
+            key={uno.key}
+            member={uno}
+            unfolded={unfolded.has(uno.key)}
+            onToggle={() => setUnfolded(uno.key, !unfolded.has(uno.key))}
+            routeThreadKey={props.routeThreadKey}
+            extraChats={props.unoRunning}
+            renderChat={props.renderChat}
+            meta={free ? "sleeps on Free" : unoHome ? `on ${unoHome.label}` : null}
+          />
+        ) : (
+          <UnoFallbackRow />
+        )}
+        {hands.length > 1 ? (
+          <>
+            <CaptionRow>Works on your computers</CaptionRow>
+            {hands.map((hand) => {
+              const key = `hand:${hand.key}`;
+              return (
+                <HandRow
+                  key={hand.key}
+                  hand={hand}
+                  unfolded={unfolded.has(key)}
+                  onToggle={() => setUnfolded(key, !unfolded.has(key))}
+                  chats={chatsOn(hand.environmentId)}
+                  renderChat={props.renderChat}
+                />
+              );
+            })}
+          </>
+        ) : null}
+        <CaptionRow
+          action={
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="New teammate"
+                    onClick={newTeammate}
+                    data-testid="sidebar-new-assistant"
+                    className="text-muted-foreground hover:text-foreground"
+                  />
+                }
+              >
+                <PlusIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="right">New teammate — works under Uno</TooltipPopup>
+            </Tooltip>
+          }
+        >
+          {mates.length > 0 ? `Team · ${mates.length}` : "Team"}
+        </CaptionRow>
+        {shownMates.map((member) => (
+          <AssistantRow
+            key={member.key}
+            member={member}
+            unfolded={unfolded.has(member.key)}
+            onToggle={() => setUnfolded(member.key, !unfolded.has(member.key))}
+            routeThreadKey={props.routeThreadKey}
+            // A task Uno handed it shows under it while it runs or waits.
+            extraChats={member.chats.work.filter(
+              (thread) => resolveSidebarThreadStatus(thread) !== "ready",
+            )}
+            renderChat={props.renderChat}
+            meta={member.profile.roles[0] ?? null}
+            nested
+          />
+        ))}
+        {mates.length > TEAM_PREVIEW ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+              data-testid="sidebar-team-more"
+              className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-6 text-left text-xs text-sidebar-muted-foreground/55 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {showAll ? "Show less" : `Show ${mates.length - TEAM_PREVIEW} more`}
+            </button>
+          </li>
+        ) : null}
+        {mates.length === 0 ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={newTeammate}
+              data-testid="sidebar-add-teammate"
+              className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 pl-6 text-left text-xs text-sidebar-muted-foreground/70 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <PlusIcon className="size-3" />
+              Add a teammate — a secretary, a marketer…
+            </button>
+          </li>
+        ) : null}
       </ul>
       <AssistantOnboardingDialog />
     </li>

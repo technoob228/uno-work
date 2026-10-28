@@ -280,8 +280,8 @@ export const machineName = (machine: MachineKey) => NAMES[machine];
 
 export interface Trigger {
   readonly id: string;
-  /** What the person's words must match (case-insensitive). */
-  readonly match: RegExp;
+  /** What the person's words must match (case-insensitive), or a test of them. */
+  readonly match: RegExp | ((text: string) => boolean);
   /** Only for this assistant (its folder id), or any. */
   readonly persona?: string;
   readonly script: (ctx: ScriptContext, text: string) => Script;
@@ -375,7 +375,7 @@ export function onTurn(machine: MachineKey, threadId: string, text: string): boo
     triggers.find(
       (item) =>
         (item.persona === undefined || item.persona === ctx.persona.projectId) &&
-        item.match.test(text),
+        (typeof item.match === "function" ? item.match(text) : item.match.test(text)),
     ) ?? null;
   const script = trigger ? trigger.script(ctx, text) : fallback(ctx);
   void runSteps(ctx, script);

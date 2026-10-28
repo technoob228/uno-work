@@ -12,6 +12,7 @@
  *   bottom;
  * - Uno's face, used on the rail, the pinned Uno row and chats Uno started.
  */
+import { VARIANT_C } from "../../demo/demoFlag";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -402,7 +403,8 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-apps"
         tour="apps"
       />
-      {shown ? (
+      {/* Variant C: the Inbox stays in reach — the team's reports and asks land there too. */}
+      {shown || VARIANT_C ? (
         <NeedsYouPopover
           side="right"
           trigger={(badge) => (
@@ -411,7 +413,9 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
               data-testid="sidebar-needs-you"
             >
               <InboxIcon />
-              <span className="min-w-0 flex-1 truncate">Needs you</span>
+              <span className="min-w-0 flex-1 truncate">
+                {shown || !VARIANT_C ? "Needs you" : "Inbox"}
+              </span>
               <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
             </PopoverTrigger>
           )}

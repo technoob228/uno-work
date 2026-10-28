@@ -35,6 +35,9 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { isAssistantProjectId } from "@t3tools/contracts";
+import { VARIANT_C } from "../demo/demoFlag";
+import { UnoFreeBanner } from "./assistants/variantC/UnoFreeBanner";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -4261,6 +4264,9 @@ export default function ChatView(props: ChatViewProps) {
                 {activeThread && isAssistantConversation(activeThread) ? (
                   <AssistantEngineBanner environmentId={activeThread.environmentId} />
                 ) : null}
+                {VARIANT_C && activeThread && isAssistantConversation(activeThread) ? (
+                  <UnoFreeBanner />
+                ) : null}
                 {harnessAuth?.loss ? (
                   <HarnessReauthCard
                     key={`${activeThread.id}:${harnessAuth.loss.kind}:${harnessAuth.loss.driver}`}
@@ -4311,7 +4317,13 @@ export default function ChatView(props: ChatViewProps) {
                     isLocalDraftThread={isLocalDraftThread}
                     forceCompact={isPreviewFocusMode}
                     inDock={isChatDockMode}
-                    hideRuntimeModeControl={isEmbedded}
+                    hideRuntimeModeControl={
+                      isEmbedded ||
+                      // Variant C: an assistant's chat runs in its mode — the chip in the header.
+                      (VARIANT_C &&
+                        activeThread !== undefined &&
+                        isAssistantProjectId(activeThread.projectId))
+                    }
                     phase={phase}
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}

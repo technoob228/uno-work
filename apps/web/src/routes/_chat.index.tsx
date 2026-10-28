@@ -15,6 +15,8 @@ import { resolveDefaultLandingTarget } from "../defaultLanding";
 import { useActiveMachine } from "../hooks/useActiveMachine";
 import { useSettings } from "../hooks/useSettings";
 import { isWebApp } from "../webMode";
+import { VARIANT_C } from "../demo/demoFlag";
+import { useAssistantChat } from "../assistant/useAssistantChat";
 import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
@@ -118,11 +120,29 @@ function ChatIndexRouteView() {
   // every render — React "Maximum update depth exceeded" (#185).
   const navigate = useNavigate();
   const homeRedirected = useRef(false);
+  // Variant C: the very first open goes to Uno's chat — Uno introduces itself
+  // there (apps, Telegram and the mode as cards), no setup screens.
+  const assistantChat = useAssistantChat();
+  // Known once the computer's snapshot is in (its folders are): folders, no chats yet.
+  const firstRun = useStore(
+    (state) =>
+      VARIANT_C &&
+      selectProjectsAcrossEnvironments(state).length > 0 &&
+      selectSidebarThreadsAcrossEnvironments(state).length === 0,
+  );
+  const snapshotIn = useStore((state) => selectProjectsAcrossEnvironments(state).length > 0);
   useEffect(() => {
     if (!openHome || homeRedirected.current) return;
+    if (VARIANT_C && !snapshotIn) return;
+    if (firstRun) {
+      if (assistantChat.environmentId === null) return;
+      homeRedirected.current = true;
+      void assistantChat.open();
+      return;
+    }
     homeRedirected.current = true;
     void navigate({ to: "/computer", replace: true });
-  }, [navigate, openHome]);
+  }, [navigate, openHome, firstRun, snapshotIn, assistantChat]);
 
   if (needsEnvironment) {
     return <HostedStaticOnboardingState />;

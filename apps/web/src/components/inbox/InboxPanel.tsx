@@ -40,6 +40,7 @@ import {
 } from "../../inbox/systemNotifications";
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
@@ -330,6 +331,9 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
+  const machineLabels = useMachineLabels();
+  const machineLabel =
+    machineLabels.size > 1 ? (machineLabels.get(item.environmentId) ?? null) : null;
 
   return (
     <li
@@ -379,6 +383,15 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
           ) : null}
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
             {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
+            {/* Which computer it's on, once there's more than one (audit 27.10 #9). */}
+            {machineLabel ? (
+              <span
+                className="inline-flex items-center gap-1 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground"
+                data-testid="inbox-item-machine"
+              >
+                {machineLabel}
+              </span>
+            ) : null}
             {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
           </span>
         </span>

@@ -22,6 +22,7 @@ import { HttpResponse, http, type HttpHandler } from "msw";
 
 import { MACHINES, PROJECTS, type DemoMachine, type MachineKey } from "../heavyFixtures";
 import { type DemoPersona, assistantsOn } from "./fixtures";
+import { avatarOf } from "./variantC/avatarDaemon";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -147,7 +148,7 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       emoji: record.persona.emoji,
       template: null,
       createdAt: record.createdAt,
-      avatar: null,
+      avatar: avatarOf(machine.key, record.persona.projectId),
     },
     team: {
       team: record.team,
@@ -250,6 +251,16 @@ export function telegramLinked(machine: MachineKey, projectId: string): boolean 
   return recordOf(machine, projectId)?.telegram === true;
 }
 
+/** Everyone on the team now (not removed), Uno included: its computer and persona. */
+export function liveTeam(): ReadonlyArray<{ machine: MachineKey; persona: DemoPersona }> {
+  return [...records.entries()]
+    .filter(([, record]) => record.revokedAt === null)
+    .map(([key, record]) => ({
+      machine: key.split(":")[0] as MachineKey,
+      persona: record.persona,
+    }));
+}
+
 /** Its mode changed from a script (the first-run card "Does it itself / Asks first"). */
 export function setPreset(machine: MachineKey, projectId: string, preset: AssistantPreset) {
   const record = recordOf(machine, projectId);
@@ -271,6 +282,7 @@ export function onAssistantRevoked(listener: RevokedListener) {
 function revokeRecord(machine: MachineKey, record: AssistantRecord) {
   if (record.revokedAt !== null) return;
   record.revokedAt = new Date().toISOString();
+  record.team = { ...record.team, revokedAt: record.revokedAt };
   for (const listener of revokedListeners) listener(machine, record.persona);
 }
 
@@ -354,7 +366,8 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
       const list = [...records.values()]
-        .filter((record) => record.persona.machine === machine.key && record.revokedAt === null)
+        // Removed ones stay listed with their token revoked (the real daemon's answer).
+        .filter((record) => record.persona.machine === machine.key)
         .map((record) => summaryOf(machine, record));
       return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
     }),
@@ -491,8 +504,10 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       const body = await bodyOf(request);
       const machine = machineOf(request).key;
       const record = recordOf(machine, String(body.projectId ?? ""));
-      if (record && body.revoked === false) record.revokedAt = null;
-      else if (record) revokeRecord(machine, record);
+      if (record && body.revoked === false) {
+        record.revokedAt = null;
+        record.team = { ...record.team, revokedAt: null };
+      } else if (record) revokeRecord(machine, record);
       return json({ affected: record ? [record.persona.projectId] : [] });
     }),
     http.post("*/api/manager/assistant/telegram/pair", async ({ request }) => {

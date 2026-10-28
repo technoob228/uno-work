@@ -3,7 +3,9 @@
 import { flow, openDemo, openMainChat, scene, seeText, send } from "../harness.mjs";
 
 /** Main: a new account — Uno talks first, the apps card, the Telegram card. */
-export default flow("base-new-account", async ({ page, url, step, shot }) => {
+// Variant C replaces this one with c-first-run (Work opens straight in Uno's chat,
+// the mode card comes after Telegram) — kept for the base, not run here.
+export const baseNewAccount = flow("base-new-account", async ({ page, url, step, shot }) => {
   await step("open a new account", () => openDemo(page, url, { world: "new" }));
   await shot("home");
   await step("open Uno from the sidebar", async () => {
