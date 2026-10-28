@@ -51,6 +51,7 @@ import {
   resolveProviderModelSelection,
 } from "../agentThreads/logic.ts";
 import { owningAssistant } from "../assistants/localAssistantStore.ts";
+import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { isAssistantConversationThread } from "../manager/assistantPush.ts";
 import { workStatusState } from "../manager/workStatus.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
@@ -162,6 +163,47 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
   const home = deps.home ?? os.homedir();
   const nowMs = deps.nowMs ?? (() => Date.now());
 
+  /**
+   * The home folder's project ("Home folder", where New chat starts on a new
+   * computer), created now when this computer has none — a fresh computer
+   * has no projects, and a chat sent here must still start (live 28.10).
+   */
+  const homeProject = Effect.gen(function* () {
+    const root = normalizeWorkspacePath(home);
+    const existing = yield* deps.projections.getActiveProjectByWorkspaceRoot(root);
+    if (Option.isSome(existing) && !isAssistantProjectId(existing.value.id)) {
+      const shell = yield* deps.projections.getProjectShellById(existing.value.id);
+      if (Option.isSome(shell)) return shell.value;
+    }
+    const selection = selectAutoBootstrapModelSelection(yield* deps.getProviders);
+    if (selection === null) {
+      return fail(
+        409,
+        "no_ai",
+        "No AI is ready on this computer yet. Sign in to Uno there (or set up an agent in Settings → Agents).",
+      );
+    }
+    const projectId = ProjectId.make(crypto.randomUUID());
+    yield* deps.engine.dispatch(
+      {
+        type: "project.create",
+        commandId: CommandId.make(`remote-chat:project:${crypto.randomUUID()}`),
+        projectId,
+        title: "Home folder",
+        workspaceRoot: root,
+        defaultModelSelection: selection,
+        createdAt: new Date(nowMs()).toISOString(),
+      },
+      { origin: systemCommandOrigin(REMOTE_CHAT_ORIGIN_COMPONENT, "home folder") },
+    );
+    for (let tries = 0; tries < 50; tries += 1) {
+      const shell = yield* deps.projections.getProjectShellById(projectId);
+      if (Option.isSome(shell)) return shell.value;
+      yield* Effect.sleep("100 millis");
+    }
+    return fail(500, "internal_error", "This computer couldn't open its home folder.");
+  });
+
   const resolveProject = (input: ManagerRemoteChatCreateInput) =>
     Effect.gen(function* () {
       if (input.projectId !== undefined && input.projectId.trim().length > 0) {
@@ -185,12 +227,11 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
       if (input.cwd !== undefined && input.cwd.trim().length > 0) {
         const root = normalizeWorkspacePath(expandHome(input.cwd.trim(), home));
         const found = yield* deps.projections.getActiveProjectByWorkspaceRoot(root);
+        // The folder is the caller's (its computer's project): not here. The
+        // chat starts in this computer's home folder — like New chat on a new
+        // machine — and can clone or create what it needs there.
         if (Option.isNone(found) || isAssistantProjectId(found.value.id)) {
-          return fail(
-            404,
-            "project_not_found",
-            `There is no project at ${input.cwd.trim()} on this computer. Leave the folder out to use the project used last, or ask the person to open that folder there first.`,
-          );
+          return yield* homeProject;
         }
         const shell = yield* deps.projections.getProjectShellById(found.value.id);
         return Option.isSome(shell)
@@ -204,7 +245,7 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
       const snapshot = yield* deps.projections.getShellSnapshot();
       const id = defaultProjectFor(snapshot.projects, snapshot.threads);
       const project = id === null ? undefined : snapshot.projects.find((entry) => entry.id === id);
-      return project ?? fail(404, "no_projects", "This computer has no projects yet.");
+      return project ?? (yield* homeProject);
     });
 
   const resolveModel = (input: ManagerRemoteChatCreateInput, project: OrchestrationProjectShell) =>

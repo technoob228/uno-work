@@ -181,11 +181,29 @@ describe("remote chat host", () => {
       remoteHost.create({ text: "hi", projectId: UNO, startedBy }),
     );
     expect(own.status).toBe(403);
+    // A folder that isn't here and no AI to open the home folder with: said plainly.
     const missing = await Effect.runPromise(
       remoteHost.create({ text: "hi", cwd: "~/nowhere", startedBy }),
     );
-    expect(missing.status).toBe(404);
-    expect(JSON.stringify(missing.body)).toContain("~/nowhere");
+    expect(missing.status).toBe(409);
+    expect(JSON.stringify(missing.body)).toContain("No AI is ready");
+  });
+
+  it("a folder that isn't here, or no projects at all: the chat starts in the home folder", async () => {
+    const home = project("home-folder" as never, {
+      workspaceRoot: "/home/uno",
+      title: "Home folder",
+      defaultModelSelection: { instanceId: "uno", model: "smart" } as never,
+    });
+    const { remoteHost, dispatched } = host({ projects: [home] });
+    const reply = await Effect.runPromise(
+      remoteHost.create({ text: "uname -a", cwd: "~/projects/coffee-site", startedBy }),
+    );
+    expect(reply.status).toBe(200);
+    expect((reply.body as { projectId: string }).projectId).toBe("home-folder");
+    const fresh = await Effect.runPromise(remoteHost.create({ text: "uname -a", startedBy }));
+    expect(fresh.status).toBe(200);
+    expect(dispatched.some(({ command }) => command.type === "project.create")).toBe(false);
   });
 
   it("status only for chats that came from another computer", async () => {
