@@ -49,7 +49,7 @@ import {
   TeamRunsOn,
   useOpenAssistantSettings,
 } from "./AssistantProfileReal";
-import { AssistantProfileSimple } from "./AssistantProfileSimple";
+import { AssistantPageA } from "./AssistantPageA";
 import { TeammateAccess } from "./TeammateAccess";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import { useAssistantOnboarding } from "./AssistantOnboarding";
@@ -246,7 +246,8 @@ export function AssistantProfilePage(props: {
   readonly environmentId: string;
   readonly projectId: string;
 }) {
-  return REAL ? <AssistantProfileSimple {...props} /> : <AssistantProfileMock {...props} />;
+  // Variant A (28.10): the one Uno's page (and its own assistants') — AssistantPageA.
+  return REAL ? <AssistantPageA {...props} /> : <AssistantProfileMock {...props} />;
 }
 
 function AssistantProfileMock(props: {

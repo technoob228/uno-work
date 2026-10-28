@@ -99,7 +99,9 @@ function InlineConnect(props: {
   const environmentId = usePrimaryEnvironmentId();
   const actions = useConnectorActions(environmentId);
   const [asked, setAsked] = useState(false);
-  const connected = actions.byProvider.get(props.connect.provider as never)?.connected === true;
+  const connector = actions.byProvider.get(props.connect.provider as never);
+  // An app whose sign-in ended isn't connected for the card: it offers to sign in again.
+  const connected = connector?.connected === true && connector.needsReconnect !== true;
   const onConnected = useEffectEvent(props.onConnected);
   useEffect(() => {
     if (asked && connected) onConnected();

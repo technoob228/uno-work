@@ -16,6 +16,17 @@ password="${PASSWORD:-duet-four-ways-1027}"
 web="$(cd "$(dirname "$0")/.." && pwd)"
 out="$web/dist-demo"
 console="${UNO_CONSOLE:-https://console.uno4.dev}"
+# Cloudflare cuts the upload at 100 s (524) while the console unpacks ~3 min:
+# TUNNEL=1 sends the same zip to the same deploy API through an SSH tunnel to
+# the console on Contabo (127.0.0.1:8082), past Cloudflare (variant D, 28.10).
+tunnel_pid=""
+if [ "${TUNNEL:-1}" = "1" ]; then
+  ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -N -L 18082:127.0.0.1:8082 fish@84.247.162.151 &
+  tunnel_pid=$!
+  trap '[ -n "$tunnel_pid" ] && kill "$tunnel_pid" 2>/dev/null' EXIT
+  sleep 3
+  console="http://127.0.0.1:18082"
+fi
 
 "$web/demo-e2e/build-demo.sh" "$out"
 
@@ -30,7 +41,7 @@ zip="$(mktemp -d)/site.zip"
 (cd "$out" && zip -qr "$zip" .)
 echo "uploading $(du -h "$zip" | cut -f1) as $slug…"
 # The console may answer 524 while the upload is still being unpacked: check the page after.
-curl -sS -o /dev/null -w "deploy: HTTP %{http_code}\n" --max-time 300 \
+curl -sS -o /dev/null -w "deploy: HTTP %{http_code}\n" --max-time 600 \
   -H "Authorization: Bearer $key" -F "file=@$zip" -F "slug=$slug" "$console/api/v1/deploy" || true
 
 for _ in $(seq 1 30); do

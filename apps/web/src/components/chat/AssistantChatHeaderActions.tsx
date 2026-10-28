@@ -26,6 +26,8 @@ import { useDevMode } from "../../devMode";
 import { useEnvironmentSupportsAssistantLlm } from "../../environments/assistantChatSupport";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { UnoFace } from "../sidebar/SidebarDParts";
+import { AssistantModeChip } from "../assistants/AssistantModeChip";
+import { useUnoHome } from "../assistants/useUnoHome";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { AssistantMemoryChip } from "./AssistantMemoryChip";
 import { cn } from "../../lib/utils";
@@ -58,6 +60,9 @@ export function AssistantChatHeadline({
   title: string;
 }) {
   const channels = useAssistantChannels(environmentId);
+  // Variant A: where the one Uno lives, and whether it stays awake.
+  const home = useUnoHome();
+  const talks = assistantStatusLine(channels).replace(/^Online · /, "");
   return (
     <div className="flex min-w-0 items-center gap-2.5" data-testid="uno-headline">
       <span className="relative shrink-0">
@@ -72,7 +77,8 @@ export function AssistantChatHeadline({
           {title}
         </h2>
         <p className="truncate text-[11px] text-muted-foreground" data-testid="uno-status-line">
-          {assistantStatusLine(channels)}
+          {home.line.replace(/^on /, "Lives on ")}
+          {/^answers in/.test(talks) ? ` · ${talks}` : ""}
         </p>
       </div>
     </div>
@@ -98,8 +104,10 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
   const conversations = useAssistantConversations();
   const runsOnHermes = useEnvironmentSupportsAssistantLlm(environmentId);
 
+  const { uno } = useUnoHome();
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-testid="uno-header-actions">
+      {uno ? <AssistantModeChip member={uno} /> : null}
       {devMode ? <AssistantModelPicker environmentId={environmentId} /> : null}
       {devMode && runsOnHermes ? (
         <Tooltip>

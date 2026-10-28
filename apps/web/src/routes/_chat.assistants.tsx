@@ -26,6 +26,12 @@ export const Route = createFileRoute("/_chat/assistants")({
         ? { view, project }
         : {};
     }
+    if (view === "gallery") {
+      const character = search["character"];
+      return typeof character === "string" && /^[\w-]{1,24}$/.test(character)
+        ? { view, character }
+        : { view };
+    }
     return view === "new" || view === "here" || view === "card" ? { view } : {};
   },
   component: AssistantsView,

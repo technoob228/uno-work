@@ -744,3 +744,43 @@ export function setSlackChannels(
     body,
   });
 }
+
+/** Variant A: a computer of the account as the assistant sees it — home or hands. */
+export interface AssistantComputer {
+  readonly key: string;
+  readonly environmentId: string;
+  readonly label: string;
+  readonly kind: "cloud" | "computer";
+  /** It lives there (can't be turned off). */
+  readonly home: boolean;
+  readonly awake: boolean;
+  /** It may start chats there. */
+  readonly allowed: boolean;
+}
+
+/** Variant A: the computers it may use as its hands (new daemon route). */
+export function getAssistantComputers(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ readonly computers: ReadonlyArray<AssistantComputer> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/computers",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function setAssistantComputers(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    /** Environment ids it may use besides its home. */
+    readonly computers: ReadonlyArray<string>;
+  },
+): Promise<{ readonly ok: boolean }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/computers",
+    method: "POST",
+    body,
+  });
+}

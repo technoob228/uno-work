@@ -52,6 +52,8 @@ import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
+import { AssistantModeChip } from "../assistants/AssistantModeChip";
+import { channelName, useUnoHome } from "../assistants/useUnoHome";
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
@@ -60,7 +62,6 @@ import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import {
   ASSISTANT_CHAT_NAME,
   ASSISTANT_VALUE_LINE,
-  assistantConversationLabel,
   isFromAssistant,
 } from "../../assistant/assistantChat.logic";
 import { useAssistantConversations } from "../../assistant/useAssistantConversations";
@@ -205,6 +206,7 @@ export const ChatHeader = memo(function ChatHeader({
     return summary ? isFromAssistant(summary, assistantChat?.id ?? null) : false;
   });
   const assistantConversations = useAssistantConversations().conversations;
+  const unoHome = useUnoHome();
   const isMainAssistantChat =
     !draftId &&
     assistantChat !== null &&
@@ -222,10 +224,14 @@ export const ChatHeader = memo(function ChatHeader({
   const teammate = useTeammateOfThread(activeThreadEnvironmentId, activeThreadId);
   const isAssistantChat =
     teammate === null && (isMainAssistantChat || assistantConversation !== null);
+  // Variant A: one Uno, its topics are channels — "Uno · Everything", "Uno · #landing".
+  const unoName = unoHome.uno?.profile.name ?? ASSISTANT_CHAT_NAME;
   const title = isMainAssistantChat
-    ? ASSISTANT_CHAT_NAME
+    ? `${unoName} · Everything`
     : assistantConversation
-      ? `${ASSISTANT_CHAT_NAME} · ${assistantConversationLabel(assistantConversation)}`
+      ? assistantConversation.assistantRole === "chat"
+        ? `${unoName} · Everything`
+        : `${unoName} · #${channelName(assistantConversation)}`
       : activeThreadTitle;
   const [continueDialogOpen, setContinueDialogOpen] = useState(false);
   // A draft has nothing to carry yet: no files were touched, no history exists.
@@ -299,7 +305,7 @@ export const ChatHeader = memo(function ChatHeader({
             projectName={activeProjectName}
             projectCwd={activeProjectCwd}
           />
-        ) : activeProjectName && !isMobile ? (
+        ) : activeProjectName && !isMobile && !teammate ? (
           // A phone has no room for it: squeezed, it was an empty pill. Short
           // of room it leaves whole (it's in the sidebar), never as "H.".
           <Foldable id="project" folded={folded}>
@@ -370,6 +376,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
+        {teammate && !devMode ? <AssistantModeChip member={teammate} /> : null}
         {isAssistantChat ? (
           <AssistantChatHeaderActions environmentId={activeThreadEnvironmentId} />
         ) : null}

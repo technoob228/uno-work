@@ -6,7 +6,7 @@
 import { useNavigate } from "@tanstack/react-router";
 
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
-import { ACTIVITY_LABEL, profileLine } from "./assistantTeam.logic";
+
 import type { TeamMember } from "./useAssistantTeam";
 
 export function TeammateChatHeadline(props: {
@@ -39,12 +39,15 @@ export function TeammateChatHeadline(props: {
       <span className="min-w-0 leading-tight">
         <span className="block truncate text-sm font-medium text-foreground">
           {member.profile.name}
-          <span className="font-normal text-muted-foreground"> · {props.title}</span>
+          {/* Its main chat is named after it: no "Mia · Mia". */}
+          {props.title && props.title !== member.profile.name ? (
+            <span className="font-normal text-muted-foreground"> · {props.title}</span>
+          ) : null}
         </span>
         <span className="block truncate text-[11px] text-muted-foreground">
           {member.profile.setUpAt === null
             ? "Setting itself up with you"
-            : `${ACTIVITY_LABEL[member.activity]} · ${profileLine(member.profile)}`}
+            : `${member.profile.roles[0] ?? "Your own assistant"} · lives on ${member.computerLabel || "your cloud computer"} · uses Uno's apps`}
         </span>
       </span>
     </button>

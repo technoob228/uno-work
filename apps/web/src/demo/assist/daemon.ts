@@ -28,6 +28,7 @@ import {
   type ConnectorProvider,
   type ConnectorState,
   macOnline,
+  thirdOnline,
 } from "./world";
 
 // ── Per assistant: what its daemon keeps ─────────────────────────────────
@@ -41,6 +42,10 @@ interface AssistantRecord {
   apps: Record<string, "none" | "read" | "write">;
   revokedAt: string | null;
   createdAt: string;
+  /** Its picture (base64 + type), set from the face picker / the builder. */
+  avatar: { base64: string; type: string } | null;
+  /** Variant A: the computers it may use as its hands (keys); null = every one. */
+  hands: ReadonlyArray<MachineKey> | null;
 }
 
 const records = new Map<string, AssistantRecord>();
@@ -89,11 +94,19 @@ function addRecord(machine: MachineKey, persona: DemoPersona) {
     apps: {},
     revokedAt: null,
     createdAt,
+    avatar: null,
+    hands: null,
   });
 }
 
 function recordOf(machine: MachineKey, projectId: string): AssistantRecord | null {
   return records.get(recordKey(machine, projectId)) ?? null;
+}
+
+/** Removed / brought back: its token and its team record say so. */
+function setRevoked(record: AssistantRecord, revoked: boolean) {
+  record.revokedAt = revoked ? new Date().toISOString() : null;
+  record.team = { ...record.team, revokedAt: record.revokedAt };
 }
 
 function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssistantSummary {
@@ -147,7 +160,7 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       emoji: record.persona.emoji,
       template: null,
       createdAt: record.createdAt,
-      avatar: null,
+      avatar: record.avatar ? `v${record.avatar.base64.length}` : null,
     },
     team: {
       team: record.team,
@@ -213,6 +226,8 @@ function connectorsList() {
         account: connected ? CONNECTOR_META[provider].account : null,
         connectedAt: connected ? new Date(Date.now() - 86_400_000 * 12).toISOString() : null,
         toolCount: connected ? 12 : 0,
+        // Variant A: the list says the sign-in ended (the console would learn it on a failed call).
+        ...(state === "expired" ? { needsReconnect: true } : {}),
       };
     }),
   };
@@ -244,6 +259,12 @@ export function asksFirst(machine: MachineKey, projectId: string): boolean {
   return record !== null && record.preset !== "full";
 }
 
+/** Variant A: its mode from a card in its chat. */
+export function setPresetOf(machine: MachineKey, projectId: string, preset: AssistantPreset) {
+  const record = recordOf(machine, projectId);
+  if (record) record.preset = preset;
+}
+
 export function telegramLinked(machine: MachineKey, projectId: string): boolean {
   return recordOf(machine, projectId)?.telegram === true;
 }
@@ -257,7 +278,19 @@ export function setTelegram(machine: MachineKey, projectId: string, linked: bool
 export function machineAwake(key: MachineKey): boolean {
   if (key === "work") return true;
   if (key === "mac") return macOnline(world);
-  return false;
+  return thirdOnline(world);
+}
+
+/** Variant A: may that assistant use that computer as its hands. */
+export function handAllowed(projectId: string, key: MachineKey): boolean {
+  const record = recordOf("work", projectId);
+  return record?.hands == null || record.hands.includes(key);
+}
+
+/** Revoked (removed) — its running work stops. */
+export function isGone(machine: MachineKey, projectId: string): boolean {
+  const record = recordOf(machine, projectId);
+  return record === null || record.revokedAt !== null;
 }
 
 // ── Its memory files (NOTES.md, AGENTS.md…) ─────────────────────────────
@@ -272,6 +305,31 @@ function defaultFile(projectId: string, name: string | null): string {
     return "- Acme pays late; a gentle reminder after 5 days\n- Morning summary goes to Telegram at 08:00\n- The pitch deck lives on the MacBook";
   }
   return "";
+}
+
+// ── Portraits (made up, for the face picker) ─────────────────────────────
+
+const PORTRAIT_FACES: Record<string, ReadonlyArray<string>> = {
+  human: ["🧑‍💼", "👩‍💻", "🧑‍🎨", "👨‍🔬", "👩‍🏫"],
+  animal: ["🦊", "🦉", "🐼", "🐯", "🐨"],
+  robot: ["🤖", "🦾", "👾", "🛰️", "⚙️"],
+  alien: ["👽", "🛸", "🪐", "🌌", "✨"],
+};
+const PORTRAIT_SKIES: ReadonlyArray<readonly [string, string]> = [
+  ["#fde68a", "#f59e0b"],
+  ["#bfdbfe", "#6366f1"],
+  ["#bbf7d0", "#14b8a6"],
+  ["#fbcfe8", "#ec4899"],
+  ["#e9d5ff", "#8b5cf6"],
+];
+
+/** A soft round portrait: a gradient and a character — as a data: URL (SVG). */
+function portrait(persona: string, seed: number): string {
+  const faces = PORTRAIT_FACES[persona] ?? PORTRAIT_FACES.human!;
+  const face = faces[Math.abs(seed) % faces.length]!;
+  const [from, to] = PORTRAIT_SKIES[Math.abs(seed + persona.length) % PORTRAIT_SKIES.length]!;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="256" height="256" fill="url(#g)"/><circle cx="128" cy="300" r="150" fill="rgba(255,255,255,.35)"/><text x="128" y="160" font-size="128" text-anchor="middle">${face}</text></svg>`;
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
 // ── The handlers ─────────────────────────────────────────────────────────
@@ -302,6 +360,10 @@ export interface DaemonHooks {
   readonly newConversation: (machine: DemoMachine, projectId: string, title: string) => string;
   /** The setup chat of a new assistant. */
   readonly setupChat: (machine: DemoMachine, projectId: string) => string;
+  /** Variant A: it was removed — its running chats stop. */
+  readonly onRevoked: (machine: DemoMachine, projectId: string) => void;
+  /** Variant A: its mode changed — its chats switch to it. */
+  readonly onPreset: (machine: DemoMachine, projectId: string) => void;
 }
 
 export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
@@ -327,8 +389,9 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     ),
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
+      // Removed ones stay listed as revoked (the page hides them; "Bring back" works).
       const list = [...records.values()]
-        .filter((record) => record.persona.machine === machine.key && record.revokedAt === null)
+        .filter((record) => record.persona.machine === machine.key)
         .map((record) => summaryOf(machine, record));
       return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
     }),
@@ -370,8 +433,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       return json({ projectId });
     }),
     http.delete("*/api/manager/assistants", ({ request }) => {
-      const record = recordOf(machineOf(request).key, projectParam(request));
-      if (record) record.revokedAt = new Date().toISOString();
+      const machine = machineOf(request);
+      const record = recordOf(machine.key, projectParam(request));
+      if (record) {
+        setRevoked(record, true);
+        hooks.onRevoked(machine, record.persona.projectId);
+      }
       return json({ ok: true });
     }),
     http.get("*/api/manager/assistant", ({ request }) =>
@@ -409,6 +476,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
         team.setup = { ...team.setup, state: "in-progress", answered: [], skipped: [] };
       if (typeof body.emoji === "string") record.persona = { ...record.persona, emoji: body.emoji };
       if (typeof body.name === "string") record.persona = { ...record.persona, name: body.name };
+      if (typeof body.tone === "string") record.persona = { ...record.persona, tone: body.tone };
+      if (typeof body.character === "string")
+        record.persona = { ...record.persona, character: body.character };
+      if (Array.isArray(body.roles))
+        record.persona = { ...record.persona, roles: body.roles as string[] };
       return json({ team: record.team });
     }),
     http.post("*/api/manager/assistant/preset", async ({ request }) => {
@@ -419,6 +491,7 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       if (typeof body.preset === "string") record.preset = body.preset as AssistantPreset;
       if (body.projects === "all" || Array.isArray(body.projects))
         record.projects = body.projects as never;
+      hooks.onPreset(machine, record.persona.projectId);
       return json({ token: summaryOf(machine, record).token, losses: [] });
     }),
     http.post("*/api/manager/assistant/access", async ({ request }) => {
@@ -455,9 +528,41 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       });
     }),
     http.post("*/api/manager/assistant/revoke", async ({ request }) => {
+      const machine = machineOf(request);
+      const body = await bodyOf(request);
+      const record = recordOf(machine.key, String(body.projectId ?? ""));
+      if (record) {
+        setRevoked(record, body.revoked !== false);
+        if (record.revokedAt) hooks.onRevoked(machine, record.persona.projectId);
+      }
+      return json({ affected: record ? [record.persona.projectId] : [] });
+    }),
+    // Variant A: the computers an assistant may use as its hands (new for the daemon).
+    http.get("*/api/manager/assistant/computers", ({ request }) => {
+      const record = recordOf(machineOf(request).key, projectParam(request));
+      return json({
+        computers: (Object.keys(MACHINES) as MachineKey[]).map((key) => ({
+          key,
+          environmentId: MACHINES[key].environmentId,
+          label: MACHINES[key].label,
+          kind: MACHINES[key].machineKind === "uno_box" ? "cloud" : "computer",
+          home: key === record?.persona.machine,
+          awake: machineAwake(key),
+          allowed: record?.hands == null || record.hands.includes(key),
+        })),
+      });
+    }),
+    http.post("*/api/manager/assistant/computers", async ({ request }) => {
       const body = await bodyOf(request);
       const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
-      if (record) record.revokedAt = new Date().toISOString();
+      if (!record) return json({ error: "not found" }, { status: 404 });
+      const asked = Array.isArray(body.computers) ? (body.computers as string[]) : [];
+      record.hands = (Object.keys(MACHINES) as MachineKey[]).filter(
+        (key) =>
+          key === record.persona.machine ||
+          asked.includes(MACHINES[key].environmentId) ||
+          asked.includes(key),
+      );
       return json({ ok: true });
     }),
     http.post("*/api/manager/assistant/telegram/pair", async ({ request }) => {
@@ -509,7 +614,31 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       );
       return json({ ok: true });
     }),
-    http.get("*/api/manager/assistant/avatar", () => new HttpResponse(null, { status: 404 })),
+    http.get("*/api/manager/assistant/avatar", ({ request }) => {
+      const record = recordOf(machineOf(request).key, projectParam(request));
+      if (!record?.avatar) return new HttpResponse(null, { status: 404 });
+      const bytes = Uint8Array.from(atob(record.avatar.base64), (char) => char.charCodeAt(0));
+      return new HttpResponse(bytes, { headers: { "content-type": record.avatar.type } });
+    }),
+    http.post("*/api/manager/assistant/avatar", async ({ request }) => {
+      const body = await bodyOf(request);
+      const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
+      if (!record) return json({ error: "not found" }, { status: 404 });
+      record.avatar =
+        typeof body.image === "string" && body.image
+          ? { base64: body.image, type: body.image.startsWith("UklG") ? "image/webp" : "image/png" }
+          : null;
+      return json({ avatar: record.avatar ? `v${record.avatar.base64.length}` : null });
+    }),
+    // A persona portrait "drawn by Uno AI": a made-up picture, or a failure (`face=fail`).
+    http.post("*/api/manager/assistant/avatar/generate", async ({ request }) => {
+      const body = await bodyOf(request);
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      if (world.face === "fail") {
+        return json({ error: "Uno AI is busy drawing for others right now." }, { status: 503 });
+      }
+      return json({ image: portrait(String(body.persona ?? "human"), Number(body.seed ?? 0)) });
+    }),
     http.get("*/api/manager/assistant/instructions", () => json({ state: "current", content: "" })),
     http.get("*/api/manager/assistant/chats", () => json({ chats: [] })),
     http.get("*/api/manager/connector-bindings", () => json({ bindings: [] })),
@@ -550,7 +679,14 @@ export function accountHandlers(): HttpHandler[] {
     });
     const list = [wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier)];
     if (live())
-      list.push(wire(MACHINES.product.boxId!, MACHINES.product.label, "sleeping", "free"));
+      list.push(
+        wire(
+          MACHINES.product.boxId!,
+          MACHINES.product.label,
+          thirdOnline(world) ? "running" : "sleeping",
+          "free",
+        ),
+      );
     return list;
   };
   return [

@@ -73,10 +73,12 @@ import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../Compos
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { isUnoPremiumModelSelected, PremiumCreditNotice } from "./PremiumCreditNotice";
 import { SmartPausedNotice } from "./SmartPausedNotice";
+import { UnoSleepNotice } from "./UnoSleepNotice";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { ASSISTANT_PROJECT_ID, isAssistantProjectId } from "@t3tools/contracts";
 import { coerceAssistantModelSelection } from "@t3tools/shared/assistantLlm";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -127,6 +129,8 @@ import {
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  HandIcon,
+  ZapIcon,
   PenLineIcon,
   XIcon,
 } from "lucide-react";
@@ -330,6 +334,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   hideRuntimeModeControl?: boolean;
+  /** Variant A: an assistant's chat says its mode (the same as its header), not the agent's permissions. */
+  assistantMode?: "itself" | "asks-first" | null;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
@@ -368,7 +374,20 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         </>
       ) : null}
 
-      {props.hideRuntimeModeControl ? null : (
+      {props.assistantMode ? (
+        <span
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 px-2 text-sm font-medium text-muted-foreground"
+          title="Change it at the top of the chat"
+          data-testid="composer-assistant-mode"
+        >
+          {props.assistantMode === "itself" ? (
+            <ZapIcon className="size-4 text-sky-500" />
+          ) : (
+            <HandIcon className="size-4 text-amber-500" />
+          )}
+          {props.assistantMode === "itself" ? "Does it itself" : "Asks first"}
+        </span>
+      ) : props.hideRuntimeModeControl ? null : (
         <Select
           value={props.runtimeMode}
           onValueChange={(value) => props.onRuntimeModeChange(value!)}
@@ -1014,6 +1033,11 @@ export const ChatComposer = memo(
     // the chat's own selection on the daemon; turns carry exactly that.
     // Every conversation with Uno (0.0.85), not only the main one.
     const isAssistantChat = activeThread ? isAssistantConversation(activeThread) : false;
+    // Variant A: an assistant's Allow card in plain words (Uno's chats and own assistants').
+    const assistantAllow =
+      isAssistantChat || (activeThread ? isAssistantProjectId(activeThread.projectId) : false);
+    // One of Uno's own channels (not an own assistant's chat).
+    const unoChannel = isAssistantChat && activeThread?.projectId === ASSISTANT_PROJECT_ID;
     const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
     const assistantEngine = isAssistantChat && assistantLlm.supported;
     const assistantSendBlock = assistantEngine
@@ -3106,6 +3130,7 @@ export const ChatComposer = memo(
               environmentId={environmentId}
               premiumSelected={unoPremiumSelected}
             />
+            <UnoSleepNotice unoChat={unoChannel} />
             <SmartPausedNotice
               environmentId={environmentId}
               unoSelected={
@@ -3126,6 +3151,7 @@ export const ChatComposer = memo(
                   <ComposerPendingApprovalPanel
                     approval={activePendingApproval}
                     pendingCount={pendingApprovals.length}
+                    assistant={assistantAllow}
                   />
                 </div>
               ) : pendingUserInputs.length > 0 ? (
@@ -3157,12 +3183,14 @@ export const ChatComposer = memo(
                 <ComposerPendingApprovalPanel
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
+                  assistant={assistantAllow}
                 />
                 <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4">
                   <ComposerPendingApprovalActions
                     requestId={activePendingApproval.requestId}
                     isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
                     onRespondToApproval={onRespondToApproval}
+                    assistant={assistantAllow}
                   />
                 </div>
               </div>
@@ -3512,11 +3540,13 @@ export const ChatComposer = memo(
                                     ? "reconnecting"
                                     : "disconnected"
                               }`
-                            : isAssistantChat
-                              ? "Ask Uno anything — it can start chats for you…"
-                              : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach files"
-                                : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                            : assistantAllow && !unoChannel
+                              ? "Message your assistant…"
+                              : isAssistantChat
+                                ? "Message Uno — it can start work on any of your computers…"
+                                : phase === "disconnected"
+                                  ? "Ask for follow-up changes or attach files"
+                                  : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||
@@ -3557,6 +3587,7 @@ export const ChatComposer = memo(
                   requestId={activePendingApproval.requestId}
                   isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
                   onRespondToApproval={onRespondToApproval}
+                  assistant={assistantAllow}
                 />
               </div>
             ) : (
@@ -3694,6 +3725,13 @@ export const ChatComposer = memo(
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
                         hideRuntimeModeControl={hideRuntimeModeControl}
+                        assistantMode={
+                          assistantAllow
+                            ? runtimeMode === "full-access"
+                              ? "itself"
+                              : "asks-first"
+                            : null
+                        }
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}

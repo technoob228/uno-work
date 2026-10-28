@@ -30,7 +30,7 @@ import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InboxActionButtons, WithInboxItemActions } from "./InboxItemActions";
-import { ItemIcon, filterInbox } from "./InboxPanel";
+import { InboxMachineTag, ItemIcon, filterInbox, useInboxMachineLabel } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
@@ -207,6 +207,7 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
+  const machineLabel = useInboxMachineLabel(item.environmentId);
   // "Uno set up assistant Scout": revoke right here (w0138 p7).
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
@@ -250,8 +251,9 @@ const BellItem = memo(function BellItem({
                 {item.body}
               </span>
             ) : null}
-            {item.source.kind === "app" || item.count > 1 ? (
+            {item.source.kind === "app" || item.count > 1 || machineLabel ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+                {machineLabel ? <InboxMachineTag label={machineLabel} /> : null}
                 {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
                 {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
               </span>

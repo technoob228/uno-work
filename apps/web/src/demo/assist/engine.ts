@@ -89,6 +89,14 @@ export interface ChatOps {
   /** Ask first (Helper/Observer) or does it itself (Full) — its daemon's preset. */
   readonly asksFirst: (machine: MachineKey, projectId: string) => boolean;
   readonly telegramLinked: (machine: MachineKey, projectId: string) => boolean;
+  /** Variant A: removed — its scripts stop where they are. */
+  readonly gone: (machine: MachineKey, projectId: string) => boolean;
+  /** Variant A: its mode from a card in the chat ("Does it itself" / "Asks first"). */
+  readonly setMode: (machine: MachineKey, projectId: string, asksFirst: boolean) => void;
+  /** Variant A: may it use that computer as its hands. */
+  readonly handAllowed: (projectId: string, machine: MachineKey) => boolean;
+  /** The page asks its computers again (after the demo changed something behind it). */
+  readonly refresh: () => void;
 }
 
 // ── Scripts ───────────────────────────────────────────────────────────────
@@ -133,7 +141,11 @@ export type Step =
         readonly prompt: string;
         readonly steps: ReadonlyArray<string>;
         readonly result: string;
+        /** Variant A: it fails there with this error instead (the result never comes). */
+        readonly fails?: string;
       };
+      /** What it says / offers after a failure there. */
+      readonly onFail?: Script;
       readonly delay?: number;
     }
   /** The turn fails with this error. */
@@ -172,16 +184,21 @@ const keyOf = (machine: MachineKey, threadId: string) => `${machine}:${threadId}
 async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
   const { ops, machine, threadId } = ctx;
   for (const step of script) {
+    // Removed mid-task: nothing more happens (demoBoot already stopped its turn).
+    if (ops.gone(machine, ctx.persona.projectId)) return;
     if ("say" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? replyDelay(step.say));
+      if (ops.gone(machine, ctx.persona.projectId)) return;
       ops.say(machine, threadId, step.say);
     } else if ("work" in step) {
       await wait(step.delay ?? replyDelay(step.work));
+      if (ops.gone(machine, ctx.persona.projectId)) return;
       ops.working(machine, threadId, step.work);
     } else if ("ask" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? replyDelay(step.ask));
+      if (ops.gone(machine, ctx.persona.projectId)) return;
       pending.set(keyOf(machine, threadId), {
         kind: "ask",
         ctx,
@@ -191,6 +208,7 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
       return;
     } else if ("act" in step) {
       await wait(step.delay ?? 900);
+      if (ops.gone(machine, ctx.persona.projectId)) return;
       if (!ops.asksFirst(machine, ctx.persona.projectId)) {
         await runSteps(ctx, step.allowed);
         return;
@@ -236,6 +254,24 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
         ops.working(job.machine, childId, line);
       }
       await wait(1400);
+      if (job.fails) {
+        ops.fail(job.machine, childId, job.fails);
+        ops.addInbox({
+          id: `i-job-${childId}`,
+          machine: job.machine,
+          kind: "agent.error",
+          chat: childId,
+          title: `Failed on ${machineName(job.machine)}: ${job.title}`,
+          body: job.fails,
+        });
+        await wait(900);
+        ops.working(machine, threadId);
+        await runSteps(ctx, [
+          { say: `It failed on ${machineName(job.machine)}: ${job.fails}`, delay: 600 },
+          ...(step.onFail ?? []),
+        ]);
+        return;
+      }
       ops.say(job.machine, childId, job.result);
       ops.addInbox({
         id: `i-job-${childId}`,
@@ -307,8 +343,11 @@ const scenes: Scene[] = [];
 export function addTrigger(trigger: Trigger) {
   triggers.unshift(trigger);
 }
+/** A variant's scene; one with the same id as the base's takes its place. */
 export function addScene(scene: Scene) {
-  scenes.push(scene);
+  const index = scenes.findIndex((item) => item.id === scene.id);
+  if (index >= 0) scenes[index] = scene;
+  else scenes.push(scene);
 }
 export function listScenes(): ReadonlyArray<Scene> {
   return scenes;
@@ -324,6 +363,18 @@ let greeting: (ctx: ScriptContext) => Script = (ctx) => greetingScript(ctx);
 export function setGreeting(script: (ctx: ScriptContext) => Script) {
   greeting = script;
 }
+let channelGreeting: (ctx: ScriptContext, title: string) => Script = (_ctx, title) => [
+  { say: `This is #${title}. Everything about ${title} goes here.` },
+];
+/** Variant A: what Uno says in a new channel of its own. */
+export function setChannelGreeting(script: (ctx: ScriptContext, title: string) => Script) {
+  channelGreeting = script;
+}
+export function greetChannel(machine: MachineKey, threadId: string, title: string): Promise<void> {
+  const ctx = contextOf(machine, threadId);
+  return ctx ? runSteps(ctx, channelGreeting(ctx, title)) : Promise.resolve();
+}
+
 /** Its first words in a new main chat / setup chat. */
 export function greet(machine: MachineKey, threadId: string): Promise<void> {
   const ctx = contextOf(machine, threadId);

@@ -14,6 +14,7 @@ import { useActiveFollowsOpenChat } from "../DemoPanel";
 import { assistDemo } from "../demoBoot";
 import type { MachineKey } from "../heavyFixtures";
 import { listScenes, play } from "./engine";
+import { waitForThread } from "../../components/assistants/useUnoHome";
 import { personaOf } from "./daemon";
 import { VARIANT } from "./variant";
 import {
@@ -23,6 +24,7 @@ import {
   type ConnectorState,
   WORLD,
   switchWorld,
+  worldStamp,
 } from "./world";
 
 type DemoRouter = ReturnType<typeof getRouter>;
@@ -78,6 +80,30 @@ const ROWS: ReadonlyArray<{
     options: [
       { id: "cloud", name: "В браузере" },
       { id: "desktop", name: "Десктоп" },
+    ],
+  },
+  {
+    key: "third",
+    label: "3-й комп.",
+    options: [
+      { id: "asleep", name: "Спит" },
+      { id: "online", name: "Онлайн" },
+    ],
+  },
+  {
+    key: "many",
+    label: "Много",
+    options: [
+      { id: "off", name: "Обычно" },
+      { id: "on", name: "12 каналов, 10 своих" },
+    ],
+  },
+  {
+    key: "face",
+    label: "Лица",
+    options: [
+      { id: "ok", name: "Рисуются" },
+      { id: "fail", name: "Ошибка" },
     ],
   },
 ];
@@ -147,6 +173,49 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
       : window.innerWidth >= 900 && !/[?&]panel=closed/.test(location.search),
   );
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // The page asks its computers again when the demo changed something behind it.
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__assistRefresh = () =>
+      void router.options.context.queryClient.invalidateQueries();
+  }, [router]);
+  // Variant A: a new account opens on Uno — it's already there and talks first (Duet).
+  // Free: uno-work slept overnight — Uno catches up the moment Work opens.
+  useEffect(() => {
+    const once = (name: string) => {
+      const key = `${name}:${worldStamp(WORLD)}`;
+      if (sessionStorage.getItem(key)) return false;
+      sessionStorage.setItem(key, "1");
+      return true;
+    };
+    const timer = setTimeout(() => {
+      if (WORLD.account === "new" && once("demo:a-first-open")) {
+        if (["", "#/", "#/computer"].includes(location.hash)) {
+          const threadId = assistDemo.mainChat("work", ASSISTANT_PROJECT_ID);
+          const environmentId = assistDemo.environmentOf("work");
+          void waitForThread(environmentId, threadId).then(() =>
+            router.navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId, threadId },
+            } as never),
+          );
+        }
+      }
+      if (WORLD.account === "live" && WORLD.tier === "free" && once("demo:a-free-wake")) {
+        const scene = listScenes().find((item) => item.id === "free-wake");
+        const persona = personaOf("work", ASSISTANT_PROJECT_ID);
+        if (scene && persona) {
+          const threadId = assistDemo.mainChat("work", ASSISTANT_PROJECT_ID);
+          scene.run({
+            ops: assistDemo.ops,
+            world: WORLD,
+            target: { machine: "work", threadId, persona },
+            play: (script) => play("work", threadId, script),
+          });
+        }
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [router]);
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__assistDemo = {
       world: WORLD,
@@ -273,8 +342,11 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
           ))}
         </ol>
         <div className="mt-2 text-[11px] leading-snug text-muted-foreground">
-          В чате с Uno можно писать и самому: «morning summary», «send the Acme reminder», «export
-          the deck on my Mac», «connect my apps», «connect Telegram», «break something».
+          Вариант A: один Uno на аккаунт, живёт на uno-work (Plus не спит), остальные компьютеры —
+          его руки. Темы — каналы (Everything, «New channel»). Свои ассистенты — на странице Uno →
+          Advanced (галерея как в Grok). Писать Uno можно самому: «morning summary», «send the Acme
+          reminder», «export the deck on my Mac», «build the landing», «go through the launch
+          checklist», «what computers do you see», «outline the newsletter», «break something».
         </div>
       </div>
     </div>

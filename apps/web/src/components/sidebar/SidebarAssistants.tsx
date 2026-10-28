@@ -26,6 +26,16 @@ import { type ReactNode, memo, useState } from "react";
 import { create } from "zustand";
 
 import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { createAssistantConversation } from "../../lib/managerApi";
+import { toastManager } from "../ui/toast";
+import {
+  CHANNELS_PREVIEW,
+  channelName,
+  cleanChannelName,
+  orderChannels,
+  useUnoHome,
+  waitForThread,
+} from "../assistants/useUnoHome";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -40,12 +50,10 @@ import {
   latestConversation,
   previewChats,
 } from "../assistants/assistantTeam.logic";
-import { useQuickCreateAssistant } from "../assistants/useQuickCreateAssistant";
 import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { assistantsHeaderState } from "./sidebarAssistants.logic";
 import { sidebarDPanel } from "./sidebarDState";
 
 const OPEN_KEY = "sidebar:assistants-open:v1";
@@ -236,7 +244,15 @@ const AssistantRow = memo(function AssistantRow(props: {
           data-testid="sidebar-assistant-open"
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          <span className="min-w-0 truncate text-sm font-medium text-foreground" title={name}>
+            {name}
+          </span>
+          {/* Variant A: an own assistant says its role (they live in Advanced). */}
+          {!member.isUno && member.profile.roles[0] && member.configured ? (
+            <span className="ml-auto shrink-0 truncate pr-1 text-[11px] text-muted-foreground">
+              {member.profile.roles[0]}
+            </span>
+          ) : null}
           {/* One signal for "waits for you": the dot (the Inbox counts it too). */}
           {!member.configured ? (
             <span className="shrink-0 text-xs text-primary">Set up</span>
@@ -323,6 +339,219 @@ function UnoFallbackRow() {
   );
 }
 
+/**
+ * Variant A (28.10): one Uno for the account. Its row says where it lives
+ * ("uno-work · always on"); under it its channels — Everything first, then
+ * the topics you made — and "New channel". Your own assistants (made in
+ * Advanced) follow, each with its role. No "+" here: Uno is the one you
+ * talk to; extras live behind Uno's page → Advanced.
+ */
+const UnoChannels = memo(function UnoChannels(props: {
+  readonly uno: TeamMember;
+  /** What it runs right now on any computer (shown under it while it runs). */
+  readonly running: ReadonlyArray<SidebarThreadSummary>;
+  readonly routeThreadKey: string | null;
+  readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+}) {
+  const { uno } = props;
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const [showAll, setShowAll] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [creating, setCreating] = useState(false);
+  const channels = orderChannels(uno.chats.conversations);
+  const isOpen = (thread: SidebarThreadSummary) => threadKeyOf(thread) === props.routeThreadKey;
+  const preview = previewChats(channels, { showAll, isOpen, limit: CHANNELS_PREVIEW });
+
+  const create = async () => {
+    const name = cleanChannelName(draft);
+    if (name === null || creating) return;
+    setCreating(true);
+    try {
+      const { threadId } = await createAssistantConversation({
+        environmentId: uno.environmentId as EnvironmentId,
+        title: name,
+      });
+      setNaming(false);
+      setDraft("");
+      await waitForThread(uno.environmentId, threadId);
+      if (isMobile) setOpenMobile(false);
+      sidebarDPanel.closeNow();
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams({
+          environmentId: uno.environmentId as EnvironmentId,
+          threadId,
+        }),
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't make the channel",
+        description: cause instanceof Error ? cause.message : "Uno's computer didn't answer.",
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <ul role="list" className="flex flex-col gap-px" data-testid="sidebar-uno-channels">
+      {preview.visible.map((thread) =>
+        props.renderChat({
+          ...thread,
+          title: thread.assistantRole === "chat" ? "Everything" : `# ${channelName(thread)}`,
+        }),
+      )}
+      {props.running.map((thread) => props.renderChat(thread))}
+      {preview.hiddenCount > 0 || showAll ? (
+        <li className="list-none">
+          <button
+            type="button"
+            onClick={() => setShowAll((value) => !value)}
+            data-testid="sidebar-uno-channels-more"
+            className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-8 text-left text-xs text-sidebar-muted-foreground/70 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {preview.hiddenCount > 0 ? `Show ${preview.hiddenCount} more` : "Show less"}
+          </button>
+        </li>
+      ) : null}
+      <li className="list-none">
+        {naming ? (
+          <form
+            className="flex h-7 items-center gap-1 pr-1 pl-7"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void create();
+            }}
+          >
+            <span className="text-xs text-muted-foreground">#</span>
+            <input
+              // oxlint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+              value={draft}
+              maxLength={40}
+              disabled={creating}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setNaming(false);
+                  setDraft("");
+                }
+              }}
+              onBlur={() => {
+                if (draft.trim() === "" && !creating) setNaming(false);
+              }}
+              placeholder="channel name"
+              aria-label="New channel name"
+              data-testid="sidebar-uno-new-channel-input"
+              className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-1.5 text-xs outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            {creating ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin text-muted-foreground" />
+            ) : null}
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setNaming(true)}
+            data-testid="sidebar-uno-new-channel"
+            className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 pl-7 text-left text-xs text-sidebar-muted-foreground/80 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PlusIcon className="size-3.5" />
+            New channel
+          </button>
+        )}
+      </li>
+    </ul>
+  );
+});
+
+function UnoHomeRow(props: { readonly uno: TeamMember; readonly routeThreadKey: string | null }) {
+  const { uno } = props;
+  const navigate = useNavigate();
+  const home = useUnoHome();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const leave = () => {
+    if (isMobile) setOpenMobile(false);
+    sidebarDPanel.closeNow();
+  };
+  const main = uno.chats.conversations.find((thread) => thread.assistantRole === "chat") ?? null;
+  const assistantChat = useAssistantChat();
+  const open = () => {
+    leave();
+    if (main === null) {
+      void assistantChat.open();
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams({
+        environmentId: main.environmentId,
+        threadId: main.id as ThreadId,
+      }),
+    });
+  };
+  const openPage = () => {
+    leave();
+    void navigate({
+      to: "/assistants",
+      search: { view: "profile", env: uno.environmentId, project: uno.projectId },
+    });
+  };
+  const asleep = home.alwaysOn === false;
+  return (
+    <div
+      className="group/assistant flex h-7 w-full items-center rounded-md hover:bg-sidebar-row-hover"
+      data-testid="sidebar-assistant"
+      data-assistant={uno.projectId}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={openPage}
+              aria-label={`${uno.profile.name}'s page`}
+              data-testid="sidebar-assistant-face"
+              className="ml-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <AssistantAvatar emoji={null} tone="violet" activity={uno.activity} />
+        </TooltipTrigger>
+        <TooltipPopup side="right">
+          {uno.profile.name} · {ACTIVITY_LABEL[uno.activity]} — open its page
+        </TooltipPopup>
+      </Tooltip>
+      <button
+        type="button"
+        onClick={open}
+        data-testid="sidebar-assistant-open"
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          className="min-w-0 truncate text-sm font-medium text-foreground"
+          title={uno.profile.name}
+        >
+          {uno.profile.name}
+        </span>
+        <span
+          className={cn(
+            "ml-auto shrink-0 pr-2 text-[11px]",
+            asleep ? "text-warning" : "text-muted-foreground",
+          )}
+          data-testid="sidebar-uno-home"
+          title={home.line}
+        >
+          {asleep ? "sleeps on Free" : home.label}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly routeThreadKey: string | null;
   /** Uno's work chats that are still running (the sidebar keeps them under Uno). */
@@ -330,60 +559,59 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
 }) {
   const team = useAssistantTeam();
-  const teamShown = useTeamShown();
   const unfolded = useUnfoldedStore((state) => state.keys);
   const setUnfolded = useUnfoldedStore((state) => state.set);
-  const quick = useQuickCreateAssistant();
   const live = team.filter((member) => !member.revoked);
-  const header = assistantsHeaderState({ teamShown });
+  const uno = live.find((member) => member.isUno) ?? null;
+  const own = live.filter((member) => !member.isUno);
+  const [showAllOwn, setShowAllOwn] = useState(false);
+  const ownShown = showAllOwn ? own : own.slice(0, CHANNELS_PREVIEW);
 
   return (
     <li className="list-none pb-1" data-testid="sidebar-assistants">
-      {header.showHeader ? (
-        <div
-          className="flex h-6 items-center justify-between pr-1 pl-2.5"
-          data-testid="sidebar-assistants-header"
-        >
-          <span className="text-xs font-medium text-sidebar-muted-foreground/70">Assistants</span>
-          {header.showCreate ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="New assistant"
-                    disabled={quick.creating || !quick.available}
-                    onClick={() => void quick.create()}
-                    data-testid="sidebar-new-assistant"
-                    className="text-muted-foreground hover:text-foreground"
-                  />
-                }
-              >
-                {quick.creating ? (
-                  <LoaderCircleIcon className="size-3.5 animate-spin" />
-                ) : (
-                  <PlusIcon className="size-3.5" />
-                )}
-              </TooltipTrigger>
-              <TooltipPopup side="right">New assistant</TooltipPopup>
-            </Tooltip>
-          ) : null}
-        </div>
-      ) : null}
+      <div
+        className="flex h-6 items-center justify-between pr-1 pl-2.5"
+        data-testid="sidebar-assistants-header"
+      >
+        <span className="text-xs font-medium text-sidebar-muted-foreground/70">Uno</span>
+      </div>
       <ul role="list" className="flex flex-col gap-px">
-        {live.map((member) => (
+        {uno ? (
+          <li className="list-none">
+            <UnoHomeRow uno={uno} routeThreadKey={props.routeThreadKey} />
+            <UnoChannels
+              uno={uno}
+              running={props.unoRunning}
+              routeThreadKey={props.routeThreadKey}
+              renderChat={props.renderChat}
+            />
+          </li>
+        ) : (
+          <UnoFallbackRow />
+        )}
+        {ownShown.map((member) => (
           <AssistantRow
             key={member.key}
             member={member}
             unfolded={unfolded.has(member.key)}
             onToggle={() => setUnfolded(member.key, !unfolded.has(member.key))}
             routeThreadKey={props.routeThreadKey}
-            extraChats={member.isUno ? props.unoRunning : []}
+            extraChats={[]}
             renderChat={props.renderChat}
           />
         ))}
-        {live.length === 0 ? <UnoFallbackRow /> : null}
+        {own.length > CHANNELS_PREVIEW ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={() => setShowAllOwn((value) => !value)}
+              data-testid="sidebar-own-assistants-more"
+              className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-8 text-left text-xs text-sidebar-muted-foreground/70 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {showAllOwn ? "Show less" : `${own.length - CHANNELS_PREVIEW} more assistants`}
+            </button>
+          </li>
+        ) : null}
       </ul>
       <AssistantOnboardingDialog />
     </li>

@@ -32,6 +32,12 @@ export interface AssistWorld {
   /** Work in the browser on uno-work, or the desktop app on the Mac. */
   readonly platform: "cloud" | "desktop";
   readonly connectors: Readonly<Record<ConnectorProvider, ConnectorState>>;
+  /** Variant A: the third computer (free-cloud) awake — the "3 computers" view. */
+  readonly third: "asleep" | "online";
+  /** Variant A: a heavy account — 12 channels and 10 own assistants. */
+  readonly many: "off" | "on";
+  /** Variant A: drawing a face for a new assistant fails (Uno AI is out). */
+  readonly face: "ok" | "fail";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -49,6 +55,9 @@ export const LIVE_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "on", "google-drive": "on", notion: "off", github: "on" },
+  third: "asleep",
+  many: "off",
+  face: "ok",
 };
 
 export const NEW_WORLD: AssistWorld = {
@@ -59,6 +68,9 @@ export const NEW_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "off", "google-drive": "off", notion: "off", github: "off" },
+  third: "asleep",
+  many: "off",
+  face: "ok",
 };
 
 const KEY = "demo:assist-world";
@@ -103,6 +115,9 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     mode: take("mode", ["itself", "asks-first"] as const) ?? start.mode,
     platform: take("platform", ["cloud", "desktop"] as const) ?? start.platform,
     connectors,
+    third: take("third", ["asleep", "online"] as const) ?? start.third,
+    many: take("many", ["off", "on"] as const) ?? start.many,
+    face: take("face", ["ok", "fail"] as const) ?? start.face,
   };
   return touched ? next : null;
 }
@@ -159,3 +174,6 @@ export function switchWorld(patch: Partial<AssistWorld>) {
 export const isLive = (world: AssistWorld = WORLD) => world.account === "live";
 export const macOnline = (world: AssistWorld = WORLD) =>
   world.account === "live" && world.mac === "online";
+/** Variant A: the third computer answers (live, `third=online`). */
+export const thirdOnline = (world: AssistWorld = WORLD) =>
+  world.account === "live" && world.third === "online";

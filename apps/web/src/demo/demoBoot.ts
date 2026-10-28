@@ -33,6 +33,7 @@ import {
   type DemoInboxInput,
   type DemoQuestion,
   greet,
+  greetChannel,
   onAnswer,
   onApproval,
   onTurn,
@@ -44,15 +45,18 @@ import {
   asksFirst,
   connectorState,
   daemonHandlers,
+  handAllowed,
+  isGone,
   machineAwake,
   personaOf,
   presetOf,
+  setPresetOf,
   setTelegram,
   startDaemons,
   telegramLinked,
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
-import { WORLD, worldStamp } from "./assist/world";
+import { WORLD, thirdOnline, worldStamp } from "./assist/world";
 import "./assist/variant";
 import {
   CHATS,
@@ -89,8 +93,9 @@ const SEED_VERSION = DEMO_ASSIST ? `assist-1:${worldStamp(WORLD)}` : "w0138-1";
 /** Computers the page has saved (besides its own): the 16.10 mock's two clouds, or the MacBook. */
 function savedMachines(): DemoMachine[] {
   if (!DEMO_ASSIST) return [MACHINES.work, MACHINES.product];
-  // The MacBook stays saved while it sleeps (it shows offline).
-  return WORLD.account === "live" ? [MACHINES.mac] : [];
+  // The MacBook stays saved while it sleeps (it shows offline); variant A's third computer when awake.
+  if (WORLD.account !== "live") return [];
+  return thirdOnline(WORLD) ? [MACHINES.mac, MACHINES.product] : [MACHINES.mac];
 }
 
 function seedLocalStorage() {
@@ -452,7 +457,13 @@ function cloudState() {
       ? [
           box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
           ...(WORLD.account === "live"
-            ? [box(MACHINES.product.boxId!, MACHINES.product.label, "sleeping")]
+            ? [
+                box(
+                  MACHINES.product.boxId!,
+                  MACHINES.product.label,
+                  thirdOnline(WORLD) ? "running" : "sleeping",
+                ),
+              ]
             : []),
         ]
       : [
@@ -1373,7 +1384,71 @@ const assistOps = {
   connectorState,
   asksFirst,
   telegramLinked,
+  gone: isGone,
+  handAllowed,
+  setMode: (key: MachineKey, projectId: string, asks: boolean) => {
+    setPresetOf(key, projectId, asks ? "helper" : "full");
+    applyPreset(MACHINES[key], projectId);
+    demoRefresh();
+  },
+  refresh: () => demoRefresh(),
 };
+
+/** The page asks its computers again (the panel sets the query client's invalidate). */
+function demoRefresh() {
+  const refresh = (window as unknown as { __assistRefresh?: () => void }).__assistRefresh;
+  setTimeout(() => refresh?.(), 50);
+}
+
+/** Variant A: an assistant was removed — what it was doing stops with one honest line. */
+function stopRemoved(machine: DemoMachine, projectId: string) {
+  const name = personaOf(machine.key, projectId)?.name ?? "The assistant";
+  for (const thread of modelFor(machine).threads) {
+    if (thread.projectId !== projectId) continue;
+    const turn = thread.latestTurn as { state: string } | null;
+    if (turn?.state !== "running") continue;
+    const activities = (thread as MutableThread).activities as Array<Record<string, unknown>>;
+    const now = new Date().toISOString();
+    for (const activity of [...activities]) {
+      const kind = String(activity.kind);
+      if (!kind.endsWith(".requested")) continue;
+      activities.push({
+        ...activity,
+        id: `${String(activity.id)}-stopped`,
+        kind: kind.replace(".requested", ".resolved"),
+        summary: "Stopped",
+        createdAt: now,
+      });
+    }
+    finishTurn(
+      machine,
+      String(thread.id),
+      `Stopped — ${name} was removed. Nothing more was sent or changed.`,
+    );
+  }
+  inboxes.set(
+    machine.environmentId,
+    inboxItemsFor(machine).filter((item) => {
+      if (item.open?.kind !== "thread") return true;
+      const threadId = item.open.threadId;
+      return !modelFor(machine).threads.some(
+        (thread) => thread.id === threadId && thread.projectId === projectId,
+      );
+    }),
+  );
+  publishInbox(machine);
+  demoRefresh();
+}
+
+/** Variant A: its mode changed — its chats switch to it (the composer says the same as the header). */
+function applyPreset(machine: DemoMachine, projectId: string) {
+  for (const thread of modelFor(machine).threads) {
+    if (thread.projectId !== projectId) continue;
+    thread.runtimeMode = assistantRuntimeMode(machine.key, projectId);
+    touch(modelFor(machine));
+    publishThread(machine, String(thread.id));
+  }
+}
 
 /** The assistant's main chat on that computer (the daemon makes it on a fresh one). */
 function mainChatOf(machine: DemoMachine, projectId: string) {
@@ -1400,8 +1475,12 @@ const assistDaemonHooks = {
   newConversation: (machine: DemoMachine, projectId: string, title: string) => {
     const threadId = `${projectId}-c-${Date.now().toString(36)}`;
     newThread(machine, { threadId, projectId, title });
+    // Variant A: a new channel — Uno says what goes there.
+    setTimeout(() => void greetChannel(machine.key, threadId, title), 400);
     return threadId;
   },
+  onRevoked: stopRemoved,
+  onPreset: applyPreset,
   setupChat: (machine: DemoMachine, projectId: string) => {
     const threadId = `${projectId}-setup-${Date.now().toString(36)}`;
     const name = personaOf(machine.key, projectId)?.name ?? "assistant";

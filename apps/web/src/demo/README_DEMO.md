@@ -66,3 +66,20 @@ else the system Chrome. Typecheck: `cd apps/web && tsc --noEmit`.
   and the Free computer is only in the account's list (never connected).
 - Onboarding (first run) is skipped in both worlds (`onboardingCompleted: true`).
 - Avatars/pictures, Slack, the assistant's own mail are stubs (empty answers).
+
+## Variant A (branch `demo/assistants-a-1028`): one Uno for the account
+
+- One Uno, on uno-work (Plus keeps it awake); the MacBook and free-cloud are its
+  hands (Uno's page → "Computers — its hands", new daemon route
+  `GET/POST /api/manager/assistant/computers`).
+- Channels = Uno's conversations: "Everything" (main) + `# name`
+  (`createAssistantConversation({ title })`), "New channel" in the sidebar.
+- Own assistants behind Uno's page → Advanced → the Grok-style gallery
+  (`/assistants?view=gallery[&character=mia|own]`, `AssistantGallery.tsx`).
+- Real components changed: `SidebarAssistants.tsx` (Uno + channels + own),
+  `ChatHeader`/`AssistantChatHeaderActions` (Uno · channel, home line, mode chip
+  `AssistantModeChip.tsx`), `AssistantPageA.tsx` (page), `UnoSleepNotice.tsx` (Free),
+  plain-words Allow card, Inbox computer tags, "Sign-in expired" in Connectors.
+- Extra worlds: `third=online` (3 computers), `many=on` (12 channels, 10 own),
+  `face=fail` (drawing a face fails).
+- Flows: `demo-e2e/flows/a.flow.mjs` (main) + `a-edge.flow.mjs` (edge), 21 in all.

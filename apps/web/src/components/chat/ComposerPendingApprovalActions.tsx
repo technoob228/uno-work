@@ -9,13 +9,40 @@ interface ComposerPendingApprovalActionsProps {
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<void>;
+  /** An assistant's chat: only Decline and Allow once. */
+  assistant?: boolean;
 }
 
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
   requestId,
   isResponding,
   onRespondToApproval,
+  assistant = false,
 }: ComposerPendingApprovalActionsProps) {
+  if (assistant) {
+    return (
+      <>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={isResponding}
+          onClick={() => void onRespondToApproval(requestId, "decline")}
+          data-testid="assistant-allow-decline"
+        >
+          Decline
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          disabled={isResponding}
+          onClick={() => void onRespondToApproval(requestId, "accept")}
+          data-testid="assistant-allow-once"
+        >
+          Allow once
+        </Button>
+      </>
+    );
+  }
   return (
     <>
       <Button

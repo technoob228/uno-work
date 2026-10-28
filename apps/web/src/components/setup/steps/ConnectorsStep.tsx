@@ -550,7 +550,11 @@ function ProviderRow({
         data-testid={`setup-connect-${meta.provider}`}
       >
         {pending === "connect" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-        {pending === "connect" ? "Connecting" : connector?.needsReconnect ? "Reconnect" : "Connect"}
+        {pending === "connect"
+          ? "Connecting"
+          : connector?.needsReconnect
+            ? "Sign in again"
+            : "Connect"}
       </Button>
     );
   }
@@ -568,7 +572,18 @@ function ProviderRow({
             Connected{connector?.account ? ` · ${connector.account}` : ""}
           </ConnectedBadge>
         ) : connector?.needsReconnect ? (
-          "It stopped working. Sign in again to keep it."
+          <span
+            className="flex flex-wrap items-center gap-1.5"
+            data-testid={`connector-expired-${meta.provider}`}
+          >
+            <span className="rounded bg-amber-500/15 px-1.5 py-px text-[11px] font-medium text-amber-700 dark:text-amber-400">
+              Sign-in expired
+            </span>
+            <span>
+              {connector.account ? `${connector.account} · ` : ""}Uno can't use it until you sign in
+              again.
+            </span>
+          </span>
         ) : (
           meta.description
         )
@@ -784,7 +799,9 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
   }, [pending, queryClient]);
   useEffect(() => {
     if (pending?.action !== "connect") return;
-    if (byProvider.get(pending.provider)?.connected) {
+    // An expired one is "connected" with needsReconnect: wait until the new sign-in lands.
+    const connector = byProvider.get(pending.provider);
+    if (connector?.connected && connector.needsReconnect !== true) {
       toastManager.add({
         type: "success",
         title: `${PROVIDERS.find((meta) => meta.provider === pending.provider)?.name} connected`,
@@ -831,7 +848,13 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
  * by this step and by Settings → Connectors (the place to manage them since
  * 16.10), so both show the same thing.
  */
-export function ConnectorsList(props: { readonly className?: string } = {}) {
+export function ConnectorsList(
+  props: {
+    readonly className?: string;
+    /** Only the four apps (an assistant's page): no mailbox row, no servers by address. */
+    readonly appsOnly?: boolean;
+  } = {},
+) {
   const environmentId = usePrimaryEnvironmentId();
   const { connectors, byProvider, pending, connect, disconnect } =
     useConnectorActions(environmentId);
@@ -839,14 +862,14 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
   const githubViaMachine = connectors.isFetched && githubConnector?.available !== true;
   const agentMail = useAgentMail(environmentId);
   const mailbox = agentMailRowVisible(agentMail.data) ? agentMail.data.mailbox : null;
-  const mailShown = environmentId !== null && mailbox !== null;
+  const mailShown = environmentId !== null && mailbox !== null && props.appsOnly !== true;
 
   return (
     <div
       className={cn("overflow-hidden rounded-2xl border border-border", props.className)}
       data-testid="setup-connectors"
     >
-      {environmentId !== null && mailbox !== null ? (
+      {mailShown && environmentId !== null && mailbox !== null ? (
         <AgentMailRow environmentId={environmentId} mailbox={mailbox} />
       ) : null}
       {PROVIDERS.map((meta, index) =>
@@ -864,7 +887,7 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
           />
         ),
       )}
-      <McpServers environmentId={environmentId} />
+      {props.appsOnly ? null : <McpServers environmentId={environmentId} />}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import {
   ChevronLeftIcon,
   FileTextIcon,
   InboxIcon,
+  MonitorIcon,
   ShieldQuestionIcon,
   XIcon,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import {
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
 import { cn } from "../../lib/utils";
+import { useMachineLabels } from "../../hooks/useMachineRows";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
@@ -306,6 +308,24 @@ export function ItemIcon({ item }: { item: InboxEntry }) {
   );
 }
 
+/** Variant A: with several computers, each item says which one it is about. */
+export function useInboxMachineLabel(environmentId: string): string | null {
+  const labels = useMachineLabels();
+  return labels.size > 1 ? (labels.get(environmentId) ?? null) : null;
+}
+
+export function InboxMachineTag(props: { readonly label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded bg-muted px-1 py-px text-muted-foreground"
+      data-testid="inbox-item-machine"
+    >
+      <MonitorIcon className="size-3" />
+      {props.label}
+    </span>
+  );
+}
+
 const InboxRow = memo(function InboxRow({ item }: { item: InboxEntry }) {
   return (
     <WithInboxItemActions item={item}>
@@ -330,6 +350,7 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
+  const machineLabel = useInboxMachineLabel(item.environmentId);
 
   return (
     <li
@@ -378,6 +399,7 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
             </span>
           ) : null}
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+            {machineLabel ? <InboxMachineTag label={machineLabel} /> : null}
             {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
             {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
           </span>

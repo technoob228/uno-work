@@ -17,6 +17,7 @@
  *   2. where it answers: Telegram (a bot of its own, BotFather), Slack, or
  *      "Only here".
  */
+import { AssistantGallery } from "./AssistantGallery";
 import { ASSISTANT_PROJECT_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -119,8 +120,10 @@ export interface AssistantsRouteSearch {
    * assistant `project` that lives on this computer; "profile" — the team
    * page of assistant `project` on computer `env` (w0138 p7).
    */
-  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile" | "gallery";
   readonly box?: number;
+  /** Variant A, `view=gallery`: a character to open the builder with ("mia"), or "own". */
+  readonly character?: string;
   readonly project?: string;
   readonly env?: string;
 }
@@ -179,6 +182,10 @@ export function AssistantsView() {
     search.project
   ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
+  }
+  // Variant A: your own assistants, the Grok way (Uno's page → Advanced).
+  if ((DEMO || availability === "on") && search.view === "gallery") {
+    return <AssistantGallery {...(search.character ? { character: search.character } : {})} />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;

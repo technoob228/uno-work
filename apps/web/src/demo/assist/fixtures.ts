@@ -18,7 +18,7 @@ import {
   type MachineKey,
   type ProjectSpec,
 } from "../heavyFixtures";
-import { type AssistWorld, macOnline } from "./world";
+import { type AssistWorld, macOnline, thirdOnline } from "./world";
 
 /** An assistant the demo has: its folder on one computer, how it looks, what its daemon keeps. */
 export interface DemoPersona {
@@ -73,9 +73,9 @@ function liveProjects(): Record<MachineKey, ProjectSpec[]> {
         repo: REPO.bot,
       },
     ],
+    // Variant A: one Uno on the account — it lives on uno-work; the MacBook is its hands.
     mac: [
       { id: "p-mac-home", title: "Home folder", root: "/Users/misha" },
-      { id: ASSISTANT_PROJECT_ID, title: "Uno", root: UNO_ROOT.mac },
       {
         id: "p-mac-landing",
         title: "landing",
@@ -89,9 +89,22 @@ function liveProjects(): Record<MachineKey, ProjectSpec[]> {
         repo: REPO.deck,
       },
     ],
-    // The Free computer is asleep: the page never reaches its daemon.
+    // The Free computer is asleep (the page never reaches its daemon), or awake (`third=online`).
     product: [],
   };
+}
+
+/** Variant A: the third computer when it's awake — one project, Uno's hands there too. */
+function thirdProjects(): ProjectSpec[] {
+  return [
+    { id: "p-free-home", title: "Home folder", root: "/home/uno" },
+    {
+      id: "p-free-newsletter",
+      title: "newsletter",
+      root: "/home/uno/projects/newsletter",
+      repo: "github.com/misha-demo/newsletter",
+    },
+  ];
 }
 
 function newProjects(): Record<MachineKey, ProjectSpec[]> {
@@ -136,7 +149,8 @@ function liveChats(world: AssistWorld): ChatSpec[] {
       id: "uno-acme",
       machine: "work",
       project: ASSISTANT_PROJECT_ID,
-      title: "Acme invoice: what to write",
+      // Variant A: a channel of Uno's (a topic), like Duet's.
+      title: "invoices",
       minutesAgo: 60 * 20,
       state: "read",
       role: "solo",
@@ -185,6 +199,44 @@ function liveChats(world: AssistWorld): ChatSpec[] {
       ],
     },
   ];
+  // Variant A: one more channel of Uno's.
+  chats.push({
+    id: "uno-landing",
+    machine: "work",
+    project: ASSISTANT_PROJECT_ID,
+    title: "landing",
+    minutesAgo: 60 * 6,
+    state: "read",
+    role: "solo",
+    messages: [
+      ["user", "Everything about the landing goes here. Launch is Friday."],
+      [
+        "assistant",
+        "Got it — #landing. Checklist: 4 of 6 done. Left: the pricing copy and the checkout test on a phone.",
+      ],
+    ],
+  });
+  if (world.many === "on") chats.push(...manyChannels());
+  if (thirdOnline(world)) {
+    chats.push({
+      id: "f-newsletter",
+      machine: "product",
+      project: "p-free-newsletter",
+      title: "Newsletter #14 draft",
+      minutesAgo: 35,
+      state: "needs-you",
+      role: "from-uno",
+      ask: {
+        kind: "permission",
+        text: "Draft is ready. Send newsletter #14 to 1,240 subscribers?",
+        command: "Send newsletter #14 to 1,240 subscribers",
+      },
+      messages: [
+        ["user", "Uno: draft newsletter #14 from this week's changelog."],
+        ["assistant", "Draft is in newsletter/drafts/14.md — 380 words, 3 sections."],
+      ],
+    });
+  }
   if (macOnline(world)) {
     chats.push(
       {
@@ -221,6 +273,35 @@ function liveChats(world: AssistWorld): ChatSpec[] {
   return chats;
 }
 
+/** `many=on`: a heavy account — 10 more channels of Uno's. */
+const MANY_CHANNELS = [
+  "hiring",
+  "taxes-2026",
+  "investors",
+  "support",
+  "partners",
+  "content-plan",
+  "travel",
+  "orders-bot",
+  "pitch-deck",
+  "family",
+];
+function manyChannels(): ChatSpec[] {
+  return MANY_CHANNELS.map((title, index) => ({
+    id: `uno-ch-${title}`,
+    machine: "work" as const,
+    project: ASSISTANT_PROJECT_ID,
+    title,
+    minutesAgo: 60 * 24 * (index + 1),
+    state: "read" as const,
+    role: "solo" as const,
+    messages: [
+      ["user", `Everything about ${title} goes here.`] as const,
+      ["assistant", `OK — #${title}. I'll keep it out of Everything.`] as const,
+    ],
+  }));
+}
+
 function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
   const items: (typeof INBOX)[number][] = [
     {
@@ -243,6 +324,17 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       body: "212 orders → Drive / Orders / 2026-10-27.",
     },
   ];
+  if (thirdOnline(world)) {
+    items.push({
+      id: "i-free-newsletter",
+      machine: "product",
+      kind: "agent.approval",
+      minutesAgo: 35,
+      chat: "f-newsletter",
+      title: "Uno asks: send newsletter #14 to 1,240 subscribers?",
+      body: "The draft is in newsletter/drafts/14.md — 380 words.",
+    });
+  }
   if (macOnline(world)) {
     items.push({
       id: "i-mac-build",
@@ -319,6 +411,7 @@ function replace<T>(target: T[], next: ReadonlyArray<T>) {
 export function installAssistFixtures(world: AssistWorld) {
   const live = world.account === "live";
   const projects = live ? liveProjects() : newProjects();
+  if (live && thirdOnline(world)) projects.product = thirdProjects();
   const chats = live ? liveChats(world) : [];
   for (const persona of DEMO_PERSONAS) {
     if (!live && persona.machine !== "work") continue;
