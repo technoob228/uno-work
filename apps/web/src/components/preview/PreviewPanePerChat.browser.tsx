@@ -138,8 +138,11 @@ function paneVisible(): boolean {
 }
 
 describe("right panel lives in the chat", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear();
+    // Desktop width: below 768 px (the runner's default is 414) the panel is a
+    // phone sheet and the agent's opens wait behind a chip (0.0.154).
+    await page.viewport(1280, 800);
   });
 
   it("follows the chat, not the person: chat → Home → chat B → back", async () => {
