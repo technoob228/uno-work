@@ -113,6 +113,7 @@ import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { ComputerResourcesService } from "./computerResources/ComputerResourcesService.ts";
 import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
+import { PlanLimitsService } from "./planLimits/PlanLimitsService.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import { CustomHarnessService } from "./provider/customHarness/CustomHarnessService.ts";
@@ -316,6 +317,7 @@ const makeWsRpcLayer = (
       const filesRecent = yield* FilesRecentService;
       const machineApps = yield* MachineAppsService;
       const appSdk = yield* AppSdkService;
+      const planLimits = yield* PlanLimitsService;
       const inbox = yield* InboxService;
       const computerResources = yield* ComputerResourcesService;
       const harnessSetup = yield* HarnessSetup;
@@ -1695,6 +1697,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.appAiSpend]: (_input) =>
           observeRpcEffect(WS_METHODS.appAiSpend, appSdk.spend, {
             "rpc.aggregate": "app-sdk",
+          }),
+        [WS_METHODS.unoComputerPlanLimits]: (input) =>
+          observeRpcEffect(WS_METHODS.unoComputerPlanLimits, planLimits.read(input), {
+            "rpc.aggregate": "uno-computer",
           }),
         [WS_METHODS.workSites]: (_input) =>
           observeRpcEffect(

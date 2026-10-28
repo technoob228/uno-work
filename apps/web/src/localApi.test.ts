@@ -182,6 +182,7 @@ const rpcClientMock = {
     appAiUpdate: vi.fn(),
     appAiModels: vi.fn(),
     appAiSpend: vi.fn(),
+    planLimits: vi.fn(),
     localMetrics: vi.fn(),
     resizeOptions: vi.fn(),
     resize: vi.fn(),

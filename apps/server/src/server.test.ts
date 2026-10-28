@@ -138,6 +138,7 @@ import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { FilesRecentService } from "./files/FilesRecentService.ts";
+import { PlanLimitsService } from "./planLimits/PlanLimitsService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
@@ -709,6 +710,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(FilesRecentService)({}),
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
+          Layer.mock(PlanLimitsService)({}),
           Layer.mock(ConnectorsService)({
             list: () =>
               Effect.succeed({ available: false, reason: "not_cloud_computer", connectors: [] }),

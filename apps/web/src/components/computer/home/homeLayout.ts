@@ -12,6 +12,10 @@
  * is the field "What should we do?", what needs you and what's in progress.
  * A layout nobody touched (the old default with Files and Apps) moves to the
  * new default; a layout the person arranged is kept.
+ *
+ * Since 0.0.157 one widget comes with Home: "AI plan limits" (shown only
+ * where Claude Code or Codex is signed in). It is put on existing layouts
+ * too, once per device — see newBuiltInWidgetBlocks.
  */
 import {
   DEFAULT_HOME_WIDGETS,
@@ -35,8 +39,17 @@ export type HomeBlockId = HomeFixedBlockId | HomeWidgetId | AppWidgetBlockId;
 
 export const COMPOSER_BLOCK: HomeFixedBlockId = "composer";
 
-/** No widgets by default (01.10); Customize → Add widget brings them. */
-export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [...HOME_FIXED_BLOCKS];
+/**
+ * Built-in widgets every Home starts with (0.0.157: "AI plan limits", which
+ * hides itself without a Claude Code / Codex sign-in). The rest (01.10) come
+ * from Customize → Add widget.
+ */
+export const SEEDED_HOME_WIDGETS: ReadonlyArray<HomeWidgetId> = ["plan-limits"];
+
+export const DEFAULT_HOME_LAYOUT: ReadonlyArray<HomeBlockId> = [
+  ...HOME_FIXED_BLOCKS,
+  ...SEEDED_HOME_WIDGETS,
+];
 
 /** The default until 0.0.103: the fixed blocks, then Files and Apps. */
 const UNTOUCHED_V2_LAYOUT: ReadonlyArray<HomeBlockId> = [
@@ -163,6 +176,32 @@ export function addableBlocks(
   available: ReadonlyArray<HomeBlockId>,
 ): HomeBlockId[] {
   return available.filter((id) => !state.includes(id));
+}
+
+// ------------------------------------------ built-in widgets land on Home --
+
+/** Built-in widgets this device has already put on Home (or found there). */
+export const HOME_BUILT_IN_WIDGETS_SEEN_KEY = "uno-work:home:built-in-widgets-seen:v1";
+
+/**
+ * A built-in widget that comes with Home (SEEDED_HOME_WIDGETS) is put on a
+ * layout saved before it existed — once per device. Removing it with × is
+ * the person's choice and sticks: it isn't brought back. Unlike apps'
+ * widgets, an updated device gets it too (it's new to everyone).
+ *
+ * `seen` null — this device never recorded it.
+ */
+export function newBuiltInWidgetBlocks(input: {
+  readonly blocks: ReadonlyArray<HomeBlockId>;
+  readonly seen: ReadonlyArray<string> | null;
+  readonly seeded?: ReadonlyArray<HomeWidgetId>;
+}): { readonly add: HomeWidgetId[]; readonly seen: string[] } {
+  const known = new Set(input.seen ?? []);
+  const fresh = (input.seeded ?? SEEDED_HOME_WIDGETS).filter((id) => !known.has(id));
+  return {
+    add: fresh.filter((id) => !input.blocks.includes(id)),
+    seen: [...known, ...fresh],
+  };
 }
 
 // ------------------------------------------------------------ app widgets --
