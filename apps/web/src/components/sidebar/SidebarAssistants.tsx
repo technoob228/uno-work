@@ -574,14 +574,19 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             member={member}
             foldChoice={foldChoiceOf(foldState, member.key)}
             onFoldChange={(choice) => setFold(member.key, choice)}
-            note={assistantRowNote({
-              isUno: member.isUno,
-              role: member.profile.roles[0] ?? null,
-              environmentId: member.environmentId,
-              homeEnvironmentId,
-              computerLabel: member.computerLabel,
-              multiComputer,
-            })}
+            // Gating (28.10): no notes beside the rows without the assistants update (0.0.156).
+            note={
+              teamShown
+                ? assistantRowNote({
+                    isUno: member.isUno,
+                    role: member.profile.roles[0] ?? null,
+                    environmentId: member.environmentId,
+                    homeEnvironmentId,
+                    computerLabel: member.computerLabel,
+                    multiComputer,
+                  })
+                : { text: "", computer: null }
+            }
             routeThreadKey={props.routeThreadKey}
             extraChats={member.isUno ? props.unoRunning : []}
             renderChat={props.renderChat}
