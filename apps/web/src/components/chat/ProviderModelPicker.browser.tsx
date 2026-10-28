@@ -404,7 +404,7 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
-        expect(text).not.toContain("Codex");
+        expect(text).not.toContain("GPT-5 Codex"); // the rail names Codex (0.0.155), its models stay out
         expect(text).toContain("Claude");
         expect(text).toContain("Claude Opus 4.6");
       });
