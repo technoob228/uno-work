@@ -59,6 +59,7 @@ import { OpenCodeKeyForm } from "../harness/OpenCodeKeyForm";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
 import { runsOnUnoAi } from "../harness/harnessSetupState";
 import { subscriptionActionLabel, subscriptionRowState } from "./simpleSubscriptionRow.logic";
+import { unoCreditsAllowed, unoCreditsHarnessLabel } from "../chat/unoCreditsChoice.logic";
 import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
@@ -473,7 +474,9 @@ export function AiSettings() {
             signOutError?.driver === agent.driver
               ? `Couldn't sign out: ${signOutError.message}`
               : row.state === "unoAi"
-                ? `Works now on Uno AI (premium credit). Have ${agent.plans ?? "your own plan"}? Sign in to use it instead.`
+                ? unoCreditsAllowed(serverSettings, agent.driver)
+                  ? `Runs on your Uno credits (premium credit, then balance). Have ${agent.plans ?? "your own plan"}? Sign in to use it instead.`
+                  : `Not signed in. Have ${agent.plans ?? "your own plan"}? Sign in to use it. Chats ask before using your Uno credits.`
                 : row.state === "connected"
                   ? ownAccount
                     ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick it in any chat, or under "New chats start on".`
@@ -578,6 +581,43 @@ export function AiSettings() {
                 </div>
               ) : null}
             </SettingsRow>
+          );
+        })}
+        {agents.map(({ agent, row }) => {
+          // Claude Code without a sign-in: may chats run it on Uno credits
+          // without asking? Set from the chat's "Use Uno credits"; off = ask.
+          const harness = unoCreditsHarnessLabel(agent.driver);
+          const allowed = unoCreditsAllowed(serverSettings, agent.driver);
+          if (harness === null || (row.state !== "unoAi" && !allowed)) return null;
+          return (
+            <SettingsRow
+              key={`uno-credits-${agent.driver}`}
+              title={`${harness} on Uno credits`}
+              description={
+                allowed
+                  ? `When ${harness} isn't signed in on this computer, chats run it on your Uno credits: premium credit first, then your balance.`
+                  : `Off: chats ask before running ${harness} on your Uno credits.`
+              }
+              control={
+                <Switch
+                  checked={allowed}
+                  disabled={!serverSettings}
+                  onCheckedChange={(checked) =>
+                    void updateEnvironmentSettings({
+                      harnessUnoCredits: { [agent.driver]: checked },
+                    }).catch((error: unknown) =>
+                      toastManager.add({
+                        type: "error",
+                        title: "Couldn't save",
+                        description: error instanceof Error ? error.message : String(error),
+                      }),
+                    )
+                  }
+                  aria-label={`Run ${harness} on Uno credits without asking`}
+                  data-testid={`uno-credits-switch-${agent.driver}`}
+                />
+              }
+            />
           );
         })}
       </SettingsSection>
