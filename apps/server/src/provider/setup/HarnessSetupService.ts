@@ -168,6 +168,26 @@ interface AuthExtra {
   readonly verificationUrl?: string;
   readonly userCode?: string;
   readonly needsCodeInput: boolean;
+  readonly codeCheck?: "checking" | "rejected";
+}
+
+/** Written into the job log when a pasted code goes to the CLI. */
+export const CODE_SUBMITTED_MARK = "[code submitted]";
+
+/**
+ * The CLI's output since the last code went in (all of it before any):
+ * whether it asks for a code is read from there, so the prompt it printed
+ * before the code doesn't bring the box back (cap walkthrough 28.10, P4:
+ * the code box stayed up after Submit, nothing moved for 25 s).
+ */
+export function outputSinceCodeSubmitted(log: string): {
+  readonly submitted: boolean;
+  readonly text: string;
+} {
+  const at = log.lastIndexOf(CODE_SUBMITTED_MARK);
+  return at < 0
+    ? { submitted: false, text: log }
+    : { submitted: true, text: log.slice(at + CODE_SUBMITTED_MARK.length) };
 }
 
 const fail = (code: ProviderSetupRpcError["code"], message: string) =>
@@ -361,6 +381,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     ...(job.extra.verificationUrl ? { verificationUrl: job.extra.verificationUrl } : {}),
     ...(job.extra.userCode ? { userCode: job.extra.userCode } : {}),
     needsCodeInput: job.extra.needsCodeInput,
+    ...(job.extra.codeCheck ? { codeCheck: job.extra.codeCheck } : {}),
     ...(job.error ? { error: job.error } : {}),
   });
 
@@ -449,13 +470,21 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
                 verificationUrl?: string;
                 userCode?: string;
                 needsCodeInput?: boolean;
+                codeCheck?: "checking" | "rejected";
               } = {};
               if (parsed.verificationUrl && !current.extra.verificationUrl) {
                 patch.verificationUrl = parsed.verificationUrl;
               }
               if (parsed.userCode && !current.extra.userCode) patch.userCode = parsed.userCode;
-              if (parsed.needsCodeInput && !current.extra.needsCodeInput) {
+              // After a code went in, only a prompt printed since then asks
+              // again — and means that code didn't work.
+              const since = outputSinceCodeSubmitted(accumulated);
+              const asks = since.submitted
+                ? parseOAuthPrompt(since.text).needsCodeInput
+                : parsed.needsCodeInput;
+              if (asks && !current.extra.needsCodeInput) {
                 patch.needsCodeInput = true;
+                if (since.submitted) patch.codeCheck = "rejected";
               }
               if (Object.keys(patch).length > 0) auths.updateExtra(job.jobId, patch);
             },
@@ -562,8 +591,10 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     const handle = handles.get(job.jobId);
     if (!handle) throw fail("invalid", "This sign-in is not waiting for a code.");
     handle.write(`${code}\n`);
-    auths.appendLog(job.jobId, "[code submitted]\n");
-    return toAuthStatus(auths.updateExtra(job.jobId, { needsCodeInput: false }) ?? job);
+    auths.appendLog(job.jobId, `${CODE_SUBMITTED_MARK}\n`);
+    return toAuthStatus(
+      auths.updateExtra(job.jobId, { needsCodeInput: false, codeCheck: "checking" }) ?? job,
+    );
   };
 
   const authCancel = (input: ProviderAuthCancelInput): ProviderAuthCancelResult => {

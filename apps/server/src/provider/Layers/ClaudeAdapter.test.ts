@@ -2726,6 +2726,63 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("keeps Claude Code's bookkeeping out of the Work log (P11, 28.10)", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Everything up to the first warning: with the bookkeeping quiet, that
+      // is the busy-API line, written for people.
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "runtime.warning"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      for (const subtype of ["vcs_state_changed", "task_updated", "background_tasks_changed"]) {
+        harness.query.emit({
+          type: "system",
+          subtype,
+          session_id: "550e8400-e29b-41d4-a716-446655440000",
+          uuid: `bookkeeping-${subtype}`,
+        } as unknown as SDKMessage);
+      }
+      harness.query.emit({
+        type: "command_lifecycle",
+        session_id: "550e8400-e29b-41d4-a716-446655440000",
+        uuid: "lifecycle-1",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "system",
+        subtype: "api_retry",
+        attempt: 1,
+        max_retries: 10,
+        retry_delay_ms: 500,
+        error_status: 529,
+        error: "overloaded",
+        session_id: "550e8400-e29b-41d4-a716-446655440000",
+        uuid: "retry-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const warnings = runtimeEvents.filter((event) => event.type === "runtime.warning");
+      assert.equal(warnings.length, 1);
+      const warning = warnings[0];
+      if (warning?.type === "runtime.warning") {
+        assert.equal(warning.payload.summary, "Claude's servers are busy — trying again (1 of 10)");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses an app-generated Claude session id for fresh sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

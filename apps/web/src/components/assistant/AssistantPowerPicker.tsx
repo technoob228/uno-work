@@ -288,7 +288,9 @@ export function AssistantPowerPicker(props: {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const llm = useAssistantLlm(environmentId);
-  const setup = useHarnessSetup(environmentId);
+  // These cards move the assistant to the plan themselves (and only when it
+  // was picked here); a sign-in from them still starts new chats on Claude.
+  const setup = useHarnessSetup(environmentId, { adopt: { assistant: false } });
   const [picking, setPicking] = useState<PowerCard | null>(null);
   const [claudeSignInOpen, setClaudeSignInOpen] = useState(false);
   const [chatgptSignInOpen, setChatgptSignInOpen] = useState(false);

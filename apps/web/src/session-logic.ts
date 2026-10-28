@@ -558,9 +558,29 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "context-window.updated")
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
+    .filter((activity) => !isClaudeBookkeepingWarning(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
+  );
+}
+
+/**
+ * "Runtime warning" rows a Work daemon before 0.0.157 wrote for every Claude
+ * Code status message it didn't know (`vcs_state_changed`, `task_updated`…):
+ * four of them under a plain "Hi" (cap walkthrough 28.10, P11). Nothing in
+ * them is for the person; newer daemons don't write them at all.
+ */
+export function isClaudeBookkeepingWarning(activity: OrchestrationThreadActivity): boolean {
+  if (activity.kind !== "runtime.warning") return false;
+  const payload =
+    activity.payload && typeof activity.payload === "object"
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  const message = typeof payload?.message === "string" ? payload.message : "";
+  return (
+    message.startsWith("Unhandled Claude system message subtype ") ||
+    message.startsWith("Unhandled Claude SDK message type ")
   );
 }
 

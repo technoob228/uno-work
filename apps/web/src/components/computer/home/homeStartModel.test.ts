@@ -3,6 +3,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 
 import {
+  claudePlanStartSelection,
   homeStartModelSelection,
   newChatModelSelection,
   newThreadStartSelection,
@@ -394,5 +395,102 @@ describe("New chat for someone who picked only OpenCode in the configurator (28.
         ownAgent: onlyOpenCode,
       }),
     ).toBeNull();
+  });
+});
+
+describe("Claude plan signed in here → new chats on Claude, none → Uno · Smart (Misha 28.10, P2)", () => {
+  // Cap walkthrough 28.10: Claude Code signed in to the person's plan, the
+  // next new chat in a project still opened on "uno · Smart".
+  const hermes = provider({ provider: "hermes", models: ["uno/smart", "uno/fast"] });
+  const opencode = provider({
+    provider: "opencode",
+    models: ["uno/uno/smart", "uno/uno/fast"],
+  });
+  const claudePlan = {
+    ...provider({ provider: "claudeAgent", models: ["claude-opus-5-5", "claude-sonnet-5-5"] }),
+    auth: { status: "authenticated", type: "max", label: "Claude Max Subscription" },
+  } as ServerProvider;
+  const claudeOnUnoAi = {
+    ...claudePlan,
+    auth: { status: "authenticated", type: "unoAi", label: "Uno AI" },
+  } as ServerProvider;
+  const claudeApiKey = {
+    ...claudePlan,
+    auth: { status: "authenticated", type: "apiKey", label: "Claude API Key" },
+  } as ServerProvider;
+  const claudeOut = {
+    ...claudePlan,
+    auth: { status: "unauthenticated" },
+  } as ServerProvider;
+  const projectDefault = { instanceId: id("uno"), model: "uno/moonshotai/kimi-k2.7-code" };
+  const home = (providers: ReadonlyArray<ServerProvider>, sticky: string | null = null) =>
+    homeStartModelSelection({
+      stickyActiveProvider: sticky ? id(sticky) : null,
+      stickyModelSelectionByProvider: sticky
+        ? { [sticky]: { instanceId: id(sticky), model: "uno/fast" } }
+        : {},
+      providers,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+  const newChat = (providers: ReadonlyArray<ServerProvider>, sticky: string | null = null) =>
+    newThreadStartSelection({
+      stickyActiveProvider: sticky ? id(sticky) : null,
+      projectDefault,
+      providers,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+
+  it("Home's box and New chat start on Claude", () => {
+    expect(home([hermes, uno, opencode, claudePlan])?.instanceId).toBe("claudeAgent");
+    expect(newChat([hermes, uno, opencode, claudePlan])?.instanceId).toBe("claudeAgent");
+    expect(
+      claudePlanStartSelection({
+        providers: [uno, claudePlan],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }),
+    ).toEqual({ instanceId: "claudeAgent", model: home([uno, claudePlan])?.model });
+  });
+
+  it("no plan of theirs (Claude on Uno AI, an API key, signed out): Uno as before", () => {
+    for (const claude of [claudeOnUnoAi, claudeApiKey, claudeOut]) {
+      expect(home([uno, claude])?.instanceId).toBe("uno");
+      // New chat keeps the project's own start.
+      expect(newChat([uno, claude])).toBeNull();
+    }
+  });
+
+  it("a model the person picked in a chat still wins", () => {
+    expect(home([hermes, uno, claudePlan], "hermes")).toEqual({
+      instanceId: "hermes",
+      model: "uno/fast",
+    });
+    expect(newChat([hermes, uno, claudePlan], "hermes")).toBeNull();
+  });
+
+  it("'New chats start on' still wins", () => {
+    const settings = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      newChatModelSelection: { instanceId: id("hermes"), model: "uno/smart" },
+    };
+    expect(
+      homeStartModelSelection({
+        stickyActiveProvider: null,
+        stickyModelSelectionByProvider: {},
+        providers: [hermes, uno, claudePlan],
+        settings,
+      }),
+    ).toEqual({ instanceId: "hermes", model: "uno/smart" });
+  });
+
+  it("OpenCode picked in the configurator stays first (0.0.156)", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault,
+        providers: [hermes, uno, opencode, claudePlan],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+        ownAgent: { picked: null, openCodeFirst: true },
+      }),
+    ).toEqual({ instanceId: "opencode", model: "uno/uno/smart" });
   });
 });

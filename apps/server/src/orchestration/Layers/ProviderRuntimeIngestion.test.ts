@@ -2667,6 +2667,43 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBeNull();
   });
 
+  it("titles a warning with its human summary when it has one (P11, 28.10)", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "runtime.warning",
+      eventId: asEventId("evt-warning-human"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        message: "Claude's servers are busy — trying again (2 of 10)",
+        summary: "Claude's servers are busy — trying again (2 of 10)",
+      },
+    });
+    harness.emit({
+      type: "runtime.warning",
+      eventId: asEventId("evt-warning-plain"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: { message: "Reconnecting... 2/5" },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-warning-plain",
+      ),
+    );
+    const byId = (id: string) =>
+      thread.activities.find((activity: ProviderRuntimeTestActivity) => activity.id === id);
+    expect(byId("evt-warning-human")?.summary).toBe(
+      "Claude's servers are busy — trying again (2 of 10)",
+    );
+    expect(byId("evt-warning-plain")?.summary).toBe("Runtime warning");
+  });
+
   it("maps session/thread lifecycle and item.started into session/activity projections", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

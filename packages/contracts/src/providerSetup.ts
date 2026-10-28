@@ -131,6 +131,13 @@ export const ProviderAuthJobStatus = Schema.Struct({
    * code it got from the browser; `provider.auth.submitCode` delivers it.
    */
   needsCodeInput: Schema.Boolean,
+  /**
+   * The pasted code, once it went to the CLI: "checking" while the CLI trades
+   * it for a sign-in (a few seconds, sometimes ~30), "rejected" when the CLI
+   * asked for a code again (that one didn't work). Absent before any code, and
+   * from daemons before 0.0.157.
+   */
+  codeCheck: Schema.optional(Schema.Literals(["checking", "rejected"])),
   error: Schema.optional(Schema.String),
 });
 export type ProviderAuthJobStatus = typeof ProviderAuthJobStatus.Type;

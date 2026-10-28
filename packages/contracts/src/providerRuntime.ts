@@ -616,6 +616,11 @@ export type FilesPersistedPayload = typeof FilesPersistedPayload.Type;
 const RuntimeWarningPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
   detail: Schema.optional(Schema.Unknown),
+  /**
+   * One line written for the person ("Claude's servers are busy — trying
+   * again (2 of 10)"): the Work log shows it instead of "Runtime warning".
+   */
+  summary: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type RuntimeWarningPayload = typeof RuntimeWarningPayload.Type;
 

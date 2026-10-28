@@ -30,6 +30,7 @@ import { usePrimaryEnvironmentId } from "~/environments/primary/context";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
 import { isJobActive } from "./harnessSetupState";
+import { type AdoptSignedInAgentOptions, useAdoptSignedInAgent } from "./useAdoptSignedInAgent";
 
 export const HARNESS_SETUP_POLL_MS = 1_000;
 
@@ -80,13 +81,43 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * The daemon doesn't know this job (it restarted, or the job is long gone):
+ * nothing to wait for any more. Anything else — a reconnecting socket, a
+ * timeout — is worth asking again.
+ */
+export function isLostJobError(error: unknown): boolean {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  if (code === "notFound") return true;
+  return /unknown sign-in job|unknown install job/i.test(errorMessage(error));
+}
+
+/** What a sign-in that the computer forgot reads as. */
+export const LOST_SIGN_IN_MESSAGE =
+  "This sign-in stopped on the computer (it may have restarted). Get a new link and sign in again.";
+
+/**
  * @param explicitEnvironmentId the machine to act on. Omit (or pass `null`)
  * on the onboarding screens, which always target the machine serving the UI.
  */
-export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): HarnessSetupApi {
+export function useHarnessSetup(
+  explicitEnvironmentId?: EnvironmentId | null,
+  options: {
+    /** What a sign-in that lands here also changes (useAdoptSignedInAgent). */
+    readonly adopt?: AdoptSignedInAgentOptions;
+  } = {},
+): HarnessSetupApi {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = explicitEnvironmentId ?? null;
   const refreshTargetId = explicitEnvironmentId ?? primaryEnvironmentId;
+  // A sign-in finished here: new chats start on that agent, and Claude's
+  // plan powers the assistant too — one sign-in for both (P2/P3, 28.10).
+  const adopt = useAdoptSignedInAgent(refreshTargetId, options.adopt);
+  const onSignedInRef = useRef<
+    ((driver: ProviderAuthDriver, method: ProviderAuthMethod) => void) | null
+  >(adopt);
+  useEffect(() => {
+    onSignedInRef.current = adopt;
+  }, [adopt]);
 
   const [installJobs, setInstallJobs] = useState<Record<string, InstallJobView | undefined>>({});
   const [authJobs, setAuthJobs] = useState<Record<string, AuthJobView | undefined>>({});
@@ -204,21 +235,70 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
 
   const submitAuthCode = useCallback<HarnessSetupApi["submitAuthCode"]>(
     async ({ driver, code }) => {
-      const jobId = authIds.current.get(driver);
-      if (!jobId) return;
-      const client = resolveClient(environmentId);
+      // Shown at once, whatever the daemon says next (P4, 28.10: Submit did
+      // nothing visible for 25 s).
+      setAuthJobs((current) => {
+        const existing = current[driver];
+        if (!existing) return current;
+        const { error: _error, ...rest } = existing;
+        return {
+          ...current,
+          [driver]: { ...rest, needsCodeInput: false, codeCheck: "checking" },
+        };
+      });
+      const failSubmit = (message: string, lost: boolean) =>
+        setAuthJobs((current) => {
+          const existing = current[driver];
+          if (!existing) return current;
+          return {
+            ...current,
+            [driver]: lost
+              ? { ...existing, state: "failed", needsCodeInput: false, error: message }
+              : { ...existing, needsCodeInput: true, codeCheck: undefined, error: message },
+          };
+        });
+      let client: WsRpcClient;
+      try {
+        client = resolveClient(environmentId);
+      } catch (error) {
+        failSubmit(errorMessage(error), false);
+        return;
+      }
+      let jobId = authIds.current.get(driver);
+      if (!jobId) {
+        // This page lost track of the sign-in (a failed status check used to
+        // drop it, and Submit then did nothing). If it still waits on the
+        // computer, it comes back as the same job and takes the code.
+        try {
+          const resumed = await client.providerSetup.authStart({ driver, method: "oauth" });
+          if (!resumed.resumed) {
+            // Nothing was waiting: the code belongs to a sign-in that is gone.
+            // Stop the one this just started; "Try again" begins cleanly.
+            await client.providerSetup.authCancel({ driver }).catch(() => undefined);
+            failSubmit(LOST_SIGN_IN_MESSAGE, true);
+            return;
+          }
+          authIds.current.set(driver, resumed.jobId);
+          jobId = resumed.jobId;
+        } catch (error) {
+          failSubmit(errorMessage(error), false);
+          return;
+        }
+      }
       try {
         const status = await client.providerSetup.authSubmitCode({
           jobId: jobId as ProviderAuthJobStatus["jobId"],
           code,
         });
-        setAuthJobs((current) => ({ ...current, [driver]: status }));
+        setAuthJobs((current) => ({
+          ...current,
+          // An older daemon says nothing about the code: it is being checked.
+          [driver]: status.codeCheck ? status : { ...status, codeCheck: "checking" },
+        }));
       } catch (error) {
-        setAuthJobs((current) => {
-          const existing = current[driver];
-          if (!existing) return current;
-          return { ...current, [driver]: { ...existing, error: errorMessage(error) } };
-        });
+        const lost = isLostJobError(error);
+        if (lost) authIds.current.delete(driver);
+        failSubmit(lost ? LOST_SIGN_IN_MESSAGE : errorMessage(error), lost);
       }
     },
     [environmentId],
@@ -293,10 +373,32 @@ export function useHarnessSetup(explicitEnvironmentId?: EnvironmentId | null): H
           setAuthJobs((current) => ({ ...current, [driver]: status }));
           if (!isJobActive(status)) {
             authIds.current.delete(driver);
-            if (status.state === "succeeded") refreshProviders(driver);
+            if (status.state === "succeeded") {
+              refreshProviders(driver);
+              onSignedInRef.current?.(driver as ProviderAuthDriver, status.method);
+            }
           }
-        } catch {
+        } catch (error) {
+          if (cancelled) return;
+          // Only a job the computer doesn't know any more is over; a missed
+          // check (the socket reconnecting while the person is on claude.ai)
+          // is asked again next second. Dropping the job here froze the
+          // dialog: its Submit had no job to send the code to (P4, 28.10).
+          if (!isLostJobError(error)) continue;
           authIds.current.delete(driver);
+          setAuthJobs((current) => {
+            const existing = current[driver];
+            if (!existing || !isJobActive(existing)) return current;
+            return {
+              ...current,
+              [driver]: {
+                ...existing,
+                state: "failed",
+                needsCodeInput: false,
+                error: LOST_SIGN_IN_MESSAGE,
+              },
+            };
+          });
         }
       }
     };

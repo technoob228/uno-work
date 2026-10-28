@@ -52,6 +52,18 @@ const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
+/**
+ * A capabilities probe that saw who Claude Code is signed in as: a plan, an
+ * email, or where its token comes from. Without any of these it ran signed out.
+ */
+export function capabilitiesFoundAccount(capabilities: {
+  readonly email?: string | undefined;
+  readonly subscriptionType?: string | undefined;
+  readonly tokenSource?: string | undefined;
+}): boolean {
+  return Boolean(capabilities.subscriptionType || capabilities.email || capabilities.tokenSource);
+}
+
 export type ClaudeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
@@ -180,11 +192,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // A probe that could not verify auth (typically: not signed in yet) is
       // not worth caching for the full TTL — the user may sign in from the
       // UI moments later and the explicit refresh that follows must see it.
+      // The same for a probe that ran but found no account (Claude Code not
+      // signed in yet): kept, it hid a sign-in for up to 5 minutes — the
+      // refresh right after it still read "no plan", so Settings → AI asked
+      // to sign in to Claude again (cap walkthrough 28.10, P3).
       const resolveCapabilities = (_settings: ClaudeSettings, mode: ClaudeAuthMode) => {
         const key = `${capabilitiesCacheKey}\0${mode}`;
         return Cache.get(capabilitiesProbeCache, key).pipe(
           Effect.tap((capabilities) =>
-            capabilities === undefined
+            capabilities === undefined ||
+            (mode === "own" && !capabilitiesFoundAccount(capabilities))
               ? Cache.invalidate(capabilitiesProbeCache, key)
               : Effect.void,
           ),
