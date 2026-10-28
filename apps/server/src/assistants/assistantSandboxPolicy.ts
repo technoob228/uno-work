@@ -23,6 +23,7 @@ import { presetRuntimeCeiling } from "@t3tools/shared/assistantPreset";
 import { Effect, Layer, Option } from "effect";
 
 import { ServerConfig } from "../config.ts";
+import { CustomMcpServers } from "../mcp/customMcpServers.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
@@ -65,6 +66,9 @@ export const AssistantHarnessSandboxPolicyLive = Layer.effect(
     const config = yield* ServerConfig;
     const projections = yield* ProjectionSnapshotQuery;
     const tokens = yield* ManagerCapabilityTokenRepository;
+    // The servers the person gave to the chat's assistant (customMcpServers.ts):
+    // noted here, where the chat's assistant is resolved before every start.
+    const mcpServers = Option.getOrNull(yield* Effect.serviceOption(CustomMcpServers));
     const home = os.homedir();
     // The chat and the chats that started it (the owner walk goes ≤ 6 up):
     // a few row reads per turn instead of the whole read model.
@@ -110,6 +114,9 @@ export const AssistantHarnessSandboxPolicyLive = Layer.effect(
             { tokens, stateDir: config.stateDir, threads: chain, unsetAllowlist: "all" },
             threadId,
           );
+          if (mcpServers !== null) {
+            yield* mcpServers.noteSessionAssistant(threadId, owner?.projectId ?? null);
+          }
           // The person's own chats and All-projects assistants: no probe, no change.
           if (owner === null || !isRestrictedAllowlist(owner.allowlist)) {
             return { _tag: "none" } as const;

@@ -9,7 +9,12 @@ import {
   UNO_WORK_MCP_SERVER,
   type UnoWorkToolDeps,
 } from "../unoWork/tools.ts";
-import { ConnectorsError, makeConnectorsClient, type MachineCredentials } from "./connectors.ts";
+import {
+  ConnectorsError,
+  connectorCredentialsFrom,
+  makeConnectorsClient,
+  type ConnectorCredentials,
+} from "./connectors.ts";
 
 const CONSOLE_LIST = {
   connectors: [
@@ -81,7 +86,7 @@ function fakeConsole(
 
 function client(
   options: {
-    credentials?: MachineCredentials | null;
+    credentials?: ConnectorCredentials | null;
     handler?: (call: Call) => { status: number; body?: unknown };
   } = {},
 ) {
@@ -121,6 +126,7 @@ describe("connectors client", () => {
           connected: true,
           account: "mikhail@uno4.dev",
           connectedAt: "2026-09-25T09:00:00Z",
+          needsReconnect: false,
           toolCount: 2,
         },
         {
@@ -131,6 +137,7 @@ describe("connectors client", () => {
           connected: false,
           account: null,
           connectedAt: null,
+          needsReconnect: false,
           toolCount: 1,
         },
       ],
@@ -142,19 +149,104 @@ describe("connectors client", () => {
     });
   });
 
-  it("says not_cloud_computer without a machine token, and start refuses with 409", async () => {
+  it("says sign_in_required without a machine token or an account key, and start refuses with 409", async () => {
     const { connectors, calls } = client({ credentials: null });
     expect(await connectors.list()).toEqual({
       available: false,
-      reason: "not_cloud_computer",
+      reason: "sign_in_required",
       connectors: [],
     });
     await expect(connectors.start("notion")).rejects.toMatchObject({
       status: 409,
-      code: "not_cloud_computer",
+      code: "sign_in_required",
     });
     expect(await connectors.tools()).toEqual([]);
     expect(calls).toHaveLength(0);
+  });
+
+  it("passes an expired grant on as needsReconnect", async () => {
+    const { connectors } = client({
+      handler: () => ({
+        status: 200,
+        body: {
+          connectors: [{ ...CONSOLE_LIST.connectors[0], needs_reconnect: true }],
+        },
+      }),
+    });
+    const list = await connectors.list();
+    expect(list.connectors[0]).toMatchObject({ connected: true, needsReconnect: true });
+  });
+
+  it("a Mac with the account key uses the account routes, without a box", async () => {
+    const { connectors, calls } = client({
+      credentials: { kind: "account", accountKey: "uno_usr_mac" },
+      handler: (call) =>
+        call.url.endsWith("/start")
+          ? { status: 200, body: { authorize_url: "https://console.test/o?state=1" } }
+          : call.url.endsWith("/call")
+            ? { status: 200, body: { content: [{ type: "text", text: "ok" }] } }
+            : call.method === "DELETE"
+              ? { status: 204 }
+              : { status: 200, body: CONSOLE_LIST },
+    });
+    expect((await connectors.list()).available).toBe(true);
+    expect(await connectors.start("notion")).toEqual({
+      authorizeUrl: "https://console.test/o?state=1",
+    });
+    expect(
+      await connectors.call({ provider: "notion", tool: "notion_search", arguments: {} }),
+    ).toEqual({ content: [{ type: "text", text: "ok" }], isError: false });
+    await connectors.remove("notion");
+    expect(calls.map((call) => `${call.method} ${call.url} ${call.auth}`)).toEqual([
+      "GET https://console.test/api/v1/work/connectors Bearer uno_usr_mac",
+      "POST https://console.test/api/v1/work/connectors/notion/start Bearer uno_usr_mac",
+      "POST https://console.test/api/v1/work/connectors/notion/call Bearer uno_usr_mac",
+      "DELETE https://console.test/api/v1/work/connectors/notion Bearer uno_usr_mac",
+    ]);
+  });
+
+  it("an older console without the account routes: console_outdated, not 'disconnected'", async () => {
+    const { connectors } = client({
+      credentials: { kind: "account", accountKey: "uno_usr_mac" },
+      handler: () => ({ status: 404, body: { error: "NOT_FOUND" } }),
+    });
+    expect(await connectors.list()).toEqual({
+      available: false,
+      reason: "console_outdated",
+      connectors: [],
+    });
+    await expect(connectors.start("notion")).rejects.toMatchObject({
+      status: 503,
+      code: "console_outdated",
+    });
+    const result = await connectors.call({
+      provider: "notion",
+      tool: "notion_search",
+      arguments: {},
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toMatch(/needs an update/);
+    expect(await connectors.tools()).toEqual([]);
+  });
+
+  it("doesn't serve one account's cached list to another", async () => {
+    let creds: ConnectorCredentials = { kind: "account", accountKey: "uno_usr_first111" };
+    let served = 0;
+    const connectors = makeConnectorsClient({
+      credentials: async () => creds,
+      baseUrl: () => "https://console.test",
+      fetch: (async () => {
+        served += 1;
+        return new Response(JSON.stringify(CONSOLE_LIST), { status: 200 });
+      }) as unknown as typeof fetch,
+      now: () => 1_000,
+    });
+    await connectors.list();
+    await connectors.list();
+    expect(served).toBe(1);
+    creds = { kind: "account", accountKey: "uno_usr_second22" };
+    await connectors.list();
+    expect(served).toBe(2);
   });
 
   it("caches the list for 30 s and drops the cache on start / delete", async () => {
@@ -376,5 +468,33 @@ describe("connector tools in the uno-work MCP server", () => {
     for (const name of ["gdrive_search", "gdrive_read", "gmail_search", "calendar_list_events"]) {
       expect(connectorToolLevel(name), name).toBe("safe");
     }
+  });
+});
+
+describe("connectorCredentialsFrom", () => {
+  it("a cloud computer: the machine token, even with an account key next to it", () => {
+    expect(
+      connectorCredentialsFrom({ boxToken: " uno_agt_x ", boxId: 2531, apiKey: "uno_usr_y" }),
+    ).toEqual({ kind: "machine", boxToken: "uno_agt_x", boxId: 2531 });
+  });
+
+  it("a Mac: the account key the person pasted", () => {
+    expect(
+      connectorCredentialsFrom({ boxToken: undefined, boxId: null, apiKey: "uno_usr_y" }),
+    ).toEqual({ kind: "account", accountKey: "uno_usr_y" });
+    // A token without its box id is not a machine: the key decides.
+    expect(
+      connectorCredentialsFrom({ boxToken: "uno_agt_x", boxId: null, apiKey: "legacykey" }),
+    ).toEqual({ kind: "account", accountKey: "legacykey" });
+  });
+
+  it("a gateway-only key or nothing: none (Sign in to Uno)", () => {
+    expect(
+      connectorCredentialsFrom({ boxToken: "", boxId: null, apiKey: "unollm_abc" }),
+    ).toBeNull();
+    expect(connectorCredentialsFrom({ boxToken: null, boxId: null, apiKey: "  " })).toBeNull();
+    expect(
+      connectorCredentialsFrom({ boxToken: undefined, boxId: undefined, apiKey: undefined }),
+    ).toBeNull();
   });
 });

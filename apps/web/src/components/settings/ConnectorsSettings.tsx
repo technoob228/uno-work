@@ -33,8 +33,10 @@ export function ConnectorsSettings() {
       <div className="flex flex-col gap-1 px-1" data-testid="settings-connectors">
         <h1 className="text-lg font-semibold">Connectors</h1>
         <p className="text-sm text-muted-foreground">
-          Apps your AI can work in. Connect once here — Uno and your assistants use them in any
-          chat. You approve each one on the app’s own page and can disconnect any time.
+          Apps your AI can work in. Connect once for your Uno account: Uno and your assistants use
+          Google Drive, Gmail and Notion as tools in their chats, within the apps you let each
+          assistant use. GitHub here is for git — clone and push your repos. You approve each one on
+          the app’s own page and can disconnect any time.
         </p>
       </div>
 
@@ -102,9 +104,15 @@ export function ConnectorsSettings() {
               computer’s Uno Work checks its level (none / read / read+write) on every call.
             </p>
             <p className="text-muted-foreground">
-              Servers you add (<code className="font-mono">settings.mcpServers</code>) live on this
-              computer only and reach every chat on it — they can’t be limited per assistant yet.
-              Addresses show the host only: one may carry a token.
+              Servers you add here (<code className="font-mono">settings.mcpServers</code>) live on
+              this computer only and reach every chat on it, except an assistant held to its
+              projects. A server for one assistant only is added on that assistant’s page: its chats
+              get it, in its sandbox too. Addresses show the host only: one may carry a token.
+            </p>
+            <p className="text-muted-foreground">
+              GitHub connected through the Uno GitHub App gives git on your computers (clone, pull,
+              push). It isn’t a tool in chats unless the console offers GitHub’s tools — then it
+              shows in the apps above like the others.
             </p>
             <p className="text-muted-foreground">
               Not covered: a chat can still use the <code className="font-mono">gh</code> CLI or a

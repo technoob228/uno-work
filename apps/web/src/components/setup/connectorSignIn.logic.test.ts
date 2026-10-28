@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorSignedIn } from "./connectorSignIn.logic";
+import { connectorSignedIn, connectorsGate } from "./connectorSignIn.logic";
 
 describe("connectorSignedIn", () => {
   it("is not signed in before the first sign-in", () => {
@@ -20,5 +20,24 @@ describe("connectorSignedIn", () => {
 
   it("an older console without needsReconnect counts connected as signed in", () => {
     expect(connectorSignedIn({ connected: true })).toBe(true);
+  });
+});
+
+describe("connectorsGate", () => {
+  it("ready when the console answered", () => {
+    expect(connectorsGate({ available: true, reason: null })).toBe("ready");
+  });
+
+  it("a computer without a token or an account key: Sign in, not Soon", () => {
+    expect(connectorsGate({ available: false, reason: "sign_in_required" })).toBe("sign-in");
+    // An older daemon's word for the same.
+    expect(connectorsGate({ available: false, reason: "not_cloud_computer" })).toBe("sign-in");
+  });
+
+  it("a console without the Mac routes yet, the console down, no answer: no false Sign in", () => {
+    expect(connectorsGate({ available: false, reason: "console_outdated" })).toBe("outdated");
+    expect(connectorsGate({ available: false, reason: "console_unreachable" })).toBe("soon");
+    expect(connectorsGate({ available: false, reason: "unavailable" })).toBe("soon");
+    expect(connectorsGate(undefined)).toBe("soon");
   });
 });

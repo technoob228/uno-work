@@ -116,7 +116,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
           acpMcpServers(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              custom: customMcpServers({ threadId: context.threadId }),
             }),
           ),
         ...(harnessInstructions.length > 0 ? { harnessInstructions } : {}),

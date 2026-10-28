@@ -8,7 +8,13 @@
  * - the remote servers the owner added by address (setup → "Your own tool",
  *   `settings.mcpServers`), kept current by `CustomMcpServers` below and read
  *   per session, so a tool added during setup is in the very next chat
- *   without rebuilding (and interrupting) running agents.
+ *   without rebuilding (and interrupting) running agents. Not in a sandboxed
+ *   assistant's chat: they carry the owner's keys and reach (952aedc09d);
+ * - the servers the person gave to the assistant the chat belongs to
+ *   (`assistantMcpStore.ts`, 28.10) — in its chats only, sandboxed or not;
+ *   on a name clash the assistant's wins in its chats. The chat's assistant
+ *   is noted at session start by the sandbox policy, which resolves it anyway
+ *   (`noteSessionAssistant`), so drivers read the list synchronously.
  *
  * One set of per-harness shapes, so a server shows up in every agent alike:
  * - Claude: the SDK's `mcpServers` query option (`type: "http"`); it lands on
@@ -28,7 +34,9 @@
 import type { UnoMcpServer } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option, Stream } from "effect";
 
+import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { readAssistantMcpServers } from "./assistantMcpStore.ts";
 import { BROWSER_BRIDGE_TOKEN_ENV, BROWSER_BRIDGE_URL_ENV } from "../browserBridge.ts";
 import { UNO_WORK_MCP_PATH, UNO_WORK_MCP_SERVER_NAME } from "../unoWork/constants.ts";
 
@@ -60,9 +68,50 @@ export function enabledMcpServers<T extends McpServerEntry>(
 
 // ── The owner's servers (settings.mcpServers) ──────────────────────────
 
+/** Which chat a session is for: its assistant's servers, and no owner's in the sandbox. */
+export interface McpSessionContext {
+  readonly threadId?: string | undefined;
+  /** A restricted assistant's chat held by the sandbox: the owner's servers stay out. */
+  readonly sandboxed?: boolean | undefined;
+}
+
+/**
+ * A session's own servers: the owner's (unless sandboxed) and its
+ * assistant's; the assistant's win a name clash. Pure.
+ */
+export function mergeSessionCustomServers(input: {
+  readonly owner: ReadonlyArray<UnoMcpServer>;
+  readonly assistant: ReadonlyArray<UnoMcpServer>;
+  readonly sandboxed: boolean;
+}): ReadonlyArray<UnoMcpServer> {
+  const assistant = enabledMcpServers(input.assistant).filter(
+    (server) => server.name !== UNO_WORK_MCP_SERVER_NAME,
+  );
+  if (input.sandboxed) return assistant;
+  const taken = new Set(assistant.map((server) => server.name));
+  return [
+    ...enabledMcpServers(input.owner).filter((server) => !taken.has(server.name)),
+    ...assistant,
+  ];
+}
+
+/** Sessions remembered at once (thread → its assistant's servers); oldest dropped first. */
+const SESSION_NOTES_LIMIT = 1_000;
+
 export interface CustomMcpServersShape {
-  /** Enabled servers, as of the latest settings. Cheap and synchronous. */
+  /** The owner's enabled servers, as of the latest settings. Cheap and synchronous. */
   readonly current: () => ReadonlyArray<UnoMcpServer>;
+  /** What a session gets: owner's (unless sandboxed) + its assistant's. Synchronous. */
+  readonly forSession: (context?: McpSessionContext) => ReadonlyArray<UnoMcpServer>;
+  /**
+   * Notes whose chat `threadId` is (an assistant's project id, or null for
+   * the person's own chat) and loads that assistant's servers. Called before
+   * the session starts; never fails (unreadable = no servers of its own).
+   */
+  readonly noteSessionAssistant: (
+    threadId: string,
+    assistantProjectId: string | null,
+  ) => Effect.Effect<void>;
 }
 
 export class CustomMcpServers extends Context.Service<CustomMcpServers, CustomMcpServersShape>()(
@@ -86,18 +135,52 @@ export const CustomMcpServersLive = Layer.effect(
       ),
       Effect.forkScoped,
     );
-    return { current: () => current } satisfies CustomMcpServersShape;
+    const config = yield* Effect.serviceOption(ServerConfig);
+    const stateDir = Option.isSome(config) ? config.value.stateDir : null;
+    const notes = new Map<string, ReadonlyArray<UnoMcpServer>>();
+    return {
+      current: () => current,
+      forSession: (context) =>
+        mergeSessionCustomServers({
+          owner: current,
+          assistant: context?.threadId ? (notes.get(context.threadId) ?? []) : [],
+          sandboxed: context?.sandboxed === true,
+        }),
+      noteSessionAssistant: (threadId, assistantProjectId) =>
+        Effect.promise(async () => {
+          const servers =
+            assistantProjectId === null || stateDir === null
+              ? []
+              : await readAssistantMcpServers(stateDir, assistantProjectId);
+          notes.delete(threadId);
+          if (servers.length === 0) return;
+          notes.set(threadId, servers);
+          if (notes.size > SESSION_NOTES_LIMIT) {
+            const oldest = notes.keys().next();
+            if (!oldest.done) notes.delete(oldest.value);
+          }
+        }),
+    } satisfies CustomMcpServersShape;
   }),
 );
 
+/** A driver's getter: what one session gets (see {@link CustomMcpServersShape.forSession}). */
+export type CustomMcpServersGetter = (context?: McpSessionContext) => ReadonlyArray<UnoMcpServer>;
+
 /**
  * A getter for drivers: the live list when the service is in the runtime,
- * an empty list in tests and in layers built without it.
+ * an empty list in tests and in layers built without it. Pass the session's
+ * thread (and whether it is sandboxed): the owner's servers stay out of a
+ * sandboxed chat, its assistant's come in.
  */
-export const customMcpServersGetter = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(CustomMcpServers);
-  return Option.isSome(service) ? service.value.current : (): ReadonlyArray<UnoMcpServer> => [];
-});
+export const customMcpServersGetter: Effect.Effect<CustomMcpServersGetter> = Effect.gen(
+  function* () {
+    const service = yield* Effect.serviceOption(CustomMcpServers);
+    return Option.isSome(service)
+      ? service.value.forSession
+      : (): ReadonlyArray<UnoMcpServer> => [];
+  },
+);
 
 // ── The built-in uno-work server ───────────────────────────────────────
 

@@ -22,7 +22,6 @@ import {
   ChevronRightIcon,
   GlobeIcon,
   KeyRoundIcon,
-  Loader2Icon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -64,8 +63,14 @@ import {
 
 // ── Data ──────────────────────────────────────────────────────────────────
 
-export function useConnectorItems() {
-  const environmentId = usePrimaryEnvironmentId();
+/**
+ * The apps and servers as one list. `on`: the computer whose Uno Work asks
+ * the console (the one the assistant works on); the window's by default.
+ * The servers listed are the window's computer's own (`settings.mcpServers`).
+ */
+export function useConnectorItems(on?: EnvironmentId | null) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = on ?? primaryEnvironmentId;
   const actions = useConnectorActions(environmentId);
   const servers = useSettings((settings) => settings.mcpServers);
   const apps = PROVIDERS.map((meta) => {
@@ -308,7 +313,7 @@ export function TeammateAccess(props: {
 }) {
   const { access, onChange, name, place } = props;
   const navigate = useNavigate();
-  const connectors = useConnectorItems();
+  const connectors = useConnectorItems(place.environmentId as EnvironmentId | null);
   const vault = useVaultEntries();
   const projectSkills = useProjectSkills(place.environmentId);
   const computerBrowser = useSettings((settings) => settings.browserAutomationLevel);
@@ -425,22 +430,11 @@ export function TeammateAccess(props: {
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={connectors.actions.pending !== null}
-                    onClick={() => void connectors.actions.connect("github")}
-                    data-testid="teammate-connect-github"
-                  >
-                    {connectors.actions.pending?.provider === "github" ? (
-                      <Loader2Icon className="size-3 animate-spin" />
-                    ) : null}
-                    Connect GitHub
-                  </Button>
-                  <button
-                    type="button"
                     onClick={() => void navigate({ to: "/settings/connectors" })}
-                    className="cursor-pointer text-primary hover:underline"
+                    data-testid="teammate-connect-apps"
                   >
-                    Others in Settings
-                  </button>
+                    Connect apps
+                  </Button>
                 </>
               )}
             </span>

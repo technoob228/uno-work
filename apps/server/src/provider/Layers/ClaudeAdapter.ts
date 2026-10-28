@@ -44,13 +44,13 @@ import {
   RuntimeTaskId,
   ThreadId,
   TurnId,
-  type UnoMcpServer,
   type UserInputQuestion,
 } from "@t3tools/contracts";
 import {
   claudeMcpServers,
   claudePreApprovedTools,
   sessionMcpServers,
+  type CustomMcpServersGetter,
 } from "../../mcp/customMcpServers.ts";
 import {
   applyClaudePromptEffortPrefix,
@@ -219,7 +219,7 @@ export interface ClaudeAdapterLiveOptions {
     readonly cwd?: string;
   }) => Record<string, string>;
   /** Remote MCP servers the owner added (settings.mcpServers), read per query. */
-  readonly customMcpServers?: () => ReadonlyArray<UnoMcpServer>;
+  readonly customMcpServers?: CustomMcpServersGetter;
 }
 
 function isUuid(value: string): boolean {
@@ -2957,11 +2957,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // This chat's MCP servers: the built-in uno-work server (per-thread
       // token) and the owner's own (settings.mcpServers), read per query.
       // uno-work asks the person itself, so Claude doesn't prompt for it.
-      // A sandboxed assistant's chat gets uno-work only: the owner's own
-      // servers carry the owner's keys and reach past the assistant's projects.
+      // A sandboxed assistant's chat gets no owner's servers (they carry the
+      // owner's keys and reach past its projects) — only uno-work and the
+      // servers the person gave to that assistant (customMcpServers.ts).
       const sessionMcp = sessionMcpServers({
         bridgeEnvironment: sessionBridgeEnvironment,
-        custom: input.harnessSandbox ? [] : options?.customMcpServers?.(),
+        custom: options?.customMcpServers?.({
+          threadId: input.threadId,
+          sandboxed: input.harnessSandbox !== undefined,
+        }),
       });
       // Entries reference the token and addresses as ${VAR} (they end up in
       // `ps` via --mcp-config); the values ride in the env below.

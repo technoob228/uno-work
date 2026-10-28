@@ -164,7 +164,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           // plus the owner's own. Per-thread opencode server, per-chat config.
           const configContent = withOpenCodeMcpServers(
             processEnv.OPENCODE_CONFIG_CONTENT,
-            sessionMcpServers({ bridgeEnvironment: bridge, custom: customMcpServers() }),
+            sessionMcpServers({
+              bridgeEnvironment: bridge,
+              custom: customMcpServers({ threadId: context.threadId }),
+            }),
           );
           return configContent === undefined || configContent === processEnv.OPENCODE_CONFIG_CONTENT
             ? bridge
