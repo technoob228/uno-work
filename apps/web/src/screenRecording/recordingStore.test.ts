@@ -287,3 +287,61 @@ describe("the card", () => {
     expect(store().items["t1"]).toBeUndefined();
   });
 });
+
+describe("Home's recording moves to the new chat", () => {
+  async function recordedOnHome() {
+    await store().start({ threadKey: "home:e1", environmentId: "e1" });
+    await store().stop();
+    await flush();
+  }
+
+  it("moves a finished card: the chat owns it, Home is empty, the words aren't put in twice", async () => {
+    await recordedOnHome();
+    store().markPrefilled("home:e1");
+    expect(store().moveTo("home:e1", "chat-1")).toBe(true);
+    expect(store().items["home:e1"]).toBeUndefined();
+    expect(store().items["chat-1"]).toMatchObject({ threadKey: "chat-1", prefilled: true });
+    // The chat's send takes it like its own recording.
+    const taken = store().take("chat-1");
+    expect(taken?.forAgent.speech).toBe("Rename the button to Start");
+    expect(store().items["chat-1"]).toBeUndefined();
+    // A failed send brings it back to the chat, not to Home.
+    store().restore(taken!.item);
+    expect(store().items["chat-1"]).toBeDefined();
+    expect(store().items["home:e1"]).toBeUndefined();
+  });
+
+  it("Retry after the move works on the chat's card", async () => {
+    let fail = true;
+    describeImpl = async () => {
+      if (fail) throw new Error("gateway timeout");
+      return { speech: "ok", visual: "" };
+    };
+    await recordedOnHome();
+    expect(store().moveTo("home:e1", "chat-1")).toBe(true);
+    fail = false;
+    store().retryWatch("chat-1");
+    await flush();
+    expect(store().items["chat-1"]!.watch).toMatchObject({ status: "done", speech: "ok" });
+  });
+
+  it("doesn't move while saving or watching", async () => {
+    describeImpl = () => new Promise(() => undefined);
+    await recordedOnHome();
+    expect(store().moveTo("home:e1", "chat-1")).toBe(false);
+    expect(store().items["home:e1"]).toBeDefined();
+    expect(store().items["chat-1"]).toBeUndefined();
+  });
+
+  it("replaces a card the chat already had; nothing to move is a no-op", async () => {
+    await store().start({ threadKey: "chat-1", environmentId: "e1" });
+    await store().stop();
+    await flush();
+    const old = store().items["chat-1"]!.id;
+    await recordedOnHome();
+    expect(store().moveTo("home:e1", "chat-1")).toBe(true);
+    expect(store().items["chat-1"]!.id).not.toBe(old);
+    expect(store().moveTo("home:e1", "chat-2")).toBe(false);
+    expect(store().moveTo("chat-1", "chat-1")).toBe(false);
+  });
+});

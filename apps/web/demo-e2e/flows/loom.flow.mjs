@@ -1,6 +1,6 @@
 // Loom Work flows on the demo build: the real composer and recorder in
 // Chrome with fake camera/mic and an auto-picked screen.
-import { composer, flow, openDemo, startRecording } from "../harness.mjs";
+import { composer, flow, openDemo, openDemoHome, startRecording } from "../harness.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SPEECH = "On the pricing page, put the Pro card first";
@@ -133,6 +133,91 @@ export const flows = [
     );
     await sleep(600);
     await shot("sent-and-answered");
+  }),
+
+  flow("home-show-the-agent", async ({ page, url, step, shot }) => {
+    await step("open Home", () => openDemoHome(page, url));
+    await step("the chip sits next to Add a project", async () => {
+      const chips = await page
+        .getByTestId("home-starters")
+        .locator("button")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+      const at = chips.indexOf("home-upload-project");
+      if (at === -1 || chips[at + 1] !== "home-show-agent")
+        throw new Error(`chips: ${chips.join(", ")}`);
+    });
+    await step("the chip opens the same popover", async () => {
+      await page.getByTestId("home-show-agent").click();
+      await page.getByTestId("record-popup").waitFor();
+      await sleep(400);
+    });
+    await shot("popover");
+    await page.keyboard.press("Escape");
+    await step("record a few seconds", async () => {
+      await startRecording(page, { trigger: "home-show-agent" });
+      await sleep(3000);
+      await page.getByTestId("recording-stop").click();
+    });
+    await step("the card is in Home's box; sending waits for the agent", async () => {
+      await page
+        .getByTestId("home-recording")
+        .getByTestId("recording-composer-card")
+        .waitFor({ timeout: 15_000 });
+      await page.getByTestId("home-composer").press("Enter");
+      await page.getByText("Wait until", { exact: false }).first().waitFor({ timeout: 5_000 });
+      if (!new URL(page.url()).hash.startsWith("#/computer"))
+        throw new Error(`left Home while the recording was busy: ${page.url()}`);
+    });
+    await step("saved, watched, the words are in Home's box", async () => {
+      await waitStatus(page, "save", "done");
+      await waitStatus(page, "watch", "done");
+      await page.waitForFunction(
+        (text) => document.querySelector('[data-testid="home-composer"]')?.value?.includes(text),
+        SPEECH,
+        { timeout: 10_000 },
+      );
+    });
+    await step("edits stay: the words aren't put in again", async () => {
+      const box = page.getByTestId("home-composer");
+      await box.click();
+      // The caret to the very end (End stops at the end of a wrapped line).
+      await box.evaluate((node) => node.setSelectionRange(node.value.length, node.value.length));
+      await page.keyboard.type(" Also check it on a phone.");
+      await sleep(500);
+      const value = await box.inputValue();
+      if (!value.endsWith("Also check it on a phone.") || value.split(SPEECH).length !== 2)
+        throw new Error(`box: ${value}`);
+    });
+    for (const close of await page.getByRole("button", { name: "Dismiss notification" }).all())
+      await close.click().catch(() => undefined);
+    await sleep(600);
+    await shot("card-in-home");
+    await step("send → a new chat with the recording", async () => {
+      await page.getByTestId("home-composer").press("Enter");
+      await page.waitForFunction(() => !location.hash.startsWith("#/computer"), null, {
+        timeout: 15_000,
+      });
+      await page.getByTestId("recording-message-card").waitFor({ timeout: 20_000 });
+      await page.getByTestId("recording-message-player").waitFor();
+      await page.getByText("Also check it on a phone.", { exact: false }).first().waitFor();
+    });
+    await step("nothing left behind: no card in the chat's box or on Home", async () => {
+      await sleep(500);
+      if (await page.getByTestId("recording-composer-card").count())
+        throw new Error("a composer card after sending");
+      const left = await page.evaluate(() =>
+        Object.keys(window.__loomDemo.recordingItems?.() ?? {}),
+      );
+      if (left.length) throw new Error(`recordings left in the store: ${left.join(", ")}`);
+    });
+    await step("the agent answers", () =>
+      page
+        .getByText("Watched your recording", { exact: false })
+        .first()
+        .waitFor({ timeout: 15_000 }),
+    );
+    await sleep(600);
+    await shot("new-chat");
   }),
 
   flow("edge-upload-breaks-retry", async ({ page, url, step, shot }) => {

@@ -2,6 +2,7 @@
  * Loom Work: the Record button of the composer (next to Attach and Dictate).
  * Idle → a small popover: what to record (screen / window / tab), camera and
  * microphone switches, Start. While recording → the same button stops it.
+ * Home shows it as a pill, "Show the agent" (`chip`).
  */
 import { AppWindowIcon, MonitorIcon, PanelTopIcon, VideoIcon } from "lucide-react";
 import { useState } from "react";
@@ -40,6 +41,11 @@ export function RecordButton(props: {
   readonly environmentId: string | null;
   readonly compact?: boolean;
   readonly disabled?: boolean;
+  /**
+   * Home's pill "Show the agent" instead of the composer's camera icon; the
+   * popover is the same. `className` is the pill's look, `testId` its id.
+   */
+  readonly chip?: { readonly className: string; readonly testId: string };
 }) {
   const [open, setOpen] = useState(false);
   const options = useScreenRecordingStore((state) => state.options);
@@ -50,6 +56,24 @@ export function RecordButton(props: {
   const busy = phase !== "idle";
   // The desktop app shows the system's picker (screens and windows), no tabs.
   const sources = isElectron ? SOURCES.filter((source) => source.id !== "tab") : SOURCES;
+
+  if (busy && props.chip) {
+    return (
+      <button
+        type="button"
+        aria-label="Stop recording"
+        title="Stop recording"
+        data-testid={props.chip.testId}
+        data-recording="true"
+        className={cn(props.chip.className, "text-red-500")}
+        disabled={phase === "starting" || phase === "finishing"}
+        onClick={() => void stop("person")}
+      >
+        <span className="size-2.5 shrink-0 animate-pulse rounded-[2px] bg-current" />
+        Stop recording
+      </button>
+    );
+  }
 
   if (busy) {
     return (
@@ -79,19 +103,36 @@ export function RecordButton(props: {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        data-testid="record-button"
-        aria-label="Record your screen"
-        title="Record your screen — the agent watches it and does what you show"
-        disabled={props.disabled || !props.threadKey}
-        className={cn(
-          "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:cursor-not-allowed disabled:opacity-50",
-          props.compact ? "size-7" : "size-8 sm:size-7",
-        )}
+      {props.chip ? (
+        <PopoverTrigger
+          data-testid={props.chip.testId}
+          title="Record your screen — the agent watches it and does what you show"
+          disabled={props.disabled || !props.threadKey}
+          className={cn(props.chip.className, "disabled:cursor-not-allowed disabled:opacity-50")}
+        >
+          <VideoIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          Show the agent
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger
+          data-testid="record-button"
+          aria-label="Record your screen"
+          title="Record your screen — the agent watches it and does what you show"
+          disabled={props.disabled || !props.threadKey}
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:cursor-not-allowed disabled:opacity-50",
+            props.compact ? "size-7" : "size-8 sm:size-7",
+          )}
+        >
+          <VideoIcon className="size-4" />
+        </PopoverTrigger>
+      )}
+      <PopoverPopup
+        side={props.chip ? "bottom" : "top"}
+        align="start"
+        className="w-[19rem]"
+        data-testid="record-popup"
       >
-        <VideoIcon className="size-4" />
-      </PopoverTrigger>
-      <PopoverPopup side="top" align="start" className="w-[19rem]" data-testid="record-popup">
         <div className="flex flex-col gap-3">
           <div>
             <div className="text-sm font-semibold">Show the agent</div>

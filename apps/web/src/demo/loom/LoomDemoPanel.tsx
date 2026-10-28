@@ -27,6 +27,12 @@ export async function openLoomChat(router: DemoRouter) {
   });
 }
 
+/** Home of the same computer: "Show the agent" next to "Add a project" → a new chat. */
+export async function openLoomHome(router: DemoRouter) {
+  useStore.getState().setActiveEnvironmentId(ENV_PRODUCT as EnvironmentId);
+  await router.navigate({ to: "/computer" });
+}
+
 export default function LoomDemoPanel({ router }: { router: DemoRouter }) {
   demoHooks.router = router;
   const [open, setOpen] = useState(
@@ -93,6 +99,14 @@ export default function LoomDemoPanel({ router }: { router: DemoRouter }) {
         className="cursor-pointer rounded-md bg-primary px-2 py-1.5 text-[12px] font-medium text-primary-foreground hover:bg-primary/90"
       >
         Открыть чат «pricing» на uno-product
+      </button>
+      <button
+        type="button"
+        data-testid="loom-open-home"
+        onClick={() => void openLoomHome(router)}
+        className="cursor-pointer rounded-md border border-border px-2 py-1.5 text-[12px] font-medium hover:bg-accent"
+      >
+        Или с Home: «Show the agent» → новый чат
       </button>
       <div className="mt-1 text-[12px] font-medium">Сценарий (крайние случаи)</div>
       <div className="flex flex-col gap-1" role="radiogroup" aria-label="Сценарий">

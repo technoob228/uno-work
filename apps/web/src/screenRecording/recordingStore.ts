@@ -77,6 +77,12 @@ interface StoreState {
   take: (threadKey: string) => { forAgent: RecordingForAgent; item: RecordingItem } | null;
   /** The send failed: the card comes back. */
   restore: (item: RecordingItem) => void;
+  /**
+   * The card goes to another chat (Home's recording → the new chat it starts).
+   * Only a card that isn't saving or watching moves; a card already there is
+   * replaced. True when it moved.
+   */
+  moveTo: (fromKey: string, toKey: string) => boolean;
 }
 
 const IDLE: RecordingSession = {
@@ -388,6 +394,21 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
     restore: (item) => {
       sentRecordingUrls.delete(item.name);
       set((state) => ({ items: { ...state.items, [item.threadKey]: item } }));
+    },
+
+    moveTo: (fromKey, toKey) => {
+      const item = get().items[fromKey];
+      if (!item || fromKey === toKey || recordingReadiness(item).busy) return false;
+      const replaced = get().items[toKey];
+      if (replaced) get().remove(toKey);
+      set((state) => {
+        const items = { ...state.items };
+        delete items[fromKey];
+        // The person already had the words put in the box where they recorded.
+        items[toKey] = { ...item, threadKey: toKey, prefilled: true };
+        return { items };
+      });
+      return true;
     },
   };
 });

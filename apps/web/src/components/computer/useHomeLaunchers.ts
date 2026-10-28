@@ -24,6 +24,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { startNewLocalThreadFromContext } from "../../lib/chatThreadActions";
 import { useTerminalStateStore } from "../../terminalStateStore";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
+import { useScreenRecordingStore } from "../../screenRecording/recordingStore";
 import type { HomeStartOptions } from "./home/HomeComposer";
 import { usePendingSendStore } from "./pendingSendStore";
 import { useComposerFileHandoffStore } from "./composerFileHandoffStore";
@@ -147,6 +148,11 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       if (options.images?.length) store.addImages(draftId, [...options.images]);
       if (options.files?.length) {
         useComposerFileHandoffStore.getState().handOff(draftId, options.files);
+      }
+      // Home's screen recording becomes this chat's: its send carries the block.
+      const threadId = options.recordingKey ? store.getDraftSession(draftId)?.threadId : null;
+      if (options.recordingKey && threadId) {
+        useScreenRecordingStore.getState().moveTo(options.recordingKey, threadId);
       }
       store.setRuntimeMode(draftId, options.runtimeMode);
       store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });

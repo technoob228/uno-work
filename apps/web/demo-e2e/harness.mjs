@@ -110,6 +110,19 @@ export async function openDemo(page, baseUrl, { scenario = "normal", speed = 4 }
   await dismissBanners(page);
 }
 
+/** Opens the Loom demo on Home of the same computer (Home's "Show the agent"). */
+export async function openDemoHome(page, baseUrl, { scenario = "normal", speed = 4 } = {}) {
+  const params = new URLSearchParams({ loom: scenario, speed: String(speed), panel: "closed" });
+  await page.goto(`${baseUrl}?${params}`);
+  await page.waitForFunction(() => Boolean(window.__loomDemo), null, { timeout: 30_000 });
+  await dismissBanners(page);
+  await page.getByTestId("loom-panel-pill").click();
+  await page.getByTestId("loom-open-home").click();
+  await page.getByTestId("loom-panel").getByRole("button", { name: "Свернуть" }).click();
+  await page.getByTestId("home-composer").waitFor({ timeout: 20_000 });
+  await dismissBanners(page);
+}
+
 /** Toasts that cover the page in a screenshot. */
 export async function dismissBanners(page) {
   for (const label of ["Later", "Not now", "Dismiss"]) {
@@ -118,12 +131,12 @@ export async function dismissBanners(page) {
   }
 }
 
-/** Record → options → Start; waits for the bar. */
+/** Record → options → Start; waits for the bar. `trigger` = the button's test id. */
 export async function startRecording(
   page,
-  { source = "screen", camera = true, microphone = true } = {},
+  { source = "screen", camera = true, microphone = true, trigger = "record-button" } = {},
 ) {
-  await page.getByTestId("record-button").first().click();
+  await page.getByTestId(trigger).first().click();
   const popup = page.getByTestId("record-popup");
   await popup.waitFor();
   await page.getByTestId(`record-source-${source}`).click();

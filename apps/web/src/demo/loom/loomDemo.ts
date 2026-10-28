@@ -9,6 +9,7 @@ import { demoHooks } from "../demoFlag";
 import { overrideRecordingDeps } from "../../screenRecording/recordingRuntime";
 import type { PipelineDeps } from "../../screenRecording/pipeline";
 import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
+import { useScreenRecordingStore } from "../../screenRecording/recordingStore";
 
 export type LoomScenario = "normal" | "drive-full" | "upload-breaks" | "watch-fails" | "silent";
 
@@ -142,5 +143,10 @@ export function loomReply(text: string): string | null {
 export function startLoomDemo() {
   overrideRecordingDeps(() => demoDeps());
   demoHooks.replyTo = loomReply;
-  (window as unknown as { __loomDemo: unknown }).__loomDemo = { log: demoLog, setLoomScenario };
+  (window as unknown as { __loomDemo: unknown }).__loomDemo = {
+    log: demoLog,
+    setLoomScenario,
+    /** The cards waiting in composers (for the flows: nothing left after sending). */
+    recordingItems: () => useScreenRecordingStore.getState().items,
+  };
 }

@@ -15,6 +15,11 @@
  * A newcomer's first screen
  * (`minimal`) is only the box and the pills: no folder chip, model or
  * permissions pickers — the defaults a new chat gets.
+ *
+ * "Show the agent" (Loom Work, 28.10) sits next to "Add a project": the same
+ * recording as the chat's Record button. Its card waits in this box (saving,
+ * watching, Retry), the words go in once, and on Enter it moves to the new
+ * chat, whose first message carries it (see `screenRecording/homeRecording.ts`).
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -57,6 +62,14 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../../providerInstances";
+import { RecordButton, screenRecordingAvailable } from "../../../screenRecording/RecordButton";
+import { RecordingComposerCard } from "../../../screenRecording/RecordingCards";
+import {
+  homeRecordingKey,
+  homeRecordingPrefill,
+  homeSendCheck,
+} from "../../../screenRecording/homeRecording";
+import { useScreenRecordingStore } from "../../../screenRecording/recordingStore";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
 import { TraitsPicker } from "../../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
@@ -87,6 +100,8 @@ export interface HomeStartOptions {
   readonly images?: ReadonlyArray<ComposerImageAttachment>;
   /** Other files attached on Home (saved to ~/Uploads when the chat sends). */
   readonly files?: ReadonlyArray<ComposerFileAttachment>;
+  /** Home's screen recording (its store key): it moves to the new chat and goes with the message. */
+  readonly recordingKey?: string;
 }
 
 /**
@@ -207,6 +222,21 @@ export function HomeComposer({
   const [images, setImages] = useState<ComposerImageAttachment[]>([]);
   const [files, setFiles] = useState<ComposerFileAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Loom Work: Home's own recording (one per computer), shown as the chat shows it.
+  const [recordingSupported] = useState(screenRecordingAvailable);
+  const recordingKey = environmentId ? homeRecordingKey(environmentId) : null;
+  const recording = useScreenRecordingStore((state) =>
+    recordingKey ? (state.items[recordingKey] ?? null) : null,
+  );
+  const markRecordingPrefilled = useScreenRecordingStore((state) => state.markPrefilled);
+  const textRef = useRef(text);
+  textRef.current = text;
+  useEffect(() => {
+    const prefill = homeRecordingPrefill(recording, textRef.current);
+    if (!recording || !prefill.mark) return;
+    markRecordingPrefilled(recording.threadKey);
+    if (prefill.text !== null) setText(prefill.text);
+  }, [recording, markRecordingPrefilled]);
   const selectedEntry = picker.selection
     ? picker.instanceEntries.find((entry) => entry.instanceId === picker.selection?.instanceId)
     : undefined;
@@ -242,7 +272,17 @@ export function HomeComposer({
 
   const submit = async () => {
     const prompt = text.trim();
-    if ((!prompt && images.length === 0 && files.length === 0) || starting) {
+    const check = homeSendCheck({
+      text: prompt,
+      attachments: images.length + files.length,
+      recording,
+    });
+    if (check.kind === "empty" || starting) {
+      ref.current?.focus();
+      return;
+    }
+    if (check.kind === "blocked") {
+      toastManager.add({ type: "warning", title: check.message });
       ref.current?.focus();
       return;
     }
@@ -254,6 +294,7 @@ export function HomeComposer({
         runtimeMode,
         images,
         files,
+        ...(recording ? { recordingKey: recording.threadKey } : {}),
       });
       // The new chat's draft owns the previews now (no revoke).
       setImages([]);
@@ -318,6 +359,11 @@ export function HomeComposer({
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[20px] bg-card/90 text-sm font-medium text-primary">
             <FolderUpIcon className="size-4" />
             Drop files to attach, or a project folder / .zip
+          </div>
+        ) : null}
+        {recording ? (
+          <div className="px-3 pt-3" data-testid="home-recording">
+            <RecordingComposerCard item={recording} />
           </div>
         ) : null}
         {images.length > 0 || files.length > 0 ? (
@@ -501,7 +547,7 @@ export function HomeComposer({
             disabled={starting}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              text.trim() || images.length > 0 || files.length > 0
+              text.trim() || images.length > 0 || files.length > 0 || recording
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground",
             )}
@@ -510,7 +556,7 @@ export function HomeComposer({
           </button>
         </div>
       </div>
-      {starters.length > 0 || onUploadProject ? (
+      {starters.length > 0 || onUploadProject || (recordingSupported && recordingKey) ? (
         // One row of light pills; on a narrow screen they wrap (no sideways scroll).
         <div
           className={cn("flex flex-wrap gap-2", minimal && "justify-center")}
@@ -550,6 +596,13 @@ export function HomeComposer({
               <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
               Add a project
             </button>
+          ) : null}
+          {recordingSupported && recordingKey ? (
+            <RecordButton
+              threadKey={recordingKey}
+              environmentId={environmentId}
+              chip={{ className: PILL, testId: "home-show-agent" }}
+            />
           ) : null}
         </div>
       ) : null}
