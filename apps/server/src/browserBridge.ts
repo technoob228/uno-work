@@ -241,7 +241,15 @@ export const MAX_SECRET_HOLD_MS = 7 * 24 * 3_600_000;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
 const MAX_APPROVAL_TIMEOUT_MS = 3_600_000;
 
-export type ToolApprovalOutcome = "approved" | "denied" | "timeout" | "no_client";
+/**
+ * - `approved` / `denied` — the person answered while the call waited;
+ * - `timeout` — nobody answered in time (the request is gone);
+ * - `queued` — nobody answered while the call waited, but the request stays
+ *   open (the card, replayed when a window connects; the Inbox) and the
+ *   answer goes to `late.onLateOutcome` (see `requestToolApproval`).
+ */
+export type ToolApprovalOutcome = "approved" | "denied" | "timeout" | "queued";
+export type LateToolApprovalOutcome = "approved" | "denied" | "timeout";
 
 interface PendingToolApproval {
   readonly responseToken: string;
@@ -427,8 +435,14 @@ export interface BrowserBridgeShape {
   }) => Effect.Effect<boolean>;
   /**
    * Ask the person to allow one `uno-work` tool call: pushes a
-   * `toolApprovalRequest` card to web clients and waits for Allow / Deny.
-   * `no_client` — nobody is connected to ask (the call is refused).
+   * `toolApprovalRequest` card to web clients (replayed to every window that
+   * connects while it is open) and waits for Allow / Deny. Nobody connected
+   * is not a refusal (audit 27.10 #3): the card waits for the next window.
+   *
+   * With `late`, the call waits at most `late.syncWaitMs` (nothing when no
+   * window is open), then answers `queued`; the request stays open until
+   * `late.holdMs` from the start and its answer — or `timeout` — goes to
+   * `late.onLateOutcome`. Without it the call waits up to `timeoutMs`.
    */
   readonly requestToolApproval: (
     input: {
@@ -439,9 +453,24 @@ export interface BrowserBridgeShape {
       /** Done by the person's Uno Work on Allow, before it answers (see the contract). */
       readonly clientAction?: BridgeToolApprovalRequestEvent["clientAction"];
       readonly timeoutMs?: number;
+      readonly late?: {
+        readonly syncWaitMs: number;
+        readonly holdMs: number;
+        readonly onLateOutcome: (outcome: LateToolApprovalOutcome) => Effect.Effect<void>;
+      };
+      /** Called once with the request id (e.g. to tie an Inbox row to it). */
+      readonly onRequestId?: (requestId: string) => void;
     },
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<ToolApprovalOutcome>;
+  /**
+   * Answer an open approval by its id without the card's token — the
+   * person's own session (an Inbox row's Allow / Decline). False: not open.
+   */
+  readonly completeToolApprovalById: (input: {
+    readonly requestId: string;
+    readonly approved: boolean;
+  }) => Effect.Effect<boolean>;
   /** The person's answer from the card; false — unknown id or token. */
   readonly completeToolApproval: (input: {
     readonly requestId: string;
@@ -830,8 +859,8 @@ export const makeBrowserBridge = (input: {
       requestToolApproval: (input, context?) =>
         Effect.gen(function* () {
           const subscribers = yield* Ref.get(subscriberCountRef);
-          if (subscribers === 0) return "no_client" as const;
           const requestId = randomBytes(12).toString("hex");
+          input.onRequestId?.(requestId);
           const responseToken = randomBytes(24).toString("hex");
           const deferred = yield* Deferred.make<"approved" | "denied">();
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
@@ -851,19 +880,75 @@ export const makeBrowserBridge = (input: {
           pendingToolApprovals.set(requestId, { responseToken, deferred, event });
           yield* PubSub.publish(pubsub, event);
 
-          const maybeOutcome = yield* Deferred.await(deferred).pipe(
-            Effect.timeoutOption(Duration.millis(approvalTimeoutMs(input.timeoutMs))),
-            Effect.ensuring(Effect.sync(() => pendingToolApprovals.delete(requestId))),
+          const expire = Effect.gen(function* () {
+            pendingToolApprovals.delete(requestId);
+            const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+            yield* PubSub.publish(pubsub, {
+              version: 1,
+              type: "toolApprovalSettled",
+              sequence: settledSequence,
+              requestId,
+            } satisfies BrowserBridgeStreamEvent);
+          });
+
+          const late = input.late;
+          if (late === undefined) {
+            const maybeOutcome = yield* Deferred.await(deferred).pipe(
+              Effect.timeoutOption(Duration.millis(approvalTimeoutMs(input.timeoutMs))),
+            );
+            if (Option.isSome(maybeOutcome)) {
+              pendingToolApprovals.delete(requestId);
+              return maybeOutcome.value;
+            }
+            yield* expire;
+            return "timeout" as const;
+          }
+
+          // Nobody to look at the card right now: don't hold the caller.
+          const syncWaitMs = subscribers === 0 ? 0 : Math.max(0, late.syncWaitMs);
+          const startedAt = Date.now();
+          const quick =
+            syncWaitMs === 0
+              ? Option.none<"approved" | "denied">()
+              : yield* Deferred.await(deferred).pipe(
+                  Effect.timeoutOption(Duration.millis(Math.min(syncWaitMs, late.holdMs))),
+                );
+          if (Option.isSome(quick)) {
+            pendingToolApprovals.delete(requestId);
+            return quick.value;
+          }
+          const remainingMs = Math.max(1_000, late.holdMs - (Date.now() - startedAt));
+          yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(remainingMs)),
+            Effect.flatMap((answer) =>
+              Option.isSome(answer)
+                ? Effect.sync(() => pendingToolApprovals.delete(requestId)).pipe(
+                    Effect.as<LateToolApprovalOutcome>(answer.value),
+                  )
+                : expire.pipe(Effect.as<LateToolApprovalOutcome>("timeout")),
+            ),
+            Effect.flatMap((outcome) => late.onLateOutcome(outcome)),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("tool approval: late answer handler failed", { cause }),
+            ),
+            Effect.forkDetach,
           );
-          if (Option.isSome(maybeOutcome)) return maybeOutcome.value;
-          const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
+          return "queued" as const;
+        }),
+      completeToolApprovalById: (input) =>
+        Effect.gen(function* () {
+          const pending = pendingToolApprovals.get(input.requestId);
+          if (!pending) return false;
+          pendingToolApprovals.delete(input.requestId);
+          yield* Deferred.succeed(pending.deferred, input.approved ? "approved" : "denied");
+          const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
           yield* PubSub.publish(pubsub, {
             version: 1,
             type: "toolApprovalSettled",
-            sequence: settledSequence,
-            requestId,
+            sequence,
+            requestId: input.requestId,
           } satisfies BrowserBridgeStreamEvent);
-          return "timeout" as const;
+          return true;
         }),
       completeToolApproval: (input) =>
         Effect.gen(function* () {

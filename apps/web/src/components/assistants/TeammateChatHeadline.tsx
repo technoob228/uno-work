@@ -5,8 +5,8 @@
  */
 import { useNavigate } from "@tanstack/react-router";
 
-import { AssistantAvatar } from "./AssistantAvatar";
-import { ACTIVITY_LABEL, profileLine } from "./assistantTeam.logic";
+import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
+import { ACTIVITY_LABEL } from "./assistantTeam.logic";
 import type { TeamMember } from "./useAssistantTeam";
 
 export function TeammateChatHeadline(props: {
@@ -30,20 +30,25 @@ export function TeammateChatHeadline(props: {
     >
       <AssistantAvatar
         emoji={member.profile.emoji}
+        image={avatarImageOf(member.profile)}
         tone={member.profile.tone}
         activity={member.activity}
         className="size-7 shrink-0"
         emojiClassName="text-sm"
       />
       <span className="min-w-0 leading-tight">
-        <span className="block truncate text-sm font-medium text-foreground">
+        <span className="block max-w-[28rem] truncate text-sm font-medium text-foreground">
           {member.profile.name}
-          <span className="font-normal text-muted-foreground"> · {props.title}</span>
+          {/* Variant D: a persona is a channel with a role, next to Uno. */}
+          <span className="font-normal text-muted-foreground">
+            {" "}
+            · {member.profile.roles[0] ?? props.title}
+          </span>
         </span>
         <span className="block truncate text-[11px] text-muted-foreground">
-          {member.profile.setUpAt === null
-            ? "Setting itself up with you"
-            : `${ACTIVITY_LABEL[member.activity]} · ${profileLine(member.profile)}`}
+          {member.revoked
+            ? "Removed · its chats stay"
+            : `${ACTIVITY_LABEL[member.activity]} · works next to Uno · shares its memory and apps`}
         </span>
       </span>
     </button>

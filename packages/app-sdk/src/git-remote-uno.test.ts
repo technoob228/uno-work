@@ -175,10 +175,17 @@ describe("machineCredentials", () => {
       boxId: 7,
       consoleUrl: "http://127.0.0.1:9",
     });
-    // A laptop signed in with an account key only: not a cloud computer.
-    fs.writeFileSync(settings, JSON.stringify({ uno: { apiKey: "a" } }));
+    // A laptop with the account key in Uno Work: its projects sync too.
+    fs.writeFileSync(settings, JSON.stringify({ uno: { apiKey: " acct " } }));
+    expect(machineCredentials({ home }, [])).toEqual({
+      token: "acct",
+      boxId: null,
+      consoleUrl: "http://127.0.0.1:9",
+    });
+    // An Uno AI key isn't an account key: nothing to sign in with.
+    fs.writeFileSync(settings, JSON.stringify({ uno: { apiKey: "unollm_x" } }));
     expect(machineCredentials({ home }, [])).toBeNull();
-    expect(NOT_CLOUD).toContain("Uno cloud computers");
+    expect(NOT_CLOUD).toContain("Uno account");
   });
 });
 

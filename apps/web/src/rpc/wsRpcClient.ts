@@ -220,6 +220,18 @@ export interface WsRpcClient {
     readonly fill: RpcUnaryMethod<typeof WS_METHODS.vaultFill>;
     readonly sync: RpcUnaryMethod<typeof WS_METHODS.vaultSync>;
   };
+  /** "On all my computers" on this daemon: sync status and choices, the projects' keys. */
+  readonly projectSync: {
+    readonly status: RpcUnaryNoArgMethod<typeof WS_METHODS.projectSyncStatus>;
+    readonly setEnabled: RpcUnaryMethod<typeof WS_METHODS.projectSyncSetEnabled>;
+    readonly syncNow: RpcUnaryMethod<typeof WS_METHODS.projectSyncSyncNow>;
+    readonly resolve: RpcUnaryMethod<typeof WS_METHODS.projectSyncResolve>;
+    readonly getHere: RpcUnaryMethod<typeof WS_METHODS.projectSyncGetHere>;
+    readonly opened: RpcUnaryMethod<typeof WS_METHODS.projectSyncOpened>;
+    readonly secretsList: RpcUnaryMethod<typeof WS_METHODS.projectSecretsList>;
+    readonly secretsSet: RpcUnaryMethod<typeof WS_METHODS.projectSecretsSet>;
+    readonly secretsRemove: RpcUnaryMethod<typeof WS_METHODS.projectSecretsRemove>;
+  };
   /**
    * Workspace registry. Every mutating call answers with the full state, so a
    * caller never has to reconcile a local delta against the daemon's epoch.
@@ -633,6 +645,24 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       import: (input) => transport.request((client) => client[WS_METHODS.vaultImport](input)),
       fill: (input) => transport.request((client) => client[WS_METHODS.vaultFill](input)),
       sync: (input) => transport.request((client) => client[WS_METHODS.vaultSync](input)),
+    },
+    projectSync: {
+      status: () => transport.request((client) => client[WS_METHODS.projectSyncStatus]({})),
+      setEnabled: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncSetEnabled](input)),
+      syncNow: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncSyncNow](input)),
+      resolve: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncResolve](input)),
+      getHere: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncGetHere](input)),
+      opened: (input) => transport.request((client) => client[WS_METHODS.projectSyncOpened](input)),
+      secretsList: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSecretsList](input)),
+      secretsSet: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSecretsSet](input)),
+      secretsRemove: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSecretsRemove](input)),
     },
     workspace: {
       getState: () => transport.request((client) => client[WS_METHODS.workspaceGetState]({})),

@@ -37,18 +37,18 @@ describe("an assistant sets itself up in a chat", () => {
     expect(first.text).toContain("Hi, I'm Ada");
     expect(first.question?.id).toBe("role");
 
-    const role = answerSetupChatTurn("t1", "Marketing", world);
-    expect(role?.text).toContain("✓ **Saved:** role — Marketing");
+    const role = answerSetupChatTurn("t1", "Sales", world);
+    expect(role?.text).toContain("✓ **Saved:** role — Sales");
     expect(role?.question?.id).toBe("tone");
     expect(useAssistantTeamStore.getState().profiles["env:assistant-ada"]?.roles).toEqual([
-      "Marketing",
+      "Sales",
     ]);
 
     const skipped = answerSetupChatTurn("t1", "Skip", world);
     expect(skipped?.text).toContain("Skipped");
 
     answerSetupChatTurn("t1", "Only here", world);
-    const rights = answerSetupChatTurn("t1", "Observer", world);
+    const rights = answerSetupChatTurn("t1", "Reads only", world);
     // Limited rights: it offers a computer of its own, with the price.
     expect(rights?.question?.id).toBe("own-computer");
     expect(rights?.question?.detail).toContain("$5/mo");

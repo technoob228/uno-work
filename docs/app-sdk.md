@@ -359,6 +359,26 @@ a "Can comment" / "Can edit" share link becomes "Boris commented on
 report.docx" (the name the visitor typed; repeats of one visitor fold into one
 item) with Open → the document.
 
+### Join my calls — `"calls": true` (the Notetaker)
+
+An assistant's **Join my calls** (its page → Calls, or the card in its chat):
+one click connects Google Calendar (the "Gmail & Calendar" connector), installs
+the Notetaker from the App Store on this computer and turns it on. The
+Notetaker then asks this API (only the app with id `notetaker`; others get
+403 `calls_not_allowed`; while nobody turned it on — 409 `calls_off`):
+
+- `GET /v1/assistant/link` → `{enabled, assistant:{projectId,name}, owner:{name,email},
+  botName:"Ada (Uno notes)", rule:"mine", choices:{<meetingKey>:{choice,at}}}`;
+- `GET /v1/calendar/events?from=&to=` → the person's Google Calendar as JSON
+  (the console's `calendar_feed`; 424 `google_reconnect` / `google_not_connected`);
+- `POST /v1/assistant/events` `{id, kind, at, …}` → 202 (a repeated `id` → 200
+  `duplicate`). Kinds: `calls.upcoming`, `call.status` (a failure goes to the
+  Inbox), `meeting.notes` (the assistant's turn — its answer goes to Telegram —
+  and an Inbox item), `meeting.error`.
+
+Contract and fields: `reports/day_2026-10-28/assistants-d-impl/CONTRACTS.md`
+(W ↔ N) in the Uno workspace; code: `apps/server/src/assistants/assistantCalls*.ts`.
+
 ## 3. SDKs
 
 Zero-dependency single files; the daemon keeps a copy on every machine:

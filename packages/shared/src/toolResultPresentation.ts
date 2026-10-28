@@ -517,6 +517,12 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
         : "Checked your assistant",
     "Couldn't reach your assistant",
   ],
+  project_keys: [
+    "Looking at the project's keys…",
+    (c) =>
+      c.args.load === true ? "Brought the project's keys here" : "Checked the project's keys",
+    "Couldn't reach the project's keys",
+  ],
   request_secret: [
     "Waiting for you to paste it…",
     (c) => {
@@ -569,6 +575,46 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Setting up the site's forms…",
     (c) => named("Set up the forms of site", text(c.args, "slug"), "Set up the site's forms"),
     "The site's forms weren't changed",
+  ],
+  mail_address: [
+    "Checking your mailbox…",
+    (c) => named("Your mailbox:", text(c.result, "address"), "Checked your mailbox"),
+    "Couldn't open the mailbox",
+  ],
+  mail_list: [
+    "Looking at your mail…",
+    (c) => countOf(c, "messages", "letters", ["subject"]),
+    "Couldn't read the mail",
+  ],
+  mail_read: [
+    "Reading a letter…",
+    (c) => named("Read the letter", text(c.result, "subject"), "Read a letter"),
+    "Couldn't read the letter",
+  ],
+  mail_attachment_save: [
+    "Saving an attachment…",
+    (c) => named("Saved", text(c.result, "file"), "Saved the attachment"),
+    "The attachment wasn't saved",
+  ],
+  mail_send: [
+    "Sending an email…",
+    (c) => {
+      const to = Array.isArray(c.args.to)
+        ? c.args.to.filter((entry) => typeof entry === "string")
+        : [];
+      return named("Sent an email to", to.length > 0 ? to.join(", ") : undefined, "Sent an email");
+    },
+    "The email wasn't sent",
+  ],
+  github_pr_comment: [
+    "Commenting on the pull request…",
+    (c) =>
+      named(
+        "Commented on pull request",
+        typeof c.args.number === "number" ? `#${c.args.number}` : undefined,
+        "Commented on the pull request",
+      ),
+    "The comment wasn't posted",
   ],
   db_list: [
     "Looking at your databases…",

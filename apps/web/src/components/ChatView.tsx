@@ -184,6 +184,7 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
+import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
 import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
@@ -4186,6 +4187,10 @@ export default function ChatView(props: ChatViewProps) {
                 ? "Built-in Uno AI is available — start a new chat to use it."
                 : null
             }
+          />
+          <CloudSleepsBanner
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
           />
           <UnoBillingTopUpBanner
             active={activeThread.session?.lastErrorClass === "billing_error"}

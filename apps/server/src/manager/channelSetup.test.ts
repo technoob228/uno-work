@@ -43,6 +43,7 @@ const BOX_TOKEN = "uno_agt_machine";
 const identity: WorkMachineIdentity = { boxToken: BOX_TOKEN, boxId: 4242 };
 const TGR = "tgr_" + "a".repeat(64);
 const SLR = "slr_" + "b".repeat(64);
+const TGA = "tga_" + "c".repeat(64);
 const projectId = ASSISTANT_PROJECT_ID;
 
 interface Recorded {
@@ -265,6 +266,113 @@ it.layer(NodeServices.layer)("Telegram via Uno's shared bot", (it) => {
       }).pipe(Effect.provide(telegramLayer)),
   );
 
+  it.effect("asks for Uno's assistant bot first and links through it", () =>
+    Effect.gen(function* () {
+      const calls = installFetch([
+        route("POST", "/api/v1/boxes/4242/work/telegram/relay", () =>
+          json({ relay_token: TGA, bot_username: "uno_work_bot", bot: "assistant" }),
+        ),
+        route("POST", `/bot${TGA}/unoRegisterStartCode`, () => json({ ok: true, result: true })),
+      ]);
+      const outcome = yield* connectSharedTelegram({ projectId, identity });
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.value.botUsername).toBe("uno_work_bot");
+      expect(outcome.value.link).toBe(`https://t.me/uno_work_bot?start=${outcome.value.code}`);
+      const mints = calls.filter((call) => call.url.endsWith("/work/telegram/relay"));
+      expect(mints.map((call) => call.body)).toEqual([{ bot: "assistant" }]);
+      expect(calls.find((call) => call.url.endsWith("/unoRegisterStartCode"))?.url).toBe(
+        `${CONSOLE}/api/v1/work-relay/telegram/bot${TGA}/unoRegisterStartCode`,
+      );
+      expect(yield* readTelegramRow).toMatchObject({ botToken: `unorelay:${TGA}`, enabled: true });
+    }).pipe(Effect.provide(telegramLayer)),
+  );
+
+  for (const [label, refusal] of [
+    [
+      "503 TELEGRAM_ASSISTANT_BOT_NOT_CONFIGURED",
+      () => json({ code: "TELEGRAM_ASSISTANT_BOT_NOT_CONFIGURED" }, 503),
+    ],
+    ["400 from an older console", () => json({ error: "bad request" }, 400)],
+  ] as const) {
+    it.effect(`falls back to the old shared bot on ${label}`, () =>
+      Effect.gen(function* () {
+        const calls = installFetch([
+          (request) =>
+            request.method === "POST" &&
+            request.url.endsWith("/work/telegram/relay") &&
+            JSON.stringify(request.body) === JSON.stringify({ bot: "assistant" })
+              ? refusal()
+              : undefined,
+          route("POST", "/work/telegram/relay", () =>
+            json({ relay_token: TGR, bot_username: "get_uno_bot" }),
+          ),
+          route("POST", `/bot${TGR}/unoRegisterStartCode`, () => json({ ok: true, result: true })),
+        ]);
+        const outcome = yield* connectSharedTelegram({ projectId, identity });
+        expect(outcome.ok).toBe(true);
+        if (!outcome.ok) return;
+        expect(outcome.value.link).toBe(`https://t.me/get_uno_bot?start=${outcome.value.code}`);
+        expect(
+          calls.filter((call) => call.url.endsWith("/work/telegram/relay")).map((c) => c.body),
+        ).toEqual([{ bot: "assistant" }, {}]);
+        expect(yield* readTelegramRow).toMatchObject({ botToken: `unorelay:${TGR}` });
+      }).pipe(Effect.provide(telegramLayer)),
+    );
+  }
+
+  it.effect("keeps Uno on the old shared bot it already has (its chats live there)", () =>
+    Effect.gen(function* () {
+      yield* saveTelegramRow({
+        botToken: `unorelay:${TGR}`,
+        allowedChatIds: ["777"],
+        enabled: true,
+      });
+      const calls = installFetch([
+        route("POST", "/work/telegram/relay", () =>
+          json({ relay_token: TGR, bot_username: "get_uno_bot" }),
+        ),
+        route("POST", `/bot${TGR}/unoRegisterStartCode`, () => json({ ok: true, result: true })),
+      ]);
+      const outcome = yield* connectSharedTelegram({ projectId, identity });
+      expect(outcome.ok).toBe(true);
+      expect(
+        calls.filter((call) => call.url.endsWith("/work/telegram/relay")).map((c) => c.body),
+      ).toEqual([{}]);
+    }).pipe(Effect.provide(telegramLayer)),
+  );
+
+  it.effect("offers Uno's bot to Uno only: a new assistant gets 409 shared_bot_uno_only", () =>
+    Effect.gen(function* () {
+      const calls = installFetch([]);
+      const outcome = yield* connectSharedTelegram({
+        projectId: ProjectId.make("assistant-mia"),
+        identity,
+      });
+      expect(outcome).toMatchObject({
+        ok: false,
+        failure: { status: 409, error: "shared_bot_uno_only" },
+      });
+      expect(calls.filter((call) => call.url.startsWith(CONSOLE))).toEqual([]);
+    }).pipe(Effect.provide(telegramLayer)),
+  );
+
+  it.effect("deletes Uno's assistant-bot relay with ?bot=assistant", () =>
+    Effect.gen(function* () {
+      const calls = installFetch([
+        route("DELETE", "/work/telegram/relay", () => new Response(null, { status: 204 })),
+      ]);
+      yield* afterTelegramConfigSaved({
+        previous: { botToken: `unorelay:${TGA}`, allowedChatIds: ["1"], enabled: true },
+        next: { botToken: "123:own", allowedChatIds: ["1"], enabled: true },
+        identity,
+      });
+      expect(calls.filter((call) => call.method === "DELETE").map((call) => call.url)).toEqual([
+        `${CONSOLE}/api/v1/boxes/4242/work/telegram/relay?bot=assistant`,
+      ]);
+    }),
+  );
+
   it.effect("maps an unconfigured shared bot to 503 shared_bot_unavailable", () =>
     Effect.gen(function* () {
       installFetch([
@@ -362,6 +470,9 @@ it.layer(NodeServices.layer)("Telegram via Uno's shared bot", (it) => {
       expect(
         calls.filter((call) => call.method === "DELETE").map((call) => call.authorization),
       ).toEqual([`Bearer ${BOX_TOKEN}`]);
+      expect(calls.find((call) => call.method === "DELETE")?.url).toBe(
+        `${CONSOLE}/api/v1/boxes/4242/work/telegram/relay`,
+      );
       expect(calls.some((call) => call.url.includes("unoUnlinkChat"))).toBe(false);
     }),
   );
@@ -447,12 +558,21 @@ const routedTelegramLayer = ManagerTelegramServiceLive.pipe(
 );
 
 // Live clock: the connector's real poller has to run.
-it.live("routes the second assistant through the holder's relay and links its chat by code", () =>
+// Since 28.10 Uno's bot is Uno's only; an assistant already routed through it
+// (set up before) keeps working and can still link a chat.
+it.live("a second assistant already on the holder's relay links its chat by code", () =>
   Effect.gen(function* () {
     yield* saveTelegramRow({
       botToken: `unorelay:${TGR}`,
       allowedChatIds: ["111"],
       enabled: true,
+    });
+    const anaRepository = yield* ManagerConnectorRepository;
+    yield* anaRepository.upsert({
+      projectId: ana,
+      kind: "telegram",
+      config: { botToken: `unoroute:${projectId}`, allowedChatIds: [], enabled: true },
+      updatedAt: new Date().toISOString(),
     });
     const queued: Array<unknown> = [];
     const calls = installFetch([

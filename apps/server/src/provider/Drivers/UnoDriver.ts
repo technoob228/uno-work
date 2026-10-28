@@ -1253,7 +1253,7 @@ export const UnoDriver: ProviderDriver<OpenCodeSettings, UnoDriverEnv> = {
             // Built-in uno-work (per-thread token) + the owner's own servers.
             mcpServers: sessionMcpServers({
               bridgeEnvironment: bridge,
-              custom: customMcpServers(),
+              custom: customMcpServers({ threadId: context.threadId }),
             }),
           });
           // A refreshed catalog: the chat's config differs from the one the

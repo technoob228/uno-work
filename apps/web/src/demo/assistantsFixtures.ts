@@ -490,6 +490,22 @@ useDemoStore.subscribe((state, previous) => {
   location.reload();
 });
 
+/** "Email for your AI" in demo: one mailbox, renamable (taken: "taken-name"). */
+let demoMailLocal = "misha-otter";
+function agentMailState() {
+  return {
+    available: true,
+    reason: null,
+    mailbox: {
+      address: `${demoMailLocal}@uno4.me`,
+      local: demoMailLocal,
+      createdAt: "2026-10-20T10:00:00Z",
+      dailyLimit: 50,
+      sentToday: 2,
+    },
+  };
+}
+
 function connectorsState() {
   const now = Date.now();
   return {
@@ -595,6 +611,7 @@ const SUMMARIES: Record<
   ],
   product: [{ projectId: BUILDER, title: "Builder", emoji: "🛠️" }],
   mac: [],
+  own: [],
 };
 
 const FILES: Record<string, Record<string, string>> = {
@@ -856,6 +873,19 @@ export function assistantHandlers(input: {
       return HttpResponse.json({ ok: true });
     }),
     http.get("*/api/manager/connectors", () => HttpResponse.json(connectorsState())),
+    http.get("*/api/manager/mail", () => HttpResponse.json(agentMailState())),
+    http.put("*/api/manager/mail/address", async ({ request }) => {
+      const body = (await request.json().catch(() => null)) as { local?: unknown } | null;
+      const local = typeof body?.local === "string" ? body.local.trim().toLowerCase() : "";
+      if (local === "taken-name") {
+        return HttpResponse.json(
+          { error: "This name is taken. Try another one.", code: "taken" },
+          { status: 409 },
+        );
+      }
+      demoMailLocal = local;
+      return HttpResponse.json({ address: `${local}@uno4.me` });
+    }),
     http.post("*/api/manager/connectors/:provider/start", ({ params }) => {
       const provider = String(params.provider) as Provider;
       const state = connectors.get(provider);

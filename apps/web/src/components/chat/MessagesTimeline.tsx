@@ -22,6 +22,8 @@ import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
 import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
 import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
+import { AutomationCreatedCard } from "../automations/AutomationCreatedCard";
+import { automationFromToolResult } from "../automations/automations.logic";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
   type ChatFileAttachment,
@@ -712,13 +714,22 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={`work-row:${workEntry.id}`}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
+        {visibleEntries.map((workEntry) => {
+          // An assistant made an automation: its card, from the call's result (28.10).
+          const automation =
+            workEntry.toolName === "automation_create"
+              ? automationFromToolResult(workEntry.rawResult)
+              : null;
+          return automation ? (
+            <AutomationCreatedCard key={`work-row:${workEntry.id}`} automation={automation} />
+          ) : (
+            <SimpleWorkEntryRow
+              key={`work-row:${workEntry.id}`}
+              workEntry={workEntry}
+              workspaceRoot={workspaceRoot}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -901,13 +912,18 @@ const HandoffSeedBody = memo(function HandoffSeedBody(props: { text: string }) {
 
 /**
  * A message Uno Work put into the chat for the agent ("(Uno Work) The person
- * entered TELEGRAM_BOT_TOKEN — it is saved in /home/…"): the person reads one
- * centred line in their words; Dev mode shows what the agent got.
+ * entered TELEGRAM_BOT_TOKEN — it is saved in /home/…", the assistant's work
+ * update, a scheduled task's prompt): the person reads one centred line in
+ * their words; Dev mode shows what the agent got.
  */
 const UnoWorkNoteLine = memo(function UnoWorkNoteLine(props: { note: UnoWorkNote; raw: string }) {
   const devMode = useDevMode();
   return (
-    <div className="flex justify-center px-4" data-testid="uno-work-note">
+    <div
+      className="flex justify-center px-4"
+      data-testid="uno-work-note"
+      data-note-kind={props.note.kind}
+    >
       <p
         className="max-w-[80%] text-center text-xs text-muted-foreground"
         title={devMode ? props.raw : undefined}

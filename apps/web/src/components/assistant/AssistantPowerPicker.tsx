@@ -71,7 +71,7 @@ export type PowerCard = "uno" | SubscriptionLlmProvider | "key";
 /** While a sign-in is waiting, look at the computer this often. */
 const SIGN_IN_POLL_MS = 2_500;
 
-function cardOf(provider: AssistantLlmProvider): PowerCard {
+export function cardOf(provider: AssistantLlmProvider): PowerCard {
   if (provider === "uno") return "uno";
   if (isSubscriptionLlmProvider(provider)) return provider;
   return "key";
@@ -280,7 +280,7 @@ export function AssistantPowerPicker(props: {
   /** Controlled: the card picked for an assistant being set up. */
   readonly value?: PowerCard;
   readonly onChange?: (card: PowerCard) => void;
-  /** The line under the cards (controlled); the computer-wide note otherwise. */
+  /** The line under the cards; the computer-wide note when absent (uncontrolled). */
   readonly note?: string;
 }) {
   const { environmentId, onChange } = props;
@@ -447,9 +447,10 @@ export function AssistantPowerPicker(props: {
         />
       </div>
       <p className="text-[11px] leading-snug text-muted-foreground">
-        {controlled
-          ? (props.note ?? "")
-          : "One choice for every assistant chat on this computer. Change the model with the chip in Uno's chat."}
+        {props.note ??
+          (controlled
+            ? ""
+            : "One choice for every assistant chat on this computer. Change the model with the chip in Uno's chat.")}
       </p>
 
       {claudeSignInOpen ? (

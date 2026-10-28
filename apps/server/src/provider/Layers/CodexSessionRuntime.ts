@@ -1,3 +1,5 @@
+import * as nodePath from "node:path";
+
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
@@ -27,6 +29,13 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import {
+  prepareSandboxHost,
+  sandboxedCommand,
+  type HarnessSandboxPlan,
+  type HarnessSandboxSpec,
+} from "../../sandbox/harnessSandbox.ts";
+import { codexSandboxExtras, topLevelLinkTargets } from "../../sandbox/harnessSandboxExtras.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
@@ -89,6 +98,23 @@ export interface CodexSessionRuntimeOptions {
   readonly appendDeveloperInstructions?: string;
   /** Extra `codex app-server` arguments (`-c key=value` overrides). */
   readonly extraArgs?: ReadonlyArray<string>;
+  /** A restricted assistant's chat: run `codex app-server` inside the sandbox. */
+  readonly sandbox?: HarnessSandboxPlan;
+}
+
+/** The sandbox spec of a Codex session: its home (sign-in, config, sessions) read-write. */
+export function codexSandboxSpec(
+  plan: HarnessSandboxPlan,
+  env: NodeJS.ProcessEnv,
+): HarnessSandboxSpec {
+  const configured = env.CODEX_HOME?.trim();
+  const codexHome = nodePath.resolve(
+    configured && configured.length > 0 ? configured : nodePath.join(plan.home, ".codex"),
+  );
+  return {
+    plan,
+    extras: codexSandboxExtras({ codexHome, linkTargets: topLevelLinkTargets(codexHome) }),
+  };
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -708,12 +734,34 @@ export const makeCodexSessionRuntime = (
       ...(options.environment ?? process.env),
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
+    const appServerArgs = ["app-server", ...(options.extraArgs ?? [])];
+    const sandboxSpec = options.sandbox
+      ? codexSandboxSpec(options.sandbox, env as NodeJS.ProcessEnv)
+      : undefined;
+    if (sandboxSpec) {
+      yield* Effect.try({
+        try: () => prepareSandboxHost(sandboxSpec),
+        catch: (cause) =>
+          new CodexErrors.CodexAppServerSpawnError({
+            command: `${options.binaryPath} app-server`,
+            cause,
+          }),
+      });
+    }
+    const command = sandboxSpec
+      ? sandboxedCommand(
+          sandboxSpec,
+          options.binaryPath,
+          appServerArgs,
+          (env as NodeJS.ProcessEnv).PATH,
+        )
+      : { command: options.binaryPath, args: appServerArgs };
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server", ...(options.extraArgs ?? [])], {
+        ChildProcess.make(command.command, [...command.args], {
           cwd: options.cwd,
           env,
-          shell: process.platform === "win32",
+          shell: sandboxSpec === undefined && process.platform === "win32",
         }),
       )
       .pipe(

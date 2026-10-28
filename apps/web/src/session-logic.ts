@@ -84,6 +84,8 @@ export interface WorkLogEntry {
    */
   rawInput?: string;
   rawResult?: string;
+  /** The MCP tool of the call (`automation_create`): a few get a card of their own. */
+  toolName?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -644,6 +646,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     };
     if (human.rawInput) humanEntry.rawInput = human.rawInput;
     if (human.rawResult) humanEntry.rawResult = human.rawResult;
+    const toolName = human.callKey.split(":").at(-1);
+    if (toolName) humanEntry.toolName = toolName;
     if (toolCallId) humanEntry.toolCallId = toolCallId;
     return humanEntry;
   }

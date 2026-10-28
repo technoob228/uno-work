@@ -6,7 +6,7 @@
  * - the places: Home (the start screen — Misha 08.10: "no way back to Home
  *   once you left it"), Files, Apps & sites, and "Needs you" only when an
  *   approval or a question waits (it replaces the bell — the same panel
- *   opens from it);
+ *   opens from it); since 28.10 they are icons in one row, named on hover;
  * - the collapsed rail: the same places as icons (Home first), Uno and Chats slide the
  *   chats panel out (see sidebarD.hover.ts), expand and the account at the
  *   bottom;
@@ -31,6 +31,7 @@ import {
   SettingsIcon,
   SparklesIcon,
   SquarePenIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 
@@ -50,6 +51,8 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useTeamShown } from "../assistants/useAssistantTeam";
+import { useAutomationsShown } from "../automations/useAutomations";
 import { InboxCountBadge } from "./SidebarInboxRow";
 import {
   SidebarDAccountTrigger,
@@ -283,6 +286,41 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
   );
 });
 
+/**
+ * A place as an icon in the one row on top (Misha 28.10: "Home / Files / Apps
+ * & sites — icons in one line, the name on hover; they shouldn't get in the
+ * way"). The active one is lit.
+ */
+function PlaceIcon(props: {
+  icon: ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  testId: string;
+  tour?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={props.label}
+            onClick={props.onClick}
+            data-testid={props.testId}
+            data-tour={props.tour}
+            aria-current={props.active ? "page" : undefined}
+            className={cn(PLACE_ICON_CLASS, props.active ? PLACE_ICON_ACTIVE : PLACE_ICON_IDLE)}
+          />
+        }
+      >
+        {props.icon}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function PlaceRow(props: {
   icon: ReactNode;
   label: string;
@@ -290,42 +328,38 @@ function PlaceRow(props: {
   onClick?: () => void;
   testId: string;
   tour?: string;
-  trailing?: ReactNode;
-  render?: (className: string, children: ReactNode) => ReactNode;
 }) {
-  const className = cn(
-    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
-    props.active
-      ? "bg-sidebar-row-active font-medium text-foreground"
-      : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-foreground",
-  );
-  const children = (
-    <>
-      {props.icon}
-      <span className="min-w-0 flex-1 truncate">{props.label}</span>
-      {props.trailing}
-    </>
-  );
-  if (props.render) return <>{props.render(className, children)}</>;
   return (
     <button
       type="button"
       onClick={props.onClick}
-      className={className}
+      className={cn(
+        "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
+        props.active
+          ? "bg-sidebar-row-active font-medium text-foreground"
+          : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-foreground",
+      )}
       data-testid={props.testId}
       data-tour={props.tour}
       aria-current={props.active ? "page" : undefined}
     >
-      {children}
+      {props.icon}
+      <span className="min-w-0 flex-1 truncate">{props.label}</span>
     </button>
   );
 }
+
+const PLACE_ICON_CLASS =
+  "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
+const PLACE_ICON_IDLE =
+  "text-sidebar-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground data-[popup-open]:bg-sidebar-row-hover";
 
 function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const openFilesInPanel = useOpenFilesInPanel(isMobile);
-  return (to: "/files" | "/sites") => {
+  return (to: "/files" | "/sites" | "/automations") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     // In a chat, Files opens on the right, beside it (Misha 18.10).
@@ -367,8 +401,95 @@ function NeedsYouPopover(props: {
   );
 }
 
-/** Home, Files, Apps & sites, and Needs you (only when something waits for the person). */
-export const SidebarDPlaces = memo(function SidebarDPlaces() {
+/**
+ * Home, Files, Apps & sites, Automations (with the assistants, 28.10) — and
+ * Needs you only when something waits for the person — as icons in one row,
+ * the name on hover.
+ */
+const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const open = useOpenPlace();
+  const goHome = useGoHome();
+  const { shown } = useNeedsYouBadge();
+  const automations = useAutomationsShown();
+  return (
+    <nav
+      aria-label="Uno Work"
+      className="flex items-center gap-0.5 px-0.5"
+      data-testid="sidebar-places"
+    >
+      <PlaceIcon
+        icon={<HouseIcon />}
+        label="Home"
+        active={isHomePath(pathname)}
+        onClick={() => {
+          sidebarDPanel.closeNow();
+          goHome();
+        }}
+        testId="sidebar-nav-home"
+        tour="home"
+      />
+      <PlaceIcon
+        icon={<FolderIcon />}
+        label="Files"
+        active={pathname.startsWith("/files")}
+        onClick={() => open("/files")}
+        testId="sidebar-nav-files"
+        tour="files"
+      />
+      <PlaceIcon
+        icon={<LayoutGridIcon />}
+        label="Apps & sites"
+        active={pathname.startsWith("/sites")}
+        onClick={() => open("/sites")}
+        testId="sidebar-nav-apps"
+        tour="apps"
+      />
+      {automations ? (
+        <PlaceIcon
+          icon={<WorkflowIcon />}
+          label="Automations"
+          active={pathname.startsWith("/automations")}
+          onClick={() => open("/automations")}
+          testId="sidebar-nav-automations"
+        />
+      ) : null}
+      {shown ? (
+        <NeedsYouPopover
+          side="bottom"
+          trigger={(badge) => (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <PopoverTrigger
+                    aria-label="Needs you"
+                    className={cn(PLACE_ICON_CLASS, PLACE_ICON_IDLE)}
+                    data-testid="sidebar-needs-you"
+                  />
+                }
+              >
+                <InboxIcon />
+                <InboxCountBadge
+                  unread={badge.needsYou}
+                  needsYou={badge.needsYou}
+                  className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Needs you</TooltipPopup>
+            </Tooltip>
+          )}
+        />
+      ) : null}
+    </nav>
+  );
+});
+
+/**
+ * The places as rows (v0.0.156): what an account without the assistants
+ * update (`assistants_mvp`) keeps seeing — Home, Files, Apps & sites, and
+ * Needs you only when something waits.
+ */
+const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
@@ -419,6 +540,14 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
       ) : null}
     </nav>
   );
+});
+
+/**
+ * Home, Files, Apps & sites (+ Needs you): icons in one row with the
+ * assistants update (28.10), else the v0.0.156 rows.
+ */
+export const SidebarDPlaces = memo(function SidebarDPlaces() {
+  return useTeamShown() ? <SidebarDPlaceIcons /> : <SidebarDPlaceRows />;
 });
 
 function RailButton(props: {
@@ -475,6 +604,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
   const { shown } = useNeedsYouBadge();
+  const automations = useAutomationsShown();
   const hover = {
     onPointerEnter: () => sidebarDPanel.enterTrigger(),
     onPointerLeave: () => sidebarDPanel.leave(),
@@ -529,6 +659,16 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         >
           <LayoutGridIcon />
         </RailButton>
+        {automations ? (
+          <RailButton
+            label="Automations"
+            active={pathname.startsWith("/automations")}
+            onClick={() => open("/automations")}
+            testId="sidebar-rail-automations"
+          >
+            <WorkflowIcon />
+          </RailButton>
+        ) : null}
         {shown ? (
           <NeedsYouPopover
             side="right"

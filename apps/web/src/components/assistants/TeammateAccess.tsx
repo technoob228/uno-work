@@ -22,7 +22,6 @@ import {
   ChevronRightIcon,
   GlobeIcon,
   KeyRoundIcon,
-  Loader2Icon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -64,8 +63,14 @@ import {
 
 // ── Data ──────────────────────────────────────────────────────────────────
 
-export function useConnectorItems() {
-  const environmentId = usePrimaryEnvironmentId();
+/**
+ * The apps and servers as one list. `on`: the computer whose Uno Work asks
+ * the console (the one the assistant works on); the window's by default.
+ * The servers listed are the window's computer's own (`settings.mcpServers`).
+ */
+export function useConnectorItems(on?: EnvironmentId | null) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = on ?? primaryEnvironmentId;
   const actions = useConnectorActions(environmentId);
   const servers = useSettings((settings) => settings.mcpServers);
   const apps = PROVIDERS.map((meta) => {
@@ -299,10 +304,16 @@ export function TeammateAccess(props: {
   /** Its projects — the skills shown are theirs. */
   readonly projects: "all" | ReadonlyArray<string>;
   readonly className?: string;
+  /**
+   * Only the apps (the level per app is what Work enforces per assistant on
+   * this computer today); the browser, saved logins, keys and skills are
+   * one setting for every assistant here — said in one line instead.
+   */
+  readonly onlyConnectors?: boolean;
 }) {
   const { access, onChange, name, place } = props;
   const navigate = useNavigate();
-  const connectors = useConnectorItems();
+  const connectors = useConnectorItems(place.environmentId as EnvironmentId | null);
   const vault = useVaultEntries();
   const projectSkills = useProjectSkills(place.environmentId);
   const computerBrowser = useSettings((settings) => settings.browserAutomationLevel);
@@ -320,10 +331,24 @@ export function TeammateAccess(props: {
           <ShieldCheckIcon className="size-3.5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">Full access to this computer</div>
-          <div className="text-xs text-muted-foreground">
-            Every project, connected app, browser login, key and skill here — like you.
-          </div>
+          {props.projects === "all" ? (
+            <>
+              <div className="text-sm font-medium">Full access to this computer</div>
+              <div className="text-xs text-muted-foreground">
+                Every project, connected app, browser login, key and skill here — like you.
+              </div>
+            </>
+          ) : (
+            // Audit 27.10 #12: its projects are limited above — say only what is full.
+            <>
+              <div className="text-sm font-medium">Every app in its projects</div>
+              <div className="text-xs text-muted-foreground">
+                Only its{" "}
+                {props.projects.length === 1 ? "project" : `${props.projects.length} projects`};
+                there it uses every connected app, browser login, key and skill.
+              </div>
+            </>
+          )}
         </div>
         {readOnly ? null : (
           <Button
@@ -419,22 +444,11 @@ export function TeammateAccess(props: {
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={connectors.actions.pending !== null}
-                    onClick={() => void connectors.actions.connect("github")}
-                    data-testid="teammate-connect-github"
-                  >
-                    {connectors.actions.pending?.provider === "github" ? (
-                      <Loader2Icon className="size-3 animate-spin" />
-                    ) : null}
-                    Connect GitHub
-                  </Button>
-                  <button
-                    type="button"
                     onClick={() => void navigate({ to: "/settings/connectors" })}
-                    className="cursor-pointer text-primary hover:underline"
+                    data-testid="teammate-connect-apps"
                   >
-                    Others in Settings
-                  </button>
+                    Connect apps
+                  </Button>
                 </>
               )}
             </span>
@@ -538,6 +552,76 @@ export function TeammateAccess(props: {
         }
       />
 
+      {props.onlyConnectors ? (
+        <p
+          className="border-t border-border/70 px-3 py-2 text-xs text-muted-foreground"
+          data-testid="teammate-access-shared-line"
+        >
+          Browser, saved logins, keys and skills are the same for every assistant on{" "}
+          {place.label || "this computer"} for now — limits per assistant come later.
+        </p>
+      ) : (
+        <TeammateAccessMore
+          name={name}
+          access={access}
+          readOnly={readOnly}
+          set={set}
+          place={place}
+          vault={vault}
+          loginNames={loginNames}
+          secretNames={secretNames}
+          skills={skills}
+          personal={personal}
+          vaultWhere={vaultWhere}
+          picksList={picksList}
+          computerBrowser={computerBrowser}
+          projectSkillsLoading={projectSkills.isLoading}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Browser & logins, keys and skills (the mock's per-assistant blocks). */
+function TeammateAccessMore(props: {
+  readonly name: string;
+  readonly access: AssistantAccess;
+  readonly readOnly: boolean;
+  readonly set: (patch: Partial<AssistantAccess>) => void;
+  readonly place: AccessPlace;
+  readonly vault: ReturnType<typeof useVaultEntries>;
+  readonly loginNames: ReadonlyArray<{ id: string; name: string }>;
+  readonly secretNames: ReadonlyArray<{ id: string; name: string }>;
+  readonly skills: ReadonlyArray<{ name: string; project: string; path: string }>;
+  readonly personal: ReadonlyArray<(typeof SETUP_SKILLS)[keyof typeof SETUP_SKILLS]>;
+  readonly vaultWhere: string;
+  readonly picksList: (input: {
+    readonly picks: Picks;
+    readonly entries: ReadonlyArray<CredentialMetadata>;
+    readonly label: (entry: CredentialMetadata) => ReactNode;
+    readonly onChange: (picks: Picks) => void;
+    readonly disabled?: boolean;
+  }) => ReactNode;
+  readonly computerBrowser: unknown;
+  readonly projectSkillsLoading: boolean;
+}) {
+  const {
+    name,
+    access,
+    readOnly,
+    set,
+    place,
+    vault,
+    loginNames,
+    secretNames,
+    skills,
+    personal,
+    vaultWhere,
+    picksList,
+    computerBrowser,
+  } = props;
+  return (
+    <>
       {/* Browser & logins */}
       <Block
         testId="teammate-access-browser"
@@ -804,6 +888,6 @@ export function TeammateAccess(props: {
           </>
         }
       />
-    </div>
+    </>
   );
 }

@@ -11,6 +11,7 @@
  * Pure part only — no I/O, no React.
  */
 import { ASSISTANT_PROJECT_ID, isAssistantProjectId } from "@t3tools/contracts";
+import { ASSISTANT_PRESET_COPY } from "@t3tools/shared/assistantPreset";
 
 // ── What the person picks in the setup ───────────────────────────────────
 
@@ -26,6 +27,12 @@ export const DEFAULT_PRESET: AssistantPreset = "full";
 /** Decision 14.10 (1): Uno's second bot, linked by a `?start=` link. */
 export const DEFAULT_CHANNEL: AssistantChannel = "uno-bot";
 
+/**
+ * The presets as the mock's setup chat offers them. The names and lines are
+ * the shared ones (Misha 23.10: "Autonomous" / "Cautious"; an old
+ * Observer reads "Reads only") — the same words the real page shows, and
+ * nothing the daemon doesn't enforce (no payments: there is no payment tool).
+ */
 export const PRESETS: ReadonlyArray<{
   readonly id: AssistantPreset;
   readonly name: string;
@@ -35,28 +42,28 @@ export const PRESETS: ReadonlyArray<{
 }> = [
   {
     id: "full",
-    name: "Full",
-    line: "Does everything by itself, except spending money and deleting.",
+    name: ASSISTANT_PRESET_COPY.full.name,
+    line: ASSISTANT_PRESET_COPY.full.line,
     examples: "Starts chats in your projects, pushes a fix, sends the morning plan.",
   },
   {
     id: "helper",
-    name: "Helper",
-    line: "Works in chats, but asks you first before deploys, payments, deleting, emails out or a new assistant.",
-    examples: "Writes the fix and opens a PR — asks before merging it.",
+    name: ASSISTANT_PRESET_COPY.helper.name,
+    line: ASSISTANT_PRESET_COPY.helper.line,
+    examples: "Writes the fix in a chat — asks you before it emails anyone or publishes a site.",
   },
   {
     id: "observer",
-    name: "Observer",
-    line: "Reads your chats, apps and pages and sends you summaries. Changes nothing, uses no logins or keys, sets up no one.",
+    name: ASSISTANT_PRESET_COPY.observer.name,
+    line: ASSISTANT_PRESET_COPY.observer.line,
     examples: "“What moved today” every evening; never writes anywhere.",
   },
 ];
 
 export const PRESET_NAME: Readonly<Record<AssistantPreset, string>> = {
-  observer: "Observer",
-  helper: "Helper",
-  full: "Full access",
+  observer: ASSISTANT_PRESET_COPY.observer.name,
+  helper: ASSISTANT_PRESET_COPY.helper.name,
+  full: ASSISTANT_PRESET_COPY.full.name,
 };
 
 export const BRAIN_NAME: Readonly<Record<AssistantBrain, string>> = {
@@ -72,12 +79,13 @@ export const CHANNEL_NAME: Readonly<Record<AssistantChannel, string>> = {
   slack: "Slack",
 };
 
+/** The areas (Misha 21.10): what an assistant takes off the person's plate. */
 export const ROLE_CHIPS = [
   "Personal assistant",
-  "Developer",
-  "Marketing",
-  "Security",
-  "Ops",
+  "Finance",
+  "Sales",
+  "Dev",
+  "YouTube & content",
 ] as const;
 
 export const CHARACTER_CHIPS = [
@@ -90,10 +98,10 @@ export const CHARACTER_CHIPS = [
 /** Skills offered on step 5, the ones of the picked roles first. */
 export const SKILLS_BY_ROLE: Readonly<Record<string, ReadonlyArray<string>>> = {
   "Personal assistant": ["Morning plan", "Reminders", "Pay invoices (asks first)", "Inbox digest"],
-  Developer: ["Code review", "Run tests", "Fix CI", "Release notes"],
-  Marketing: ["Read competitors", "Draft posts", "Landing copy", "Weekly numbers"],
-  Security: ["Watch logins", "Check servers", "Dependency alerts"],
-  Ops: ["Check servers", "Watch releases", "Disk and load alerts", "Backups"],
+  Finance: ["Invoices into a sheet", "What's due", "Subscriptions", "Monthly summary"],
+  Sales: ["Leads in Notion", "Follow-up drafts", "Who to answer today"],
+  Dev: ["Code review", "Run tests", "Fix CI", "Release notes"],
+  "YouTube & content": ["Video ideas", "Scripts", "Titles and descriptions", "Content plan"],
 };
 
 /** Names offered to a new teammate (critics 16.10: the name comes filled in). */
@@ -179,6 +187,11 @@ export interface AssistantProfile {
   readonly name: string;
   /** null: Uno's own face. */
   readonly emoji: string | null;
+  /**
+   * Its picture's file name on its computer (`.uno/avatar-<ms>.webp`), shown
+   * instead of the emoji; null / absent: the emoji (Misha 23.10).
+   */
+  readonly avatar?: string | null;
   readonly tone: AvatarTone;
   readonly roles: ReadonlyArray<string>;
   readonly character: string;

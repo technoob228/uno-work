@@ -1,8 +1,7 @@
-// Loom Work (28.10): Playwright harness for the demo build of the real Work
-// web client (`VITE_DEMO=loom`). Serves the build, opens it, and gives flows a
-// few helpers. Plain `playwright`, no test runner: `node demo-e2e/run.mjs [flow…]`.
-// Chrome runs with fake camera/microphone and an auto-picked screen, so the
-// recording is real (MediaRecorder, canvas, worker ticks) without a person.
+// The assistants base (28.10): Playwright harness for the demo build of the
+// real Work web client (`VITE_DEMO=assist`). Serves the build, opens it in a
+// chosen world, and gives flows a few helpers. Plain `playwright` (the
+// workspace has it), no test runner: `node demo-e2e/run.mjs [flow…]`.
 //
 // Browser: Chrome for Testing from PLAYWRIGHT_BROWSERS_PATH if it is whole,
 // else the system Chrome (`channel: "chrome"`) — on the Mac the cached one
@@ -70,56 +69,27 @@ function cachedChromium() {
   return existsSync(framework) ? join(app, "Contents/MacOS/Google Chrome for Testing") : null;
 }
 
-export const MEDIA_ARGS = [
-  "--use-fake-ui-for-media-stream",
-  "--use-fake-device-for-media-stream",
-  "--auto-select-desktop-capture-source=Entire screen",
-  "--enable-features=GetDisplayMediaSetAutoSelectAllScreens",
-  "--autoplay-policy=no-user-gesture-required",
-];
-
-export async function launch({ extraArgs = [] } = {}) {
+export async function launch() {
   const executablePath = cachedChromium();
-  const args = [...MEDIA_ARGS, ...extraArgs];
-  // BACKGROUNDING=1: let Chrome throttle hidden pages like it does for people
-  // (Playwright turns that off by default).
-  const ignoreDefaultArgs = process.env.BACKGROUNDING
-    ? [
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-backgrounding-occluded-windows",
-      ]
-    : [];
-  return chromium.launch(
-    executablePath
-      ? { executablePath, args, ignoreDefaultArgs }
-      : { channel: "chrome", args, ignoreDefaultArgs, headless: process.env.HEADED ? false : true },
-  );
+  return chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
 }
 
-/** Opens the Loom demo (scenario via `?loom=`) on the pricing chat. */
-export async function openDemo(page, baseUrl, { scenario = "normal", speed = 4 } = {}) {
-  const params = new URLSearchParams({ loom: scenario, speed: String(speed), panel: "closed" });
-  await page.goto(`${baseUrl}?${params}`);
-  await page.waitForFunction(() => Boolean(window.__loomDemo), null, { timeout: 30_000 });
-  await dismissBanners(page);
-  await page.getByTestId("loom-panel-pill").click();
-  await page.getByTestId("loom-open-chat").click();
-  await page.getByTestId("loom-panel").getByRole("button", { name: "Свернуть" }).click();
-  await composer(page).waitFor({ timeout: 20_000 });
-  await dismissBanners(page);
-}
-
-/** Opens the Loom demo on Home of the same computer (Home's "Show the agent"). */
-export async function openDemoHome(page, baseUrl, { scenario = "normal", speed = 4 } = {}) {
-  const params = new URLSearchParams({ loom: scenario, speed: String(speed), panel: "closed" });
-  await page.goto(`${baseUrl}?${params}`);
-  await page.waitForFunction(() => Boolean(window.__loomDemo), null, { timeout: 30_000 });
-  await dismissBanners(page);
-  await page.getByTestId("loom-panel-pill").click();
-  await page.getByTestId("loom-open-home").click();
-  await page.getByTestId("loom-panel").getByRole("button", { name: "Свернуть" }).click();
-  await page.getByTestId("home-composer").waitFor({ timeout: 20_000 });
+/**
+ * Opens the demo in a world: `{ world: "new", mode: "asks-first", mac: "asleep",
+ * gmail: "expired", tg: "off", tier: "free", platform: "desktop" }` (any subset,
+ * see src/demo/assist/world.ts). `speed` runs the assistant's scripts faster.
+ */
+export async function openDemo(page, baseUrl, world = {}, { speed = 3, hash = "" } = {}) {
+  const params = new URLSearchParams({
+    world: "live",
+    ...world,
+    speed: String(speed),
+    panel: "closed",
+  });
+  await page.goto(`${baseUrl}?${params}${hash ? `#${hash}` : ""}`);
+  await page.waitForFunction(() => Boolean(window.__assistDemo), null, { timeout: 30_000 });
+  // The sidebar is there: the computers answered.
+  await page.getByText("Assistants", { exact: true }).first().waitFor({ timeout: 30_000 });
   await dismissBanners(page);
 }
 
@@ -131,29 +101,25 @@ export async function dismissBanners(page) {
   }
 }
 
-/** Record → options → Start; waits for the bar. `trigger` = the button's test id. */
-export async function startRecording(
-  page,
-  { source = "screen", camera = true, microphone = true, trigger = "record-button" } = {},
-) {
-  await page.getByTestId(trigger).first().click();
-  const popup = page.getByTestId("record-popup");
-  await popup.waitFor();
-  await page.getByTestId(`record-source-${source}`).click();
-  for (const [id, want] of [
-    ["record-camera", camera],
-    ["record-microphone", microphone],
-  ]) {
-    const toggle = page.getByTestId(id);
-    const on =
-      (await toggle.getAttribute("aria-checked")) === "true" ||
-      (await toggle.getAttribute("data-checked")) !== null;
-    if (on !== want) await toggle.click();
-  }
-  await page.getByTestId("record-start").click();
-  await page
-    .locator('[data-testid="recording-bar"][data-phase="recording"]')
-    .waitFor({ timeout: 15_000 });
+/** Plays a scene of the panel (engine.ts `addScene`) in the assistant's main chat. */
+export async function scene(page, id, target) {
+  await page.evaluate(
+    ([sceneId, to]) => window.__assistDemo.scene(sceneId, to),
+    [id, target ?? null],
+  );
+}
+
+/** Opens an assistant's main chat (Uno on uno-work by default). */
+export async function openMainChat(page, machine = "work", projectId) {
+  await page.evaluate(
+    async ([key, project]) => {
+      const demo = window.__assistDemo;
+      const threadId = demo.mainChat(key, project ?? undefined);
+      location.hash = `#/${demo.environmentOf(key)}/${threadId}`;
+    },
+    [machine, projectId ?? null],
+  );
+  await composer(page).waitFor({ timeout: 15_000 });
 }
 
 export function composer(page) {

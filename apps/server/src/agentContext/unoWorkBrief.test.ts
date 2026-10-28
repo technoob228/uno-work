@@ -36,9 +36,15 @@ describe("Uno Work environment brief", () => {
     // details are uno_guide("spark")); ~60 for "Deploying to Uno / uno.place"
     // (Misha 19.10: a Codex chat asked to deploy on uno.place went to click
     // the site and hit the sign-in page instead of reading llms.txt); ~15
-    // for `recording_frames` (Loom Work 28.10: the agent looks closer at the
-    // person's screen recording; the details are in the tool's description).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1915);
+    // for `recording_frames` (Loom Work 28.10); +60 for the agent's own
+    // mailbox (spec 20.10: one line, own mail vs Gmail); ~6 for `github_pr_comment` (Automations).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1985);
+  });
+
+  it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(/Your own mailbox \(`mail_address`\)/);
+    expect(brief).toMatch(/the person's mail only via the Gmail connector/);
   });
 
   it("deploying to uno.place: tools or llms.txt first, never a browser sign-in", () => {

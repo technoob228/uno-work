@@ -10,8 +10,10 @@
  * background job, tracked in memory and polled by the client via
  * `createBoxStatus`. The job itself lives in `UnoBoxProvision.ts`.
  *
- * The API key is the account credential from server settings. There is no
- * separate login: a workspace is "linked" exactly when the daemon has a key.
+ * The key is the account credential from server settings — or, on a cloud
+ * computer whose settings hold only the AI key, the machine's own token
+ * (`accountWideKeyFor`). There is no separate login: a workspace is "linked"
+ * exactly when the daemon has one of them.
  */
 import type {
   UnoBoxConnection,
@@ -37,6 +39,12 @@ import {
   parseUnoBoxConnection,
   parseUnoBoxList,
 } from "./unoCloudParse.ts";
+import {
+  accountWideKeyFor,
+  humanizeControlPlaneError,
+  isMachineScopeDisabled,
+  MACHINES_READ_DISABLED_MESSAGE,
+} from "./unoComputer.ts";
 
 /**
  * A control-plane request that did not return a usable payload. Tagged so the
@@ -45,7 +53,23 @@ import {
  */
 export class UnoCloudFetchError extends Data.TaggedError("UnoCloudFetchError")<{
   readonly message: string;
+  /** The original failure (HTTP status inside), for a plain-words message. */
+  readonly cause?: unknown;
 }> {}
+
+/**
+ * Why the computer list is missing, in plain words. A machine token the person
+ * did not allow `machines:read` gets the way to allow it, not "403".
+ */
+export function boxesFailureMessage(
+  cause: unknown,
+  keyKind: "account" | "machine" | "none",
+): string {
+  if (keyKind === "machine" && isMachineScopeDisabled(cause)) {
+    return MACHINES_READ_DISABLED_MESSAGE;
+  }
+  return humanizeControlPlaneError(cause);
+}
 
 /**
  * Short enough that waking a box shows up on the next panel paint, long enough
@@ -174,16 +198,24 @@ const makeUnoCloudService = Effect.gen(function* () {
         }),
     });
 
+  // The account key on a laptop; on a cloud computer (where `uno.apiKey` is
+  // the AI key the console refuses) the machine's own token — see
+  // `accountWideKeyFor`.
   const readApiKey = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const credential = accountWideKeyFor({
+      accountKey: current?.uno.apiKey ?? "",
+      boxToken: current?.uno.boxToken ?? "",
+    });
     return {
-      apiKey: current?.uno.apiKey.trim() ?? "",
+      apiKey: credential.key,
+      keyKind: credential.kind,
       goldenImageId: current?.uno.goldenImageId ?? null,
     };
   });
 
   const load = Effect.gen(function* () {
-    const { apiKey } = yield* readApiKey;
+    const { apiKey, keyKind } = yield* readApiKey;
     if (apiKey.length === 0) return disconnectedState(null);
 
     // Account and boxes are fetched independently: a boxes call that fails
@@ -191,7 +223,7 @@ const makeUnoCloudService = Effect.gen(function* () {
     // say which account it is looking at.
     const accountResult = yield* Effect.result(fetchJson("/auth/me", apiKey));
     if (accountResult._tag === "Failure") {
-      return disconnectedState(accountResult.failure.message);
+      return disconnectedState(humanizeControlPlaneError(accountResult.failure.cause));
     }
     const accountRecord = accountResult.success as Record<string, unknown>;
     const boxesResult = yield* Effect.result(fetchJson("/api/v1/boxes", apiKey));
@@ -209,7 +241,10 @@ const makeUnoCloudService = Effect.gen(function* () {
       },
       boxes: boxesResult._tag === "Success" ? parseUnoBoxList(boxesResult.success) : [],
       fetchedAt: new Date().toISOString(),
-      error: boxesResult._tag === "Failure" ? boxesResult.failure.message : null,
+      error:
+        boxesResult._tag === "Failure"
+          ? boxesFailureMessage(boxesResult.failure.cause, keyKind)
+          : null,
     } satisfies UnoCloudState;
   });
 

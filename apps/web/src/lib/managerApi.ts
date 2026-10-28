@@ -10,6 +10,9 @@
  * fails rather than falling back.
  */
 import type {
+  AssistantTeamUpdateInput,
+  ManagerAssistantMailView,
+  ManagerAssistantTeam,
   AssistantAppAccess,
   AssistantAppLevel,
   AssistantInstructionsStatus,
@@ -17,9 +20,14 @@ import type {
   AssistantDraftResult,
   AssistantChatsResult,
   AssistantEditableFileName,
+  AssistantPersona,
+  AssistantPreset,
+  AssistantPresetAccess,
   EnvironmentId,
   ManagerActionProposal,
   ManagerAssistantSummary,
+  ManagerStartedByList,
+  ManagerAssistantsList,
   ManagerCapabilityTokenDescriptor,
   ManagerConnectorBindingKind,
   ManagerConnectorBindingTarget,
@@ -37,7 +45,11 @@ import type {
 } from "@t3tools/contracts";
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 
-import { environmentFetchJson } from "~/environments/http/target";
+import {
+  environmentFetchJson,
+  environmentFetchResponse,
+  isEnvironmentHttpError,
+} from "~/environments/http/target";
 
 export {
   EnvironmentHttpError as ManagerApiError,
@@ -111,9 +123,8 @@ export function revokeManagerToken(
   });
 }
 
-export function listAssistants(input: EnvironmentScoped): Promise<{
-  assistants: ReadonlyArray<ManagerAssistantSummary>;
-}> {
+/** Its assistants, and whether it can hold one to selected projects (`assistantSandbox`). */
+export function listAssistants(input: EnvironmentScoped): Promise<ManagerAssistantsList> {
   return environmentFetchJson({
     environmentId: input.environmentId,
     pathname: "/api/manager/assistants",
@@ -126,6 +137,8 @@ export function createAssistant(
     readonly name: string;
     readonly emoji?: string;
     readonly template?: string | null;
+    /** Its preset from the first token on (daemons from 0.0.153; older ones: Full). */
+    readonly access?: AssistantPresetAccess;
   },
 ): Promise<{ projectId: ProjectId }> {
   const { environmentId, ...body } = input;
@@ -207,11 +220,114 @@ export function putAssistantApps(
     readonly projectId: string;
     readonly permissions: Readonly<Record<string, AssistantAppLevel>>;
   },
-): Promise<AssistantAppAccess> {
+): Promise<
+  AssistantAppAccess & {
+    readonly losses?: ReadonlyArray<{
+      readonly projectId: string;
+      readonly lost: ReadonlyArray<string>;
+    }>;
+  }
+> {
   const { environmentId, ...body } = input;
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/apps",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * The person edits who an assistant is on the team: name, face, role,
+ * character, where it talks, "setup done" (Later) or "set up again".
+ */
+export function updateAssistantTeam(
+  input: EnvironmentScoped &
+    Omit<AssistantTeamUpdateInput, "projectId"> & {
+      readonly projectId: string;
+    },
+): Promise<{ readonly team: ManagerAssistantTeam }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/team",
+    method: "POST",
+    body,
+  });
+}
+
+/** Its own email for its page: address, rules, today's count, newest letters. */
+export function getAssistantMail(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<ManagerAssistantMailView> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/mail",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+/** Its picture as a `data:` URL (owner session), or null when it has none. */
+export async function fetchAssistantAvatar(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<string | null> {
+  try {
+    const response = await environmentFetchResponse({
+      environmentId: input.environmentId,
+      pathname: "/api/manager/assistant/avatar",
+      searchParams: { projectId: input.projectId },
+    });
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result)));
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsDataURL(blob);
+    });
+  } catch (cause) {
+    if (isEnvironmentHttpError(cause) && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/** Sets its picture (base64 PNG / JPG / WebP), or back to its emoji with null. */
+export function setAssistantAvatar(
+  input: EnvironmentScoped & { readonly projectId: string; readonly image: string | null },
+): Promise<{ readonly avatar: string | null }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/avatar",
+    method: "POST",
+    body,
+  });
+}
+
+/** A persona portrait drawn by Uno AI (not saved): a `data:` URL. */
+export function generateAssistantAvatar(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly persona: AssistantPersona;
+    readonly seed: number;
+  },
+): Promise<{ readonly image: string }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/avatar/generate",
+    method: "POST",
+    body,
+  });
+}
+
+/** Revoke an assistant with everything it set up, or bring it back. */
+export function revokeAssistant(
+  input: EnvironmentScoped & { readonly projectId: string; readonly revoked: boolean },
+): Promise<{ readonly affected: ReadonlyArray<string> }> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/revoke",
     method: "POST",
     body,
   });
@@ -330,6 +446,30 @@ export function updateAssistantAccess(
   return environmentFetchJson({
     environmentId,
     pathname: "/api/manager/assistant/access",
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * What an assistant may do — Full / Helper / Observer and its projects. The
+ * daemon rewrites its token and enforces it from its next step.
+ */
+export function setAssistantPreset(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly preset: AssistantPreset;
+    readonly projects: "all" | ReadonlyArray<string>;
+  },
+): Promise<{
+  token: ManagerCapabilityTokenDescriptor | null;
+  /** Assistants it set up that were cut to match (daemons with the team). */
+  losses?: ReadonlyArray<{ readonly projectId: string; readonly lost: ReadonlyArray<string> }>;
+}> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/preset",
     method: "POST",
     body,
   });
@@ -603,5 +743,17 @@ export function setSlackChannels(
     pathname: "/api/manager/assistant/slack/channels",
     method: "POST",
     body,
+  });
+}
+
+/**
+ * Chats of that computer an assistant started — here or from another computer
+ * (assistants D, 28.10). An older daemon answers 404: callers fall back to
+ * what the store can tell (`spawnedByThreadId` chains into an assistant).
+ */
+export function listStartedBy(input: EnvironmentScoped): Promise<ManagerStartedByList> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/started-by",
   });
 }

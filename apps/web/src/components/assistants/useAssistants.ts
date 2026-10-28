@@ -11,8 +11,13 @@ import { useShallow } from "zustand/react/shallow";
 import { accountTransport } from "../../account/unoAccount";
 import { ensureAssistantChatWhenReady } from "../../assistant/assistantChat.logic";
 import { isPrimaryEnvironmentId } from "../../environments/http/target";
+import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
+import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
-import { updateEnvironmentSettings } from "../../environments/settings/serverSettings";
+import {
+  updateEnvironmentSettings,
+  useEnvironmentSettings,
+} from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import {
   createAssistantSchedule,
@@ -66,6 +71,7 @@ export type AssistantsAvailability = "loading" | "on" | "not-yet" | "no-account"
  */
 export function useAssistantsAvailability(): AssistantsAvailability {
   const signedIn = canCreateAssistantComputers();
+  const primaryId = usePrimaryEnvironmentId();
   const feature = useQuery({
     queryKey: ["uno-assistants", "enabled"],
     queryFn: fetchAssistantsEnabled,
@@ -73,7 +79,20 @@ export function useAssistantsAvailability(): AssistantsAvailability {
     staleTime: 60_000,
     retry: false,
   });
-  if (!signedIn) return "no-account";
+  // Opened at the computer's own address: the account isn't reachable from
+  // the page, so ask the computer (its daemon asks the account by its key).
+  const byComputer = useQuery({
+    queryKey: ["uno-assistants", "enabled-by-computer", primaryId],
+    queryFn: async () =>
+      (await listAssistants({ environmentId: primaryId! })).assistantsEnabled === true,
+    enabled: !signedIn && primaryId !== null,
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (!signedIn) {
+    if (byComputer.data === true) return "on";
+    return byComputer.isLoading ? "loading" : "no-account";
+  }
   if (feature.isLoading) return "loading";
   return feature.data === true ? "on" : "not-yet";
 }
@@ -172,6 +191,23 @@ export function useAssistantList(
 export function useBoxIdOfEnvironment(environmentId: EnvironmentId | null): number | null {
   const rows = useMachineRows();
   return rows.find((row) => row.environmentId === environmentId)?.box?.id ?? null;
+}
+
+/**
+ * The box id a computer's daemon says it runs on (its descriptor's
+ * `unoBoxId`, else `uno.boxId` in its settings, written by the console) —
+ * known even where the account's list isn't (its direct address). Null on a
+ * laptop.
+ */
+export function useOwnBoxId(environmentId: EnvironmentId | string | null): number | null {
+  const primary = usePrimaryEnvironmentDescriptor();
+  const saved = useSavedEnvironmentRuntimeStore((state) =>
+    environmentId ? (state.byId[environmentId as EnvironmentId]?.descriptor ?? null) : null,
+  );
+  const settings = useEnvironmentSettings((environmentId as EnvironmentId | null) ?? null);
+  if (!environmentId) return null;
+  const descriptor = primary?.environmentId === environmentId ? primary : saved;
+  return descriptor?.unoBoxId ?? settings?.uno?.boxId ?? null;
 }
 
 function readSetup(environmentId: EnvironmentId) {
@@ -288,12 +324,13 @@ export function makeLocalCreateDeps(
   onStage: (stage: LocalCreateStage) => void,
 ): LocalCreateDeps {
   return {
-    createAssistant: async ({ name, emoji, template }) => {
+    createAssistant: async ({ name, emoji, template, access }) => {
       const { projectId } = await createAssistantOnComputer({
         environmentId,
         name,
         emoji,
         template,
+        ...(access ? { access } : {}),
       });
       const summary = await getAssistant({ environmentId, projectId }).catch(() => null);
       return { projectId, workspaceRoot: summary?.workspaceRoot ?? null };

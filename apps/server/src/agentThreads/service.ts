@@ -34,11 +34,29 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat, isAssistantConversation } from "@t3tools/shared/assistantChat";
+import {
+  ASSISTANT_PRESET_COPY,
+  allowlistReaches,
+  assistantPresetAllows,
+  capRuntimeToPreset,
+} from "@t3tools/shared/assistantPreset";
 import { Data, Effect, Option } from "effect";
 import * as crypto from "node:crypto";
 
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
+import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
+import type {
+  RemoteChatStarted,
+  RemoteChatStartInput,
+  RemoteTarget,
+} from "../remoteComputers/RemoteComputers.ts";
+import type { RemoteComputerError } from "../remoteComputers/remoteDaemonClient.ts";
+import {
+  portableFolder,
+  remoteChatPermission,
+  remoteChatStartedNote,
+} from "../remoteComputers/remoteChatPolicy.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import {
@@ -77,6 +95,25 @@ import {
 
 export type AgentThreadsScope = "own-project" | "any-project";
 
+export interface AgentThreadsRemoteDeps {
+  readonly resolveTarget: (computerId: unknown) => Effect.Effect<RemoteTarget, RemoteComputerError>;
+  readonly startChat: (
+    input: RemoteChatStartInput,
+  ) => Effect.Effect<RemoteChatStarted, RemoteComputerError>;
+  /** The assistant's name as the person sees it. */
+  readonly assistantName: (projectId: string) => Effect.Effect<string>;
+  /** Report the chat's outcome back to the assistant's conversation (assistantPush). */
+  readonly watch: (input: {
+    readonly threadId: string;
+    readonly assistantProjectId: string;
+    readonly conversationThreadId: string;
+    readonly boxId: number;
+    readonly computerName: string;
+  }) => Effect.Effect<void>;
+  /** This computer's home, to send a local project's folder portably. */
+  readonly home: string;
+}
+
 export interface AgentThreadsReply {
   readonly status: number;
   readonly body: unknown;
@@ -95,19 +132,28 @@ export interface AgentThreadsDeps {
   >;
   readonly getAgentThreadsScope: Effect.Effect<AgentThreadsScope>;
   /**
-   * What the assistant ("Uno") may see and manage (Settings → Assistant,
-   * 0.0.85): "all" projects or only these. Applies to callers that are a
-   * conversation with the assistant instead of `getAgentThreadsScope`; the
-   * assistant's own workspace is always reachable. Absent: only that
-   * workspace (no token/allowlist never widens access).
+   * The assistant the calling chat belongs to — its workspace, a chat it
+   * started, or a chat one of those started — with its preset and projects
+   * (`assistants/assistantAccess.ts`); null for the person's own chats.
+   * An assistant's conversations reach its projects instead of the global
+   * `getAgentThreadsScope`; chats it started keep that setting and are
+   * narrowed to its projects. Absent: an assistant conversation reaches only
+   * its own workspace (no token never widens access).
    */
-  readonly getAssistantProjectAllowlist?: Effect.Effect<"all" | ReadonlyArray<string>>;
+  readonly getCallerAssistant?: (
+    caller: OrchestrationThreadShell,
+  ) => Effect.Effect<AssistantAccessView | null>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   /**
    * This computer's box id (null on a laptop): the only `computerId` a new
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
    */
   readonly getOwnBoxId?: Effect.Effect<number | null>;
+  /**
+   * Chats on another computer of the account (`remoteComputers/`). Absent:
+   * only this computer (the old `checkTargetComputer` rule).
+   */
+  readonly remote?: AgentThreadsRemoteDeps;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -124,6 +170,9 @@ const ok = (body: Record<string, unknown>, status = 200): AgentThreadsReply => (
   status,
   body: { ok: true, ...body },
 });
+
+const expandHome = (raw: string, home: string) =>
+  raw === "~" ? home : raw.startsWith("~/") ? `${home}${raw.slice(1)}` : raw;
 
 const commandId = (tag: string) => CommandId.make(`agent:${tag}:${crypto.randomUUID()}`);
 
@@ -264,24 +313,86 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   };
 
   /**
-   * Which projects the caller may reach besides its own: the person's
-   * agent-threads setting for a regular chat; for a conversation with the
-   * assistant, the assistant's own allowlist (Settings → Assistant → "Can
-   * see and manage"), enforced here for the uno-work chat tools as the
-   * manager enforces it for uno-manager's.
+   * Which projects the caller may reach, and on whose behalf it acts:
+   *
+   * - the person's own chat: its project, others with the person's
+   *   agent-threads setting;
+   * - an assistant's conversation (its workspace, or Uno's pinned chat):
+   *   that assistant's projects (its preset page / Settings → Assistant →
+   *   "Can see and manage"), as uno-manager enforces them;
+   * - a chat an assistant started: the person's setting, never beyond that
+   *   assistant's projects.
    */
-  const projectAccess = (caller: OrchestrationThreadShell) =>
+  // Handlers live for one request: whose chat the caller is is looked up
+  // once, not on every long-poll step.
+  const assistantByCaller = new Map<string, AssistantAccessView | null>();
+  const callerAssistant = (caller: OrchestrationThreadShell) =>
     Effect.gen(function* () {
-      if (isAssistantConversation(caller)) {
-        const allowlist = deps.getAssistantProjectAllowlist
-          ? yield* deps.getAssistantProjectAllowlist
-          : ([] as ReadonlyArray<string>);
-        return (projectId: string) =>
-          projectId === caller.projectId || allowlist === "all" || allowlist.includes(projectId);
+      const cached = assistantByCaller.get(caller.id);
+      if (cached !== undefined) return cached;
+      const found = deps.getCallerAssistant ? yield* deps.getCallerAssistant(caller) : null;
+      assistantByCaller.set(caller.id, found);
+      return found;
+    });
+
+  const callerAccess = (caller: OrchestrationThreadShell) =>
+    Effect.gen(function* () {
+      const assistant = yield* callerAssistant(caller);
+      const conversation =
+        isAssistantConversation(caller) ||
+        (assistant !== null && caller.projectId === assistant.projectId);
+      if (conversation) {
+        return {
+          assistant,
+          // Lists every project it may reach (scope "all").
+          wide: true,
+          allowed: (projectId: string) =>
+            projectId === caller.projectId ||
+            (assistant !== null &&
+              allowlistReaches(assistant.allowlist, projectId, assistant.projectId)),
+        };
       }
       const scope = yield* deps.getAgentThreadsScope;
-      return (projectId: string) => projectId === caller.projectId || scope === "any-project";
+      return {
+        assistant,
+        wide: scope === "any-project",
+        allowed: (projectId: string) =>
+          (projectId === caller.projectId || scope === "any-project") &&
+          (assistant === null ||
+            allowlistReaches(assistant.allowlist, projectId, assistant.projectId)),
+      };
     });
+
+  const projectAccess = (caller: OrchestrationThreadShell) =>
+    callerAccess(caller).pipe(Effect.map((access) => access.allowed));
+
+  /**
+   * The preset of the assistant the caller acts for refuses `action` (403),
+   * and the widest mode the chats it starts or steers may run in.
+   */
+  const presetCheck = (
+    assistant: AssistantAccessView | null,
+    action: "start-chat" | "write-chat",
+  ) => {
+    if (assistant === null || assistantPresetAllows(assistant.preset, action)) {
+      return Effect.void;
+    }
+    const copy = ASSISTANT_PRESET_COPY[assistant.preset];
+    return fail(
+      403,
+      "assistant_preset_denied",
+      `Your access is "${copy.name}": ${copy.line} Tell the person what you would do; they can change your access on your page in Uno Work. Don't retry or work around it.`,
+    );
+  };
+
+  /** The caller's own mode, narrowed to its assistant's preset (Helper: approval-required). */
+  const effectiveRuntime = (
+    caller: OrchestrationThreadShell,
+    assistant: AssistantAccessView | null,
+  ) =>
+    assistant === null
+      ? caller.runtimeMode
+      : capRuntimeToPreset(caller.runtimeMode, assistant.preset);
 
   /** A child of the caller, or 404 — foreign threads are indistinguishable from absent ones. */
   const loadChild = (caller: OrchestrationThreadShell, rawThreadId: string | undefined) =>
@@ -378,14 +489,100 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
 
   const requireProjectAllowed = (caller: OrchestrationThreadShell, projectId: string) =>
     Effect.gen(function* () {
-      if ((yield* projectAccess(caller))(projectId)) return;
+      const access = yield* callerAccess(caller);
+      if (access.allowed(projectId)) return;
       return yield* fail(
         403,
         "project_not_allowed",
-        isAssistantConversation(caller)
-          ? "This project is outside what the person lets Uno see and manage (Settings → Assistant)."
+        isAssistantConversation(caller) || access.assistant !== null
+          ? "This project is outside the projects the person lets this assistant work in (its page in Uno Work, or Settings → Assistant for Uno)."
           : "Создавать треды можно только в проекте этого чата. Другие проекты разрешает пользователь в Settings.",
       );
+    });
+
+  /**
+   * The chat goes to another computer of the account: same preset check,
+   * the assistant's "selected projects" boundary stays here (refused), the
+   * mode never wider than the caller's own. A conversation of an assistant
+   * hears the outcome by itself (assistantPush remote watch).
+   */
+  const startRemote = (
+    caller: OrchestrationThreadShell,
+    remote: AgentThreadsRemoteDeps,
+    target: { readonly boxId: number; readonly name: string },
+    input: {
+      readonly text: string;
+      readonly title: string | undefined;
+      readonly provider: string | undefined;
+      readonly model: string | undefined;
+      readonly projectId: string | undefined;
+      readonly cwd: string | undefined;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const { assistant } = yield* callerAccess(caller);
+      yield* presetCheck(assistant, "start-chat");
+      const assistantName =
+        assistant === null ? null : yield* remote.assistantName(assistant.projectId);
+      const permission = remoteChatPermission({
+        allowlist: assistant === null ? null : assistant.allowlist,
+        assistantName,
+        computerName: target.name,
+      });
+      if (!permission.ok) return yield* fail(403, permission.code, permission.message);
+      // A project of THIS computer named by id goes as its folder: synced
+      // projects keep the same folder under the home on every computer.
+      let cwd = input.cwd;
+      let projectId = input.projectId;
+      if (projectId !== undefined) {
+        const local = yield* deps.projections.getProjectShellById(ProjectId.make(projectId));
+        if (Option.isSome(local)) {
+          cwd = portableFolder(local.value.workspaceRoot, remote.home);
+          projectId = undefined;
+        }
+      }
+      const started = yield* remote
+        .startChat({
+          target,
+          text: input.text,
+          title: input.title,
+          cwd,
+          projectId,
+          provider: input.provider,
+          model: input.model,
+          runtimeMode: effectiveRuntime(caller, assistant),
+          startedBy: {
+            assistantName: assistantName ?? `Chat “${caller.title}”`,
+            assistantProjectId: assistant?.projectId ?? null,
+            fromThreadId: caller.id,
+            preset: assistant?.preset ?? null,
+          },
+        })
+        .pipe(
+          Effect.catch((error) =>
+            fail(error.code === "not_found" ? 404 : 409, `computer_${error.code}`, error.message),
+          ),
+        );
+      const conversation =
+        assistant !== null &&
+        (isAssistantConversation(caller) || caller.projectId === assistant.projectId);
+      if (conversation) {
+        yield* remote.watch({
+          threadId: started.threadId,
+          assistantProjectId: assistant.projectId,
+          conversationThreadId: caller.id,
+          boxId: target.boxId,
+          computerName: target.name,
+        });
+      }
+      return ok({
+        threadId: started.threadId,
+        projectId: started.projectId,
+        title: started.title,
+        computer: { id: target.boxId, name: target.name },
+        controller: "agent",
+        note: remoteChatStartedNote(target.name, conversation),
+      });
     });
 
   const createThread = (authorization: BridgeAuthorization | null, rawBody: unknown) =>
@@ -401,27 +598,59 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         }
         const text = checkMessageText(body.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
-        const target = checkTargetComputer(
-          body.computerId,
-          deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
-        );
-        if (!target.ok) return yield* fail(403, target.code, target.message);
         const title = optionalString(body, "title", AGENT_THREAD_MAX_TITLE_CHARS);
         const provider = optionalString(body, "provider", 200);
         const model = optionalString(body, "model", 500);
         const projectId = optionalString(body, "projectId", 500);
-        const cwd = optionalString(body, "cwd", 4096);
-        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !cwd.ok) {
+        const rawCwd = optionalString(body, "cwd", 4096);
+        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok) {
           return yield* fail(
             400,
             "invalid_payload",
             `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd" — строки.`,
           );
         }
+        if (deps.remote === undefined) {
+          const target = checkTargetComputer(
+            body.computerId,
+            deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
+          );
+          if (!target.ok) return yield* fail(403, target.code, target.message);
+        } else {
+          const remote = deps.remote;
+          const target = yield* remote
+            .resolveTarget(body.computerId)
+            .pipe(
+              Effect.catch((error) =>
+                fail(
+                  error.code === "not_found" ? 404 : 409,
+                  `computer_${error.code}`,
+                  error.message,
+                ),
+              ),
+            );
+          if (target.kind === "box") {
+            return yield* startRemote(caller, remote, target, {
+              text: text.value,
+              title: title.value,
+              provider: provider.value,
+              model: model.value,
+              projectId: projectId.value,
+              cwd: rawCwd.value,
+            });
+          }
+        }
+        // A folder sent for another computer comes unexpanded ("~/site").
+        const cwd =
+          rawCwd.value !== undefined && deps.remote !== undefined
+            ? expandHome(rawCwd.value, deps.remote.home)
+            : rawCwd.value;
 
+        const { assistant } = yield* callerAccess(caller);
+        yield* presetCheck(assistant, "start-chat");
         const project = yield* resolveTargetProject(caller, {
           projectId: projectId.value,
-          cwd: cwd.value,
+          cwd,
         });
         const sameProject = project.id === caller.projectId;
 
@@ -449,10 +678,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const inherited = sameProject
           ? { runtimeMode: caller.runtimeMode, interactionMode: caller.interactionMode }
           : yield* inheritProjectThreadModes(deps.projections, project.id);
-        // Never spawn a thread with more permissions than the caller has.
+        // Never spawn a thread with more permissions than the caller has
+        // (nor than its assistant's preset allows).
         const modes = {
           ...inherited,
-          runtimeMode: capRuntimeMode(inherited.runtimeMode, caller.runtimeMode),
+          runtimeMode: capRuntimeMode(inherited.runtimeMode, effectiveRuntime(caller, assistant)),
         };
         const threadTitle = title.value ?? defaultTitleFromText(text.value);
         const threadId = ThreadId.make(crypto.randomUUID());
@@ -517,14 +747,10 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             '"scope" — "children" (по умолчанию), "project" или "all".',
           );
         }
-        const allowed = yield* projectAccess(caller);
+        const { allowed, wide } = yield* callerAccess(caller);
         // The assistant lists whatever it may see; any other chat needs the
         // person's "any project" setting for "all".
-        if (
-          scope === "all" &&
-          !isAssistantConversation(caller) &&
-          (yield* deps.getAgentThreadsScope) !== "any-project"
-        ) {
+        if (scope === "all" && !wide) {
           return yield* fail(
             403,
             "project_not_allowed",
@@ -652,6 +878,9 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("send", authorization, (caller) =>
       Effect.gen(function* () {
+        const { assistant } = yield* callerAccess(caller);
+        yield* presetCheck(assistant, "write-chat");
+        const callerMode = effectiveRuntime(caller, assistant);
         let target = yield* loadReachable(caller, input.threadId, { assistantChat: true });
         if (target.id === caller.id) {
           return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");
@@ -674,11 +903,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         if (block !== null) return yield* fail(block.status, block.error, block.message);
         // The decider runs the turn in the target's own mode, so a caller may
         // not drive a thread that is allowed more than the caller itself.
-        if (isRuntimeModeWider(target.runtimeMode, caller.runtimeMode)) {
+        if (isRuntimeModeWider(target.runtimeMode, callerMode)) {
           return yield* fail(
             403,
             "runtime_mode_escalation",
-            `Этот тред работает в режиме "${target.runtimeMode}", шире твоего ("${caller.runtimeMode}"). Писать в него может только человек.`,
+            `Этот тред работает в режиме "${target.runtimeMode}", шире твоего ("${callerMode}"). Писать в него может только человек.`,
           );
         }
 
@@ -693,7 +922,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
               text: text.value,
               attachments: [],
             },
-            runtimeMode: capRuntimeMode(target.runtimeMode, caller.runtimeMode),
+            runtimeMode: capRuntimeMode(target.runtimeMode, callerMode),
             interactionMode: target.interactionMode,
             createdAt: new Date(nowMs()).toISOString(),
           },

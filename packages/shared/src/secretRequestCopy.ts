@@ -14,6 +14,19 @@ import { turnAutoRetryNoteLine } from "./turnErrorRetry.ts";
 /** Marks a message the computer (not the person) put into a chat for its agent. */
 export const UNO_WORK_NOTE_PREFIX = "(Uno Work) ";
 
+/**
+ * Starts the work update the daemon sends the assistant when a chat it handed
+ * work to settles (assistant push, 21.10). The assistant reads it; the person
+ * sees one quiet line, not their own bubble.
+ */
+export const WORK_UPDATE_NOTICE_PREFIX = "[Uno Work — work update";
+
+/** Starts the prompt of a scheduled assistant task (assistant_turn, no person in the chat). */
+export const SCHEDULED_TASK_PREFIX = "[Scheduled task ";
+
+/** Starts the message that opens an assistant's setup chat (it then asks the person). */
+export const ASSISTANT_SETUP_PREFIX = "[Uno Work — setup";
+
 const KNOWN_WORDS: Readonly<Record<string, string>> = {
   API: "API",
   AI: "AI",
@@ -135,13 +148,55 @@ export type UnoWorkNote =
   | { readonly kind: "auto-retry"; readonly text: string }
   | { readonly kind: "secret-saved"; readonly name: string; readonly text: string }
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
+  | { readonly kind: "work-update"; readonly text: string }
+  | { readonly kind: "scheduled-task"; readonly text: string }
+  | { readonly kind: "assistant-setup"; readonly text: string }
   | { readonly kind: "other"; readonly text: string };
+
+const NOTE_LINE_MAX = 200;
+
+function clip(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > NOTE_LINE_MAX ? `${flat.slice(0, NOTE_LINE_MAX - 1)}…` : flat;
+}
+
+/** "1. «Fix login» (threadId t-1) — finished, after 4 min, 3 files changed." → "«Fix login» finished, after 4 min, 3 files changed" */
+const WORK_UPDATE_ITEM = /^\d+\. («[^\n]*?») \(threadId [^)\n]*\) — ([^\n]*?)\.?$/gm;
+
+function parseWorkUpdate(text: string): UnoWorkNote {
+  const items = Array.from(text.matchAll(WORK_UPDATE_ITEM), (match) => `${match[1]} ${match[2]}`);
+  return {
+    kind: "work-update",
+    text:
+      items.length === 0
+        ? "Uno Work told the assistant a chat finished."
+        : `Uno Work told the assistant: ${clip(items.join("; "))}.`,
+  };
+}
+
+function parseScheduledTask(text: string): UnoWorkNote {
+  const name = /^\[Scheduled task "([^"\n]*)"/.exec(text)?.[1];
+  const header = text.indexOf("]\n");
+  const prompt = header === -1 ? "" : clip(text.slice(header + 2));
+  const label = name ? `Scheduled task “${name}”` : "Scheduled task";
+  return { kind: "scheduled-task", text: prompt ? `${label}: ${prompt}` : `${label} ran.` };
+}
 
 /**
  * A message the computer wrote for the agent, in the person's words; null for
  * anything the person (or another agent) wrote.
  */
 export function parseUnoWorkNote(text: string): UnoWorkNote | null {
+  if (text.startsWith(WORK_UPDATE_NOTICE_PREFIX)) return parseWorkUpdate(text);
+  if (text.startsWith(SCHEDULED_TASK_PREFIX)) return parseScheduledTask(text);
+  if (text.startsWith(ASSISTANT_SETUP_PREFIX)) {
+    return {
+      kind: "assistant-setup",
+      text: text.startsWith(`${ASSISTANT_SETUP_PREFIX} (continue)`)
+        ? "Setup goes on where it stopped."
+        : "Setup started: one question at a time, skip any.",
+    };
+  }
   if (!text.startsWith(UNO_WORK_NOTE_PREFIX)) return null;
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const autoRetry = turnAutoRetryNoteLine(body);

@@ -35,6 +35,8 @@ import { readAssistantLlmProvider } from "@t3tools/shared/assistantLlm";
  * in the app.
  */
 export const ASSISTANT_THREAD_RUNTIME_MODE: RuntimeMode = "full-access";
+// ^ The default for "Autonomous". An "Cautious" assistant's chats run
+// narrower: the daemon passes `assistantRuntimeMode` (its preset's ceiling).
 
 export const defaultBindingTarget = (
   connectorProjectId: ProjectId,
@@ -300,6 +302,13 @@ export interface ThreadRoutingInput {
    * in another mode refuses them.
    */
   readonly forcedRuntimeMode?: RuntimeMode | null;
+  /**
+   * The mode the assistant's own chats run in (`assistant` targets): the
+   * ceiling of its preset — full-access for "Autonomous",
+   * auto-accept-edits for "Cautious" (`readAssistantRuntimeMode`). Unset
+   * means {@link ASSISTANT_THREAD_RUNTIME_MODE}.
+   */
+  readonly assistantRuntimeMode?: RuntimeMode | null;
 }
 
 const sameHarnessAndModel = (a: ModelSelection, b: ModelSelection): boolean =>
@@ -316,8 +325,9 @@ export const sameAssistantEngine = (a: ModelSelection, b: ModelSelection): boole
  *   the chat is told about, never a silently created replacement.
  * - `assistant`: today's flow — one thread per chat on the connector's
  *   harness (falling back to the assistant project's default), re-created
- *   when the selection changes or the thread is archived, always in
- *   {@link ASSISTANT_THREAD_RUNTIME_MODE}.
+ *   when the selection changes or the thread is archived, in the mode the
+ *   assistant's preset allows (`assistantRuntimeMode`, default
+ *   {@link ASSISTANT_THREAD_RUNTIME_MODE}).
  * - `project`: one thread per chat in that project on the project's own
  *   default model; the connector's harness choice does not apply. A reused
  *   thread keeps its own mode, a fresh one inherits the project's.
@@ -354,6 +364,7 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
   }
 
   const isAssistant = target.kind === "assistant";
+  const assistantMode = input.assistantRuntimeMode ?? ASSISTANT_THREAD_RUNTIME_MODE;
   const modelSelection = isAssistant
     ? (input.assistantModelSelection ??
       input.connectorModelSelection ??
@@ -371,7 +382,7 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
     return {
       kind: "reuse",
       threadId: mapped.id,
-      runtimeMode: forced ?? (isAssistant ? ASSISTANT_THREAD_RUNTIME_MODE : mapped.runtimeMode),
+      runtimeMode: forced ?? (isAssistant ? assistantMode : mapped.runtimeMode),
       interactionMode: isAssistant ? "default" : mapped.interactionMode,
     };
   }
@@ -384,7 +395,7 @@ export const decideThreadRouting = (input: ThreadRoutingInput): ThreadRouting =>
     };
   }
   const modes: RoutingModes = isAssistant
-    ? { runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE, interactionMode: "default" }
+    ? { runtimeMode: assistantMode, interactionMode: "default" }
     : (input.inheritedModes ?? { runtimeMode: "approval-required", interactionMode: "default" });
   return {
     kind: "create",

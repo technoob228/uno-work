@@ -24,9 +24,12 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
-  type UnoMcpServer,
 } from "@t3tools/contracts";
-import { codexMcpConfigArgs, sessionMcpServers } from "../../mcp/customMcpServers.ts";
+import {
+  codexMcpConfigArgs,
+  sessionMcpServers,
+  type CustomMcpServersGetter,
+} from "../../mcp/customMcpServers.ts";
 import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -84,7 +87,7 @@ export interface CodexAdapterLiveOptions {
     readonly cwd?: string;
   }) => Record<string, string>;
   /** Remote MCP servers the owner added (settings.mcpServers), read per session. */
-  readonly customMcpServers?: () => ReadonlyArray<UnoMcpServer>;
+  readonly customMcpServers?: CustomMcpServersGetter;
 }
 
 interface CodexAdapterSessionContext {
@@ -1393,7 +1396,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const mcpArgs = codexMcpConfigArgs(
           sessionMcpServers({
             bridgeEnvironment: sessionEnvironment,
-            custom: options?.customMcpServers?.(),
+            // A sandboxed assistant's chat: no owner's servers, its assistant's yes.
+            custom: options?.customMcpServers?.({
+              threadId: input.threadId,
+              sandboxed: input.harnessSandbox !== undefined,
+            }),
           }),
         );
         const runtimeInput: CodexSessionRuntimeOptions = {
@@ -1409,6 +1416,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : {}),
           ...(mcpArgs.length > 0 ? { extraArgs: mcpArgs } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          ...(input.harnessSandbox ? { sandbox: input.harnessSandbox } : {}),
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
@@ -1699,6 +1707,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      harnessSandbox: true,
     },
     startSession,
     sendTurn,

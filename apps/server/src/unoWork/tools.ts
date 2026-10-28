@@ -16,6 +16,8 @@
 import { randomInt } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+
+import { boundaryDenial } from "./pathBoundary.ts";
 import { promises as fsp } from "node:fs";
 
 import type {
@@ -67,7 +69,8 @@ import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
-import type { ToolApprovalOutcome } from "../browserBridge.ts";
+import type { LateToolApprovalOutcome, ToolApprovalOutcome } from "../browserBridge.ts";
+import { lateApprovalNote, queuedApprovalMessage } from "../personApproval.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
 import {
   buildUnoWorkGuide,
@@ -85,16 +88,20 @@ import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegr
 import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
+import { mailTools, type MailOwner } from "./mailTools.ts";
+import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
+import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 import { workAppLink } from "../workAddress.ts";
 
 export {
+  UNO_WORK_APPROVAL_FROM_INBOX_PATH,
   UNO_WORK_APPROVAL_RESULT_PATH,
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
@@ -106,6 +113,10 @@ export class UnoWorkToolError extends Data.TaggedError("UnoWorkToolError")<{
 }> {}
 
 const toolError = (message: string) => new UnoWorkToolError({ message });
+
+/** What an Observer's chat reads when it reaches for a tool that changes something. */
+export const observerRefusal = (assistant: string) =>
+  `${assistant} only reads and reports (its access): it changes nothing. Tell the person what you would change; they can give ${assistant} more access on its page in Uno Work. Don't retry or work around it.`;
 
 /** Any failure with a message → a tool error the model can read. */
 const asToolError = <A, E extends { readonly message: string }, R>(
@@ -129,6 +140,29 @@ export interface UnoWorkCaller {
   readonly runtimeMode: RuntimeMode;
   /** The chat's working folder, when known. */
   readonly cwd: string | undefined;
+  /**
+   * The chat belongs to an assistant held to selected projects (the sandbox):
+   * the folders it may reach (its projects, its own folder, the chat's cwd)
+   * and its name. These tools run in the daemon, outside the sandbox, so
+   * every path they take is checked against the same boundary here — else
+   * `files_list`, `site_publish`, `file_share_link` or a mail attachment would
+   * reach what the sandbox hides. Absent / null: the person's own chat, or an
+   * assistant that sees everything.
+   */
+  readonly boundary?: { readonly roots: ReadonlyArray<string>; readonly name: string } | null;
+}
+
+export { boundaryDenial, isWithinRoot } from "./pathBoundary.ts";
+
+/** What `project_keys` shows: names and where they are, never values. */
+export interface ProjectKeysView {
+  readonly synced: boolean;
+  readonly secrets: ReadonlyArray<{
+    readonly name: string;
+    readonly inVault: boolean;
+    readonly inFile: boolean;
+  }>;
+  readonly vaultError: string | null;
 }
 
 export interface BridgeReply {
@@ -138,6 +172,31 @@ export interface BridgeReply {
 
 export interface UnoWorkToolDeps {
   readonly caller: UnoWorkCaller;
+  /**
+   * The calling chat's assistant preset refuses tools that change things
+   * (an Observer's chats): the text the model reads, or null. Absent: no
+   * assistant rules.
+   */
+  readonly presetRefusal?: Effect.Effect<string | null>;
+  /**
+   * The calling chat belongs to an assistant in "Cautious" mode: its name
+   * (for the approval card), or null. Outward-acting calls then always wait
+   * for the person's Allow (`asksFirstCategory`). Absent: no assistant rules.
+   */
+  readonly asksFirst?: Effect.Effect<{ readonly name: string } | null>;
+  /**
+   * The keys of the chat's project ("On all my computers": kept in the Uno
+   * vault, written into its `.env` on every computer). `refusal`: the
+   * caller's assistant preset doesn't get project keys (Observer). Absent:
+   * this daemon has no project sync.
+   */
+  readonly projectKeys?: {
+    readonly refusal: Effect.Effect<string | null>;
+    readonly list: (
+      cwd: string,
+    ) => Effect.Effect<ProjectKeysView | null, { readonly message: string }>;
+    readonly load: (cwd: string) => Effect.Effect<ProjectKeysView, { readonly message: string }>;
+  };
   readonly home: string;
   /** `~/.uno/apps` (absolute). */
   readonly manifestDir: string;
@@ -158,7 +217,19 @@ export interface UnoWorkToolDeps {
     readonly detail?: string;
     readonly sensitive: boolean;
     readonly clientAction?: ToolApprovalClientAction;
+    /**
+     * The person answered after the call returned `queued`: run the call
+     * then (and tell the chat). Absent: the call waits for the answer.
+     */
+    readonly later?: (outcome: LateToolApprovalOutcome) => Effect.Effect<void>;
   }) => Effect.Effect<ToolApprovalOutcome>;
+  /** A note from Uno Work into this chat as a new turn (late answers). Absent: none. */
+  readonly tellChat?: (text: string) => Effect.Effect<void>;
+  /**
+   * The caller is an assistant's own conversation (its name): it hands heavy
+   * or outward work to a chat it starts instead of doing it (Misha 28.10).
+   */
+  readonly orchestratorOnly?: Effect.Effect<{ readonly name: string } | null>;
   readonly machineApps: {
     readonly list: Effect.Effect<UnoMachineApps>;
     readonly action: (
@@ -280,6 +351,12 @@ export interface UnoWorkToolDeps {
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
   };
+  /**
+   * The assistant whose chat calls the mail tools, with its own mail rules
+   * (`mailTools.ts`, `@t3tools/shared/assistantMail`); null in the person's
+   * own chats. Absent (tests, older wiring): no assistant rules.
+   */
+  readonly mailOwner?: Effect.Effect<MailOwner | null>;
   /**
    * Uno Spark's gateway with a Spark-only token the daemon gets from the
    * console itself (`sparkClient.ts`): mints, caches, renews on 401. Absent
@@ -442,6 +519,7 @@ export type UnoWorkGroup =
   | "sites"
   | "databases"
   | "account"
+  | "mail"
   | "settings"
   | "docs";
 
@@ -511,10 +589,20 @@ const readDiskUsage = (
 /** `~/x`, `/abs` or a path relative to the chat's folder (then home). */
 export function resolveUserPath(raw: string, deps: Pick<UnoWorkToolDeps, "home" | "caller">) {
   const value = raw.trim();
-  if (value === "~") return deps.home;
-  if (value.startsWith("~/")) return path.join(deps.home, value.slice(2));
-  if (path.isAbsolute(value)) return path.normalize(value);
-  return path.resolve(deps.caller.cwd ?? deps.home, value);
+  const absolute =
+    value === "~"
+      ? deps.home
+      : value.startsWith("~/")
+        ? path.join(deps.home, value.slice(2))
+        : path.isAbsolute(value)
+          ? path.normalize(value)
+          : path.resolve(deps.caller.cwd ?? deps.home, value);
+  // A sandboxed assistant's boundary holds for the daemon-side tools too.
+  // Thrown (not returned): every tool resolves paths inline; the MCP runner
+  // turns a thrown UnoWorkToolError into the text the model reads.
+  const denial = boundaryDenial(absolute, deps.caller.boundary, deps.home);
+  if (denial !== null) throw new UnoWorkToolError({ message: denial });
+  return absolute;
 }
 
 /** Spell a path for a person: `~/projects/notes`. */
@@ -1051,6 +1139,16 @@ const appIdArg = {
   minLength: 1,
   maxLength: 200,
 };
+
+/** `computerId` names some computer other than this one (resolved by the bridge). */
+function namesAnotherComputer(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw === "number") return true;
+  return (
+    typeof raw === "string" &&
+    !["", "this", "self", "local", "here"].includes(raw.trim().toLowerCase())
+  );
+}
 
 export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   // This computer
@@ -2229,7 +2327,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, or with another harness. It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in a folder that is a project; provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). Returns the threadId (and the computer).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2250,7 +2348,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         computerId: {
           type: "string",
           description:
-            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+            'Another computer of the person\'s Uno account to run the chat on: its name or id from account_overview ("stage-work", "box-2531"). Leave it out for this computer. There, cwd is a folder of THAT computer (e.g. ~/projects/site) and projectId one of its projects (or a project here: the same folder is used there). The result comes back to you by itself.',
         },
       },
       required: ["text"],
@@ -2267,7 +2365,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           body: {
             text: str(args, "text"),
             ...(str(args, "title") ? { title: str(args, "title") } : {}),
-            ...(str(args, "cwd") ? { cwd: resolveUserPath(str(args, "cwd")!, deps) } : {}),
+            // A folder of another computer is that computer's: never
+            // resolved (nor bounded) against this one.
+            ...(str(args, "cwd")
+              ? {
+                  cwd: namesAnotherComputer(args["computerId"])
+                    ? str(args, "cwd")
+                    : resolveUserPath(str(args, "cwd")!, deps),
+                }
+              : {}),
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
@@ -2772,6 +2878,55 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   },
 
   {
+    name: "project_keys",
+    group: "person",
+    description:
+      "The keys (API keys, tokens) of this chat's project, by name — never values: which are in its .env here and which travel with the project in the Uno vault (a project On all my computers gets them in its .env on every computer by itself). load: true re-reads the vault's keys into .env now (after the person added one on another computer). Read values from .env; never print them. A missing key: request_secret.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        load: {
+          type: "boolean",
+          description: "true: write the vault's keys into the project's .env now.",
+        },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const keys = deps.projectKeys;
+        if (!keys) return yield* toolError("Project keys aren't available on this computer.");
+        const refusal = yield* keys.refusal;
+        if (refusal !== null) return yield* toolError(refusal);
+        const cwd = deps.caller.cwd;
+        if (!cwd) return yield* toolError("This chat has no project folder.");
+        const view =
+          args.load === true
+            ? yield* keys.load(cwd).pipe(Effect.mapError((error) => toolError(error.message)))
+            : yield* keys.list(cwd).pipe(Effect.mapError((error) => toolError(error.message)));
+        if (view === null) {
+          return {
+            project: null,
+            note: "This chat's folder isn't a project in Uno Work: keys are only in its .env.",
+          };
+        }
+        return {
+          synced: view.synced,
+          keys: view.secrets.map((secret) => ({
+            name: secret.name,
+            inEnvFile: secret.inFile,
+            travelsWithProject: secret.inVault,
+          })),
+          ...(view.vaultError ? { vaultError: view.vaultError } : {}),
+          note: view.synced
+            ? "Keys travel with the project, never in its files. Values are in .env: read them from there, never print them."
+            : "This project isn't On all my computers: its keys stay in this computer's .env.",
+        };
+      }),
+  },
+
+  {
     name: "assistant_connect",
     group: "person",
     description:
@@ -2876,7 +3031,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     // Misha 02.10: a plain static site goes up without an Allow (Unpublish is
     // one click in Apps & sites). Opening an app or a port to the internet,
     // removing a password and sending forms to an outside URL still ask.
+    // An "Cautious" assistant asks (the card's title).
     level: "safe",
+    approvalTitle: (args) =>
+      str(args, "slug") ? `Publish site “${str(args, "slug")}”` : "Publish a site",
+    approvalDetail: (args) => str(args, "path"),
     run: (deps, args) => {
       const password =
         str(args, "password") ?? (bool(args, "protect") === true ? readablePassword() : undefined);
@@ -3410,12 +3569,22 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     fail: toolError,
   }),
 
+  // The agent's own mailbox on uno4.me (mailTools.ts)
+  ...mailTools({
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    displayPath: (absolute, home) => displayPath(absolute, home),
+    fail: toolError,
+  }),
+
+  // A comment on a GitHub pull request as the Uno GitHub app (Automations, 28.10)
+  githubPrCommentTool({ fail: toolError }),
+
   // Account
   {
     name: "account_overview",
     group: "account",
     description:
-      "The person's Uno account: plan and what it allows (biggest computer), the upgrade link, balances, and their computers (status, size, address). Read-only. Needs agent access Read only or Manage.",
+      "The person's Uno account: plan and what it allows (biggest computer), the upgrade link, balances, and their computers (status, size, address; thisComputer marks where you run — the others' name or id is chat_create's computerId). Read-only. Needs agent access Read only or Manage.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
@@ -3455,6 +3624,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           computers: cloud.boxes.map((box) => ({
             id: box.id,
             name: box.name,
+            // chat_create takes another one's name or id as computerId.
+            thisComputer: box.id === settings.uno.boxId,
             status: box.status,
             workComputer: box.workMachine ?? false,
             ramMb: box.ramMb,
@@ -3602,8 +3773,18 @@ export function runUnoWorkTool(
       return yield* toolError(`Invalid arguments for ${tool.name}: ${problem}`);
     }
     const level = toolLevel(tool, args);
+    if (level !== "safe" && deps.presetRefusal) {
+      const refusal = yield* deps.presetRefusal;
+      if (refusal !== null) return yield* toolError(refusal);
+    }
+    if (deps.orchestratorOnly && isWorkerTool(tool.name, args)) {
+      const owner = yield* deps.orchestratorOnly;
+      if (owner !== null) return yield* toolError(orchestratorRefusal(owner.name, tool.name));
+    }
     if (tool.prepare) yield* tool.prepare(deps, args);
-    if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+    const outward = asksFirstCategory(tool.name, args);
+    const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
+    if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
       const appName =
@@ -3614,19 +3795,125 @@ export function runUnoWorkTool(
             )
           : undefined;
       const described = appName ? { ...args, appId: appName } : args;
-      const title = tool.approvalTitle?.(described) ?? tool.name;
-      const detail = tool.approvalDetail?.(described);
+      const title =
+        tool.approvalTitle?.(described) ??
+        (outward !== null ? ASKS_FIRST_CATEGORY_LABEL[outward] : tool.name);
+      const ownDetail = tool.approvalDetail?.(described);
+      // Why it asks although the chat's mode would let it run: say so.
+      const detail =
+        asking !== null
+          ? [ownDetail, `${asking.name} is Cautious, so it asks first.`].filter(Boolean).join(" · ")
+          : ownDetail;
       const clientAction = tool.approvalClientAction?.(args);
-      yield* askPerson(deps, {
+      const outcome = yield* askPerson(deps, {
         tool: tool.name,
         level,
         title,
         detail,
         ...(clientAction ? { clientAction } : {}),
+        later: lateRun(deps, title, tool.run(deps, args)),
       });
+      if (outcome === "queued")
+        return { ok: false, waiting: true, message: queuedApprovalMessage(title) };
     }
     return yield* tool.run(deps, args);
   });
+}
+
+/** Result text for the late note: the tool's answer, clipped. */
+function lateResultText(result: unknown): string {
+  const raw =
+    result instanceof McpContent
+      ? result.content
+          .map((part) =>
+            part["type"] === "text" && typeof part["text"] === "string"
+              ? part["text"]
+              : `[${String(part["type"])}]`,
+          )
+          .join("\n")
+      : typeof result === "string"
+        ? result
+        : JSON.stringify(result);
+  return raw.length > 1_500 ? `${raw.slice(0, 1_500)}…` : raw;
+}
+
+/**
+ * What runs when the person answers after the call returned: the call itself
+ * on Allow, then a note into the chat either way (none without `tellChat`).
+ */
+function lateRun(
+  deps: UnoWorkToolDeps,
+  title: string,
+  run: Effect.Effect<unknown, UnoWorkToolError>,
+): ((outcome: LateToolApprovalOutcome) => Effect.Effect<void>) | undefined {
+  const tell = deps.tellChat;
+  if (tell === undefined) return undefined;
+  return (outcome) =>
+    outcome !== "approved"
+      ? tell(lateApprovalNote(title, outcome, null))
+      : run.pipe(
+          Effect.catchDefect((defect) =>
+            defect instanceof UnoWorkToolError ? Effect.fail(defect) : Effect.die(defect),
+          ),
+          Effect.map((result) => lateApprovalNote(title, "approved", lateResultText(result))),
+          Effect.catch((error) =>
+            Effect.succeed(
+              `${lateApprovalNote(title, "approved", null)} But it failed: ${error.message}`,
+            ),
+          ),
+          Effect.flatMap(tell),
+        );
+}
+
+/**
+ * Tools an assistant's own conversation does not run itself (Misha 28.10:
+ * an assistant answers fast and orchestrates; real work — publishing,
+ * deploying, creating databases or computers, driving a site in the browser,
+ * changing apps — goes to a chat it starts with chat_create, which has them).
+ */
+const WORKER_TOOLS: ReadonlySet<string> = new Set([
+  "site_publish",
+  "site_unpublish",
+  "site_set_password",
+  "site_forms_set",
+  "app_deploy",
+  "app_register",
+  "app_remove",
+  "app_show_on_internet",
+  "app_hide_from_internet",
+  "app_add_widget",
+  "spark_deploy",
+  "spark_delete",
+  "db_create",
+  "computer_create",
+  "computer_cleanup",
+  "drive_save",
+]);
+
+/** Reading a page is fine for a quick look; acting on it is a chat's job. */
+const BROWSER_READ_COMMANDS: ReadonlySet<string> = new Set([
+  "state",
+  "screenshot",
+  "openUrl",
+  "navigate",
+  "reload",
+  "back",
+  "forward",
+]);
+
+export function isWorkerTool(name: string, args: Record<string, unknown>): boolean {
+  if (name === "browser_command") {
+    return (
+      args["login"] !== undefined ||
+      typeof args["command"] !== "string" ||
+      !BROWSER_READ_COMMANDS.has(args["command"])
+    );
+  }
+  return WORKER_TOOLS.has(name);
+}
+
+export function orchestratorRefusal(name: string, tool: string): string {
+  return `${tool} is work, and ${name}'s own conversation only orchestrates: start a chat for it with chat_create (on the right computer — computerId; it has every tool, and in Accounts work it signs in with browser_command {"login": …} there), tell the person in one short line, and end your turn. The result comes back to you by itself.`;
 }
 
 /** The approval card; a refusal fails with the message the model reads. */
@@ -3638,8 +3925,9 @@ function askPerson(
     readonly title: string;
     readonly detail: string | undefined;
     readonly clientAction?: ToolApprovalClientAction;
+    readonly later?: ((outcome: LateToolApprovalOutcome) => Effect.Effect<void>) | undefined;
   },
-): Effect.Effect<void, UnoWorkToolError> {
+): Effect.Effect<"approved" | "queued", UnoWorkToolError> {
   return Effect.gen(function* () {
     const outcome = yield* deps.requestApproval({
       tool: input.tool,
@@ -3647,10 +3935,10 @@ function askPerson(
       ...(input.detail ? { detail: input.detail } : {}),
       sensitive: input.level === "sensitive",
       ...(input.clientAction ? { clientAction: input.clientAction } : {}),
+      ...(input.later ? { later: input.later } : {}),
     });
-    if (outcome !== "approved") {
-      return yield* toolError(refusalMessage(outcome, input.title));
-    }
+    if (outcome === "approved" || outcome === "queued") return outcome;
+    return yield* toolError(refusalMessage(outcome, input.title));
   });
 }
 
@@ -3715,13 +4003,14 @@ export function connectorMcpTool(
           rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {};
-        if (!deps.connectors) {
+        const connectors = deps.connectors;
+        if (!connectors) {
           return yield* toolError(
             `${tool.providerName} isn't reachable from this computer right now.`,
           );
         }
-        const access = deps.connectors.access
-          ? yield* deps.connectors.access({
+        const access = connectors.access
+          ? yield* connectors.access({
               provider: tool.provider,
               changesThings: level !== "safe",
             })
@@ -3734,22 +4023,38 @@ export function connectorMcpTool(
               : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
-        if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
-          yield* askPerson(deps, {
+        // An "Cautious" assistant asks before any change in a connected app.
+        const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
+        // The console validates the arguments against its own schema.
+        const call = Effect.gen(function* () {
+          const result = yield* connectors.call({
+            provider: tool.provider,
+            tool: tool.name,
+            arguments: args,
+          });
+          if (result.isError) return yield* toolError(connectorErrorText(result));
+          return new McpContent(result.content);
+        });
+        if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
+          const described = describeConnectorArgs(args);
+          const title = `${tool.providerName}: ${tool.name}`;
+          const outcome = yield* askPerson(deps, {
             tool: tool.name,
             level,
-            title: `${tool.providerName}: ${tool.name}`,
-            detail: describeConnectorArgs(args),
+            title,
+            detail:
+              asking !== null
+                ? [described, `${asking.name} is Cautious, so it asks first.`]
+                    .filter(Boolean)
+                    .join(" · ")
+                : described,
+            later: lateRun(deps, title, call),
           });
+          if (outcome === "queued") {
+            return { ok: false, waiting: true, message: queuedApprovalMessage(title) };
+          }
         }
-        // The console validates the arguments against its own schema.
-        const result = yield* deps.connectors.call({
-          provider: tool.provider,
-          tool: tool.name,
-          arguments: args,
-        });
-        if (result.isError) return yield* toolError(connectorErrorText(result));
-        return new McpContent(result.content);
+        return yield* call;
       }),
   };
 }
@@ -3770,9 +4075,20 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
         readOnlyHint: level === "safe",
         destructiveHint: level === "sensitive",
         openWorldHint:
-          tool.group === "sites" || tool.group === "databases" || tool.group === "account",
+          tool.group === "sites" ||
+          tool.group === "databases" ||
+          tool.group === "account" ||
+          tool.group === "mail",
       },
-      run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
+      run: (deps: UnoWorkToolDeps, args: unknown) =>
+        runUnoWorkTool(tool, deps, args).pipe(
+          // A path outside a sandboxed assistant's boundary is thrown where
+          // the path is resolved (`resolveUserPath`): the model reads it as
+          // the tool's error, like any other refusal.
+          Effect.catchDefect((defect) =>
+            defect instanceof UnoWorkToolError ? Effect.fail(defect) : Effect.die(defect),
+          ),
+        ),
     };
   }),
   errorText: (error) => error.message,

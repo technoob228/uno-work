@@ -30,5 +30,6 @@ squashfs-root/
 *.zip
 dist-tarball/
 
-# Demo builds (VITE_DEMO=…, demo-e2e/build-demo.sh)
+# Demo builds (VITE_DEMO=…, demo-e2e/build-demo.sh) and flow screenshots
 apps/web/dist-demo
+apps/web/demo-e2e/shots

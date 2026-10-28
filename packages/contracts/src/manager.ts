@@ -136,7 +136,21 @@ export const AssistantEditableFileName = Schema.Literals(ASSISTANT_EDITABLE_FILE
 export type AssistantEditableFileName = typeof AssistantEditableFileName.Type;
 
 /** Role templates of "New assistant" (assistants MVP). */
-export const ASSISTANT_TEMPLATE_IDS = ["personal", "marketing", "security", "support"] as const;
+/**
+ * Areas offered in New assistant (22.10): personal, finance, sales, dev,
+ * youtube. The last three are from before and stay readable on the
+ * assistants made with them.
+ */
+export const ASSISTANT_TEMPLATE_IDS = [
+  "personal",
+  "finance",
+  "sales",
+  "dev",
+  "youtube",
+  "marketing",
+  "security",
+  "support",
+] as const;
 export const AssistantTemplateId = Schema.Literals(ASSISTANT_TEMPLATE_IDS);
 export type AssistantTemplateId = typeof AssistantTemplateId.Type;
 
@@ -174,11 +188,70 @@ export const AssistantDraftResult = Schema.Struct({
 });
 export type AssistantDraftResult = typeof AssistantDraftResult.Type;
 
+/**
+ * What an assistant may do (decision 21.10, enforced by the daemon, not the
+ * prompt): `full` — everything except money, the account and deleting
+ * computers; `helper` — works in its projects, but the chats it starts ask
+ * the person before risky steps and it can't approve anything; `observer` —
+ * reads chats in its projects and changes nothing. Rules:
+ * `@t3tools/shared/assistantPreset`.
+ */
+export const AssistantPreset = Schema.Literals(["full", "helper", "observer"]);
+export type AssistantPreset = typeof AssistantPreset.Type;
+
+/** The preset plus the projects it applies to (its own workspace is always in). */
+export const AssistantPresetAccess = Schema.Struct({
+  preset: AssistantPreset,
+  projects: ManagerProjectAllowlist,
+});
+export type AssistantPresetAccess = typeof AssistantPresetAccess.Type;
+
+/** `POST /api/manager/assistant/preset` — owner session only. */
+export const AssistantPresetInput = Schema.Struct({
+  projectId: ProjectId,
+  preset: AssistantPreset,
+  projects: ManagerProjectAllowlist,
+});
+export type AssistantPresetInput = typeof AssistantPresetInput.Type;
+
+/** The biggest picture an assistant's face may be (decoded bytes). */
+export const ASSISTANT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * `POST /api/manager/assistant/avatar` — its picture (png / jpg / webp,
+ * base64 without the `data:` prefix), or null to go back to its emoji.
+ */
+export const AssistantAvatarSetInput = Schema.Struct({
+  projectId: ProjectId,
+  image: Schema.NullOr(
+    Schema.String.check(Schema.isMaxLength(Math.ceil((ASSISTANT_AVATAR_MAX_BYTES * 4) / 3) + 4)),
+  ),
+});
+export type AssistantAvatarSetInput = typeof AssistantAvatarSetInput.Type;
+
+/** What its picture is drawn as (the Persona tab). */
+export const AssistantPersona = Schema.Literals(["human", "animal", "robot", "alien"]);
+export type AssistantPersona = typeof AssistantPersona.Type;
+
+/**
+ * `POST /api/manager/assistant/avatar/generate` — a portrait drawn by Uno AI
+ * (not saved: the person picks it, then it goes through the set route).
+ * `seed` picks a different look for "Another one".
+ */
+export const AssistantAvatarGenerateInput = Schema.Struct({
+  projectId: ProjectId,
+  persona: AssistantPersona,
+  seed: Schema.optional(Schema.Number.check(Schema.isInt())),
+});
+export type AssistantAvatarGenerateInput = typeof AssistantAvatarGenerateInput.Type;
+
 export const ManagerCreateAssistantInput = Schema.Struct({
   name: TrimmedNonEmptyString,
   /** "New assistant" (0.0.106): its picture and role template, kept in `.uno/profile.json`. */
   emoji: Schema.optional(Schema.String.check(Schema.isMaxLength(16))),
   template: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(40)))),
+  /** Its preset from the first token on (absent: Full, every project). */
+  access: Schema.optional(AssistantPresetAccess),
 });
 export type ManagerCreateAssistantInput = typeof ManagerCreateAssistantInput.Type;
 
@@ -211,6 +284,12 @@ export const ManagerAssistantProfile = Schema.Struct({
   emoji: Schema.NullOr(Schema.String),
   template: Schema.NullOr(Schema.String),
   createdAt: Schema.NullOr(Schema.String),
+  /**
+   * Its picture (Misha 23.10): the file in its folder (`.uno/avatar-<ms>.webp`),
+   * served by `GET /api/manager/assistant/avatar`; the name changes with each
+   * new picture. Null / absent: its emoji.
+   */
+  avatar: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ManagerAssistantProfile = typeof ManagerAssistantProfile.Type;
 
@@ -495,6 +574,8 @@ export const ManagerChannelSetupErrorCode = Schema.Literals([
   "slack_not_installed",
   /** Uno's Slack app already answers for another assistant of this computer. */
   "slack_app_in_use",
+  /** Uno's Telegram bot is the default assistant's only (409, decision 28.10). */
+  "shared_bot_uno_only",
   "console_unreachable",
   "console_error",
 ]);
@@ -625,6 +706,327 @@ export const DEFAULT_SLACK_CONNECTOR_STATUS: ManagerSlackConnectorStatus = {
   shared: false,
 };
 
+// ===============================
+// The team of assistants (decisions 14.10, 16.10)
+// ===============================
+//
+// Who an assistant is beyond its folder: its face, role and character, where
+// it talks, how far its setup went, who set it up and whether it is revoked.
+// Kept by the daemon next to its access (`<stateDir>/assistants/<id>/team.json`,
+// not in the folder the assistant writes). Its rights stay where they are:
+// the preset and projects on its token, the app levels in `apps.json`.
+
+/** Steps of the setup an assistant runs in its chat (one question each). */
+export const ASSISTANT_SETUP_STEP_IDS = [
+  "role",
+  "duties",
+  "character",
+  "channel",
+  "access",
+  "apps",
+  "mail",
+  "computer",
+  "routine",
+  "first-task",
+] as const;
+export const AssistantSetupStepId = Schema.Literals(ASSISTANT_SETUP_STEP_IDS);
+export type AssistantSetupStepId = typeof AssistantSetupStepId.Type;
+
+export const AssistantTeamChannel = Schema.Literals(["here", "telegram", "slack"]);
+export type AssistantTeamChannel = typeof AssistantTeamChannel.Type;
+
+export const ASSISTANT_TEAM_TEXT_MAX = 200;
+export const ASSISTANT_TEAM_ACTIVITY_LIMIT = 200;
+
+export const AssistantTeamActivityKind = Schema.Literals([
+  "teammate",
+  "access",
+  "setup",
+  "note",
+  "denied",
+]);
+export type AssistantTeamActivityKind = typeof AssistantTeamActivityKind.Type;
+
+export const AssistantTeamActivity = Schema.Struct({
+  at: Schema.String,
+  kind: AssistantTeamActivityKind,
+  text: Schema.String,
+  /** "you": the person did it; "auto": its rights let it, nobody asked. */
+  by: Schema.optional(Schema.Literals(["you", "auto"])),
+});
+export type AssistantTeamActivity = typeof AssistantTeamActivity.Type;
+
+export const AssistantSetupProgress = Schema.Struct({
+  state: Schema.Literals(["not-started", "in-progress", "done"]),
+  answered: Schema.Array(AssistantSetupStepId),
+  skipped: Schema.Array(AssistantSetupStepId),
+  /** Its setup chat, so "Set up again" and a restart continue there. */
+  threadId: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+export type AssistantSetupProgress = typeof AssistantSetupProgress.Type;
+
+/** Standing duties: what an assistant is responsible for, one line each (Misha 22.10). */
+export const ASSISTANT_DUTIES_MAX = 12;
+export const ASSISTANT_DUTY_MAX_CHARS = 200;
+
+/**
+ * Who an assistant may write to from its own mailbox: anyone, only the
+ * person (their Uno account's address), or the addresses listed.
+ */
+export const AssistantMailRecipients = Schema.Literals(["anyone", "owner", "list"]);
+export type AssistantMailRecipients = typeof AssistantMailRecipients.Type;
+
+/** The console's limit per mailbox (agent-mail spec 20.10): an assistant's own is at most this. */
+export const ASSISTANT_MAIL_DAILY_MAX = 50;
+export const ASSISTANT_MAIL_ALLOW_MAX = 20;
+
+/**
+ * An assistant's own mail (decisions 20.10, 22.10): on or off, who it may
+ * write to, its own daily limit. Work checks it on every `mail_*` call of
+ * the assistant's chats; the console keeps one mailbox per computer.
+ */
+export const AssistantMailPolicy = Schema.Struct({
+  enabled: Schema.Boolean,
+  recipients: AssistantMailRecipients,
+  /** Addresses for `recipients: "list"` (lowercase, plain addresses). */
+  allow: Schema.Array(Schema.String),
+  dailyLimit: Schema.Number,
+});
+export type AssistantMailPolicy = typeof AssistantMailPolicy.Type;
+
+/** One letter on an assistant's page (newest first). */
+export const ManagerAssistantMailLetter = Schema.Struct({
+  id: Schema.String,
+  direction: Schema.Literals(["in", "out"]),
+  from: Schema.NullOr(Schema.String),
+  to: Schema.Array(Schema.String),
+  subject: Schema.String,
+  snippet: Schema.String,
+  receivedAt: Schema.NullOr(Schema.String),
+  read: Schema.Boolean,
+  suspicious: Schema.Boolean,
+});
+export type ManagerAssistantMailLetter = typeof ManagerAssistantMailLetter.Type;
+
+/**
+ * `GET /api/manager/assistant/mail?projectId=` — its own email as its page
+ * shows it. `available: false` (the account's flag is off, not a cloud
+ * computer): the page shows no Mail block.
+ */
+export const ManagerAssistantMailView = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.NullOr(Schema.String),
+  /** Its own address (Uno: the mailbox's; the others: `local+tag@…`). */
+  address: Schema.NullOr(Schema.String),
+  /** The computer's mailbox address, where its letters go out from. */
+  computerAddress: Schema.NullOr(Schema.String),
+  policy: AssistantMailPolicy,
+  /** The person's Uno account address ("Only you"), when known here. */
+  ownerEmail: Schema.NullOr(Schema.String),
+  sentToday: Schema.Number,
+  letters: Schema.Array(ManagerAssistantMailLetter),
+});
+export type ManagerAssistantMailView = typeof ManagerAssistantMailView.Type;
+
+/** Where the person wants it to work, said in its setup (moving is theirs, on its page). */
+export const AssistantWorksOnWish = Schema.Literals(["here", "cloud", "own"]);
+export type AssistantWorksOnWish = typeof AssistantWorksOnWish.Type;
+
+export const ManagerAssistantTeam = Schema.Struct({
+  /** Its name as the person sees it; null = the folder's title. */
+  name: Schema.NullOr(Schema.String),
+  /** Background tone of its face (`amber`, `teal`, …). */
+  tone: Schema.NullOr(Schema.String),
+  roles: Schema.Array(Schema.String),
+  character: Schema.String,
+  skills: Schema.Array(Schema.String),
+  channel: Schema.NullOr(AssistantTeamChannel),
+  /** The assistant (on this computer) that set it up; null = the person. */
+  createdBy: Schema.NullOr(ProjectId),
+  createdAt: Schema.NullOr(Schema.String),
+  setup: AssistantSetupProgress,
+  firstTask: Schema.NullOr(Schema.String),
+  /** What it is responsible for, standing (not one-off tasks): "watch CI on fishcode". */
+  duties: Schema.Array(Schema.String),
+  mail: AssistantMailPolicy,
+  /** Where the person said it should work (its setup); null = not asked. */
+  worksOnWish: Schema.NullOr(AssistantWorksOnWish),
+  revokedAt: Schema.NullOr(Schema.String),
+  pausedAt: Schema.NullOr(Schema.String),
+  activity: Schema.Array(AssistantTeamActivity),
+});
+export type ManagerAssistantTeam = typeof ManagerAssistantTeam.Type;
+
+/** The team part of `GET /api/manager/assistants` (absent on older daemons). */
+export const ManagerAssistantTeamView = Schema.Struct({
+  team: ManagerAssistantTeam,
+  apps: Schema.Struct({
+    permissions: Schema.Record(Schema.String, AssistantAppLevel),
+    restricted: Schema.Boolean,
+  }),
+});
+export type ManagerAssistantTeamView = typeof ManagerAssistantTeamView.Type;
+
+const TeamText = Schema.String.check(Schema.isMaxLength(ASSISTANT_TEAM_TEXT_MAX));
+const TeamList = Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(60))).check(
+  Schema.isMaxLength(8),
+);
+const DutyList = Schema.Array(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_DUTY_MAX_CHARS)),
+).check(Schema.isMaxLength(ASSISTANT_DUTIES_MAX));
+const MailAddress = TrimmedNonEmptyString.check(Schema.isMaxLength(254));
+
+/** A change of its mail: any part of it. */
+export const AssistantMailPolicyPatch = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean),
+  recipients: Schema.optional(AssistantMailRecipients),
+  allow: Schema.optional(
+    Schema.Array(MailAddress).check(Schema.isMaxLength(ASSISTANT_MAIL_ALLOW_MAX)),
+  ),
+  dailyLimit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(0),
+      Schema.isLessThanOrEqualTo(ASSISTANT_MAIL_DAILY_MAX),
+    ),
+  ),
+});
+export type AssistantMailPolicyPatch = typeof AssistantMailPolicyPatch.Type;
+
+/** `POST /api/manager/assistant/team` — the person edits who it is (owner session). */
+export const AssistantTeamUpdateInput = Schema.Struct({
+  projectId: ProjectId,
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(60))),
+  emoji: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(16)))),
+  tone: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(20)))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  skills: Schema.optional(TeamList),
+  channel: Schema.optional(Schema.NullOr(AssistantTeamChannel)),
+  duties: Schema.optional(DutyList),
+  mail: Schema.optional(AssistantMailPolicyPatch),
+  /** "done": the person finished or skipped the setup ("Later"). */
+  setup: Schema.optional(Schema.Literals(["not-started", "done"])),
+  paused: Schema.optional(Schema.Boolean),
+});
+export type AssistantTeamUpdateInput = typeof AssistantTeamUpdateInput.Type;
+
+/** `POST /api/manager/assistant/revoke` — revoke (with everything it set up) or bring back. */
+export const AssistantRevokeInput = Schema.Struct({
+  projectId: ProjectId,
+  revoked: Schema.Boolean,
+});
+export type AssistantRevokeInput = typeof AssistantRevokeInput.Type;
+
+/** `POST /api/manager/assistants/:projectId/setup-chat` answer. */
+export const AssistantSetupChatResult = Schema.Struct({ threadId: ThreadId });
+export type AssistantSetupChatResult = typeof AssistantSetupChatResult.Type;
+
+const AppLevels = Schema.Record(Schema.String, AssistantAppLevel);
+
+/**
+ * `assistant_profile_set` (uno-manager, an assistant's own token): the
+ * assistant saves what the person told it in its setup. Rights only narrow
+ * here — widening is the person's, on its page.
+ */
+export const ManagerAssistantProfileSetInput = Schema.Struct({
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(60))),
+  emoji: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(16))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  skills: Schema.optional(TeamList),
+  channel: Schema.optional(AssistantTeamChannel),
+  preset: Schema.optional(AssistantPreset),
+  /** Project ids (from `assistant_profile_get`) or "all". */
+  projects: Schema.optional(ManagerProjectAllowlist),
+  /** Connector levels by provider id (`gmail`, `google-drive`, `notion`, `github`). */
+  apps: Schema.optional(AppLevels),
+  firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  /** Its standing duties, the whole list (replaces what is saved). */
+  duties: Schema.optional(DutyList),
+  /** Its own mail — only narrower than now (off, fewer people, a lower limit). */
+  mail: Schema.optional(AssistantMailPolicyPatch),
+  /** Where the person wants it to work; moving is theirs, on its page. */
+  worksOn: Schema.optional(AssistantWorksOnWish),
+  /**
+   * A repeating task (a morning plan, a weekly report): made with the same
+   * schedules as `schedule_create`. Only on a cloud computer — the answer
+   * says so on a laptop.
+   */
+  routine: Schema.optional(
+    Schema.Struct({
+      // The limits of `ManagerScheduleCreateInput` (declared further down).
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+      cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+      prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(2_000)),
+      timezone: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+    }),
+  ),
+  /** The setup step this answer belongs to: marked answered (or skipped). */
+  step: Schema.optional(AssistantSetupStepId),
+  skipped: Schema.optional(Schema.Boolean),
+  /** The setup is over (every step answered or skipped). */
+  done: Schema.optional(Schema.Boolean),
+});
+export type ManagerAssistantProfileSetInput = typeof ManagerAssistantProfileSetInput.Type;
+
+/** `assistant_create`: an assistant sets up a helper, never wider than itself. */
+export const ManagerAssistantCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
+  emoji: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(16))),
+  roles: Schema.optional(TeamList),
+  character: Schema.optional(TeamText),
+  /** Default: the creator's own preset. */
+  preset: Schema.optional(AssistantPreset),
+  /** Default: the creator's own projects. */
+  projects: Schema.optional(ManagerProjectAllowlist),
+  /** Default: the creator's own levels. */
+  apps: Schema.optional(AppLevels),
+  /** What it should do first; sent to it as its first message. */
+  firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
+  /** What it is always responsible for (its standing duties). */
+  duties: Schema.optional(DutyList),
+  /**
+   * A face drawn by Uno AI in the background (a portrait of a person, an
+   * animal, a robot or an alien); the emoji stays until it is ready.
+   */
+  face: Schema.optional(AssistantPersona),
+});
+export type ManagerAssistantCreateInput = typeof ManagerAssistantCreateInput.Type;
+
+/**
+ * `ask_user`: a question card in the assistant's own conversation (Hermes has
+ * no question events of its own). The answer comes back as the person's next
+ * message, so the assistant ends its turn after asking.
+ */
+export const ManagerAskUserInput = Schema.Struct({
+  header: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+  question: TrimmedNonEmptyString.check(Schema.isMaxLength(300)),
+  options: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        label: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+        description: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+      }),
+    ).check(Schema.isMaxLength(6)),
+  ),
+  multiSelect: Schema.optional(Schema.Boolean),
+  detail: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(400))),
+  input: Schema.optional(
+    Schema.Struct({
+      placeholder: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+      kind: Schema.optional(Schema.Literals(["text", "email", "url", "time"])),
+    }),
+  ),
+  /** A Connect button for one of the person's apps (`gmail`, `github`, …). */
+  connect: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(40))),
+});
+export type ManagerAskUserInput = typeof ManagerAskUserInput.Type;
+
+/** Request ids of `ask_user` cards: answered by the daemon, not the provider. */
+export const ASSISTANT_ASK_REQUEST_PREFIX = "uno-ask:";
+
 export const ManagerAssistantSummary = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -636,6 +1038,8 @@ export const ManagerAssistantSummary = Schema.Struct({
   skills: Schema.Array(Schema.String),
   /** Emoji / template from "New assistant"; absent on older daemons. */
   profile: Schema.optional(Schema.NullOr(ManagerAssistantProfile)),
+  /** Who it is on the team, and its app levels (absent on older daemons). */
+  team: Schema.optional(ManagerAssistantTeamView),
 });
 export type ManagerAssistantSummary = typeof ManagerAssistantSummary.Type;
 
@@ -657,6 +1061,12 @@ export const ManagerProposedActionCreateThread = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: RuntimeMode,
+  /**
+   * The id the new thread gets, chosen when the proposal is filed so the
+   * caller learns it from the receipt (no list_threads round trip). Absent
+   * in proposals filed before 0.0.153: a fresh id then.
+   */
+  threadId: Schema.optional(ThreadId),
 });
 export type ManagerProposedActionCreateThread = typeof ManagerProposedActionCreateThread.Type;
 
@@ -826,6 +1236,19 @@ export const MANAGER_WAIT_MAX_TIMEOUT_SEC = 3_600;
 export const MANAGER_WAIT_MAX_THREADS = 20;
 export const MANAGER_WAIT_REPLY_MAX_CHARS = 4_000;
 export const MANAGER_WAIT_MAX_CHANGED_FILES = 50;
+/**
+ * The longest wait an assistant's own token gets: the assistant is a
+ * dispatcher that hands work off and ends its turn — the daemon tells it when
+ * a thread it started settles (`manager/assistantPush.ts`). Longer requests
+ * are cut to this.
+ */
+export const MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC = 30;
+/**
+ * Header the daemon adds to an assistant chat's own `uno-manager` server
+ * (HermesAdapter): which conversation makes the call, so the work it hands
+ * off is reported back to that conversation.
+ */
+export const MANAGER_CALLER_THREAD_HEADER = "x-uno-thread-id";
 
 const ManagerWaitTimeoutSec = PositiveInt.check(
   Schema.isLessThanOrEqualTo(MANAGER_WAIT_MAX_TIMEOUT_SEC),
@@ -906,6 +1329,64 @@ export const ManagerWaitForThreadsResult = Schema.Struct({
 });
 export type ManagerWaitForThreadsResult = typeof ManagerWaitForThreadsResult.Type;
 
+// ===============================
+// work_status — the assistant's one-call digest
+// ===============================
+
+/** Threads in one work_status answer (the assistant's own first). */
+export const MANAGER_WORK_STATUS_MAX_THREADS = 15;
+/** The person's own threads in it: only ones active this recently. */
+export const MANAGER_WORK_STATUS_RECENT_HOURS = 24;
+
+/**
+ * - `running` — a turn is in flight;
+ * - `needs_you` — waits for the person (an approval or a question);
+ * - `done` / `failed` / `stopped` — the latest turn ended so;
+ * - `idle` — nothing ran yet.
+ */
+export const ManagerWorkStatusState = Schema.Literals([
+  "running",
+  "needs_you",
+  "done",
+  "failed",
+  "stopped",
+  "idle",
+]);
+export type ManagerWorkStatusState = typeof ManagerWorkStatusState.Type;
+
+export const ManagerWorkStatusThread = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  project: Schema.String,
+  /** `you`: this assistant started or steered it; `person`: the person's own chat. */
+  startedBy: Schema.Literals(["you", "person"]),
+  status: ManagerWorkStatusState,
+  /** For `running`: seconds since its turn started. */
+  runningForSec: Schema.NullOr(NonNegativeInt),
+  /** For a settled thread: when its latest turn ended. */
+  finishedAt: Schema.NullOr(IsoDateTime),
+  /** What it is doing / did last, a few words (its latest tool or task). */
+  step: Schema.NullOr(Schema.String),
+  /** The start of its last answer (untrusted, wrapped). */
+  lastAnswer: Schema.NullOr(Schema.String),
+  /** The daemon has news about it you have not received yet (it is on its way). */
+  reportPending: Schema.Boolean,
+  /** It runs on another computer of the account (its name); absent: this computer. */
+  computer: Schema.optional(Schema.String),
+});
+export type ManagerWorkStatusThread = typeof ManagerWorkStatusThread.Type;
+
+export const ManagerWorkStatusInput = Schema.Struct({});
+export type ManagerWorkStatusInput = typeof ManagerWorkStatusInput.Type;
+
+export const ManagerWorkStatusResult = Schema.Struct({
+  now: IsoDateTime,
+  threads: Schema.Array(ManagerWorkStatusThread),
+  /** Threads left out to keep the answer short. */
+  omitted: NonNegativeInt,
+});
+export type ManagerWorkStatusResult = typeof ManagerWorkStatusResult.Type;
+
 export const ManagerListPendingApprovalsResult = Schema.Struct({
   approvals: Schema.Array(ManagerPendingApprovalSummary),
 });
@@ -920,9 +1401,10 @@ export const ManagerCreateThreadInput = Schema.Struct({
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: Schema.optional(RuntimeMode),
   /**
-   * The computer the chat runs on (box id, or `"this"`). Absent = this
-   * computer. Only this computer is allowed for now (assistants MVP); the
-   * cross-machine Allow comes with the next wave.
+   * The computer the chat runs on: absent / `"this"` = this computer; a box
+   * id, `"box-N"` or a computer's name (`account_overview`) = another
+   * computer of the account (assistants D, 28.10) — then `projectId` names a
+   * project there, or a project here whose folder is used there.
    */
   computerId: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
 });
@@ -961,6 +1443,20 @@ export const ManagerWriteReceipt = Schema.Union([
     status: Schema.Literal("executed"),
     proposalId: ManagerProposalId,
     commandIds: Schema.Array(CommandId),
+    /** create_thread: the new thread. */
+    threadId: Schema.optional(ThreadId),
+  }),
+  /**
+   * create_thread with the `computerId` of another computer of the account
+   * (assistants D, 28.10): started there at once; its outcome comes back as a
+   * work update.
+   */
+  Schema.Struct({
+    status: Schema.Literal("started-on-another-computer"),
+    threadId: ThreadId,
+    computer: Schema.Struct({ boxId: Schema.Number, name: Schema.String }),
+    title: Schema.String,
+    note: Schema.String,
   }),
 ]);
 export type ManagerWriteReceipt = typeof ManagerWriteReceipt.Type;
@@ -1243,3 +1739,94 @@ export const AssistantChatsResult = Schema.Struct({
   gateway: Schema.Literals(["metered", "unavailable", "no-key", "unknown"]),
 });
 export type AssistantChatsResult = typeof AssistantChatsResult.Type;
+
+// ===============================
+// Assistants D (28.10): chats an assistant started, here or on another computer
+// ===============================
+
+/**
+ * Who started a chat of this computer: an assistant of this computer (its
+ * conversation or a chat one of those started), or an assistant living on
+ * another computer of the account that asked this daemon over
+ * `POST /api/manager/remote-chats`. The sidebar puts these chats in the
+ * common list with "started by <name>" and one filter to hide them.
+ */
+export const ManagerStartedByEntry = Schema.Struct({
+  threadId: ThreadId,
+  /** The assistant's name as the person sees it ("Uno", "Ada"). */
+  assistantName: TrimmedNonEmptyString,
+  /** Its project on ITS computer (an `assistant-…` id); null when unknown. */
+  assistantProjectId: Schema.NullOr(Schema.String),
+  /** False: the assistant lives on another computer (`fromComputerName`). */
+  local: Schema.Boolean,
+  /** The other computer's name ("stage-work", "MacBook"); null when local. */
+  fromComputerName: Schema.NullOr(Schema.String),
+  /** The other computer's box id, when it is a cloud computer. */
+  fromBoxId: Schema.NullOr(Schema.Number),
+  startedAt: IsoDateTime,
+});
+export type ManagerStartedByEntry = typeof ManagerStartedByEntry.Type;
+
+/** `GET /api/manager/started-by` (owner session). */
+export const ManagerStartedByList = Schema.Struct({
+  items: Schema.Array(ManagerStartedByEntry),
+});
+export type ManagerStartedByList = typeof ManagerStartedByList.Type;
+
+/**
+ * `POST /api/manager/remote-chats` (owner session of the calling daemon,
+ * paired through the console's `work/session`): an assistant on another
+ * computer of the same account starts a chat here.
+ */
+export const ManagerRemoteChatCreateInput = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  title: Schema.optional(Schema.String),
+  /** Folder on THIS computer; absent: the default project of this computer. */
+  cwd: Schema.optional(Schema.String),
+  projectId: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  /** Runtime mode cap: never more than the calling assistant has. */
+  runtimeMode: Schema.optional(RuntimeMode),
+  startedBy: Schema.Struct({
+    assistantName: TrimmedNonEmptyString,
+    assistantProjectId: Schema.NullOr(Schema.String),
+    fromComputerName: Schema.String,
+    fromBoxId: Schema.NullOr(Schema.Number),
+    /** The caller's thread on its computer (for the done push back). */
+    fromThreadId: Schema.String,
+    /**
+     * The assistant's app levels on its computer: the chat here opens this
+     * computer's connected apps no wider (`restricted: false` — every app,
+     * as there). Absent: the person's own chat, no limits.
+     */
+    apps: Schema.optional(
+      Schema.Struct({
+        restricted: Schema.Boolean,
+        permissions: Schema.Record(Schema.String, AssistantAppLevel),
+      }),
+    ),
+    /** Its mode: an Observer only reads apps here too. */
+    preset: Schema.optional(AssistantPreset),
+  }),
+});
+export type ManagerRemoteChatCreateInput = typeof ManagerRemoteChatCreateInput.Type;
+
+export const ManagerRemoteChatResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: Schema.String,
+});
+export type ManagerRemoteChatResult = typeof ManagerRemoteChatResult.Type;
+
+/** `GET /api/manager/remote-chats/:threadId` — one line of the status summary. */
+export const ManagerRemoteChatStatus = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  /** running | waiting-for-you | done | failed | idle */
+  state: Schema.String,
+  /** The last assistant message, trimmed (≤ 600 chars); null while nothing yet. */
+  lastMessage: Schema.NullOr(Schema.String),
+  updatedAt: IsoDateTime,
+});
+export type ManagerRemoteChatStatus = typeof ManagerRemoteChatStatus.Type;

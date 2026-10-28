@@ -6,22 +6,21 @@
  * from what is connected here.
  */
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRightIcon, Loader2Icon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
-import { GitHubIcon } from "../Icons";
-import { AssistantAvatar } from "../assistants/AssistantAvatar";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
+import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
 import { useAssistantTeam } from "../assistants/useAssistantTeam";
 import { connectedSummary } from "../connectors/connectorsCatalog.logic";
 import { ConnectorsList } from "../setup/steps/ConnectorsStep";
-import { Button } from "../ui/button";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
 export function ConnectorsSettings() {
   const navigate = useNavigate();
-  const { items, actions, loading } = useConnectorItems();
+  const { items, loading } = useConnectorItems();
   const team = useAssistantTeam().filter((member) => !member.revoked);
   const [details, setDetails] = useState(false);
   const connected = items.filter((item) => item.connected);
@@ -34,43 +33,19 @@ export function ConnectorsSettings() {
       <div className="flex flex-col gap-1 px-1" data-testid="settings-connectors">
         <h1 className="text-lg font-semibold">Connectors</h1>
         <p className="text-sm text-muted-foreground">
-          Apps your AI can work in. Connect once here — Uno and your assistants use them in any
-          chat. You approve each one on the app’s own page and can disconnect any time.
+          Apps your AI can work in. Connect once for your Uno account: Uno and your assistants use
+          Google Drive, Gmail and Notion as tools in their chats, within the apps you let each
+          assistant use. GitHub here is for git — clone and push your repos. You approve each one on
+          the app’s own page and can disconnect any time.
         </p>
       </div>
-
-      {!loading && names.length === 0 ? (
-        <div
-          className="flex items-center gap-3 rounded-2xl border border-dashed border-border px-4 py-3.5"
-          data-testid="settings-connectors-empty"
-        >
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-border bg-background">
-            <GitHubIcon className="size-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">Nothing connected yet</div>
-            <div className="text-xs text-muted-foreground">
-              Start with GitHub: one click, then press Authorize on GitHub’s page.
-            </div>
-          </div>
-          <Button
-            size="sm"
-            disabled={actions.pending !== null}
-            onClick={() => void actions.connect("github")}
-          >
-            {actions.pending?.provider === "github" ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : null}
-            Connect GitHub
-          </Button>
-        </div>
-      ) : null}
 
       <SettingsSection title={loading ? "Apps" : `Apps · ${connectedSummary(items)}`}>
         <ConnectorsList className="rounded-none border-0" />
       </SettingsSection>
 
-      {team.length > 0 ? (
+      {/* Per-teammate access ships with the team (Misha 16.10); the mock shows it already. */}
+      {DEMO_PROTOTYPE && team.length > 0 ? (
         <SettingsSection title="Who can use them">
           {team.map((member) => {
             const access = accessOf(member.profile);
@@ -92,6 +67,7 @@ export function ConnectorsSettings() {
               >
                 <AssistantAvatar
                   emoji={member.profile.emoji}
+                  image={avatarImageOf(member.profile)}
                   tone={member.profile.tone}
                   className="size-6"
                   emojiClassName="text-xs"
@@ -128,9 +104,15 @@ export function ConnectorsSettings() {
               computer’s Uno Work checks its level (none / read / read+write) on every call.
             </p>
             <p className="text-muted-foreground">
-              Servers you add (<code className="font-mono">settings.mcpServers</code>) live on this
-              computer only and reach every chat on it — they can’t be limited per assistant yet.
-              Addresses show the host only: one may carry a token.
+              Servers you add here (<code className="font-mono">settings.mcpServers</code>) live on
+              this computer only and reach every chat on it, except an assistant held to its
+              projects. A server for one assistant only is added on that assistant’s page: its chats
+              get it, in its sandbox too. Addresses show the host only: one may carry a token.
+            </p>
+            <p className="text-muted-foreground">
+              GitHub connected through the Uno GitHub App gives git on your computers (clone, pull,
+              push). It isn’t a tool in chats unless the console offers GitHub’s tools — then it
+              shows in the apps above like the others.
             </p>
             <p className="text-muted-foreground">
               Not covered: a chat can still use the <code className="font-mono">gh</code> CLI or a

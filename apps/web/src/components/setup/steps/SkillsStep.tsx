@@ -186,11 +186,10 @@ function SkillRow({
   );
 }
 
-export function SkillsStep() {
+export function SkillsPanel() {
   const environmentId = usePrimaryEnvironmentId();
   const queryClient = useQueryClient();
   const progress = useSetupProgress();
-  const { completeStep } = useSetupNavigation();
   const status = useSkillsStatus();
   const project = progress.project;
   const found = useFoundSkills(project?.path ?? null);
@@ -208,7 +207,6 @@ export function SkillsStep() {
     () => existingNames(found.data ?? [], status.data?.installed ?? new Set()),
     [found.data, status.data],
   );
-  const count = (status.data?.installed.size ?? 0) + view.activeNames.size;
   const refresh = () => queryClient.invalidateQueries({ queryKey: SKILLS_STATUS_QUERY_KEY });
   // A project's own skills/ folder: no agent reads it, so turning one on goes
   // through the same preview as any other skill.
@@ -263,17 +261,7 @@ export function SkillsStep() {
     );
   };
   return (
-    <SetupShell
-      step="skills"
-      primary={{
-        label: count > 0 ? `Continue with ${count} skill${count > 1 ? "s" : ""}` : "Continue",
-        onClick: () => void completeStep("skills"),
-      }}
-    >
-      <SetupHeading
-        title="Give your AI skills"
-        lead="A skill is a short playbook for one kind of task. Add it once, and your AI uses it when it fits."
-      />
+    <>
       <SkillsFound
         project={view.project}
         computer={view.computer}
@@ -372,6 +360,35 @@ export function SkillsStep() {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+/** Skills installed for every agent plus the ones they already read — the number on Continue. */
+function useSkillsCount(): number {
+  const project = useSetupProgress().project;
+  const status = useSkillsStatus();
+  const found = useFoundSkills(project?.path ?? null);
+  const view = useMemo(() => foundSkillsView(found.data ?? [], CATALOG_IDS), [found.data]);
+  return (status.data?.installed.size ?? 0) + view.activeNames.size;
+}
+
+export function SkillsStep() {
+  const { completeStep } = useSetupNavigation();
+  const count = useSkillsCount();
+  return (
+    <SetupShell
+      step="skills"
+      primary={{
+        label: count > 0 ? `Continue with ${count} skill${count > 1 ? "s" : ""}` : "Continue",
+        onClick: () => void completeStep("skills"),
+      }}
+    >
+      <SetupHeading
+        title="Give your AI skills"
+        lead="A skill is a short playbook for one kind of task. Add it once, and your AI uses it when it fits."
+      />
+      <SkillsPanel />
     </SetupShell>
   );
 }

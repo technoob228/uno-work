@@ -22,13 +22,18 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
-export const DEMO_VERSION = "0.0.147";
+import { DEMO_ASSIST } from "./demoFlag";
+
+// The computers run the same Work as the page (no "runs another version" banner).
+export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
 
 export const ENV_WORK = EnvironmentId.make("env-demo-uno-work");
 export const ENV_PRODUCT = EnvironmentId.make("env-demo-uno-product");
 export const ENV_MAC = EnvironmentId.make("env-demo-macbook");
+/** Assistants D: the computer the wizard makes for an assistant (demo/assist/ownComputer.ts). */
+export const ENV_OWN = EnvironmentId.make("env-demo-assistant-own");
 
-export type MachineKey = "work" | "product" | "mac";
+export type MachineKey = "work" | "product" | "mac" | "own";
 
 export interface DemoMachine {
   readonly key: MachineKey;
@@ -42,7 +47,7 @@ export interface DemoMachine {
   readonly boxId: number | null;
 }
 
-export const MACHINES: Record<MachineKey, DemoMachine> = {
+const W0138_MACHINES: Record<MachineKey, DemoMachine> = {
   work: {
     key: "work",
     environmentId: ENV_WORK,
@@ -73,12 +78,49 @@ export const MACHINES: Record<MachineKey, DemoMachine> = {
     machineKind: "computer",
     boxId: null,
   },
+  own: {
+    key: "own",
+    environmentId: ENV_OWN,
+    label: "assistant-computer",
+    host: "own.demo.uno4.me",
+    home: "/home/uno",
+    os: "linux",
+    machineKind: "uno_box",
+    boxId: 2701,
+  },
 };
+
+/**
+ * The assistants base (`VITE_DEMO=assist`): the page is Work on the cloud
+ * computer uno-work (Plus, always on); the MacBook is another computer of the
+ * account (online or asleep, `demo/assist/world.ts`); `product` stands for the
+ * account's Free cloud computer, asleep — listed by the account, not connected.
+ */
+const ASSIST_MACHINES: Record<MachineKey, DemoMachine> = {
+  work: { ...W0138_MACHINES.work, host: "" },
+  product: {
+    ...W0138_MACHINES.product,
+    label: "free-cloud",
+    host: "free-cloud.demo.uno4.me",
+    boxId: 2650,
+  },
+  mac: { ...W0138_MACHINES.mac, host: "macbook.demo.uno4.me" },
+  // Exists (and answers) only once "Create its computer" made it.
+  own: W0138_MACHINES.own,
+};
+
+export const MACHINES: Record<MachineKey, DemoMachine> = DEMO_ASSIST
+  ? ASSIST_MACHINES
+  : W0138_MACHINES;
+
+/** The computer this page is opened on (its daemon answers the page's own address). */
+export const PRIMARY_MACHINE: DemoMachine = DEMO_ASSIST ? MACHINES.work : MACHINES.mac;
 
 export const MACHINE_LIST: ReadonlyArray<DemoMachine> = [
   MACHINES.mac,
   MACHINES.work,
   MACHINES.product,
+  ...(DEMO_ASSIST ? [MACHINES.own] : []),
 ];
 
 export function machineByEnv(environmentId: string): DemoMachine | null {
@@ -127,6 +169,8 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       assistantChat: true,
       // p7: the assistant's AI and sign-ins (assistantsFixtures.ts answers them).
       assistantLlm: true,
+      // Assistants D: a project limit is a sandbox lock on the cloud computers, a note on the Mac.
+      assistantSandbox: machine.os !== "darwin",
     },
     machineKind: machine.machineKind,
     ...(machine.boxId !== null ? { unoBoxId: machine.boxId } : {}),
@@ -278,6 +322,7 @@ export const PROJECTS: Record<MachineKey, ProjectSpec[]> = {
       repo: REPO.workspace,
     },
   ],
+  own: [{ id: "p-own-home", title: "Home folder", root: "/home/uno" }],
 };
 
 /** Project name by its id, on any computer. */

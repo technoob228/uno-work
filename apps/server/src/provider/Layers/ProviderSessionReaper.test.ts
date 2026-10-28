@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  ASSISTANT_PROJECT_ID,
   type OrchestrationCommand,
   ProjectId,
   ThreadId,
@@ -51,7 +52,8 @@ const unsupported = () => Effect.die(new Error("Unsupported provider call in tes
 function makeReadModel(
   threads: ReadonlyArray<{
     readonly id: ThreadId;
-    readonly assistantRole?: "chat";
+    readonly assistantRole?: "chat" | "spawned";
+    readonly projectId?: ProjectId;
     readonly session: {
       readonly threadId: ThreadId;
       readonly status: "starting" | "running" | "ready" | "interrupted" | "stopped" | "error";
@@ -83,7 +85,7 @@ function makeReadModel(
     ],
     threads: threads.map((thread) => ({
       id: thread.id,
-      projectId,
+      projectId: thread.projectId ?? projectId,
       ...(thread.assistantRole ? { assistantRole: thread.assistantRole } : {}),
       title: `Thread ${thread.id}`,
       modelSelection: defaultModelSelection,
@@ -132,6 +134,7 @@ describe("ProviderSessionReaper", () => {
   async function createHarness(input: {
     readonly readModel: ReturnType<typeof makeReadModel>;
     readonly activeTurnThresholdMs?: number;
+    readonly assistantInactivityThresholdMs?: number;
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId;
     }) => ReturnType<ProviderServiceShape["stopSession"]>;
@@ -191,6 +194,9 @@ describe("ProviderSessionReaper", () => {
       ...(input.activeTurnThresholdMs == null
         ? {}
         : { activeTurnThresholdMs: input.activeTurnThresholdMs }),
+      ...(input.assistantInactivityThresholdMs == null
+        ? {}
+        : { assistantInactivityThresholdMs: input.assistantInactivityThresholdMs }),
     };
     const layer = makeProviderSessionReaperLive(reaperOptions).pipe(
       Layer.provideMerge(providerSessionDirectoryLayer),
@@ -635,6 +641,72 @@ describe("ProviderSessionReaper", () => {
     expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
       reapedThreadId,
     ]);
+  });
+
+  it("keeps the assistant's recent conversations warm longer, not its work chats", async () => {
+    const assistantProject = ASSISTANT_PROJECT_ID;
+    const recentConversation = ThreadId.make("thread-reaper-assistant-telegram");
+    const oldConversation = ThreadId.make("thread-reaper-assistant-old");
+    const workChat = ThreadId.make("thread-reaper-assistant-spawned");
+    const now = new Date().toISOString();
+    const session = (threadId: ThreadId) => ({
+      threadId,
+      status: "ready" as const,
+      providerName: "codex" as const,
+      runtimeMode: "full-access" as const,
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: now,
+    });
+    const harness = await createHarness({
+      assistantInactivityThresholdMs: 60_000,
+      readModel: makeReadModel([
+        {
+          id: recentConversation,
+          projectId: assistantProject,
+          session: session(recentConversation),
+        },
+        { id: oldConversation, projectId: assistantProject, session: session(oldConversation) },
+        {
+          id: workChat,
+          projectId: assistantProject,
+          assistantRole: "spawned",
+          session: session(workChat),
+        },
+      ]),
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+    // Idle past the general 1 s threshold, well inside the assistant's 60 s.
+    const fiveSecondsAgo = new Date(Date.now() - 5_000).toISOString();
+    for (const [threadId, lastSeenAt] of [
+      [recentConversation, fiveSecondsAgo],
+      [oldConversation, "2026-04-14T00:00:00.000Z"],
+      [workChat, fiveSecondsAgo],
+    ] as const) {
+      await runtime!.runPromise(
+        repository.upsert({
+          threadId,
+          providerName: "codex",
+          providerInstanceId: null,
+          adapterKey: "codex",
+          runtimeMode: "full-access",
+          status: "running",
+          lastSeenAt,
+          resumeCursor: { opaque: `resume-${threadId}` },
+          runtimePayload: null,
+        }),
+      );
+    }
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(
+      harness.stopSession.mock.calls.map(([request]) => String(request.threadId)).toSorted(),
+    ).toEqual([String(oldConversation), String(workChat)].toSorted());
   });
 
   it("continues reaping other sessions when one stop attempt fails", async () => {

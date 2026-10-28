@@ -10,6 +10,7 @@ import packageJson from "../../../package.json" with { type: "json" };
 import { resolveMachineKind } from "../machineKind.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { resolveUpdateChannel } from "../updateChannel.ts";
+import { assistantSandboxAvailable } from "../../assistants/assistantSandboxPolicy.ts";
 
 function platformOs(): ExecutionEnvironmentDescriptor["platform"]["os"] {
   switch (process.platform) {
@@ -98,6 +99,8 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   });
 
   const channel = resolveUpdateChannel();
+  // Whether bubblewrap can hold an assistant to its projects here (cached probe).
+  const assistantSandbox = yield* assistantSandboxAvailable;
   const base = {
     ...(channel ? { channel } : {}),
     platform: {
@@ -115,6 +118,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantChat: true,
       assistantLlm: true,
       assistantConversations: true,
+      assistantSandbox,
     },
   } satisfies Omit<
     ExecutionEnvironmentDescriptor,

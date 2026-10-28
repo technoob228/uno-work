@@ -1,4 +1,5 @@
 import { ManagerTokenId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { parseUnoWorkNote } from "@t3tools/shared/secretRequestCopy";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -172,6 +173,12 @@ describe("scheduled assistant turn", () => {
     expect(isNoReply("No reply needed, all good")).toBe(false);
   });
 
+  it("the client shows the prompt as a scheduled-task line, not the person's message", () => {
+    expect(
+      parseUnoWorkNote(wrapScheduledPrompt({ name: "Digest", prompt: "Collect mentions" })),
+    ).toEqual({ kind: "scheduled-task", text: "Scheduled task “Digest”: Collect mentions" });
+  });
+
   it("runs in the main conversation and delivers the answer to the person's chats", async () => {
     const world = freshWorld("3 new mentions, draft is in Notion.");
     const result = await runTurn(
@@ -194,6 +201,37 @@ describe("scheduled assistant turn", () => {
       includeSlack: true,
       includeAssistantFallback: true,
     });
+  });
+
+  it("the CLI's answer is the status only; an event turn also returns the answer (automations)", async () => {
+    const world = freshWorld("Reviewed PR #12: two nits.");
+    const cli = await runTurn(
+      world,
+      { mainChat: true, projectId: "assistant-home" },
+      "assistant:assistant-home",
+    );
+    expect(cli._tag === "Success" && "reply" in cli.success).toBe(false);
+    const event = await Effect.runPromise(
+      Effect.gen(function* () {
+        const turns = yield* AssistantScheduledTurns;
+        return yield* turns.runEvent({
+          projectId: ProjectId.make("assistant-home"),
+          prompt: "[Automation …]",
+          header: "⚙️ Review PRs\n\n",
+          threadTitle: "Automations",
+          source: "automation",
+          timeoutSec: 30,
+        });
+      }).pipe(
+        Effect.provide(
+          makeLayer(freshWorld("Reviewed PR #12: two nits."), {
+            mainChat: true,
+            projectId: "assistant-home",
+          }),
+        ),
+      ),
+    );
+    expect(event).toMatchObject({ status: "delivered", reply: "Reviewed PR #12: two nits." });
   });
 
   it("stays silent on NO_REPLY", async () => {

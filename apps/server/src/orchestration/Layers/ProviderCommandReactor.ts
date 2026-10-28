@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationThread,
@@ -37,6 +38,11 @@ import {
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import {
+  askCardAnswerText,
+  findAskCardQuestion,
+  isAskCardRequest,
+} from "../../assistants/askCards.ts";
 import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
 import { currentAssistantModelSelection } from "../../manager/assistantEngineSelection.ts";
 import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
@@ -57,6 +63,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { ServerConfig } from "../../config.ts";
+import { HarnessSandboxPolicy } from "../../provider/Services/HarnessSandboxPolicy.ts";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
 import { appendChatAttachmentsNote, buildChatAttachmentsNote } from "../../files/chatUploads.ts";
 
@@ -303,6 +310,19 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
+  const sandboxPolicy = Option.getOrUndefined(yield* Effect.serviceOption(HarnessSandboxPolicy));
+  /**
+   * Title and branch name come from a one-shot harness run (TextGeneration)
+   * outside the chat's session — outside the assistant sandbox too, and fed
+   * the first message, which a restricted assistant writes itself
+   * (create_thread). Such chats keep their given title instead.
+   */
+  const firstTurnGenerationAllowed = (threadId: ThreadId, cwd: string) =>
+    sandboxPolicy === undefined
+      ? Effect.succeed(true)
+      : sandboxPolicy
+          .decide({ threadId, cwd })
+          .pipe(Effect.map((decision) => decision._tag === "none"));
   const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
     attachments.length === 0
       ? null
@@ -919,13 +939,19 @@ const make = Effect.gen(function* () {
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     let titleAfterTurn: Effect.Effect<void> | undefined;
-    if (isFirstUserMessageTurn) {
-      const project = yield* resolveProject(thread.projectId);
-      const generationCwd =
-        resolveThreadWorkspaceCwd({
-          thread,
-          projects: project ? [project] : [],
-        }) ?? process.cwd();
+    const firstTurnProject = isFirstUserMessageTurn
+      ? yield* resolveProject(thread.projectId)
+      : null;
+    const firstTurnCwd =
+      resolveThreadWorkspaceCwd({
+        thread,
+        projects: firstTurnProject ? [firstTurnProject] : [],
+      }) ?? process.cwd();
+    if (
+      isFirstUserMessageTurn &&
+      (yield* firstTurnGenerationAllowed(event.payload.threadId, firstTurnCwd))
+    ) {
+      const generationCwd = firstTurnCwd;
       const generationInput = {
         messageText: message.text,
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
@@ -1220,6 +1246,44 @@ const make = Effect.gen(function* () {
     ) {
       const thread = yield* resolveThread(event.payload.threadId);
       if (!thread) {
+        return;
+      }
+      // An assistant's `ask_user` card (Hermes asks no questions itself): the
+      // daemon resolves it and hands the answer to the conversation as the
+      // person's next message — the provider never knew the request.
+      if (isAskCardRequest(event.payload.requestId)) {
+        const question = findAskCardQuestion(thread.activities, event.payload.requestId);
+        if (question === null) return;
+        const createdAt = event.payload.createdAt;
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("ask-card-resolved"),
+          threadId: event.payload.threadId,
+          activity: {
+            id: EventId.make(crypto.randomUUID()),
+            tone: "info",
+            kind: "user-input.resolved",
+            summary: "Answered",
+            payload: { requestId: event.payload.requestId, answers: event.payload.answers },
+            turnId: null,
+            createdAt,
+          },
+          createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: serverCommandId("ask-card-answer"),
+          threadId: event.payload.threadId,
+          message: {
+            messageId: MessageId.make(crypto.randomUUID()),
+            role: "user",
+            text: askCardAnswerText(question, event.payload.answers),
+            attachments: [],
+          },
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          createdAt,
+        });
         return;
       }
       const hasSession = thread.session && thread.session.status !== "stopped";

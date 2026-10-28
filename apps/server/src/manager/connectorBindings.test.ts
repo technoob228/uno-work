@@ -550,6 +550,34 @@ describe("decideThreadRouting for non-owner senders", () => {
     expect(routing.kind).toBe("reject");
   });
 
+  it("an Asks-first assistant's chat is created and reused in auto-accept-edits (its own mode)", () => {
+    const created = decideThreadRouting({
+      target: { kind: "assistant", projectId: assistantId },
+      mappedThread: null,
+      targetThread: null,
+      connectorModelSelection: uno,
+      projectModelSelection: null,
+      inheritedModes: null,
+      assistantRuntimeMode: "auto-accept-edits",
+    });
+    expect(created).toMatchObject({ kind: "create", runtimeMode: "auto-accept-edits" });
+    const reused = decideThreadRouting({
+      target: { kind: "assistant", projectId: assistantId },
+      mappedThread: shell({
+        projectId: assistantId,
+        runtimeMode: "full-access",
+        modelSelection: uno,
+      }),
+      targetThread: null,
+      connectorModelSelection: uno,
+      projectModelSelection: null,
+      inheritedModes: null,
+      assistantRuntimeMode: "auto-accept-edits",
+    });
+    // The turn runs in the assistant's mode even before the thread is realigned.
+    expect(reused).toMatchObject({ kind: "reuse", runtimeMode: "auto-accept-edits" });
+  });
+
   it("never reuses a full-access assistant thread and creates an approval-required one", () => {
     const routing = decideThreadRouting({
       target: { kind: "assistant", projectId: assistantId },

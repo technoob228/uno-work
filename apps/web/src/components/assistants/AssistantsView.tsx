@@ -1,8 +1,8 @@
 /**
  * Assistants — every assistant on the account.
  *
- * "New assistant" is one sentence → up to three questions → "Will do / Won't
- * do" → Create (`NewAssistantFlow.tsx`). By default (decision 02.10 evening)
+ * "New assistant" makes one in a click and opens its page
+ * (`useQuickCreateAssistant.tsx`, Misha 23.10). By default (decision 02.10 evening)
  * it lives on THIS computer, next to the others (`LocalAssistantPage.tsx`);
  * "Give it its own computer" makes it a Work computer of role `assistant`
  * (`AssistantPage.tsx`). Both pages have access, schedule, memory, models,
@@ -72,11 +72,14 @@ import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
 import { AssistantPage } from "./AssistantPage";
 import { AssistantProfilePage } from "./AssistantProfilePage";
-import { DEMO } from "../../demo/demoFlag";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
-import { NewAssistantFlow } from "./NewAssistantFlow";
+import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
+import { PersonaCreatorPage } from "./PersonaCreator";
+import { UnoSetupPage } from "./UnoSetupPage";
+import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { useTeamShown } from "./useAssistantTeam";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -117,9 +120,10 @@ export interface AssistantsRouteSearch {
    * default assistant; "card" — that assistant's card; "assistant" — the
    * page of the assistant on its own computer `box`; "local" — the page of
    * assistant `project` that lives on this computer; "profile" — the team
-   * page of assistant `project` on computer `env` (w0138 p7).
+   * page of assistant `project` on computer `env` (w0138 p7); "uno-setup" —
+   * Uno's first-run screen on computer `env` (AI, mode, apps; assistants D).
    */
-  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile" | "uno-setup";
   readonly box?: number;
   readonly project?: string;
   readonly env?: string;
@@ -171,9 +175,19 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
 export function AssistantsView() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
-  // The team page (w0138 p7) is mock-only: the release has Uno alone (Misha 16.10).
-  if (DEMO && search.view === "profile" && search.env && search.project) {
+  // The assistants update on the account, or the 16.10 mock (useAssistantsUpdate).
+  const teamShown = useTeamShown();
+  // The team page (w0138 p7): with the assistants update on the account, and in the mock.
+  if (teamShown && search.view === "profile" && search.env && search.project) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
+  }
+  // Variant D: Uno's first click when it isn't set up — AI, mode, apps, then its chat.
+  if (teamShown && search.view === "uno-setup") {
+    return <UnoSetupPage environmentId={search.env} />;
+  }
+  // Variant D: a new assistant is a persona from the gallery (Grok-style), next to Uno.
+  if (teamShown && search.view === "new") {
+    return <PersonaCreatorPage />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;
@@ -363,13 +377,8 @@ function AssistantsViewMvp() {
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">No computer is connected.</p>
             ) : creating ? (
-              <NewAssistantFlow
-                environmentId={environmentId}
-                boxId={activeBoxId}
-                machineLabel={machineLabel}
-                onOpen={(box) => setView("assistant", box)}
-                onOpenHere={(project) => setView("local", undefined, project)}
-              />
+              // One click (Misha 23.10): made at once, then its page.
+              <QuickCreateAssistantView />
             ) : settingUpHere && model.loading ? null : settingUpHere ? (
               <CreateAssistant
                 environmentId={environmentId}
@@ -496,9 +505,9 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
           An assistant that works while you don't
         </h1>
         <p className="text-sm text-muted-foreground">
-          Describe it in one sentence: it answers your customers, keeps your inbox in order or
-          prepares posts. It lives on this computer, or on its own, and opens only the apps you
-          allow.
+          Describe it in one sentence: it keeps your inbox in order, tracks your invoices or
+          prepares your next video. It lives on this computer, or on its own, and opens only the
+          apps you allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
@@ -763,7 +772,7 @@ const WHERE_OPTIONS: ReadonlyArray<{
   {
     id: "telegram",
     title: "Telegram",
-    body: "Its own bot: about a minute in @BotFather.",
+    body: "Its own bot, made in @BotFather.",
     icon: <TelegramMark className="size-5" />,
   },
   {
@@ -799,6 +808,8 @@ function CreateAssistant({
   const [saving, setSaving] = useState(false);
   const assistantChat = useAssistantChat();
   const connected = model.entity?.telegramOn === true || model.entity?.slackOn === true;
+  // Without the assistants update: the 0.0.156 words and AI picker.
+  const teamShown = useTeamShown();
 
   const saveProfile = async () => {
     setSaving(true);
@@ -887,7 +898,11 @@ function CreateAssistant({
               value={about}
               maxLength={ASSISTANT_ABOUT_MAX}
               rows={2}
-              placeholder="For example: answers my customers' questions about prices and opening hours"
+              placeholder={
+                teamShown
+                  ? "For example: keeps my calendar and sends me a plan for the day"
+                  : "For example: answers my customers' questions about prices and opening hours"
+              }
               onChange={(event) => setAbout(event.currentTarget.value)}
               data-testid="assistants-about"
             />
@@ -938,7 +953,11 @@ function CreateAssistant({
                       </span>
                     ) : null}
                   </span>
-                  <span className="block text-xs text-muted-foreground">{option.body}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {option.id === "telegram" && !teamShown
+                      ? "Its own bot: about a minute in @BotFather."
+                      : option.body}
+                  </span>
                 </span>
               </button>
             ))}
@@ -957,11 +976,20 @@ function CreateAssistant({
               </p>
             )}
           </div>
-          <AssistantPowerPicker
-            environmentId={environmentId}
-            heading={`What powers ${name.trim() || DEFAULT_ASSISTANT_NAME}`}
-            className="rounded-2xl border border-border p-4"
-          />
+          {teamShown ? (
+            <AssistantAiChoice
+              environmentId={environmentId}
+              name={name.trim() || DEFAULT_ASSISTANT_NAME}
+              computer={machineLabel}
+              className="rounded-2xl border border-border p-4"
+            />
+          ) : (
+            <AssistantPowerPicker
+              environmentId={environmentId}
+              heading={`What powers ${name.trim() || DEFAULT_ASSISTANT_NAME}`}
+              className="rounded-2xl border border-border p-4"
+            />
+          )}
           <div className="flex items-center justify-between gap-2">
             <Button variant="ghost" onClick={() => setStep(1)}>
               Back

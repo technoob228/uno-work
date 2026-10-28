@@ -132,6 +132,18 @@
       "types": "./src/assistantChat.ts",
       "import": "./src/assistantChat.ts"
     },
+    "./assistantPreset": {
+      "types": "./src/assistantPreset.ts",
+      "import": "./src/assistantPreset.ts"
+    },
+    "./assistantTeam": {
+      "types": "./src/assistantTeam.ts",
+      "import": "./src/assistantTeam.ts"
+    },
+    "./assistantMail": {
+      "types": "./src/assistantMail.ts",
+      "import": "./src/assistantMail.ts"
+    },
     "./assistantLlm": {
       "types": "./src/assistantLlm.ts",
       "import": "./src/assistantLlm.ts"

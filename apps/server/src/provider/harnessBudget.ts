@@ -12,6 +12,9 @@
  *
  * Overrides (for support and experiments), read once at startup:
  * - `UNO_WORK_HARNESS_IDLE_MINUTES` — idle time before a harness is stopped;
+ * - `UNO_WORK_ASSISTANT_IDLE_MINUTES` — the same for the assistant's
+ *   conversations (Telegram/Slack/desktop), kept warm longer: a cold Hermes
+ *   start is ~4 s on the person's next message;
  * - `UNO_WORK_MAX_LIVE_HARNESSES` — cap on live harness processes, `0` = none;
  * - `UNO_WORK_OPENCODE_SHARED_SERVER=0` — one OpenCode server per thread again.
  *
@@ -26,6 +29,13 @@ export const SMALL_MACHINE_MAX_MEMORY_BYTES = 4 * GIB;
 const SMALL_MACHINE_IDLE_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
 const SMALL_MACHINE_MAX_LIVE = 3;
+/**
+ * The assistant's conversations stay up this long. On a small machine the
+ * live-harness cap still applies (an idle conversation is the first evicted
+ * when a fourth harness starts), so the longer wait costs no extra process.
+ */
+const SMALL_MACHINE_ASSISTANT_IDLE_MS = 15 * 60 * 1000;
+const DEFAULT_ASSISTANT_IDLE_MS = 60 * 60 * 1000;
 /** The reaper sweeps this often relative to the idle threshold (bounded). */
 const SWEEP_FRACTION = 5;
 const MIN_SWEEP_MS = 30 * 1000;
@@ -33,6 +43,8 @@ const MAX_SWEEP_MS = 5 * 60 * 1000;
 
 export interface HarnessBudget {
   readonly inactivityThresholdMs: number;
+  /** Idle time before an assistant conversation's harness is stopped (≥ the general one). */
+  readonly assistantInactivityThresholdMs: number;
   readonly sweepIntervalMs: number;
   /** `null` — no cap. */
   readonly maxLiveProcesses: number | null;
@@ -61,6 +73,15 @@ export function resolveHarnessBudget(input?: {
       : small
         ? SMALL_MACHINE_IDLE_MS
         : DEFAULT_IDLE_MS;
+  const assistantIdleMinutes = positiveNumber(env.UNO_WORK_ASSISTANT_IDLE_MINUTES);
+  const assistantInactivityThresholdMs = Math.max(
+    inactivityThresholdMs,
+    assistantIdleMinutes !== undefined && assistantIdleMinutes > 0
+      ? Math.round(assistantIdleMinutes * 60 * 1000)
+      : small
+        ? SMALL_MACHINE_ASSISTANT_IDLE_MS
+        : DEFAULT_ASSISTANT_IDLE_MS,
+  );
   const sweepIntervalMs = Math.min(
     MAX_SWEEP_MS,
     Math.max(MIN_SWEEP_MS, Math.round(inactivityThresholdMs / SWEEP_FRACTION)),
@@ -78,6 +99,7 @@ export function resolveHarnessBudget(input?: {
 
   return {
     inactivityThresholdMs,
+    assistantInactivityThresholdMs,
     sweepIntervalMs,
     maxLiveProcesses,
     shareOpenCodeServer: env.UNO_WORK_OPENCODE_SHARED_SERVER?.trim() !== "0",

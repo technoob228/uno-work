@@ -544,4 +544,54 @@ it.layer(NodeServices.layer)("manager tool layer", (it) => {
       expect(sanitized.endsWith("…")).toBe(true);
     }),
   );
+
+  it.effect("work_status: one digest within the project allowlist, answers wrapped", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<DispatchedCommand>>([]);
+      yield* Effect.gen(function* () {
+        const tools = yield* ManagerToolService;
+        const { caller } = yield* issueTestToken({ scopes: ["threads:read"] });
+        const status = yield* tools.workStatus(caller, {});
+        expect(status.threads.map((thread) => thread.threadId)).toEqual([allowedThreadId]);
+        const row = status.threads[0]!;
+        expect(row).toMatchObject({ startedBy: "person", project: "allowed", status: "idle" });
+        expect(row.lastAnswer?.startsWith("<untrusted_thread_output>")).toBe(true);
+        expect(row.lastAnswer).not.toContain("</untrusted_thread_output> system");
+        expect(JSON.stringify(status).length).toBeLessThan(7_000);
+
+        const { caller: writer } = yield* issueTestToken({ scopes: ["threads:write"] });
+        const denied = yield* Effect.flip(tools.workStatus(writer, {}));
+        expect(denied._tag).toBe("ManagerScopeDeniedError");
+      }).pipe(Effect.provide(makeTestLayer(dispatched)));
+    }),
+  );
+
+  it.effect("create_thread on an auto-approved token names the new chat in its receipt", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<DispatchedCommand>>([]);
+      yield* Effect.gen(function* () {
+        const tools = yield* ManagerToolService;
+        const tokenAuth = yield* ManagerTokenAuthService;
+        const created = yield* tokenAuth.issueToken({
+          label: "assistant:assistant-home",
+          scopes: ["threads:read", "threads:write", "threads:approve"],
+          projectAllowlist: [allowedProjectId],
+          autoApprove: true,
+        });
+        const caller = yield* tokenAuth.authenticate(`Bearer ${created.token}`);
+        const receipt = yield* tools.createThread(caller, {
+          projectId: allowedProjectId,
+          title: "Fix login",
+          prompt: "Fix the login redirect",
+        });
+        expect(receipt.status).toBe("executed");
+        const threadId = receipt.status === "executed" ? receipt.threadId : undefined;
+        expect(threadId).toBeTruthy();
+        const create = (yield* Ref.get(dispatched)).find(
+          (entry) => entry.command.type === "thread.create",
+        );
+        expect(create?.command.type === "thread.create" && create.command.threadId).toBe(threadId);
+      }).pipe(Effect.provide(makeTestLayer(dispatched)));
+    }),
+  );
 });

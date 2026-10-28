@@ -98,6 +98,7 @@ import {
   personalAiAction,
 } from "./unoPersonalAi.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
+import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
@@ -270,6 +271,7 @@ const makeWsRpcLayer = (
       const serverBrowser = yield* ServerBrowser;
       const serverSettings = yield* ServerSettingsService;
       const credentialsVault = yield* CredentialsVaultService;
+      const projectSync = yield* ProjectSyncService;
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -1304,6 +1306,49 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.vaultFill, fillCredentialInBrowser(input), {
             "rpc.aggregate": "vault",
           }),
+        [WS_METHODS.projectSyncStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.projectSyncStatus, projectSync.status, {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncSetEnabled]: ({ projectId, enabled }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSyncSetEnabled,
+            projectSync.setEnabled(projectId, enabled),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        [WS_METHODS.projectSyncSyncNow]: ({ projectId }) =>
+          observeRpcEffect(WS_METHODS.projectSyncSyncNow, projectSync.syncNow(projectId), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncResolve]: ({ projectId, keep }) =>
+          observeRpcEffect(WS_METHODS.projectSyncResolve, projectSync.resolve(projectId, keep), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncGetHere]: ({ name }) =>
+          observeRpcEffect(WS_METHODS.projectSyncGetHere, projectSync.getHere(name), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncOpened]: ({ projectId }) =>
+          observeRpcEffect(WS_METHODS.projectSyncOpened, projectSync.opened(projectId), {
+            "rpc.aggregate": "projectSync",
+          }),
+        // Values go in (set) and never come back out: the list has names only.
+        [WS_METHODS.projectSecretsList]: ({ projectId }) =>
+          observeRpcEffect(WS_METHODS.projectSecretsList, projectSync.secretsList(projectId), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSecretsSet]: ({ projectId, name, value }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSecretsSet,
+            projectSync.secretSet(projectId, name, value),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        [WS_METHODS.projectSecretsRemove]: ({ projectId, name }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSecretsRemove,
+            projectSync.secretRemove(projectId, name),
+            { "rpc.aggregate": "projectSync" },
+          ),
         [WS_METHODS.workspaceGetState]: (_input) =>
           observeRpcEffect(WS_METHODS.workspaceGetState, workspaceRegistry.getState, {
             "rpc.aggregate": "workspace",

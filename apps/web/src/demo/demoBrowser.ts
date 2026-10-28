@@ -58,6 +58,7 @@ function app(
 }
 
 const APPS_BY_MACHINE: Record<DemoMachine["key"], () => UnoMachineApp[]> = {
+  own: () => [],
   product: () => [
     app("pult", "Пульт", "🎛", "Agents, questions and reports", demoSiteUrl("apps/pult.html")),
   ],

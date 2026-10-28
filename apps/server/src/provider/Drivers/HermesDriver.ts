@@ -13,6 +13,7 @@
  * @module provider/Drivers/HermesDriver
  */
 import {
+  ASSISTANT_PROJECT_ID,
   AI_PROVIDER_LABELS,
   ASSISTANT_HARNESS_INSTANCE_ID,
   HermesSettings,
@@ -63,6 +64,8 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
+import { assistantProfileBlock } from "../../assistants/profileHint.ts";
+import { readTeam } from "../../assistants/teamStore.ts";
 import {
   claudePluginInstalled,
   hermesSharedHome,
@@ -275,7 +278,11 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           acpMcpServers(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              // A sandboxed assistant's chat: no owner's servers, its assistant's yes.
+              custom: customMcpServers({
+                threadId: context.threadId,
+                sandboxed: context.sandboxed,
+              }),
             }),
           ),
         // ACP can't carry a tool timeout: without it Hermes cut uno-work calls
@@ -284,7 +291,11 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
           mcpToolTimeoutsSec(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              // A sandboxed assistant's chat: no owner's servers, its assistant's yes.
+              custom: customMcpServers({
+                threadId: context.threadId,
+                sandboxed: context.sandboxed,
+              }),
             }),
           ),
         assistantsEnabled: serverSettingsService.getSettings.pipe(
@@ -297,6 +308,13 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
             Effect.orElseSucceed(() => null),
             Effect.flatMap((uno) => Effect.promise(() => readComputerRole(uno))),
             Effect.map((role) => role === ASSISTANT_COMPUTER_ROLE),
+          ),
+        // Its duties and rules (team.json) in the assistant's system prompt.
+        assistantProfile: (projectId) =>
+          Effect.promise(() => readTeam(serverConfig.stateDir, projectId)).pipe(
+            Effect.map((team) =>
+              assistantProfileBlock(team, { isUno: projectId === ASSISTANT_PROJECT_ID }),
+            ),
           ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,

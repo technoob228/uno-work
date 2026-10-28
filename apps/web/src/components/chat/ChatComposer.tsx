@@ -164,6 +164,7 @@ import { RecordButton, screenRecordingAvailable } from "../../screenRecording/Re
 import { RecordingComposerCard } from "../../screenRecording/RecordingCards";
 import { prefilledInstruction } from "../../screenRecording/recordingLogic";
 import { useScreenRecordingStore } from "../../screenRecording/recordingStore";
+import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import type { ProjectUploadFile } from "../../projectUpload";
 import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projectUploadPickers";
 
@@ -1043,6 +1044,8 @@ export const ChatComposer = memo(
     // the chat's own selection on the daemon; turns carry exactly that.
     // Every conversation with Uno (0.0.85), not only the main one.
     const isAssistantChat = activeThread ? isAssistantConversation(activeThread) : false;
+    // Variant D: a persona's channel says its own name, not Uno's.
+    const persona = useTeammateOfThread(environmentId, activeThread?.id ?? "");
     const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
     const assistantEngine = isAssistantChat && assistantLlm.supported;
     const assistantSendBlock = assistantEngine
@@ -3620,11 +3623,13 @@ export const ChatComposer = memo(
                                     ? "reconnecting"
                                     : "disconnected"
                               }`
-                            : isAssistantChat
-                              ? "Ask Uno anything — it can start chats for you…"
-                              : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach files"
-                                : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                            : persona
+                              ? `Message ${persona.profile.name}…`
+                              : isAssistantChat
+                                ? "Ask Uno anything — it can start chats for you…"
+                                : phase === "disconnected"
+                                  ? "Ask for follow-up changes or attach files"
+                                  : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||

@@ -21,6 +21,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { MachineMenuItems, MachineStatusDot } from "./SettingsScopeSwitcher";
+import { useTeamShown } from "../assistants/useAssistantTeam";
 import { buildSettingsNavGroups, type SettingsNavGroup } from "./settingsNavGroups";
 import { useSettingsScopeModel, type SettingsScopeModel } from "./useSettingsScope";
 
@@ -40,6 +41,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   // 01.10: five entries without Dev mode; with it, everything after them.
   const devMode = useDevMode();
 
+  const assistantsUpdate = useTeamShown();
   const groups = useMemo(() => {
     const isFlagEnabled = (flag: FeatureFlagKey | undefined) =>
       flag === undefined || resolveFeatureFlag(flagOverrides, flag);
@@ -56,8 +58,16 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       isFlagEnabled,
       machine,
       mode: devMode ? "developer" : "simple",
+      assistantsUpdate,
     });
-  }, [devMode, flagOverrides, location.environmentId, selectedMachine, unknownMachine]);
+  }, [
+    assistantsUpdate,
+    devMode,
+    flagOverrides,
+    location.environmentId,
+    selectedMachine,
+    unknownMachine,
+  ]);
 
   const handleSectionClick = useCallback(
     (to: string) => {

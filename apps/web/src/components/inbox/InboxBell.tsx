@@ -24,6 +24,7 @@ import {
 } from "../../inbox/systemNotifications";
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
+import { useInboxWho } from "../assistants/PersonaMode";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -207,8 +208,14 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
+  // Variant D: which computer and which persona it is from (audit 27.10 #9).
+  const who = useInboxWho(
+    item.environmentId,
+    item.open?.kind === "thread" ? item.open.threadId : null,
+  );
   // "Uno set up assistant Scout": revoke right here (w0138 p7).
-  const assistantNotice = item.open?.kind === "url" ? assistantPageOfUrl(item.open.url) : null;
+  const assistantNotice =
+    item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
   const open = () => {
     onNavigate();
     void openItem(item);
@@ -249,9 +256,10 @@ const BellItem = memo(function BellItem({
                 {item.body}
               </span>
             ) : null}
-            {item.source.kind === "app" || item.count > 1 ? (
+            {item.source.kind === "app" || item.count > 1 || who ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
                 {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
+                {who ? <span data-testid="inbox-item-who">{who}</span> : null}
                 {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
               </span>
             ) : null}

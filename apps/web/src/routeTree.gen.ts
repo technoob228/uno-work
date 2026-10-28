@@ -17,6 +17,7 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsWorkspaceRouteImport } from './routes/settings.workspace'
 import { Route as SettingsVaultRouteImport } from './routes/settings.vault'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
+import { Route as SettingsSkillsRouteImport } from './routes/settings.skills'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
@@ -38,6 +39,7 @@ import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
 import { Route as ChatComputerRouteImport } from './routes/_chat.computer'
+import { Route as ChatAutomationsRouteImport } from './routes/_chat.automations'
 import { Route as ChatAssistantsRouteImport } from './routes/_chat.assistants'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAppRouteImport } from './routes/_chat.app'
@@ -97,6 +99,11 @@ const SettingsVaultRoute = SettingsVaultRouteImport.update({
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
   id: '/source-control',
   path: '/source-control',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSkillsRoute = SettingsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
@@ -202,6 +209,11 @@ const ChatDriveRoute = ChatDriveRouteImport.update({
 const ChatComputerRoute = ChatComputerRouteImport.update({
   id: '/computer',
   path: '/computer',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatAutomationsRoute = ChatAutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatAssistantsRoute = ChatAssistantsRouteImport.update({
@@ -329,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof ChatAppRoute
   '/assistant': typeof ChatAssistantRouteWithChildren
   '/assistants': typeof ChatAssistantsRoute
+  '/automations': typeof ChatAutomationsRoute
   '/computer': typeof ChatComputerRoute
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
@@ -350,6 +363,7 @@ export interface FileRoutesByFullPath {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -378,6 +392,7 @@ export interface FileRoutesByTo {
   '/ai': typeof ChatAiRoute
   '/app': typeof ChatAppRoute
   '/assistants': typeof ChatAssistantsRoute
+  '/automations': typeof ChatAutomationsRoute
   '/computer': typeof ChatComputerRoute
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
@@ -399,6 +414,7 @@ export interface FileRoutesByTo {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -431,6 +447,7 @@ export interface FileRoutesById {
   '/_chat/app': typeof ChatAppRoute
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
   '/_chat/assistants': typeof ChatAssistantsRoute
+  '/_chat/automations': typeof ChatAutomationsRoute
   '/_chat/computer': typeof ChatComputerRoute
   '/_chat/drive': typeof ChatDriveRoute
   '/_chat/files': typeof ChatFilesRoute
@@ -452,6 +469,7 @@ export interface FileRoutesById {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/security': typeof SettingsSecurityRoute
+  '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/vault': typeof SettingsVaultRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -485,6 +503,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/assistant'
     | '/assistants'
+    | '/automations'
     | '/computer'
     | '/drive'
     | '/files'
@@ -506,6 +525,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
+    | '/settings/skills'
     | '/settings/source-control'
     | '/settings/vault'
     | '/settings/workspace'
@@ -534,6 +554,7 @@ export interface FileRouteTypes {
     | '/ai'
     | '/app'
     | '/assistants'
+    | '/automations'
     | '/computer'
     | '/drive'
     | '/files'
@@ -555,6 +576,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
+    | '/settings/skills'
     | '/settings/source-control'
     | '/settings/vault'
     | '/settings/workspace'
@@ -586,6 +608,7 @@ export interface FileRouteTypes {
     | '/_chat/app'
     | '/_chat/assistant'
     | '/_chat/assistants'
+    | '/_chat/automations'
     | '/_chat/computer'
     | '/_chat/drive'
     | '/_chat/files'
@@ -607,6 +630,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/security'
+    | '/settings/skills'
     | '/settings/source-control'
     | '/settings/vault'
     | '/settings/workspace'
@@ -693,6 +717,13 @@ declare module '@tanstack/react-router' {
       path: '/source-control'
       fullPath: '/settings/source-control'
       preLoaderRoute: typeof SettingsSourceControlRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/skills': {
+      id: '/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof SettingsSkillsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/security': {
@@ -840,6 +871,13 @@ declare module '@tanstack/react-router' {
       path: '/computer'
       fullPath: '/computer'
       preLoaderRoute: typeof ChatComputerRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/automations': {
+      id: '/_chat/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof ChatAutomationsRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/assistants': {
@@ -1012,6 +1050,7 @@ interface ChatRouteChildren {
   ChatAppRoute: typeof ChatAppRoute
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
   ChatAssistantsRoute: typeof ChatAssistantsRoute
+  ChatAutomationsRoute: typeof ChatAutomationsRoute
   ChatComputerRoute: typeof ChatComputerRoute
   ChatDriveRoute: typeof ChatDriveRoute
   ChatFilesRoute: typeof ChatFilesRoute
@@ -1029,6 +1068,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatAppRoute: ChatAppRoute,
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
   ChatAssistantsRoute: ChatAssistantsRoute,
+  ChatAutomationsRoute: ChatAutomationsRoute,
   ChatComputerRoute: ChatComputerRoute,
   ChatDriveRoute: ChatDriveRoute,
   ChatFilesRoute: ChatFilesRoute,
@@ -1091,6 +1131,7 @@ interface SettingsRouteChildren {
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
+  SettingsSkillsRoute: typeof SettingsSkillsRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsVaultRoute: typeof SettingsVaultRoute
   SettingsWorkspaceRoute: typeof SettingsWorkspaceRoute
@@ -1117,6 +1158,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
+  SettingsSkillsRoute: SettingsSkillsRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsVaultRoute: SettingsVaultRoute,
   SettingsWorkspaceRoute: SettingsWorkspaceRoute,

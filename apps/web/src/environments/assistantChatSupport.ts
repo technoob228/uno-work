@@ -73,3 +73,28 @@ export function useEnvironmentSupportsAssistantConversations(
   }
   return saved;
 }
+
+/**
+ * Whether the daemon can hold an assistant on this computer to its projects
+ * with a sandbox (`assistantSandbox`). Absent / false: an assistant here sees
+ * every file; "Only selected projects" needs its own computer.
+ */
+export function descriptorSupportsAssistantSandbox(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.assistantSandbox === true;
+}
+
+export function useEnvironmentSupportsAssistantSandbox(
+  environmentId: EnvironmentId | string | null | undefined,
+): boolean {
+  const primary = usePrimaryEnvironmentDescriptor();
+  const saved = useSavedEnvironmentRuntimeStore((state) =>
+    environmentId
+      ? descriptorSupportsAssistantSandbox(state.byId[environmentId as EnvironmentId]?.descriptor)
+      : false,
+  );
+  if (!environmentId) return false;
+  if (primary?.environmentId === environmentId) return descriptorSupportsAssistantSandbox(primary);
+  return saved;
+}

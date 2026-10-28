@@ -21,7 +21,7 @@
  * plan stays in local storage (`pendingAssistantSetup`) so the assistant's
  * page can finish the setup once the computer answers.
  */
-import type { EnvironmentId, UnoSetupProgress } from "@t3tools/contracts";
+import type { AssistantPresetAccess, EnvironmentId, UnoSetupProgress } from "@t3tools/contracts";
 
 import { GOAL_KEY } from "../setup/goals";
 import {
@@ -271,6 +271,8 @@ export interface LocalCreateDeps {
     readonly name: string;
     readonly emoji: string;
     readonly template: string | null;
+    /** Its preset from the first token on. */
+    readonly access?: AssistantPresetAccess;
   }) => Promise<{ readonly projectId: string; readonly workspaceRoot: string | null }>;
   readonly readFile: (projectId: string, name: "AGENTS.md") => Promise<string>;
   readonly writeFile: (
@@ -317,6 +319,7 @@ export async function createLocalAssistant(
     name: plan.name,
     emoji: plan.emoji,
     template: plan.template,
+    ...(plan.access ? { access: plan.access } : {}),
   });
   const files = assistantFiles(plan, now);
   await deps.writeFile(projectId, "SOUL.md", files.soul);

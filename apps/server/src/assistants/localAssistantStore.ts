@@ -31,7 +31,10 @@ import {
   ASSISTANT_PROJECT_ID,
   isAssistantProjectId,
   type AssistantAppLevel,
+  type AssistantPreset,
+  type ManagerScope,
 } from "@t3tools/contracts";
+import { capAppLevel, type AssistantTokenAccess } from "@t3tools/shared/assistantPreset";
 
 /** How long a deleted assistant is kept (same as an assistant computer). */
 export const DELETED_ASSISTANT_KEEP_DAYS = 7;
@@ -78,6 +81,9 @@ function updateJson<A>(file: string, fallback: A, update: (current: A) => A): Pr
     return next;
   });
 }
+
+/** The same serialized JSON files, for neighbours (remote chats' ledgers). */
+export { readJson as readStoreJson, updateJson as updateStoreJson, storeDir as assistantStoreDir };
 
 // ── Apps an assistant may open ────────────────────────────────────────
 
@@ -138,12 +144,77 @@ export function connectorAccessDecision(
   access: AppAccess,
   provider: string,
   toolChangesThings: boolean,
+  /** The assistant's preset caps the level (Observer only reads). Absent: Full. */
+  preset: AssistantPreset = "full",
 ): "allow" | "none" | "read-only" {
-  if (!access.restricted) return "allow";
-  const level = access.permissions[provider] ?? "write";
+  const picked = access.restricted ? (access.permissions[provider] ?? "write") : "write";
+  const level = capAppLevel(picked, preset);
   if (level === "none") return "none";
   if (level === "read" && toolChangesThings) return "read-only";
   return "allow";
+}
+
+// ── What it may do (its preset, as token access) ──────────────────────
+
+/**
+ * The assistant's access (preset → scopes, projects, autoApprove), kept by
+ * the daemon so a new token gets it back: tokens are re-issued when the
+ * daemon port changes, on a cloned computer and on Restore. The live copy is
+ * the token itself; this file is what a fresh token starts from. Not in the
+ * assistant's folder, which the assistant can write.
+ */
+const accessFile = (stateDir: string, projectId: string) =>
+  nodePath.join(storeDir(stateDir), encodeURIComponent(projectId), "access.json");
+
+const SCOPES: ReadonlySet<string> = new Set([
+  "threads:read",
+  "threads:write",
+  "threads:approve",
+  "manager:memory",
+]);
+
+export function normalizeTokenAccess(raw: unknown): AssistantTokenAccess | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.scopes)) return null;
+  const scopes = record.scopes.filter(
+    (scope): scope is ManagerScope => typeof scope === "string" && SCOPES.has(scope),
+  );
+  const allowlist = record.projectAllowlist;
+  const projectAllowlist =
+    allowlist === "all"
+      ? ("all" as const)
+      : Array.isArray(allowlist)
+        ? allowlist.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : null;
+  if (projectAllowlist === null) return null;
+  return {
+    scopes,
+    projectAllowlist: projectAllowlist as AssistantTokenAccess["projectAllowlist"],
+    autoApprove: record.autoApprove === true,
+  };
+}
+
+export async function readStoredAccess(
+  stateDir: string,
+  projectId: string,
+): Promise<AssistantTokenAccess | null> {
+  return normalizeTokenAccess(await readJson<unknown>(accessFile(stateDir, projectId), null));
+}
+
+export function writeStoredAccess(
+  stateDir: string,
+  projectId: string,
+  access: AssistantTokenAccess,
+): Promise<void> {
+  const file = accessFile(stateDir, projectId);
+  return serialized(file, () =>
+    writeJson(file, {
+      scopes: access.scopes,
+      projectAllowlist: access.projectAllowlist,
+      autoApprove: access.autoApprove,
+    }),
+  );
 }
 
 // ── Which assistant started which chat ────────────────────────────────
@@ -300,7 +371,12 @@ export interface AssistantProfileFile {
   readonly emoji: string | null;
   readonly template: string | null;
   readonly createdAt: string | null;
+  /** Its picture's file in `.uno/` (`assistantAvatar.ts`); null = its emoji. */
+  readonly avatar?: string | null;
 }
+
+/** `avatar-<ms>.<ext>` — the only names an avatar file may have. */
+export const AVATAR_FILE_NAME = /^avatar-\d{1,16}\.(png|jpg|webp)$/;
 
 /** `.uno/profile.json` in the assistant's folder: what "New assistant" picked. */
 export const profilePath = (workspaceRoot: string) =>
@@ -316,11 +392,34 @@ export async function readProfile(workspaceRoot: string): Promise<AssistantProfi
     null,
   );
   if (raw === null) return null;
+  const avatar = profileText(raw.avatar, 40);
   return {
     emoji: profileText(raw.emoji, 16),
     template: profileText(raw.template, 40),
     createdAt: profileText(raw.createdAt, 40),
+    avatar: avatar !== null && AVATAR_FILE_NAME.test(avatar) ? avatar : null,
   };
+}
+
+/** Changes part of `.uno/profile.json`, keeping the rest (its picture too). */
+export function patchProfile(
+  workspaceRoot: string,
+  patch: Partial<AssistantProfileFile>,
+  now: Date = new Date(),
+): Promise<AssistantProfileFile> {
+  const file = profilePath(workspaceRoot);
+  return serialized(file, async () => {
+    const current = await readProfile(workspaceRoot);
+    const next: AssistantProfileFile = {
+      emoji: current?.emoji ?? null,
+      template: current?.template ?? null,
+      createdAt: current?.createdAt ?? now.toISOString(),
+      avatar: current?.avatar ?? null,
+      ...patch,
+    };
+    await writeJson(file, next);
+    return next;
+  });
 }
 
 export function writeProfile(workspaceRoot: string, profile: AssistantProfileFile): Promise<void> {

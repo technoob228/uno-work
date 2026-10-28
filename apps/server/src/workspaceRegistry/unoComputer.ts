@@ -109,6 +109,38 @@ export function computerKeyFor(creds: UnoComputerCredentials, targetBoxId: numbe
   return account.length > 0 && !account.startsWith(GATEWAY_KEY_PREFIX) ? account : "";
 }
 
+/**
+ * Каким ключом читать аккаунт целиком (`/auth/me`, список компьютеров,
+ * pairing-ссылки на другие компьютеры).
+ *
+ * Настоящий ключ аккаунта (ноутбук) — им. На облачной машине в `uno.apiKey`
+ * лежит ключ ИИ `unollm_`, консоль его не принимает (аудит 27.10 #1: «401»):
+ * тогда — токеном машины. Консоль пускает его на `/auth/me` всегда, на список
+ * компьютеров — при `machines:read`, на pairing чужого компьютера — при
+ * `machines:create` (человек включает их в Settings → Computer access).
+ */
+export function accountWideKeyFor(creds: Pick<UnoComputerCredentials, "accountKey" | "boxToken">): {
+  readonly key: string;
+  readonly kind: "account" | "machine" | "none";
+} {
+  const account = creds.accountKey.trim();
+  if (account.length > 0 && !account.startsWith(GATEWAY_KEY_PREFIX)) {
+    return { key: account, kind: "account" };
+  }
+  const machine = creds.boxToken.trim();
+  return machine.length > 0 ? { key: machine, kind: "machine" } : { key: "", kind: "none" };
+}
+
+/** Консоль: человек не дал токену машины это право (`WORK_MACHINE_SCOPE_DISABLED`). */
+export function isMachineScopeDisabled(cause: unknown): boolean {
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  return controlPlaneErrorStatus(cause) === 403 && raw.includes("WORK_MACHINE_SCOPE_DISABLED");
+}
+
+/** Что видит человек, когда этому компьютеру не разрешено видеть остальные. */
+export const MACHINES_READ_DISABLED_MESSAGE =
+  "This computer can't see your other computers yet. Allow it in the Uno console: Settings → Computer access.";
+
 function bind(ctx: UnoComputerClientContext): ControlPlaneFetch | null {
   const apiKey = ctx.apiKey.trim();
   if (apiKey.length === 0) return null;

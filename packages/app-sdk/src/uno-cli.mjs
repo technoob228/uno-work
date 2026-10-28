@@ -18,7 +18,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { mkdir, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import * as http from "node:http";
 import * as https from "node:https";
 import { constants as osConstants, homedir } from "node:os";
@@ -34,6 +34,7 @@ import {
   readRemote,
   slugName,
 } from "./git-remote-uno.mjs";
+import { getProject, syncProject } from "./uno-sync.mjs";
 
 export const MCP_PATH = "/api/uno-work/mcp";
 export const GUIDE_PATH = "/api/uno-work/guide";
@@ -54,8 +55,8 @@ export const USAGE = `uno — Uno Work from the shell (this computer and Uno Dri
   uno drive put <path...> [--to Folder/] Copy files or folders from this computer to Uno Drive
   uno drive get <key...> [--to ~/dir]    Copy Uno Drive files here (default ~/Uploads/YYYY-MM)
   uno drive link <key> [--days N]        A download link anyone can open (default 7 days, max 90)
-  uno project sync [dir] [--name N]      Save this git project to the Uno cloud (then: git push uno)
-  uno project get <name> [dir]           Get it on this computer (~/projects/<name>); again = pull
+  uno project sync [dir] [--name N]      Keep this folder in the Uno cloud (git or not; .env and keys never go)
+  uno project get <name> [dir]           Get it on this computer (~/projects/<name>); again = sync
   uno project ls [--json]                Projects in the Uno cloud
   uno guide [topic]                      How-to for Uno Work (storage, apps, app-sdk, ...)
   uno help
@@ -168,8 +169,8 @@ function positiveInt(/** @type {string | true | undefined} */ raw, /** @type {st
  *   | { kind: "drive-ls", folder: string, json: boolean }
  *   | { kind: "guide", topic: string }
  *   | { kind: "project-ls", json: boolean }
- *   | { kind: "project-sync", dir: string, name: string | null }
- *   | { kind: "project-get", name: string, dir: string }
+ *   | { kind: "project-sync", dir: string, name: string | null, json?: boolean }
+ *   | { kind: "project-get", name: string, dir: string, json?: boolean }
  *   | { kind: "delegate", argv: string[] }} Plan
  */
 
@@ -356,18 +357,19 @@ function planProject(argv, where) {
     }
     case "sync":
     case "save": {
-      const { positionals, flags } = splitArgs(rest, [{ name: "name", value: true }]);
+      const { positionals, flags } = splitArgs(rest, [{ name: "name", value: true }, JSON_FLAG]);
       if (positionals.length > 1) throw new UsageError("Usage: uno project sync [dir] [--name N]");
       const name = typeof flags.name === "string" ? projectName(flags.name) : null;
       return {
         kind: "project-sync",
         dir: absolutePath(positionals[0] ?? ".", where),
         name,
+        ...(flags.json ? { json: true } : {}),
       };
     }
     case "get":
     case "clone": {
-      const { positionals } = splitArgs(rest, []);
+      const { positionals, flags } = splitArgs(rest, [JSON_FLAG]);
       if (positionals.length < 1 || positionals.length > 2) {
         throw new UsageError("Usage: uno project get <name> [dir]");
       }
@@ -376,6 +378,7 @@ function planProject(argv, where) {
         kind: "project-get",
         name,
         dir: absolutePath(positionals[1] ?? path.join(where.home, "projects", name), where),
+        ...(flags.json ? { json: true } : {}),
       };
     }
     case undefined:
@@ -829,9 +832,14 @@ async function sharesHistory(name, state, at) {
 async function projectSync(planned, ctx) {
   const env = projectGitEnv(ctx.env);
   const top = await git(["rev-parse", "--show-toplevel"], { cwd: planned.dir, env });
-  if (top.code !== 0) {
-    throw new UnoCliError(
-      `${planned.dir} isn't a git project yet. Start one there: git init && git add -A && git commit -m "First version"`,
+  // A folder without git, or a caller that wants the result (the daemon, an
+  // agent): the sync engine — the same one "On all my computers" runs.
+  if (top.code !== 0 || planned.json) {
+    return syncOutcome(
+      await syncProject({ dir: planned.dir, name: planned.name }, { home: ctx.home, env: ctx.env }),
+      planned.json,
+      (result) =>
+        `Saved to your Uno cloud as ${result.name}. On another computer: uno project get ${result.name}`,
     );
   }
   const at = { cwd: top.stdout.trim(), env };
@@ -888,42 +896,33 @@ async function projectSync(planned, ctx) {
  * @param {{ env: NodeJS.ProcessEnv, home: string }} ctx
  */
 async function projectGet(planned, ctx) {
-  const env = projectGitEnv(ctx.env);
-  const { name, dir } = planned;
-  const entries = await readdir(dir).catch(() => null);
-  if (entries !== null) {
-    const top = await git(["rev-parse", "--show-toplevel"], { cwd: dir, env });
-    const remotes = top.code === 0 ? await git(["remote", "-v"], { cwd: dir, env }) : null;
-    const ours = remotes?.stdout
-      .split("\n")
-      .map((line) => line.split(/\s+/))
-      .find(([, url]) => url?.startsWith("uno::") && projectNameOf(url) === name)?.[0];
-    if (ours) {
-      if ((await gitAloud(["pull", "--ff-only", ours], { cwd: dir, env })) !== 0) {
-        throw new UnoCliError(
-          `Couldn't bring ${dir} up to date (see above). Commit or put aside local changes, then try again.`,
-        );
-      }
-      return `${dir} is up to date with your Uno cloud.`;
-    }
-    if (entries.length > 0) {
-      throw new UnoCliError(
-        `${dir} already exists and isn't the project "${name}". Pick another folder: uno project get ${name} <folder>`,
-      );
-    }
+  const existed = ((await readdir(planned.dir).catch(() => null)) ?? []).length > 0;
+  return syncOutcome(
+    await getProject({ name: planned.name, dir: planned.dir }, { home: ctx.home, env: ctx.env }),
+    planned.json,
+    (result) =>
+      existed
+        ? `${result.dir} is up to date with your Uno cloud.`
+        : `Ready in ${result.dir}. Save changes back from there with: uno project sync`,
+  );
+}
+
+/**
+ * What a sync says: JSON as is (--json), else a line for the person; a
+ * failure is thrown so the exit code says it too.
+ * @param {import("./uno-sync.mjs").SyncResult} result
+ * @param {boolean | undefined} json
+ * @param {(result: import("./uno-sync.mjs").SyncResult) => string} done
+ */
+function syncOutcome(result, json, done) {
+  if (json) {
+    if (!result.ok) process.exitCode = 1;
+    return JSON.stringify(result, null, 2);
   }
-  const state = await readRemote(openStorage({ home: ctx.home, env: ctx.env }), name);
-  if (Object.keys(state.refs).length === 0) {
-    throw new UnoCliError(
-      `There's no project "${name}" in your Uno cloud. See them: uno project ls`,
-    );
-  }
-  const parent = path.dirname(dir);
-  await mkdir(parent, { recursive: true });
-  if ((await gitAloud(["clone", "-o", "uno", `uno::${name}`, dir], { cwd: parent, env })) !== 0) {
-    throw new UnoCliError(`Couldn't get "${name}" (see above).`);
-  }
-  return `Ready in ${dir}. Save changes back from there with: uno project sync`;
+  if (!result.ok) throw new UnoCliError(result.message);
+  if (result.state === "conflict" || result.state === "empty") return result.message;
+  const extra = /aren't committed/.test(result.message) ? ` ${result.message}` : "";
+  return `${done(result)}${extra}`;
 }
 
 /**

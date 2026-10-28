@@ -9,6 +9,7 @@
  * @module ManagerAssistantService
  */
 import type {
+  AssistantPresetAccess,
   AssistantEditableFileName,
   ManagerAssistantSummary,
   ManagerDeletedAssistant,
@@ -90,6 +91,8 @@ export interface ManagerAssistantServiceShape {
     readonly name: string;
     readonly emoji?: string | undefined;
     readonly template?: string | null | undefined;
+    /** Its preset from the first token on (absent: Full, every project). */
+    readonly access?: AssistantPresetAccess | undefined;
   }) => Effect.Effect<{ readonly projectId: ProjectId }, ManagerAssistantError>;
   /**
    * Make sure THE assistant chat ("Uno", `assistantRole: "chat"`) exists and

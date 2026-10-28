@@ -57,6 +57,13 @@ export interface InboxActionsInput {
   readonly open: ChatOpenRequests | undefined;
   /** Approvals only: where the request stands (`usePendingApproval`). */
   readonly approvalPhase?: ApprovalPhase | null;
+  /**
+   * Approvals only: the row itself can be answered (`POST
+   * /api/uno-work/approval/from-inbox`) — an "Cautious" request that waits
+   * with no chat card to answer (assistants D). Only while the row is unread:
+   * the daemon keeps it unread until the person answers.
+   */
+  readonly answerableByRow?: boolean;
 }
 
 const OTHER: InboxItemActions = {
@@ -85,6 +92,23 @@ export function questionWaits(input: Pick<InboxActionsInput, "kind" | "unread" |
 
 export function resolveInboxItemActions(input: InboxActionsInput): InboxItemActions {
   const reason = inboxActionReason(input.kind);
+  if (
+    reason === "approval" &&
+    input.answerableByRow === true &&
+    input.unread &&
+    input.approvalPhase !== "pending" &&
+    input.approvalPhase !== "loading"
+  ) {
+    // The chat knows no card for it (or there is no chat): Allow / Decline by the row.
+    return {
+      reason,
+      buttons: input.hasThread ? ["allow", "decline", "view"] : ["allow", "decline"],
+      skip: false,
+      done: false,
+      snooze: false,
+      markRead: false,
+    };
+  }
   if (reason === "other" || !input.hasThread) return OTHER;
 
   if (reason === "approval") {

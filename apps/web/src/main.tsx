@@ -13,12 +13,17 @@ import { handleUncaughtRenderError } from "./fatalRecovery";
 import { installPreloadErrorReload } from "./staleBundle";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
-import { DEMO, DEMO_LOOM } from "./demo/demoFlag";
+import { DEMO, DEMO_ASSIST, DEMO_LOOM } from "./demo/demoFlag";
 
 // Demo mode (?demo=w0138): computers answered in the page from fixtures,
 // plus the "what to look at" panel and the variant switcher. Loaded only with the parameter.
 const DemoPanelLazy = React.lazy(() =>
-  DEMO_LOOM ? import("./demo/loom/LoomDemoPanel") : import("./demo/DemoPanel"),
+  DEMO_LOOM
+    ? import("./demo/loom/LoomDemoPanel")
+    : // The assistants base (VITE_DEMO=assist) has its own card: the account's state and scenes.
+      DEMO_ASSIST
+      ? import("./demo/assist/AssistPanel")
+      : import("./demo/DemoPanel"),
 );
 if (DEMO) {
   const { startDemo } = await import("./demo/demoBoot");

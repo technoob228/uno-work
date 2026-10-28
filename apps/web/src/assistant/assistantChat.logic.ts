@@ -183,7 +183,7 @@ export const ASSISTANT_VALUE_LINE =
 
 /** Why Uno's harness is not a choice (header chip, Settings). */
 export const ASSISTANT_HARNESS_NOTE =
-  "Uno always runs on Hermes: it keeps Uno's memory and tools the same in every conversation, in Telegram and in Slack, and works with any model. Pick the model and where the AI comes from instead.";
+  "Uno keeps its memory and tools the same in every conversation, in Telegram and in Slack. What it thinks with is one choice per computer: Uno AI, your Claude or ChatGPT plan, or your own key.";
 
 /** How a conversation is named in the Uno list. */
 export function assistantConversationLabel(

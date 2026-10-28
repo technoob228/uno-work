@@ -64,6 +64,17 @@ const rpcClientMock = {
     setEnabled: vi.fn(),
     setPluginEnabled: vi.fn(),
   },
+  projectSync: {
+    status: vi.fn(),
+    setEnabled: vi.fn(),
+    syncNow: vi.fn(),
+    resolve: vi.fn(),
+    getHere: vi.fn(),
+    opened: vi.fn(),
+    secretsList: vi.fn(),
+    secretsSet: vi.fn(),
+    secretsRemove: vi.fn(),
+  },
   filesystem: {
     browse: vi.fn(),
     readFile: vi.fn(),

@@ -5,7 +5,11 @@ import {
   collectTelegramMedia,
   describeNonFileContent,
   extractOutgoingFiles,
+  formatMediaDuration,
   isImageLikeMedia,
+  mediaLabel,
+  mediaLimitReply,
+  type TelegramMediaDescriptor,
   pickTelegramUploadMethod,
   sanitizeFileName,
   telegramIsDirectMessage,
@@ -71,6 +75,62 @@ describe("collectTelegramMedia", () => {
 
   it("returns nothing for a plain text message", () => {
     expect(collectTelegramMedia({ text: "hello" })).toEqual([]);
+  });
+});
+
+describe("media labels and limits", () => {
+  const base: TelegramMediaDescriptor = {
+    kind: "voice",
+    fileId: "f",
+    fileName: "voice.ogg",
+    mimeType: "audio/ogg",
+    durationSec: 42,
+    sizeBytes: 10_000,
+  };
+
+  it("formats Telegram durations as m:ss (h:mm:ss past an hour)", () => {
+    expect(formatMediaDuration(0)).toBe("0:00");
+    expect(formatMediaDuration(42)).toBe("0:42");
+    expect(formatMediaDuration(760)).toBe("12:40");
+    expect(formatMediaDuration(3725)).toBe("1:02:05");
+  });
+
+  it("labels voice, audio, video and video messages", () => {
+    expect(mediaLabel(base)).toBe("voice, 0:42");
+    expect(mediaLabel({ ...base, kind: "audio", fileName: "song.mp3", durationSec: 190 })).toBe(
+      'audio "song.mp3", 3:10',
+    );
+    expect(mediaLabel({ ...base, kind: "video", durationSec: 35 })).toBe("video, 0:35");
+    expect(mediaLabel({ ...base, kind: "video_note", durationSec: 12 })).toBe(
+      "video message, 0:12",
+    );
+    expect(mediaLabel({ ...base, durationSec: null })).toBe("voice");
+  });
+
+  it("refuses files over Telegram's 20 MB bot download limit, with the real size", () => {
+    expect(mediaLimitReply({ ...base, kind: "video", sizeBytes: 34 * 1024 * 1024 })).toBe(
+      "This file is 34 MB — Telegram lets bots download up to 20 MB. Send a shorter clip or a link.",
+    );
+    expect(mediaLimitReply({ ...base, kind: "document", sizeBytes: 20 * 1024 * 1024 })).toBeNull();
+  });
+
+  it("refuses video over 10 minutes and audio over 30", () => {
+    expect(mediaLimitReply({ ...base, kind: "video", durationSec: 760 })).toBe(
+      "This video is too long (12:40). I can take up to 10 minutes of video.",
+    );
+    expect(mediaLimitReply({ ...base, kind: "video", durationSec: 600 })).toBeNull();
+    expect(mediaLimitReply({ ...base, durationSec: 31 * 60 })).toBe(
+      "This voice message is too long (31:00). I can take up to 30 minutes of audio.",
+    );
+    expect(mediaLimitReply({ ...base, kind: "audio", durationSec: 29 * 60 })).toBeNull();
+    expect(mediaLimitReply({ ...base, kind: "document", durationSec: 99_999 })).toBeNull();
+  });
+
+  it("keeps Telegram's preview frame of a video", () => {
+    const [video] = collectTelegramMedia({
+      video: { file_id: "v", duration: 5, thumbnail: { file_id: "thumb", width: 320 } },
+    });
+    expect(video?.thumbnailFileId).toBe("thumb");
   });
 });
 

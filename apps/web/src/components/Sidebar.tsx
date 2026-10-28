@@ -198,6 +198,13 @@ import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
 import { SidebarMyUnoRow } from "./sidebar/SidebarMyUnoRow";
 import { ProjectRenameDialog, type ProjectRenameTarget } from "./sidebar/ProjectRenameDialog";
+import {
+  ProjectSettingsDialog,
+  type ProjectSettingsTarget,
+} from "./projectSync/ProjectSettingsDialog";
+import { ProjectSyncMark, ProjectsElsewhere, mostUrgent } from "./projectSync/ProjectSyncParts";
+import { toggleMenuLabel } from "./projectSync/projectSync.logic";
+import { useProjectSyncStatuses, useRefreshProjectSync } from "./projectSync/useProjectSync";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { setThreadAgentsClosed } from "../agentsAccess";
 import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
@@ -263,7 +270,14 @@ import {
 import { DEMO, demoHooks, useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import { SidebarAssistants } from "./sidebar/SidebarAssistants";
+import { StartedByFace, type StartedByView, useStartedBy } from "./sidebar/useStartedBy";
+import {
+  passesAssistantChatsFilter,
+  startedByElsewhere,
+  startedByKey,
+} from "./sidebar/startedBy.logic";
 import { isTeamConversation } from "./assistants/assistantTeam.logic";
+import { useTeamShown } from "./assistants/useAssistantTeam";
 import {
   type DRowMark,
   dRowMark,
@@ -331,6 +345,7 @@ const HELPER_SCOPE = "helper";
 const ALL_SCOPE = "all";
 
 const EMPTY_THREADS: readonly SidebarThreadSummary[] = [];
+const NO_PROJECTS: readonly Project[] = [];
 
 function threadKeyOf(thread: Pick<SidebarThreadSummary, "environmentId" | "id">): string {
   return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -554,6 +569,8 @@ const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
 /** The title menu's filters, choices of this device (null — all). */
 const SIDEBAR_D_PROJECT_FILTER_KEY = "uno-work:sidebar:project-filter";
 const SIDEBAR_D_COMPUTER_FILTER_KEY = "uno-work:sidebar:computer-filter";
+/** "Assistants' chats" off in the title menu (28.10): only the person's own chats. */
+const SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY = "uno-work:sidebar:hide-assistant-chats";
 
 /** Sidebar D: "Projects", "Recents" — quiet labels between the groups. */
 function SidebarDSectionLabel(props: { label: string }) {
@@ -665,6 +682,8 @@ function SidebarDProjectRow(props: {
   onMenu?: ((position: { x: number; y: number }) => void) | null;
   /** Double-click on the name renames the project. */
   onRename?: (() => void) | null;
+  /** "On all my computers": ✓ / ↻ / ⚠ after the name. */
+  sync?: ReactNode;
 }) {
   const { onMenu, onRename } = props;
   return (
@@ -700,6 +719,7 @@ function SidebarDProjectRow(props: {
             />
           </span>
           <span className="min-w-0 truncate">{props.name}</span>
+          {props.sync ?? null}
           {props.computers ? (
             <span className="inline-flex shrink-0 items-center gap-0.5">{props.computers}</span>
           ) : null}
@@ -807,6 +827,11 @@ interface SidebarThreadRowProps {
   nested?: boolean;
   /** Sidebar D: started by Uno — its small face before the title. */
   fromUno?: boolean;
+  /**
+   * Sidebar D with the assistants (28.10): who started the chat — its face
+   * before the title, "Started by Mia" on hover. Wins over `fromUno`.
+   */
+  startedBy?: StartedByView | null;
   /** Sidebar D: whether the computer's mark shows (default: on any other computer). */
   showMachine?: boolean;
   /**
@@ -1227,7 +1252,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
             className={cn("flex min-w-0 flex-1 items-center gap-2", hasActions && D_ROW_FADE)}
           >
-            {props.fromUno ? <UnoFace className="size-3.5" title="Started by Uno" /> : null}
+            {props.startedBy ? (
+              <StartedByFace startedBy={props.startedBy} threadId={thread.id} />
+            ) : props.fromUno ? (
+              <UnoFace className="size-3.5" title="Started by Uno" />
+            ) : null}
             {isRenaming ? (
               title
             ) : (
@@ -1725,8 +1754,10 @@ export default function Sidebar() {
   // with the project on each row, computers. Off — the 0.0.137 sidebar.
   const sidebarViewMenu = useFeatureFlag("sidebarViewMenu");
   // Labs "Uno's chats in the sidebar" (w0138 p6–p7): the assistants on top,
-  // each unfolding its chats. Off — the 0.0.137 Uno row.
-  const assistantChatsInSidebar = useFeatureFlag("assistantChatsInSidebar");
+  // each unfolding its chats. Off — the 0.0.137 Uno row. With the team of
+  // assistants on the account (22.10) the block is there regardless.
+  const teamShown = useTeamShown();
+  const assistantChatsInSidebar = useFeatureFlag("assistantChatsInSidebar") || teamShown;
   const environmentScopeSetting = useSettings((s) => s.sidebarEnvironmentScope);
   const machineScope = useMemo(
     () =>
@@ -1759,7 +1790,7 @@ export default function Sidebar() {
           ),
     ),
   );
-  const threads = useStore(
+  const scopeThreads = useStore(
     useShallow((store) =>
       machineScope.kind === "all-environments"
         ? selectSidebarThreadsAcrossEnvironments(store)
@@ -1768,6 +1799,39 @@ export default function Sidebar() {
             machineScope.kind === "environment" ? machineScope.environmentId : null,
           ),
     ),
+  );
+  // Assistants D (Misha 28.10): the chats an assistant started sit in the
+  // common list with "started by <name>"; with one computer in view, the
+  // ones started on the other computers come along with their computer.
+  // Gating (28.10): only with the assistants update — not for Labs alone.
+  const dStartedByInList = !railLayout && teamShown;
+  const startedBy = useStartedBy(dStartedByInList);
+  const startedByOutOfView = useMemo(
+    () =>
+      dStartedByInList
+        ? startedByElsewhere({
+            threads: startedBy.threads,
+            startedBy: startedBy.byKey,
+            inView: machineScope.kind === "environment" ? machineScope.environmentId : null,
+          })
+        : EMPTY_THREADS,
+    [dStartedByInList, machineScope, startedBy],
+  );
+  const threads = useMemo(
+    () =>
+      startedByOutOfView.length === 0 ? scopeThreads : [...scopeThreads, ...startedByOutOfView],
+    [scopeThreads, startedByOutOfView],
+  );
+  // Their projects name them (the list's own projects stay this computer's).
+  const allProjectsForOutOfView = useStore(
+    useShallow((store) =>
+      startedByOutOfView.length > 0 ? selectProjectsAcrossEnvironments(store) : NO_PROJECTS,
+    ),
+  );
+  const [dHideAssistantChats, setDHideAssistantChats] = useLocalStorage(
+    SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY,
+    false,
+    Schema.Boolean,
   );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
@@ -1839,10 +1903,19 @@ export default function Sidebar() {
       ),
     [assistantChatId, threads],
   );
-  const projectByKey = useMemo(
-    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
-    [projects],
-  );
+  const projectByKey = useMemo(() => {
+    const map = new Map<string, Project>(
+      projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
+    );
+    if (startedByOutOfView.length > 0) {
+      const wanted = new Set(startedByOutOfView.map(projectKeyOf));
+      for (const project of allProjectsForOutOfView) {
+        const key = `${project.environmentId}:${project.id}`;
+        if (wanted.has(key) && !map.has(key)) map.set(key, project);
+      }
+    }
+    return map;
+  }, [allProjectsForOutOfView, projects, startedByOutOfView]);
   const projectDisplayNameByKey = useMemo(() => {
     const map = new Map<string, string>();
     for (const group of projectGroups) {
@@ -1967,6 +2040,18 @@ export default function Sidebar() {
       if (thread.archivedAt !== null) return false;
       // A chat Uno opened by itself that nobody wrote in yet is noise.
       if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
+      const byAssistant =
+        dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
+      if (
+        !passesAssistantChatsFilter({
+          hidden: dStartedByInList && dHideAssistantChats,
+          startedByAssistant: byAssistant,
+          isOpen: threadKeyOf(thread) === routeThreadKey,
+          pinned: thread.pinnedAt != null,
+        })
+      ) {
+        return false;
+      }
       // The Uno chat is pinned on top of the sidebar, never in the list.
       if (assistantChatId !== null && thread.id === assistantChatId) return false;
       const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
@@ -1977,6 +2062,8 @@ export default function Sidebar() {
         // A conversation with Uno shows under the Uno row (unfolded while
         // it is open), never twice.
         if (showAssistantRow && isTeamConversation(thread)) return false;
+        // A chat an assistant started in its own folder: in the list, "started by".
+        if (byAssistant) return true;
         return threadKeyOf(thread) === routeThreadKey;
       }
       // The open chat stays listed even when the scope is another project.
@@ -1995,12 +2082,15 @@ export default function Sidebar() {
     };
   }, [
     assistantChatId,
+    dHideAssistantChats,
+    dStartedByInList,
     isHelperScope,
     now,
     routeThreadKey,
     showAssistantRow,
     scopedProjectKeys,
     sidebarThreadSortOrder,
+    startedBy.byKey,
     threads,
   ]);
 
@@ -2164,8 +2254,10 @@ export default function Sidebar() {
     const activeKeys = new Set(activeThreads.map(threadKeyOf));
     // Uno's running chats may live in the assistant's own folder, which the
     // main list keeps out: they still show under Uno while they run.
+    // With the assistants (28.10) they are in the list instead, "started by".
     const unoRunningElsewhere = threads.filter(
       (thread) =>
+        !dStartedByInList &&
         thread.archivedAt === null &&
         thread.id !== assistantChatId &&
         !activeKeys.has(threadKeyOf(thread)) &&
@@ -2175,7 +2267,7 @@ export default function Sidebar() {
     );
     return groupChatsForSidebarD({
       chats: [...activeThreads, ...unoRunningElsewhere],
-      isFromUno: (thread) => isFromAssistant(thread, assistantChatId),
+      isFromUno: (thread) => !dStartedByInList && isFromAssistant(thread, assistantChatId),
       isRunning: (thread) => isRunningStatus(resolveSidebarThreadStatus(thread)),
       projectOf: sidebarViewMenu
         ? dGroupOf
@@ -2207,6 +2299,7 @@ export default function Sidebar() {
     activeThreads,
     assistantChatId,
     dGroupOf,
+    dStartedByInList,
     dHomeFolderPath,
     dProjectInfo,
     pinnedThreads,
@@ -2916,6 +3009,71 @@ export default function Sidebar() {
   }, [attemptSnooze, snoozePickerTarget, snoozePickerWake]);
   const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRenameTarget | null>(null);
+  // "On all my computers": each computer's daemon syncs its own projects.
+  const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
+    null,
+  );
+  // Gating (28.10): "On all my computers" is part of the assistants update.
+  const projectSyncEnvironments = useMemo(
+    () => (teamShown ? projects.map((project) => project.environmentId) : []),
+    [projects, teamShown],
+  );
+  const projectSync = useProjectSyncStatuses(projectSyncEnvironments);
+  const refreshProjectSync = useRefreshProjectSync();
+  const syncEntryOf = useCallback(
+    (project: Project) => projectSync.entries.get(`${project.environmentId}:${project.id}`) ?? null,
+    [projectSync.entries],
+  );
+  const openProjectSettings = useCallback(
+    (project: Project) =>
+      setProjectSettingsTarget({
+        environmentId: project.environmentId,
+        projectId: project.id,
+        name: project.name,
+        cwd: project.cwd,
+      }),
+    [],
+  );
+  const toggleProjectSync = useCallback(
+    async (project: Project) => {
+      const api = readEnvironmentApi(project.environmentId);
+      if (!api) return;
+      const enabled = !(syncEntryOf(project)?.enabled ?? false);
+      const current = syncEntryOf(project);
+      if (enabled) {
+        refreshProjectSync(project.environmentId, {
+          projectId: project.id,
+          enabled: true,
+          name: current?.name ?? null,
+          mode: current?.mode ?? null,
+          state: "syncing",
+          message: "",
+          lastSyncedAt: current?.lastSyncedAt ?? null,
+          conflict: null,
+        });
+      }
+      try {
+        const entry = await api.projectSync.setEnabled({ projectId: project.id, enabled });
+        refreshProjectSync(project.environmentId, entry);
+        if (enabled && entry.state !== "synced" && entry.state !== "empty") {
+          toastManager.add({
+            type: entry.state === "conflict" ? "warning" : "error",
+            title:
+              entry.state === "conflict" ? "Synced with a conflict" : `${project.name} didn't sync`,
+            description: entry.message,
+          });
+        }
+      } catch (error) {
+        refreshProjectSync(project.environmentId);
+        toastManager.add({
+          type: "error",
+          title: enabled ? "Couldn't put it on all your computers" : "Couldn't turn it off",
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [refreshProjectSync, syncEntryOf],
+  );
 
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) =>
@@ -3501,6 +3659,11 @@ export default function Sidebar() {
             ? isFromAssistant(thread, assistantChatId)
             : false
         }
+        startedBy={
+          options?.d === true && dStartedByInList
+            ? (startedBy.byKey.get(startedByKey(thread.environmentId, thread.id)) ?? null)
+            : null
+        }
         section={section}
         isActive={routeThreadKey === threadKey}
         jumpLabel={showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
@@ -3646,6 +3809,10 @@ export default function Sidebar() {
         target={projectRenameTarget}
         onClose={() => setProjectRenameTarget(null)}
       />
+      <ProjectSettingsDialog
+        target={projectSettingsTarget}
+        onClose={() => setProjectSettingsTarget(null)}
+      />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}
@@ -3727,6 +3894,11 @@ export default function Sidebar() {
     underComputer: boolean,
     projectComputers: ReadonlyArray<string> | null,
   ) =>
+    // A chat an assistant started on another computer, while one is in view.
+    (dStartedByInList &&
+      !dMultiComputer &&
+      dThisComputer !== null &&
+      thread.environmentId !== dThisComputer) ||
     chatRowShowsComputer({
       chatComputer: thread.environmentId,
       thisComputer: dThisComputer,
@@ -3737,6 +3909,12 @@ export default function Sidebar() {
   const dNewChatIn = (project: Project) => () => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
+    // On all my computers: bring the other computers' changes before work starts here.
+    if (syncEntryOf(project)?.enabled) {
+      void readEnvironmentApi(project.environmentId)
+        ?.projectSync.opened({ projectId: project.id })
+        .catch(() => undefined);
+    }
     void newThreadContext.handleNewThread(scopeProjectRef(project.environmentId, project.id), {
       envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
     });
@@ -3769,12 +3947,31 @@ export default function Sidebar() {
           label: "Copy path",
           run: (member: Project) => copyPathToClipboard(member.cwd, { path: member.cwd }),
         },
+        ...(teamShown
+          ? [
+              {
+                id: "sync",
+                label: "On all my computers",
+                labelFor: (member: Project) =>
+                  toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
+                run: (member: Project) => void toggleProjectSync(member),
+              },
+              {
+                id: "settings",
+                label: "Project settings…",
+                run: (member: Project) => openProjectSettings(member),
+              },
+            ]
+          : []),
       ];
       const items: ContextMenuItem<string>[] = actions.map((action) => {
         if (members.length === 1) {
           const only = members[0]!;
           handlers.set(action.id, () => action.run(only));
-          return { id: action.id, label: action.label };
+          return {
+            id: action.id,
+            label: "labelFor" in action ? action.labelFor(only) : action.label,
+          };
         }
         return {
           id: `${action.id}:submenu`,
@@ -3782,9 +3979,10 @@ export default function Sidebar() {
           children: members.map((member) => {
             const id = `${action.id}:${member.environmentId}:${member.id}`;
             handlers.set(id, () => action.run(member));
+            const where = resolveEnvironmentLabel(member.environmentId) ?? member.environmentId;
             return {
               id,
-              label: resolveEnvironmentLabel(member.environmentId) ?? member.environmentId,
+              label: "labelFor" in action && syncEntryOf(member)?.enabled ? `✓ ${where}` : where,
             };
           }),
         };
@@ -3878,6 +4076,28 @@ export default function Sidebar() {
             <SidebarDProjectRow
               name={block.name}
               home={block.isHome}
+              sync={
+                block.isHome ? null : (
+                  <ProjectSyncMark
+                    entry={mostUrgent(
+                      block.members.map(syncEntryOf).filter((entry) => entry !== null),
+                    )}
+                    onOpen={() => {
+                      const member =
+                        block.members.find((item) => {
+                          const state = syncEntryOf(item)?.state;
+                          return (
+                            state === "conflict" ||
+                            state === "blocked" ||
+                            state === "error" ||
+                            state === "too-big"
+                          );
+                        }) ?? block.members[0];
+                      if (member) openProjectSettings(member);
+                    }}
+                  />
+                )
+              }
               computers={dRowChips(block.computers, underComputer)}
               folded={folded}
               mark={foldedProjectMark(
@@ -3957,6 +4177,14 @@ export default function Sidebar() {
             <ul role="list" className="flex flex-col gap-px">
               <SidebarDProjectRow
                 name={group.name}
+                sync={
+                  project ? (
+                    <ProjectSyncMark
+                      entry={syncEntryOf(project)}
+                      onOpen={() => openProjectSettings(project)}
+                    />
+                  ) : null
+                }
                 folded={folded}
                 mark={foldedProjectMark(
                   group.chats.map((thread) =>
@@ -4079,6 +4307,7 @@ export default function Sidebar() {
                 title={sidebarDTitle({
                   projectNames: dPickedProjectNames,
                   computerNames: dPickedComputerNames,
+                  assistantChatsHidden: dStartedByInList && dHideAssistantChats,
                 })}
                 groupInHeader={dGroupInHeader}
                 levels={dLevelsChosen}
@@ -4099,7 +4328,13 @@ export default function Sidebar() {
                 onClearFilters={() => {
                   setDProjectPicks(null);
                   setDComputerPicks(null);
+                  setDHideAssistantChats(false);
                 }}
+                assistantChatsFilter={
+                  dStartedByInList
+                    ? { hidden: dHideAssistantChats, onChange: setDHideAssistantChats }
+                    : null
+                }
                 onNewChat={handleNewThreadClick}
                 newChatShortcutLabel={newChatShortcutLabel}
                 onAddProject={handleAddProject}
@@ -4107,6 +4342,19 @@ export default function Sidebar() {
             )}
             {dShowAddProject ? <SidebarAddProjectButton onAddProject={handleAddProject} /> : null}
             {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
+            {dThisComputer
+              ? (() => {
+                  const here = projectSync.statuses.find(
+                    (item) => item.environmentId === dThisComputer,
+                  );
+                  return here?.status ? (
+                    <ProjectsElsewhere
+                      environmentId={here.environmentId}
+                      projects={here.status.elsewhere}
+                    />
+                  ) : null;
+                })()
+              : null}
             {!dLegacyInbox && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="snoozed"

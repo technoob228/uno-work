@@ -16,6 +16,7 @@ import {
   ShieldCheckIcon,
   ArchiveIcon,
   BlocksIcon,
+  BookOpenIcon,
   BotIcon,
   CircleUserIcon,
   CodeIcon,
@@ -36,7 +37,6 @@ import {
 } from "lucide-react";
 import type { ComponentType } from "react";
 
-import { DEMO } from "../../demo/demoFlag";
 import type { FeatureFlagKey } from "../../featureFlags";
 import {
   appSettingsPath,
@@ -151,35 +151,26 @@ export const SIMPLE_SETTINGS_PATHS = {
   account: "/settings/account",
   ai: "/settings/ai",
   connectors: "/settings/connectors",
+  skills: "/settings/skills",
   assistants: "/settings/assistants-phone",
   computer: "/settings/computer",
   developer: "/settings/developer",
 } as const;
 
-/**
- * The simple entries. Connectors (16.10: the apps the AI works in — one
- * place, teammates pick from it) is only in the mock for now (Misha 16.10:
- * the team and its access ship later); the release keeps the five.
- */
-export function simpleNavEntries(withConnectors = DEMO): ReadonlyArray<SettingsNavEntry> {
-  return [
-    { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
-    { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
-    ...(withConnectors
-      ? [{ label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon }]
-      : []),
-    { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
-    { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
-    { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
-  ];
-}
-
-export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = simpleNavEntries();
+/** The simple entries. Connectors and Skills are here, not only in setup (Misha 20.10). */
+export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
+  { label: "Account & plan", to: SIMPLE_SETTINGS_PATHS.account, icon: CircleUserIcon },
+  { label: "AI", to: SIMPLE_SETTINGS_PATHS.ai, icon: SparklesIcon },
+  { label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon },
+  { label: "Skills", to: SIMPLE_SETTINGS_PATHS.skills, icon: BookOpenIcon },
+  { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
+  { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+  { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
+];
 
 export const SIMPLE_NAV_GROUP_HEADING = "Settings";
 
-export function isSimpleSettingsPath(pathname: string, withConnectors = DEMO): boolean {
-  if (pathname === SIMPLE_SETTINGS_PATHS.connectors) return withConnectors;
+export function isSimpleSettingsPath(pathname: string): boolean {
   return (Object.values(SIMPLE_SETTINGS_PATHS) as ReadonlyArray<string>).includes(pathname);
 }
 
@@ -204,11 +195,23 @@ export function buildSettingsNavGroups(input: {
    * then everything. "classic" (default): everything, as before 01.10.
    */
   readonly mode?: "classic" | "simple" | "developer";
+  /**
+   * The account has the assistants update (gating 28.10). Off: Connectors
+   * and Skills aren't in the simple entries, as in 0.0.156.
+   */
+  readonly assistantsUpdate?: boolean;
 }): ReadonlyArray<SettingsNavGroup> {
   const simpleGroup: SettingsNavGroup = {
     kind: "simple",
     heading: SIMPLE_NAV_GROUP_HEADING,
-    entries: SIMPLE_NAV_ENTRIES,
+    entries:
+      input.assistantsUpdate === false
+        ? SIMPLE_NAV_ENTRIES.filter(
+            (entry) =>
+              entry.to !== SIMPLE_SETTINGS_PATHS.connectors &&
+              entry.to !== SIMPLE_SETTINGS_PATHS.skills,
+          )
+        : SIMPLE_NAV_ENTRIES,
   };
   if (input.mode === "simple") return [simpleGroup];
   const appEntries: SettingsNavEntry[] = [

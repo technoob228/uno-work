@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Builds the Loom Work demo (VITE_DEMO=loom) and publishes it on Uno Sites
-# under a password:
-#   demo-e2e/publish-demo.sh            → https://misha-loom-work-1028.uno4.me
-#   SLUG=... PASSWORD=... demo-e2e/publish-demo.sh
+# Builds the assistants demo and publishes it on Uno Sites under a password:
+#   demo-e2e/publish-demo.sh <variant>      → https://misha-assistants-<variant>-1028.uno4.me
+#   SLUG=... PASSWORD=... demo-e2e/publish-demo.sh base
 #
 # Why not site_publish (uno-work MCP): on Work before 0.0.156 it gave up on a
 # build this size (~28 MB). This uploads the zip to the console's deploy API
@@ -13,8 +12,9 @@
 # The key: $UNO_DEPLOY_KEY, else read from the prod DB over SSH (account 85,
 # never printed).
 set -euo pipefail
-slug="${SLUG:-misha-loom-work-1028}"
-password="${PASSWORD:?set PASSWORD=… (not stored in the repo)}"
+variant="${1:?usage: publish-demo.sh <variant>}"
+slug="${SLUG:-misha-assistants-${variant}-1028}"
+password="${PASSWORD:-duet-four-ways-1027}"
 web="$(cd "$(dirname "$0")/.." && pwd)"
 out="$web/dist-demo"
 console="${UNO_CONSOLE:-https://console.uno4.dev}"
