@@ -111,7 +111,10 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import packageJson from "../package.json" with { type: "json" };
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
-const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
+// No icon of its own: a 404, so the client draws the project's two letters
+// (ProjectFavicon). A stand-in image here would load "successfully" and hide
+// them. Short cache: an icon added later shows up within minutes.
+const MISSING_PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=300";
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 
 // Which origins may talk to the daemon cross-origin lives in corsOrigins.ts
@@ -886,11 +889,10 @@ export const projectFaviconRouteLayer = HttpRouter.add(
     const faviconResolver = yield* ProjectFaviconResolver;
     const faviconFilePath = yield* faviconResolver.resolvePath(projectCwd);
     if (!faviconFilePath) {
-      return HttpServerResponse.text(FALLBACK_PROJECT_FAVICON_SVG, {
-        status: 200,
-        contentType: "image/svg+xml",
+      return HttpServerResponse.text("No project icon", {
+        status: 404,
         headers: {
-          "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+          "Cache-Control": MISSING_PROJECT_FAVICON_CACHE_CONTROL,
         },
       });
     }
