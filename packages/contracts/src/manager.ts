@@ -574,6 +574,8 @@ export const ManagerChannelSetupErrorCode = Schema.Literals([
   "slack_not_installed",
   /** Uno's Slack app already answers for another assistant of this computer. */
   "slack_app_in_use",
+  /** Uno's Telegram bot is the default assistant's only (409, decision 28.10). */
+  "shared_bot_uno_only",
   "console_unreachable",
   "console_error",
 ]);

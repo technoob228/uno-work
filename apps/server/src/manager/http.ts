@@ -616,7 +616,8 @@ const requireAssistantProject = (projectId: ProjectId) =>
  * `POST /api/manager/assistant/telegram/shared` {projectId} → {code,
  * expiresAt, botUsername, link}: switch the assistant's Telegram to Uno's
  * shared bot (a console relay) and issue a link code. 409
- * `not_cloud_computer` without a machine token, 503
+ * `not_cloud_computer` without a machine token, 409 `shared_bot_uno_only`
+ * for an assistant other than Uno that is not on Uno's bot yet, 503
  * `shared_bot_unavailable`, 502 when the console fails.
  */
 export const managerAssistantTelegramSharedRouteLayer = HttpRouter.add(

@@ -8,7 +8,7 @@
  * path. The connector row stores that token as its bot token with the
  * `unorelay:` prefix:
  *
- * - Telegram: `unorelay:<tgr_…>` — the console mirrors the Bot API at
+ * - Telegram: `unorelay:<tgr_…>` (or `<tga_…>`, Uno's assistant bot) — the console mirrors the Bot API at
  *   `/api/v1/work-relay/telegram/bot<tgr>/<method>` (files at
  *   `/api/v1/work-relay/telegram/file/bot<tgr>/<path>`), so the connector
  *   stays a Bot-API client and only its base URL changes.
@@ -42,6 +42,18 @@ export function isRelayCredential(credential: string): boolean {
 
 export function relayCredential(relayToken: string): string {
   return `${RELAY_CREDENTIAL_PREFIX}${relayToken}`;
+}
+
+/**
+ * Uno's assistant bot (@uno_work_bot, 28.10) mints `tga_` relay tokens; the
+ * older shared bot (@get_uno_bot) mints `tgr_`. Same Bot-API mirror path —
+ * the console tells the bots apart by this prefix.
+ */
+export const ASSISTANT_BOT_RELAY_PREFIX = "tga_";
+
+/** Whether a connector credential is a relay of Uno's assistant bot (`unorelay:tga_…`). */
+export function isAssistantBotRelay(credential: string): boolean {
+  return parseRelayCredential(credential)?.startsWith(ASSISTANT_BOT_RELAY_PREFIX) === true;
 }
 
 /**
@@ -109,7 +121,7 @@ export function redactConnectorSecrets(text: string): string {
     .replace(/\/bot[^/\s?]+/g, "/bot<redacted>")
     .replace(/\/work-relay\/slack\/[^/\s?]+/g, "/work-relay/slack/<redacted>")
     .replace(/unorelay:[^\s"']+/g, "unorelay:<redacted>")
-    .replace(/\b(tgr|slr)_[0-9a-fA-F]{8,}\b/g, "$1_<redacted>");
+    .replace(/\b(tgr|tga|slr)_[0-9a-fA-F]{8,}\b/g, "$1_<redacted>");
 }
 
 function slackRelayBase(relayToken: string, baseUrl: string): string {
