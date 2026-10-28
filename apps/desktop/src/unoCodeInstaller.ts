@@ -325,10 +325,32 @@ export function releaseTagToNumericVersion(tag: string): string | null {
   return match?.[1] ?? null;
 }
 
-/** Fetch the numeric version of the latest GitHub release (throws on network/API error). */
+/**
+ * Uno build number of a version or tag: `uno-v1.14.48-uno.2` / `1.14.48-uno.2`
+ * → `2`. Dev and local builds (`1.14.48-uno.dev`) and plain upstream versions
+ * have none → `null`.
+ */
+export function unoBuildNumber(raw: string): number | null {
+  const match = raw.match(/\d+\.\d+\.\d+-uno\.(\d+)\b/);
+  return match?.[1] ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
+ * Upgrade target from a release tag: the numeric core plus the Uno build, so
+ * `uno-v1.14.48-uno.2` → `1.14.48-uno.2`. Fixes in our fork ship as a new
+ * `-uno.N` on the same upstream version, so the build number must survive.
+ */
+export function releaseTagToTargetVersion(tag: string): string | null {
+  const numeric = releaseTagToNumericVersion(tag);
+  if (!numeric) return null;
+  const build = unoBuildNumber(tag);
+  return build === null ? numeric : `${numeric}-uno.${build}`;
+}
+
+/** Fetch the upgrade target of the latest GitHub release (throws on network/API error). */
 export async function fetchLatestUnoCodeReleaseVersion(): Promise<string | null> {
   const release = await fetchLatestRelease();
-  return releaseTagToNumericVersion(release.tag_name);
+  return releaseTagToTargetVersion(release.tag_name);
 }
 
 /**
@@ -341,10 +363,10 @@ export async function fetchLatestUnoCodeReleaseVersion(): Promise<string | null>
  * ({@link parseGenericCliVersion}), so prerelease suffixes (`-uno.1`,
  * `-uno.dev`) never produce a false "outdated" signal.
  *
- * Note: by semver prerelease rules `1.14.48-uno.dev` and `1.14.48-uno.1` share
- * the numeric core `1.14.48`, so a locally-built dev binary is treated as the
- * same version as the release and is NOT force-replaced. Intentional — the
- * numeric version matches, so there is nothing to upgrade.
+ * On the same numeric core, a newer Uno build wins: `1.14.48-uno.1` is
+ * replaced by a `1.14.48-uno.2` release (fixes in our fork ship that way).
+ * A locally-built dev binary (`1.14.48-uno.dev`) has no build number and is
+ * NOT force-replaced.
  */
 export function decideInstall(opts: {
   readonly exists: boolean;
@@ -379,6 +401,23 @@ export function decideInstall(opts: {
   }
 
   if (targetNumeric && compareCliVersions(installedNumeric, targetNumeric) < 0) {
+    return {
+      install: true,
+      reason: "outdated",
+      installedVersion: installedNumeric,
+      targetVersion: targetNumeric,
+    };
+  }
+
+  const installedBuild = opts.installedVersionRaw ? unoBuildNumber(opts.installedVersionRaw) : null;
+  const targetBuild = opts.targetVersion ? unoBuildNumber(opts.targetVersion) : null;
+  if (
+    targetNumeric &&
+    compareCliVersions(installedNumeric, targetNumeric) === 0 &&
+    installedBuild !== null &&
+    targetBuild !== null &&
+    installedBuild < targetBuild
+  ) {
     return {
       install: true,
       reason: "outdated",

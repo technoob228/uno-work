@@ -29,6 +29,11 @@ describe("cliVersion", () => {
       assert.strictEqual(extractNumericCliVersion("opencode 1.14.48 (abc1234)"), "1.14.48");
     });
 
+    it("reads release uno-code builds that print their tag", () => {
+      assert.strictEqual(extractNumericCliVersion("uno-v1.14.48-uno.1"), "1.14.48");
+      assert.strictEqual(extractNumericCliVersion("v2.1.0"), "2.1.0");
+    });
+
     it("returns null for non-version output", () => {
       assert.strictEqual(extractNumericCliVersion("no version here"), null);
     });

@@ -44,10 +44,11 @@ export function normalizeCliVersion(version: string): string {
  * `parseGenericCliVersion` so desktop and server judge "freshness" identically.
  *
  * `"1.14.48-uno.1"` → `"1.14.48"`, `"opencode 1.14.48 (abc)"` → `"1.14.48"`,
+ * `"uno-v1.14.48-uno.1"` (what release uno-code builds print) → `"1.14.48"`,
  * non-version garbage → `null`.
  */
 export function extractNumericCliVersion(raw: string): string | null {
-  const match = raw.match(/\b(\d+\.\d+\.\d+)\b/);
+  const match = raw.match(/(?:\b|(?<=\bv))(\d+\.\d+\.\d+)\b/);
   return match?.[1] ?? null;
 }
 
