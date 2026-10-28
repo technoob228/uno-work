@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.154 — 2026-10-28
+
+- **A long task keeps going when Uno AI hiccups.** If the model doesn't answer in time or is busy, Uno Work tries the turn again by itself (up to 2 times; after "didn't answer" in 15 s, then 45 s) and continues where it stopped, with a line in the chat. You don't need the tab open; the chat shows "working" while it retries.
+- **The panel on a phone.** On a narrow screen the agent no longer opens the panel over your chat: you get a chip "Opened … View", and the panel opens as a full-screen sheet with "Back to chat". A page the agent opened no longer puts the panel into "You're in control".
+- The agent no longer offers Plus to someone who is already on Plus when the computer sleeps.
+
 ## v0.0.153 — 2026-10-23
 
 - **One project across your computers.** The same repository on your laptop and a cloud computer is now one project in the sidebar, with its chats from both, instead of a row per computer. A project is recognised by its own GitHub `origin` (a fork is no longer named after the repository it was forked from) or by its Uno cloud name once it syncs through Uno. Two folders of one repository stay two projects. Devices that kept the old sidebar's "separate" grouping move to this once.
