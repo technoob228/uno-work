@@ -48,7 +48,8 @@ export function portableFolder(workspaceRoot: string, home: string): string {
 
 /** What the tool answers after a chat started on another computer. */
 export function remoteChatStartedNote(computerName: string, fromAssistant: boolean): string {
+  const carries = `There it uses ${computerName}'s connected apps within your app levels; your own MCP servers and keys don't go along.`;
   return fromAssistant
-    ? `Started on ${computerName}. Its result comes to you by itself (a work update) — end your turn now with one short line; work_status lists it meanwhile.`
+    ? `Started on ${computerName}. ${carries} Its result comes to you by itself (a work update) — end your turn now with one short line; work_status lists it meanwhile.`
     : `Started on ${computerName}. The person sees it in Uno Work on that computer.`;
 }

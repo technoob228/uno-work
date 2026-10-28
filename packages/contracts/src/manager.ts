@@ -1795,6 +1795,19 @@ export const ManagerRemoteChatCreateInput = Schema.Struct({
     fromBoxId: Schema.NullOr(Schema.Number),
     /** The caller's thread on its computer (for the done push back). */
     fromThreadId: Schema.String,
+    /**
+     * The assistant's app levels on its computer: the chat here opens this
+     * computer's connected apps no wider (`restricted: false` — every app,
+     * as there). Absent: the person's own chat, no limits.
+     */
+    apps: Schema.optional(
+      Schema.Struct({
+        restricted: Schema.Boolean,
+        permissions: Schema.Record(Schema.String, AssistantAppLevel),
+      }),
+    ),
+    /** Its mode: an Observer only reads apps here too. */
+    preset: Schema.optional(AssistantPreset),
   }),
 });
 export type ManagerRemoteChatCreateInput = typeof ManagerRemoteChatCreateInput.Type;

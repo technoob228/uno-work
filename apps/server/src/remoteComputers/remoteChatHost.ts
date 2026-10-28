@@ -281,6 +281,8 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
         fromBoxId: input.startedBy.fromBoxId,
         fromThreadId: input.startedBy.fromThreadId,
         startedAt: createdAt,
+        ...(input.startedBy.apps !== undefined ? { apps: input.startedBy.apps } : {}),
+        ...(input.startedBy.preset !== undefined ? { preset: input.startedBy.preset } : {}),
       });
       yield* deps.engine.dispatch(
         {

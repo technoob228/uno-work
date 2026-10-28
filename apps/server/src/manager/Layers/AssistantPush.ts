@@ -601,6 +601,35 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           )
         : Effect.void;
 
+    const chatOf: AssistantPushServiceShape["chatOf"] = (threadId) => viaOf(threadId);
+
+    const tellViaChat: AssistantPushServiceShape["tellViaChat"] = (input) =>
+      Effect.gen(function* () {
+        const conversation = yield* shellOf(input.threadId);
+        if (conversation === null || conversation.archivedAt !== null) return false;
+        const row = yield* pendingReplies
+          .get({
+            kind: input.chat.kind,
+            connectorProjectId: ProjectId.make(input.chat.connectorProjectId),
+            replyKey: input.chat.replyKey,
+          })
+          .pipe(Effect.orElseSucceed(() => Option.none()));
+        if (Option.isNone(row)) return false;
+        const turn = {
+          from: row.value,
+          replyKey: `note:${crypto.randomUUID()}`,
+          text: input.text,
+          fallbackText: input.fallbackText,
+          runtimeMode: conversation.runtimeMode,
+          interactionMode: conversation.interactionMode,
+        };
+        const outcome =
+          input.chat.kind === "telegram"
+            ? yield* telegram.enqueueSystemTurn(turn)
+            : yield* slack.enqueueSystemTurn(turn);
+        return outcome !== "failed";
+      }).pipe(Effect.orElseSucceed(() => false));
+
     const reportsOutcomeOf: AssistantPushServiceShape["reportsOutcomeOf"] = (threadId) =>
       Effect.gen(function* () {
         if (!enabled) return false;
@@ -636,6 +665,8 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       enabled,
       noteCaller,
       watchRemote,
+      chatOf,
+      tellViaChat,
       reportsOutcomeOf,
       watchedBy,
     } satisfies AssistantPushServiceShape;

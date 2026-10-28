@@ -555,6 +555,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             assistantName: assistantName ?? `Chat “${caller.title}”`,
             assistantProjectId: assistant?.projectId ?? null,
             fromThreadId: caller.id,
+            preset: assistant?.preset ?? null,
           },
         })
         .pipe(

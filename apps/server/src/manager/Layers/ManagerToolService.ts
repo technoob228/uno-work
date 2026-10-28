@@ -675,6 +675,7 @@ const makeManagerToolService = Effect.gen(function* () {
             assistantName: assistantName ?? "Uno manager",
             assistantProjectId,
             fromThreadId: caller.callerThreadId ?? "",
+            preset: callerPreset(caller),
           },
         })
         .pipe(

@@ -96,6 +96,8 @@ import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
 import { answerApprovalFromInbox, askPersonApproval, tellChat } from "../personApproval.ts";
 import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
 import { isAssistantConversationThread } from "../manager/assistantPush.ts";
+import { readIncomingRemoteChats, remoteStarterOf } from "../remoteComputers/remoteChatStore.ts";
+import { AssistantPushService, type AssistantPushChat } from "../manager/Services/AssistantPush.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -348,7 +350,17 @@ const makeDeps = (input: {
       Effect.orElseSucceed(() => null),
     );
 
+    // The remote assistant this chat acts for, if it came from another computer.
+    const remoteStarter = Effect.gen(function* () {
+      const incoming = yield* Effect.promise(() => readIncomingRemoteChats(serverConfig.stateDir));
+      if (incoming.length === 0) return null;
+      const snapshot = yield* projections.getShellSnapshot();
+      const byId = new Map(snapshot.threads.map((entry) => [entry.id as string, entry]));
+      return remoteStarterOf(input.threadId, (id) => byId.get(id), incoming);
+    }).pipe(Effect.orElseSucceed(() => null));
     const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
+    const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+    let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
       // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
@@ -437,6 +449,11 @@ const makeDeps = (input: {
       requestApproval: ({ later, ...approval }) =>
         Effect.gen(function* () {
           const owner = yield* callerAssistant;
+          // An assistant's conversation asked from Telegram / Slack: the late
+          // answer goes back there too (read now, while its turn runs).
+          if (later && push !== null && thread !== null && isAssistantConversationThread(thread)) {
+            lateChat = yield* push.chatOf(thread.id);
+          }
           return yield* askPersonApproval({
             ...approval,
             threadId: input.threadId,
@@ -452,7 +469,19 @@ const makeDeps = (input: {
           }).pipe(Effect.provideContext(secretServices));
         }),
       tellChat: (text) =>
-        tellChat(input.threadId, text).pipe(Effect.provideContext(secretServices)),
+        Effect.gen(function* () {
+          const chat = lateChat;
+          if (chat !== null && push !== null) {
+            const handed = yield* push.tellViaChat({
+              threadId: ThreadId.make(input.threadId),
+              chat,
+              text,
+              fallbackText: "Your answer in Uno Work went through. Details are in the chat there.",
+            });
+            if (handed) return;
+          }
+          yield* tellChat(input.threadId, text).pipe(Effect.provideContext(secretServices));
+        }),
       // The assistant's own conversation orchestrates: heavy work goes to a
       // chat it starts (Misha 28.10), enforced in runUnoWorkTool.
       orchestratorOnly: callerAssistant.pipe(
@@ -665,7 +694,23 @@ const makeDeps = (input: {
                   // Whose chat is this: an assistant's (its workspace, a chat
                   // it started, a chat one of those started) or the person's.
                   const owner = yield* callerAssistant;
-                  if (owner === null) return { decision: "allow" as const, assistant: null };
+                  if (owner === null) {
+                    // A chat an assistant of ANOTHER computer started here (or
+                    // one such a chat started): its app levels came along.
+                    const remote = yield* remoteStarter;
+                    if (remote === null || remote.apps === undefined) {
+                      return { decision: "allow" as const, assistant: null };
+                    }
+                    return {
+                      decision: connectorAccessDecision(
+                        remote.apps,
+                        provider,
+                        changesThings,
+                        remote.preset ?? "full",
+                      ),
+                      assistant: `${remote.assistantName} (from ${remote.fromComputerName})`,
+                    };
+                  }
                   const access = yield* Effect.promise(() =>
                     readAppAccess(serverConfig.stateDir, owner.projectId),
                   );
