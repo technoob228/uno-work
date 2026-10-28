@@ -74,6 +74,14 @@ describe("title, presets, place", () => {
       "Chats · 2 projects · MacBook",
     );
   });
+  it("says so when the chats assistants started are hidden (28.10)", () => {
+    expect(
+      sidebarDTitle({ projectNames: null, computerNames: null, assistantChatsHidden: true }),
+    ).toBe("Your chats");
+    expect(
+      sidebarDTitle({ projectNames: ["landing"], computerNames: null, assistantChatsHidden: true }),
+    ).toBe("Your chats · landing");
+  });
   it("knows the four ready ways, anything else is custom", () => {
     expect(headerPresetOf([])).toBe("list");
     expect(headerPresetOf(["computer", "project"])).toBe("computer");
