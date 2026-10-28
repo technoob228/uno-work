@@ -57,6 +57,8 @@ import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { TeammateChatHeadline } from "../assistants/TeammateChatHeadline";
 import { useTeammateOfThread } from "../assistants/useAssistantTeam";
+import { MachineAssistantHeadline } from "../assistants/MachineAssistants";
+import { useAssistantOfThread } from "../assistants/perMachine";
 import {
   ASSISTANT_CHAT_NAME,
   ASSISTANT_VALUE_LINE,
@@ -220,6 +222,9 @@ export const ChatHeader = memo(function ChatHeader({
       ) ?? null);
   // A teammate's chat (Ada, Builder…) gets its own face, not Uno's (16.10).
   const teammate = useTeammateOfThread(activeThreadEnvironmentId, activeThreadId);
+  // Variant B: any assistant's chat (Uno on any computer too) is headed by
+  // its face, "Uno · MacBook" and "sees only MacBook".
+  const ownAssistant = useAssistantOfThread(activeThreadEnvironmentId, activeThreadId);
   const isAssistantChat =
     teammate === null && (isMainAssistantChat || assistantConversation !== null);
   const title = isMainAssistantChat
@@ -247,7 +252,12 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           </TooltipProvider>
         )}
-        {teammate && !devMode ? (
+        {ownAssistant && !devMode && !draftId ? (
+          <MachineAssistantHeadline
+            member={ownAssistant.member}
+            machineLabel={ownAssistant.machineLabel}
+          />
+        ) : teammate && !devMode ? (
           <TeammateChatHeadline member={teammate} title={activeThreadTitle} />
         ) : isAssistantChat && !devMode ? (
           // Sidebar D: Uno's face, name and where it answers; its settings are
@@ -267,7 +277,7 @@ export const ChatHeader = memo(function ChatHeader({
             {title}
           </h2>
         )}
-        {isAssistantChat && !devMode ? null : isAssistantChat ? (
+        {(isAssistantChat || ownAssistant) && !devMode ? null : isAssistantChat ? (
           <>
             <Tooltip>
               <TooltipTrigger

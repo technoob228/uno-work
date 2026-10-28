@@ -50,6 +50,8 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
+import { AssistantBasics } from "./AssistantBasics";
+import { MachineTag } from "./MachineAssistants";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import {
@@ -399,7 +401,14 @@ export function AssistantProfileSimple(props: {
               </button>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-xl leading-tight font-semibold">{name}</h1>
+                  <h1
+                    className="min-w-0 max-w-full truncate text-xl leading-tight font-semibold"
+                    title={name}
+                    data-testid="assistant-profile-name"
+                  >
+                    {name}
+                  </h1>
+                  <MachineTag label={homeMachine?.label ?? member.computerLabel} />
                   {!member.revoked && !editingWho ? (
                     <Button
                       size="icon-xs"
@@ -431,8 +440,11 @@ export function AssistantProfileSimple(props: {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {member.isUno ? "Your main assistant · " : ""}
-                  Takes tasks only from you · lives on {member.computerLabel || "this computer"}
+                  {member.isUno
+                    ? `The assistant of ${homeMachine?.label ?? member.computerLabel} · `
+                    : ""}
+                  Takes tasks only from you · sees only{" "}
+                  {homeMachine?.label ?? (member.computerLabel || "this computer")}
                 </p>
                 {setupLine ? (
                   <p
@@ -481,6 +493,13 @@ export function AssistantProfileSimple(props: {
                 onClose={() => setEditingWho(false)}
               />
             ) : null}
+
+            <AssistantBasics
+              member={member}
+              machineLabel={homeMachine?.label ?? member.computerLabel}
+              running={running}
+              onRemoved={() => undefined}
+            />
 
             {/* The one next step, then the other ways to reach it. */}
             {!member.revoked && !telegramLinked ? <ConnectTelegramCard member={member} /> : null}

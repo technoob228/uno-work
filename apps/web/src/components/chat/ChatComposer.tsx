@@ -1,3 +1,4 @@
+import { useAssistantOfThread } from "../assistants/perMachine";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -1014,6 +1015,11 @@ export const ChatComposer = memo(
     // the chat's own selection on the daemon; turns carry exactly that.
     // Every conversation with Uno (0.0.85), not only the main one.
     const isAssistantChat = activeThread ? isAssistantConversation(activeThread) : false;
+    // Variant B: "Message Mia · MacBook" — whose chat this is, on which computer.
+    const ownAssistant = useAssistantOfThread(
+      environmentId ?? "",
+      activeThread ? String(activeThread.id) : "",
+    );
     const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
     const assistantEngine = isAssistantChat && assistantLlm.supported;
     const assistantSendBlock = assistantEngine
@@ -3512,11 +3518,13 @@ export const ChatComposer = memo(
                                     ? "reconnecting"
                                     : "disconnected"
                               }`
-                            : isAssistantChat
-                              ? "Ask Uno anything — it can start chats for you…"
-                              : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach files"
-                                : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                            : ownAssistant
+                              ? `Message ${ownAssistant.member.profile.name} · ${ownAssistant.machineLabel}`
+                              : isAssistantChat
+                                ? "Ask Uno anything — it can start chats for you…"
+                                : phase === "disconnected"
+                                  ? "Ask for follow-up changes or attach files"
+                                  : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||

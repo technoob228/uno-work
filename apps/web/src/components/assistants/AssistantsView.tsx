@@ -70,6 +70,7 @@ import { EMPTY_SETUP_PROGRESS } from "../setup/setupModel";
 import { AssistantSlackPanel, AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { EmojiAvatar, StatusPill } from "./AssistantBits";
+import { AssistantGalleryPage } from "./AssistantGallery";
 import { AssistantPage } from "./AssistantPage";
 import { AssistantProfilePage } from "./AssistantProfilePage";
 import { DEMO } from "../../demo/demoFlag";
@@ -117,9 +118,10 @@ export interface AssistantsRouteSearch {
    * default assistant; "card" — that assistant's card; "assistant" — the
    * page of the assistant on its own computer `box`; "local" — the page of
    * assistant `project` that lives on this computer; "profile" — the team
-   * page of assistant `project` on computer `env` (w0138 p7).
+   * page of assistant `project` on computer `env` (w0138 p7); "gallery" —
+   * New assistant as a gallery of characters, on computer `env` if given.
    */
-  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile" | "gallery";
   readonly box?: number;
   readonly project?: string;
   readonly env?: string;
@@ -171,6 +173,7 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
 export function AssistantsView() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
+  if (search.view === "gallery") return <AssistantGalleryPage environmentId={search.env} />;
   // The team page (w0138 p7): with the assistants update on the account, and in the mock.
   if (
     (DEMO || availability === "on") &&

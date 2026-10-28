@@ -177,6 +177,7 @@ import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
+import { AssistantPlanBanner } from "./assistants/MachineAssistants";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
@@ -4077,6 +4078,10 @@ export default function ChatView(props: ChatViewProps) {
       {/* Error banner */}
       {!isPreviewFocusMode ? (
         <>
+          <AssistantPlanBanner
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+          />
           <ProviderStatusBanner
             status={
               // Assistant chats show Hermes' state in AssistantEngine; a lost

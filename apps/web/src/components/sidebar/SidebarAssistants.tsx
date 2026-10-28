@@ -21,11 +21,12 @@
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRightIcon, LoaderCircleIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import { ChevronRightIcon, MoonIcon, PlusIcon, SquarePenIcon } from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
 import { create } from "zustand";
 
 import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { ensureAssistantChat } from "../../lib/managerApi";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -40,8 +41,17 @@ import {
   latestConversation,
   previewChats,
 } from "../assistants/assistantTeam.logic";
-import { useQuickCreateAssistant } from "../assistants/useQuickCreateAssistant";
-import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
+import { AsleepAssistantSheet, MachineTag } from "../assistants/MachineAssistants";
+import {
+  type MachineAssistant,
+  type MachineGroup,
+  assistantFullName,
+  openComputerSwitcher,
+  useAssistantsByMachine,
+  useAssistantsLayout,
+  useAsleepSheet,
+} from "../assistants/perMachine";
+import { type TeamMember, useTeamShown } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -119,6 +129,8 @@ function HoverButton(props: {
 
 const AssistantRow = memo(function AssistantRow(props: {
   readonly member: TeamMember;
+  /** Variant B: the computer it lives on, as a tag after its name. */
+  readonly machineLabel?: string | undefined;
   readonly unfolded: boolean;
   readonly onToggle: () => void;
   readonly routeThreadKey: string | null;
@@ -128,8 +140,6 @@ const AssistantRow = memo(function AssistantRow(props: {
   const { member } = props;
   const navigate = useNavigate();
   const { handleNewThread } = useNewThreadHandler();
-  // Uno's main chat (the one Telegram and Slack talk to) is made by the daemon.
-  const assistantChat = useAssistantChat();
   const openSetup = useAssistantOnboarding((state) => state.openFor);
   const teamShown = useTeamShown();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -161,13 +171,20 @@ const AssistantRow = memo(function AssistantRow(props: {
       return;
     }
     if (latest === null) {
-      // The very first chat with Uno is its main one, as before 0.0.139.
-      if (member.isUno && assistantChat.environmentId === member.environmentId) {
-        leave();
-        void assistantChat.open();
-        return;
-      }
-      newChat();
+      // Variant B: its main chat on its own computer (the daemon there makes it).
+      leave();
+      void ensureAssistantChat({
+        environmentId: member.environmentId as EnvironmentId,
+        projectId: member.projectId as ProjectId,
+      }).then(({ threadId }) =>
+        navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams({
+            environmentId: member.environmentId as EnvironmentId,
+            threadId,
+          }),
+        }),
+      );
       return;
     }
     leave();
@@ -226,7 +243,8 @@ const AssistantRow = memo(function AssistantRow(props: {
             />
           </TooltipTrigger>
           <TooltipPopup side="right">
-            {name} · {member.configured ? status : "Not set up yet"} — open its page
+            {props.machineLabel ? assistantFullName(name, props.machineLabel) : name} ·{" "}
+            {member.configured ? status : "Not set up yet"} — open its page
           </TooltipPopup>
         </Tooltip>
         <button
@@ -236,7 +254,10 @@ const AssistantRow = memo(function AssistantRow(props: {
           data-testid="sidebar-assistant-open"
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          <span className="min-w-0 truncate text-sm font-medium text-foreground" title={name}>
+            {name}
+          </span>
+          {props.machineLabel ? <MachineTag label={props.machineLabel} /> : null}
           {/* One signal for "waits for you": the dot (the Inbox counts it too). */}
           {!member.configured ? (
             <span className="shrink-0 text-xs text-primary">Set up</span>
@@ -323,28 +344,144 @@ function UnoFallbackRow() {
   );
 }
 
+/** A sleeping computer's assistant: grey, "asleep"; a click says why and what to do. */
+function AsleepAssistantRow(props: {
+  readonly assistant: MachineAssistant;
+  readonly showMachine: boolean;
+}) {
+  const { assistant } = props;
+  const show = useAsleepSheet((state) => state.show);
+  return (
+    <li
+      className="list-none"
+      data-testid="sidebar-assistant-asleep"
+      data-assistant={assistant.projectId}
+    >
+      <button
+        type="button"
+        onClick={() => show(assistant)}
+        title={`${assistantFullName(assistant.name, assistant.machine.label)} is asleep`}
+        className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center opacity-55 grayscale">
+          <AssistantAvatar emoji={assistant.isUno ? null : assistant.emoji} tone={assistant.tone} />
+        </span>
+        <span className="min-w-0 truncate text-sm text-sidebar-muted-foreground">
+          {assistant.name}
+        </span>
+        {props.showMachine ? <MachineTag label={assistant.machine.label} asleep /> : null}
+        {!props.showMachine ? (
+          <span className="ml-auto inline-flex shrink-0 items-center gap-0.5 pr-1 text-[10px] text-muted-foreground">
+            <MoonIcon className="size-2.5" /> asleep
+          </span>
+        ) : null}
+      </button>
+    </li>
+  );
+}
+
+/** Many assistants on several computers: a small header per computer (B1, more than 6). */
+function MachineSubheader(props: {
+  readonly group: MachineGroup;
+  readonly folded: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <li className="list-none">
+      <button
+        type="button"
+        onClick={props.onToggle}
+        className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-left text-[11px] text-sidebar-muted-foreground/70 hover:text-sidebar-foreground"
+        data-testid="sidebar-assistants-machine"
+      >
+        <ChevronRightIcon
+          className={cn("size-3 transition-transform", !props.folded && "rotate-90")}
+        />
+        <span className="truncate">{props.group.label}</span>
+        <span className="text-sidebar-muted-foreground/50">
+          · {props.group.assistants.length}
+          {props.group.awake ? "" : " · asleep"}
+        </span>
+      </button>
+    </li>
+  );
+}
+
 export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly routeThreadKey: string | null;
   /** Uno's work chats that are still running (the sidebar keeps them under Uno). */
   readonly unoRunning: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
 }) {
-  const team = useAssistantTeam();
   const teamShown = useTeamShown();
   const unfolded = useUnfoldedStore((state) => state.keys);
   const setUnfolded = useUnfoldedStore((state) => state.set);
-  const quick = useQuickCreateAssistant();
-  const live = team.filter((member) => !member.revoked);
+  const navigate = useNavigate();
+  const layout = useAssistantsLayout((state) => state.layout);
+  const groups = useAssistantsByMachine();
   const header = assistantsHeaderState({ teamShown });
+  const [foldedMachines, setFoldedMachines] = useState<ReadonlySet<string>>(() => new Set());
+  const current = groups.find((group) => group.current) ?? groups[0] ?? null;
+  const several = groups.length > 1;
+  const shown = layout === "switcher" ? (current ? [current] : []) : groups;
+  const total = shown.reduce((sum, group) => sum + group.assistants.length, 0);
+  // Many on several computers: a small header per computer, sleeping ones folded.
+  const byMachine = layout === "group" && several && total > 6;
+  const elsewhere = layout === "switcher" ? groups.filter((group) => group !== current) : [];
+  const elsewhereCount = elsewhere.reduce((sum, group) => sum + group.assistants.length, 0);
+  const firstElsewhere = elsewhere[0]?.assistants[0] ?? null;
+
+  const isFolded = (group: MachineGroup) => foldedMachines.has(group.key) !== !group.awake; // asleep: folded unless opened
+  const toggleMachine = (group: MachineGroup) =>
+    setFoldedMachines((keys) => {
+      const next = new Set(keys);
+      if (next.has(group.key)) next.delete(group.key);
+      else next.add(group.key);
+      return next;
+    });
+
+  const row = (assistant: MachineAssistant, showMachine: boolean) =>
+    assistant.member && assistant.awake ? (
+      <AssistantRow
+        key={assistant.key}
+        member={assistant.member}
+        machineLabel={showMachine ? assistant.machine.label : undefined}
+        unfolded={unfolded.has(assistant.key)}
+        onToggle={() => setUnfolded(assistant.key, !unfolded.has(assistant.key))}
+        routeThreadKey={props.routeThreadKey}
+        extraChats={assistant.isUno && assistant.machine.current ? props.unoRunning : []}
+        renderChat={props.renderChat}
+      />
+    ) : (
+      <AsleepAssistantRow key={assistant.key} assistant={assistant} showMachine={showMachine} />
+    );
+
+  const create = () =>
+    void navigate({
+      to: "/assistants",
+      search: {
+        view: "gallery",
+        ...(current?.environmentId ? { env: current.environmentId } : {}),
+      },
+    } as never);
 
   return (
-    <li className="list-none pb-1" data-testid="sidebar-assistants">
+    <li className="list-none pb-1" data-testid="sidebar-assistants" data-layout={layout}>
       {header.showHeader ? (
         <div
           className="flex h-6 items-center justify-between pr-1 pl-2.5"
           data-testid="sidebar-assistants-header"
         >
-          <span className="text-xs font-medium text-sidebar-muted-foreground/70">Assistants</span>
+          <span className="min-w-0 truncate text-xs font-medium text-sidebar-muted-foreground/70">
+            {layout === "switcher" && current && several ? (
+              <>
+                Assistants{" "}
+                <span className="text-sidebar-muted-foreground/50">· {current.label}</span>
+              </>
+            ) : (
+              "Assistants"
+            )}
+          </span>
           {header.showCreate ? (
             <Tooltip>
               <TooltipTrigger
@@ -353,39 +490,57 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
                     variant="ghost"
                     size="icon-xs"
                     aria-label="New assistant"
-                    disabled={quick.creating || !quick.available}
-                    onClick={() => void quick.create()}
+                    onClick={create}
                     data-testid="sidebar-new-assistant"
                     className="text-muted-foreground hover:text-foreground"
                   />
                 }
               >
-                {quick.creating ? (
-                  <LoaderCircleIcon className="size-3.5 animate-spin" />
-                ) : (
-                  <PlusIcon className="size-3.5" />
-                )}
+                <PlusIcon className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="right">New assistant</TooltipPopup>
+              <TooltipPopup side="right">
+                New assistant — pick a character, pick a computer
+              </TooltipPopup>
             </Tooltip>
           ) : null}
         </div>
       ) : null}
       <ul role="list" className="flex flex-col gap-px">
-        {live.map((member) => (
-          <AssistantRow
-            key={member.key}
-            member={member}
-            unfolded={unfolded.has(member.key)}
-            onToggle={() => setUnfolded(member.key, !unfolded.has(member.key))}
-            routeThreadKey={props.routeThreadKey}
-            extraChats={member.isUno ? props.unoRunning : []}
-            renderChat={props.renderChat}
-          />
-        ))}
-        {live.length === 0 ? <UnoFallbackRow /> : null}
+        {byMachine
+          ? shown.flatMap((group) => [
+              <MachineSubheader
+                key={`h-${group.key}`}
+                group={group}
+                folded={isFolded(group)}
+                onToggle={() => toggleMachine(group)}
+              />,
+              ...(isFolded(group)
+                ? []
+                : group.assistants.map((assistant) => row(assistant, false))),
+            ])
+          : shown.flatMap((group) =>
+              group.assistants.map((assistant) => row(assistant, several && layout === "group")),
+            )}
+        {groups.length === 0 ? <UnoFallbackRow /> : null}
+        {layout === "switcher" && firstElsewhere ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={openComputerSwitcher}
+              className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-2.5 text-left text-[11px] text-sidebar-muted-foreground/60 hover:text-sidebar-foreground"
+              data-testid="sidebar-assistants-elsewhere"
+            >
+              <span className="truncate">
+                {assistantFullName(firstElsewhere.name, firstElsewhere.machine.label)}
+                {elsewhereCount > 1 ? ` and ${elsewhereCount - 1} more` : ""} — in the computer
+                switcher ↗
+              </span>
+            </button>
+          </li>
+        ) : null}
       </ul>
       <AssistantOnboardingDialog />
+      <AsleepAssistantSheet />
     </li>
   );
 });

@@ -24,6 +24,8 @@ import {
 } from "../../inbox/systemNotifications";
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
+import { useMachineLabels } from "../../hooks/useMachineRows";
+import { MachineTag } from "../assistants/MachineAssistants";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -33,8 +35,6 @@ import { InboxActionButtons, WithInboxItemActions } from "./InboxItemActions";
 import { ItemIcon, filterInbox } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
-import { useAssistantChat } from "../../assistant/useAssistantChat";
-import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
@@ -86,7 +86,6 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
   const anyUnread = entries.some((item) => item.readAt === null && !isSnoozed(item));
   const system = useSystemNotificationsState();
   const empty = sections.every((section) => section.items.length === 0);
-  const assistantChatId = useAssistantChat().chat?.id ?? null;
 
   return (
     <section aria-label="Notifications" className="-my-4 flex max-h-[min(34rem,75vh)] flex-col">
@@ -175,13 +174,8 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
                     <BellItem
                       key={`${item.environmentId}:${item.id}`}
                       item={item}
-                      title={
-                        assistantChatId !== null &&
-                        item.open?.kind === "thread" &&
-                        item.open.threadId === assistantChatId
-                          ? ASSISTANT_CHAT_NAME
-                          : item.title
-                      }
+                      // Variant B: the card says which assistant (and computer) — not just "Uno".
+                      title={item.title}
                       onNavigate={onClose}
                     />
                   ))}
@@ -207,6 +201,9 @@ const BellItem = memo(function BellItem({
 }) {
   const openItem = useOpenInboxItem();
   const unread = item.readAt === null;
+  // Variant B: which computer it came from (each has its own assistant).
+  const labels = useMachineLabels();
+  const machineLabel = labels.size > 1 ? (labels.get(item.environmentId) ?? null) : null;
   // "Uno set up assistant Scout": revoke right here (w0138 p7).
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
@@ -250,8 +247,9 @@ const BellItem = memo(function BellItem({
                 {item.body}
               </span>
             ) : null}
-            {item.source.kind === "app" || item.count > 1 ? (
+            {item.source.kind === "app" || item.count > 1 || machineLabel ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+                {machineLabel ? <MachineTag label={machineLabel} /> : null}
                 {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
                 {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
               </span>

@@ -38,7 +38,7 @@ import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
-import { useInboxNeedsYouCount } from "../../inbox/inboxStore";
+import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -337,7 +337,10 @@ function useOpenPlace() {
 /** Whether Needs you shows, and its count: approvals and questions waiting, nothing else. */
 export function useNeedsYouBadge() {
   const { shown, count } = needsYouPlace(useInboxNeedsYouCount());
-  return { needsYou: count, shown };
+  // Variant B: each assistant's summaries and finished tasks land here too —
+  // the row stays while anything is unread (the count is still what waits).
+  const unread = useInboxUnreadCount();
+  return { needsYou: count, shown: shown || unread > 0 };
 }
 
 /** "Needs you" — the Inbox (approvals, questions, finished chats, app news) in place of the bell. */

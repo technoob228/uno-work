@@ -221,20 +221,14 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
         ),
       });
     }
-    // Every computer has a Uno of its own: the team shows one — the one the
-    // person talks to (latest conversation), else the first.
-    const unos = members.filter((member) => member.isUno);
-    const lastTalk = (member: TeamMember) =>
-      member.chats.conversations[0] ? threadActivityMs(member.chats.conversations[0]) : -1;
-    const mainUno = unos.toSorted((a, b) => lastTalk(b) - lastTalk(a))[0];
-    return members
-      .filter((member) => !member.isUno || member === mainUno)
-      .toSorted(
-        (a, b) =>
-          ORDER(a) - ORDER(b) ||
-          a.profile.createdAt.localeCompare(b.profile.createdAt) ||
-          a.key.localeCompare(b.key),
-      );
+    // Variant B (28.10): every computer has a Uno of its own and the team
+    // shows them all — each is named by its computer (perMachine.ts).
+    return members.toSorted(
+      (a, b) =>
+        ORDER(a) - ORDER(b) ||
+        a.profile.createdAt.localeCompare(b.profile.createdAt) ||
+        a.key.localeCompare(b.key),
+    );
   }, [daemon.summaries, fromDaemon, labels, profiles, projects, teamShown, threads]);
 }
 

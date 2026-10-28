@@ -20,6 +20,8 @@ import { cn } from "../../lib/utils";
 import { MACHINE_KIND_GROUP_LABELS } from "../../plainLanguage";
 import { AddEnvModal } from "../AddEnvModal";
 import { MACHINE_KIND_ICON } from "../machineKindIcons";
+import { SwitcherAssistants } from "../assistants/MachineAssistants";
+import { useAssistantsLayout } from "../assistants/perMachine";
 import { STATUS_DOT_CLASS, type ComputerSwitcher } from "./useComputerSwitcher";
 
 export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher }) {
@@ -35,6 +37,8 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
     useThisComputer,
     openAddComputer,
   } = switcher;
+  // Variant B, layout B2: each computer's assistants at the top of its row.
+  const withAssistants = useAssistantsLayout((state) => state.layout) === "switcher";
   return (
     <div className="flex flex-col" data-testid="computer-switcher-list">
       {groups.map((group) => (
@@ -46,70 +50,78 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
             const Icon = MACHINE_KIND_ICON[env.kind];
             const isActive = env.id === currentId;
             return (
-              <div
-                key={env.id}
-                className={cn(
-                  "group/machine flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent",
-                  isActive && "bg-accent/60",
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => openMachine(env.id, env.kind)}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
-                >
-                  <span
-                    aria-hidden="true"
-                    className={cn(
-                      "size-2 shrink-0 rounded-full",
-                      STATUS_DOT_CLASS[env.connectionState],
-                    )}
-                  />
-                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate font-medium">{env.name}</span>
-                      {env.isDefault ? (
-                        <span className="shrink-0 text-[10px] font-normal text-primary">
-                          Default
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="truncate text-[10px] text-muted-foreground">{env.meta}</div>
-                  </div>
-                  {isActive ? (
-                    <CheckIcon className="size-3.5 shrink-0 text-primary" />
-                  ) : env.isPrimary ? (
-                    <span
-                      className="shrink-0 text-[10px] text-muted-foreground"
-                      title="The machine serving this page"
-                    >
-                      current
-                    </span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleDefault(env.id)}
-                  aria-pressed={env.isDefault}
-                  aria-label={
-                    env.isDefault
-                      ? `Stop using ${env.name} as the default machine`
-                      : `Make ${env.name} the default machine`
-                  }
-                  title={env.isDefault ? "Default machine" : "Make this the default machine"}
+              <div key={env.id} className="flex flex-col">
+                <div
                   className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
-                    env.isDefault
-                      ? "text-primary opacity-100"
-                      : "opacity-0 focus-visible:opacity-100 group-hover/machine:opacity-100",
+                    "group/machine flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent",
+                    isActive && "bg-accent/60",
                   )}
                 >
-                  <StarIcon
-                    className={cn("size-3.5", env.isDefault && "fill-current")}
-                    aria-hidden="true"
+                  <button
+                    type="button"
+                    onClick={() => openMachine(env.id, env.kind)}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        STATUS_DOT_CLASS[env.connectionState],
+                      )}
+                    />
+                    <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate font-medium">{env.name}</span>
+                        {env.isDefault ? (
+                          <span className="shrink-0 text-[10px] font-normal text-primary">
+                            Default
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="truncate text-[10px] text-muted-foreground">{env.meta}</div>
+                    </div>
+                    {isActive ? (
+                      <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                    ) : env.isPrimary ? (
+                      <span
+                        className="shrink-0 text-[10px] text-muted-foreground"
+                        title="The machine serving this page"
+                      >
+                        current
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleDefault(env.id)}
+                    aria-pressed={env.isDefault}
+                    aria-label={
+                      env.isDefault
+                        ? `Stop using ${env.name} as the default machine`
+                        : `Make ${env.name} the default machine`
+                    }
+                    title={env.isDefault ? "Default machine" : "Make this the default machine"}
+                    className={cn(
+                      "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:text-foreground",
+                      env.isDefault
+                        ? "text-primary opacity-100"
+                        : "opacity-0 focus-visible:opacity-100 group-hover/machine:opacity-100",
+                    )}
+                  >
+                    <StarIcon
+                      className={cn("size-3.5", env.isDefault && "fill-current")}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+                {withAssistants ? (
+                  <SwitcherAssistants
+                    environmentId={env.id}
+                    boxId={null}
+                    onOpened={switcher.done}
                   />
-                </button>
+                ) : null}
               </div>
             );
           })}
@@ -126,28 +138,36 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
             const Icon = MACHINE_KIND_ICON.uno_box;
             const busy = connecting?.boxId === row.box?.id;
             return (
-              <button
-                key={row.key}
-                type="button"
-                disabled={connecting !== null}
-                onClick={() => void openAccountBox(row)}
-                className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
-              >
-                <span
-                  aria-hidden="true"
-                  className="size-2 shrink-0 rounded-full bg-muted-foreground/40"
-                />
-                <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{row.label}</div>
-                  <div className="truncate text-[10px] text-muted-foreground">
-                    {busy && connecting ? connecting.label : row.detail || "Click to open"}
+              <div key={row.key} className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={connecting !== null}
+                  onClick={() => void openAccountBox(row)}
+                  className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-2 shrink-0 rounded-full bg-muted-foreground/40"
+                  />
+                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{row.label}</div>
+                    <div className="truncate text-[10px] text-muted-foreground">
+                      {busy && connecting ? connecting.label : row.detail || "Click to open"}
+                    </div>
                   </div>
-                </div>
-                {busy ? (
-                  <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  {busy ? (
+                    <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  ) : null}
+                </button>
+                {withAssistants ? (
+                  <SwitcherAssistants
+                    environmentId={null}
+                    boxId={row.box?.id ?? null}
+                    onOpened={switcher.done}
+                  />
                 ) : null}
-              </button>
+              </div>
             );
           })}
         </div>

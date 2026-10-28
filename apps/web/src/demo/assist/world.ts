@@ -32,6 +32,14 @@ export interface AssistWorld {
   /** Work in the browser on uno-work, or the desktop app on the Mac. */
   readonly platform: "cloud" | "desktop";
   readonly connectors: Readonly<Record<ConnectorProvider, ConnectorState>>;
+  /** Variant B: assistants as a group in the sidebar (B1) or in the computer switcher (B2). */
+  readonly sidebar: "group" | "switcher";
+  /** Variant B: who else lives on the computers (besides an Uno on each). */
+  readonly cast: "unos" | "team" | "many" | "twins" | "long";
+  /** Variant B: a task passed to the MacBook's assistant finishes, or fails. */
+  readonly macjob: "ok" | "fail";
+  /** Variant B: drawing a face works, or Uno AI can't draw right now. */
+  readonly face: "ok" | "fail";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -49,6 +57,10 @@ export const LIVE_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "on", "google-drive": "on", notion: "off", github: "on" },
+  sidebar: "group",
+  cast: "unos",
+  macjob: "ok",
+  face: "ok",
 };
 
 export const NEW_WORLD: AssistWorld = {
@@ -59,6 +71,10 @@ export const NEW_WORLD: AssistWorld = {
   mode: "itself",
   platform: "cloud",
   connectors: { gmail: "off", "google-drive": "off", notion: "off", github: "off" },
+  sidebar: "group",
+  cast: "unos",
+  macjob: "ok",
+  face: "ok",
 };
 
 const KEY = "demo:assist-world";
@@ -103,6 +119,10 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     mode: take("mode", ["itself", "asks-first"] as const) ?? start.mode,
     platform: take("platform", ["cloud", "desktop"] as const) ?? start.platform,
     connectors,
+    sidebar: take("sb", ["group", "switcher"] as const) ?? start.sidebar,
+    cast: take("cast", ["unos", "team", "many", "twins", "long"] as const) ?? start.cast,
+    macjob: take("macjob", ["ok", "fail"] as const) ?? start.macjob,
+    face: take("face", ["ok", "fail"] as const) ?? start.face,
   };
   return touched ? next : null;
 }

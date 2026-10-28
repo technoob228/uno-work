@@ -277,6 +277,8 @@ export function useComputerSwitcher(onDone?: () => void) {
   };
 
   return {
+    /** Closes whatever holds the list (an assistant row in it was picked, B2). */
+    done: () => onDone?.(),
     environments,
     groups,
     current,

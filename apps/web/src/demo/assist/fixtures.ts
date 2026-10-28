@@ -114,17 +114,13 @@ const UNO_MAIN: ChatSpec = {
   minutesAgo: 40,
   state: "read",
   role: "assistant",
+  // Variant B: Uno on uno-work sees only uno-work (the MacBook has its own Uno).
   messages: [
     [
       "assistant",
-      "Good morning. 3 things today: Acme's invoice is 5 days late, the landing build on the MacBook failed overnight, and the orders-bot export ran fine (212 orders).",
+      "Good morning. From uno-work: Acme's invoice is 5 days late, and the orders-bot export ran fine (212 orders).",
     ],
-    ["user", "📱 Telegram: fix the landing build"],
-    [
-      "assistant",
-      "Fixed on the MacBook: a missing image in /public. The build is green, the preview is at landing-misha.uno4.me.",
-    ],
-    ["user", "Thanks. Remind me about Acme at 4 pm."],
+    ["user", "📱 Telegram: remind me about Acme at 4 pm"],
     ["assistant", "Will do — at 16:00 here and in Telegram."],
   ],
 };
@@ -188,6 +184,23 @@ function liveChats(world: AssistWorld): ChatSpec[] {
   if (macOnline(world)) {
     chats.push(
       {
+        id: "mac-uno-main",
+        machine: "mac",
+        project: ASSISTANT_PROJECT_ID,
+        title: "Uno",
+        minutesAgo: 65,
+        state: "read",
+        role: "assistant",
+        messages: [
+          [
+            "assistant",
+            "Good morning. From this MacBook: the landing build failed overnight — a missing image.",
+          ],
+          ["user", "Fix it."],
+          ["assistant", "Fixed: /public/hero.webp was missing. `npm run build` is green."],
+        ],
+      },
+      {
         id: "m-landing-build",
         machine: "mac",
         project: "p-mac-landing",
@@ -196,7 +209,7 @@ function liveChats(world: AssistWorld): ChatSpec[] {
         state: "unread",
         role: "from-uno",
         messages: [
-          ["user", "Uno: the landing build fails — fix it and tell me what it was."],
+          ["user", "Uno · MacBook: the landing build fails — fix it and tell me what it was."],
           [
             "assistant",
             "A missing image in /public/hero.webp. Added it back, `npm run build` is green.",
@@ -229,8 +242,8 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       kind: "agent.done",
       minutesAgo: 40,
       chat: "uno-main",
-      title: "Uno: your morning summary",
-      body: "Acme is 5 days late · landing build fixed on the MacBook · 212 orders exported.",
+      title: "Uno · uno-work: your morning summary",
+      body: "Acme is 5 days late · 212 orders exported to Drive.",
     },
     {
       id: "i-export",
@@ -250,7 +263,7 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       kind: "agent.done",
       minutesAgo: 70,
       chat: "m-landing-build",
-      title: "Finished on MacBook: Fix the landing build",
+      title: "Uno · MacBook: fixed the landing build",
       body: "A missing image in /public. The build is green.",
     });
   } else {
@@ -260,8 +273,8 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       kind: "app",
       minutesAgo: 25,
       source: { kind: "system", id: "uno", name: "Uno", icon: "💤" },
-      title: "Your MacBook is asleep",
-      body: "Uno keeps working here on uno-work. Chats on the MacBook wait until it wakes.",
+      title: "Your MacBook is asleep — Uno · MacBook too",
+      body: "Its chats and tasks wait until the laptop opens. Uno · uno-work keeps working here.",
       open: null,
     });
   }
@@ -273,7 +286,7 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       minutesAgo: 12,
       source: { kind: "system", id: "connectors", name: "Gmail", icon: "✉️" },
       title: "Gmail needs you to sign in again",
-      body: "Google ended the sign-in. Uno can't read or send mail until you reconnect.",
+      body: "Google ended the sign-in. Your assistants can't read or send mail until you reconnect — Settings → Connectors.",
       open: null,
     });
   }
@@ -285,8 +298,8 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       minutesAgo: 60 * 5,
       read: true,
       source: { kind: "system", id: "uno", name: "Uno", icon: "⏱" },
-      title: "On Free, uno-work sleeps after 15 min without you",
-      body: "Uno answers Telegram when it wakes (about 20 s). Plus keeps it on.",
+      title: "On Free, uno-work sleeps after 15 min without you — Uno · uno-work too",
+      body: "No morning summary; Telegram replies wait about 20 s for it to wake. Plus keeps it on.",
       open: { kind: "url", url: "https://console.uno4.dev/billing?tab=plan" },
     });
   }

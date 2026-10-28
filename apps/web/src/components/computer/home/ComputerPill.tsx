@@ -42,7 +42,8 @@ import {
   ZapIcon,
 } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { OPEN_COMPUTER_SWITCHER_EVENT } from "../../assistants/perMachine";
 
 import { cn } from "~/lib/utils";
 import { useDevMode } from "../../../devMode";
@@ -194,6 +195,12 @@ function ComputerPillView({
 }: ComputerPillProps & { connection: ComputerConnection | null }) {
   const [open, setOpen] = useState(false);
   const switcher = useComputerSwitcher(() => setOpen(false));
+  // Variant B2: "others are in the computer switcher" in the sidebar opens it.
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener(OPEN_COMPUTER_SWITCHER_EVENT, show);
+    return () => window.removeEventListener(OPEN_COMPUTER_SWITCHER_EVENT, show);
+  }, []);
   const look = FIT[fit];
   // 01.10: on the start screen the pill is the name, on/asleep and "Details";
   // the meters, boost and economy marks are for Dev mode (all of it is in the menu).

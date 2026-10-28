@@ -169,9 +169,20 @@ const pending = new Map<
 >();
 const keyOf = (machine: MachineKey, threadId: string) => `${machine}:${threadId}`;
 
+/** A variant's check before each step: a reason to stop (e.g. the assistant was removed). */
+let stopCheck: (ctx: ScriptContext) => string | null = () => null;
+export function setStopCheck(fn: (ctx: ScriptContext) => string | null) {
+  stopCheck = fn;
+}
+
 async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
   const { ops, machine, threadId } = ctx;
   for (const step of script) {
+    const stop = stopCheck(ctx);
+    if (stop) {
+      ops.fail(machine, threadId, stop);
+      return;
+    }
     if ("say" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? replyDelay(step.say));
@@ -208,7 +219,7 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
         machine,
         kind: "agent.approval",
         chat: threadId,
-        title: `${ctx.persona.name} asks: ${step.act.command}`,
+        title: `${assistantLabel(ctx)} asks: ${step.act.command}`,
         body: viaTelegram
           ? `${step.act.why} Also sent to your Telegram — answer there or here.`
           : `${step.act.why} It waits for you here.`,
@@ -267,6 +278,18 @@ const NAMES: Record<MachineKey, string> = {
   product: "free-cloud",
 };
 export const machineName = (machine: MachineKey) => NAMES[machine];
+
+/** How an assistant is named in the Inbox and to its neighbours (a variant may add its computer). */
+let labelOf: (ctx: { readonly persona: DemoPersona; readonly machine: MachineKey }) => string = (
+  ctx,
+) => ctx.persona.name;
+export function setAssistantLabel(fn: typeof labelOf) {
+  labelOf = fn;
+}
+export const assistantLabel = (ctx: {
+  readonly persona: DemoPersona;
+  readonly machine: MachineKey;
+}) => labelOf(ctx);
 
 // ── Triggers: what the person writes → which script ─────────────────────
 
@@ -539,7 +562,7 @@ export function morningSummary(ctx: ScriptContext, proactive = false): Script {
           id: `i-summary-${Date.now()}`,
           kind: "agent.done",
           chat: ctx.threadId,
-          title: `${ctx.persona.name}: your morning summary`,
+          title: `${assistantLabel(ctx)}: your morning summary`,
           body: "Also sent to your Telegram.",
         },
       },

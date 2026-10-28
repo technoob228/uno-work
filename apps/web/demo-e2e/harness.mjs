@@ -89,7 +89,7 @@ export async function openDemo(page, baseUrl, world = {}, { speed = 3, hash = ""
   await page.goto(`${baseUrl}?${params}${hash ? `#${hash}` : ""}`);
   await page.waitForFunction(() => Boolean(window.__assistDemo), null, { timeout: 30_000 });
   // The sidebar is there: the computers answered.
-  await page.getByText("Assistants", { exact: true }).first().waitFor({ timeout: 30_000 });
+  await page.getByTestId("sidebar-assistants").first().waitFor({ timeout: 30_000 });
   await dismissBanners(page);
 }
 

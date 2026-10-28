@@ -33,6 +33,14 @@ const ROWS: ReadonlyArray<{
   readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
 }> = [
   {
+    key: "sidebar",
+    label: "Сайдбар",
+    options: [
+      { id: "group", name: "B1 · группа" },
+      { id: "switcher", name: "B2 · в переключателе" },
+    ],
+  },
+  {
     key: "account",
     label: "Аккаунт",
     options: [
@@ -70,6 +78,33 @@ const ROWS: ReadonlyArray<{
     options: [
       { id: "itself", name: "Всё сам" },
       { id: "asks-first", name: "Спрашивает" },
+    ],
+  },
+  {
+    key: "cast",
+    label: "Кто живёт",
+    options: [
+      { id: "unos", name: "Uno на каждой" },
+      { id: "team", name: "+Mia, Bolt" },
+      { id: "many", name: "12 на 3" },
+      { id: "twins", name: "Две Mia" },
+      { id: "long", name: "Длинное имя" },
+    ],
+  },
+  {
+    key: "macjob",
+    label: "Задача на Маке",
+    options: [
+      { id: "ok", name: "Проходит" },
+      { id: "fail", name: "Падает" },
+    ],
+  },
+  {
+    key: "face",
+    label: "Рисование лица",
+    options: [
+      { id: "ok", name: "Работает" },
+      { id: "fail", name: "Падает" },
     ],
   },
   {
@@ -159,6 +194,19 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
       switchWorld,
     };
   }, [router]);
+  // First run on a new account: Work opens on Uno's chat — it talks first.
+  useEffect(() => {
+    if (WORLD.account !== "new" || sessionStorage.getItem("demo:first-run-opened")) return;
+    sessionStorage.setItem("demo:first-run-opened", "1");
+    const timer = setTimeout(() => {
+      const threadId = assistDemo.mainChat("work");
+      void router.navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: assistDemo.environmentOf("work"), threadId },
+      } as never);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [router]);
   useEffect(() => {
     if (!open) return;
     const onDown = (event: PointerEvent) => {
@@ -213,7 +261,7 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
           Состояние
         </div>
         {ROWS.map((row) => (
-          <div key={row.key} className="mt-1.5 flex items-center gap-1.5">
+          <div key={row.key} className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <span className="w-16 shrink-0 text-[11px] text-muted-foreground">{row.label}</span>
             {row.options.map((option) => (
               <Chip
@@ -274,7 +322,8 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
         </ol>
         <div className="mt-2 text-[11px] leading-snug text-muted-foreground">
           В чате с Uno можно писать и самому: «morning summary», «send the Acme reminder», «export
-          the deck on my Mac», «connect my apps», «connect Telegram», «break something».
+          the deck on my Mac» (передача соседу), «connect my apps», «connect Telegram», «break
+          something». «+» у Assistants — свой ассистент как в Grok.
         </div>
       </div>
     </div>

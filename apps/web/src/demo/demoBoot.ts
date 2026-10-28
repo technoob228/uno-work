@@ -53,7 +53,8 @@ import {
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
 import { WORLD, worldStamp } from "./assist/world";
-import "./assist/variant";
+import { lastKnownSeed, setMainChatLookup } from "./assist/variant";
+import { LAST_KNOWN_KEY, setAssistantsLayout } from "../components/assistants/perMachine";
 import {
   CHATS,
   DEMO_VERSION,
@@ -1434,6 +1435,16 @@ function startAssist() {
 export async function startDemo(): Promise<void> {
   if (DEMO_ASSIST) startAssist();
   seedLocalStorage();
+  if (DEMO_ASSIST) {
+    // Variant B: what sleeping computers had (seen last in this browser), and B1/B2.
+    const known = JSON.parse(localStorage.getItem(LAST_KNOWN_KEY) ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({ ...known, ...lastKnownSeed() }));
+    setAssistantsLayout(WORLD.sidebar);
+    setMainChatLookup((key, projectId) => assistDemo.mainChat(key, projectId));
+  }
   if (!DEMO_ASSIST) seedAssistantTeam({ addInbox: addDemoInbox });
   void loadAgentFrame();
   // Touch every fixture once so a typo in them fails loudly at start.

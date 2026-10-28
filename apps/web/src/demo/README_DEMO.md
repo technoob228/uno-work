@@ -66,3 +66,22 @@ else the system Chrome. Typecheck: `cd apps/web && tsc --noEmit`.
   and the Free computer is only in the account's list (never connected).
 - Onboarding (first run) is skipped in both worlds (`onboardingCompleted: true`).
 - Avatars/pictures, Slack, the assistant's own mail are stubs (empty answers).
+
+## Variant B (branch `demo/assistants-b-1028`): an assistant of its own on every computer
+
+Each computer has its own Uno (and the assistants made on it); each sees only its computer and
+is named by it everywhere ("Uno · MacBook"). Address params on top of the base:
+`sb=group|switcher` (B1: "Assistants" group with computer tags · B2: this computer's assistants
+in the sidebar, the rest at the top of each computer in the computer switcher),
+`cast=unos|team|many|twins|long`, `macjob=ok|fail`, `face=ok|fail`.
+
+| What                                                                                                           | File                                                                           |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Computers with their assistants, B1/B2 switch, last-known list of sleeping ones                                | `components/assistants/perMachine.ts`                                          |
+| Computer tag, sleeping sheet, chat headline, Free banner, switcher rows                                        | `components/assistants/MachineAssistants.tsx`                                  |
+| Lives on / How it works / Remove on its page                                                                   | `components/assistants/AssistantBasics.tsx`                                    |
+| New assistant like Grok (gallery + build your own, picks the computer)                                         | `components/assistants/AssistantGallery.tsx` (`/assistants?view=gallery&env=`) |
+| The story: greeting (apps → one Telegram bot → mode), hand-off to a neighbour, a summary from each, long tasks | `assist/variant.ts`                                                            |
+
+Scenes: `b-morning`, `b-handoff`. Flows: `node demo-e2e/run.mjs b-` (25 flows; the base's own
+flows assume one Uno and aren't run for B).

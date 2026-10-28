@@ -41,9 +41,41 @@ interface AssistantRecord {
   apps: Record<string, "none" | "read" | "write">;
   revokedAt: string | null;
   createdAt: string;
+  avatar?: string | null;
 }
 
 const records = new Map<string, AssistantRecord>();
+/** Pictures set on an assistant (base64), by computer:folder. */
+const avatars = new Map<string, { data: string; type: string }>();
+
+/** A friendly flat portrait, drawn here instead of by Uno AI (SVG, as a `data:` URL). */
+function drawFace(persona: string, seed: number): string {
+  const hues = [210, 25, 160, 280, 340, 45, 190];
+  const hue = hues[Math.abs(seed) % hues.length]!;
+  const skin = ["#f2c9a0", "#d9a27a", "#a8724f", "#f5d6b8"][Math.abs(seed) % 4]!;
+  const face =
+    persona === "robot"
+      ? `<rect x="58" y="62" width="140" height="120" rx="28" fill="#cfd8e3"/><circle cx="100" cy="118" r="14" fill="#1e293b"/><circle cx="156" cy="118" r="14" fill="#1e293b"/><rect x="104" y="150" width="48" height="8" rx="4" fill="#1e293b"/><rect x="122" y="36" width="12" height="28" fill="#94a3b8"/><circle cx="128" cy="34" r="9" fill="hsl(${hue} 80% 60%)"/>`
+      : persona === "alien"
+        ? `<ellipse cx="128" cy="124" rx="70" ry="84" fill="#9be3a8"/><ellipse cx="100" cy="120" rx="18" ry="26" fill="#0f172a"/><ellipse cx="156" cy="120" rx="18" ry="26" fill="#0f172a"/><path d="M110 170 q18 12 36 0" stroke="#0f172a" stroke-width="5" fill="none" stroke-linecap="round"/>`
+        : persona === "animal"
+          ? `<circle cx="78" cy="70" r="26" fill="#c08457"/><circle cx="178" cy="70" r="26" fill="#c08457"/><circle cx="128" cy="128" r="76" fill="#d79b6b"/><ellipse cx="128" cy="150" rx="34" ry="26" fill="#f4dcc3"/><circle cx="102" cy="116" r="8" fill="#1f2937"/><circle cx="154" cy="116" r="8" fill="#1f2937"/><ellipse cx="128" cy="140" rx="10" ry="7" fill="#1f2937"/>`
+          : `<circle cx="128" cy="128" r="70" fill="${skin}"/><path d="M58 118 q4 -70 70 -70 q66 0 70 70 q-30 -34 -70 -34 q-40 0 -70 34z" fill="hsl(${hue} 35% 25%)"/><circle cx="104" cy="132" r="7" fill="#1f2937"/><circle cx="152" cy="132" r="7" fill="#1f2937"/><path d="M108 164 q20 14 40 0" stroke="#1f2937" stroke-width="5" fill="none" stroke-linecap="round"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" fill="hsl(${hue} 70% 88%)"/>${face}</svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+/** The portrait as a PNG (what the real route returns and the avatar route keeps). */
+async function drawFacePng(persona: string, seed: number): Promise<string> {
+  const image = new Image();
+  image.src = drawFace(persona, seed);
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  canvas.getContext("2d")!.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
 const recordKey = (machine: MachineKey, projectId: string) => `${machine}:${projectId}`;
 let world: AssistWorld;
 
@@ -82,9 +114,8 @@ function addRecord(machine: MachineKey, persona: DemoPersona) {
     persona,
     preset: world.mode === "asks-first" ? "helper" : "full",
     projects: "all",
-    // Uno on uno-work is the one Telegram talks to.
-    telegram:
-      world.telegram === "on" && persona.projectId === ASSISTANT_PROJECT_ID && machine === "work",
+    // Variant B: one bot for all assistants (@uno_team_bot) — linked once, each signs its messages.
+    telegram: world.telegram === "on",
     team: teamOf(persona, createdAt),
     apps: {},
     revokedAt: null,
@@ -147,10 +178,10 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       emoji: record.persona.emoji,
       template: null,
       createdAt: record.createdAt,
-      avatar: null,
+      avatar: record.avatar ?? null,
     },
     team: {
-      team: record.team,
+      team: { ...record.team, revokedAt: record.revokedAt },
       apps: { permissions: record.apps, restricted: Object.keys(record.apps).length > 0 },
     },
   } as ManagerAssistantSummary;
@@ -213,6 +244,8 @@ function connectorsList() {
         account: connected ? CONNECTOR_META[provider].account : null,
         connectedAt: connected ? new Date(Date.now() - 86_400_000 * 12).toISOString() : null,
         toolCount: connected ? 12 : 0,
+        // The real list's "Reconnect" state (Google ended the sign-in).
+        needsReconnect: state === "expired",
       };
     }),
   };
@@ -248,9 +281,19 @@ export function telegramLinked(machine: MachineKey, projectId: string): boolean 
   return recordOf(machine, projectId)?.telegram === true;
 }
 
-export function setTelegram(machine: MachineKey, projectId: string, linked: boolean) {
+/** Variant B: the bot is shared — linking (or unlinking) it is for every assistant at once. */
+export function setTelegram(_machine: MachineKey, _projectId: string, linked: boolean) {
+  for (const record of records.values()) record.telegram = linked;
+}
+
+/** "Does it itself" (full) / "Asks first" (helper) — from a chat card or its page. */
+export function setPreset(machine: MachineKey, projectId: string, preset: AssistantPreset) {
   const record = recordOf(machine, projectId);
-  if (record) record.telegram = linked;
+  if (record) record.preset = preset;
+}
+
+export function isRevoked(machine: MachineKey, projectId: string): boolean {
+  return recordOf(machine, projectId)?.revokedAt != null;
 }
 
 /** Is that computer reachable from the page (asleep ones aren't). */
@@ -328,7 +371,8 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
       const list = [...records.values()]
-        .filter((record) => record.persona.machine === machine.key && record.revokedAt === null)
+        // Revoked ones stay listed (their token says so), as a real daemon lists them.
+        .filter((record) => record.persona.machine === machine.key)
         .map((record) => summaryOf(machine, record));
       return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
     }),
@@ -408,6 +452,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       if (body.setup === "again")
         team.setup = { ...team.setup, state: "in-progress", answered: [], skipped: [] };
       if (typeof body.emoji === "string") record.persona = { ...record.persona, emoji: body.emoji };
+      if (Array.isArray(body.roles))
+        record.persona = { ...record.persona, roles: body.roles as string[] };
+      if (typeof body.character === "string")
+        record.persona = { ...record.persona, character: body.character };
+      if (typeof body.tone === "string") record.persona = { ...record.persona, tone: body.tone };
       if (typeof body.name === "string") record.persona = { ...record.persona, name: body.name };
       return json({ team: record.team });
     }),
@@ -457,8 +506,8 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.post("*/api/manager/assistant/revoke", async ({ request }) => {
       const body = await bodyOf(request);
       const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
-      if (record) record.revokedAt = new Date().toISOString();
-      return json({ ok: true });
+      if (record) record.revokedAt = body.revoked === false ? null : new Date().toISOString();
+      return json({ affected: record ? [record.persona.projectId] : [] });
     }),
     http.post("*/api/manager/assistant/telegram/pair", async ({ request }) => {
       const machine = machineOf(request);
@@ -509,7 +558,40 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       );
       return json({ ok: true });
     }),
-    http.get("*/api/manager/assistant/avatar", () => new HttpResponse(null, { status: 404 })),
+    http.get("*/api/manager/assistant/avatar", ({ request }) => {
+      const image = avatars.get(`${machineOf(request).key}:${projectParam(request)}`);
+      if (!image) return new HttpResponse(null, { status: 404 });
+      return new HttpResponse(
+        Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0)),
+        {
+          headers: { "content-type": image.type },
+        },
+      );
+    }),
+    http.post("*/api/manager/assistant/avatar/generate", async ({ request }) => {
+      const body = await bodyOf(request);
+      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      // Uno AI can't draw right now (the edge flow "face generation failed").
+      if (world.face === "fail") {
+        return json({ error: "Uno AI couldn't draw right now. Try again later." }, { status: 503 });
+      }
+      const seed = Number(body.seed ?? 0);
+      return json({ image: await drawFacePng(String(body.persona ?? "human"), seed) });
+    }),
+    http.post("*/api/manager/assistant/avatar", async ({ request }) => {
+      const body = await bodyOf(request);
+      const key = `${machineOf(request).key}:${String(body.projectId)}`;
+      if (typeof body.image === "string" && body.image) {
+        avatars.set(key, { data: body.image, type: "image/png" });
+        const record = recordOf(machineOf(request).key, String(body.projectId));
+        if (record) record.avatar = new Date().toISOString();
+        return json({ avatar: record?.avatar ?? null });
+      }
+      avatars.delete(key);
+      const record = recordOf(machineOf(request).key, String(body.projectId));
+      if (record) record.avatar = null;
+      return json({ avatar: null });
+    }),
     http.get("*/api/manager/assistant/instructions", () => json({ state: "current", content: "" })),
     http.get("*/api/manager/assistant/chats", () => json({ chats: [] })),
     http.get("*/api/manager/connector-bindings", () => json({ bindings: [] })),

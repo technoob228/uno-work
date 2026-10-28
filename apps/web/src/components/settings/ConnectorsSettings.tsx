@@ -14,6 +14,10 @@ import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
 import { useAssistantTeam } from "../assistants/useAssistantTeam";
+import { useAssistantsByMachine } from "../assistants/perMachine";
+
+const connectorsLineOf = (names: ReadonlyArray<{ readonly name: string }>) =>
+  names.map((item) => item.name).join(", ");
 import { connectedSummary } from "../connectors/connectorsCatalog.logic";
 import { ConnectorsList } from "../setup/steps/ConnectorsStep";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
@@ -23,6 +27,10 @@ export function ConnectorsSettings() {
   const { items, loading } = useConnectorItems();
   const team = useAssistantTeam().filter((member) => !member.revoked);
   const [details, setDetails] = useState(false);
+  const machines = useAssistantsByMachine();
+  const expired = items.filter(
+    (item) => (item as { needsReconnect?: boolean }).needsReconnect === true,
+  );
   const connected = items.filter((item) => item.connected);
   const names = connected
     .filter((item) => item.kind === "app")
@@ -33,8 +41,8 @@ export function ConnectorsSettings() {
       <div className="flex flex-col gap-1 px-1" data-testid="settings-connectors">
         <h1 className="text-lg font-semibold">Connectors</h1>
         <p className="text-sm text-muted-foreground">
-          Apps your AI can work in. Connect once here — Uno and your assistants use them in any
-          chat. You approve each one on the app’s own page and can disconnect any time.
+          Apps your assistants work in. You connect each one once, for your whole account — every
+          assistant on every computer uses the same connection. Disconnect any time.
         </p>
       </div>
 
@@ -80,6 +88,61 @@ export function ConnectorsSettings() {
               </button>
             );
           })}
+        </SettingsSection>
+      ) : null}
+
+      {/* Variant B: whose assistants use them, computer by computer. */}
+      {machines.length > 0 ? (
+        <SettingsSection title="Who uses them">
+          {machines.map((machine) => (
+            <div
+              key={machine.key}
+              className="flex items-start gap-3 border-t border-border/60 px-4 py-2.5 first:border-t-0 sm:px-5"
+              data-testid="connectors-machine"
+            >
+              <span className="w-28 shrink-0 pt-0.5 text-sm font-medium">
+                <span className="block truncate">{machine.label}</span>
+                <span className="block text-[11px] font-normal text-muted-foreground">
+                  {machine.awake ? "awake" : "asleep"}
+                </span>
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                {machine.assistants.map((assistant) => {
+                  const levels = assistant.member ? accessOf(assistant.member.profile) : null;
+                  return (
+                    <div key={assistant.key} className="flex min-w-0 items-center gap-2 text-xs">
+                      <AssistantAvatar
+                        emoji={assistant.isUno ? null : assistant.emoji}
+                        tone={assistant.tone}
+                        image={assistant.member ? avatarImageOf(assistant.member.profile) : null}
+                        className={assistant.awake ? "size-5" : "size-5 opacity-60 grayscale"}
+                        emojiClassName="text-[10px]"
+                      />
+                      <span className="w-20 shrink-0 truncate font-medium">{assistant.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        {names.length === 0
+                          ? "nothing connected yet"
+                          : !assistant.awake
+                            ? `${connectorsLineOf(names)} — when ${machine.label} wakes`
+                            : levels
+                              ? connectorsLine(levels.connectors, names)
+                              : connectorsLineOf(names)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {expired.length > 0 ? (
+            <p
+              className="border-t border-border/60 px-4 py-2.5 text-xs text-amber-700 sm:px-5 dark:text-amber-400"
+              data-testid="connectors-expired-note"
+            >
+              {expired.map((item) => item.name).join(", ")} stopped working for all of them — sign
+              in again above.
+            </p>
+          ) : null}
         </SettingsSection>
       ) : null}
 

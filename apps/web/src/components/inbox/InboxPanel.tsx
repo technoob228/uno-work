@@ -41,6 +41,8 @@ import {
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
 import { cn } from "../../lib/utils";
+import { useMachineLabels } from "../../hooks/useMachineRows";
+import { MachineTag } from "../assistants/MachineAssistants";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
 import { resolveSnoozePresets, snoozeWakeDescription } from "../Sidebar.snooze";
@@ -318,6 +320,7 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const openItem = useOpenInboxItem();
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const unread = item.readAt === null;
+  const machineLabels = useMachineLabels();
   const snoozed = isSnoozed(item);
   const time = formatRelativeTime(item.updatedAt).value;
   const presets = useMemo(() => (snoozeOpen ? resolveSnoozePresets(new Date()) : []), [snoozeOpen]);
@@ -378,6 +381,10 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
             </span>
           ) : null}
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+            {/* Variant B: which computer it came from (each has its own assistant). */}
+            {machineLabels.size > 1 && machineLabels.get(item.environmentId) ? (
+              <MachineTag label={machineLabels.get(item.environmentId)!} />
+            ) : null}
             {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
             {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
           </span>
