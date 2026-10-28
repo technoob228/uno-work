@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.159 — 2026-10-29
+
+- Assistants D + Automations — only for accounts with the assistants update (console ASSISTANTS_MVP / AUTOMATIONS): icons on top of the sidebar, a gallery of three roles, Permission level (Autonomous / Cautious), "What should it do?" as a multi-select, a computer of its own right in the wizard, Uno as the orchestrator, chats on other computers, Telegram for Uno, Join my calls, Automations.
+- Everyone else sees Work as in 0.0.158.
+
+---
+
 ## v0.0.158 — 2026-10-28
 
 - **Show the agent: record your screen and the agent does it.** A Record button in the chat box and "Show the agent" on Home: share a screen, window or tab, your camera in a corner and your voice. The recording goes to Uno Drive (up to 60 minutes), the agent gets a second-by-second timeline of what you said and where the cursor was, key frames at your clicks and at "here / this", and can look at any moment frame by frame. Your words go into the message box.
