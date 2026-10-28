@@ -1,5 +1,7 @@
 import {
   ProviderDriverKind,
+  UNO_FAST_GATEWAY_MODEL,
+  UNO_SMART_GATEWAY_MODEL,
   type ModelCapabilities,
   type OpenCodeSettings,
   type ServerProviderModel,
@@ -261,7 +263,41 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
     }
   }
 
-  return models.toSorted((left, right) => left.name.localeCompare(right.name));
+  return orderOpenCodeModels(models);
+}
+
+/** OpenCode's provider id for the Uno AI gateway (UnoDriver `UNO_GATEWAY_OPENCODE_PROVIDER_ID`). */
+const OPENCODE_UNO_PROVIDER_PREFIX = "uno/";
+const OPENCODE_UNO_PINNED: ReadonlyArray<string> = [
+  `${OPENCODE_UNO_PROVIDER_PREFIX}${UNO_SMART_GATEWAY_MODEL}`,
+  `${OPENCODE_UNO_PROVIDER_PREFIX}${UNO_FAST_GATEWAY_MODEL}`,
+];
+
+/**
+ * The OpenCode list, Uno AI first (agent-flow pass 25.10, item 7: 23 models,
+ * OpenCode's 9 free ones on top and Smart at the bottom of 14 "Uno AI" ones,
+ * so people picked a free model or a premium one they had no credit for).
+ * Uno AI: Smart, Fast, then the gateway's own order (the order OpenCode got
+ * them in its config); then everything else by name.
+ */
+export function orderOpenCodeModels(
+  models: ReadonlyArray<ServerProviderModel>,
+): ReadonlyArray<ServerProviderModel> {
+  const rank = (model: ServerProviderModel, index: number): [number, number] => {
+    const slug = model.slug.toLowerCase();
+    if (!slug.startsWith(OPENCODE_UNO_PROVIDER_PREFIX)) return [2, 0];
+    const pinned = OPENCODE_UNO_PINNED.indexOf(slug);
+    return pinned >= 0 ? [0, pinned] : [1, index];
+  };
+  return models
+    .map((model, index) => ({ model, rank: rank(model, index) }))
+    .toSorted(
+      (left, right) =>
+        left.rank[0] - right.rank[0] ||
+        left.rank[1] - right.rank[1] ||
+        (left.rank[0] === 2 ? left.model.name.localeCompare(right.model.name) : 0),
+    )
+    .map((entry) => entry.model);
 }
 
 export const makePendingOpenCodeProvider = (
