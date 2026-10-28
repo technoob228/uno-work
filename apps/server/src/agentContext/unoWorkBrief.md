@@ -15,7 +15,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - Spark: `spark_deploy`, `spark_logs`, `spark_list`, `spark_delete`: one JS/Python file → `https://<name>.spark.uno4.me`, free, no server: `uno_guide("spark")`
 - Databases (Postgres): `db_create`, `db_list`, `db_connection` (puts DATABASE_URL in `.env`, never in the chat)
 - Bots/APIs for others: small ones on Spark first; else `app_deploy` if `app_servers_list` says `enabled: true`, else run them here as an app; `app_server_logs`
-- Your own mailbox (`mail_address`): `mail_list`, `mail_read`, `mail_attachment_save`, `mail_send`. Use it for sign-ups, codes and mail as yourself; the person's mail only via the Gmail connector
+- Your own mailbox (`mail_address`): `mail_list`, `mail_read`, `mail_attachment_save`, `mail_send`: sign-ups, codes; the person's mail only via the Gmail connector
 - Account: `account_overview`, `computer_create`, `computer_create_status`, `settings_read`
 - Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear here: use them, don't ask to copy things over. A project's `materials/README.md` sums up their files: read it first.
 - Details: `uno_guide` with a topic: `computer`, `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `spark`, `databases`, `app-servers`, `account`, `plugins`
