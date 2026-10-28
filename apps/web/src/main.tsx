@@ -13,14 +13,20 @@ import { handleUncaughtRenderError } from "./fatalRecovery";
 import { installPreloadErrorReload } from "./staleBundle";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
-import { DEMO } from "./demo/demoFlag";
+import { DEMO, DEMO_LOOM } from "./demo/demoFlag";
 
 // Demo mode (?demo=w0138): computers answered in the page from fixtures,
 // plus the "what to look at" panel and the variant switcher. Loaded only with the parameter.
-const DemoPanelLazy = React.lazy(() => import("./demo/DemoPanel"));
+const DemoPanelLazy = React.lazy(() =>
+  DEMO_LOOM ? import("./demo/loom/LoomDemoPanel") : import("./demo/DemoPanel"),
+);
 if (DEMO) {
   const { startDemo } = await import("./demo/demoBoot");
   await startDemo();
+  if (DEMO_LOOM) {
+    const { startLoomDemo } = await import("./demo/loom/loomDemo");
+    startLoomDemo();
+  }
 }
 
 // A tab still on the previous bundle asks for chunks that are gone after an

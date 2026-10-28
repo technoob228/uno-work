@@ -10,8 +10,26 @@
  */
 import { create } from "zustand";
 
+/**
+ * Loom Work (28.10): `VITE_DEMO=loom` (or `?demo=loom` on the dev server) is
+ * the same fake-computers demo with screen recording answered in the page
+ * (demo/loom/*) and its own "what to look at" panel.
+ */
+function readDemoLoom(): boolean {
+  if (import.meta.env.VITE_DEMO === "loom") return true;
+  if (!import.meta.env.DEV || typeof location === "undefined") return false;
+  try {
+    return new URLSearchParams(location.search).get("demo") === "loom";
+  } catch {
+    return false;
+  }
+}
+
+export const DEMO_LOOM: boolean = readDemoLoom();
+
 function readDemo(): boolean {
   if (import.meta.env.VITE_DEMO === "w0138") return true;
+  if (DEMO_LOOM) return true;
   // `?demo=` only on the dev server: in a real build the link must not swap
   // the person's saved computers for demo ones (demoBoot clears storage).
   if (!import.meta.env.DEV || typeof location === "undefined") return false;

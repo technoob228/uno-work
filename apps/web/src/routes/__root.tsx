@@ -1,3 +1,4 @@
+import { ScreenRecordingBar } from "../screenRecording/ScreenRecordingBar";
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
@@ -220,6 +221,7 @@ function RootRouteView() {
         </AppSidebarLayout>
         <NewProjectDialog />
         <ProjectUploadsPanel />
+        <ScreenRecordingBar />
         <WorkIntentBridge />
         <SetupTourCoach />
       </CommandPalette>

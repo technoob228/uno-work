@@ -347,6 +347,9 @@ import {
   VideoDigest,
 } from "./video.ts";
 import {
+  UnoDescribeVideoError,
+  UnoDescribeVideoInput,
+  UnoDescribeVideoResult,
   UnoTranscribeAudioInput,
   UnoTranscribeAudioResult,
   UnoTranscriptionError,
@@ -448,6 +451,7 @@ export const WS_METHODS = {
   unoVideoGetDigest: "uno.video.getDigest",
   unoVideoPackDigest: "uno.video.packDigest",
   unoTranscribeAudio: "uno.transcribeAudio",
+  unoDescribeVideo: "uno.describeVideo",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -885,6 +889,12 @@ export const WsUnoTranscribeAudioRpc = Rpc.make(WS_METHODS.unoTranscribeAudio, {
   payload: UnoTranscribeAudioInput,
   success: UnoTranscribeAudioResult,
   error: UnoTranscriptionError,
+});
+
+export const WsUnoDescribeVideoRpc = Rpc.make(WS_METHODS.unoDescribeVideo, {
+  payload: UnoDescribeVideoInput,
+  success: UnoDescribeVideoResult,
+  error: UnoDescribeVideoError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -2230,6 +2240,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsUnoVideoGetDigestRpc,
   WsUnoVideoPackDigestRpc,
   WsUnoTranscribeAudioRpc,
+  WsUnoDescribeVideoRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

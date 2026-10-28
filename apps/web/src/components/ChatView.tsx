@@ -156,6 +156,9 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { appendRecordingToPrompt } from "../screenRecording/recordingLogic";
+import { recordingReadiness } from "../screenRecording/pipeline";
+import { useScreenRecordingStore } from "../screenRecording/recordingStore";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -2880,6 +2883,8 @@ export default function ChatView(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
     const promptForSend = promptRef.current;
+    // Loom Work: the chat's screen recording goes with the message as a block.
+    const composerRecording = useScreenRecordingStore.getState().items[activeThread.id] ?? null;
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -2887,11 +2892,18 @@ export default function ChatView(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: composerImages.length + composerVideos.length + composerFiles.length,
+      imageCount:
+        composerImages.length +
+        composerVideos.length +
+        composerFiles.length +
+        (composerRecording ? 1 : 0),
       terminalContexts: composerTerminalContexts,
     });
     const hasComposerAttachments =
-      composerImages.length > 0 || composerVideos.length > 0 || composerFiles.length > 0;
+      composerImages.length > 0 ||
+      composerVideos.length > 0 ||
+      composerFiles.length > 0 ||
+      composerRecording !== null;
     if (
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
@@ -2938,6 +2950,13 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
+    if (composerRecording) {
+      const readiness = recordingReadiness(composerRecording);
+      if (!readiness.ready) {
+        setThreadError(activeThread.id, readiness.blocking);
+        return;
+      }
+    }
     const pendingVideo = composerVideos.find(
       (video) => video.status !== "ready" || !video.digestId || !video.jobId || !video.digest,
     );
@@ -2977,8 +2996,11 @@ export default function ChatView(props: ChatViewProps) {
     const composerVideosSnapshot = [...composerVideos];
     const composerFilesSnapshot = [...composerFiles];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
+    const takenRecording = composerRecording
+      ? useScreenRecordingStore.getState().take(activeThread.id)
+      : null;
     const messageTextForSend = appendTerminalContextsToPrompt(
-      promptForSend,
+      appendRecordingToPrompt(promptForSend, takenRecording?.forAgent ?? null),
       composerTerminalContextsSnapshot,
     );
     const messageIdForSend = newMessageId();
@@ -3216,6 +3238,7 @@ export default function ChatView(props: ChatViewProps) {
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         composerRef.current?.setVideoAttachments(retryComposerVideos);
         composerRef.current?.setFileAttachments(composerFilesSnapshot);
+        if (takenRecording) useScreenRecordingStore.getState().restore(takenRecording.item);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),

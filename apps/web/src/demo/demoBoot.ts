@@ -11,6 +11,7 @@ import { HttpResponse, delay, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
+import { demoHooks } from "./demoFlag";
 import { answerFileRpc } from "./demoFiles";
 import {
   demoBrowserLiveInitial,
@@ -590,7 +591,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
         startTurn(target, message.messageId, message.text);
         touch(model);
         publishThread(machine, String(command.threadId));
-        setTimeout(() => finishTurn(machine, String(command.threadId)), 2200);
+        // A variant can answer some messages itself (Loom Work: a recording).
+        const replyTo = demoHooks.replyTo as ((text: string) => string | null) | undefined;
+        const reply = replyTo?.(message.text) ?? undefined;
+        setTimeout(() => finishTurn(machine, String(command.threadId), reply), reply ? 3200 : 2200);
         return { sequence: commandSequence };
       }
       break;

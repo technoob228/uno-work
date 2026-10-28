@@ -30,3 +30,39 @@ export class UnoTranscriptionError extends Schema.TaggedErrorClass<UnoTranscript
     reason: Schema.optional(Schema.Literals(["missing-api-key", "invalid-audio", "gateway"])),
   },
 ) {}
+
+/**
+ * uno.describeVideo — Loom Work (28.10): a screen recording made in Work is
+ * watched by the Uno Gateway's `POST /video/describe` (speech + what was on
+ * screen, one multimodal call). The browser first stages the small "agent
+ * copy" of the recording on the computer; the daemon reads it from there, so
+ * no 20 MB frame goes over the WebSocket and the key stays server-side.
+ */
+export const UNO_DESCRIBE_VIDEO_MAX_BYTES = 25 * 1024 * 1024;
+export const UNO_DESCRIBE_VIDEO_MAX_SECONDS = 10 * 60;
+
+export const UnoDescribeVideoInput = Schema.Struct({
+  /** Inside the home folder: `~/.uno-recordings/<id>/agent.webm` or an absolute path. */
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+  mimeType: TrimmedNonEmptyString,
+  durationSec: Schema.Number,
+});
+export type UnoDescribeVideoInput = typeof UnoDescribeVideoInput.Type;
+
+export const UnoDescribeVideoResult = Schema.Struct({
+  /** Verbatim transcript of what was said ("" when nobody spoke). */
+  speech: Schema.String,
+  /** What was on screen, with readable text quoted. */
+  visual: Schema.String,
+});
+export type UnoDescribeVideoResult = typeof UnoDescribeVideoResult.Type;
+
+export class UnoDescribeVideoError extends Schema.TaggedErrorClass<UnoDescribeVideoError>()(
+  "UnoDescribeVideoError",
+  {
+    message: Schema.String,
+    reason: Schema.optional(
+      Schema.Literals(["missing-api-key", "invalid-path", "too-large", "unsupported", "gateway"]),
+    ),
+  },
+) {}

@@ -15,6 +15,7 @@ import {
   BrowserWindow,
   type BrowserWindowConstructorOptions,
   clipboard,
+  desktopCapturer,
   dialog,
   ipcMain,
   Menu,
@@ -2635,6 +2636,35 @@ function isAllowedAppSubframeUrl(rawUrl: string): boolean {
   return protocol === "http:" || protocol === "https:" || protocol === "blob:";
 }
 
+/**
+ * Loom Work (28.10): the app's own window records the screen with
+ * getDisplayMedia. Electron answers that only through this handler: on macOS
+ * 15+ the system's own picker (screens and windows, the person chooses);
+ * elsewhere the main screen (a picker of our own is a follow-up). Embedded
+ * pages (guest sessions below) stay denied.
+ */
+function configureScreenRecording(): void {
+  session.defaultSession.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      void desktopCapturer
+        .getSources({ types: ["screen"] })
+        .then((sources) => {
+          const screen = sources[0];
+          if (!screen) {
+            callback({});
+            return;
+          }
+          // Windows can add the system sound; macOS has no loopback here.
+          callback(
+            process.platform === "win32" ? { video: screen, audio: "loopback" } : { video: screen },
+          );
+        })
+        .catch(() => callback({}));
+    },
+    { useSystemPicker: true },
+  );
+}
+
 const guardedGuestSessions = new WeakSet<Electron.Session>();
 
 /**
@@ -3058,6 +3088,7 @@ app
     configureApplicationMenu();
     registerDesktopProtocol();
     configureAutoUpdater();
+    configureScreenRecording();
 
     // Waking from sleep should retry dead ssh tunnels immediately instead of
     // waiting out whatever backoff delay their supervisors were sleeping on.

@@ -156,6 +156,10 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { readLocalApi } from "../../localApi";
 import { isDictationSupported, useDictation } from "../../hooks/useDictation";
+import { RecordButton, screenRecordingAvailable } from "../../screenRecording/RecordButton";
+import { RecordingComposerCard } from "../../screenRecording/RecordingCards";
+import { prefilledInstruction } from "../../screenRecording/recordingLogic";
+import { useScreenRecordingStore } from "../../screenRecording/recordingStore";
 import type { ProjectUploadFile } from "../../projectUpload";
 import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projectUploadPickers";
 
@@ -1848,6 +1852,23 @@ export const ChatComposer = memo(
           ? "Transcribing…"
           : "Dictate";
 
+    // Loom Work: a screen recording for this chat (recordingStore.ts). When the
+    // agent has watched it, the person's words go into an empty box once.
+    const recordingSupported = screenRecordingAvailable();
+    const composerRecording = useScreenRecordingStore((state) =>
+      activeThreadId ? (state.items[activeThreadId] ?? null) : null,
+    );
+    const markRecordingPrefilled = useScreenRecordingStore((state) => state.markPrefilled);
+    useEffect(() => {
+      if (!composerRecording || composerRecording.prefilled) return;
+      if (composerRecording.watch.status !== "done" && composerRecording.watch.status !== "skipped")
+        return;
+      markRecordingPrefilled(composerRecording.threadKey);
+      if (promptRef.current.trim().length === 0) {
+        setPromptFromTraits(prefilledInstruction(composerRecording.watch.speech));
+      }
+    }, [composerRecording, markRecordingPrefilled, promptRef, setPromptFromTraits]);
+
     const resolveActiveComposerTrigger = useCallback((): {
       snapshot: { value: string; cursor: number; expandedCursor: number };
       trigger: ComposerTrigger | null;
@@ -2909,6 +2930,14 @@ export const ChatComposer = memo(
               </Tooltip>
             ) : null}
 
+            {recordingSupported ? (
+              <RecordButton
+                threadKey={activeThreadId}
+                environmentId={environmentId}
+                compact={inDock}
+              />
+            ) : null}
+
             {inDock ? null : focusPromptInput}
 
             <div className="hidden min-w-0 shrink-0 items-center gap-1 md:flex">
@@ -3317,6 +3346,12 @@ export const ChatComposer = memo(
                 </div>
               ) : null}
 
+              {!isComposerCollapsedMobile && !isComposerApprovalState && composerRecording ? (
+                <div className="mb-3">
+                  <RecordingComposerCard item={composerRecording} />
+                </div>
+              ) : null}
+
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
@@ -3631,6 +3666,9 @@ export const ChatComposer = memo(
                       />
                       <TooltipPopup side="top">{dictationTooltip}</TooltipPopup>
                     </Tooltip>
+                  ) : null}
+                  {recordingSupported ? (
+                    <RecordButton threadKey={activeThreadId} environmentId={environmentId} />
                   ) : null}
                   {assistantEngine ? (
                     <AssistantModelPicker

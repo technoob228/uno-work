@@ -1,3 +1,6 @@
+import { RecordingMessageCard } from "../../screenRecording/RecordingCards";
+import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
+import { localRecordingUrl } from "../../screenRecording/recordingStore";
 import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
@@ -382,7 +385,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const userFiles = userAttachments.filter(
             (attachment): attachment is ChatFileAttachment => attachment.type === "file",
           );
-          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+          const displayedWithRecording = deriveDisplayedUserMessageState(row.message.text);
+          // Loom Work: a screen recording block shows as a player card.
+          const recordingPart = extractRecordingBlock(displayedWithRecording.visibleText);
+          const displayedUserMessage = recordingPart.recording
+            ? { ...displayedWithRecording, visibleText: recordingPart.text }
+            : displayedWithRecording;
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
           const sentByThreadId = row.message.sentByThreadId ?? null;
@@ -442,6 +450,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     ))}
                   </div>
                 )}
+                {recordingPart.recording ? (
+                  <RecordingMessageCard
+                    recording={recordingPart.recording}
+                    localUrl={localRecordingUrl(recordingPart.recording.name)}
+                  />
+                ) : null}
                 {userFiles.length > 0 && (
                   <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
                     {userFiles.map((file) => (
