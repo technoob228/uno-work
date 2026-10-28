@@ -12,6 +12,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerConfig,
+  type ServerProvider,
+  UNO_SMART_MODEL_SLUG,
   type ServerLifecycleWelcomePayload,
   type ThreadId,
   type TurnId,
@@ -2776,6 +2778,245 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(turnStartRequest?.bootstrap?.createThread?.modelSelection).toMatchObject({
             instanceId: openRouterInstanceId,
             model: "openai/gpt-5.5",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  // ── Claude Code with no sign-in: Sign in or Use Uno credits (28.10) ──
+
+  const claudeOnUnoAiTest = (input: {
+    readonly auth: ServerProvider["auth"];
+    readonly harnessUnoCredits?: Record<string, boolean>;
+    readonly premiumExhausted?: boolean;
+    readonly viewport?: ViewportSpec;
+    readonly withUnoSmart?: boolean;
+  }) => {
+    setDraftThreadWithoutWorktree();
+    useComposerDraftStore
+      .getState()
+      .setModelSelection(
+        THREAD_REF,
+        createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-4-7"),
+      );
+    return mountChatView({
+      viewport: input.viewport ?? DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            ...nextFixture.serverConfig.providers,
+            {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              enabled: true,
+              installed: true,
+              version: "2.1.290",
+              status: "ready",
+              auth: input.auth,
+              checkedAt: NOW_ISO,
+              models: [
+                {
+                  slug: "claude-opus-4-7",
+                  name: "Claude Opus 4.7",
+                  isCustom: false,
+                  capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                },
+              ],
+              slashCommands: [],
+              skills: [],
+            },
+            ...(input.withUnoSmart
+              ? [
+                  {
+                    driver: ProviderDriverKind.make("uno"),
+                    instanceId: ProviderInstanceId.make("uno"),
+                    enabled: true,
+                    installed: true,
+                    version: "1.14.48",
+                    status: "ready" as const,
+                    auth: { status: "authenticated" as const },
+                    checkedAt: NOW_ISO,
+                    models: [
+                      {
+                        slug: UNO_SMART_MODEL_SLUG,
+                        name: "Smart",
+                        isCustom: false,
+                        capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                      },
+                    ],
+                    slashCommands: [],
+                    skills: [],
+                  },
+                ]
+              : []),
+          ],
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            harnessUnoCredits: input.harnessUnoCredits ?? {},
+          },
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: fixture.snapshot.snapshotSequence + 1 };
+        }
+        if (body._tag === WS_METHODS.serverUpdateSettings) {
+          return fixture.serverConfig.settings;
+        }
+        if (body._tag === WS_METHODS.appAiStatus && input.premiumExhausted) {
+          return {
+            status: "ok",
+            hoursLeftMinutes: 600,
+            unlimited: false,
+            fullSpeedHoursLeft: null,
+            usedTodayMinutes: 0,
+            power: 1,
+            inFlight: 0,
+            throttled: false,
+            speedPct: 100,
+            renewsAt: null,
+            plan: "plus",
+            checkedAt: NOW_ISO,
+            premium: {
+              limited: true,
+              limitUsd: 30,
+              leftUsd: 0,
+              monthlyUsd: 30,
+              overage: false,
+              balanceUsd: 0,
+              renewsAt: null,
+              exhausted: true,
+            },
+          };
+        }
+        return undefined;
+      },
+    });
+  };
+
+  const turnStartRequests = () =>
+    wsRequests.filter(
+      (request) =>
+        request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+        request.type === "thread.turn.start",
+    );
+
+  const UNO_AI_AUTH = { status: "authenticated", type: "unoAi", label: "Uno AI" } as const;
+
+  it("Claude on Uno AI with no choice yet: asks, sends nothing, then sends on Use Uno credits", async () => {
+    const mounted = await claudeOnUnoAiTest({ auth: UNO_AI_AUTH });
+    try {
+      await waitForElement(
+        () => document.querySelector('[data-testid="uno-credits-choice"]'),
+        "Unable to find the Uno credits choice.",
+      );
+      expect(document.body.textContent).toContain("You're not signed in to Claude Code");
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Hello there");
+      await waitForLayout();
+      (await waitForSendButton()).click();
+
+      await vi.waitFor(
+        () => expect(document.body.textContent).toContain("Your message is waiting"),
+        { timeout: 4_000, interval: 16 },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(turnStartRequests()).toHaveLength(0);
+
+      (await waitForButtonByText("Use Uno credits")).click();
+
+      await vi.waitFor(
+        () => {
+          const update = wsRequests.find(
+            (request) => request._tag === WS_METHODS.serverUpdateSettings,
+          ) as { patch?: { harnessUnoCredits?: Record<string, boolean> } } | undefined;
+          expect(update?.patch?.harnessUnoCredits).toEqual({ claudeAgent: true });
+          expect(turnStartRequests()).toHaveLength(1);
+          expect(turnStartRequests()[0]).toMatchObject({
+            modelSelection: { instanceId: "claudeAgent" },
+          });
+          expect(document.querySelector('[data-testid="uno-credits-choice"]')).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      expect(getServerConfig()?.settings.harnessUnoCredits).toEqual({ claudeAgent: true });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("Claude on Uno AI already allowed here: no question, the turn goes", async () => {
+    const mounted = await claudeOnUnoAiTest({
+      auth: UNO_AI_AUTH,
+      harnessUnoCredits: { claudeAgent: true },
+    });
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Hello there");
+      await waitForLayout();
+      (await waitForSendButton()).click();
+      await vi.waitFor(() => expect(turnStartRequests()).toHaveLength(1), {
+        timeout: 8_000,
+        interval: 16,
+      });
+      expect(document.querySelector('[data-testid="uno-credits-choice"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("Claude signed in with the person's own account: never asked", async () => {
+    const mounted = await claudeOnUnoAiTest({
+      auth: { status: "authenticated", type: "claude.ai", label: "Claude Max" },
+    });
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Hello there");
+      await waitForLayout();
+      (await waitForSendButton()).click();
+      await vi.waitFor(() => expect(turnStartRequests()).toHaveLength(1), {
+        timeout: 8_000,
+        interval: 16,
+      });
+      expect(document.querySelector('[data-testid="uno-credits-choice"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("no premium credit left: Add credit instead of Use Uno credits", async () => {
+    const mounted = await claudeOnUnoAiTest({
+      auth: UNO_AI_AUTH,
+      premiumExhausted: true,
+      withUnoSmart: true,
+    });
+    try {
+      await vi.waitFor(
+        () => {
+          const choice = document.querySelector('[data-testid="uno-credits-choice"]');
+          expect(choice?.getAttribute("data-uno-credits-action")).toBe("billing");
+          expect(findButtonByText("Add credit")).not.toBeNull();
+          expect(findButtonByText("Use Uno credits")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Hello there");
+      await waitForLayout();
+      (await waitForSendButton()).click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(turnStartRequests()).toHaveLength(0);
+
+      // Smart instead: the waiting message goes on Uno AI · Smart.
+      (await waitForButtonByText("Use Uno AI · Smart instead")).click();
+      await vi.waitFor(
+        () => {
+          expect(turnStartRequests()).toHaveLength(1);
+          expect(turnStartRequests()[0]).toMatchObject({
+            modelSelection: { instanceId: "uno", model: UNO_SMART_MODEL_SLUG },
           });
         },
         { timeout: 8_000, interval: 16 },

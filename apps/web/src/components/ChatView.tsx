@@ -2,6 +2,7 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
+  isUnoCreditsChoiceRequiredText,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -4110,7 +4111,9 @@ export default function ChatView(props: ChatViewProps) {
           <ThreadErrorBanner
             error={
               activeThread.session?.lastErrorClass === "billing_error" ||
-              harnessAuth?.suppressThreadError
+              harnessAuth?.suppressThreadError ||
+              // "Sign in or use Uno credits": the composer asks that itself.
+              isUnoCreditsChoiceRequiredText(activeThread.error)
                 ? null
                 : activeThread.error
             }

@@ -768,6 +768,13 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // Harnesses (by driver kind) the person allowed to run on the account's Uno
+  // credits on this machine when they have no sign-in of their own — Claude
+  // Code on Uno AI. Absent = not decided yet: chats ask first and nothing is
+  // sent through Uno AI until the person picks (see UNO_CREDITS_CHOICE_*).
+  harnessUnoCredits: Schema.Record(Schema.String, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -807,6 +814,26 @@ export const ServerSettings = Schema.Struct({
   appsAi: AppsAiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
+
+/**
+ * A harness without a sign-in of its own (Claude Code) would run on the
+ * account's Uno credits, and the person hasn't allowed that on this machine
+ * yet: the turn is refused with this text. It is what a Telegram / Slack chat
+ * or a calling agent reads, so it says what to do; the Uno Work composer
+ * recognises it by {@link isUnoCreditsChoiceRequiredText} and shows the
+ * "Sign in / Use Uno credits" choice instead of an error.
+ */
+export const UNO_CREDITS_CHOICE_REQUIRED_MARKER = "isn't signed in on this computer";
+export function unoCreditsChoiceRequiredText(harnessLabel: string): string {
+  return `${harnessLabel} ${UNO_CREDITS_CHOICE_REQUIRED_MARKER}, so nothing was sent. Open Uno Work and sign in to ${harnessLabel}, or allow it to use your Uno credits.`;
+}
+export function isUnoCreditsChoiceRequiredText(text: string | null | undefined): boolean {
+  return (
+    typeof text === "string" &&
+    text.includes(UNO_CREDITS_CHOICE_REQUIRED_MARKER) &&
+    text.includes("Uno credits")
+  );
+}
 
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({});
 
@@ -887,6 +914,7 @@ export const ServerSettingsPatch = Schema.Struct({
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
+  harnessUnoCredits: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({

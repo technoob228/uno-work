@@ -14,6 +14,7 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 import {
+  isUnoCreditsChoiceRequiredText,
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -72,6 +73,9 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { isUnoPremiumModelSelected, PremiumCreditNotice } from "./PremiumCreditNotice";
+import { UnoCreditsChoicePanel } from "./UnoCreditsChoicePanel";
+import { unoCreditsChoiceNeeded, unoSmartTarget } from "./unoCreditsChoice.logic";
+import { useEnvironmentSettings } from "~/environments/settings/serverSettings";
 import { SmartPausedNotice } from "./SmartPausedNotice";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
@@ -984,6 +988,24 @@ export const ChatComposer = memo(
     const personalAiModel = personalAi.model;
     const startPersonalAi = personalAi.start;
     const personalAiBlocksSend = personalAiId !== null && !personalAiCanSend(personalAi.model);
+    // Claude Code with no sign-in of its own would run on Uno credits: ask
+    // first ("Sign in / Use Uno credits"), send nothing until the person
+    // picks. A message sent meanwhile waits here and goes out by itself.
+    const environmentServerSettings = useEnvironmentSettings(environmentId);
+    const unoCreditsChoice = unoCreditsChoiceNeeded({
+      provider: selectedProviderStatus,
+      settings: environmentServerSettings,
+      lastError: activeThread?.error ?? activeThread?.session?.lastError ?? null,
+    });
+    const smartTarget = useMemo(
+      () =>
+        lockedProvider === null || lockedProvider === "uno"
+          ? unoSmartTarget(providerStatuses)
+          : null,
+      [lockedProvider, providerStatuses],
+    );
+    // The instance the waiting message is for (Smart, when switched from the choice).
+    const [unoCreditsQueuedFor, setUnoCreditsQueuedFor] = useState<string | null>(null);
     const [personalAiQueued, setPersonalAiQueued] = useState(false);
     useEffect(() => {
       setPersonalAiQueued(false);
@@ -2029,6 +2051,11 @@ export const ChatComposer = memo(
           toastManager.add({ type: "info", title: assistantSendBlock });
           return;
         }
+        if (unoCreditsChoice) {
+          event?.preventDefault();
+          setUnoCreditsQueuedFor(selectedInstanceId);
+          return;
+        }
         if (personalAiBlocksSend) {
           event?.preventDefault();
           setPersonalAiQueued(true);
@@ -2051,10 +2078,32 @@ export const ChatComposer = memo(
         onSend,
         personalAiBlocksSend,
         personalAiModel,
+        selectedInstanceId,
         startPersonalAi,
         shouldBlurMobileComposerOnSubmit,
+        unoCreditsChoice,
       ],
     );
+    // The choice is made (Uno credits allowed, signed in, or switched to
+    // Smart from it): the waiting message goes. Another pick in the model
+    // picker drops the wait — the person is doing something else.
+    useEffect(() => {
+      if (unoCreditsQueuedFor === null) return;
+      if (selectedInstanceId !== unoCreditsQueuedFor) {
+        setUnoCreditsQueuedFor(null);
+        return;
+      }
+      if (unoCreditsChoice) return;
+      setUnoCreditsQueuedFor(null);
+      onSend();
+    }, [onSend, selectedInstanceId, unoCreditsChoice, unoCreditsQueuedFor]);
+    const switchToSmartFromChoice = useMemo(() => {
+      if (!smartTarget) return null;
+      return () => {
+        setUnoCreditsQueuedFor((queued) => (queued === null ? null : smartTarget.instanceId));
+        onProviderModelSelect(smartTarget.instanceId, smartTarget.model);
+      };
+    }, [onProviderModelSelect, smartTarget]);
     // Модель поднялась — отправляем то, что ждало в поле ввода.
     useEffect(() => {
       if (!personalAiQueued || personalAiId === null) return;
@@ -3106,6 +3155,19 @@ export const ChatComposer = memo(
             <ComposerSecretRequestPanel threadId={activeThread?.id} />
             <ComposerBrowserHelpPanel environmentId={environmentId} threadId={activeThread?.id} />
             <ComposerToolApprovalPanel threadId={activeThread?.id} />
+            {unoCreditsChoice && selectedProviderStatus ? (
+              <UnoCreditsChoicePanel
+                environmentId={environmentId}
+                provider={selectedProviderStatus}
+                queued={unoCreditsQueuedFor !== null}
+                onSwitchToSmart={switchToSmartFromChoice}
+                onAllowed={() => {
+                  if (activeThread && isUnoCreditsChoiceRequiredText(activeThread.error)) {
+                    setThreadError(activeThread.id, null);
+                  }
+                }}
+              />
+            ) : null}
             <PremiumCreditNotice
               environmentId={environmentId}
               premiumSelected={unoPremiumSelected}

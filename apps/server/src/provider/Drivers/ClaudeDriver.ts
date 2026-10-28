@@ -16,7 +16,9 @@ import {
   ClaudeSettings,
   ProviderDriverKind,
   UNO_GATEWAY_BASE_URL,
+  unoCreditsChoiceRequiredText,
   type ServerProvider,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { Cache, Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -27,7 +29,8 @@ import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { buildUnoWorkBrief } from "../../agentContext/unoWorkBrief.ts";
 import { ServerConfig } from "../../config.ts";
-import { ProviderDriverError } from "../Errors.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProviderAdapterRequestError, ProviderDriverError } from "../Errors.ts";
 import { customMcpServersGetter } from "../../mcp/customMcpServers.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import {
@@ -49,6 +52,8 @@ import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
+/** How the person knows this harness (the composer's choice says the same). */
+const CLAUDE_CODE_LABEL = "Claude Code";
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
@@ -60,7 +65,8 @@ export type ClaudeDriverEnv =
   | BrowserBridge
   | UnoAgentAccess
   | UnoGatewayKey
-  | ServerConfig;
+  | ServerConfig
+  | ServerSettingsService;
 
 /**
  * Claude Code on Uno AI talks to the gateway's Anthropic Messages API:
@@ -93,6 +99,51 @@ const withInstanceIdentity =
     continuation: { groupKey: input.continuationGroupKey },
   });
 
+/** The person allowed Claude Code to run on the account's Uno credits on this machine. */
+export function claudeUnoCreditsAllowed(
+  settings: Pick<ServerSettings, "harnessUnoCredits">,
+): boolean {
+  return settings.harnessUnoCredits?.[DRIVER_KIND] === true;
+}
+
+/**
+ * The env Claude Code runs with on top of its own: the Uno gateway only on
+ * Uno AI (no sign-in of its own) and only once Uno credits are allowed here.
+ */
+export function claudeAuthOverlay(input: {
+  readonly mode: ClaudeAuthMode;
+  readonly unoOverlay: Readonly<Record<string, string>> | null;
+  readonly unoCreditsAllowed: boolean;
+}): Record<string, string> {
+  return input.mode === "uno" && input.unoOverlay !== null && input.unoCreditsAllowed
+    ? { ...input.unoOverlay }
+    : {};
+}
+
+/**
+ * Refuses a session / turn that would run on Uno AI before the person chose
+ * between signing in and Uno credits. `pending` is read again after
+ * `recheck` (a fresh status check): a sign-in from a terminal lands only on
+ * the next 5-minute check otherwise.
+ */
+export function makeUnoCreditsGuard(input: {
+  readonly pending: () => boolean;
+  readonly recheck: Effect.Effect<unknown>;
+  readonly harnessLabel: string;
+}) {
+  return (method: string): Effect.Effect<void, ProviderAdapterRequestError> =>
+    Effect.gen(function* () {
+      if (!input.pending()) return;
+      yield* input.recheck.pipe(Effect.ignore);
+      if (!input.pending()) return;
+      return yield* new ProviderAdapterRequestError({
+        provider: DRIVER_KIND,
+        method,
+        detail: unoCreditsChoiceRequiredText(input.harnessLabel),
+      });
+    });
+}
+
 export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
@@ -120,8 +171,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ? makeUnoClaudeAvailability({ baseUrl: UNO_GATEWAY_BASE_URL, key: unoGatewayKey })
           : null;
       let authMode: ClaudeAuthMode = "own";
+      // Uno AI is paid from the account's credits: only once the person said
+      // so on this machine (the chat asks — "Sign in / Use Uno credits").
+      // Without it nothing runs on the gateway: turns are refused below and
+      // text generation gets no gateway env.
+      const serverSettings = yield* ServerSettingsService;
+      let unoCreditsAllowed = yield* serverSettings.getSettings.pipe(
+        Effect.map(claudeUnoCreditsAllowed),
+        Effect.orElseSucceed(() => false),
+      );
+      yield* Stream.runForEach(serverSettings.streamChanges, (settings) =>
+        Effect.sync(() => {
+          unoCreditsAllowed = claudeUnoCreditsAllowed(settings);
+        }),
+      ).pipe(Effect.forkScoped);
       const authOverlay = (): Record<string, string> =>
-        authMode === "uno" && unoOverlay !== null ? unoOverlay : {};
+        claudeAuthOverlay({ mode: authMode, unoOverlay, unoCreditsAllowed });
       const processEnv = {
         ...unoAgentEnv,
         ...browserBridge.applyEnvironment(mergeProviderInstanceEnvironment(environment)),
@@ -227,6 +292,29 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ),
       );
 
+      // Not signed in, would run on Uno AI, and the person hasn't allowed Uno
+      // credits here: refuse instead of spending them quietly. Every source
+      // lands here — the composer (which asks first), Telegram / Slack, other
+      // agents, schedules. A sign-in from a terminal is not seen until the
+      // next 5-minute check, so look again before saying no.
+      const requireUnoCreditsChoice = makeUnoCreditsGuard({
+        pending: () => authMode === "uno" && unoOverlay !== null && !unoCreditsAllowed,
+        recheck: snapshot.refresh,
+        harnessLabel: CLAUDE_CODE_LABEL,
+      });
+      const guardedAdapter: typeof adapter = {
+        ...adapter,
+        startSession: (input) =>
+          requireUnoCreditsChoice("session/start").pipe(
+            Effect.andThen(adapter.startSession(input)),
+          ),
+        sendTurn: (input) =>
+          requireUnoCreditsChoice("turn/start").pipe(Effect.andThen(adapter.sendTurn(input))),
+        get streamEvents() {
+          return adapter.streamEvents;
+        },
+      };
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -238,7 +326,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        adapter: guardedAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),
