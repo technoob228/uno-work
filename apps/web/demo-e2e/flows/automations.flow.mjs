@@ -88,7 +88,7 @@ export default flow("auto-create-schedule", async ({ page, url, step, shot }) =>
       .getByTestId("automation-instruction")
       .fill("Send me the week's numbers: sales, signups, churn");
     await seeText(page, "Your time ·");
-    await page.getByTestId("automation-mode-line").filter({ hasText: "Does it itself" }).waitFor();
+    await page.getByTestId("automation-mode-line").filter({ hasText: "Autonomous" }).waitFor();
   });
   await shot("dialog-schedule");
   await step("Create → the card says when, in words", async () => {
@@ -230,7 +230,7 @@ export const flows = [
   }),
 
   flow("auto-asks-first-allow", async ({ page, url, step, shot }) => {
-    await step("open live, Asks first", () => openDemo(page, url, { mode: "asks-first" }));
+    await step("open live, Cautious", () => openDemo(page, url, { mode: "asks-first" }));
     await step("PR #12 opens → Bolt starts the review on uno-work", async () => {
       await scene(page, "auto-pr-opened");
       await seeText(page, "Started “Review PR #12” on uno-work", 20_000);
@@ -254,12 +254,12 @@ export const flows = [
   }),
 
   flow("auto-itself-no-allow", async ({ page, url, step, shot }) => {
-    await step("open live, Does it itself", () => openDemo(page, url, { mode: "itself" }));
+    await step("open live, Autonomous", () => openDemo(page, url, { mode: "itself" }));
     await step("PR #12 opens → reviewed and commented, no Allow", async () => {
       await scene(page, "auto-pr-opened");
       await seeText(page, "Commented on PR #12", 45_000);
       if (await page.getByRole("button", { name: /^Approve/ }).count()) {
-        throw new Error("an Allow card showed in Does it itself");
+        throw new Error("an Allow card showed in Autonomous");
       }
     });
     await shot("commented");

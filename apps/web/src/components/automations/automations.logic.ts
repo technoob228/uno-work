@@ -126,12 +126,12 @@ export function modeLine(
   const pr = kind === "github.pull_request";
   if (asksFirst) {
     return pr
-      ? `Asks first — ${name} asks you before commenting`
-      : `Asks first — ${name} asks you before sending anything`;
+      ? `Cautious — ${name} asks you before commenting`
+      : `Cautious — ${name} asks you before sending anything`;
   }
   return pr
-    ? `Does it itself — ${name} comments on its own`
-    : `Does it itself — ${name} acts and tells you after`;
+    ? `Autonomous — ${name} comments on its own`
+    : `Autonomous — ${name} acts and tells you after`;
 }
 
 export type EventSource = "github" | "call" | "gmail";

@@ -7,7 +7,7 @@ import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 // ===============================
 //
 // Automation = When (trigger) → Who (an assistant) → What (an instruction);
-// the mode ("Does it itself" / "Asks first") is the assistant's own.
+// the mode (Autonomous / Cautious) is the assistant's own.
 //
 // The Uno console keeps them (it is always on and can wake a sleeping
 // computer): it runs the clock, receives GitHub's pull request events through
@@ -235,7 +235,7 @@ export const AutomationGithubReposResult = Schema.Struct({
 });
 export type AutomationGithubReposResult = typeof AutomationGithubReposResult.Type;
 
-/** `github_pr_comment` (uno-work tool; an outward step — "Asks first" waits for Allow). */
+/** `github_pr_comment` (uno-work tool; an outward step — Cautious waits for Allow). */
 export const GithubPrCommentInput = Schema.Struct({
   repo: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   number: PositiveInt,

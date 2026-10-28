@@ -495,7 +495,7 @@ function prOf(automation: Automation): string {
   return automation.trigger.kind === "github.pull_request" ? automation.trigger.repo : DEMO_REPO;
 }
 
-/** The turn of a PR event: a review chat on the computer, then the comment (Allow in "Asks first"). */
+/** The turn of a PR event: a review chat on the computer, then the comment (Allow in Cautious). */
 function prScript(automation: Automation, run: AutomationRun, pr: PrEvent) {
   const repo = prOf(automation);
   const url = `https://github.com/${repo}/pull/${pr.number}`;

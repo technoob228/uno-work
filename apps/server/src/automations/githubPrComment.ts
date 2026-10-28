@@ -4,9 +4,9 @@
  * an installation token narrowed to that one repository and
  * `pull_requests: write` (CONTRACT.md, `/work/git/github/pr-comment`).
  *
- * An outward step: in Ask mode and for an "Asks first" assistant it waits
+ * An outward step: in Ask mode and for a Cautious assistant it waits
  * for the person's Allow ("Comment on PR #12 in owner/x", the start of the
- * text as the detail); "Does it itself" posts at once. Open to an
+ * text as the detail); Autonomous posts at once. Open to an
  * assistant's own conversation (it is the review's last step, not work) and
  * to every chat.
  *

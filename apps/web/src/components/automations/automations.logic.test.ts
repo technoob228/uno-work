@@ -117,14 +117,12 @@ describe("what's wrong with it", () => {
 
   it("says the mode and the empty hint plainly", () => {
     expect(modeLine("Ada", true, "github.pull_request")).toBe(
-      "Asks first — Ada asks you before commenting",
+      "Cautious — Ada asks you before commenting",
     );
     expect(modeLine("Ada", false, "github.pull_request")).toBe(
-      "Does it itself — Ada comments on its own",
+      "Autonomous — Ada comments on its own",
     );
-    expect(modeLine("Uno", false, "schedule")).toBe(
-      "Does it itself — Uno acts and tells you after",
-    );
+    expect(modeLine("Uno", false, "schedule")).toBe("Autonomous — Uno acts and tells you after");
     expect(emptyHint("Uno")).toContain("every time a PR comes to owner/repo, review it");
   });
 });
