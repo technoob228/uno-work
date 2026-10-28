@@ -7,7 +7,13 @@
  * box). A harness not signed in on this computer is skipped: a new chat on it
  * opens straight into "Sign in to Codex" (Misha 18.10, uno-product).
  */
-import type { ModelSelection, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProviderAuthDriver,
+  ProviderInstanceId,
+  ServerProvider,
+} from "@t3tools/contracts";
+import { UNO_SMART_GATEWAY_MODEL } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 
@@ -16,7 +22,8 @@ import {
   resolveAppModelSelectionForInstance,
 } from "../../../modelSelection";
 import { deriveProviderInstanceEntries } from "../../../providerInstances";
-import { pickUsableDefaultModelSelection } from "../../../providerModels";
+import { isUsableDefaultProvider, pickUsableDefaultModelSelection } from "../../../providerModels";
+import { signedInWithOwnAccount } from "./agentStart";
 
 /** The harness can't answer here until someone signs it in. */
 function signedOutHere(provider: ServerProvider): boolean {
@@ -49,11 +56,62 @@ export function newChatModelSelection(input: {
   return model ? { ...chosen, model } : null;
 }
 
+/** OpenCode's Smart: the gateway's `uno/smart` under OpenCode's `uno` provider. */
+const OPENCODE_SMART_MODEL = `uno/${UNO_SMART_GATEWAY_MODEL}`;
+
+/**
+ * Where Home starts for a person who came for their own agent (goal
+ * `own_agent`; agent-flow pass 25.10: Home went to "uno · Smart"): the agent
+ * they picked before Work when it is signed in here with their own account,
+ * else any of Claude Code / Codex signed in that way, else OpenCode on Uno AI
+ * (Smart) — the agent that works with no sign-in at all. Null when none of
+ * these can run here (Home starts as for everyone).
+ */
+export function ownAgentStartSelection(input: {
+  readonly picked: ProviderAuthDriver | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
+}): ModelSelection | null {
+  const byDriver = (driver: string) =>
+    input.providers.find((candidate) => candidate.instanceId === driver);
+  const order: ReadonlyArray<ProviderAuthDriver> = [
+    ...(input.picked ? [input.picked] : []),
+    "claudeAgent",
+    "codex",
+  ];
+  for (const driver of order) {
+    const provider = byDriver(driver);
+    if (!provider || !signedInWithOwnAccount(provider)) continue;
+    const model = resolveAppModelSelectionForInstance(
+      provider.instanceId,
+      input.settings,
+      input.providers,
+      null,
+    );
+    if (model) return { instanceId: provider.instanceId, model };
+  }
+  const opencode = byDriver("opencode");
+  if (opencode && isUsableDefaultProvider(opencode)) {
+    const model = resolveAppModelSelectionForInstance(
+      opencode.instanceId,
+      input.settings,
+      input.providers,
+      opencode.models.some((entry) => entry.slug === OPENCODE_SMART_MODEL)
+        ? OPENCODE_SMART_MODEL
+        : null,
+    );
+    if (model) return { instanceId: opencode.instanceId, model };
+  }
+  return null;
+}
+
 export function homeStartModelSelection(input: {
   readonly stickyActiveProvider: ProviderInstanceId | null;
   readonly stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
+  /** The person came for their own agent: start there unless they picked otherwise. */
+  readonly ownAgent?: { readonly picked: ProviderAuthDriver | null } | null;
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
@@ -71,7 +129,14 @@ export function homeStartModelSelection(input: {
       if (model) return { ...sticky, model };
     }
   }
-  return pickUsableDefaultModelSelection(input.providers);
+  const ownAgent = input.ownAgent
+    ? ownAgentStartSelection({
+        picked: input.ownAgent.picked,
+        providers: input.providers,
+        settings: input.settings,
+      })
+    : null;
+  return ownAgent ?? pickUsableDefaultModelSelection(input.providers);
 }
 
 /** The chat would open on a sign-in or install card here, not an answer. */

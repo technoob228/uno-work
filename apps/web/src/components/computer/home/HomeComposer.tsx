@@ -65,6 +65,9 @@ import { toastManager } from "../../ui/toast";
 import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
 import { homeAttachmentsFromFiles } from "./homeAttachments";
 import { homeStartModelSelection } from "./homeStartModel";
+import { AGENT_PICK_KEY, parseAgentDriver } from "./agentStart";
+import { useOwnAgentGoal } from "./HomeAgentSignIn";
+import { useSetupProgress } from "../../setup/useSetupProgress";
 import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
 
@@ -92,9 +95,16 @@ export interface HomeStartOptions {
  * The chat composer's model picker, fed the same way: this computer's
  * harnesses, the default a new chat would get, and a pick that sticks.
  */
-export function useHomeModelPicker(environmentId: EnvironmentId | null) {
+export function useHomeModelPicker(
+  environmentId: EnvironmentId | null,
+  options: { readonly ownAgentStart?: boolean } = {},
+) {
   const providers = useEnvironmentProviders(environmentId);
   const settings = useSettings();
+  // Home's box for someone who came for their own agent starts on it, not on
+  // Uno's own harness (Settings' pickers keep the plain default).
+  const ownAgentGoal = useOwnAgentGoal() && options.ownAgentStart === true;
+  const pickedAgent = parseAgentDriver(useSetupProgress().answers?.[AGENT_PICK_KEY]);
   const stickyActiveProvider = useComposerDraftStore((store) => store.stickyActiveProvider);
   const stickyModelSelectionByProvider = useComposerDraftStore(
     (store) => store.stickyModelSelectionByProvider,
@@ -133,8 +143,17 @@ export function useHomeModelPicker(environmentId: EnvironmentId | null) {
       stickyModelSelectionByProvider,
       providers,
       settings,
+      ownAgent: ownAgentGoal ? { picked: pickedAgent } : null,
     });
-  }, [picked, providers, settings, stickyActiveProvider, stickyModelSelectionByProvider]);
+  }, [
+    ownAgentGoal,
+    picked,
+    pickedAgent,
+    providers,
+    settings,
+    stickyActiveProvider,
+    stickyModelSelectionByProvider,
+  ]);
   const pick = (instanceId: ProviderInstanceId, model: string) => {
     const resolved = resolveAppModelSelectionForInstance(instanceId, settings, providers, model);
     if (!resolved) return;
@@ -193,7 +212,7 @@ export function HomeComposer({
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const picker = useHomeModelPicker(environmentId);
+  const picker = useHomeModelPicker(environmentId, { ownAgentStart: true });
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
   const [images, setImages] = useState<ComposerImageAttachment[]>([]);
