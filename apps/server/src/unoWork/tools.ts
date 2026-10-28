@@ -611,6 +611,17 @@ const appIdLabel = (args: Record<string, unknown>) => str(args, "appId") ?? "an 
 
 const MANIFEST_ID_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$";
 
+/** "Plan limits" → "plan-limits": an app id from its name. */
+export function appIdFromName(name: string): string {
+  return name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+}
+
 const manifestPath = (deps: UnoWorkToolDeps, id: string) =>
   path.join(deps.manifestDir, `${id}.json`);
 
@@ -1365,7 +1376,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         id: {
           type: "string",
           pattern: MANIFEST_ID_PATTERN,
-          description: "Short lowercase id: letters, digits, - and _, e.g. notes.",
+          description:
+            "Short lowercase id: letters, digits, - and _, e.g. notes. Optional: made from the name.",
         },
         name: {
           type: "string",
@@ -1468,7 +1480,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             "always: keep an economy-mode computer awake for it (a bot on long polling). Ignored on the free trial — check sleep in computer_status.",
         },
       },
-      required: ["id", "name"],
+      required: ["name"],
       additionalProperties: false,
     },
     level: "change",
@@ -1476,7 +1488,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     approvalDetail: (args) => str(args, "command"),
     run: (deps, args) =>
       Effect.gen(function* () {
-        const id = str(args, "id")!;
+        // No id: one from the name (weak models often leave it out — the
+        // P16 Haiku runs did in 3 of 6). The same name gives the same id, so
+        // registering again still updates the app.
+        const id = str(args, "id") ?? appIdFromName(str(args, "name") ?? "");
+        if (!new RegExp(MANIFEST_ID_PATTERN).test(id)) {
+          return yield* toolError(
+            'Give the app an id: short, lowercase letters, digits, - and _, e.g. "notes".',
+          );
+        }
         // Keep a widget registered earlier: app_register updates, app_add_widget adds.
         const previous = yield* readManifestRecord(deps, id).pipe(
           Effect.orElseSucceed(() => ({}) as Record<string, unknown>),

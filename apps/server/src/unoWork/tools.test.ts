@@ -25,6 +25,7 @@ import {
   BOT_WAITING_FOR_TOKEN_NEXT,
   UNO_WORK_MCP_SERVER,
   UNO_WORK_TOOLS,
+  appIdFromName,
   appLocalAddress,
   runUnoWorkTool,
   toolLevel,
@@ -803,6 +804,23 @@ describe("apps and widgets", () => {
     expect(validateArgs(schema, { id: "x", name: "X", widget: { path: "https://x" } })).toContain(
       "must match",
     );
+  });
+
+  it("an app without an id gets one from its name (weak models leave it out)", async () => {
+    const { deps, home } = makeDeps();
+    const result = await run("app_register", deps, {
+      name: "Plan limits",
+      port: 8471,
+      command: "python3 app.py",
+      widget: { path: "/widget" },
+    });
+    expect(result).toMatchObject({ _tag: "Success", success: { appId: "manifest:plan-limits" } });
+    expect(
+      JSON.parse(readFileSync(path.join(home, ".uno", "apps", "plan-limits.json"), "utf8")).widget,
+    ).toEqual({ path: "/widget", size: "medium" });
+    expect(appIdFromName("Café · Orders!")).toBe("cafe-orders");
+    const nameless = await run("app_register", deps, { name: "📊", port: 1, command: "x" });
+    expect(nameless._tag === "Failure" && nameless.failure.message).toContain("Give the app an id");
   });
 
   it("app_add_widget says the widget is on Home already, not 'add it by hand'", async () => {
