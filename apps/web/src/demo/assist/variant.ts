@@ -27,6 +27,7 @@ import {
   setAssistantLabel,
   setGreeting,
   setStopCheck,
+  removeScene,
 } from "./engine";
 import { isRevoked, setPreset, telegramLinked as daemonTelegramLinked } from "./daemon";
 import { WORLD, macOnline } from "./world";
@@ -479,6 +480,10 @@ function macSummary(threadId: string): Script {
     },
   ];
 }
+
+// B's own morning and hand-off replace the base's (one Uno that sees every computer).
+removeScene("morning");
+removeScene("elsewhere");
 
 addScene({
   id: "b-morning",

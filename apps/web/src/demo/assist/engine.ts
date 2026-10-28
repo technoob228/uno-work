@@ -333,6 +333,11 @@ export function addTrigger(trigger: Trigger) {
 export function addScene(scene: Scene) {
   scenes.push(scene);
 }
+/** A variant drops a base scene its own story replaces. */
+export function removeScene(id: string) {
+  const index = scenes.findIndex((scene) => scene.id === id);
+  if (index >= 0) scenes.splice(index, 1);
+}
 export function listScenes(): ReadonlyArray<Scene> {
   return scenes;
 }
