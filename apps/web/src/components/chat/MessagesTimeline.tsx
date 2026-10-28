@@ -18,6 +18,8 @@ import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
 import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
 import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
+import { AutomationCreatedCard } from "../automations/AutomationCreatedCard";
+import { automationFromToolResult } from "../automations/automations.logic";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
   type ChatFileAttachment,
@@ -685,13 +687,22 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={`work-row:${workEntry.id}`}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
+        {visibleEntries.map((workEntry) => {
+          // An assistant made an automation: its card, from the call's result (28.10).
+          const automation =
+            workEntry.toolName === "automation_create"
+              ? automationFromToolResult(workEntry.rawResult)
+              : null;
+          return automation ? (
+            <AutomationCreatedCard key={`work-row:${workEntry.id}`} automation={automation} />
+          ) : (
+            <SimpleWorkEntryRow
+              key={`work-row:${workEntry.id}`}
+              workEntry={workEntry}
+              workspaceRoot={workspaceRoot}
+            />
+          );
+        })}
       </div>
     </div>
   );
