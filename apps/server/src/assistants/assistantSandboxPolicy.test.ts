@@ -8,6 +8,7 @@ import { Effect, Layer, Option } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ServerConfig } from "../config.ts";
+import { CustomMcpServers } from "../mcp/customMcpServers.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { HarnessSandboxPolicy } from "../provider/Services/HarnessSandboxPolicy.ts";
@@ -62,7 +63,10 @@ const primeCapability = (available: boolean) =>
     run: async () => (available ? 0 : 1),
   });
 
-async function setup(input: { readonly anaProjects: ReadonlyArray<string> | "all" | null }) {
+async function setup(input: {
+  readonly anaProjects: ReadonlyArray<string> | "all" | null;
+  readonly noted?: Map<string, string | null>;
+}) {
   const baseDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "sbx-policy-"));
   dirs.push(baseDir);
   const configLayer = ServerConfig.layerTest(process.cwd(), baseDir).pipe(
@@ -79,7 +83,20 @@ async function setup(input: { readonly anaProjects: ReadonlyArray<string> | "all
       autoApprove: true,
     });
   }
+  const noted = input.noted;
   const layer = AssistantHarnessSandboxPolicyLive.pipe(
+    Layer.provide(
+      noted
+        ? Layer.mock(CustomMcpServers)({
+            current: () => [],
+            forSession: () => [],
+            noteSessionAssistant: (threadId, projectId) =>
+              Effect.sync(() => {
+                noted.set(threadId, projectId);
+              }),
+          })
+        : Layer.empty,
+    ),
     Layer.provide(
       Layer.mock(ProjectionSnapshotQuery)({
         getThreadShellById: (threadId) =>
@@ -125,6 +142,19 @@ describe("AssistantHarnessSandboxPolicyLive", () => {
     expect(await decide("ana-started", SHOP_DIR)).toEqual(refused);
     // The person's chat in the same project is untouched.
     expect(await decide("mine", SHOP_DIR)).toEqual({ _tag: "none" });
+  });
+
+  it("notes whose chat it is for the assistant's own MCP servers (sandboxed or not)", async () => {
+    await primeCapability(true);
+    const noted = new Map<string, string | null>();
+    const { decide } = await setup({ anaProjects: ["shop"], noted });
+    await decide("ana-started", SHOP_DIR);
+    await decide("mine", SHOP_DIR);
+    expect(Object.fromEntries(noted)).toEqual({ "ana-started": ANA, mine: null });
+    const all = new Map<string, string | null>();
+    const open = await setup({ anaProjects: "all", noted: all });
+    await open.decide("ana-chat", ANA_DIR);
+    expect(Object.fromEntries(all)).toEqual({ "ana-chat": ANA });
   });
 
   it("sandboxes a restricted assistant's chats where it can", async () => {

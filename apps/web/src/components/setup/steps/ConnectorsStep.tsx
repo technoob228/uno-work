@@ -5,8 +5,14 @@
  *   built-in uno-work MCP server (`/api/manager/connectors`). "Connect" opens
  *   the provider's consent in a small window; the row turns "Connected ·
  *   <account>" when the grant lands. A provider the console has no OAuth app
- *   for yet is shown, marked Soon, not clickable. GitHub falls back to this
- *   computer's own `gh` sign-in then.
+ *   for yet is shown, marked Soon, not clickable. A computer with neither a
+ *   machine token nor an Uno account key says "Sign in to Uno to connect"
+ *   instead (audit 27.10 #6). GitHub here is git access (clone and push),
+ *   not a chat tool, unless the console offers its tools; it falls back to
+ *   this computer's own `gh` sign-in.
+ * - Every piece takes the computer it talks to (`environmentId`): an
+ *   assistant's page connects through the Uno Work where the assistant works
+ *   (decision 28.10, item 12), not the window's.
  * - Email for your AI (first, when the account has it): the computer's own
  *   address on uno4.me for sign-ups and mail the AI writes as itself, with
  *   Copy and "Change name" (`/api/manager/mail`, spec 20.10). Hidden
@@ -14,8 +20,14 @@
  * - Your own tool: a remote MCP server by address, checked first (it must
  *   answer and list its tools), then handed to every agent in new chats
  *   (`settings.mcpServers`, see customMcpServers.ts on the daemon).
+ * - `AssistantMcpForm`: the same, for ONE assistant (`/api/manager/assistant/mcp`):
+ *   only its chats get the tools, also in its sandbox.
  */
-import { UNO_MCP_SERVER_NAME_PATTERN, type UnoMcpServer } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  UNO_MCP_SERVER_NAME_PATTERN,
+  type UnoMcpServer,
+} from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2Icon, MailIcon, ServerIcon } from "lucide-react";
@@ -24,14 +36,17 @@ import { type ReactNode, useEffect, useState } from "react";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
+  addAssistantMcp,
   changeAgentMailAddress,
   connectGithubAccount,
   disconnectConnector,
   getAgentMail,
   getGithubAccount,
+  listAssistantMcp,
   listConnectors,
   openAuthWindow,
   probeMcpServer,
+  removeAssistantMcp,
   startConnector,
   type ConnectorProvider,
   type McpProbeResult,
@@ -54,7 +69,7 @@ import {
 import { Input } from "../../ui/input";
 import { toastManager } from "../../ui/toast";
 import { GmailMark, GoogleCalendarMark, GoogleDriveMark, NotionMark } from "../brandMarks";
-import { connectorSignedIn } from "../connectorSignIn.logic";
+import { connectorSignedIn, connectorsGate, GITHUB_FOR_GIT_LINE } from "../connectorSignIn.logic";
 import { ConnectedBadge, SetupHeading, SetupShell, SoonBadge } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { maskServerUrl } from "../../connectors/connectorsCatalog.logic";
@@ -216,8 +231,13 @@ const GITHUB_WAIT_MS = 180_000;
  * Off a cloud computer (or an older console) it falls back to this
  * computer's own `gh` sign-in.
  */
-function GitHubAccountRow({ first }: { first: boolean }) {
-  const environmentId = usePrimaryEnvironmentId();
+function GitHubAccountRow({
+  first,
+  environmentId,
+}: {
+  first: boolean;
+  environmentId: EnvironmentId | null;
+}) {
   const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
   const account = useQuery({
     queryKey: [...GITHUB_ACCOUNT_KEY, environmentId],
@@ -238,7 +258,9 @@ function GitHubAccountRow({ first }: { first: boolean }) {
     return () => window.clearTimeout(timer);
   }, [waitingUntil, connected]);
 
-  if (account.isError || (state && !state.available)) return <GitHubMachineRow first={first} />;
+  if (account.isError || (state && !state.available)) {
+    return <GitHubMachineRow first={first} environmentId={environmentId} />;
+  }
 
   const open = async () => {
     if (!environmentId) return;
@@ -266,11 +288,14 @@ function GitHubAccountRow({ first }: { first: boolean }) {
       testId="setup-connector-github"
       description={
         connected ? (
-          <ConnectedBadge>
-            Connected{state.accounts.length > 0 ? ` · ${state.accounts.join(", ")}` : ""}
-          </ConnectedBadge>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <ConnectedBadge>
+              Connected{state.accounts.length > 0 ? ` · ${state.accounts.join(", ")}` : ""}
+            </ConnectedBadge>
+            <span>{GITHUB_FOR_GIT_LINE} Not a tool in chats.</span>
+          </span>
         ) : (
-          "Your repositories for git on every computer. You pick them on GitHub."
+          `${GITHUB_FOR_GIT_LINE} On every computer; you pick the repos on GitHub.`
         )
       }
       side={
@@ -294,8 +319,14 @@ function GitHubAccountRow({ first }: { first: boolean }) {
 }
 
 /** This computer's own `gh` sign-in — GitHub's fallback while the connector isn't available. */
-function GitHubMachineRow({ first }: { first: boolean }) {
-  const discovery = useSourceControlDiscovery();
+function GitHubMachineRow({
+  first,
+  environmentId,
+}: {
+  first: boolean;
+  environmentId: EnvironmentId | null;
+}) {
+  const discovery = useSourceControlDiscovery({ environmentId });
   const navigate = useNavigate();
   const github = discovery.data?.sourceControlProviders.find((item) => item.kind === "github");
   const signedIn = github?.auth.status === "authenticated";
@@ -309,9 +340,12 @@ function GitHubMachineRow({ first }: { first: boolean }) {
       testId="setup-connector-github"
       description={
         signedIn ? (
-          <ConnectedBadge>Connected{account ? ` · ${account}` : ""}</ConnectedBadge>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <ConnectedBadge>Connected{account ? ` · ${account}` : ""}</ConnectedBadge>
+            <span>{GITHUB_FOR_GIT_LINE} With this computer’s GitHub sign-in.</span>
+          </span>
         ) : (
-          "Repos, issues and pull requests, through this computer’s GitHub sign-in."
+          `${GITHUB_FOR_GIT_LINE} With this computer’s GitHub sign-in.`
         )
       }
       side={
@@ -522,6 +556,8 @@ function ProviderRow({
   pending,
   onConnect,
   onDisconnect,
+  onSignIn,
+  outdated = false,
 }: {
   meta: ProviderMeta;
   connector: SetupConnector | undefined;
@@ -529,11 +565,26 @@ function ProviderRow({
   pending: "connect" | "disconnect" | null;
   onConnect: () => void;
   onDisconnect: () => void;
+  /** Set when the computer isn't signed in to Uno: the row offers that instead of "Soon". */
+  onSignIn?: (() => void) | null;
+  /** The console doesn't serve this computer yet (a Mac, before the console update). */
+  outdated?: boolean;
 }) {
   const available = connector?.available === true;
   const connected = connectorSignedIn(connector);
   let side: ReactNode;
-  if (!available) side = <SoonBadge />;
+  if (!available && onSignIn) {
+    side = (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onSignIn}
+        data-testid={`setup-sign-in-${meta.provider}`}
+      >
+        Sign in to Uno
+      </Button>
+    );
+  } else if (!available) side = <SoonBadge />;
   else if (connected) {
     side = (
       <Button size="sm" variant="ghost" disabled={pending !== null} onClick={onDisconnect}>
@@ -559,12 +610,16 @@ function ProviderRow({
     <Row
       first={first}
       done={connected}
-      muted={!available}
+      muted={!available && !onSignIn}
       logo={meta.logo}
       name={meta.name}
       testId={`setup-connector-${meta.provider}`}
       description={
-        connected ? (
+        !available && onSignIn ? (
+          "Sign in to Uno to connect."
+        ) : !available && outdated ? (
+          "Connecting from this computer comes with the next Uno update. It works from your cloud computers today."
+        ) : connected ? (
           <ConnectedBadge>
             Connected{connector?.account ? ` · ${connector.account}` : ""}
           </ConnectedBadge>
@@ -579,17 +634,133 @@ function ProviderRow({
   );
 }
 
-function McpServers({
+/**
+ * "Paste its address → Add": checks the server first (it must answer and list
+ * its tools), then saves. Shared by the computer's own servers and an
+ * assistant's (`AssistantMcpForm`).
+ */
+function McpAddRow({
   environmentId,
+  title,
+  lead,
+  exists,
+  save,
+  testIdPrefix,
 }: {
-  environmentId: ReturnType<typeof usePrimaryEnvironmentId>;
+  environmentId: EnvironmentId | null;
+  title: string;
+  lead: string;
+  /** Already added (by address). */
+  exists: (url: string) => boolean;
+  /** Saves the server; a thrown error's message is shown. */
+  save: (url: string) => Promise<void>;
+  testIdPrefix: string;
 }) {
-  const servers = useSettings((settings) => settings.mcpServers);
-  const { updateSettings } = useUpdateSettings();
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unchecked, setUnchecked] = useState<string | null>(null);
+
+  const add = async (force = false) => {
+    const value = url.trim();
+    if (!mcpServerNameFromUrl(value, [])) {
+      setError("Paste the server’s https:// address, e.g. https://mcp.example.com/mcp");
+      return;
+    }
+    if (exists(value)) {
+      setError("This server is already added.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      if (!force && environmentId) {
+        let result: McpProbeResult | null = null;
+        try {
+          result = await probeMcpServer({ environmentId, url: value });
+        } catch {
+          result = null; // an older daemon can't check: add as before
+        }
+        if (result && !result.ok) {
+          setError(mcpProbeProblem(result));
+          setUnchecked(value);
+          return;
+        }
+      }
+      await save(value);
+      setUrl("");
+      setUnchecked(null);
+      toastManager.add({ type: "success", title: "MCP server added" });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Couldn't save.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-4 border-t border-border px-4 py-3.5 first:border-t-0 sm:px-5">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+        <ServerIcon className="size-5 text-muted-foreground" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{title}</div>
+        <div className="mt-0.5 text-sm text-muted-foreground">{lead}</div>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Input
+            className="min-w-[220px] flex-1 font-mono"
+            placeholder="https://mcp.example.com/mcp"
+            value={url}
+            onChange={(event) => {
+              setUrl(event.target.value);
+              setError(null);
+              setUnchecked(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void add();
+            }}
+            aria-label="MCP server address"
+            spellCheck={false}
+            autoComplete="off"
+            data-testid={`${testIdPrefix}-url`}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void add()}
+            disabled={pending || !url.trim()}
+            data-testid={`${testIdPrefix}-add`}
+          >
+            {pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+            {pending ? "Checking" : "Add"}
+          </Button>
+        </div>
+        {error ? (
+          <div className="mt-2 text-xs text-destructive-foreground" role="alert">
+            {error}
+            {unchecked === url.trim() ? (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => void add(true)}
+                >
+                  Add anyway
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The computer's own servers (`settings.mcpServers` of the window's computer). */
+function McpServers({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const servers = useSettings((settings) => settings.mcpServers);
+  const { updateSettings } = useUpdateSettings();
 
   // What each added server offers, checked on this page (cached briefly).
   const probes = useQuery({
@@ -612,55 +783,7 @@ function McpServers({
     staleTime: 60_000,
   });
 
-  const save = async (next: ReadonlyArray<UnoMcpServer>) => {
-    try {
-      await updateSettings({ mcpServers: next });
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Couldn't save.");
-      return false;
-    }
-  };
-
-  const add = async (force = false) => {
-    const value = url.trim();
-    const name = mcpServerNameFromUrl(
-      value,
-      servers.map((server) => server.name),
-    );
-    if (!name) {
-      setError("Paste the server’s https:// address, e.g. https://mcp.example.com/mcp");
-      return;
-    }
-    if (servers.some((server) => server.url === value)) {
-      setError("This server is already added.");
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      if (!force && environmentId) {
-        let result: McpProbeResult | null = null;
-        try {
-          result = await probeMcpServer({ environmentId, url: value });
-        } catch {
-          result = null; // an older daemon can't check: add as before
-        }
-        if (result && !result.ok) {
-          setError(mcpProbeProblem(result));
-          setUnchecked(value);
-          return;
-        }
-      }
-      if (await save([...servers, { name, url: value, enabled: true }])) {
-        setUrl("");
-        setUnchecked(null);
-        toastManager.add({ type: "success", title: "MCP server added" });
-      }
-    } finally {
-      setPending(false);
-    }
-  };
+  const save = (next: ReadonlyArray<UnoMcpServer>) => updateSettings({ mcpServers: next });
 
   return (
     <>
@@ -689,7 +812,11 @@ function McpServers({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => void save(servers.filter((entry) => entry.name !== server.name))}
+                onClick={() =>
+                  void save(servers.filter((entry) => entry.name !== server.name)).catch(() => {
+                    toastManager.add({ type: "error", title: "Couldn't remove the server" });
+                  })
+                }
               >
                 Remove
               </Button>
@@ -697,63 +824,131 @@ function McpServers({
           />
         );
       })}
-      <div className="flex items-start gap-4 border-t border-border px-4 py-3.5 sm:px-5">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
-          <ServerIcon className="size-5 text-muted-foreground" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">Your own tool (MCP server)</div>
-          <div className="mt-0.5 text-sm text-muted-foreground">
-            Paste its address. Every chat on this computer gets its tools.
-          </div>
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            <Input
-              className="min-w-[220px] flex-1 font-mono"
-              placeholder="https://mcp.example.com/mcp"
-              value={url}
-              onChange={(event) => {
-                setUrl(event.target.value);
-                setError(null);
-                setUnchecked(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void add();
-              }}
-              aria-label="MCP server address"
-              spellCheck={false}
-              data-testid="setup-mcp-url"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void add()}
-              disabled={pending || !url.trim()}
-              data-testid="setup-mcp-add"
-            >
-              {pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-              {pending ? "Checking" : "Add"}
-            </Button>
-          </div>
-          {error ? (
-            <div className="mt-2 text-xs text-destructive-foreground">
-              {error}
-              {unchecked === url.trim() ? (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className="font-medium text-primary hover:underline"
-                    onClick={() => void add(true)}
-                  >
-                    Add anyway
-                  </button>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
+      <McpAddRow
+        environmentId={environmentId}
+        title="Your own tool (MCP server)"
+        lead="Paste its address. Every chat on this computer gets its tools — not an assistant held to its projects; give one a server on its own page."
+        exists={(url) => servers.some((server) => server.url === url)}
+        save={async (url) => {
+          const name = mcpServerNameFromUrl(
+            url,
+            servers.map((server) => server.name),
+          );
+          if (!name) throw new Error("Paste the server’s https:// address.");
+          await save([...servers, { name, url, enabled: true }]);
+        }}
+        testIdPrefix="setup-mcp"
+      />
     </>
+  );
+}
+
+export const ASSISTANT_MCP_KEY = ["uno-assistant", "mcp"] as const;
+
+/**
+ * "Your own tool" for ONE assistant (assistants D, item 11 "Tasks"): an MCP
+ * server only this assistant's chats get — also in its sandbox, where the
+ * computer's own servers stay out. Kept by the Uno Work of the computer the
+ * assistant works on (`environmentId`), outside the assistant's folder. The
+ * list shows hosts only: an address may carry the server's key.
+ *
+ * Drop it into an assistant's setup or page:
+ * `<AssistantMcpForm environmentId={assistant.environmentId} projectId={assistant.projectId} name="Ada" />`.
+ * An older Uno Work there (no route): the form says so and adds nothing.
+ */
+export function AssistantMcpForm(props: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: string;
+  /** The assistant's name for the lines ("Ada's chats get its tools"). */
+  readonly name?: string;
+  readonly className?: string;
+}) {
+  const { environmentId, projectId } = props;
+  const who = props.name?.trim() || "This assistant";
+  const queryClient = useQueryClient();
+  const key = [...ASSISTANT_MCP_KEY, environmentId, projectId] as const;
+  const list = useQuery({
+    queryKey: key,
+    queryFn: () => listAssistantMcp({ environmentId, projectId }),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const servers = list.data?.servers ?? [];
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const remove = async (name: string) => {
+    setRemoving(name);
+    try {
+      const next = await removeAssistantMcp({ environmentId, projectId, name });
+      queryClient.setQueryData(key, next);
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't remove the server",
+        description: cause instanceof Error ? cause.message : undefined,
+      });
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  return (
+    <div
+      className={cn("overflow-hidden rounded-2xl border border-border", props.className)}
+      data-testid="assistant-mcp"
+    >
+      {list.isError ? (
+        <div className="px-4 py-3.5 text-sm text-muted-foreground sm:px-5">
+          The Uno Work on this assistant’s computer can’t keep servers for one assistant yet. Update
+          it, or add the server for the whole computer in Settings → Connectors.
+        </div>
+      ) : (
+        <>
+          {servers.map((server, index) => (
+            <Row
+              key={server.name}
+              first={index === 0}
+              done
+              logo={<ServerIcon className="size-5 text-muted-foreground" />}
+              name={`${server.name} · ${who}’s MCP server`}
+              testId="assistant-mcp-server"
+              description={
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                  <ConnectedBadge>Added · {who}’s new chats get its tools</ConnectedBadge>
+                  <span className="truncate font-mono text-xs text-muted-foreground">
+                    {server.host}
+                  </span>
+                </span>
+              }
+              side={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={removing !== null}
+                  onClick={() => void remove(server.name)}
+                >
+                  {removing === server.name ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : null}
+                  Remove
+                </Button>
+              }
+            />
+          ))}
+          <McpAddRow
+            environmentId={environmentId}
+            title={`Your own tool for ${who === "This assistant" ? "this assistant" : who} (MCP server)`}
+            lead={`Paste its address. Only ${who === "This assistant" ? "this assistant’s" : `${who}’s`} chats get its tools, from the next chat on.`}
+            exists={() => false}
+            save={async (url) => {
+              const next = await addAssistantMcp({ environmentId, projectId, url });
+              queryClient.setQueryData(key, { servers: next.servers });
+            }}
+            testIdPrefix="assistant-mcp"
+          />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -832,9 +1027,23 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
  * The list itself — the four apps in one click and servers of your own. Used
  * by this step and by Settings → Connectors (the place to manage them since
  * 16.10), so both show the same thing.
+ *
+ * `environmentId`: the Uno Work it talks to — the window's computer by
+ * default; an assistant's page passes the computer the assistant works on,
+ * so "Connect" goes through that Uno Work (grants are the account's either
+ * way). The computer's own MCP servers show only for the window's computer
+ * (`ownServers`, default true); for an assistant use `AssistantMcpForm`.
  */
-export function ConnectorsList(props: { readonly className?: string } = {}) {
-  const environmentId = usePrimaryEnvironmentId();
+export function ConnectorsList(
+  props: {
+    readonly className?: string;
+    readonly environmentId?: EnvironmentId | null;
+    readonly ownServers?: boolean;
+  } = {},
+) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = props.environmentId ?? primaryEnvironmentId;
+  const navigate = useNavigate();
   const { connectors, byProvider, pending, connect, disconnect } =
     useConnectorActions(environmentId);
   const githubConnector = byProvider.get("github");
@@ -842,6 +1051,17 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
   const agentMail = useAgentMail(environmentId);
   const mailbox = agentMailRowVisible(agentMail.data) ? agentMail.data.mailbox : null;
   const mailShown = environmentId !== null && mailbox !== null;
+  const gate = connectorsGate(connectors.data);
+  const signIn =
+    gate === "sign-in" && environmentId !== null
+      ? () =>
+          void navigate({
+            to: "/settings/environment/$environmentId/general",
+            params: { environmentId },
+          })
+      : null;
+  const showOwnServers =
+    props.ownServers !== false && environmentId !== null && environmentId === primaryEnvironmentId;
 
   return (
     <div
@@ -853,7 +1073,11 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
       ) : null}
       {PROVIDERS.map((meta, index) =>
         meta.provider === "github" && githubViaMachine ? (
-          <GitHubAccountRow key={meta.provider} first={index === 0 && !mailShown} />
+          <GitHubAccountRow
+            key={meta.provider}
+            first={index === 0 && !mailShown}
+            environmentId={environmentId}
+          />
         ) : (
           <ProviderRow
             key={meta.provider}
@@ -863,10 +1087,12 @@ export function ConnectorsList(props: { readonly className?: string } = {}) {
             pending={pending?.provider === meta.provider ? pending.action : null}
             onConnect={() => void connect(meta.provider)}
             onDisconnect={() => void disconnect(meta.provider)}
+            onSignIn={signIn}
+            outdated={gate === "outdated"}
           />
         ),
       )}
-      <McpServers environmentId={environmentId} />
+      {showOwnServers ? <McpServers environmentId={environmentId} /> : null}
     </div>
   );
 }

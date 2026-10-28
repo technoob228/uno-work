@@ -1,7 +1,9 @@
 /**
  * ConnectorsService — the connectors client (`connectors.ts`) bound to this
- * daemon's settings: the work-machine token `uno.boxToken` and `uno.boxId`,
- * read on every call (the console may write them after the daemon started).
+ * daemon's settings, read on every call (the console may write them after the
+ * daemon started): the work-machine token `uno.boxToken` + `uno.boxId` on a
+ * cloud computer, else the account key in `uno.apiKey` (a Mac), else none
+ * (`connectorCredentialsFrom`).
  *
  * @module setupTools/ConnectorsService
  */
@@ -13,10 +15,11 @@ import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import {
   ConnectorsError,
   makeConnectorsClient,
+  connectorCredentialsFrom,
   type ConnectorCallResult,
+  type ConnectorCredentials,
   type ConnectorsClientDeps,
   type ConnectorTool,
-  type MachineCredentials,
   type ManagerConnectorsList,
 } from "./connectors.ts";
 
@@ -28,7 +31,7 @@ export interface ConnectorsServiceShape {
     provider: string,
   ) => Effect.Effect<{ readonly authorizeUrl: string }, ConnectorsError>;
   readonly remove: (provider: string) => Effect.Effect<void, ConnectorsError>;
-  /** Never fails: no tools is the answer off a cloud computer or with the console down. */
+  /** Never fails: no tools is the answer without credentials or with the console down. */
   readonly tools: Effect.Effect<ReadonlyArray<ConnectorTool>>;
   readonly call: (input: {
     readonly provider: string;
@@ -52,11 +55,13 @@ export const makeConnectorsService = (overrides: Partial<ConnectorsClientDeps> =
     const context = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(context);
 
-    const credentials = async (): Promise<MachineCredentials | null> => {
+    const credentials = async (): Promise<ConnectorCredentials | null> => {
       const current = await runPromise(settings.getSettings.pipe(Effect.orElseSucceed(() => null)));
-      const boxToken = current?.uno.boxToken?.trim() ?? "";
-      const boxId = parseSettingsBoxId(current?.uno.boxId);
-      return boxToken.length > 0 && boxId !== null ? { boxToken, boxId } : null;
+      return connectorCredentialsFrom({
+        boxToken: current?.uno.boxToken,
+        boxId: parseSettingsBoxId(current?.uno.boxId),
+        apiKey: current?.uno.apiKey,
+      });
     };
 
     const client = makeConnectorsClient({

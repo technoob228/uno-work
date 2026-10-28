@@ -1,8 +1,20 @@
 /**
  * Connectors (Google Drive, Gmail & Calendar, Notion, GitHub) as this
- * computer sees them: a thin client over the console's machine routes
- * (`/api/v1/boxes/{id}/work/connectors…`, onboarding v3 contract, section
- * "Connectors"), called with the work-machine token `settings.uno.boxToken`.
+ * computer sees them: a thin client over the console's routes, with one of
+ * two credentials ({@link connectorCredentialsFrom}):
+ *
+ * - a cloud computer: its work-machine token `settings.uno.boxToken` on the
+ *   machine routes `/api/v1/boxes/{id}/work/connectors…` (onboarding v3
+ *   contract, section "Connectors"); the machine's connector permissions
+ *   apply there;
+ * - a computer without a box (Uno Work on a Mac): the account key the
+ *   person pasted (`settings.uno.apiKey`, not a `unollm_` gateway key) on
+ *   the account routes `/api/v1/work/connectors…` (fishcode
+ *   `feat/connectors-account-key-1028`; decision 16.10 "the console lets a
+ *   Mac in by the account key"). An older console answers 404 there:
+ *   listed as `console_outdated`.
+ *
+ * Neither: `sign_in_required` — the person signs in to Uno on this computer.
  *
  * Grants live at the console, per account. The daemon only lists them for
  * the Setup screen (`GET /api/manager/connectors`), starts / removes a grant,
@@ -33,6 +45,8 @@ export interface ConsoleConnector {
   readonly connected: boolean;
   readonly account: string | null;
   readonly connectedAt: string | null;
+  /** The provider refused the grant (expired, revoked): sign in again. */
+  readonly needsReconnect: boolean;
   readonly tools: ReadonlyArray<ConnectorToolDescriptor>;
 }
 
@@ -45,10 +59,22 @@ export interface ManagerConnectorView {
   readonly connected: boolean;
   readonly account: string | null;
   readonly connectedAt: string | null;
+  /** Listed as connected, but the provider refused it: the row says Reconnect. */
+  readonly needsReconnect?: boolean;
   readonly toolCount: number;
 }
 
-export type ConnectorsUnavailableReason = "not_cloud_computer" | "console_unreachable";
+/**
+ * Why the list is unavailable:
+ * - `sign_in_required` — no machine token and no account key on this
+ *   computer (an older daemon said `not_cloud_computer` for the same);
+ * - `console_outdated` — the console doesn't serve the account routes yet;
+ * - `console_unreachable` — the console didn't answer.
+ */
+export type ConnectorsUnavailableReason =
+  | "sign_in_required"
+  | "console_outdated"
+  | "console_unreachable";
 
 export interface ManagerConnectorsList {
   readonly available: boolean;
@@ -67,14 +93,61 @@ export interface ConnectorCallResult {
   readonly isError: boolean;
 }
 
+/** A cloud computer: its work-machine token and box id (machine routes). */
 export interface MachineCredentials {
+  readonly kind?: "machine";
   readonly boxToken: string;
   readonly boxId: number;
 }
 
+/** A computer without a box: the person's account key (account routes). */
+export interface AccountCredentials {
+  readonly kind: "account";
+  readonly accountKey: string;
+}
+
+export type ConnectorCredentials = MachineCredentials | AccountCredentials;
+
+/** Prefix of the console's gateway-only keys (`unoGatewayKey.ts`): they can't open connectors. */
+const GATEWAY_KEY_PREFIX = "unollm_";
+
+/**
+ * Which credentials this computer uses for connectors: the machine token
+ * first (a cloud computer, the machine's permissions apply), else a real
+ * account key (a Mac), else none. A `unollm_` key only buys AI: none.
+ */
+export function connectorCredentialsFrom(input: {
+  readonly boxToken: string | null | undefined;
+  readonly boxId: number | null | undefined;
+  readonly apiKey: string | null | undefined;
+}): ConnectorCredentials | null {
+  const boxToken = input.boxToken?.trim() ?? "";
+  if (boxToken.length > 0 && typeof input.boxId === "number" && input.boxId > 0) {
+    return { kind: "machine", boxToken, boxId: input.boxId };
+  }
+  const accountKey = input.apiKey?.trim() ?? "";
+  if (accountKey.length > 0 && !accountKey.startsWith(GATEWAY_KEY_PREFIX)) {
+    return { kind: "account", accountKey };
+  }
+  return null;
+}
+
+const isAccount = (creds: ConnectorCredentials): creds is AccountCredentials =>
+  creds.kind === "account";
+
+/** The console path of a connectors route for these credentials. */
+export function connectorsRoutePath(creds: ConnectorCredentials, path: string): string {
+  return isAccount(creds) ? `/api/v1${path}` : `/api/v1/boxes/${creds.boxId}${path}`;
+}
+
+/** Which grant list a cached answer belongs to (never the key itself). */
+function credentialsCacheKey(creds: ConnectorCredentials): string {
+  return isAccount(creds) ? `account:${creds.accountKey.slice(-8)}` : `machine:${creds.boxId}`;
+}
+
 export interface ConnectorsClientDeps {
-  /** The machine token + box id, or null off a cloud computer. Read on every call. */
-  readonly credentials: () => Promise<MachineCredentials | null>;
+  /** Machine token + box id, the account key, or null (neither). Read on every call. */
+  readonly credentials: () => Promise<ConnectorCredentials | null>;
   readonly baseUrl: () => string;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
@@ -98,7 +171,9 @@ export class ConnectorsError extends Error {
   }
 }
 
+/** @deprecated the old name of {@link SIGN_IN_REQUIRED}, still sent by older daemons. */
 export const NOT_CLOUD_COMPUTER = "not_cloud_computer";
+export const SIGN_IN_REQUIRED = "sign_in_required";
 
 const PROVIDER_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -154,6 +229,7 @@ export function parseConsoleConnectors(raw: unknown): ReadonlyArray<ConsoleConne
       connected: record["connected"] === true,
       account: strOrNull(record["account"]),
       connectedAt: strOrNull(record["connected_at"]),
+      needsReconnect: record["needs_reconnect"] === true,
       tools,
     });
   }
@@ -169,6 +245,7 @@ export function toManagerConnectorView(connector: ConsoleConnector): ManagerConn
     connected: connector.connected,
     account: connector.account,
     connectedAt: connector.connectedAt,
+    needsReconnect: connector.needsReconnect,
     toolCount: connector.tools.length,
   };
 }
@@ -228,8 +305,13 @@ export interface ConnectorsClient {
 
 interface Snapshot {
   readonly at: number;
+  /** Whose list it is: a Mac that signs in to another account doesn't see the old one. */
+  readonly key: string;
   readonly connectors: ReadonlyArray<ConsoleConnector>;
 }
+
+/** The account routes are missing on this console (it predates them). */
+class ConsoleOutdated extends Error {}
 
 export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClient {
   const fetchImpl = deps.fetch ?? fetch;
@@ -245,7 +327,7 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
   let generation = 0;
 
   const request = async (
-    creds: MachineCredentials,
+    creds: ConnectorCredentials,
     method: "GET" | "POST" | "DELETE",
     path: string,
     body: unknown,
@@ -253,10 +335,10 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
   ): Promise<{ status: number; body: unknown }> => {
     let response: Response;
     try {
-      response = await fetchImpl(`${deps.baseUrl()}/api/v1/boxes/${creds.boxId}${path}`, {
+      response = await fetchImpl(`${deps.baseUrl()}${connectorsRoutePath(creds, path)}`, {
         method,
         headers: {
-          Authorization: `Bearer ${creds.boxToken}`,
+          Authorization: `Bearer ${isAccount(creds) ? creds.accountKey : creds.boxToken}`,
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -279,25 +361,31 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
     return { status: response.status, body: parsed };
   };
 
-  const requireCredentials = async (): Promise<MachineCredentials> => {
+  const requireCredentials = async (): Promise<ConnectorCredentials> => {
     const creds = await deps.credentials();
     if (creds === null) {
       throw new ConnectorsError(
         409,
-        NOT_CLOUD_COMPUTER,
-        "Connectors work on an Uno cloud computer. This one isn't linked to the console.",
+        SIGN_IN_REQUIRED,
+        "Sign in to Uno on this computer to use connectors: a cloud computer is signed in already; on your own computer, add your Uno account key in Settings.",
       );
     }
     return creds;
   };
 
+  /** A 404 of an account route: the console predates them (not "unknown connector"). */
+  const outdatedConsole = (creds: ConnectorCredentials, status: number) =>
+    isAccount(creds) && status === 404;
+
   const fetchConnectors = async (
-    creds: MachineCredentials,
+    creds: ConnectorCredentials,
   ): Promise<ReadonlyArray<ConsoleConnector>> => {
     if (inflight) return inflight;
     const startedAt = generation;
+    const key = credentialsCacheKey(creds);
     inflight = (async () => {
       const reply = await request(creds, "GET", "/work/connectors", undefined, requestTimeoutMs);
+      if (outdatedConsole(creds, reply.status)) throw new ConsoleOutdated();
       if (reply.status < 200 || reply.status >= 300) {
         throw new ConnectorsError(
           502,
@@ -306,7 +394,7 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
         );
       }
       const connectors = parseConsoleConnectors(reply.body);
-      if (startedAt === generation) snapshot = { at: now(), connectors };
+      if (startedAt === generation) snapshot = { at: now(), key, connectors };
       return connectors;
     })();
     try {
@@ -321,16 +409,31 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
     snapshot = null;
   };
 
+  /** The cached answer for these credentials, while it is fresh. */
+  const cachedFor = (creds: ConnectorCredentials, ttlMs: number) => {
+    const cached = snapshot;
+    return cached !== null && cached.key === credentialsCacheKey(creds) && now() - cached.at < ttlMs
+      ? cached
+      : null;
+  };
+
   const list: ConnectorsClient["list"] = async (options) => {
     const creds = await deps.credentials();
-    if (creds === null) return { available: false, reason: NOT_CLOUD_COMPUTER, connectors: [] };
-    const cached = snapshot;
+    if (creds === null) return { available: false, reason: SIGN_IN_REQUIRED, connectors: [] };
+    const cached = options?.force ? null : cachedFor(creds, listTtlMs);
+    let outdated = false;
     const connectors =
-      !options?.force && cached !== null && now() - cached.at < listTtlMs
-        ? cached.connectors
-        : await fetchConnectors(creds).catch(() => null);
+      cached?.connectors ??
+      (await fetchConnectors(creds).catch((cause: unknown) => {
+        outdated = cause instanceof ConsoleOutdated;
+        return null;
+      }));
     if (connectors === null) {
-      return { available: false, reason: "console_unreachable", connectors: [] };
+      return {
+        available: false,
+        reason: outdated ? "console_outdated" : "console_unreachable",
+        connectors: [],
+      };
     }
     return { available: true, reason: null, connectors: connectors.map(toManagerConnectorView) };
   };
@@ -338,11 +441,13 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
   const tools: ConnectorsClient["tools"] = async () => {
     const creds = await deps.credentials().catch(() => null);
     if (creds === null) return [];
-    const cached = snapshot;
-    if (cached !== null && now() - cached.at < toolsTtlMs) return connectedTools(cached.connectors);
-    const fresh = await fetchConnectors(creds).catch(() => null);
-    // The console blinked: keep offering what we knew rather than dropping tools mid-task.
-    return connectedTools(fresh ?? cached?.connectors ?? []);
+    const fresh = cachedFor(creds, toolsTtlMs);
+    if (fresh !== null) return connectedTools(fresh.connectors);
+    const fetched = await fetchConnectors(creds).catch(() => null);
+    // The console blinked: keep offering what we knew (for these credentials)
+    // rather than dropping tools mid-task.
+    const stale = snapshot?.key === credentialsCacheKey(creds) ? snapshot.connectors : [];
+    return connectedTools(fetched ?? stale);
   };
 
   const start: ConnectorsClient["start"] = async (provider) => {
@@ -355,6 +460,13 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
       requestTimeoutMs,
     );
     invalidate();
+    if (outdatedConsole(creds, reply.status)) {
+      throw new ConnectorsError(
+        503,
+        "console_outdated",
+        "Connecting apps from this computer needs a newer Uno console. Connect them from a cloud computer for now.",
+      );
+    }
     if (reply.status === 503) {
       throw new ConnectorsError(
         503,
@@ -410,6 +522,17 @@ export function makeConnectorsClient(deps: ConnectorsClientDeps): ConnectorsClie
       callTimeoutMs,
     );
     if (reply.status >= 200 && reply.status < 300) return parseCallResult(reply.body);
+    if (outdatedConsole(creds, reply.status)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `The ${input.provider} connector can't be used from this computer yet: the Uno console needs an update. Use it from a cloud computer of the account for now.`,
+          },
+        ],
+        isError: true,
+      };
+    }
     // The grant was revoked elsewhere: the next tools/list should know.
     if (reply.status === 401 || reply.status === 403 || reply.status === 404) invalidate();
     const detail =

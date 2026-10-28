@@ -727,7 +727,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(AppSdkService)({}),
           Layer.mock(ConnectorsService)({
             list: () =>
-              Effect.succeed({ available: false, reason: "not_cloud_computer", connectors: [] }),
+              Effect.succeed({ available: false, reason: "sign_in_required", connectors: [] }),
             tools: Effect.succeed([]),
             ...options?.layers?.connectors,
           }),

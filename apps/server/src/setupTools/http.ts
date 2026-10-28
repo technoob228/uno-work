@@ -11,17 +11,27 @@
  * - `GET    /api/manager/mail`                        → {available, reason, mailbox} ("Email for your AI")
  * - `PUT    /api/manager/mail/address` {local}        → {address}; 409/422 {error: sentence, code}
  * - `POST   /api/manager/mcp/probe` {url}             → {ok, toolCount, toolNames, needsAuth, error}
+ * - `GET    /api/manager/assistant/mcp?projectId=`    → {servers: [{name, host, enabled}]} (its own MCP servers)
+ * - `POST   /api/manager/assistant/mcp` {projectId, url, name?} → {name, servers}; 400 {error: sentence, code}
+ * - `DELETE /api/manager/assistant/mcp?projectId=&name=` → {servers}
  * - `POST   /api/manager/materials/read` {projectPath, links} → {jobId}
  * - `GET    /api/manager/materials/read/:jobId`       → the job
  * - `POST   /api/manager/assistant/draft` {phrase, template} → name, emoji, job, schedule, ≤3 questions
  *
  * @module setupTools/http
  */
-import { AssistantDraftInput } from "@t3tools/contracts";
+import { AssistantDraftInput, isAssistantProjectId } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { AuthError } from "../auth/Services/ServerAuth.ts";
+import { ServerConfig } from "../config.ts";
+import {
+  addAssistantMcpServer,
+  readAssistantMcpServers,
+  toAssistantMcpView,
+  updateAssistantMcpServers,
+} from "../mcp/assistantMcpStore.ts";
 import { AgentMailService } from "./AgentMailService.ts";
 import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
 import { isConnectorProvider, type ConnectorsError } from "./connectors.ts";
@@ -183,6 +193,99 @@ export const mcpProbeRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+// ── An assistant's own MCP servers (assistants D, 28.10) ─────────────────
+
+const assistantProjectParam = (raw: string | null | undefined) => {
+  const projectId = raw?.trim() ?? "";
+  return isAssistantProjectId(projectId)
+    ? Effect.succeed(projectId)
+    : Effect.fail(
+        new AuthError({ message: "projectId must be an assistant project.", status: 400 }),
+      );
+};
+
+const queryParam = (name: string) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    return url._tag === "Some" ? url.value.searchParams.get(name) : null;
+  });
+
+const ASSISTANT_MCP_PROBLEM: Readonly<Record<string, string>> = {
+  invalid_url: "Paste the server’s https:// address, e.g. https://mcp.example.com/mcp",
+  duplicate: "This server is already added for this assistant.",
+  too_many: "An assistant can have up to 20 servers of its own.",
+  invalid_name: "Use a short name: lowercase letters, digits, - and _.",
+};
+
+/** `GET /api/manager/assistant/mcp?projectId=` — the servers given to this assistant (hosts only). */
+export const assistantMcpListRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/mcp",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectParam(yield* queryParam("projectId"));
+    const { stateDir } = yield* ServerConfig;
+    const servers = yield* Effect.promise(() => readAssistantMcpServers(stateDir, projectId));
+    return json({ servers: servers.map(toAssistantMcpView) });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const AssistantMcpAddPayload = Schema.Struct({
+  projectId: Schema.String.check(Schema.isMaxLength(200)),
+  url: Schema.String.check(Schema.isMaxLength(2048)),
+  name: Schema.optional(Schema.String.check(Schema.isMaxLength(48))),
+});
+
+/**
+ * `POST /api/manager/assistant/mcp` {projectId, url, name?} — gives a server
+ * to this assistant: its next chats get the tools, in the sandbox too. The
+ * address is checked by the client first (`/api/manager/mcp/probe`).
+ */
+export const assistantMcpAddRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/mcp",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AssistantMcpAddPayload).pipe(
+      Effect.mapError(
+        () => new AuthError({ message: "Expected {projectId, url, name?}.", status: 400 }),
+      ),
+    );
+    const projectId = yield* assistantProjectParam(input.projectId);
+    const { stateDir } = yield* ServerConfig;
+    const outcome = yield* Effect.promise(() =>
+      updateAssistantMcpServers(stateDir, projectId, (current) => {
+        const result = addAssistantMcpServer(current, { url: input.url, name: input.name });
+        return { servers: result.ok ? result.servers : null, result };
+      }),
+    );
+    if (!outcome.ok) {
+      return json({ error: ASSISTANT_MCP_PROBLEM[outcome.code], code: outcome.code }, 400);
+    }
+    return json({ name: outcome.name, servers: outcome.servers.map(toAssistantMcpView) });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/** `DELETE /api/manager/assistant/mcp?projectId=&name=` — takes a server back (already gone is fine). */
+export const assistantMcpRemoveRouteLayer = HttpRouter.add(
+  "DELETE",
+  "/api/manager/assistant/mcp",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectParam(yield* queryParam("projectId"));
+    const name = (yield* queryParam("name"))?.trim() ?? "";
+    const { stateDir } = yield* ServerConfig;
+    const servers = yield* Effect.promise(() =>
+      updateAssistantMcpServers(stateDir, projectId, (current) => {
+        const next = current.filter((server) => server.name !== name);
+        return { servers: next.length === current.length ? null : next, result: next };
+      }),
+    );
+    return json({ servers: servers.map(toAssistantMcpView) });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 const MaterialsPayload = Schema.Struct({
   projectPath: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
   links: Schema.optional(Schema.Array(Schema.String.check(Schema.isMaxLength(2048)))),
@@ -268,6 +371,9 @@ export const setupToolsRouteLayers = [
   agentMailStatusRouteLayer,
   agentMailAddressRouteLayer,
   mcpProbeRouteLayer,
+  assistantMcpListRouteLayer,
+  assistantMcpAddRouteLayer,
+  assistantMcpRemoveRouteLayer,
   materialsReadRouteLayer,
   materialsReadStatusRouteLayer,
   assistantDraftRouteLayer,

@@ -32,10 +32,25 @@ export interface SetupConnector {
   readonly needsReconnect?: boolean;
 }
 
+/**
+ * Why the list is unavailable (daemon `connectors.ts`):
+ * - `sign_in_required` — no machine token and no account key on that
+ *   computer (an older daemon says `not_cloud_computer`);
+ * - `console_outdated` — the console doesn't serve a Mac's account routes yet;
+ * - `console_unreachable` — the console didn't answer;
+ * - `unavailable` — the daemon itself didn't answer (set by the web).
+ */
+export type ConnectorsUnavailableReason =
+  | "sign_in_required"
+  | "not_cloud_computer"
+  | "console_outdated"
+  | "console_unreachable"
+  | "unavailable";
+
 export interface SetupConnectorsState {
-  /** False when this computer can't reach its Uno account (not a cloud computer). */
+  /** False when this computer can't reach its Uno account (see `reason`). */
   readonly available: boolean;
-  readonly reason: string | null;
+  readonly reason: ConnectorsUnavailableReason | (string & {}) | null;
   readonly connectors: ReadonlyArray<SetupConnector>;
 }
 
@@ -160,6 +175,55 @@ export function probeMcpServer(
     pathname: "/api/manager/mcp/probe",
     method: "POST",
     body: { url: input.url },
+  });
+}
+
+// ── An assistant's own MCP servers (assistants D, 28.10) ──────────────
+
+/** A server given to one assistant; only the host shows (the address may carry its key). */
+export interface AssistantMcpServerView {
+  readonly name: string;
+  readonly host: string;
+  readonly enabled: boolean;
+}
+
+export function listAssistantMcp(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<{ readonly servers: ReadonlyArray<AssistantMcpServerView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/mcp",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+export function addAssistantMcp(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly url: string;
+    readonly name?: string;
+  },
+): Promise<{ readonly name: string; readonly servers: ReadonlyArray<AssistantMcpServerView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/mcp",
+    method: "POST",
+    body: {
+      projectId: input.projectId,
+      url: input.url,
+      ...(input.name ? { name: input.name } : {}),
+    },
+  });
+}
+
+export function removeAssistantMcp(
+  input: EnvironmentScoped & { readonly projectId: string; readonly name: string },
+): Promise<{ readonly servers: ReadonlyArray<AssistantMcpServerView> }> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/mcp",
+    searchParams: { projectId: input.projectId, name: input.name },
+    method: "DELETE",
   });
 }
 

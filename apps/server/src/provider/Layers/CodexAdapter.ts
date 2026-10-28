@@ -24,9 +24,12 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
-  type UnoMcpServer,
 } from "@t3tools/contracts";
-import { codexMcpConfigArgs, sessionMcpServers } from "../../mcp/customMcpServers.ts";
+import {
+  codexMcpConfigArgs,
+  sessionMcpServers,
+  type CustomMcpServersGetter,
+} from "../../mcp/customMcpServers.ts";
 import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -84,7 +87,7 @@ export interface CodexAdapterLiveOptions {
     readonly cwd?: string;
   }) => Record<string, string>;
   /** Remote MCP servers the owner added (settings.mcpServers), read per session. */
-  readonly customMcpServers?: () => ReadonlyArray<UnoMcpServer>;
+  readonly customMcpServers?: CustomMcpServersGetter;
 }
 
 interface CodexAdapterSessionContext {
@@ -1393,8 +1396,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const mcpArgs = codexMcpConfigArgs(
           sessionMcpServers({
             bridgeEnvironment: sessionEnvironment,
-            // A sandboxed assistant's chat: uno-work only, not the owner's servers.
-            custom: input.harnessSandbox ? [] : options?.customMcpServers?.(),
+            // A sandboxed assistant's chat: no owner's servers, its assistant's yes.
+            custom: options?.customMcpServers?.({
+              threadId: input.threadId,
+              sandboxed: input.harnessSandbox !== undefined,
+            }),
           }),
         );
         const runtimeInput: CodexSessionRuntimeOptions = {

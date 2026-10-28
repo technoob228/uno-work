@@ -642,8 +642,58 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       connectingSince.delete(provider);
       return json({ ok: true });
     }),
+    // An assistant's own MCP servers (AssistantMcpForm): kept per machine + assistant.
+    http.post("*/api/manager/mcp/probe", () =>
+      json({ ok: true, toolCount: 6, toolNames: [], needsAuth: false, error: null }),
+    ),
+    http.get("*/api/manager/assistant/mcp", ({ request }) =>
+      json({
+        servers: assistantMcp.get(`${machineOf(request).key}:${projectParam(request)}`) ?? [],
+      }),
+    ),
+    http.post("*/api/manager/assistant/mcp", async ({ request }) => {
+      const body = await bodyOf(request);
+      const key = `${machineOf(request).key}:${String(body.projectId ?? "")}`;
+      const servers = assistantMcp.get(key) ?? [];
+      let host = "";
+      try {
+        host = new URL(String(body.url ?? "")).host;
+      } catch {
+        return json(
+          { error: "Paste the server’s https:// address.", code: "invalid_url" },
+          { status: 400 },
+        );
+      }
+      if (servers.some((server) => server.host === host)) {
+        return json(
+          { error: "This server is already added for this assistant.", code: "duplicate" },
+          { status: 400 },
+        );
+      }
+      const name =
+        host
+          .split(".")
+          .filter((part) => part !== "mcp")
+          .at(-2) ?? "tool";
+      const next = [...servers, { name, host, enabled: true }];
+      assistantMcp.set(key, next);
+      return json({ name, servers: next });
+    }),
+    http.delete("*/api/manager/assistant/mcp", ({ request }) => {
+      const key = `${machineOf(request).key}:${projectParam(request)}`;
+      const name = new URL(request.url).searchParams.get("name");
+      const next = (assistantMcp.get(key) ?? []).filter((server) => server.name !== name);
+      assistantMcp.set(key, next);
+      return json({ servers: next });
+    }),
   ];
 }
+
+/** Demo: servers given to one assistant, by `<machine>:<projectId>`. */
+const assistantMcp = new Map<
+  string,
+  ReadonlyArray<{ readonly name: string; readonly host: string; readonly enabled: boolean }>
+>();
 
 /** The Uno account: who's signed in, its computers, its plan. */
 export function accountHandlers(): HttpHandler[] {

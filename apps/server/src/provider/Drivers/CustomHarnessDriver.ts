@@ -180,7 +180,7 @@ export const CustomHarnessDriver: ProviderDriver<CustomHarnessSettings, CustomHa
           acpMcpServers(
             sessionMcpServers({
               bridgeEnvironment: browserBridge.scopedEnvironment(context),
-              custom: customMcpServers(),
+              custom: customMcpServers({ threadId: context.threadId }),
             }),
           ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
