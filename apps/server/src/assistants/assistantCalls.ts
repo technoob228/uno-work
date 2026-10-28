@@ -420,6 +420,8 @@ export interface CallsEffects {
 
 const NO_EFFECTS: CallsEffects = { inbox: null, turn: null };
 const FAILED = new Set(["failed", "not_admitted"]);
+/** The bot is done with this call (in or not): the next one is "next". */
+const OVER = new Set(["failed", "not_admitted", "done", "cancelled"]);
 
 /** What one event changes and does. A repeated id does nothing. */
 export function applyCallsEvent(
@@ -569,7 +571,7 @@ export function notesPrompt(event: MeetingNotesEvent, botName: string): string {
 export function nextCall(state: AssistantCallsState, nowMs: number): CallView | null {
   return (
     state.upcoming
-      .filter((c) => c.join && Date.parse(c.end) > nowMs)
+      .filter((c) => c.join && Date.parse(c.end) > nowMs && !OVER.has(c.session?.status ?? ""))
       .toSorted((a, b) => Date.parse(a.start) - Date.parse(b.start))[0] ?? null
   );
 }

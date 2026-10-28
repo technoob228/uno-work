@@ -141,6 +141,14 @@ describe("assistantCalls", () => {
       choice: "skip",
     });
     expect(nextCall(skipped, Date.parse("2026-10-28T12:00:00Z"))?.title).toBe("Later");
+    // the bot is done with a call it couldn't get into: the next one is next
+    const over = {
+      ...state,
+      upcoming: state.upcoming.map((c) =>
+        c.key === KEY ? { ...c, session: { status: "failed", detail: "x" } } : c,
+      ),
+    };
+    expect(nextCall(over, Date.parse("2026-10-28T14:10:00Z"))?.title).toBe("Later");
   });
 
   it("tells the person when the bot couldn't get in, once", () => {
