@@ -111,9 +111,9 @@ export const FEATURE_FLAGS = [
   },
   {
     key: "browserPageTools",
-    label: "Comment and Debug in the browser",
+    label: "Developer tools in the browser",
     description:
-      "Desktop app: one Comment button on your site — point at parts of the page and leave notes for the agent; the page's console and network show below, and errors go to the chat.",
+      "A small </> button in the browser's address bar, off on every site by default: on, the page's console and network show below, and Comment lets you point at parts of the page and leave notes for the agent; errors go to the chat.",
     default: true,
   },
   {
@@ -297,7 +297,10 @@ export function groupProjectsAcrossComputersOnce<
   return {
     settings: {
       ...settings,
-      featureFlags: { ...settings.featureFlags, [PROJECT_GROUPING_RESET_MARKER]: true },
+      featureFlags: {
+        ...settings.featureFlags,
+        [PROJECT_GROUPING_RESET_MARKER]: true,
+      },
       ...(settings.sidebarProjectGroupingMode === "separate"
         ? { sidebarProjectGroupingMode: acrossComputers }
         : {}),
