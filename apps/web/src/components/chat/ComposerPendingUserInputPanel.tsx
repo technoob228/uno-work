@@ -1,6 +1,7 @@
 import { type ApprovalRequestId, type UserInputQuestion } from "@t3tools/contracts";
 import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
 import { usePrimaryEnvironmentId } from "../../environments/primary/context";
+import { connectorSignedIn } from "../setup/connectorSignIn.logic";
 import { useConnectorActions } from "../setup/steps/ConnectorsStep";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -99,7 +100,8 @@ function InlineConnect(props: {
   const environmentId = usePrimaryEnvironmentId();
   const actions = useConnectorActions(environmentId);
   const [asked, setAsked] = useState(false);
-  const connected = actions.byProvider.get(props.connect.provider as never)?.connected === true;
+  // An expired sign-in is not "connected": the card offers Connect until it lands again.
+  const connected = connectorSignedIn(actions.byProvider.get(props.connect.provider as never));
   const onConnected = useEffectEvent(props.onConnected);
   useEffect(() => {
     if (asked && connected) onConnected();
