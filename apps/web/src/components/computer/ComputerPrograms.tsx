@@ -227,7 +227,10 @@ export function TileShell({
   small = false,
   action = null,
   actionBusy = false,
+  cornerActions = null,
 }: {
+  /** More hover buttons beside the ⚙ (Apps & sites: Pin). */
+  cornerActions?: ReactNode;
   /** The app's one primary action: a chip under the name (except "Open"). */
   action?: AppPrimaryAction | null;
   /** Its action is under way (starting). */
@@ -309,7 +312,21 @@ export function TileShell({
         ) : null}
         {action ? <ActionChip action={action} busy={actionBusy} className="-mt-0.5" /> : null}
       </button>
-      {onDetails ? (
+      {onDetails && cornerActions ? (
+        <div className="absolute top-1 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+          {cornerActions}
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`${label} settings`}
+            title="Settings"
+            onClick={onDetails}
+            data-testid="program-settings"
+          >
+            <SettingsIcon />
+          </Button>
+        </div>
+      ) : onDetails ? (
         <Button
           size="icon-xs"
           variant="ghost"

@@ -7,10 +7,7 @@
  * product name small under it. Uno Drive,
  * Terminal and the App Store sit at the bottom, like fixed items of a dock.
  *
- * The same list is the Apps tab of "Apps & sites" (`variant="page"`): there
- * the built-in ones come first — on an empty computer the page used to say
- * "No apps yet" on top and keep Drive, Terminal and the App Store at the very
- * bottom of an empty page (P14, 28.10).
+ * The Apps tab of "Apps & sites" is a grid of icons instead (`AppsGrid`, 28.10).
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -48,12 +45,7 @@ import { useSidebar } from "../ui/sidebar";
 import { SidebarAppServers } from "./SidebarAppServers";
 import { Skeleton } from "../ui/skeleton";
 
-export const SidebarAppsList = memo(function SidebarAppsList({
-  variant = "sidebar",
-}: {
-  /** "page": the Apps tab of Apps & sites — built-in apps first, then the person's. */
-  readonly variant?: "sidebar" | "page";
-}) {
+export const SidebarAppsList = memo(function SidebarAppsList() {
   const { tiles, loading, hasStore } = useProgramTiles();
   const machine = useActiveMachine();
   const launchers = useHomeLaunchers(machine.environmentId);
@@ -79,94 +71,6 @@ export const SidebarAppsList = memo(function SidebarAppsList({
     close();
     void navigate({ to: "/computer", search: { store: "1" } });
   };
-
-  if (variant === "page") {
-    return (
-      <div className="flex flex-col gap-6" data-testid="apps-page">
-        <section aria-labelledby="apps-built-in">
-          <h2
-            id="apps-built-in"
-            className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide"
-          >
-            Built in
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <BuiltInTile
-              icon={<HardDriveIcon className="size-4.5 text-sky-500" />}
-              label="Uno Drive"
-              hint="Your files in the cloud"
-              onClick={openDrive}
-            />
-            <BuiltInTile
-              icon={<SquareTerminalIcon className="size-4.5" />}
-              label="Terminal"
-              hint="Command line of this computer"
-              disabled={terminalBusy}
-              onClick={openTerminal}
-            />
-            {hasStore ? (
-              <BuiltInTile
-                icon={<ShoppingBagIcon className="size-4.5" />}
-                label="App Store"
-                hint="Ready-made apps, one click"
-                onClick={openStore}
-              />
-            ) : null}
-          </div>
-        </section>
-        <section aria-labelledby="apps-yours">
-          <h2
-            id="apps-yours"
-            className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide"
-          >
-            Your apps
-          </h2>
-          {loading && tiles.length === 0 ? (
-            <div className="flex flex-col gap-1.5">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-9 w-full rounded-lg" />
-              ))}
-            </div>
-          ) : tiles.length === 0 ? (
-            <div
-              className="rounded-xl border border-dashed border-border px-4 py-5 text-center"
-              data-testid="apps-page-empty"
-            >
-              <p className="text-sm text-foreground">No apps of your own yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {hasStore
-                  ? "Add one from the App Store, or ask Uno in a chat to make one for you."
-                  : "Ask Uno in a chat to make one for you."}
-              </p>
-              {hasStore ? (
-                <button
-                  type="button"
-                  onClick={openStore}
-                  className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-accent"
-                >
-                  <ShoppingBagIcon className="size-3.5" />
-                  Open the App Store
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-px">
-              {tiles.map((tile) => (
-                <AppRow
-                  key={tile.key}
-                  tile={tile}
-                  primary={primary}
-                  starting={startingId !== null && startingId === tile.machineApp?.id}
-                  onNavigate={close}
-                />
-              ))}
-            </ul>
-          )}
-          <SidebarAppServers />
-        </section>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-full flex-col gap-px">
@@ -222,37 +126,6 @@ export const SidebarAppsList = memo(function SidebarAppsList({
     </div>
   );
 });
-
-function BuiltInTile({
-  icon,
-  label,
-  hint,
-  onClick,
-  disabled,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  hint: string;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2 disabled:cursor-wait"
-    >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 leading-tight">
-        <span className="block truncate text-sm font-medium">{label}</span>
-        <span className="block truncate text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </button>
-  );
-}
 
 function FixedRow({
   icon,
