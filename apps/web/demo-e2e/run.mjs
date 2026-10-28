@@ -28,21 +28,19 @@ const report = [];
 for (const item of flows) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
+  if (process.env.DEMO_URL) {
+    // A real origin (not localhost): Chrome's fake media UI doesn't answer for
+    // camera/microphone after a screen pick there — grant them like a person would.
+    await context.grantPermissions(["camera", "microphone"], { origin: new URL(server.url).origin });
+  }
   if (process.env.DEMO_URL && process.env.DEMO_PASSWORD) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await page.goto(server.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
-        const input = page.locator('input[name="password"]');
-        if (await input.isVisible().catch(() => false)) {
-          await input.fill(process.env.DEMO_PASSWORD);
-          await input.press("Enter");
-          // The unlock page posts and redirects: wait until the form is gone.
-          await input.waitFor({ state: "detached", timeout: 60_000 });
-        }
-        break;
-      } catch {
-        // the site is a 10 MB SPA behind a CDN: try again
-      }
+    // The site is behind Uno Sites' password page: unlock once per context.
+    await page.goto(server.url, { waitUntil: "domcontentloaded", timeout: 90_000 });
+    const input = page.locator('input[name="password"]');
+    if (await input.waitFor({ timeout: 15_000 }).then(() => true, () => false)) {
+      await input.fill(process.env.DEMO_PASSWORD);
+      await input.press("Enter");
+      await input.waitFor({ state: "detached", timeout: 60_000 });
     }
   }
   const errors = [];

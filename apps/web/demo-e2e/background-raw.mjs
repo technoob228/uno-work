@@ -11,7 +11,10 @@ import { MEDIA_ARGS, serve } from "./harness.mjs";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const server = await serve();
+// DEMO_URL=https://… DEMO_PASSWORD=… runs it on the published site.
+const server = process.env.DEMO_URL
+  ? { url: process.env.DEMO_URL.replace(/\/?$/, "/"), close: () => undefined }
+  : await serve();
 const profile = mkdtempSync(join(tmpdir(), "loom-bg-"));
 const port = 9333 + Math.floor(Math.random() * 500);
 const chrome = spawn(CHROME, [
@@ -21,7 +24,7 @@ const chrome = spawn(CHROME, [
   "--no-first-run",
   "--no-default-browser-check",
   "--window-size=1440,900",
-  `${server.url}?loom=normal&speed=4&panel=closed`,
+  process.env.DEMO_URL ? server.url : `${server.url}?loom=normal&speed=4&panel=closed`,
 ]);
 let id = 0;
 const pending = new Map();
@@ -75,6 +78,13 @@ try {
     }
   };
   const click = (testId) => run(`document.querySelector('[data-testid="${testId}"]').click()`);
+  if (process.env.DEMO_PASSWORD) {
+    await until(`!!document.querySelector('input[name="password"]') || !!window.__loomDemo`);
+    await run(`(() => { const i = document.querySelector('input[name="password"]'); if (i) { i.value = ${JSON.stringify(process.env.DEMO_PASSWORD)}; i.form.submit(); } })()`);
+    await sleep(2500);
+    await run(`location.href = ${JSON.stringify(server.url + "?loom=normal&speed=4&panel=closed")}`);
+    await sleep(1500);
+  }
   await until(
     `Boolean(window.__loomDemo) && !!document.querySelector('[data-testid="loom-panel-pill"]')`,
   );
@@ -90,6 +100,8 @@ try {
   await click("record-start");
   await until(`!!document.querySelector('[data-testid="recording-bar"][data-phase="recording"]')`);
   await sleep(1000);
+  const devices = await run(`({ camera: !!document.querySelector('[data-testid="recording-camera-preview"]'), microphone: !document.querySelector('[data-testid="recording-no-mic"]') })`);
+  console.log("camera and microphone in:", JSON.stringify(devices));
   // A real second tab in front: Work's tab goes to the background.
   const browserWs = (await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json()))
     .webSocketDebuggerUrl;

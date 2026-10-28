@@ -119,6 +119,16 @@ export default function LoomDemoPanel({ router }: { router: DemoRouter }) {
           </button>
         ))}
       </div>
+      {location.hostname.endsWith(".uno4.me") ? (
+        <div
+          className="rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200"
+          data-testid="loom-hosting-note"
+        >
+          Здесь, на Uno Sites, хостинг запрещает сайтам камеру и микрофон (заголовок
+          Permissions-Policy) — экран и звук вкладки пишутся, камера и голос нет. В настоящем Work
+          (десктоп и облачный компьютер) запрета нет.
+        </div>
+      ) : null}
       <div className="text-[11px] leading-snug text-muted-foreground">
         Ещё крайние случаи — закрыть окно выбора (ничего не происходит), «Stop sharing» в браузере
         (= Done), запрет камеры/микрофона (пишет без них и говорит об этом), 10 минут
