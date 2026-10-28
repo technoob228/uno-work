@@ -178,7 +178,7 @@ const caps = (unoGroup?: "included" | "premium" | "personal") =>
 describe("premium credit", () => {
   it("says the premium model is answered by Smart, with the way to keep it", () => {
     const notice = premiumFallbackNotice(
-      status({ premium: premium({ exhausted: true, leftUsd: 0 }) }),
+      status({ premium: premium({ exhausted: true, leftUsd: 0, balanceUsd: 12 }) }),
       true,
     );
     expect(notice).toEqual({
@@ -192,6 +192,44 @@ describe("premium credit", () => {
         true,
       )?.text,
     ).toBe("Answered by Smart: no Premium credit. New credit arrives when your plan renews.");
+  });
+
+  it("no money to continue from: the way on is Add credit", () => {
+    expect(
+      premiumFallbackNotice(status({ premium: premium({ exhausted: true, leftUsd: 0 }) }), true),
+    ).toEqual({
+      text: "Answered by Smart: no Premium credit. New credit on Oct 24.",
+      actionLabel: "Add credit",
+      actionUrl: "https://console.uno.place/billing#premium",
+    });
+  });
+
+  it("a trial (no monthly premium credit) is not promised new credit", () => {
+    // Agent-flow pass 25.10: trial, "$0 premium models", Sonnet answered by Smart.
+    expect(
+      premiumFallbackNotice(
+        status({
+          premium: premium({ exhausted: true, leftUsd: 0, monthlyUsd: 0, limitUsd: 0 }),
+        }),
+        true,
+      ),
+    ).toEqual({
+      text: "Answered by Smart: no Premium credit.",
+      actionLabel: "Add credit",
+      actionUrl: "https://console.uno.place/billing#premium",
+    });
+  });
+
+  it("knows a premium pick in OpenCode on Uno AI, not OpenCode's own models", () => {
+    const opencode = (slug: string) => isUnoPremiumModelSelected({ driverKind: "opencode", slug });
+    expect(opencode("uno/anthropic/claude-sonnet-5.5")).toBe(true);
+    expect(opencode("uno/openai/gpt-5.5")).toBe(true);
+    expect(opencode("uno/uno/smart")).toBe(false);
+    expect(opencode("uno/uno/fast")).toBe(false);
+    expect(opencode("uno/uno-personal/qwen")).toBe(false);
+    expect(opencode("opencode/claude-sonnet-5.5")).toBe(false);
+    expect(opencode("anthropic/claude-sonnet-5.5")).toBe(false);
+    expect(isUnoPremiumModelSelected({ driverKind: "codex", slug: "uno/anthropic/x" })).toBe(false);
   });
 
   it("says nothing on Smart / Fast, with credit left, or without the premium field", () => {
