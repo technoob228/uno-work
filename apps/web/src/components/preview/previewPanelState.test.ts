@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   carryPanelOnChatSwitch,
+  clearPanelNews,
   closeTab,
   DEFAULT_PREVIEW_BUCKET_STATE,
   dropChatBuckets,
@@ -159,6 +160,75 @@ describe("a panel the person closed stays closed", () => {
     expect(view.files).toHaveLength(1);
     expect(view.open).toBe(false);
     expect(view.view.unseen).toBe(1);
+  });
+});
+
+describe("on a phone the agent doesn't pop the panel over the chat (agent flow 25.10)", () => {
+  const phone = { holdAgentOpens: true } as const;
+
+  it("an agent's open_in_panel adds the tab and raises the badge, the panel stays closed", () => {
+    const states = openTab({}, chatA, "chat", report, "agent", phone);
+    const view = resolvePanelView(states, chatA);
+    expect(view.open).toBe(false);
+    expect(view.files).toEqual([report]);
+    expect(view.view.unseen).toBe(1);
+    expect(view.view.agentNews).toBe("report");
+    // Not the person's "closed": on a wider screen later the agent may show things.
+    expect(view.view.dismissed).toBe(false);
+  });
+
+  it("View opens the panel on the agent's tab and the badge goes", () => {
+    let states = openTab({}, chatA, "chat", report, "agent", phone);
+    states = setPanelOpen(states, chatA, true);
+    const view = resolvePanelView(states, chatA);
+    expect(view.visible).toBe(true);
+    expect(view.view.activeFileId).toBe("report");
+    expect(view.view.unseen).toBe(0);
+  });
+
+  it("an open panel just switches to the agent's new tab", () => {
+    let states = openTab({}, chatA, "chat", report, "person", phone);
+    states = openTab(states, chatA, "chat", notes, "agent", phone);
+    const view = resolvePanelView(states, chatA);
+    expect(view.open).toBe(true);
+    expect(view.view.activeFileId).toBe("notes");
+    expect(view.view.unseen).toBe(0);
+  });
+
+  it("whatever the person opens shows as always", () => {
+    const states = openTab({}, chatA, "chat", report, "person", phone);
+    expect(resolvePanelView(states, chatA).visible).toBe(true);
+  });
+
+  it("a chat that inherits the pinned panel isn't closed by the agent's open either", () => {
+    let states = openTab({}, home, "global", notes, "person");
+    expect(isPanelOpen(states, chatA)).toBe(true);
+    states = openTab(states, chatA, "chat", report, "agent", phone);
+    expect(isPanelOpen(states, chatA)).toBe(true);
+    expect(resolvePanelView(states, chatA).view.activeFileId).toBe("report");
+  });
+
+  it("the agent's browser tab is held the same way", () => {
+    const states = openBrowserTab(
+      {},
+      chatA,
+      "chat",
+      "http://localhost:8124/",
+      () => ({ id: "browser-1", name: "hello-api", kind: "browser", content: "", url: "x" }),
+      "agent",
+      phone,
+    );
+    expect(isPanelOpen(states, chatA)).toBe(false);
+    expect(resolvePanelView(states, chatA).view.unseen).toBe(1);
+  });
+
+  it("waving the chip away clears the badge and keeps the tab", () => {
+    let states = openTab({}, chatA, "chat", report, "agent", phone);
+    states = clearPanelNews(states, chatA);
+    const view = resolvePanelView(states, chatA);
+    expect(view.view.unseen).toBe(0);
+    expect(view.files).toEqual([report]);
+    expect(view.open).toBe(false);
   });
 });
 

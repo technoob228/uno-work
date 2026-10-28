@@ -13,6 +13,7 @@ import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 
 import { DEMO, demoHooks, useDemoSwitch } from "../../demo/demoFlag";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { recordFileOpened } from "../files/filesApi";
 import { liveBrowserTabId, liveBrowserTabName } from "./browserLiveStore";
 import { browserTabNameForUrl, normalizeBrowserUrl } from "./browserUrl";
@@ -20,6 +21,7 @@ import { forgetScrollPosition } from "./previewScrollMemory";
 import {
   applyPreviewBucketPatch,
   carryPanelOnChatSwitch,
+  clearPanelNews,
   closeTab,
   collectVisibleTabs,
   DEFAULT_PREVIEW_BUCKET_STATE,
@@ -327,6 +329,15 @@ interface PreviewPaneState {
   sourceViewFileIds: ReadonlyArray<string>;
   /** Сколько вкладок агент добавил, пока человек держал панель закрытой (бейдж). */
   unseenCount: number;
+  /** The tab the agent opened last while the panel was closed (the phone chip); null — none. */
+  unseenTab: PreviewFile | null;
+  /** Wave the chip away: the badge goes, the tab stays in the panel. */
+  clearUnseen: () => void;
+  /**
+   * Phone-width screen (`useIsMobile`): the panel is a full-screen sheet over
+   * the chat, and what the agent opens waits behind the chip.
+   */
+  panelIsSheet: boolean;
   /** Ширина панели этого контекста; null — общая по умолчанию. */
   width: number | null;
   setWidth: (width: number) => void;
@@ -469,7 +480,13 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   const newTabsGo = useDemoSwitch("newTabsGo");
   // Флаг `panelTabGroups`: вкладки агента помечены значком (без флага — как в 0.0.137).
   const markAgentTabs = useFeatureFlag("panelTabGroups");
-  const openTabOptions = useMemo(() => ({ markAgentTabs }), [markAgentTabs]);
+  // A phone: the panel can't share the width with the chat, so the agent
+  // doesn't pop it open (agent flow 25.10) — see OpenTabOptions.holdAgentOpens.
+  const panelIsSheet = useIsMobile();
+  const openTabOptions = useMemo(
+    () => ({ markAgentTabs, holdAgentOpens: panelIsSheet }),
+    [markAgentTabs, panelIsSheet],
+  );
   useEffect(() => {
     if (DEMO) demoHooks.setPreviewStates = setStatesByScopeKey;
   }, []);
@@ -525,6 +542,10 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
 
   const toggleOpen = useCallback(() => {
     transition((prev) => togglePanelOpen(prev, currentTarget));
+  }, [currentTarget, transition]);
+
+  const clearUnseen = useCallback(() => {
+    transition((prev) => clearPanelNews(prev, currentTarget));
   }, [currentTarget, transition]);
 
   const setPreviewLayoutMode = useCallback(
@@ -630,6 +651,10 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
             content: "",
             url: trimmed,
             projectKey: target.projectKey,
+            // Who opened it decides who drives the page if it moves to the
+            // computer's browser (BrowserPane); the tab row shows the mark
+            // only with `panelTabGroups`.
+            ...(source === "agent" ? { openedBy: "agent" as const } : {}),
           }),
           source,
           openTabOptions,
@@ -836,6 +861,13 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       editingFileId: viewState.editingFileId,
       sourceViewFileIds: viewState.sourceViewFileIds,
       unseenCount: open ? 0 : viewState.unseen,
+      unseenTab:
+        open || viewState.unseen === 0
+          ? null
+          : (files.find((tab) => tab.id === (viewState.agentNews ?? viewState.activeFileId)) ??
+            null),
+      clearUnseen,
+      panelIsSheet,
       width: viewState.width,
       setWidth,
       toggleSourceView,
@@ -883,6 +915,8 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
       toggleSourceView,
       setOpen,
       toggleOpen,
+      clearUnseen,
+      panelIsSheet,
       setPreviewLayoutMode,
       togglePreviewLayoutMode,
       openFile,

@@ -512,6 +512,9 @@ function BrowserView({
   // open its own. Such a page opens in the computer's browser, in the panel,
   // with Comment; public addresses stay as they are (a tab of this browser).
   const openedOnComputerRef = useRef<string | null>(null);
+  // The address the tab was opened with: the agent's own open_in_panel, while
+  // the person hasn't gone elsewhere in it, stays the agent's when carried over.
+  const [openedWithUrl] = useState(() => tab.url ?? "");
   useEffect(() => {
     // Still in the web (Misha 17.10) where Work can't show the port itself
     // ("Your site" off for the account, a self-hosted daemon): this device's
@@ -524,7 +527,11 @@ function BrowserView({
     if (portPreview.kind === "off" && (isElectron || !pageToolsFlag)) return;
     if (openedOnComputerRef.current === currentUrl) return;
     openedOnComputerRef.current = currentUrl;
-    openInSource("computer", currentUrl);
+    // The agent's page (agent flow 25.10): the agent keeps driving it — the
+    // footer said "You're in control" and blocked the agent's next open.
+    openInSource("computer", currentUrl, {
+      forAgent: tab.openedBy === "agent" && currentUrl === openedWithUrl,
+    });
     closeFile(tab.id);
   }, [
     demoDesktop,
@@ -536,6 +543,8 @@ function BrowserView({
     openInSource,
     closeFile,
     tab.id,
+    tab.openedBy,
+    openedWithUrl,
   ]);
   const origin = browserUrlOrigin(currentUrl);
   const matchedCredentials = useMemo(

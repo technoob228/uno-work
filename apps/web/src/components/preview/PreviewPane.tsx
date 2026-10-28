@@ -29,6 +29,7 @@ import {
   TableIcon,
   XIcon,
   AppWindowIcon,
+  ArrowLeftIcon,
   ListTodoIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1934,6 +1935,7 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
     currentChatProjectId,
     width: viewWidth,
     setWidth: setViewWidth,
+    panelIsSheet: sheet,
   } = usePreviewPane();
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const projectName = useCurrentProjectName(currentChatEnvironmentId, currentChatProjectId);
@@ -2053,7 +2055,9 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
   );
 
   const clampedWidth = Math.min(maxWidth, Math.max(MIN_PREVIEW_WIDTH, width));
-  const isFocusMode = previewLayoutMode === "focus";
+  // A phone (agent flow 25.10): the panel never shares the width with the chat
+  // — a full-screen sheet over it with "Back to chat"; no resizing, no focus.
+  const isFocusMode = !sheet && previewLayoutMode === "focus";
   const focusLeft = sidebarVisible ? "var(--sidebar-width)" : "0px";
 
   // Панель может быть скрыта (закрыта, пустая или подавлена настройками), но
@@ -2114,9 +2118,11 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       className={cn(
         "flex flex-col border-l border-border bg-background",
         paneVisible &&
-          (isFocusMode
-            ? "fixed bottom-0 right-0 top-0 z-50 shadow-2xl"
-            : "relative h-full shrink-0"),
+          (sheet
+            ? "fixed inset-0 z-50 border-l-0 pb-[env(safe-area-inset-bottom)]"
+            : isFocusMode
+              ? "fixed bottom-0 right-0 top-0 z-50 shadow-2xl"
+              : "relative h-full shrink-0"),
         // Скрытая панель уезжает за экран, сохраняя реальные размеры:
         // display:none ломает атачмент новых <webview>, а фоновые вкладки
         // должны оставаться рабочими для команд харнессов.
@@ -2124,16 +2130,18 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       )}
       style={
         paneVisible
-          ? isFocusMode
-            ? chatDockOn
-              ? // The chat folded into a column (ChatMiniWindow) takes the right edge.
-                { left: focusLeft, right: "var(--chat-dock-column-width, 0px)" }
-              : { left: focusLeft }
-            : { width: `${clampedWidth}px` }
+          ? sheet
+            ? undefined
+            : isFocusMode
+              ? chatDockOn
+                ? // The chat folded into a column (ChatMiniWindow) takes the right edge.
+                  { left: focusLeft, right: "var(--chat-dock-column-width, 0px)" }
+                : { left: focusLeft }
+              : { width: `${clampedWidth}px` }
           : { left: -10000, width: `${clampedWidth}px` }
       }
     >
-      {paneVisible && !isFocusMode ? (
+      {paneVisible && !isFocusMode && !sheet ? (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -2150,12 +2158,24 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
           // "All tabs" folds to an icon in a narrow panel.
           tabGroupsOn && "@container/panelhead",
           isFocusMode && "h-[52px] fullscreen:h-9 wco:h-[env(titlebar-area-height)]",
+          sheet && "h-12 pt-[env(safe-area-inset-top)] pl-1 box-content",
           isFocusMode &&
             !sidebarVisible &&
             "pl-[78px] fullscreen:pl-2 wco:pl-[calc(env(titlebar-area-x)+1em)]",
           !paneVisible && "hidden",
         )}
       >
+        {sheet ? (
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            data-testid="panel-back-to-chat"
+            className="ml-1 shrink-0"
+          >
+            <ArrowLeftIcon />
+            Back to chat
+          </Button>
+        ) : null}
         {isFocusMode && !sidebarVisible ? (
           <Button
             size="icon-xs"
@@ -2228,7 +2248,22 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </button>
           ) : null}
         </div>
-        {chatDockOn ? (
+        {sheet ? (
+          // "Back to chat" closes; only "leave the chat for the app / Files" stays.
+          fullScreenTarget ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={openFullScreen}
+              aria-label="Open full screen"
+              title="Open full screen — leave the chat and give this the whole window"
+              data-testid="preview-open-full-screen"
+              className="relative shrink-0"
+            >
+              <ExpandIcon />
+            </Button>
+          ) : null
+        ) : chatDockOn ? (
           <>
             {/* One full-screen control (D24): the tab over the whole window with the
                 chat at the bottom; "leave the chat" lives in its little menu. */}
@@ -2302,15 +2337,17 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
             </Button>
           </>
         )}
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={() => setOpen(false)}
-          aria-label="Close panel"
-          className="relative shrink-0"
-        >
-          <XIcon />
-        </Button>
+        {sheet ? null : (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => setOpen(false)}
+            aria-label="Close panel"
+            className="relative shrink-0"
+          >
+            <XIcon />
+          </Button>
+        )}
       </header>
       {paneVisible &&
       active &&

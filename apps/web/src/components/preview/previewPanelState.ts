@@ -211,13 +211,25 @@ function revealInView(
   viewKey: string,
   id: string,
   source: PanelOpenSource,
+  options: OpenTabOptions = {},
 ): PreviewStates {
+  // On a phone the agent doesn't pop a closed panel over the chat (agent flow
+  // 25.10: a 390 px chat squeezed into one letter per line); the tab waits
+  // behind the chip above the composer. An open panel just switches tabs.
+  const shownNow =
+    viewKey === GLOBAL_SCOPE_KEY || getPreviewBucketState(states, viewKey).viewTouched
+      ? getPreviewBucketState(states, viewKey).open
+      : pinnedPanelShown(states);
+  const holdClosed = options.holdAgentOpens === true && !shownNow;
   return patchView(states, viewKey, (view) => {
     const news = source === "agent" ? id : view.agentNews;
-    if (source === "agent" && view.dismissed) {
+    if (source === "agent" && (view.dismissed || holdClosed)) {
       return {
         ...view,
         viewTouched: true,
+        // Held on a phone: the panel stays closed (an untouched chat would
+        // otherwise inherit the pinned panel's "open").
+        ...(holdClosed ? { open: false } : {}),
         activeFileId: id,
         unseen: view.unseen + 1,
         agentNews: news,
@@ -233,17 +245,18 @@ function revealTab(
   landedKey: string,
   id: string,
   source: PanelOpenSource,
+  options: OpenTabOptions = {},
 ): PreviewStates {
   let next = states;
   const viewKey = viewScopeKey(target);
   // Вкладка, невидимая из вида цели (легаси-агент без треда положил её в
   // проект), вид не трогает: иначе вне чата «открылась» бы пустая панель.
   if (visibleScopeKeys(target).includes(landedKey)) {
-    next = revealInView(next, viewKey, id, source);
+    next = revealInView(next, viewKey, id, source, options);
   }
   // Закреплённая везде вкладка показывается и вне чатов.
   if (landedKey === GLOBAL_SCOPE_KEY && viewKey !== GLOBAL_SCOPE_KEY) {
-    next = revealInView(next, GLOBAL_SCOPE_KEY, id, source);
+    next = revealInView(next, GLOBAL_SCOPE_KEY, id, source, options);
   }
   return next;
 }
@@ -256,6 +269,12 @@ export interface OpenTabOptions {
    * Пометка живёт только в памяти: `previewTabPersistence` её не сохраняет.
    */
   readonly markAgentTabs?: boolean;
+  /**
+   * A phone-width screen (`useIsMobile`): what the agent opens doesn't open a
+   * closed panel — the tab is added, the badge and the chip above the
+   * composer offer it. The person's own opens show as always.
+   */
+  readonly holdAgentOpens?: boolean;
 }
 
 /**
@@ -273,14 +292,14 @@ export function openTab(
   const existingKey = visibleScopeKeys(target).find((scopeKey) =>
     (states[scopeKey]?.files ?? []).some((candidate) => candidate.id === file.id),
   );
-  if (existingKey) return revealTab(states, target, existingKey, file.id, source);
+  if (existingKey) return revealTab(states, target, existingKey, file.id, source, options);
   const bucketKey = scopeKeyForTarget(target, scope);
   const bucket = getPreviewBucketState(states, bucketKey);
   // What the agent opened carries a small mark in the tab row (w0138 p4).
   const tab: PreviewFile =
     options.markAgentTabs === true && source === "agent" ? { ...file, openedBy: "agent" } : file;
   const next = { ...states, [bucketKey]: { ...bucket, files: [...bucket.files, tab] } };
-  return revealTab(next, target, bucketKey, file.id, source);
+  return revealTab(next, target, bucketKey, file.id, source, options);
 }
 
 /**
@@ -301,7 +320,7 @@ export function openBrowserTab(
       const existing = (states[scopeKey]?.files ?? []).find(
         (file) => file.kind === "browser" && file.url === url,
       );
-      if (existing) return revealTab(states, target, scopeKey, existing.id, source);
+      if (existing) return revealTab(states, target, scopeKey, existing.id, source, options);
     }
   }
   return openTab(states, target, scope, makeTab(), source, options);
@@ -318,6 +337,13 @@ export function setPanelOpen(
     if (view.viewTouched && !view.open && view.dismissed) return view;
     return { ...view, open: false, viewTouched: true, dismissed: true };
   });
+}
+
+/** The person waved away "the agent opened X" (the phone chip): the badge goes, the tab stays. */
+export function clearPanelNews(states: PreviewStates, target: PreviewTabTarget): PreviewStates {
+  return patchView(states, viewScopeKey(target), (view) =>
+    view.unseen === 0 ? view : { ...view, unseen: 0 },
+  );
 }
 
 export function togglePanelOpen(states: PreviewStates, target: PreviewTabTarget): PreviewStates {
