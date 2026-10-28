@@ -10,7 +10,8 @@
  * - its chats and what is on it now, its memory;
  * - Advanced, folded: its mode (Does it itself / Asks first) and projects,
  *   where it works, the apps it may open, the AI (one per computer), its
- *   email rules, role, routines, the team and "Set up again".
+ *   email rules, role, routines, the team and "Set up again";
+ * - its automations (28.10): what it does on a schedule or on an event.
  *
  * Everything here reads and changes what its computer keeps. The mock's page
  * (`?demo=w0138`) is `AssistantProfilePage.tsx`.
@@ -54,6 +55,7 @@ import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
 import { AssistantModeSwitch } from "./PersonaMode";
+import { AutomationsSection } from "../automations/AutomationsSection";
 import { JoinCallsSection } from "./JoinCallsSection";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import {
@@ -532,6 +534,8 @@ export function AssistantProfileSimple(props: {
                 name={name}
               />
             ) : null}
+            {/* What it does by itself: on a schedule or when something happens (28.10). */}
+            <AutomationsSection member={member} />
 
             {/* Variant D: its mode and where it looks, in plain sight. */}
             <Section title="How it works" testId="assistant-profile-mode">

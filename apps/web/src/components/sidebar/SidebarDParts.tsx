@@ -31,6 +31,7 @@ import {
   SettingsIcon,
   SparklesIcon,
   SquarePenIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 
@@ -50,6 +51,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useTeamShown } from "../assistants/useAssistantTeam";
 import { InboxCountBadge } from "./SidebarInboxRow";
 import {
   SidebarDAccountTrigger,
@@ -328,7 +330,7 @@ function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const openFilesInPanel = useOpenFilesInPanel(isMobile);
-  return (to: "/files" | "/sites") => {
+  return (to: "/files" | "/sites" | "/automations") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     // In a chat, Files opens on the right, beside it (Misha 18.10).
@@ -371,14 +373,16 @@ function NeedsYouPopover(props: {
 }
 
 /**
- * Home, Files, Apps & sites — and Needs you only when something waits for the
- * person — as icons in one row, the name on hover.
+ * Home, Files, Apps & sites, Automations (with the assistants, 28.10) — and
+ * Needs you only when something waits for the person — as icons in one row,
+ * the name on hover.
  */
 export const SidebarDPlaces = memo(function SidebarDPlaces() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
+  const assistants = useTeamShown();
   return (
     <nav
       aria-label="Uno Work"
@@ -412,6 +416,15 @@ export const SidebarDPlaces = memo(function SidebarDPlaces() {
         testId="sidebar-nav-apps"
         tour="apps"
       />
+      {assistants ? (
+        <PlaceIcon
+          icon={<WorkflowIcon />}
+          label="Automations"
+          active={pathname.startsWith("/automations")}
+          onClick={() => open("/automations")}
+          testId="sidebar-nav-automations"
+        />
+      ) : null}
       {shown ? (
         <NeedsYouPopover
           side="bottom"
@@ -496,6 +509,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
   const { shown } = useNeedsYouBadge();
+  const assistants = useTeamShown();
   const hover = {
     onPointerEnter: () => sidebarDPanel.enterTrigger(),
     onPointerLeave: () => sidebarDPanel.leave(),
@@ -550,6 +564,16 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         >
           <LayoutGridIcon />
         </RailButton>
+        {assistants ? (
+          <RailButton
+            label="Automations"
+            active={pathname.startsWith("/automations")}
+            onClick={() => open("/automations")}
+            testId="sidebar-rail-automations"
+          >
+            <WorkflowIcon />
+          </RailButton>
+        ) : null}
         {shown ? (
           <NeedsYouPopover
             side="right"
