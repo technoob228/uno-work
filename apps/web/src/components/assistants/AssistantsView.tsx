@@ -76,6 +76,7 @@ import { DEMO } from "../../demo/demoFlag";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
+import { PersonaCreatorPage } from "./PersonaCreator";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import {
   ASSISTANT_COMPUTERS_KEY,
@@ -179,6 +180,10 @@ export function AssistantsView() {
     search.project
   ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
+  }
+  // Variant D: a new assistant is a persona from the gallery (Grok-style), next to Uno.
+  if ((DEMO || availability === "on") && search.view === "new") {
+    return <PersonaCreatorPage />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;

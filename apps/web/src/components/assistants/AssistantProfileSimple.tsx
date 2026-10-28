@@ -23,6 +23,7 @@ import {
   ArrowLeftIcon,
   ChevronRightIcon,
   LoaderCircleIcon,
+  LockIcon,
   MailIcon,
   MessageCircleIcon,
   PencilIcon,
@@ -51,6 +52,7 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
+import { AssistantModeSwitch } from "./PersonaMode";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import {
   TeamConnectors,
@@ -183,17 +185,29 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
       {telegram?.configured ? (
         <TalkRow
           icon={<SendIcon className="size-3.5" />}
-          label="Telegram"
+          label={
+            member.isUno ? "Telegram" : `Telegram · Uno's bot, signed “${member.profile.name}”`
+          }
           value={telegram.botUsername ? `@${telegram.botUsername}` : "linked"}
           testId="assistant-talk-telegram"
         />
+      ) : !member.isUno ? (
+        <TalkRow
+          icon={<SendIcon className="size-3.5" />}
+          label="Telegram · not linked yet"
+          value="Link it in Uno's chat"
+          testId="assistant-talk-telegram"
+        />
       ) : null}
-      <TalkRow
-        icon={<SlackIcon className="size-3.5" />}
-        label="Slack"
-        value={slack?.configured ? (slack.botUserName ?? "linked") : link}
-        testId="assistant-talk-slack"
-      />
+      {/* Variant D: personas talk through Uno's channels; Slack is Uno's to link. */}
+      {member.isUno ? (
+        <TalkRow
+          icon={<SlackIcon className="size-3.5" />}
+          label="Slack"
+          value={slack?.configured ? (slack.botUserName ?? "linked") : link}
+          testId="assistant-talk-slack"
+        />
+      ) : null}
       {view?.available && view.address ? (
         <TalkRow
           icon={<MailIcon className="size-3.5" />}
@@ -279,6 +293,7 @@ export function AssistantProfileSimple(props: {
 
   const { profile } = member;
   const name = profile.name;
+  const uno = team.find((item) => item.isUno) ?? null;
   const telegramLinked = member.summary?.telegram.configured === true;
   const openThread = (thread: SidebarThreadSummary) =>
     void navigate({
@@ -349,7 +364,7 @@ export function AssistantProfileSimple(props: {
       const more = await actions.revoke(member);
       toastManager.add({
         type: "success",
-        title: `${name} is revoked`,
+        title: `${name} is removed`,
         description:
           more > 0
             ? `And ${more} assistant${more === 1 ? "" : "s"} it set up. Their chats stay.`
@@ -430,9 +445,10 @@ export function AssistantProfileSimple(props: {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {member.isUno ? "Your main assistant · " : ""}
-                  Takes tasks only from you · lives on {member.computerLabel || "this computer"}
+                <p className="text-xs text-muted-foreground" data-testid="assistant-profile-line">
+                  {member.isUno
+                    ? `Your main assistant · sees all your computers and apps · lives on ${member.computerLabel || "your cloud computer"}`
+                    : `${profile.roles[0] ? `${profile.roles[0]} · ` : ""}works next to Uno · shares its memory, apps and Telegram · lives on ${member.computerLabel || "your cloud computer"}`}
                 </p>
                 {setupLine ? (
                   <p
@@ -483,8 +499,33 @@ export function AssistantProfileSimple(props: {
             ) : null}
 
             {/* The one next step, then the other ways to reach it. */}
-            {!member.revoked && !telegramLinked ? <ConnectTelegramCard member={member} /> : null}
+            {!member.revoked && !telegramLinked && member.isUno ? (
+              <ConnectTelegramCard member={member} />
+            ) : null}
             <WhereYouTalk member={member} />
+
+            {/* Variant D: its mode and where it looks, in plain sight. */}
+            <Section title="How it works" testId="assistant-profile-mode">
+              <div className="p-2">
+                <AssistantModeSwitch member={member} />
+              </div>
+            </Section>
+            <Section title="Where it can look" testId="assistant-profile-where">
+              <div className="flex flex-col gap-1 px-3 py-2.5 text-sm">
+                {profile.projects === "all" ? (
+                  <span>All your projects, new ones too — like Uno.</span>
+                ) : (
+                  <>
+                    <span>Only: {profile.projects.join(", ") || "its own folder"}</span>
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <LockIcon className="size-3 text-success" /> Locked by a sandbox on{" "}
+                      {member.computerLabel || "its computer"}. On your other computers it's a note,
+                      not a lock.
+                    </span>
+                  </>
+                )}
+              </div>
+            </Section>
 
             <div className="grid gap-6 md:grid-cols-2">
               <Section title={`Chats · ${member.chats.conversations.length}`}>
@@ -518,7 +559,9 @@ export function AssistantProfileSimple(props: {
             </div>
 
             <Section
-              title="Memory · its own folder"
+              title={
+                member.isUno ? "Memory · shared with your helpers" : "Memory · shared with Uno"
+              }
               action={
                 <button
                   type="button"
@@ -530,9 +573,54 @@ export function AssistantProfileSimple(props: {
                 </button>
               }
             >
-              <MemoryFile member={member} name="NOTES.md" what="what it has learned" />
+              <MemoryFile
+                member={uno ?? member}
+                name="NOTES.md"
+                what="what Uno and helpers learned"
+              />
               <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
             </Section>
+
+            {/* Variant D: removing a persona is a visible, plain action. */}
+            {member.isUno || member.revoked ? null : (
+              <div
+                className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5"
+                data-testid="assistant-profile-remove-box"
+              >
+                {confirmRevoke ? (
+                  <>
+                    <span className="text-sm">
+                      {running.length > 0
+                        ? `${name} is working on “${running[0]!.title}” right now. Remove anyway? That task stops; ${name}'s chats stay.`
+                        : `Remove ${name}? ${name} stops working and leaves the sidebar; its chats stay. You can bring it back.`}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Button
+                        size="xs"
+                        variant="destructive"
+                        onClick={doRevoke}
+                        data-testid="assistant-profile-remove-confirm"
+                      >
+                        Remove {name}
+                      </Button>
+                      <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
+                        Keep
+                      </Button>
+                    </span>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRevoke(true)}
+                    className="inline-flex w-fit cursor-pointer items-center gap-1.5 text-sm text-destructive hover:underline"
+                    data-testid="assistant-profile-remove"
+                  >
+                    <UserRoundXIcon className="size-3.5" />
+                    Remove {name}
+                  </button>
+                )}
+              </div>
+            )}
 
             <Advanced>
               <Section title="What it may do" testId="assistant-profile-access">
@@ -616,7 +704,7 @@ export function AssistantProfileSimple(props: {
                 action={
                   <button
                     type="button"
-                    onClick={() => void quick.create()}
+                    onClick={() => void navigate({ to: "/assistants", search: { view: "new" } })}
                     disabled={quick.creating}
                     className="cursor-pointer text-xs text-primary hover:underline"
                     data-testid="assistant-profile-new-assistant"
@@ -655,38 +743,6 @@ export function AssistantProfileSimple(props: {
                       data-testid="assistant-profile-setup-again"
                     >
                       Set up again in a chat — it asks about its job, apps and routines
-                    </button>
-                  )}
-                  {member.isUno || member.revoked ? null : confirmRevoke ? (
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="text-foreground">
-                        Revoke {name}
-                        {descendants.length > 0
-                          ? ` and ${descendants.length} assistant${descendants.length === 1 ? "" : "s"} it set up`
-                          : ""}
-                        ?
-                      </span>
-                      <Button
-                        size="xs"
-                        variant="destructive"
-                        onClick={doRevoke}
-                        data-testid="assistant-profile-revoke-confirm"
-                      >
-                        Revoke
-                      </Button>
-                      <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
-                        Cancel
-                      </Button>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRevoke(true)}
-                      className="inline-flex cursor-pointer items-center gap-1 text-destructive hover:underline"
-                      data-testid="assistant-profile-revoke"
-                    >
-                      <UserRoundXIcon className="size-3.5" />
-                      Revoke access
                     </button>
                   )}
                 </div>

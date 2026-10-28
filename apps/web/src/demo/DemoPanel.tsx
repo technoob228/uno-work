@@ -25,7 +25,7 @@ import "./show";
 type DemoRouter = ReturnType<typeof getRouter>;
 
 /** A chat opened from the joined list makes its computer the active one. */
-function useActiveFollowsOpenChat(router: DemoRouter) {
+export function useActiveFollowsOpenChat(router: DemoRouter) {
   useEffect(() => {
     const sync = () => {
       const environmentId = router.state.location.pathname.split("/")[1] ?? "";

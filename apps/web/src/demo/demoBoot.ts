@@ -5,7 +5,14 @@
  * the browser tests use). Nothing leaves the browser. Grown from the w0115
  * sidebar prototype (fix/w0115-sidebar-proto: protoBoot.ts).
  */
-import { ORCHESTRATION_WS_METHODS, WS_METHODS, type InboxItem } from "@t3tools/contracts";
+import {
+  ASSISTANT_PROJECT_ID,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+  type InboxItem,
+  type RuntimeMode,
+} from "@t3tools/contracts";
+import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { HttpResponse, delay, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
@@ -21,12 +28,45 @@ import {
   loadAgentFrame,
 } from "./demoBrowser";
 import "./seedTabs";
+import { DEMO_ASSIST, useDemoStore } from "./demoFlag";
+import {
+  type DemoInboxInput,
+  type DemoQuestion,
+  greet,
+  onAnswer,
+  onApproval,
+  onTurn,
+  restorePersona,
+  setEngineSpeed,
+  startEngine,
+  stopPersona,
+} from "./assist/engine";
+import {
+  accountHandlers,
+  asksFirst,
+  connectorState,
+  daemonHandlers,
+  machineAwake,
+  onAssistantModeChanged,
+  onAssistantRevoked,
+  personaOf,
+  presetOf,
+  setMode,
+  setPortraitsFail,
+  setTelegram,
+  startDaemons,
+  telegramLinked,
+} from "./assist/daemon";
+import { installAssistFixtures } from "./assist/fixtures";
+import { WORLD, worldStamp } from "./assist/world";
+import "./assist/variant";
 import {
   CHATS,
   DEMO_VERSION,
   INBOX,
   MACHINES,
   MACHINE_LIST,
+  PRIMARY_MACHINE,
   SLEEPING_BOX,
   ago,
   buildInboxItem,
@@ -39,6 +79,7 @@ import {
   toShellSnapshot,
   toShellThread,
   type DemoMachine,
+  type MachineKey,
   type WireThread,
 } from "./heavyFixtures";
 import {
@@ -49,11 +90,18 @@ import {
   seedAssistantTeam,
 } from "./assistantsFixtures";
 
-const SEED_VERSION = "w0138-1";
+const SEED_VERSION = DEMO_ASSIST ? `assist-1:${worldStamp(WORLD)}` : "w0138-1";
+
+/** Computers the page has saved (besides its own): the 16.10 mock's two clouds, or the MacBook. */
+function savedMachines(): DemoMachine[] {
+  if (!DEMO_ASSIST) return [MACHINES.work, MACHINES.product];
+  // The MacBook stays saved while it sleeps (it shows offline).
+  return WORLD.account === "live" ? [MACHINES.mac] : [];
+}
 
 function seedLocalStorage() {
   if (localStorage.getItem("demo:seed") === SEED_VERSION) return;
-  const keep = new Set(["demo:switches"]);
+  const keep = new Set(["demo:switches", "demo:assist-world"]);
   for (const key of Object.keys(localStorage)) {
     if (!keep.has(key)) localStorage.removeItem(key);
   }
@@ -67,7 +115,7 @@ function seedLocalStorage() {
       sidebarGroupLevels: [],
     }),
   );
-  const records = [MACHINES.work, MACHINES.product].map((machine) => ({
+  const records = savedMachines().map((machine) => ({
     environmentId: machine.environmentId,
     label: machine.label,
     httpBaseUrl: `https://${machine.host}/`,
@@ -86,7 +134,7 @@ function seedLocalStorage() {
 
 function machineForHost(host: string): DemoMachine {
   return (
-    MACHINE_LIST.find((machine) => machine.host !== "" && machine.host === host) ?? MACHINES.mac
+    MACHINE_LIST.find((machine) => machine.host !== "" && machine.host === host) ?? PRIMARY_MACHINE
   );
 }
 
@@ -104,6 +152,12 @@ function modelFor(machine: DemoMachine): Model {
   let model = models.get(machine.environmentId);
   if (!model) {
     model = readModelFor(machine) as unknown as Model;
+    // An assistant's chats run in its own mode (Asks first → asks), as the daemon does.
+    if (DEMO_ASSIST) {
+      for (const thread of model.threads) {
+        thread.runtimeMode = assistantRuntimeMode(machine.key, String(thread.projectId));
+      }
+    }
     models.set(machine.environmentId, model);
   }
   return model;
@@ -367,6 +421,7 @@ function box(id: number, name: string, status: string) {
 
 /** The account's computers as the console lists them (`GET /api/v1/boxes`). */
 function accountBoxes() {
+  if (DEMO_ASSIST) return [];
   const wire = (id: number, name: string, status: string) => ({
     id,
     name,
@@ -399,11 +454,18 @@ function cloudState() {
       oneWallet: true,
       role: "admin",
     },
-    boxes: [
-      box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
-      box(MACHINES.product.boxId!, MACHINES.product.label, "running"),
-      box(SLEEPING_BOX.id, SLEEPING_BOX.name, "sleeping"),
-    ],
+    boxes: DEMO_ASSIST
+      ? [
+          box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
+          ...(WORLD.account === "live"
+            ? [box(MACHINES.product.boxId!, MACHINES.product.label, "sleeping")]
+            : []),
+        ]
+      : [
+          box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
+          box(MACHINES.product.boxId!, MACHINES.product.label, "running"),
+          box(SLEEPING_BOX.id, SLEEPING_BOX.name, "sleeping"),
+        ],
     fetchedAt: new Date().toISOString(),
     error: null,
   };
@@ -416,23 +478,25 @@ function workspaceState() {
       workspaceId: "ws-demo",
       name: "Misha's workspace",
       epoch: 1,
-      registryEnvironmentId: MACHINES.mac.environmentId,
+      registryEnvironmentId: PRIMARY_MACHINE.environmentId,
       unoAccountId: 85,
       createdAt: at,
       updatedAt: at,
     },
-    machines: MACHINE_LIST.map((machine, index) => ({
-      environmentId: machine.environmentId,
-      label: machine.label,
-      monogram: machine.label.slice(0, 1).toUpperCase(),
-      colorSlot: index,
-      kind: machine.machineKind === "uno_box" ? "uno_box" : "local",
-      unoBoxId: machine.boxId,
-      scope: "full",
-      repositories: [],
-      addedAt: at,
-      lastSeenAt: new Date().toISOString(),
-    })),
+    machines: (DEMO_ASSIST ? [PRIMARY_MACHINE, ...savedMachines()] : MACHINE_LIST).map(
+      (machine, index) => ({
+        environmentId: machine.environmentId,
+        label: machine.label,
+        monogram: machine.label.slice(0, 1).toUpperCase(),
+        colorSlot: index,
+        kind: machine.machineKind === "uno_box" ? "uno_box" : "local",
+        unoBoxId: machine.boxId,
+        scope: "full",
+        repositories: [],
+        addedAt: at,
+        lastSeenAt: new Date().toISOString(),
+      }),
+    ),
   };
 }
 
@@ -513,6 +577,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
     case "thread.approval.respond": {
       const decision = String(command.decision ?? "accept");
       const allowed = !/decline|deny|reject|cancel/i.test(decision);
+      // An assistant's Allow card: its script goes on (assist/engine.ts).
+      if (DEMO_ASSIST && onApproval(machine.key, String(command.threadId), allowed)) {
+        return { sequence: commandSequence };
+      }
       answerChat(machine, String(command.threadId), allowed ? "Allow" : "Deny");
       return { sequence: commandSequence };
     }
@@ -522,6 +590,14 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       const text = Array.isArray(first) ? first.join(", ") : String(first ?? "OK");
       // p7: an assistant setting itself up answers by its own script.
       const setup = isSetupChat(String(command.threadId));
+      if (DEMO_ASSIST) {
+        // Its answer shows as the person's line; the assistant's script goes on.
+        answerChat(machine, String(command.threadId), text, false);
+        if (!onAnswer(machine.key, String(command.threadId), text)) {
+          setTimeout(() => finishTurn(machine, String(command.threadId)), 1500);
+        }
+        return { sequence: commandSequence };
+      }
       answerChat(machine, String(command.threadId), text, !setup);
       if (setup) answerSetupChat(machine.environmentId, String(command.threadId), text);
       return { sequence: commandSequence };
@@ -590,6 +666,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
         startTurn(target, message.messageId, message.text);
         touch(model);
         publishThread(machine, String(command.threadId));
+        // An assistant's chat answers by its script (assist/engine.ts).
+        if (DEMO_ASSIST && onTurn(machine.key, String(command.threadId), message.text)) {
+          return { sequence: commandSequence };
+        }
         setTimeout(() => finishTurn(machine, String(command.threadId)), 2200);
         return { sequence: commandSequence };
       }
@@ -1062,9 +1142,329 @@ function addDemoInbox(spec: (typeof INBOX)[number]) {
   publishInbox(machine);
 }
 
+// ── The assistants base (VITE_DEMO=assist): chats the engine drives ──────
+
+type MutableThread = WireThread & Record<string, unknown>;
+
+/** An assistant's chats run in its own mode, as its daemon makes them (assistantOwnRuntimeMode). */
+function assistantRuntimeMode(key: MachineKey, projectId: string): RuntimeMode {
+  const preset = presetOf(key, projectId);
+  return preset ? assistantOwnRuntimeMode(preset) : "full-access";
+}
+
+function threadIn(key: MachineKey, threadId: string): MutableThread | null {
+  return (
+    (modelFor(MACHINES[key]).threads.find((t) => t.id === threadId) as MutableThread | undefined) ??
+    null
+  );
+}
+
+function newThread(
+  machine: DemoMachine,
+  input: {
+    threadId: string;
+    projectId: string;
+    title: string;
+    assistantRole?: "chat" | "spawned" | null;
+    spawnedBy?: string | null;
+  },
+) {
+  const model = modelFor(machine);
+  const now = new Date().toISOString();
+  model.threads.unshift({
+    id: input.threadId,
+    projectId: input.projectId,
+    title: input.title,
+    modelSelection: (model.threads[0] as { modelSelection?: unknown } | undefined)
+      ?.modelSelection ?? { instanceId: "uno", model: "uno/smart" },
+    interactionMode: "default",
+    runtimeMode: assistantRuntimeMode(machine.key, input.projectId),
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    pinnedAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    // Only on its own computer: a chat on another one is linked by its first line.
+    spawnedByThreadId:
+      input.spawnedBy && model.threads.some((t) => t.id === input.spawnedBy)
+        ? input.spawnedBy
+        : null,
+    controller: input.assistantRole === "spawned" ? "agent" : "human",
+    controlChangedAt: null,
+    assistantRole: input.assistantRole ?? null,
+    deletedAt: null,
+    messages: [],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+    session: null,
+  } as never);
+  touch(model);
+  publishThread(machine, input.threadId);
+}
+
+/** A running turn (no person's line), unless one runs already. */
+function ensureRunning(machine: DemoMachine, thread: MutableThread): string {
+  const turn = thread.latestTurn as { turnId: string; state: string } | null;
+  if (turn && turn.state === "running") return turn.turnId;
+  const now = new Date().toISOString();
+  const turnId = `turn-${String(thread.id)}-${Date.now().toString(36)}`;
+  Object.assign(thread, {
+    updatedAt: now,
+    latestTurn: {
+      turnId,
+      state: "running",
+      requestedAt: now,
+      startedAt: now,
+      completedAt: null,
+      assistantMessageId: null,
+    },
+    session: {
+      threadId: thread.id,
+      status: "running",
+      providerName: "uno",
+      runtimeMode: "full-access",
+      activeTurnId: turnId,
+      lastError: null,
+      updatedAt: now,
+    },
+  });
+  void machine;
+  return turnId;
+}
+
+function inboxOfDemo(input: DemoInboxInput): InboxItem {
+  const now = new Date().toISOString();
+  const thread = input.chat ? threadIn(input.machine, input.chat) : null;
+  return {
+    id: input.id,
+    kind: input.kind,
+    source: thread
+      ? { kind: "agent", id: String(thread.id), name: String(thread.title), icon: null }
+      : { kind: "system", id: "uno", name: "Uno", icon: null },
+    title: input.title,
+    body: input.body,
+    open: thread ? { kind: "thread", threadId: String(thread.id) } : null,
+    createdAt: now,
+    updatedAt: now,
+    count: 1,
+    readAt: null,
+    snoozedUntil: null,
+  } as InboxItem;
+}
+
+const assistOps = {
+  createThread: (key: MachineKey, input: Parameters<typeof newThread>[1]) =>
+    newThread(MACHINES[key], input),
+  userSays: (key: MachineKey, threadId: string, text: string) => {
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    const now = new Date().toISOString();
+    (thread.messages as unknown[]).push({
+      id: `${threadId}-u-${Date.now().toString(36)}`,
+      role: "user",
+      text,
+      turnId: null,
+      streaming: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    Object.assign(thread, { updatedAt: now, settledOverride: null });
+    touch(modelFor(MACHINES[key]));
+    publishThread(MACHINES[key], threadId);
+  },
+  working: (key: MachineKey, threadId: string, text?: string) => {
+    const machine = MACHINES[key];
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    const turnId = ensureRunning(machine, thread);
+    if (text) {
+      const now = new Date().toISOString();
+      (thread.messages as unknown[]).push({
+        id: `${threadId}-w-${Date.now().toString(36)}`,
+        role: "assistant",
+        text,
+        turnId,
+        streaming: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    touch(modelFor(machine));
+    publishThread(machine, threadId);
+  },
+  say: (key: MachineKey, threadId: string, text: string) =>
+    finishTurn(MACHINES[key], threadId, text),
+  ask: (key: MachineKey, threadId: string, text: string, question: DemoQuestion) =>
+    assistantSays(MACHINES[key], threadId, text, question as unknown as Record<string, unknown>),
+  askApproval: (key: MachineKey, threadId: string, command: string, explanation: string) =>
+    demoAgentAsksApprovalIn(MACHINES[key].environmentId, threadId, command, explanation),
+  resolve: (key: MachineKey, threadId: string) => {
+    const machine = MACHINES[key];
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    const now = new Date().toISOString();
+    const activities = thread.activities as Array<Record<string, unknown>>;
+    const resolved = new Set(
+      activities
+        .filter((activity) => String(activity.kind).endsWith(".resolved"))
+        .map((activity) => (activity.payload as { requestId?: string } | null)?.requestId),
+    );
+    for (const activity of [...activities]) {
+      const kind = String(activity.kind);
+      const requestId = (activity.payload as { requestId?: string } | null)?.requestId;
+      if (!kind.endsWith(".requested") || resolved.has(requestId)) continue;
+      activities.push({
+        ...activity,
+        id: `${String(activity.id)}-resolved`,
+        kind: kind.replace(".requested", ".resolved"),
+        summary: "Answered",
+        createdAt: now,
+      });
+    }
+    touch(modelFor(machine));
+    publishThread(machine, threadId);
+    inboxes.set(
+      machine.environmentId,
+      inboxItemsFor(machine).filter(
+        (item) =>
+          !(
+            item.open?.kind === "thread" &&
+            item.open.threadId === threadId &&
+            item.kind === "agent.approval"
+          ),
+      ),
+    );
+    publishInbox(machine);
+  },
+  fail: (key: MachineKey, threadId: string, error: string) => {
+    const machine = MACHINES[key];
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    const now = new Date().toISOString();
+    const turn = thread.latestTurn as Record<string, unknown> | null;
+    Object.assign(thread, {
+      updatedAt: now,
+      latestTurn: turn ? { ...turn, state: "error", completedAt: now } : null,
+      session: {
+        threadId,
+        status: "error",
+        providerName: "uno",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: error,
+        lastErrorClass: "provider_error",
+        updatedAt: now,
+      },
+    });
+    touch(modelFor(machine));
+    publishThread(machine, threadId);
+  },
+  addInbox: (input: DemoInboxInput) => {
+    const machine = MACHINES[input.machine];
+    inboxes.set(machine.environmentId, [inboxOfDemo(input), ...inboxItemsFor(machine)]);
+    publishInbox(machine);
+  },
+  projectOf: (key: MachineKey, threadId: string) => {
+    const thread = threadIn(key, threadId);
+    return thread ? String(thread.projectId) : null;
+  },
+  setTelegram,
+  connectorState,
+  asksFirst,
+  telegramLinked,
+  setMode: (key: MachineKey, projectId: string, mode: "itself" | "asks-first") => {
+    setMode(key, projectId, mode);
+    followMode(key, projectId);
+  },
+  mainChatOf: (key: MachineKey, projectId: string) =>
+    assistDaemonHooks.ensureChat(MACHINES[key], projectId).threadId,
+};
+
+/** Its chats run in its new mode from the next turn, as the daemon does. */
+function followMode(key: MachineKey, projectId: string) {
+  const model = modelFor(MACHINES[key]);
+  for (const thread of model.threads) {
+    if (String(thread.projectId) === projectId) {
+      (thread as MutableThread).runtimeMode = assistantRuntimeMode(key, projectId);
+      publishThread(MACHINES[key], String(thread.id));
+    }
+  }
+  touch(model);
+}
+
+/** The assistant's main chat on that computer (the daemon makes it on a fresh one). */
+function mainChatOf(machine: DemoMachine, projectId: string) {
+  return modelFor(machine).threads.find(
+    (thread) =>
+      thread.projectId === projectId &&
+      (thread as MutableThread).deletedAt === null &&
+      ((thread as MutableThread).assistantRole === "chat" || projectId !== ASSISTANT_PROJECT_ID),
+  );
+}
+
+const assistDaemonHooks = {
+  machineForHost,
+  addProject: addDemoProject,
+  ensureChat: (machine: DemoMachine, projectId: string) => {
+    const found = mainChatOf(machine, projectId);
+    if (found) return { threadId: String(found.id), created: false };
+    const threadId = `${projectId}-main-${Date.now().toString(36)}`;
+    const name = personaOf(machine.key, projectId)?.name ?? "Uno";
+    newThread(machine, { threadId, projectId, title: name, assistantRole: "chat" });
+    setTimeout(() => void greet(machine.key, threadId), 400);
+    return { threadId, created: true };
+  },
+  newConversation: (machine: DemoMachine, projectId: string, title: string) => {
+    const threadId = `${projectId}-c-${Date.now().toString(36)}`;
+    newThread(machine, { threadId, projectId, title });
+    return threadId;
+  },
+  setupChat: (machine: DemoMachine, projectId: string) => {
+    const threadId = `${projectId}-setup-${Date.now().toString(36)}`;
+    const name = personaOf(machine.key, projectId)?.name ?? "assistant";
+    newThread(machine, { threadId, projectId, title: `Meet ${name}` });
+    setTimeout(() => void greet(machine.key, threadId), 500);
+    return threadId;
+  },
+};
+
+/** For the panel and Playwright: the base's scenes, and the main chat to play them in. */
+export const assistDemo = {
+  ops: assistOps,
+  mainChat: (key: MachineKey = "work", projectId: string = ASSISTANT_PROJECT_ID) => {
+    const machine = MACHINES[key];
+    return assistDaemonHooks.ensureChat(machine, projectId).threadId;
+  },
+  environmentOf: (key: MachineKey) => MACHINES[key].environmentId,
+};
+
+function startAssist() {
+  installAssistFixtures(WORLD);
+  startDaemons({ world: WORLD });
+  startEngine({ ops: assistOps, personaOf });
+  // Variant D: a removed persona stops what it was doing (its chats stay).
+  onAssistantModeChanged(followMode);
+  onAssistantRevoked((key, projectId, revoked) =>
+    revoked ? stopPersona(key, projectId) : restorePersona(key, projectId),
+  );
+  setPortraitsFail(/[?&]facegen=fail\b/.test(location.search));
+  const speed = Number(new URLSearchParams(location.search).get("speed") ?? "1");
+  if (Number.isFinite(speed) && speed > 0) setEngineSpeed(speed);
+  // Work in the browser on uno-work, or the desktop app (the 16.10 switch).
+  useDemoStore.getState().setSwitch("platform", WORLD.platform);
+}
+
 export async function startDemo(): Promise<void> {
+  if (DEMO_ASSIST) startAssist();
   seedLocalStorage();
-  seedAssistantTeam({ addInbox: addDemoInbox });
+  if (!DEMO_ASSIST) seedAssistantTeam({ addInbox: addDemoInbox });
   void loadAgentFrame();
   // Touch every fixture once so a typo in them fails loudly at start.
   void CHATS.length;
@@ -1073,6 +1473,11 @@ export async function startDemo(): Promise<void> {
   const worker = setupWorker(
     wsLink.addEventListener("connection", ({ client }) => {
       const machine = machineForHost(client.url.host);
+      // An asleep computer: the socket closes, the page keeps trying (offline).
+      if (DEMO_ASSIST && !machineAwake(machine.key)) {
+        client.close(4000, "asleep");
+        return;
+      }
       void harnessFor(machine).then((harness) => {
         harness.connect(client);
         client.addEventListener("message", (event) => {
@@ -1107,6 +1512,8 @@ export async function startDemo(): Promise<void> {
         expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       }),
     ),
+    // The assistants base: its daemons and account answer first (assist/daemon.ts).
+    ...(DEMO_ASSIST ? [...daemonHandlers(assistDaemonHooks), ...accountHandlers()] : []),
     http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
     http.post("*/api/observability/v1/traces", () => new HttpResponse(null, { status: 204 })),
     http.get("*/api/self-update/status", () =>

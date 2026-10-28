@@ -29,6 +29,7 @@ import { UnoFace } from "../sidebar/SidebarDParts";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { AssistantMemoryChip } from "./AssistantMemoryChip";
 import { cn } from "../../lib/utils";
+import { useCloudPlan } from "../assistants/PersonaMode";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -58,6 +59,15 @@ export function AssistantChatHeadline({
   title: string;
 }) {
   const channels = useAssistantChannels(environmentId);
+  // Variant D: one Uno per account, on the cloud computer — always on, or asleep on Free.
+  const plan = useCloudPlan();
+  const where =
+    plan === "free"
+      ? "On your cloud computer · sleeps when you're away"
+      : plan === "paid"
+        ? "Lives on your cloud computer · always on"
+        : null;
+  const status = assistantStatusLine(channels);
   return (
     <div className="flex min-w-0 items-center gap-2.5" data-testid="uno-headline">
       <span className="relative shrink-0">
@@ -70,9 +80,13 @@ export function AssistantChatHeadline({
       <div className="min-w-0 leading-tight">
         <h2 className="truncate text-sm font-medium text-foreground" title={title}>
           {title}
+          {/* Variant D: Uno's main chat is the channel where everything meets. */}
+          {title === "Uno" ? (
+            <span className="font-normal text-muted-foreground"> · Everything</span>
+          ) : null}
         </h2>
         <p className="truncate text-[11px] text-muted-foreground" data-testid="uno-status-line">
-          {assistantStatusLine(channels)}
+          {where ? `${where}${status.includes("Telegram") ? " · in Telegram" : ""}` : status}
         </p>
       </div>
     </div>

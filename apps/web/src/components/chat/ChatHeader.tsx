@@ -56,6 +56,7 @@ import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { TeammateChatHeadline } from "../assistants/TeammateChatHeadline";
+import { AssistantModeChip, UnoModeChip } from "../assistants/PersonaMode";
 import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import {
   ASSISTANT_CHAT_NAME,
@@ -368,6 +369,12 @@ export const ChatHeader = memo(function ChatHeader({
             compact={isMobile}
           />
         )}
+        {/* Variant D: its mode at the top of its chat — Uno's or the persona's own. */}
+        {teammate ? (
+          <AssistantModeChip member={teammate} />
+        ) : isAssistantChat ? (
+          <UnoModeChip environmentId={activeThreadEnvironmentId} />
+        ) : null}
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
         {isAssistantChat ? (

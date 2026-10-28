@@ -9,7 +9,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
@@ -43,7 +43,7 @@ export function ConnectorsSettings() {
       </SettingsSection>
 
       {/* Per-teammate access ships with the team (Misha 16.10); the mock shows it already. */}
-      {DEMO && team.length > 0 ? (
+      {DEMO_PROTOTYPE && team.length > 0 ? (
         <SettingsSection title="Who can use them">
           {team.map((member) => {
             const access = accessOf(member.profile);

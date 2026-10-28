@@ -22,7 +22,10 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
-export const DEMO_VERSION = "0.0.147";
+import { DEMO_ASSIST } from "./demoFlag";
+
+// The computers run the same Work as the page (no "runs another version" banner).
+export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
 
 export const ENV_WORK = EnvironmentId.make("env-demo-uno-work");
 export const ENV_PRODUCT = EnvironmentId.make("env-demo-uno-product");
@@ -42,7 +45,7 @@ export interface DemoMachine {
   readonly boxId: number | null;
 }
 
-export const MACHINES: Record<MachineKey, DemoMachine> = {
+const W0138_MACHINES: Record<MachineKey, DemoMachine> = {
   work: {
     key: "work",
     environmentId: ENV_WORK,
@@ -74,6 +77,30 @@ export const MACHINES: Record<MachineKey, DemoMachine> = {
     boxId: null,
   },
 };
+
+/**
+ * The assistants base (`VITE_DEMO=assist`): the page is Work on the cloud
+ * computer uno-work (Plus, always on); the MacBook is another computer of the
+ * account (online or asleep, `demo/assist/world.ts`); `product` stands for the
+ * account's Free cloud computer, asleep — listed by the account, not connected.
+ */
+const ASSIST_MACHINES: Record<MachineKey, DemoMachine> = {
+  work: { ...W0138_MACHINES.work, host: "" },
+  product: {
+    ...W0138_MACHINES.product,
+    label: "free-cloud",
+    host: "free-cloud.demo.uno4.me",
+    boxId: 2650,
+  },
+  mac: { ...W0138_MACHINES.mac, host: "macbook.demo.uno4.me" },
+};
+
+export const MACHINES: Record<MachineKey, DemoMachine> = DEMO_ASSIST
+  ? ASSIST_MACHINES
+  : W0138_MACHINES;
+
+/** The computer this page is opened on (its daemon answers the page's own address). */
+export const PRIMARY_MACHINE: DemoMachine = DEMO_ASSIST ? MACHINES.work : MACHINES.mac;
 
 export const MACHINE_LIST: ReadonlyArray<DemoMachine> = [
   MACHINES.mac,

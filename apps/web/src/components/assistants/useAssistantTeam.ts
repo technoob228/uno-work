@@ -20,7 +20,7 @@ import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO, DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import { useMachineLabels } from "../../hooks/useMachineRows";
 import { listAssistants } from "../../lib/managerApi";
 import { toSortableTimestamp } from "../../lib/threadSort";
@@ -128,7 +128,7 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
   const storeProfiles = useAssistantTeamStore((state) => state.profiles);
   const labels = useMachineLabels();
   // Outside the mock the team is what each computer's daemon keeps.
-  const fromDaemon = teamShown && !DEMO;
+  const fromDaemon = teamShown && !DEMO_PROTOTYPE;
   const environmentIds = useMemo(
     () =>
       fromDaemon
@@ -207,7 +207,7 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
         createdBy: profile.createdBy,
         configured:
           profile.setUpAt !== null ||
-          (DEMO
+          (DEMO_PROTOTYPE
             ? teamShown
               ? chats.conversations.length > 0
               : personWrote

@@ -40,6 +40,7 @@ import {
 } from "../../inbox/systemNotifications";
 import { assistantPageOfUrl, useOpenInboxItem } from "../../inbox/useOpenInboxItem";
 import { AssistantNoticeActions } from "../assistants/AssistantNoticeActions";
+import { useInboxWho } from "../assistants/PersonaMode";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
 import { markInboxItemDone } from "../../inbox/inboxDone";
@@ -328,6 +329,11 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
   const answerInRow = actions.reason !== "other" && !actions.done;
   const canDismiss = actions.done;
   const hoverActions = actions.markRead || actions.snooze || snoozed || canDismiss;
+  // Variant D: which computer and which persona it is from.
+  const who = useInboxWho(
+    item.environmentId,
+    item.open?.kind === "thread" ? item.open.threadId : null,
+  );
   const assistantNotice =
     item.open?.kind === "url" ? assistantPageOfUrl(item.open.url, item.environmentId) : null;
 
@@ -379,6 +385,7 @@ function InboxRowView({ item, resolved }: { item: InboxEntry; resolved: Resolved
           ) : null}
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
             {item.source.kind === "app" ? <span>{item.source.name}</span> : null}
+            {who ? <span data-testid="inbox-item-who">{who}</span> : null}
             {item.count > 1 ? <span className="tabular-nums">×{item.count}</span> : null}
           </span>
         </span>

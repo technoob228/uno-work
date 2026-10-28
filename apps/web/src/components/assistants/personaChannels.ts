@@ -1,0 +1,187 @@
+/**
+ * Variant D (28.10): personas as channels next to Uno. The pure part — the
+ * gallery, roles, character (sliders and tags, never a prompt), the line a
+ * persona's character is kept as, and where a project limit is a real lock.
+ *
+ * - A persona lives on the account's cloud computer (the one that doesn't
+ *   sleep on Plus), shares Uno's memory, connectors and Telegram bot, and has
+ *   its own mode ("Does it itself" / "Asks first").
+ * - A project limit is a real lock only where the persona's commands run in a
+ *   sandbox — its cloud computer (bubblewrap) — or on a computer of its own.
+ *   On the MacBook nothing locks the chats it starts there yet (seatbelt is
+ *   later, Misha 23.10): the UI says so instead of pretending.
+ */
+import type { AvatarTone } from "./assistantTeam.logic";
+
+export interface GalleryPersona {
+  readonly id: string;
+  readonly name: string;
+  readonly emoji: string;
+  readonly tone: AvatarTone;
+  readonly role: string;
+  /** What it says on its card — a thing it did, in its voice. */
+  readonly quote: string;
+  readonly tags: ReadonlyArray<string>;
+  /** Sliders 0..100: brief→chatty, careful→bold, formal→playful. */
+  readonly sliders: readonly [number, number, number];
+}
+
+export const GALLERY: ReadonlyArray<GalleryPersona> = [
+  {
+    id: "mia",
+    name: "Mia",
+    emoji: "🦉",
+    tone: "amber",
+    role: "Secretary",
+    quote: "Your 11:00 moved. I told them you're fine with 15:00.",
+    tags: ["Warm", "Brief", "Careful"],
+    sliders: [30, 40, 65],
+  },
+  {
+    id: "leo",
+    name: "Leo",
+    emoji: "🦊",
+    tone: "orange",
+    role: "Marketer",
+    quote: "Tuesday's post got 3× the clicks. Want two more like it?",
+    tags: ["Playful", "Bold", "Chatty"],
+    sliders: [75, 75, 80],
+  },
+  {
+    id: "bolt",
+    name: "Bolt",
+    emoji: "🤖",
+    tone: "sky",
+    role: "Developer",
+    quote: "CI is red on shop-site. Fixed the test, PR is up.",
+    tags: ["Direct", "Brief", "Nerdy"],
+    sliders: [15, 55, 40],
+  },
+  {
+    id: "nova",
+    name: "Nova",
+    emoji: "👽",
+    tone: "violet",
+    role: "Researcher",
+    quote: "Three suppliers compared. The cheapest one has bad reviews — here's why.",
+    tags: ["Curious", "Careful", "Chatty"],
+    sliders: [65, 30, 45],
+  },
+  {
+    id: "juno",
+    name: "Juno",
+    emoji: "🐼",
+    tone: "teal",
+    role: "Support",
+    quote: "Answered 6 customers. One wants a refund — that one's yours.",
+    tags: ["Patient", "Warm", "Formal"],
+    sliders: [50, 25, 20],
+  },
+];
+
+export const ROLES: ReadonlyArray<string> = [
+  "Secretary",
+  "Marketer",
+  "Developer",
+  "Researcher",
+  "Support",
+];
+
+export const TAGS: ReadonlyArray<string> = [
+  "Warm",
+  "Brief",
+  "Direct",
+  "Playful",
+  "Careful",
+  "Bold",
+  "Nerdy",
+  "Formal",
+  "Chatty",
+  "Funny",
+  "Patient",
+  "Curious",
+];
+
+/** At most this many tags: a character, not a list of adjectives. */
+export const MAX_TAGS = 3;
+
+export const SLIDERS: ReadonlyArray<readonly [string, string]> = [
+  ["Brief", "Chatty"],
+  ["Careful", "Bold"],
+  ["Formal", "Playful"],
+];
+
+/** Faces offered right in the builder (the full set is on its page later). */
+export const QUICK_FACES: ReadonlyArray<{ readonly emoji: string; readonly tone: AvatarTone }> = [
+  { emoji: "🦉", tone: "amber" },
+  { emoji: "🦊", tone: "orange" },
+  { emoji: "🤖", tone: "sky" },
+  { emoji: "👽", tone: "violet" },
+  { emoji: "🐼", tone: "teal" },
+  { emoji: "👩‍💼", tone: "rose" },
+  { emoji: "🧑‍🚀", tone: "slate" },
+  { emoji: "🦁", tone: "amber" },
+  { emoji: "🐙", tone: "violet" },
+  { emoji: "🌿", tone: "emerald" },
+];
+
+/** A blank persona for "Build your own". */
+export const BLANK: GalleryPersona = {
+  id: "own",
+  name: "",
+  emoji: "🧑‍🚀",
+  tone: "slate",
+  role: "",
+  quote: "",
+  tags: [],
+  sliders: [50, 50, 50],
+};
+
+/** The tags first, then what the sliders lean to: "Warm · Brief · Careful". */
+export function characterLine(
+  tags: ReadonlyArray<string>,
+  sliders: readonly [number, number, number],
+): string {
+  const words = [...tags];
+  SLIDERS.forEach(([low, high], index) => {
+    const value = sliders[index] ?? 50;
+    const lean = value <= 30 ? low : value >= 70 ? high : null;
+    if (lean && !words.includes(lean) && words.length < MAX_TAGS + 1) words.push(lean);
+  });
+  return words.join(" · ");
+}
+
+/** The tags toggled: on, off, or not more than MAX_TAGS. */
+export function toggleTag(tags: ReadonlyArray<string>, tag: string): ReadonlyArray<string> {
+  if (tags.includes(tag)) return tags.filter((item) => item !== tag);
+  if (tags.length >= MAX_TAGS) return [...tags.slice(1), tag];
+  return [...tags, tag];
+}
+
+export type ProjectLock = "sandbox" | "note";
+
+/**
+ * Whether limiting a persona to a project there is a real lock: on the
+ * persona's own (cloud) computer it is — its commands run in a sandbox; on
+ * another computer (the MacBook) the chats it starts there are not locked yet.
+ */
+export function projectLockOn(input: {
+  readonly projectEnvironmentId: string;
+  readonly personaEnvironmentId: string;
+}): ProjectLock {
+  return input.projectEnvironmentId === input.personaEnvironmentId ? "sandbox" : "note";
+}
+
+/** The one line under a persona's name: role and what it shares. */
+export function personaLine(role: string | undefined): string {
+  return `${role ? `${role} · ` : ""}works next to Uno · shares its memory and apps`;
+}
+
+/** Name problems, said plainly (the field also stops at the limit). */
+export function nameProblem(name: string, taken: ReadonlyArray<string>): string | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "Give it a name.";
+  if (taken.some((other) => other.toLowerCase() === trimmed.toLowerCase()))
+    return `You already have a ${trimmed}. Pick another name.`;
+  return null;
+}

@@ -8,7 +8,7 @@ import type { AssistantTeamUpdateInput, EnvironmentId, ThreadId } from "@t3tools
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { DEMO } from "../../demo/demoFlag";
+import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
 import {
   revokeAssistant,
   startAssistantSetupChat,
@@ -35,7 +35,8 @@ export function useTeamActions() {
       refresh,
       /** Revokes it and everything it set up; how many went with it. */
       revoke: async (target: TeamTarget): Promise<number> => {
-        if (DEMO) return storeRevoke(assistantKeyOf(target.environmentId, target.projectId));
+        if (DEMO_PROTOTYPE)
+          return storeRevoke(assistantKeyOf(target.environmentId, target.projectId));
         const { affected } = await revokeAssistant({
           environmentId: target.environmentId as EnvironmentId,
           projectId: target.projectId,
@@ -45,7 +46,7 @@ export function useTeamActions() {
         return Math.max(0, affected.length - 1);
       },
       restore: async (target: TeamTarget): Promise<void> => {
-        if (DEMO) {
+        if (DEMO_PROTOTYPE) {
           storeRestore(assistantKeyOf(target.environmentId, target.projectId));
           return;
         }
@@ -61,7 +62,7 @@ export function useTeamActions() {
         target: TeamTarget,
         input: Omit<AssistantTeamUpdateInput, "projectId">,
       ): Promise<void> => {
-        if (DEMO) {
+        if (DEMO_PROTOTYPE) {
           storePatch(assistantKeyOf(target.environmentId, target.projectId), {
             ...(input.name ? { name: input.name } : {}),
             ...(input.setup === "done" ? { setUpAt: new Date().toISOString() } : {}),
