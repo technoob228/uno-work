@@ -54,6 +54,14 @@ export interface TerminalSessionState {
   runtimeEnv: Record<string, string> | null;
 }
 
+export interface TerminalSessionSummary {
+  readonly threadId: string;
+  readonly terminalId: string;
+  readonly cwd: string;
+  readonly worktreePath: string | null;
+  readonly status: TerminalSessionStatus;
+}
+
 export interface ShellCandidate {
   shell: string;
   args?: string[];
@@ -108,6 +116,12 @@ export interface TerminalManagerShape {
    * When `terminalId` is omitted, closes all sessions for the thread.
    */
   readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * Live terminal sessions (where they run). Chat-copy cleanup keeps a
+   * worktree while a terminal is open in it.
+   */
+  readonly listSessions: () => Effect.Effect<ReadonlyArray<TerminalSessionSummary>>;
 
   /**
    * Subscribe to terminal runtime events with a direct callback.

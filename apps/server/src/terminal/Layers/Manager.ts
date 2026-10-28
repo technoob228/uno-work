@@ -1901,6 +1901,18 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       clear,
       restart,
       close,
+      listSessions: () =>
+        readManagerState.pipe(
+          Effect.map((state) =>
+            [...state.sessions.values()].map((session) => ({
+              threadId: session.threadId,
+              terminalId: session.terminalId,
+              cwd: session.cwd,
+              worktreePath: session.worktreePath,
+              status: session.status,
+            })),
+          ),
+        ),
       subscribe: (listener) =>
         Effect.sync(() => {
           terminalEventListeners.add(listener);

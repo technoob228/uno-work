@@ -152,7 +152,12 @@ import type {
 } from "./rpc.ts";
 import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
-import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import type {
+  ClientSettings,
+  ServerSettings,
+  ServerSettingsPatch,
+  StorageCleanupStatus,
+} from "./settings.ts";
 import type {
   CredentialFillPayload,
   CredentialFillResult,
@@ -994,6 +999,10 @@ export interface EnvironmentApi {
     /** What takes the disk; measured in the background, `scanning` until done. */
     diskUsage: (input: UnoDiskUsageInput) => Promise<UnoDiskUsage>;
     diskClean: (input: UnoDiskCleanInput) => Promise<UnoDiskCleanResult>;
+    /** Chat copies (worktrees): the last automatic cleanup. Needs `worktreeCleanup`. */
+    worktreeCleanupStatus: () => Promise<StorageCleanupStatus>;
+    /** Clean chat copies now with the current settings. */
+    worktreeCleanupRun: () => Promise<StorageCleanupStatus>;
     resourceAction: (input: UnoResourceActionInput) => Promise<UnoResourceActionResult>;
   };
   /** Files: the computer's file manager and its public share links. */

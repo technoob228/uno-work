@@ -52,6 +52,7 @@ import {
 } from "./provider/autoBootstrapModelSelection.ts";
 import { awaitUsableBootDefault, bootProbesFinished } from "./provider/awaitUsableBootDefault.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
+import { WorktreeCleanup } from "./worktreeCleanup/WorktreeCleanup.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -446,6 +447,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
   const unoBoxIdentity = yield* UnoBoxIdentity;
+  const worktreeCleanup = Option.getOrUndefined(yield* Effect.serviceOption(WorktreeCleanup));
 
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
@@ -506,6 +508,10 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
         yield* reminderScheduler.start().pipe(Scope.provide(reactorScope));
         yield* pluginRuntime.start().pipe(Scope.provide(reactorScope));
+        // Chat-copy cleanup: first pass ~10 minutes after start, then hourly.
+        if (worktreeCleanup !== undefined) {
+          yield* worktreeCleanup.start().pipe(Scope.provide(reactorScope));
+        }
       }),
     );
 

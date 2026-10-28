@@ -309,6 +309,10 @@ export interface WsRpcClient {
     readonly resources: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.unoComputerResources>>;
     readonly diskUsage: RpcUnaryMethod<typeof WS_METHODS.unoComputerDiskUsage>;
     readonly diskClean: RpcUnaryMethod<typeof WS_METHODS.unoComputerDiskClean>;
+    readonly worktreeCleanupStatus: RpcUnaryNoArgMethod<
+      typeof WS_METHODS.unoComputerWorktreeCleanupStatus
+    >;
+    readonly worktreeCleanupRun: RpcUnaryNoArgMethod<typeof WS_METHODS.unoComputerWorktreeCleanupRun>;
     readonly resourceAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerResourceAction>;
   };
   readonly files: {
@@ -745,6 +749,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoComputerDiskUsage](input)),
       diskClean: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerDiskClean](input)),
+      worktreeCleanupStatus: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerWorktreeCleanupStatus]({})),
+      worktreeCleanupRun: () =>
+        transport.request((client) => client[WS_METHODS.unoComputerWorktreeCleanupRun]({})),
       resourceAction: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerResourceAction](input)),
     },

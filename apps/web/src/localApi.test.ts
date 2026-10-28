@@ -192,6 +192,8 @@ const rpcClientMock = {
     resources: vi.fn(),
     diskUsage: vi.fn(),
     diskClean: vi.fn(),
+    worktreeCleanupStatus: vi.fn(),
+    worktreeCleanupRun: vi.fn(),
     resourceAction: vi.fn(),
   },
   files: {

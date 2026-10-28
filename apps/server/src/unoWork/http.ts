@@ -50,6 +50,7 @@ import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/openc
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
+import { WorktreeCleanup } from "../worktreeCleanup/WorktreeCleanup.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -241,6 +242,7 @@ const makeDeps = (input: {
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
+    const worktreeCleanup = Option.getOrNull(yield* Effect.serviceOption(WorktreeCleanup));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
     const secretStore = Option.getOrNull(yield* Effect.serviceOption(ServerSecretStore));
@@ -345,6 +347,15 @@ const makeDeps = (input: {
       disk: {
         usage: computerResources.diskUsage({}),
         clean: (input) => computerResources.clean(input),
+        ...(worktreeCleanup
+          ? {
+              chatCopies: {
+                onDisk: worktreeCleanup.copiesOnDisk,
+                lastReport: Effect.map(worktreeCleanup.status, (status) => status.report),
+                runNow: worktreeCleanup.runNow,
+              },
+            }
+          : {}),
       },
       computerState: unoComputer.getState(),
       files: {
