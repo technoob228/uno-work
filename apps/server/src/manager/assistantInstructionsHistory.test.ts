@@ -73,7 +73,6 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("2026-10-28.1: an orchestrator that hands off and ends its turn, status from one work_status", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-28.1");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("END YOUR TURN");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — work update");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("call `work_status` once");
@@ -95,7 +94,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-22.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
     expect(instructionsVersion(branch)).toBe("2026-10-22.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -118,11 +117,11 @@ describe("AGENTS.md of assistants made by older versions", () => {
     ]) {
       expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(`\`${tool}\``);
     }
-    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("Routines run on a cloud computer");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("Automations run on\n  a cloud computer");
   });
 
   it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-4)!;
     expect(instructionsVersion(branch)).toBe("2026-10-21.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -143,7 +142,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
         known: SHIPPED_ASSISTANT_INSTRUCTIONS,
       });
       expect(plan.state).toBe("current");
-      expect(plan.write).toContain("2026-10-28.1");
+      expect(plan.write).toContain("2026-10-28.2");
       expect(plan.write).toContain("Your name is Ana.");
     }
   });
@@ -162,7 +161,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
       expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
     }
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("For now only this computer");
-    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
     expect(instructionsVersion(previous)).toBe("2026-10-22.2");
     const plan = planInstructions({
       current: joinAgentsProfile(previous, profile),
@@ -172,6 +171,36 @@ describe("AGENTS.md of assistants made by older versions", () => {
     });
     expect(plan.state).toBe("current");
     expect(plan.write).toContain("## Waiting for the person's Allow");
+  });
+
+  it("2026-10-28.2: recurring and event work is an automation; no routine step in the setup", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-28.2");
+    for (const words of [
+      "## Automations — work on a schedule or on an event",
+      "`automation_create`",
+      '`{"kind": "github.pull_request", "repo": "owner/x"}`',
+      '`{"kind": "call.ended"}`',
+      "`github_pr_comment`",
+      "give them the\n  link it returns",
+      "Recurring work is not a setup step",
+      "on the Automations page",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("→ routine");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("## Schedules — recurring work");
+    // The previous version (an untouched file) upgrades silently.
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    expect(instructionsVersion(previous)).toBe("2026-10-28.1");
+    const plan = planInstructions({
+      current: joinAgentsProfile(previous, profile),
+      base: previous,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Automations");
+    expect(plan.write).toContain("Your name is Ana.");
   });
 
   it("an edited 2026-10-14.1 file is offered the update, not overwritten", () => {

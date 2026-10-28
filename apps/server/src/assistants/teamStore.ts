@@ -30,6 +30,7 @@ import {
   type ManagerAssistantTeam,
 } from "@t3tools/contracts";
 import { DEFAULT_ASSISTANT_MAIL_POLICY, normalizeMailPolicy } from "@t3tools/shared/assistantMail";
+import { ASSISTANT_SETUP_STEPS } from "@t3tools/shared/assistantTeam";
 
 export const EMPTY_TEAM: ManagerAssistantTeam = {
   name: null,
@@ -180,8 +181,9 @@ export function withSetupStep(
   const skippedSteps = skipped
     ? [...new Set([...team.setup.skipped, step])]
     : team.setup.skipped.filter((id) => id !== step);
-  const all = ASSISTANT_SETUP_STEP_IDS.every(
-    (id) => answered.includes(id) || skippedSteps.includes(id),
+  // The steps it asks today (no "routine" since 28.10), not every id ever known.
+  const all = ASSISTANT_SETUP_STEPS.every(
+    (step) => answered.includes(step.id) || skippedSteps.includes(step.id),
   );
   return {
     ...team,

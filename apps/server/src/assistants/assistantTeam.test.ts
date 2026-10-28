@@ -626,7 +626,6 @@ describe("teamStore", () => {
       "apps",
       "mail",
       "computer",
-      "routine",
     ] as const) {
       team = withSetupStep(team, step, false, now);
     }
