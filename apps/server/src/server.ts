@@ -38,8 +38,10 @@ import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { localPairingRouteLayer } from "./auth/localPairing.ts";
 import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
+import { AssistantTeamLive } from "./assistants/assistantTeamLive.ts";
 import { ConnectorsServiceLive } from "./setupTools/ConnectorsService.ts";
 import { GithubAccountServiceLive } from "./setupTools/GithubAccountService.ts";
+import { AgentMailServiceLive } from "./setupTools/AgentMailService.ts";
 import { MaterialsServiceLive } from "./setupTools/MaterialsService.ts";
 import {
   filesOfficeVersionsRouteLayer,
@@ -72,6 +74,7 @@ import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRe
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { CustomMcpServersLive } from "./mcp/customMcpServers.ts";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import { AssistantHarnessSandboxPolicyLive } from "./assistants/assistantSandboxPolicy.ts";
 import { currentHarnessBudget } from "./provider/harnessBudget.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
@@ -98,6 +101,7 @@ import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletion
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import { ServerSettingsLive } from "./serverSettings.ts";
 import { CredentialsVaultLive } from "./credentialsVault.ts";
+import { ProjectSyncServiceLive } from "./projectSync/ProjectSyncService.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -158,6 +162,10 @@ import {
 import {
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
+  managerAssistantPresetRouteLayer,
+  managerAssistantTeamUpdateRouteLayer,
+  managerAssistantRevokeRouteLayer,
+  managerAssistantSetupChatRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,
@@ -185,6 +193,10 @@ import {
   managerAssistantsDeletedRouteLayer,
   managerAssistantRestoreRouteLayer,
   managerAssistantAppsGetRouteLayer,
+  managerAssistantMailRouteLayer,
+  managerAssistantAvatarGetRouteLayer,
+  managerAssistantAvatarSetRouteLayer,
+  managerAssistantAvatarGenerateRouteLayer,
   managerAssistantAppsPutRouteLayer,
   managerAssistantInstructionsGetRouteLayer,
   managerAssistantInstructionsResolveRouteLayer,
@@ -315,6 +327,11 @@ const ProviderServiceBudgetedLive = Layer.unwrap(
 );
 
 const ProviderLayerLive = ProviderServiceBudgetedLive.pipe(
+  // Restricted assistants' chats run their harness in the sandbox, or not at
+  // all (assistants/assistantSandboxPolicy.ts). Without this layer every chat
+  // would run open: keep it here. Merged: the provider command reactor asks
+  // it too (no harness title runs for sandboxed chats).
+  Layer.provideMerge(AssistantHarnessSandboxPolicyLive),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
@@ -456,27 +473,35 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // App SDK: local App API for apps on this machine (docs/app-sdk.md) —
       // starts tasks through the same engine, forwards chat with the gateway key.
       AppSdkServiceLive,
+      // "On all my computers": projects synced through the Uno cloud, keys
+      // through the Uno vault (projectSync/); listens to agents' turns.
+      ProjectSyncServiceLive,
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,
       // GitHub of the account for git on this computer: state, "Connect
       // GitHub", and the git credential helper on a cloud computer.
       GithubAccountServiceLive,
+      // "Email for your AI": the computer's mailbox address and its rename.
+      AgentMailServiceLive,
       MaterialsServiceLive,
       // "New assistant": Uno AI drafts the assistant from one sentence.
       AssistantDraftServiceLive,
+      // The team of assistants: their profiles, helpers within their rights,
+      // question cards and the setup chat (manager + Inbox further down);
+      // the mailbox address for each assistant's own email.
+      AssistantTeamLive.pipe(Layer.provide(AgentMailServiceLive)),
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the
   // orchestration/persistence layers provided further down this pipe so it
   // shares the same engine and SqlClient instances.
   Layer.provideMerge(
-    Layer.mergeAll(
-      ManagerLayerLive,
-      // Inbox: agents' and apps' news for the person. Below the App SDK (apps
-      // post through it) and above orchestration (it listens to the events).
-      InboxServiceLive,
-    ),
+    // Inbox: agents' and apps' news for the person. Below the App SDK (apps
+    // post through it) and above orchestration (it listens to the events).
+    // Above the manager layer: a chat whose assistant reports its outcome
+    // gets no "Finished" item of its own (AssistantPushService).
+    InboxServiceLive.pipe(Layer.provideMerge(ManagerLayerLive)),
   ),
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -618,6 +643,10 @@ export const makeRoutesLayer = Layer.mergeAll(
   browserBridgeOpenRouteLayer,
   channelsNotifyRouteLayer,
   managerAssistantAccessRouteLayer,
+  managerAssistantPresetRouteLayer,
+  managerAssistantTeamUpdateRouteLayer,
+  managerAssistantRevokeRouteLayer,
+  managerAssistantSetupChatRouteLayer,
   managerAssistantFileReadRouteLayer,
   managerAssistantFileWriteRouteLayer,
   managerAssistantOverviewRouteLayer,
@@ -658,6 +687,10 @@ export const makeRoutesLayer = Layer.mergeAll(
   managerAssistantsDeletedRouteLayer,
   managerAssistantRestoreRouteLayer,
   managerAssistantAppsGetRouteLayer,
+  managerAssistantMailRouteLayer,
+  managerAssistantAvatarGetRouteLayer,
+  managerAssistantAvatarSetRouteLayer,
+  managerAssistantAvatarGenerateRouteLayer,
   managerAssistantAppsPutRouteLayer,
   managerAssistantInstructionsGetRouteLayer,
   managerAssistantInstructionsResolveRouteLayer,

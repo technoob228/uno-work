@@ -28,17 +28,19 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import { SCHEDULED_TASK_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { Context, Data, Effect, Layer, Option } from "effect";
 
 import { currentAssistantModelSelection } from "../manager/assistantEngineSelection.ts";
 import { ASSISTANT_THREAD_RUNTIME_MODE } from "../manager/connectorBindings.ts";
-import { decidePendingReply, stoppedText } from "../manager/connectorReplies.ts";
+import { decidePendingReply, isNoReply, stoppedText } from "../manager/connectorReplies.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { assistantCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistantAccess.ts";
 import { assistantProjectOfCaller } from "./schedules.ts";
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */
@@ -56,7 +58,7 @@ export class AssistantTurnError extends Data.TaggedError("AssistantTurnError")<{
 export function wrapScheduledPrompt(input: { readonly name?: string; readonly prompt: string }) {
   const title = input.name ? `"${input.name}"` : "";
   return [
-    `[Scheduled task ${title}— it runs on its own: the person is not in this chat right now.`,
+    `${SCHEDULED_TASK_PREFIX}${title}— it runs on its own: the person is not in this chat right now.`,
     "Your final message is sent to them in Telegram/Slack, so make it short and useful.",
     `If there is nothing worth telling them, answer exactly ${ASSISTANT_TURN_NO_REPLY}.]`,
     "",
@@ -64,10 +66,7 @@ export function wrapScheduledPrompt(input: { readonly name?: string; readonly pr
   ].join("\n");
 }
 
-/** NO_REPLY (any case, optional trailing dot) means: say nothing. */
-export function isNoReply(text: string): boolean {
-  return text.trim().replace(/\.$/, "").toUpperCase() === ASSISTANT_TURN_NO_REPLY;
-}
+export { isNoReply };
 
 export interface AssistantScheduledTurnsShape {
   readonly run: (
@@ -89,6 +88,12 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const turns = yield* ProjectionTurnRepository;
     const engine = yield* OrchestrationEngineService;
     const notify = yield* ConnectorNotifyService;
+    const accessDeps = yield* assistantAccessDepsOption;
+    /** The assistant's own mode: "Asks first" runs narrower than full access. */
+    const ownRuntimeMode = (projectId: ProjectId) =>
+      accessDeps === null
+        ? Effect.succeed(ASSISTANT_THREAD_RUNTIME_MODE)
+        : readAssistantRuntimeMode(accessDeps, projectId);
     const pollMs = options?.pollMs ?? POLL_MS;
 
     /** The thread a scheduled turn of `projectId` runs in (created if needed). */
@@ -118,7 +123,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             projectId,
             title: SCHEDULED_THREAD_TITLE,
             modelSelection: yield* currentAssistantModelSelection(projections),
-            runtimeMode: ASSISTANT_THREAD_RUNTIME_MODE,
+            runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: "default",
             branch: null,
             worktreePath: null,
@@ -229,11 +234,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               }),
               attachments: [],
             },
-            // The assistant's own mode (full access by Misha's decision for
-            // assistants) — never widened here.
-            runtimeMode: Option.isSome(shell)
-              ? shell.value.runtimeMode
-              : ASSISTANT_THREAD_RUNTIME_MODE,
+            // The assistant's own mode ("Does it itself" = full access,
+            // "Asks first" = auto-accept-edits) — never widened here.
+            runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: Option.isSome(shell) ? shell.value.interactionMode : "default",
             createdAt: requestedAtIso,
           },

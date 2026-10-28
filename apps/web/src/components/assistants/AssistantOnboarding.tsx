@@ -13,9 +13,10 @@
  * TEAMMATES_GROOMING.md; its page shows all of it afterwards and edits it.
  * It takes tasks only from the person — never a public bot.
  *
- * That chat setup and the team are the mock's (`TEAM_SHOWN`, `?demo=w0138`).
- * The release ships Uno alone (Misha 16.10): its first click says who it is,
- * then one screen — what it runs on — and the first chat (`UnoIntroDialog`).
+ * The team and its chat setup show with the assistants update on the account
+ * (`useTeamShown`, 22.10) and in the mock (`?demo=w0138`). Without it, Uno
+ * alone (Misha 16.10): its first click says who it is, then one screen — what
+ * it runs on — and the first chat (`UnoIntroDialog`).
  */
 import {
   ASSISTANT_PROJECT_ID,
@@ -38,6 +39,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { create } from "zustand";
 
 import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { DEMO } from "../../demo/demoFlag";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useMachineRows } from "../../hooks/useMachineRows";
@@ -58,7 +60,8 @@ import {
   uniqueName,
 } from "./assistantTeam.logic";
 import { useAssistantTeamStore } from "./assistantTeamStore";
-import { TEAM_SHOWN, type TeamMember, useAssistantTeam } from "./useAssistantTeam";
+import { type TeamMember, useAssistantTeam, useTeamShown } from "./useAssistantTeam";
+import { useTeamActions } from "./useTeamActions";
 
 /** Uno's second bot — for assistants (the first one carries notifications). */
 export const UNO_ASSISTANT_BOT = "uno_team_bot";
@@ -307,7 +310,7 @@ function UnoIntroDialog() {
 
 /** The setup: the team's chat setup in the mock, Uno's short one in the release. */
 export function AssistantOnboardingDialog() {
-  return TEAM_SHOWN ? <TeamOnboardingDialog /> : <UnoIntroDialog />;
+  return useTeamShown() ? <TeamOnboardingDialog /> : <UnoIntroDialog />;
 }
 
 // ── The team's dialog (mock): a name and an AI, then the chat ─────────────
@@ -318,6 +321,7 @@ function TeamOnboardingDialog() {
   const { environmentId: activeEnvironmentId } = useActiveMachine();
   const upsert = useAssistantTeamStore((store) => store.upsert);
   const patchProfile = useAssistantTeamStore((store) => store.patch);
+  const actions = useTeamActions();
   const { handleNewThread } = useNewThreadHandler();
   const router = useRouter();
   const [starting, setStarting] = useState(false);
@@ -361,9 +365,14 @@ function TeamOnboardingDialog() {
 
   const later = () => {
     if (target.kind === "existing") {
-      patchProfile(assistantKeyOf(target.environmentId, target.projectId), {
-        setUpAt: new Date().toISOString(),
-      });
+      if (DEMO) {
+        patchProfile(assistantKeyOf(target.environmentId, target.projectId), {
+          setUpAt: new Date().toISOString(),
+        });
+      } else {
+        // Its computer keeps "asked once": the first click opens its chat from now on.
+        void actions.update(target, { setup: "done" }).catch(() => undefined);
+      }
     }
     close();
   };
@@ -392,30 +401,43 @@ function TeamOnboardingDialog() {
             ).projectId;
       const now = new Date().toISOString();
       // Its profile starts with the defaults; the chat fills in the rest,
-      // one answer at a time.
-      upsert({
-        ...(existing?.profile ?? {
-          roles: draft.roles,
-          character: draft.character,
-          skills: draft.skills,
-          preset: draft.preset,
-          channel: draft.channel,
-          channelHandle: null,
-          projects: draft.projects,
-          computers: draft.computers,
-          createdBy: null,
-          createdAt: now,
-          revokedAt: null,
-          access: draft.access,
-        }),
-        environmentId: homeEnvironmentId,
-        projectId,
-        name: finalName,
-        emoji: draft.emoji,
-        tone: draft.tone,
-        brain: draft.brain,
-        setUpAt: null,
-      });
+      // one answer at a time — on its computer (outside the mock).
+      if (!DEMO) {
+        await actions
+          .update(
+            { environmentId: homeEnvironmentId, projectId },
+            {
+              tone: draft.tone,
+              ...(target.kind === "existing" && !isUno
+                ? { name: finalName, ...(draft.emoji ? { emoji: draft.emoji } : {}) }
+                : {}),
+            },
+          )
+          .catch(() => undefined);
+      } else
+        upsert({
+          ...(existing?.profile ?? {
+            roles: draft.roles,
+            character: draft.character,
+            skills: draft.skills,
+            preset: draft.preset,
+            channel: draft.channel,
+            channelHandle: null,
+            projects: draft.projects,
+            computers: draft.computers,
+            createdBy: null,
+            createdAt: now,
+            revokedAt: null,
+            access: draft.access,
+          }),
+          environmentId: homeEnvironmentId,
+          projectId,
+          name: finalName,
+          emoji: draft.emoji,
+          tone: draft.tone,
+          brain: draft.brain,
+          setUpAt: null,
+        });
       close();
       try {
         const { threadId } = await startAssistantSetupChat({
@@ -513,12 +535,17 @@ function TeamOnboardingDialog() {
               What does {name || "it"} run on?
             </span>
             {homeEnvironmentId ? (
-              <AssistantPowerPicker
-                environmentId={homeEnvironmentId as EnvironmentId}
-                value={draft.brain}
-                onChange={(brain) => patch({ brain })}
-                note={`Only for ${name || "it"}. A plan’s limit is shared with your own chats.`}
-              />
+              DEMO ? (
+                <AssistantPowerPicker
+                  environmentId={homeEnvironmentId as EnvironmentId}
+                  value={draft.brain}
+                  onChange={(brain) => patch({ brain })}
+                  note={`Only for ${name || "it"}. A plan’s limit is shared with your own chats.`}
+                />
+              ) : (
+                // One AI per computer for now: the computer-wide choice, said so.
+                <AssistantPowerPicker environmentId={homeEnvironmentId as EnvironmentId} />
+              )
             ) : (
               <p className="text-sm text-muted-foreground">
                 Uno AI — no computer is connected yet.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSISTANT_TEMPLATES,
   assistantBoxName,
   assistantFiles,
   assistantStatus,
@@ -39,16 +40,33 @@ describe("templates", () => {
       notion: "none",
       github: "read",
     });
-    expect(findTemplate("support")?.connectors).toEqual({
-      gmail: "write",
-      "google-drive": "none",
-      notion: "read",
+    expect(findTemplate("finance")?.connectors).toEqual({
+      gmail: "read",
+      "google-drive": "write",
+      notion: "none",
       github: "none",
+    });
+    expect(findTemplate("dev")?.connectors).toEqual({
+      gmail: "none",
+      "google-drive": "none",
+      notion: "none",
+      github: "write",
     });
   });
 
+  it("offer the areas — Personal, Finance, Sales, Dev, YouTube — and no Customer support", () => {
+    expect(ASSISTANT_TEMPLATES.map((template) => template.title)).toEqual([
+      "Personal assistant",
+      "Finance",
+      "Sales",
+      "Dev",
+      "YouTube & content",
+    ]);
+    expect(findTemplate("support")).toBeNull();
+  });
+
   it("ask at most three questions each", () => {
-    for (const id of ["personal", "marketing", "security", "support"]) {
+    for (const id of ["personal", "finance", "sales", "dev", "youtube", "marketing", "security"]) {
       expect(findTemplate(id)!.questions.length).toBeLessThanOrEqual(3);
     }
   });
@@ -118,7 +136,7 @@ describe("buildPlan", () => {
 
 describe("files", () => {
   it("write who it is, its access and the person's words", () => {
-    const template = findTemplate("support")!;
+    const template = findTemplate("finance")!;
     const plan = buildPlan({
       phrase: template.phrase,
       template,
@@ -126,9 +144,9 @@ describe("files", () => {
       answers: [{ questionId: "tone", question: "Tone?", answer: "Formal", cron: null }],
     });
     const files = assistantFiles(plan, "2026-10-02T10:00:00Z");
-    expect(files.soul).toContain("I am Lu 💬, customer support.");
-    expect(files.soul).toContain("Notion: read only");
-    expect(files.soul).toContain("Promise refunds or discounts");
+    expect(files.soul).toContain("I am Penny 📊, finance.");
+    expect(files.soul).toContain("Gmail & Calendar: read only");
+    expect(files.soul).toContain("Pay or transfer money");
     expect(files.user).toContain("Tone? — Formal");
     expect(files.notes).toContain("2026-10-02: created");
   });

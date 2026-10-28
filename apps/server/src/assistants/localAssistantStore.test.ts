@@ -136,6 +136,7 @@ describe("deleted assistants and profiles", () => {
       emoji: "📣",
       template: "marketing",
       createdAt: "2026-10-02",
+      avatar: null,
     });
   });
 });

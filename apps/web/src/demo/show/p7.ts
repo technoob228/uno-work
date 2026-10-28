@@ -35,6 +35,6 @@ demoShow.p7 = async () => {
   // The form for a moment: a name and an AI, nothing else.
   await pause(1800);
   start()?.click();
-  if (!(await answer("Marketing"))) return;
+  if (!(await answer("Sales"))) return;
   await answer("Friendly");
 };

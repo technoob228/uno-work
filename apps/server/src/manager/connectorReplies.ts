@@ -32,6 +32,7 @@
  * @module manager/connectorReplies
  */
 import {
+  ASSISTANT_TURN_NO_REPLY,
   CommandId,
   MessageId,
   type ChatAttachment,
@@ -47,7 +48,7 @@ import { Clock, Duration, Effect, Option, Ref, Semaphore } from "effect";
 import * as crypto from "node:crypto";
 import * as nodePath from "node:path";
 
-import { connectorCommandOrigin } from "../orchestration/commandOrigin.ts";
+import { connectorCommandOrigin, systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { ORPHANED_PROVIDER_SESSION_ERROR } from "../orchestration/orphanedSession.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -90,6 +91,13 @@ export const NO_TEXT_GRACE_MS = 45_000;
 export const LOST_TURN_MS = 3 * 60_000;
 /** A thread that vanished (deleted) this long ago is given up. */
 export const MISSING_THREAD_MS = 2 * 60_000;
+/**
+ * How long the loop sleeps before a ready answer's quiet window ends: just
+ * past it (the clock check is strict), never busy-spinning, never longer than
+ * a normal round.
+ */
+export const replyPauseMs = (untilReadyMs: number): number =>
+  Math.min(Duration.toMillis(REPLY_TICK), Math.max(50, Math.ceil(untilReadyMs) + 25));
 /** A restart (or a harness crash) cuts a turn off: re-run it at most this often. */
 export const MAX_RESUME_ATTEMPTS = 2;
 /** A message queued behind a turn running this long hears that it is queued. */
@@ -147,7 +155,12 @@ export interface ReplyProbe {
 }
 
 export type ReplyVerdict =
-  | { readonly kind: "wait"; readonly turnId: string | null }
+  | {
+      readonly kind: "wait";
+      readonly turnId: string | null;
+      /** The answer is ready and only sitting out the quiet window: look again in this long. */
+      readonly readyInMs?: number;
+    }
   | {
       readonly kind: "answer";
       readonly turnId: string | null;
@@ -295,8 +308,9 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
 
   const settledAtMs = Math.max(requestedMs, toMs(session?.updatedAt));
   if (final !== null) {
-    if (probe.nowMs - Math.max(settledAtMs, toMs(final.updatedAt)) < SETTLE_QUIET_MS) {
-      return { kind: "wait", turnId };
+    const quietForMs = probe.nowMs - Math.max(settledAtMs, toMs(final.updatedAt));
+    if (quietForMs < SETTLE_QUIET_MS) {
+      return { kind: "wait", turnId, readyInMs: SETTLE_QUIET_MS - quietForMs };
     }
     // The turn worked on after its last message: the answer is still on its
     // way (hermes ends the prompt before the final text lands). Give it the
@@ -369,6 +383,11 @@ export const resumePromptText = (original: string) =>
     original,
   ].join("\n");
 
+/** NO_REPLY (any case, optional trailing dot) means: say nothing. */
+export function isNoReply(text: string): boolean {
+  return text.trim().replace(/\.$/, "").toUpperCase() === ASSISTANT_TURN_NO_REPLY;
+}
+
 // ── The loop ────────────────────────────────────────────────────────────
 
 /** What a row's `meta` holds for the loop (connectors may add their own keys). */
@@ -383,6 +402,15 @@ export interface PendingReplyMeta {
   readonly queuedNoteSent?: boolean;
   /** When the row's turn was first dispatched (a queued row waited before). */
   readonly dispatchedAt?: string;
+  /**
+   * A turn the daemon started in the chat's conversation, not the person
+   * (the assistant's work update, `assistantPush.ts`): system origin, no
+   * "queued"/progress notes, NO_REPLY stays silent, and when the turn fails
+   * the person gets {@link PendingReplyMeta.fallbackText} instead of
+   * "send it again".
+   */
+  readonly systemTurn?: boolean;
+  readonly fallbackText?: string;
   readonly [key: string]: unknown;
 }
 
@@ -430,6 +458,21 @@ export interface NewPendingReply {
 
 export type EnqueueOutcome = "dispatched" | "queued" | "duplicate";
 
+/** Origin component of a system turn's dispatch (`systemCommandOrigin`). */
+export const SYSTEM_TURN_ORIGIN_COMPONENT = "assistant-push";
+
+export interface SystemTurnInput {
+  /** A row of the chat the turn answers to (its newest). */
+  readonly from: ConnectorPendingReply;
+  /** Unique per turn, e.g. `push:<uuid>`. */
+  readonly replyKey: string;
+  readonly text: string;
+  /** Sent to the chat when the turn fails or says nothing. */
+  readonly fallbackText: string;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+}
+
 interface SendState {
   readonly failures: number;
   readonly retryAtMs: number;
@@ -437,6 +480,43 @@ interface SendState {
 
 const rowId = (row: ConnectorPendingReply) =>
   `${row.kind}:${row.connectorProjectId}:${row.replyKey}`;
+
+/**
+ * Whether a thread can take a new turn: no reply of it in flight ahead of
+ * this one (`selfRowId` / `selfCreatedAt`: the row asking; null: anyone
+ * else, e.g. the assistant's work update — then every open row is ahead),
+ * and the harness is not busy with someone else's turn (the person typing
+ * in the app, a scheduled turn).
+ */
+export const isThreadBusyForNewTurn = (input: {
+  readonly rows: ReadonlyArray<ConnectorPendingReply>;
+  readonly selfRowId: string | null;
+  readonly selfCreatedAt: string | null;
+  readonly session: { readonly status: string; readonly updatedAt: string } | null;
+  readonly turns: ReadonlyArray<Pick<ProjectionTurn, "turnId" | "state" | "requestedAt">>;
+  readonly nowMs: number;
+}): { readonly busy: boolean; readonly sinceMs: number } => {
+  const ahead = input.rows.find(
+    (other) =>
+      rowId(other) !== input.selfRowId &&
+      (other.status === "waiting" ||
+        (other.status === "queued" &&
+          (input.selfCreatedAt === null || other.createdAt < input.selfCreatedAt))),
+  );
+  if (ahead !== undefined) return { busy: true, sinceMs: toMs(ahead.requestedAt) };
+  const session = input.session;
+  if (session !== null && ACTIVE_SESSION_STATUSES.has(session.status)) {
+    return { busy: true, sinceMs: toMs(session.updatedAt) };
+  }
+  const pendingStart = input.turns.find(
+    (turn) =>
+      turn.turnId === null &&
+      turn.state === "pending" &&
+      input.nowMs - toMs(turn.requestedAt) < LOST_TURN_MS,
+  );
+  if (pendingStart !== undefined) return { busy: true, sinceMs: toMs(pendingStart.requestedAt) };
+  return { busy: false, sinceMs: 0 };
+};
 
 /**
  * Start the watcher loop for one connector kind. Returns `enqueue`, which
@@ -453,6 +533,9 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
     const sendStateRef = yield* Ref.make<ReadonlyMap<string, SendState>>(new Map());
     const missingSinceRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
     const lastPruneRef = yield* Ref.make(0);
+    // An answer only sitting out SETTLE_QUIET_MS: the loop wakes for it right
+    // then, not on its next 2 s round (up to 2 s off every Telegram reply).
+    const nextWakeAtRef = yield* Ref.make<number | null>(null);
     // The loop and a fresh message both act on rows: one at a time, or a
     // queued row could be dispatched (or told it waits) twice.
     const rowsLock = yield* Semaphore.make(1);
@@ -500,7 +583,12 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
             interactionMode: meta.dispatch.interactionMode,
             createdAt,
           },
-          { origin: connectorCommandOrigin(transport.kind, row.chatId) },
+          {
+            origin:
+              meta.systemTurn === true
+                ? systemCommandOrigin(SYSTEM_TURN_ORIGIN_COMPONENT)
+                : connectorCommandOrigin(transport.kind, row.chatId),
+          },
         );
         return createdAt;
       });
@@ -513,31 +601,15 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
     const threadBusy = (row: ConnectorPendingReply) =>
       Effect.gen(function* () {
         const rows = yield* repository.listByThread({ threadId: row.threadId, limit: 50 });
-        const ahead = rows.find(
-          (other) =>
-            rowId(other) !== rowId(row) &&
-            (other.status === "waiting" ||
-              (other.status === "queued" && other.createdAt < row.createdAt)),
-        );
-        if (ahead !== undefined) {
-          return { busy: true as const, sinceMs: toMs(ahead.requestedAt) };
-        }
         const { detail, turns } = yield* loadThread(row.threadId);
-        const nowMs = yield* Clock.currentTimeMillis;
-        const session = detail?.session ?? null;
-        if (session !== null && ACTIVE_SESSION_STATUSES.has(session.status)) {
-          return { busy: true as const, sinceMs: toMs(session.updatedAt) };
-        }
-        const pendingStart = turns.find(
-          (turn) =>
-            turn.turnId === null &&
-            turn.state === "pending" &&
-            nowMs - toMs(turn.requestedAt) < LOST_TURN_MS,
-        );
-        if (pendingStart !== undefined) {
-          return { busy: true as const, sinceMs: toMs(pendingStart.requestedAt) };
-        }
-        return { busy: false as const, sinceMs: 0 };
+        return isThreadBusyForNewTurn({
+          rows,
+          selfRowId: rowId(row),
+          selfCreatedAt: row.createdAt,
+          session: detail?.session ?? null,
+          turns,
+          nowMs: yield* Clock.currentTimeMillis,
+        });
       });
 
     const tryDispatchQueued = (row: ConnectorPendingReply) =>
@@ -546,7 +618,11 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         const nowMs = yield* Clock.currentTimeMillis;
         if (busy.busy) {
           const meta = readMeta(row);
-          if (meta.queuedNoteSent !== true && nowMs - busy.sinceMs >= QUEUED_NOTE_AFTER_MS) {
+          if (
+            meta.systemTurn !== true &&
+            meta.queuedNoteSent !== true &&
+            nowMs - busy.sinceMs >= QUEUED_NOTE_AFTER_MS
+          ) {
             const outcome = yield* transport.sendText(row, queuedText(row.language), {
               asReply: true,
               newerInChat: false,
@@ -791,6 +867,53 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         yield* transport.typing(row);
       });
 
+    /** The person's copy of a system turn's facts, when the assistant could not answer. */
+    const fallbackParts = (row: ConnectorPendingReply): ReadonlyArray<Part> => {
+      const text = readMeta(row).fallbackText?.trim() ?? "";
+      return text.length > 0 ? [{ kind: "text", text }] : [];
+    };
+
+    /** A system turn (see {@link PendingReplyMeta.systemTurn}): nobody wrote, nobody waits. */
+    const handleSystemVerdict = (
+      row: ConnectorPendingReply,
+      verdict: ReplyVerdict,
+      nowMs: number,
+    ) =>
+      Effect.gen(function* () {
+        switch (verdict.kind) {
+          case "wait":
+            yield* typingIfDue(row, nowMs);
+            return;
+          case "answer":
+            if (verdict.files.length === 0 && isNoReply(verdict.text)) {
+              yield* settle(row, "delivered", "no reply");
+              return;
+            }
+            yield* deliver(
+              row,
+              verdict.text.trim().length === 0 && verdict.files.length === 0
+                ? fallbackParts(row)
+                : answerParts(verdict.text, verdict.files, row.language),
+              "delivered",
+              null,
+            );
+            return;
+          case "stopped":
+            yield* settle(row, "delivered", "stopped in the app");
+            return;
+          case "lost":
+            if (row.resumeAttempts >= MAX_RESUME_ATTEMPTS) {
+              yield* deliver(row, fallbackParts(row), "failed", verdict.reason);
+              return;
+            }
+            yield* resume(row, verdict.reason);
+            return;
+          case "failed":
+            yield* deliver(row, fallbackParts(row), "failed", verdict.reason);
+            return;
+        }
+      });
+
     const handleWaiting = (row: ConnectorPendingReply, nowMs: number) =>
       Effect.gen(function* () {
         const { detail, turns } = yield* loadThread(row.threadId);
@@ -803,7 +926,9 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           if (nowMs - since < MISSING_THREAD_MS) return;
           yield* deliver(
             row,
-            [{ kind: "text", text: threadGoneText(row.language) }],
+            readMeta(row).systemTurn === true
+              ? []
+              : [{ kind: "text", text: threadGoneText(row.language) }],
             "failed",
             "thread gone",
           );
@@ -826,9 +951,16 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           activities: detail.activities,
           nowMs,
         });
+        if (verdict.kind === "wait" && verdict.readyInMs !== undefined) {
+          const wakeAt = nowMs + verdict.readyInMs;
+          yield* Ref.update(nextWakeAtRef, (at) => (at === null ? wakeAt : Math.min(at, wakeAt)));
+        }
         let current = row;
         if (verdict.turnId !== null && verdict.turnId !== row.turnId) {
           current = yield* save({ ...current, turnId: TurnId.make(verdict.turnId) });
+        }
+        if (readMeta(current).systemTurn === true) {
+          return yield* handleSystemVerdict(current, verdict, nowMs);
         }
         switch (verdict.kind) {
           case "wait": {
@@ -876,7 +1008,10 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           // Queued behind another turn: "typing…" only — the queued note
           // already said why it waits.
           const next = yield* tryDispatchQueued(row);
-          if (next.status === "queued") yield* typingIfDue(next, nowMs);
+          // A system turn waiting its place: nobody wrote, so no "typing…".
+          if (next.status === "queued" && readMeta(next).systemTurn !== true) {
+            yield* typingIfDue(next, nowMs);
+          }
           return;
         }
         yield* handleWaiting(row, nowMs);
@@ -923,7 +1058,14 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
       ),
     );
 
-    yield* Effect.forkScoped(Effect.forever(tick.pipe(Effect.andThen(Effect.sleep(REPLY_TICK)))));
+    const pause = Effect.gen(function* () {
+      const wakeAt = yield* Ref.getAndSet(nextWakeAtRef, null);
+      if (wakeAt === null) return yield* Effect.sleep(REPLY_TICK);
+      const nowMs = yield* Clock.currentTimeMillis;
+      yield* Effect.sleep(Duration.millis(replyPauseMs(wakeAt - nowMs)));
+    });
+
+    yield* Effect.forkScoped(Effect.forever(tick.pipe(Effect.andThen(pause))));
 
     /** Whether a message already has its pending reply (a replayed update). */
     const isKnown = (connectorProjectId: ProjectId, replyKey: string) =>
@@ -932,5 +1074,35 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         Effect.orElseSucceed(() => false),
       );
 
-    return { enqueue, isKnown };
+    /**
+     * A turn the daemon starts in a chat's conversation (the assistant's work
+     * update): queued like a message of that chat, answered to that chat —
+     * `from` is a row of it (where it lives, its language, thread and
+     * identity). Never quotes a message: the person did not write one.
+     */
+    const enqueueSystemTurn = (input: SystemTurnInput) =>
+      enqueue({
+        connectorProjectId: input.from.connectorProjectId,
+        replyKey: input.replyKey,
+        chatId: input.from.chatId,
+        replyTo: null,
+        replyThread: input.from.replyThread,
+        threadId: input.from.threadId,
+        language: input.from.language,
+        dispatch: {
+          text: input.text,
+          attachments: [],
+          runtimeMode: input.runtimeMode,
+          interactionMode: input.interactionMode,
+        },
+        extraMeta: {
+          ...(typeof readMeta(input.from).identityProjectId === "string"
+            ? { identityProjectId: readMeta(input.from).identityProjectId }
+            : {}),
+          systemTurn: true,
+          fallbackText: input.fallbackText,
+        },
+      });
+
+    return { enqueue, enqueueSystemTurn, isKnown };
   });

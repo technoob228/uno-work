@@ -16,8 +16,10 @@ import { useSidebar } from "../components/ui/sidebar";
 import { useOpenApp } from "../navigation/useOpenApp";
 import { useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { assistantPageOfUrl } from "./assistantPageUrl";
 import { type InboxEntry, updateInbox } from "./inboxStore";
-import { DEMO } from "../demo/demoFlag";
+
+export { assistantPageOfUrl };
 
 const OFFICE_KINDS = new Set(["document", "spreadsheet", "presentation"]);
 
@@ -32,20 +34,6 @@ export function joinAppPath(base: string, path: string | null): string {
   } catch {
     return base;
   }
-}
-
-/**
- * `uno://assistant/<computer>/<assistant>` — an Inbox item about an assistant
- * (one assistant set up another: decision 14.10, a notice, no confirmation).
- */
-export function assistantPageOfUrl(
-  url: string,
-  teamPages = DEMO,
-): { readonly environmentId: string; readonly projectId: string } | null {
-  // The team's pages are mock-only for now (Misha 16.10).
-  if (!teamPages) return null;
-  const match = /^uno:\/\/assistant\/([^/]+)\/(assistant-[^/?#]+)$/.exec(url);
-  return match ? { environmentId: decodeURIComponent(match[1]!), projectId: match[2]! } : null;
 }
 
 export function useOpenInboxItem() {
@@ -65,7 +53,8 @@ export function useOpenInboxItem() {
       if (!target) return;
       if (isMobile) setOpenMobile(false);
       // "Uno set up assistant Scout" (w0138 p7): its page.
-      const assistant = target.kind === "url" ? assistantPageOfUrl(target.url) : null;
+      const assistant =
+        target.kind === "url" ? assistantPageOfUrl(target.url, item.environmentId) : null;
       if (assistant) {
         void navigate({
           to: "/assistants",

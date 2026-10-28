@@ -7,19 +7,21 @@
  *   setup if it was never set up).
  * - The chevron unfolds its chats, newest first: 3, then "Show N more".
  *   Before this, a second chat with Uno could only be found in Settings.
- * - "+" on hover starts a new chat with it; its face opens its page.
- * - "New assistant" at the end starts the setup (`AssistantOnboarding.tsx`)
- *   while Uno is alone; with a team it moves to the Team block of the pages.
+ * - The pencil on hover starts a new chat with it; its face opens its page.
+ * - "+" next to the "Assistants" header (Misha 23.10) is always there with
+ *   the team: one click makes an assistant and opens its page
+ *   (`useQuickCreateAssistant.tsx`) — no dialog.
  *
- * The release (0.0.139, Misha 16.10) has Uno alone: no "New assistant", the
- * face opens Uno's page under Assistants, the first click introduces Uno
- * (`TEAM_SHOWN` in useAssistantTeam.ts — the team is the mock's). The whole
- * block is behind Labs "Uno's chats in the sidebar" (Sidebar.tsx).
+ * Without the assistants update on the account (`useTeamShown`) it is Uno
+ * alone: no "New assistant", the face opens Uno's page under Assistants, the
+ * first click introduces Uno. With it (22.10) — the team, as the daemon keeps
+ * it. Without the team the block is behind Labs "Uno's chats in the sidebar"
+ * (Sidebar.tsx).
  */
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRightIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import { ChevronRightIcon, LoaderCircleIcon, PlusIcon, SquarePenIcon } from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
 import { create } from "zustand";
 
@@ -28,7 +30,7 @@ import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { SidebarThreadSummary } from "../../types";
-import { AssistantAvatar } from "../assistants/AssistantAvatar";
+import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import {
   AssistantOnboardingDialog,
   useAssistantOnboarding,
@@ -38,10 +40,12 @@ import {
   latestConversation,
   previewChats,
 } from "../assistants/assistantTeam.logic";
-import { TEAM_SHOWN, type TeamMember, useAssistantTeam } from "../assistants/useAssistantTeam";
+import { useQuickCreateAssistant } from "../assistants/useQuickCreateAssistant";
+import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { assistantsHeaderState } from "./sidebarAssistants.logic";
 import { sidebarDPanel } from "./sidebarDState";
 
 const OPEN_KEY = "sidebar:assistants-open:v1";
@@ -127,6 +131,7 @@ const AssistantRow = memo(function AssistantRow(props: {
   // Uno's main chat (the one Telegram and Slack talk to) is made by the daemon.
   const assistantChat = useAssistantChat();
   const openSetup = useAssistantOnboarding((state) => state.openFor);
+  const teamShown = useTeamShown();
   const { isMobile, setOpenMobile } = useSidebar();
   const [showAll, setShowAll] = useState(false);
 
@@ -176,9 +181,9 @@ const AssistantRow = memo(function AssistantRow(props: {
   };
   const openPage = () => {
     leave();
-    // The team's page is the mock's; the release opens Uno's page under Assistants.
+    // Without the team: Uno's page under Assistants.
     void navigate(
-      TEAM_SHOWN
+      teamShown
         ? {
             to: "/assistants",
             search: { view: "profile", env: member.environmentId, project: member.projectId },
@@ -215,6 +220,7 @@ const AssistantRow = memo(function AssistantRow(props: {
           >
             <AssistantAvatar
               emoji={member.profile.emoji}
+              image={avatarImageOf(member.profile)}
               tone={member.profile.tone}
               activity={member.configured ? member.activity : null}
             />
@@ -324,13 +330,47 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
 }) {
   const team = useAssistantTeam();
+  const teamShown = useTeamShown();
   const unfolded = useUnfoldedStore((state) => state.keys);
   const setUnfolded = useUnfoldedStore((state) => state.set);
-  const openNew = useAssistantOnboarding((state) => state.openNew);
+  const quick = useQuickCreateAssistant();
   const live = team.filter((member) => !member.revoked);
+  const header = assistantsHeaderState({ teamShown });
 
   return (
     <li className="list-none pb-1" data-testid="sidebar-assistants">
+      {header.showHeader ? (
+        <div
+          className="flex h-6 items-center justify-between pr-1 pl-2.5"
+          data-testid="sidebar-assistants-header"
+        >
+          <span className="text-xs font-medium text-sidebar-muted-foreground/70">Assistants</span>
+          {header.showCreate ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="New assistant"
+                    disabled={quick.creating || !quick.available}
+                    onClick={() => void quick.create()}
+                    data-testid="sidebar-new-assistant"
+                    className="text-muted-foreground hover:text-foreground"
+                  />
+                }
+              >
+                {quick.creating ? (
+                  <LoaderCircleIcon className="size-3.5 animate-spin" />
+                ) : (
+                  <PlusIcon className="size-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="right">New assistant</TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
       <ul role="list" className="flex flex-col gap-px">
         {live.map((member) => (
           <AssistantRow
@@ -343,27 +383,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             renderChat={props.renderChat}
           />
         ))}
-        {/* Critics 16.10: the top of the sidebar is short. "New assistant" has
-            its own row only before there is a team; with one, it is in the
-            Team block of every assistant's page. */}
         {live.length === 0 ? <UnoFallbackRow /> : null}
-        {!TEAM_SHOWN || live.length > 1 ? null : (
-          <li className="list-none">
-            <button
-              type="button"
-              onClick={() => openNew()}
-              data-testid="sidebar-new-assistant"
-              className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left text-xs text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="ml-1 inline-flex size-6 shrink-0 items-center justify-center">
-                <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/40">
-                  <PlusIcon className="size-3" />
-                </span>
-              </span>
-              New assistant
-            </button>
-          </li>
-        )}
       </ul>
       <AssistantOnboardingDialog />
     </li>

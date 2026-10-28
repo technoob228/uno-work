@@ -5,7 +5,7 @@
  */
 import { useNavigate } from "@tanstack/react-router";
 
-import { AssistantAvatar } from "./AssistantAvatar";
+import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { ACTIVITY_LABEL, profileLine } from "./assistantTeam.logic";
 import type { TeamMember } from "./useAssistantTeam";
 
@@ -30,6 +30,7 @@ export function TeammateChatHeadline(props: {
     >
       <AssistantAvatar
         emoji={member.profile.emoji}
+        image={avatarImageOf(member.profile)}
         tone={member.profile.tone}
         activity={member.activity}
         className="size-7 shrink-0"

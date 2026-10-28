@@ -299,6 +299,12 @@ export function TeammateAccess(props: {
   /** Its projects — the skills shown are theirs. */
   readonly projects: "all" | ReadonlyArray<string>;
   readonly className?: string;
+  /**
+   * Only the apps (the level per app is what Work enforces per assistant on
+   * this computer today); the browser, saved logins, keys and skills are
+   * one setting for every assistant here — said in one line instead.
+   */
+  readonly onlyConnectors?: boolean;
 }) {
   const { access, onChange, name, place } = props;
   const navigate = useNavigate();
@@ -538,6 +544,76 @@ export function TeammateAccess(props: {
         }
       />
 
+      {props.onlyConnectors ? (
+        <p
+          className="border-t border-border/70 px-3 py-2 text-xs text-muted-foreground"
+          data-testid="teammate-access-shared-line"
+        >
+          Browser, saved logins, keys and skills are the same for every assistant on{" "}
+          {place.label || "this computer"} for now — limits per assistant come later.
+        </p>
+      ) : (
+        <TeammateAccessMore
+          name={name}
+          access={access}
+          readOnly={readOnly}
+          set={set}
+          place={place}
+          vault={vault}
+          loginNames={loginNames}
+          secretNames={secretNames}
+          skills={skills}
+          personal={personal}
+          vaultWhere={vaultWhere}
+          picksList={picksList}
+          computerBrowser={computerBrowser}
+          projectSkillsLoading={projectSkills.isLoading}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Browser & logins, keys and skills (the mock's per-assistant blocks). */
+function TeammateAccessMore(props: {
+  readonly name: string;
+  readonly access: AssistantAccess;
+  readonly readOnly: boolean;
+  readonly set: (patch: Partial<AssistantAccess>) => void;
+  readonly place: AccessPlace;
+  readonly vault: ReturnType<typeof useVaultEntries>;
+  readonly loginNames: ReadonlyArray<{ id: string; name: string }>;
+  readonly secretNames: ReadonlyArray<{ id: string; name: string }>;
+  readonly skills: ReadonlyArray<{ name: string; project: string; path: string }>;
+  readonly personal: ReadonlyArray<(typeof SETUP_SKILLS)[keyof typeof SETUP_SKILLS]>;
+  readonly vaultWhere: string;
+  readonly picksList: (input: {
+    readonly picks: Picks;
+    readonly entries: ReadonlyArray<CredentialMetadata>;
+    readonly label: (entry: CredentialMetadata) => ReactNode;
+    readonly onChange: (picks: Picks) => void;
+    readonly disabled?: boolean;
+  }) => ReactNode;
+  readonly computerBrowser: unknown;
+  readonly projectSkillsLoading: boolean;
+}) {
+  const {
+    name,
+    access,
+    readOnly,
+    set,
+    place,
+    vault,
+    loginNames,
+    secretNames,
+    skills,
+    personal,
+    vaultWhere,
+    picksList,
+    computerBrowser,
+  } = props;
+  return (
+    <>
       {/* Browser & logins */}
       <Block
         testId="teammate-access-browser"
@@ -804,6 +880,6 @@ export function TeammateAccess(props: {
           </>
         }
       />
-    </div>
+    </>
   );
 }

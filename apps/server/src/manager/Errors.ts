@@ -90,8 +90,24 @@ export class ManagerExecutionError extends Schema.TaggedErrorClass<ManagerExecut
   }
 }
 
+/**
+ * The assistant's preset (Full / Helper / Observer) doesn't allow this. The
+ * message is written for the model: what it may do instead.
+ */
+export class ManagerPresetDeniedError extends Schema.TaggedErrorClass<ManagerPresetDeniedError>()(
+  "ManagerPresetDeniedError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export type ManagerToolError =
   | ManagerScopeDeniedError
+  | ManagerPresetDeniedError
   | ManagerProjectNotAllowedError
   | ManagerNotFoundError
   | ManagerInvalidRequestError

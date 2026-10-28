@@ -172,9 +172,10 @@ export function toggleQuizPick(
 
 const TEMPLATES: ReadonlyArray<AssistantTemplateId> = [
   "personal",
-  "marketing",
-  "security",
-  "support",
+  "finance",
+  "sales",
+  "dev",
+  "youtube",
 ];
 
 /**

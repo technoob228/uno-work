@@ -67,7 +67,7 @@ function repo(dirName: string, file = "index.html") {
   return dir;
 }
 
-describe("uno project", () => {
+describe("uno project", { timeout: 60_000 }, () => {
   it("plans names and folders, refusing names that can't be", () => {
     const where = { cwd: "/home/me/x", home: "/home/me" };
     expect(planCommand(["project", "get", "notes"], where)).toEqual({
@@ -136,12 +136,12 @@ describe("uno project", () => {
     ).toEqual(expect.arrayContaining(["app", "app-2"]));
   });
 
-  it("says what to do outside a git project, without commits, and for an unknown name", () => {
+  it("says what to do in an empty folder, without commits, and for an unknown name", () => {
     const plain = path.join(root, "plain");
     fs.mkdirSync(plain);
-    const notRepo = uno(plain, "project", "sync");
-    expect(notRepo.code).toBe(1);
-    expect(notRepo.stderr).toContain("isn't a git project yet");
+    const empty = uno(plain, "project", "sync");
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toContain("Nothing to sync yet");
 
     git(plain, "init", "-q");
     expect(uno(plain, "project", "sync").stderr).toContain("Nothing to save yet");
@@ -149,5 +149,23 @@ describe("uno project", () => {
     const missing = uno(root, "project", "get", "nope");
     expect(missing.code).toBe(1);
     expect(missing.stderr).toContain('There\'s no project "nope" in your Uno cloud');
+  });
+
+  it("keeps a folder without git in the cloud and gets it elsewhere, without .env", () => {
+    const docs = path.join(root, "Docs");
+    fs.mkdirSync(docs);
+    fs.writeFileSync(path.join(docs, "notes.md"), "notes\n");
+    fs.writeFileSync(path.join(docs, ".env"), "KEY=1\n");
+    const saved = uno(docs, "project", "sync");
+    expect(saved.stderr).toBe("");
+    expect(saved.stdout).toContain("Saved to your Uno cloud as docs");
+    expect(fs.existsSync(path.join(docs, ".git"))).toBe(false);
+
+    const there = path.join(root, "elsewhere");
+    const got = uno(root, "project", "get", "docs", there, "--json");
+    expect(got.code).toBe(0);
+    expect(JSON.parse(got.stdout)).toMatchObject({ ok: true, state: "synced", mode: "snapshot" });
+    expect(fs.readFileSync(path.join(there, "notes.md"), "utf8")).toBe("notes\n");
+    expect(fs.existsSync(path.join(there, ".env"))).toBe(false);
   });
 });

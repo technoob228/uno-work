@@ -41,8 +41,8 @@ describe("assistant quiz", () => {
     const plan = planFromHermes({
       name: "Uno",
       emoji: "💬",
-      template: "support",
-      phrase: "Your assistant will answer your customers in Telegram.",
+      template: "sales",
+      phrase: "Your assistant will answer your leads in Telegram.",
       job: "Reply to people (Telegram)",
       connectors: { gmail: "write", github: "bogus" },
       schedule: { label: "Every morning", cron: "0 9 * * *" },
@@ -57,7 +57,7 @@ describe("assistant quiz", () => {
       never: ["Pay for anything", "Publish anything without asking first"],
       instructions: "## How I work (set up in the Uno interview)\n- Language: English.",
     });
-    expect(plan.template).toBe("support");
+    expect(plan.template).toBe("sales");
     expect(plan.connectors).toEqual({
       gmail: "write",
       "google-drive": "none",

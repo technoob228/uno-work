@@ -11,6 +11,7 @@ import { RemindersRepositoryLive } from "../persistence/Layers/Reminders.ts";
 import { AssistantBootstrapLive, ManagerAssistantServiceLive } from "./Layers/AssistantService.ts";
 import { ManagerAssistantLlmLive } from "./Layers/AssistantLlmService.ts";
 import { ManagerAccountDefaultAiLive } from "./Layers/AccountDefaultAi.ts";
+import { AssistantPushServiceLive } from "./Layers/AssistantPush.ts";
 import { ConnectorEventsForwarderLive } from "./Layers/ConnectorEventsForwarder.ts";
 import { ConnectorNotifyServiceLive } from "./Layers/ConnectorNotify.ts";
 import { TaskDoneNotifyLive } from "./Layers/TaskDoneNotify.ts";
@@ -56,6 +57,10 @@ export const ManagerLayerLive = Layer.mergeAll(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.
   Layer.provideMerge(ManagerAssistantServiceLive),
+  // "Your thread is done" for assistants: watches the chats they hand work
+  // to and reports back into their conversations (through Telegram / Slack
+  // below). The tools and the forwarder above read it.
+  Layer.provideMerge(AssistantPushServiceLive),
   // Outbound channel (HTTP notify + forwarder) on top of the Telegram sender.
   Layer.provideMerge(ConnectorNotifyServiceLive),
   Layer.provideMerge(ManagerTelegramServiceLive),

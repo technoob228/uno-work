@@ -1,4 +1,5 @@
 import { ManagerTokenId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { parseUnoWorkNote } from "@t3tools/shared/secretRequestCopy";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -170,6 +171,12 @@ describe("scheduled assistant turn", () => {
     expect(text.endsWith("Collect mentions")).toBe(true);
     expect(isNoReply(" no_reply. ")).toBe(true);
     expect(isNoReply("No reply needed, all good")).toBe(false);
+  });
+
+  it("the client shows the prompt as a scheduled-task line, not the person's message", () => {
+    expect(
+      parseUnoWorkNote(wrapScheduledPrompt({ name: "Digest", prompt: "Collect mentions" })),
+    ).toEqual({ kind: "scheduled-task", text: "Scheduled task “Digest”: Collect mentions" });
   });
 
   it("runs in the main conversation and delivers the answer to the person's chats", async () => {

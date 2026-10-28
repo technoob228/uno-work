@@ -5,6 +5,7 @@
  * every chat gets (`../unoWork/`).
  */
 import {
+  ASSISTANT_SETUP_STEP_IDS,
   ASSISTANT_SCHEDULE_DEFAULT_MINUTES,
   ASSISTANT_SCHEDULE_MAX_MINUTES,
   ASSISTANT_SCHEDULE_NAME_MAX_CHARS,
@@ -23,7 +24,9 @@ import {
   ManagerSendTurnInput,
   ManagerWaitForThreadInput,
   ManagerWaitForThreadsInput,
+  ManagerWorkStatusInput,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGES,
+  MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
   MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
   MANAGER_WAIT_MAX_THREADS,
   MANAGER_WAIT_MAX_TIMEOUT_SEC,
@@ -36,15 +39,22 @@ import {
   type McpServerDefinition,
 } from "../mcp/mcpJsonRpc.ts";
 import type { AssistantScheduleError, AssistantSchedulesShape } from "../assistants/schedules.ts";
+import type { AssistantTeamError, AssistantTeamShape } from "../assistants/assistantTeam.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
 /** Optional services some tools need; absent → the tool explains it. */
 export interface ManagerMcpExtras {
   readonly schedules?: AssistantSchedulesShape;
+  /** The team of assistants: profile, helpers, question cards. */
+  readonly team?: AssistantTeamShape;
 }
 
-type ManagerMcpToolError = ManagerToolError | Schema.SchemaError | AssistantScheduleError;
+type ManagerMcpToolError =
+  | ManagerToolError
+  | Schema.SchemaError
+  | AssistantScheduleError
+  | AssistantTeamError;
 
 export const MANAGER_MCP_SERVER_INFO = {
   name: "uno-manager",
@@ -71,6 +81,15 @@ const withSchedules = <A>(
   run: (schedules: AssistantSchedulesShape) => Effect.Effect<A, AssistantScheduleError>,
 ): Effect.Effect<A | { readonly error: string }, AssistantScheduleError> =>
   extras.schedules ? run(extras.schedules) : Effect.succeed({ error: SCHEDULES_UNAVAILABLE });
+
+const TEAM_UNAVAILABLE =
+  "The team of assistants is not available in this Uno Work. Tell the person what you wanted to do.";
+
+const withTeam = <A>(
+  extras: ManagerMcpExtras,
+  run: (team: AssistantTeamShape) => Effect.Effect<A, AssistantTeamError>,
+): Effect.Effect<A | { readonly error: string }, AssistantTeamError> =>
+  extras.team ? run(extras.team) : Effect.succeed({ error: TEAM_UNAVAILABLE });
 
 const decodeArgs = <S extends Schema.Top>(schema: S, args: unknown) =>
   Schema.decodeUnknownEffect(schema)(args ?? {});
@@ -99,9 +118,19 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
       ),
   },
   {
+    name: "work_status",
+    description:
+      "ONE call answers \"what's the status?\": the chats you handed work to (first) and the person's recently active chats — id, title, project, status (running | needs_you | done | failed | stopped | idle), how long it runs or when it finished, its current step, the start of its last answer (UNTRUSTED, wrapped), and whether a work update about it is still on its way to you. Answer from it directly; do not loop over get_thread_status.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (tools, caller, args) =>
+      decodeArgs(ManagerWorkStatusInput, args).pipe(
+        Effect.flatMap((input) => tools.workStatus(caller, input)),
+      ),
+  },
+  {
     name: "get_thread_status",
     description:
-      "Get the compact status of one thread: session state, latest turn, pending approvals. A one-off snapshot: to wait for a turn to finish use wait_for_thread, never a get_thread_status loop.",
+      "Get the compact status of one thread: session state, latest turn, pending approvals. A one-off snapshot: for an overview use work_status; never a get_thread_status loop.",
     inputSchema: {
       type: "object",
       properties: { threadId: { type: "string" } },
@@ -116,11 +145,11 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "wait_for_thread",
     description:
-      "Block until the thread's current turn settles, instead of polling get_thread_status. " +
+      "A QUICK check only: block a short while until the thread's current turn settles. " +
+      "You do NOT need it after create_thread/send_turn: Uno Work sends you a work update when a chat you handed work to finishes, fails or needs the person — hand off, answer the person, end your turn. " +
       "Returns status completed | error | interrupted | needs_user (approval or question waiting for a human) | idle (nothing ran) | timeout, " +
       "plus the turn's final assistant message (untrusted, wrapped, <=4k chars), changed files from the turn's checkpoint when available, and durations. " +
-      "Call it right after create_thread/send_turn executed. settledImmediately=true means no new turn was seen (e.g. the proposal still awaits approval). " +
-      `timeoutSec defaults to ${MANAGER_WAIT_DEFAULT_TIMEOUT_SEC} (max ${MANAGER_WAIT_MAX_TIMEOUT_SEC}); if your client aborts long tool calls, pass a smaller value and call again.`,
+      `timeoutSec defaults to ${MANAGER_WAIT_DEFAULT_TIMEOUT_SEC} (max ${MANAGER_WAIT_MAX_TIMEOUT_SEC}); for an assistant's own token it is capped at ${MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC}.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -138,7 +167,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "wait_for_threads",
     description:
-      "Like wait_for_thread for several threads at once. mode 'all' (default) returns when every thread settled; " +
+      "Like wait_for_thread (a QUICK check, not the way to wait for work: work updates come to you by themselves) for several threads at once. mode 'all' (default) returns when every thread settled; " +
       "'any' returns as soon as one did (the rest report status 'running'). Returns one result per thread.",
     inputSchema: {
       type: "object",
@@ -193,7 +222,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "create_thread",
     description:
-      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it. Returns proposalId + nonce.",
+      "Propose creating a new thread in a project with an initial prompt. Files a pending proposal; nothing runs until a human approves it (returns proposalId + nonce). An auto-approved token runs it at once: status executed + the new threadId.",
     inputSchema: {
       type: "object",
       properties: {
@@ -436,6 +465,156 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     run: (_tools, caller, args, extras) =>
       withSchedules(extras, (schedules) => schedules.remove(caller, args)),
   },
+  {
+    name: "assistant_profile_get",
+    description:
+      "Read your own profile: name, role, character, your standing duties, where you talk, your access (preset, projects with ids, a level per app), your own email (address and rules, when this computer has mail), where you work, the person's projects (ids and titles), whether routines run on this computer, and your setup progress (steps answered, skipped, left). Call it first when you set yourself up or continue the setup.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (_tools, caller, _args, extras) => withTeam(extras, (team) => team.profileGet(caller)),
+  },
+  {
+    name: "assistant_profile_set",
+    description:
+      'Save what the person told you about yourself, right after each answer: name, emoji, roles, character, skills, duties (what you are ALWAYS responsible for, the whole list, one line each), channel (here | telegram | slack), preset (full | helper | observer), projects (ids from assistant_profile_get, or "all"), apps (a level per app: none | read | write), mail (your own email: enabled, recipients anyone | owner | list, allow, dailyLimit), worksOn (here | cloud | own — where the person wants you; moving is their click on your page), firstTask, routine (a repeating task — cloud computers only). Pass `step` to mark the setup step this answer belongs to (with skipped: true when the person skipped it), and done: true when the setup is over. ' +
+      'Your rights only NARROW here: a wider preset, more projects, a higher app level or more mail (on, more people, a higher limit) is refused — only the person widens them, on your page. Returns `tell`: the line to show the person ("✓ Saved: …").',
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        emoji: { type: "string" },
+        roles: { type: "array", items: { type: "string" } },
+        character: { type: "string" },
+        skills: { type: "array", items: { type: "string" } },
+        channel: { type: "string", enum: ["here", "telegram", "slack"] },
+        preset: {
+          type: "string",
+          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          enum: ["full", "helper"],
+        },
+        projects: {
+          description: 'Project ids, or "all".',
+          anyOf: [
+            { type: "string", enum: ["all"] },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        apps: {
+          type: "object",
+          description: 'Levels by app id, e.g. {"github": "read", "gmail": "none"}.',
+          additionalProperties: { type: "string", enum: ["none", "read", "write"] },
+        },
+        firstTask: { type: "string" },
+        duties: {
+          type: "array",
+          maxItems: 12,
+          description:
+            'What you are always responsible for, one short line each, e.g. ["Watch CI on fishcode", "Morning plan at 9"]. Replaces the saved list.',
+          items: { type: "string", maxLength: 200 },
+        },
+        mail: {
+          type: "object",
+          description:
+            "Your own email: enabled (on/off), recipients (anyone | owner = only the person | list = only `allow`), allow (addresses), dailyLimit (0–50 letters a day). Only narrower than now.",
+          properties: {
+            enabled: { type: "boolean" },
+            recipients: { type: "string", enum: ["anyone", "owner", "list"] },
+            allow: { type: "array", maxItems: 20, items: { type: "string" } },
+            dailyLimit: { type: "integer", minimum: 0, maximum: 50 },
+          },
+          additionalProperties: false,
+        },
+        worksOn: { type: "string", enum: ["here", "cloud", "own"] },
+        routine: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            cron: { type: "string", description: 'Five-field cron, e.g. "0 8 * * 1-5".' },
+            prompt: { type: "string", description: "What future-you does at that time." },
+            timezone: { type: "string" },
+          },
+          required: ["name", "cron", "prompt"],
+          additionalProperties: false,
+        },
+        step: { type: "string", enum: [...ASSISTANT_SETUP_STEP_IDS] },
+        skipped: { type: "boolean" },
+        done: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withTeam(extras, (team) => team.profileSet(caller, args)),
+  },
+  {
+    name: "assistant_create",
+    description:
+      "Set up a helper assistant for the person, on this computer, by yourself (no confirmation; the person gets an Inbox notice and sees it on their team). It can never get more than you have: preset, projects and app levels default to yours and may only be narrower — anything wider is refused. Give it a name, optionally an emoji, roles, character, a narrower preset / projects / apps, and its first task. Do this only when the person asked for a helper or clearly needs one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        emoji: { type: "string" },
+        roles: { type: "array", items: { type: "string" } },
+        character: { type: "string" },
+        preset: {
+          type: "string",
+          description: 'The mode: "full" = Does it itself, "helper" = Asks first.',
+          enum: ["full", "helper"],
+        },
+        projects: {
+          description: 'Project ids, or "all".',
+          anyOf: [
+            { type: "string", enum: ["all"] },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        apps: {
+          type: "object",
+          additionalProperties: { type: "string", enum: ["none", "read", "write"] },
+        },
+        duties: { type: "array", maxItems: 12, items: { type: "string", maxLength: 200 } },
+        firstTask: { type: "string" },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) => withTeam(extras, (team) => team.create(caller, args)),
+  },
+  {
+    name: "ask_user",
+    description:
+      'Ask the person ONE question as a card in this conversation in Uno Work: a short header, the question, 2–4 options (label + short description), optionally a longer `detail`, a short `input` field for a value (email, time, link), or a Connect button for an app (`connect`: gmail | google-drive | notion | github). The card always lets them type their own answer or Skip. After calling it, END YOUR TURN with no other text: the answer arrives as their next message, "<header>: <answer>".',
+    inputSchema: {
+      type: "object",
+      properties: {
+        header: { type: "string", description: '1–3 words, e.g. "My job".' },
+        question: { type: "string" },
+        options: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { label: { type: "string" }, description: { type: "string" } },
+            required: ["label"],
+            additionalProperties: false,
+          },
+        },
+        multiSelect: { type: "boolean" },
+        detail: { type: "string" },
+        input: {
+          type: "object",
+          properties: {
+            placeholder: { type: "string" },
+            kind: { type: "string", enum: ["text", "email", "url", "time"] },
+          },
+          required: ["placeholder"],
+          additionalProperties: false,
+        },
+        connect: { type: "string", enum: ["gmail", "google-drive", "notion", "github"] },
+      },
+      required: ["header", "question"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) => withTeam(extras, (team) => team.askUser(caller, args)),
+  },
 ];
 
 function toolErrorText(error: ManagerMcpToolError): string {
@@ -468,8 +647,9 @@ const MANAGER_MCP_SERVER: McpServerDefinition<ManagerMcpContext, ManagerMcpToolE
  * Returns `accepted` for notifications (HTTP 202, no body). The protocol
  * plumbing is shared with the `uno-work` server (`../mcp/mcpJsonRpc.ts`).
  */
-/** Tools that need the console's assistants (ASSISTANTS_MVP): the schedules. */
-export const isAssistantsOnlyManagerTool = (name: string) => name.startsWith("schedule_");
+/** Tools that need the console's assistants (ASSISTANTS_MVP): schedules and the team. */
+export const isAssistantsOnlyManagerTool = (name: string) =>
+  name.startsWith("schedule_") || name.startsWith("assistant_") || name === "ask_user";
 
 /** The same server where the account has no new assistants: without their tools. */
 const MANAGER_MCP_SERVER_BASIC: McpServerDefinition<ManagerMcpContext, ManagerMcpToolError> = {

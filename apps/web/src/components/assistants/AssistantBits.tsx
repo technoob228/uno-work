@@ -65,13 +65,18 @@ export function LevelPicker({
   value,
   onChange,
   disabled,
+  max,
   testId,
 }: {
   value: ConnectorLevel;
   onChange: (level: ConnectorLevel) => void;
   disabled?: boolean;
+  /** Levels above it can't be picked (the assistant's preset caps them). */
+  max?: ConnectorLevel;
   testId?: string;
 }) {
+  const allowed = (level: ConnectorLevel) =>
+    max === undefined || CONNECTOR_LEVELS.indexOf(level) <= CONNECTOR_LEVELS.indexOf(max);
   return (
     <div
       role="radiogroup"
@@ -84,7 +89,7 @@ export function LevelPicker({
           type="button"
           role="radio"
           aria-checked={value === level}
-          disabled={disabled}
+          disabled={disabled || !allowed(level)}
           onClick={() => onChange(level)}
           className={cn(
             "cursor-pointer rounded-md px-2 py-1 text-xs whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-60",

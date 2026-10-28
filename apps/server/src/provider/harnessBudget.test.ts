@@ -12,6 +12,7 @@ describe("resolveHarnessBudget", () => {
   it("is strict on a 2 GB Work computer", () => {
     const budget = resolveHarnessBudget({ totalMemoryBytes: 2 * GIB, env: {} });
     expect(budget.inactivityThresholdMs).toBe(5 * 60_000);
+    expect(budget.assistantInactivityThresholdMs).toBe(15 * 60_000);
     expect(budget.sweepIntervalMs).toBe(60_000);
     expect(budget.maxLiveProcesses).toBe(3);
     expect(budget.shareOpenCodeServer).toBe(true);
@@ -21,6 +22,7 @@ describe("resolveHarnessBudget", () => {
     expect(resolveHarnessBudget({ totalMemoryBytes: 4 * GIB, env: {} }).maxLiveProcesses).toBe(3);
     const roomy = resolveHarnessBudget({ totalMemoryBytes: 16 * GIB, env: {} });
     expect(roomy.inactivityThresholdMs).toBe(15 * 60_000);
+    expect(roomy.assistantInactivityThresholdMs).toBe(60 * 60_000);
     expect(roomy.sweepIntervalMs).toBe(3 * 60_000);
     expect(roomy.maxLiveProcesses).toBeNull();
   });
@@ -35,6 +37,14 @@ describe("resolveHarnessBudget", () => {
       },
     });
     expect(budget.inactivityThresholdMs).toBe(15_000);
+    // The assistant's own default stands unless it is overridden too.
+    expect(budget.assistantInactivityThresholdMs).toBe(15 * 60_000);
+    expect(
+      resolveHarnessBudget({
+        totalMemoryBytes: 16 * GIB,
+        env: { UNO_WORK_HARNESS_IDLE_MINUTES: "30", UNO_WORK_ASSISTANT_IDLE_MINUTES: "10" },
+      }).assistantInactivityThresholdMs,
+    ).toBe(30 * 60_000);
     expect(budget.sweepIntervalMs).toBe(30_000);
     expect(budget.maxLiveProcesses).toBeNull();
     expect(budget.shareOpenCodeServer).toBe(false);

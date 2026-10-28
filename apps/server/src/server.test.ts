@@ -113,6 +113,7 @@ import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegist
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
+import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import {
   BrowserTraceCollector,
@@ -142,6 +143,8 @@ import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
 import { GithubAccountService } from "./setupTools/GithubAccountService.ts";
+import { AgentMailService, type AgentMailServiceShape } from "./setupTools/AgentMailService.ts";
+import { ConnectorsError } from "./setupTools/connectors.ts";
 import { MaterialsService, type MaterialsServiceShape } from "./setupTools/MaterialsService.ts";
 import { AssistantDraftService } from "./setupTools/AssistantDraftService.ts";
 import { InboxService, type InboxServiceShape } from "./inbox/InboxService.ts";
@@ -407,6 +410,7 @@ const buildAppUnderTest = (options?: {
     managerTokenAuth?: Partial<ManagerTokenAuthService["Service"]>;
     serverBrowser?: Partial<ServerBrowserShape>;
     connectors?: Partial<ConnectorsServiceShape>;
+    agentMail?: Partial<AgentMailServiceShape>;
     materials?: Partial<MaterialsServiceShape>;
   };
 }) =>
@@ -617,6 +621,18 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
+        Layer.mock(ProjectSyncService)({
+          status: Effect.succeed({
+            available: false,
+            unavailableReason: null,
+            projects: [],
+            elsewhere: [],
+          }),
+          opened: () => Effect.void,
+          secretWritten: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
         Layer.mock(Open)({
           ...options?.layers?.open,
         }),
@@ -716,6 +732,10 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.connectors,
           }),
           Layer.mock(GithubAccountService)({}),
+          Layer.mock(AgentMailService)({
+            status: Effect.succeed({ available: false, reason: "not_enabled", mailbox: null }),
+            ...options?.layers?.agentMail,
+          }),
           Layer.mock(MaterialsService)({
             get: () => Effect.succeed(null),
             ...options?.layers?.materials,
@@ -1457,6 +1477,67 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const probed = (yield* probe.json) as { ok: boolean; error: string | null };
       assert.isFalse(probed.ok);
       assert.include(probed.error ?? "", "http");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves Email for your AI (address and rename) to owner sessions only", () =>
+    Effect.gen(function* () {
+      const renamed: string[] = [];
+      yield* buildAppUnderTest({
+        layers: {
+          agentMail: {
+            status: Effect.succeed({
+              available: true,
+              reason: null,
+              mailbox: {
+                address: "misha-otter@uno4.me",
+                local: "misha-otter",
+                createdAt: "2026-10-20T10:00:00Z",
+                dailyLimit: 50,
+                sentToday: 2,
+              },
+            }),
+            changeAddress: (local) => {
+              renamed.push(local);
+              return local === "taken-name"
+                ? Effect.fail(
+                    new ConnectorsError(409, "taken", "This name is taken. Try another one."),
+                  )
+                : Effect.succeed({ address: `${local}@uno4.me` });
+            },
+          },
+        },
+      });
+
+      assert.equal((yield* HttpClient.get("/api/manager/mail")).status, 401);
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const state = yield* HttpClient.get("/api/manager/mail", {
+        headers: { cookie: ownerCookie },
+      });
+      assert.equal(state.status, 200);
+      assert.equal(
+        ((yield* state.json) as { mailbox: { address: string } }).mailbox.address,
+        "misha-otter@uno4.me",
+      );
+
+      const rename = (body: unknown, cookie: string | null = ownerCookie) =>
+        HttpClient.put("/api/manager/mail/address", {
+          headers: cookie ? { cookie } : {},
+          body: HttpBody.text(JSON.stringify(body), "application/json"),
+        });
+      assert.equal((yield* rename({ local: "misha-agent" }, null)).status, 401);
+      const done = yield* rename({ local: " Misha-Agent " });
+      assert.equal(done.status, 200);
+      assert.deepEqual(yield* done.json, { address: "misha-agent@uno4.me" });
+      assert.deepEqual(renamed, ["misha-agent"]);
+
+      const taken = yield* rename({ local: "taken-name" });
+      assert.equal(taken.status, 409);
+      assert.deepEqual(yield* taken.json, {
+        error: "This name is taken. Try another one.",
+        code: "taken",
+      });
+      assert.equal((yield* rename({ name: "x" })).status, 400);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

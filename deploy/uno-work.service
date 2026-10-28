@@ -54,7 +54,11 @@ OOMPolicy=continue
 # deliberately narrow: protect the OS, not the workspace.
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectKernelTunables=true
+# Off for the assistant sandbox: bubblewrap mounts a fresh /proc for a
+# restricted assistant's agent, and the read-only overmounts this option puts
+# on /proc make the kernel refuse that mount. The daemon is not root, so
+# /proc/sys stays read-only to it either way.
+ProtectKernelTunables=false
 ProtectKernelModules=true
 ProtectControlGroups=true
 PrivateTmp=true

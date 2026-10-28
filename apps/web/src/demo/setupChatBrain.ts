@@ -87,10 +87,10 @@ const q = (question: Omit<SetupQuestion, "skippable">): SetupQuestion => ({
 
 const ROLE_REACTION: Readonly<Record<string, string>> = {
   "Personal assistant": "I'll keep your day tidy.",
-  Developer: "Green CI is my happy place.",
-  Marketing: "Competitors are my favorite reading.",
-  Ops: "I like quiet servers.",
-  Security: "I'll keep an eye on the doors.",
+  Finance: "Receipts in rows — my kind of calm.",
+  Sales: "Nobody waits for an answer on my watch.",
+  Dev: "Green CI is my happy place.",
+  "YouTube & content": "Ideas are my favorite reading.",
 };
 
 const TONE_REACTION: Readonly<Record<string, string>> = {
@@ -110,7 +110,7 @@ const STEPS: ReadonlyArray<Step> = [
         id: "role",
         header: "My job",
         question: "First — what should I take off your plate?",
-        options: ROLE_CHIPS.filter((role) => role !== "Security").map((role) => opt(role)),
+        options: ROLE_CHIPS.slice(0, 4).map((role) => opt(role)),
       }),
     apply: (answer) => {
       const known = (ROLE_CHIPS as ReadonlyArray<string>).includes(answer);
@@ -442,9 +442,9 @@ const STEPS: ReadonlyArray<Step> = [
         header: "First task",
         question: "Last one — what's my first task?",
         input: {
-          placeholder: profile.roles.includes("Marketing")
-            ? "Every Monday: what competitors shipped last week"
-            : profile.roles.includes("Developer")
+          placeholder: profile.roles.includes("YouTube & content")
+            ? "Every Monday: three video ideas from what's trending"
+            : profile.roles.includes("Dev")
               ? "Keep CI green on fishcode and tell me what broke"
               : "Every morning at 8: what's running, what needs me",
         },

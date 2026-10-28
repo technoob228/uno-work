@@ -1,19 +1,28 @@
 /**
  * The person's assistants as the sidebar and their pages show them: every
  * assistant folder (`assistant-*`) on the computers this app knows, joined
- * with its profile (`assistantTeamStore.ts`) and its chats.
+ * with its profile and its chats. The profile is the daemon's (its token,
+ * app levels and team record, `teamFromDaemon.logic.ts`); the mock
+ * (`?demo=w0138`) keeps its own in this browser (`assistantTeamStore.ts`).
  *
  * A folder without a profile is an assistant set up before the team existed
  * (Uno on every computer, "New assistant" from 0.0.106): it shows with what
  * the folder says — and if nobody ever talked to it, the first click on it
  * starts the setup instead of an empty chat.
  */
-import { ASSISTANT_PROJECT_ID, isAssistantProjectId } from "@t3tools/contracts";
+import {
+  ASSISTANT_PROJECT_ID,
+  type EnvironmentId,
+  isAssistantProjectId,
+  type ManagerAssistantSummary,
+} from "@t3tools/contracts";
+import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { DEMO } from "../../demo/demoFlag";
 import { useMachineLabels } from "../../hooks/useMachineRows";
+import { listAssistants } from "../../lib/managerApi";
 import { toSortableTimestamp } from "../../lib/threadSort";
 import {
   selectProjectsAcrossEnvironments,
@@ -33,6 +42,8 @@ import {
   chatsOfAssistant,
 } from "./assistantTeam.logic";
 import { useAssistantTeamStore } from "./assistantTeamStore";
+import { isConfigured, profileFromDaemon } from "./teamFromDaemon.logic";
+import { LOCAL_ASSISTANTS_KEY, useAssistantsAvailability } from "./useAssistants";
 
 export interface TeamMember {
   readonly key: AssistantKey;
@@ -41,6 +52,8 @@ export interface TeamMember {
   /** Uno — the computer's default assistant. */
   readonly isUno: boolean;
   readonly profile: AssistantProfile;
+  /** What its daemon says (null in the mock, or before the first answer). */
+  readonly summary: ManagerAssistantSummary | null;
   readonly createdBy: AssistantKey | null;
   /** The setup was done (or it was already in use before the setup existed). */
   readonly configured: boolean;
@@ -90,17 +103,79 @@ function fallbackProfile(
 const ORDER = (member: TeamMember) => (member.isUno ? 0 : 1);
 
 /**
- * Whether the team of assistants (Builder, Scout, "New assistant", their pages,
- * access and Activity) is shown: only in the mock for now (Misha 16.10).
+ * Whether the team of assistants (its block in the sidebar, "New assistant",
+ * their pages, access and Activity) is shown: for an account with the
+ * assistants update (`assistants_mvp`, 22.10), and in the mock.
  */
-export const TEAM_SHOWN: boolean = DEMO;
+export function useTeamShown(): boolean {
+  const availability = useAssistantsAvailability();
+  return DEMO || availability === "on";
+}
+
+/** The daemon's list of assistants, per computer. */
+export const TEAM_SUMMARIES_KEY = [...LOCAL_ASSISTANTS_KEY, "team"] as const;
+
+type SummariesResult = UseQueryResult<ReadonlyArray<ManagerAssistantSummary>>;
+const summariesData = (results: ReadonlyArray<SummariesResult>) =>
+  results.map((result) => result.data ?? null);
 
 /** Every assistant, Uno first, then in the order they were set up. Without the team — Uno only. */
-export function useAssistantTeam(teamShown: boolean = TEAM_SHOWN): ReadonlyArray<TeamMember> {
+export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<TeamMember> {
+  const shownByAccount = useTeamShown();
+  const teamShown = teamShownOverride ?? shownByAccount;
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
-  const profiles = useAssistantTeamStore((state) => state.profiles);
+  const storeProfiles = useAssistantTeamStore((state) => state.profiles);
   const labels = useMachineLabels();
+  // Outside the mock the team is what each computer's daemon keeps.
+  const fromDaemon = teamShown && !DEMO;
+  const environmentIds = useMemo(
+    () =>
+      fromDaemon
+        ? [
+            ...new Set(
+              projects
+                .filter((project) => isAssistantProjectId(project.id))
+                .map((project) => project.environmentId),
+            ),
+          ].toSorted()
+        : [],
+    [fromDaemon, projects],
+  );
+  const summaryLists = useQueries({
+    queries: environmentIds.map((environmentId) => ({
+      queryKey: [...TEAM_SUMMARIES_KEY, environmentId],
+      queryFn: async () =>
+        (await listAssistants({ environmentId: environmentId as EnvironmentId })).assistants,
+      refetchInterval: 15_000,
+      staleTime: 5_000,
+      retry: false,
+    })),
+    combine: summariesData,
+  });
+  const daemon = useMemo(() => {
+    const titles = new Map<string, Map<string, string>>();
+    for (const project of projects) {
+      const map = titles.get(project.environmentId) ?? new Map<string, string>();
+      map.set(project.id, project.name);
+      titles.set(project.environmentId, map);
+    }
+    const summaries = new Map<AssistantKey, ManagerAssistantSummary>();
+    const profiles: Record<AssistantKey, AssistantProfile> = {};
+    environmentIds.forEach((environmentId, index) => {
+      for (const summary of summaryLists[index] ?? []) {
+        const key = assistantKeyOf(environmentId, summary.projectId);
+        summaries.set(key, summary);
+        profiles[key] = profileFromDaemon({
+          environmentId,
+          summary,
+          projectTitles: titles.get(environmentId) ?? new Map(),
+        });
+      }
+    });
+    return { summaries, profiles };
+  }, [environmentIds, projects, summaryLists]);
+  const profiles = fromDaemon ? daemon.profiles : storeProfiles;
 
   return useMemo(() => {
     const members: TeamMember[] = [];
@@ -118,20 +193,25 @@ export function useAssistantTeam(teamShown: boolean = TEAM_SHOWN): ReadonlyArray
         { environmentId: project.environmentId, projectId: project.id },
         threadActivityMs,
       );
+      const summary = fromDaemon ? (daemon.summaries.get(key) ?? null) : null;
+      // The daemon makes Uno's main chat by itself on a fresh computer: outside
+      // the mock "set up" means the setup started, or the person wrote to it.
+      const personWrote = chats.conversations.some((thread) => thread.latestUserMessageAt !== null);
       members.push({
         key,
         environmentId: project.environmentId,
         projectId: project.id,
         isUno: project.id === ASSISTANT_PROJECT_ID,
         profile,
+        summary,
         createdBy: profile.createdBy,
-        // The daemon makes Uno's main chat by itself on a fresh computer: in
-        // the release "set up" means the person has written to it once.
         configured:
           profile.setUpAt !== null ||
-          (teamShown
-            ? chats.conversations.length > 0
-            : chats.conversations.some((thread) => thread.latestUserMessageAt !== null)),
+          (DEMO
+            ? teamShown
+              ? chats.conversations.length > 0
+              : personWrote
+            : isConfigured(summary?.team?.team ?? null, personWrote)),
         revoked: profile.revokedAt !== null,
         computerLabel: labels.get(project.environmentId) ?? "",
         chats,
@@ -155,7 +235,7 @@ export function useAssistantTeam(teamShown: boolean = TEAM_SHOWN): ReadonlyArray
           a.profile.createdAt.localeCompare(b.profile.createdAt) ||
           a.key.localeCompare(b.key),
       );
-  }, [labels, profiles, projects, teamShown, threads]);
+  }, [daemon.summaries, fromDaemon, labels, profiles, projects, teamShown, threads]);
 }
 
 export function useTeamMember(environmentId: string, projectId: string): TeamMember | null {

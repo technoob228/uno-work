@@ -319,6 +319,19 @@ import {
   CredentialsVaultError,
 } from "./credentialsVault.ts";
 import {
+  ProjectSecretRemoveInput,
+  ProjectSecretSetInput,
+  ProjectSecretsList,
+  ProjectSyncEntry,
+  ProjectSyncError,
+  ProjectSyncGetHereInput,
+  ProjectSyncGetHereResult,
+  ProjectSyncProjectInput,
+  ProjectSyncResolveInput,
+  ProjectSyncSetEnabledInput,
+  ProjectSyncSnapshot,
+} from "./projectSync.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -434,6 +447,17 @@ export const WS_METHODS = {
   vaultImport: "vault.import",
   vaultFill: "vault.fill",
   vaultSync: "vault.sync",
+
+  // "On all my computers" (projectSync/)
+  projectSyncStatus: "projectSync.status",
+  projectSyncSetEnabled: "projectSync.setEnabled",
+  projectSyncSyncNow: "projectSync.syncNow",
+  projectSyncResolve: "projectSync.resolve",
+  projectSyncGetHere: "projectSync.getHere",
+  projectSyncOpened: "projectSync.opened",
+  projectSecretsList: "projectSecrets.list",
+  projectSecretsSet: "projectSecrets.set",
+  projectSecretsRemove: "projectSecrets.remove",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -688,6 +712,59 @@ export const WsVaultSyncRpc = Rpc.make(WS_METHODS.vaultSync, {
   payload: CredentialSyncPayload,
   success: CredentialSyncResult,
   error: CredentialsVaultError,
+});
+
+export const WsProjectSyncStatusRpc = Rpc.make(WS_METHODS.projectSyncStatus, {
+  payload: Schema.Struct({}),
+  success: ProjectSyncSnapshot,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncSetEnabledRpc = Rpc.make(WS_METHODS.projectSyncSetEnabled, {
+  payload: ProjectSyncSetEnabledInput,
+  success: ProjectSyncEntry,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncSyncNowRpc = Rpc.make(WS_METHODS.projectSyncSyncNow, {
+  payload: ProjectSyncProjectInput,
+  success: ProjectSyncEntry,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncResolveRpc = Rpc.make(WS_METHODS.projectSyncResolve, {
+  payload: ProjectSyncResolveInput,
+  success: ProjectSyncEntry,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncGetHereRpc = Rpc.make(WS_METHODS.projectSyncGetHere, {
+  payload: ProjectSyncGetHereInput,
+  success: ProjectSyncGetHereResult,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncOpenedRpc = Rpc.make(WS_METHODS.projectSyncOpened, {
+  payload: ProjectSyncProjectInput,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSecretsListRpc = Rpc.make(WS_METHODS.projectSecretsList, {
+  payload: ProjectSyncProjectInput,
+  success: ProjectSecretsList,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSecretsSetRpc = Rpc.make(WS_METHODS.projectSecretsSet, {
+  payload: ProjectSecretSetInput,
+  success: ProjectSecretsList,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSecretsRemoveRpc = Rpc.make(WS_METHODS.projectSecretsRemove, {
+  payload: ProjectSecretRemoveInput,
+  success: ProjectSecretsList,
+  error: ProjectSyncError,
 });
 
 export const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
@@ -2117,6 +2194,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultImportRpc,
   WsVaultFillRpc,
   WsVaultSyncRpc,
+  WsProjectSyncStatusRpc,
+  WsProjectSyncSetEnabledRpc,
+  WsProjectSyncSyncNowRpc,
+  WsProjectSyncResolveRpc,
+  WsProjectSyncGetHereRpc,
+  WsProjectSyncOpenedRpc,
+  WsProjectSecretsListRpc,
+  WsProjectSecretsSetRpc,
+  WsProjectSecretsRemoveRpc,
   WsWorkspaceGetStateRpc,
   WsWorkspaceRenameRpc,
   WsWorkspaceSyncMachinesRpc,

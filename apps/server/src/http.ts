@@ -40,6 +40,7 @@ import {
   requireBridgeThread,
 } from "./browserBridge.ts";
 import { expandHomePath } from "./pathExpansion.ts";
+import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import {
   isValidSecretName,
   isValidSecretTargetFile,
@@ -797,6 +798,20 @@ export const secretsResultRouteLayer = HttpRouter.add(
         { ok: false, error: `Failed to write ${pending.targetFile}.` },
         { status: 500 },
       );
+    }
+
+    // A project "On all my computers": the key travels with it (the Uno
+    // vault), never in its files. In the background: the answer doesn't wait.
+    const projectSync = yield* Effect.serviceOption(ProjectSyncService);
+    if (Option.isSome(projectSync)) {
+      yield* projectSync.value
+        .secretWritten({
+          cwd: expandHomePath(pending.cwd),
+          file: pending.targetFile,
+          name: pending.name,
+          value,
+        })
+        .pipe(Effect.forkDetach, Effect.asVoid);
     }
 
     yield* browserBridge.completeSecretRequest({

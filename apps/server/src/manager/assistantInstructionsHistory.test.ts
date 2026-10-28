@@ -7,7 +7,10 @@ import {
 } from "@t3tools/shared/assistantInstructions";
 import { describe, expect, it } from "vitest";
 
-import { SHIPPED_ASSISTANT_INSTRUCTIONS } from "./assistantInstructionsHistory.ts";
+import {
+  RELEASED_2026_10_14_1,
+  SHIPPED_ASSISTANT_INSTRUCTIONS,
+} from "./assistantInstructionsHistory.ts";
 import { ASSISTANT_INSTRUCTIONS_TEMPLATE } from "./Layers/AssistantService.ts";
 
 const profile = `${AGENTS_PROFILE_START}\n## Who you are\n\nYour name is Ana.\n${AGENTS_PROFILE_END}`;
@@ -67,5 +70,92 @@ describe("AGENTS.md of assistants made by older versions", () => {
       write: null,
       base: SHIPPED_ASSISTANT_INSTRUCTIONS[0],
     });
+  });
+
+  it("2026-10-22.2: a dispatcher that hands off and ends its turn, status from one work_status", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-22.2");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("END YOUR TURN");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — work update");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("call `work_status` once");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toMatch(/call `wait_for_thread`\s*\n?\s*\(several/);
+    expect(RELEASED_2026_10_14_1).toContain("<!-- uno-instructions: 2026-10-14.1 -->");
+  });
+
+  it("2026-10-22.2: duties, its own email and where it works are asked in the setup and kept", () => {
+    for (const words of [
+      "## Always on you — your duties",
+      "## Your own email",
+      "`duties`",
+      "`worksOn`",
+      "`mail_address`",
+      "Uno skips this step",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+  });
+
+  it("an untouched 2026-10-22.1 file (branch stands) upgrades silently", () => {
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    expect(instructionsVersion(branch)).toBe("2026-10-22.1");
+    const plan = planInstructions({
+      current: joinAgentsProfile(branch, profile),
+      base: null,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Your own email");
+  });
+
+  it("2026-10-22.1: the assistant sets itself up by asking, and sets up helpers within its rights", () => {
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("## Setting yourself up");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — setup");
+    for (const tool of [
+      "assistant_profile_get",
+      "assistant_profile_set",
+      "ask_user",
+      "assistant_create",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(`\`${tool}\``);
+    }
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("Routines run on a cloud computer");
+  });
+
+  it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
+    expect(instructionsVersion(branch)).toBe("2026-10-21.1");
+    const plan = planInstructions({
+      current: joinAgentsProfile(branch, profile),
+      base: null,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Setting yourself up");
+  });
+
+  it("an untouched 2026-10-14.1 file upgrades silently, with or without its base", () => {
+    for (const base of [RELEASED_2026_10_14_1, null]) {
+      const plan = planInstructions({
+        current: joinAgentsProfile(RELEASED_2026_10_14_1, profile),
+        base,
+        next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+        known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+      });
+      expect(plan.state).toBe("current");
+      expect(plan.write).toContain("2026-10-22.2");
+      expect(plan.write).toContain("Your name is Ana.");
+    }
+  });
+
+  it("an edited 2026-10-14.1 file is offered the update, not overwritten", () => {
+    const plan = planInstructions({
+      current: `${RELEASED_2026_10_14_1}\n- Always answer in Russian.\n`,
+      base: RELEASED_2026_10_14_1,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("update-available");
+    expect(plan.write).toBeNull();
   });
 });

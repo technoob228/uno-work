@@ -96,6 +96,17 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       listLogins: () => rpcClient.vault.list(),
       fillLogin: (payload) => rpcClient.vault.fill(payload),
     },
+    projectSync: {
+      status: () => rpcClient.projectSync.status(),
+      setEnabled: rpcClient.projectSync.setEnabled,
+      syncNow: rpcClient.projectSync.syncNow,
+      resolve: rpcClient.projectSync.resolve,
+      getHere: rpcClient.projectSync.getHere,
+      opened: (input) => rpcClient.projectSync.opened(input).then(() => undefined),
+      secretsList: rpcClient.projectSync.secretsList,
+      secretsSet: rpcClient.projectSync.secretsSet,
+      secretsRemove: rpcClient.projectSync.secretsRemove,
+    },
     workspace: {
       getState: () => rpcClient.workspace.getState(),
       rename: rpcClient.workspace.rename,

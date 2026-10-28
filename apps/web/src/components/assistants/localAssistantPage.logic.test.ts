@@ -5,7 +5,7 @@ import { connectorLevels, jobFromSoul, suggestsOwnComputer } from "./LocalAssist
 describe("an assistant on this computer", () => {
   it("highlights its own computer for templates that read strangers' mail and sites", () => {
     expect(suggestsOwnComputer("marketing")).toBe(true);
-    expect(suggestsOwnComputer("support")).toBe(true);
+    expect(suggestsOwnComputer("sales")).toBe(true);
     expect(suggestsOwnComputer("personal")).toBe(false);
     expect(suggestsOwnComputer(null)).toBe(false);
   });

@@ -8,7 +8,7 @@
  * people's emails and sites (see `createAssistant.ts`).
  */
 import type { AssistantDraftResult, EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -24,7 +24,7 @@ import { useRef, useState, type ReactNode } from "react";
 
 import { UNO_WORK_URL } from "../../account/unoAccount";
 import { isAssistantsDemo } from "../../lib/assistantsDemo";
-import { draftAssistant } from "../../lib/managerApi";
+import { draftAssistant, listProjectsForAccessPicker } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { TelegramMark } from "../setup/brandMarks";
@@ -34,6 +34,15 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { EmojiAvatar, LevelPicker, nextEmoji } from "./AssistantBits";
+import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
+import { AssistantPresetPicker } from "./AssistantPresetPicker";
+import {
+  DEFAULT_PRESET_FORM,
+  effectiveLevel,
+  levelCeiling,
+  presetAccessFromForm,
+  type PresetForm,
+} from "./assistantPreset.logic";
 import {
   ASSISTANT_NAME_MAX,
   ASSISTANT_TEMPLATES,
@@ -119,6 +128,7 @@ export function NewAssistantFlow({
   const [step, setStep] = useState<Step>(fromQuiz ? { kind: "review" } : { kind: "describe" });
   const [plan, setPlan] = useState<AssistantPlan | null>(fromQuiz);
   const [home, setHome] = useState<AssistantHome>("here");
+  const [presetForm, setPresetForm] = useState<PresetForm>(DEFAULT_PRESET_FORM);
   const creating = useRef(false);
   const availability = useAssistantsAvailability();
 
@@ -176,7 +186,7 @@ export function NewAssistantFlow({
       setStep({ kind: "creating", stage: "assistant" });
       try {
         const result = await createLocalAssistant(
-          plan,
+          { ...plan, access: presetAccessFromForm(presetForm) },
           makeLocalCreateDeps(environmentId, boxId, (stage) =>
             setStep({ kind: "creating", stage }),
           ),
@@ -235,7 +245,7 @@ export function NewAssistantFlow({
             maxLength={PHRASE_MAX}
             rows={3}
             disabled={thinking}
-            placeholder="For example: answer my customers' emails using the FAQ in Notion, and hand the hard ones to me."
+            placeholder="For example: collect my invoices from email into a sheet and send me what's due every Friday."
             onChange={(event) => setPhrase(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -352,6 +362,8 @@ export function NewAssistantFlow({
         availability={availability}
         home={home}
         machineLabel={machineLabel}
+        presetForm={presetForm}
+        onPresetForm={setPresetForm}
         onHome={setHome}
         onChange={setPlan}
         onBack={() => setStep({ kind: "describe" })}
@@ -502,6 +514,8 @@ function ReviewCard({
   availability,
   home,
   machineLabel,
+  presetForm,
+  onPresetForm,
   onHome,
   onChange,
   onBack,
@@ -512,16 +526,29 @@ function ReviewCard({
   availability: AssistantsAvailability;
   home: AssistantHome;
   machineLabel: string;
+  /** What it may do on this computer (an assistant here only). */
+  presetForm: PresetForm;
+  onPresetForm: (next: PresetForm) => void;
   onHome: (home: AssistantHome) => void;
   onChange: (plan: AssistantPlan) => void;
   onBack: () => void;
   onCreate: () => void;
 }) {
+  const sandbox = useEnvironmentSupportsAssistantSandbox(environmentId);
   const setLevel = (provider: ConnectorProvider, level: ConnectorLevel) =>
     onChange({ ...plan, connectors: { ...plan.connectors, [provider]: level } });
   const name = plan.name.trim() || "Uno";
   const canCreate = home === "here" || availability === "on";
   const suggestOwn = suggestsOwnComputer(plan.template);
+  // An assistant here is held to its preset; one on its own computer is
+  // checked by Uno's servers (the apps below), so the preset isn't offered.
+  const preset = home === "here" ? presetForm.preset : "full";
+  const projects = useQuery({
+    queryKey: ["uno-assistant", "access-projects", environmentId],
+    queryFn: () => listProjectsForAccessPicker({ environmentId }),
+    retry: false,
+    enabled: home === "here",
+  });
   return (
     <section className="flex flex-col gap-4 pt-2" data-testid="assistant-new-review">
       <div className="flex items-start gap-3">
@@ -582,7 +609,8 @@ function ReviewCard({
             <div key={provider} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1 text-sm">{CONNECTOR_LABEL[provider]}</span>
               <LevelPicker
-                value={plan.connectors[provider]}
+                value={effectiveLevel(plan.connectors[provider], preset)}
+                max={levelCeiling(preset)}
                 onChange={(level) => setLevel(provider, level)}
                 testId={`assistant-review-level-${provider}`}
               />
@@ -619,6 +647,22 @@ function ReviewCard({
           testId="assistant-home-own"
         />
       </div>
+
+      {home === "here" ? (
+        <div className="rounded-2xl border border-border/70 px-4 py-3">
+          <h2 className="pb-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            What {name} may do
+          </h2>
+          <AssistantPresetPicker
+            sandbox={sandbox}
+            name={name}
+            value={presetForm}
+            onChange={onPresetForm}
+            projects={projects.data ?? []}
+            testId="assistant-review-preset"
+          />
+        </div>
+      ) : null}
 
       {home === "here" ? (
         <div className="rounded-2xl border border-border/70 px-4 py-3">

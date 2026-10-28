@@ -1,6 +1,7 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
   DEFAULT_RUNTIME_MODE,
+  type RuntimeMode,
   isAssistantProjectId,
   type EnvironmentId,
   type ModelSelection,
@@ -72,6 +73,8 @@ function useNewThreadState() {
         branch?: string | null;
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
+        /** The mode the new chat starts in (an assistant's chat: its own mode). */
+        runtimeMode?: RuntimeMode;
       },
     ): Promise<void> => {
       const {
@@ -81,6 +84,7 @@ function useNewThreadState() {
         getComposerDraft,
         applyStickyState,
         setModelSelection,
+        setRuntimeMode,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -181,10 +185,13 @@ function useNewThreadState() {
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
           envMode: options?.envMode ?? "local",
-          runtimeMode: DEFAULT_RUNTIME_MODE,
+          runtimeMode: options?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         });
         applyStickyState(draftId);
         if (startOn) setModelSelection(draftId, startOn);
+        // The composer shows the mode the chat will run in (an assistant's
+        // chat: its own mode), not the default it would otherwise start from.
+        if (options?.runtimeMode) setRuntimeMode(draftId, options.runtimeMode);
         useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
 
         await router.navigate({

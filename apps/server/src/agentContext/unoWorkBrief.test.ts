@@ -35,8 +35,15 @@ describe("Uno Work environment brief", () => {
     // uno.place, the agent didn't know Spark and said "order Small"; the
     // details are uno_guide("spark")); ~60 for "Deploying to Uno / uno.place"
     // (Misha 19.10: a Codex chat asked to deploy on uno.place went to click
-    // the site and hit the sign-in page instead of reading llms.txt).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1900);
+    // the site and hit the sign-in page instead of reading llms.txt); +60
+    // for the agent's own mailbox (spec 20.10: one line, own mail vs Gmail).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1960);
+  });
+
+  it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(/Your own mailbox \(`mail_address`\)/);
+    expect(brief).toMatch(/the person's mail only via the Gmail connector/);
   });
 
   it("deploying to uno.place: tools or llms.txt first, never a browser sign-in", () => {

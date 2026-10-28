@@ -8,6 +8,8 @@
  * - `DELETE /api/manager/connectors/:provider`        → {ok: true}
  * - `GET    /api/manager/github`                      → {available, reason, connected, accounts, permission}
  * - `POST   /api/manager/github/connect`              → {authorizeUrl} (the account's GitHub, for git on every computer)
+ * - `GET    /api/manager/mail`                        → {available, reason, mailbox} ("Email for your AI")
+ * - `PUT    /api/manager/mail/address` {local}        → {address}; 409/422 {error: sentence, code}
  * - `POST   /api/manager/mcp/probe` {url}             → {ok, toolCount, toolNames, needsAuth, error}
  * - `POST   /api/manager/materials/read` {projectPath, links} → {jobId}
  * - `GET    /api/manager/materials/read/:jobId`       → the job
@@ -20,6 +22,7 @@ import { Effect, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { AuthError } from "../auth/Services/ServerAuth.ts";
+import { AgentMailService } from "./AgentMailService.ts";
 import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
 import { isConnectorProvider, type ConnectorsError } from "./connectors.ts";
 import { ConnectorsService } from "./ConnectorsService.ts";
@@ -128,6 +131,43 @@ export const githubAccountConnectRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+/** "Email for your AI": the computer's own mailbox, shown in Settings → Connectors. */
+export const agentMailStatusRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/mail",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const mail = yield* AgentMailService;
+    return json(yield* mail.status);
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const AgentMailAddressPayload = Schema.Struct({
+  local: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+});
+
+/**
+ * Rename the mailbox. Errors carry the person's sentence in `error` (what the
+ * interface shows as is) and the console's code in `code` ("taken", "invalid").
+ */
+export const agentMailAddressRouteLayer = HttpRouter.add(
+  "PUT",
+  "/api/manager/mail/address",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(AgentMailAddressPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Expected {local}.", status: 400 })),
+    );
+    const mail = yield* AgentMailService;
+    return yield* mail.changeAddress(input.local.trim().toLowerCase()).pipe(
+      Effect.map((result) => json({ address: result.address })),
+      Effect.catch((error: ConnectorsError) =>
+        Effect.succeed(json({ error: error.message, code: error.code }, error.status)),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 const ProbePayload = Schema.Struct({ url: Schema.String.check(Schema.isMaxLength(2048)) });
 
 export const mcpProbeRouteLayer = HttpRouter.add(
@@ -225,6 +265,8 @@ export const setupToolsRouteLayers = [
   connectorsRemoveRouteLayer,
   githubAccountStatusRouteLayer,
   githubAccountConnectRouteLayer,
+  agentMailStatusRouteLayer,
+  agentMailAddressRouteLayer,
   mcpProbeRouteLayer,
   materialsReadRouteLayer,
   materialsReadStatusRouteLayer,

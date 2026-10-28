@@ -16,6 +16,8 @@
 import { randomInt } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+
+import { boundaryDenial } from "./pathBoundary.ts";
 import { promises as fsp } from "node:fs";
 
 import type {
@@ -85,10 +87,12 @@ import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegr
 import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
+import { mailTools, type MailOwner } from "./mailTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
+import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 
@@ -104,6 +108,10 @@ export class UnoWorkToolError extends Data.TaggedError("UnoWorkToolError")<{
 }> {}
 
 const toolError = (message: string) => new UnoWorkToolError({ message });
+
+/** What an Observer's chat reads when it reaches for a tool that changes something. */
+export const observerRefusal = (assistant: string) =>
+  `${assistant} only reads and reports (its access): it changes nothing. Tell the person what you would change; they can give ${assistant} more access on its page in Uno Work. Don't retry or work around it.`;
 
 /** Any failure with a message → a tool error the model can read. */
 const asToolError = <A, E extends { readonly message: string }, R>(
@@ -127,6 +135,29 @@ export interface UnoWorkCaller {
   readonly runtimeMode: RuntimeMode;
   /** The chat's working folder, when known. */
   readonly cwd: string | undefined;
+  /**
+   * The chat belongs to an assistant held to selected projects (the sandbox):
+   * the folders it may reach (its projects, its own folder, the chat's cwd)
+   * and its name. These tools run in the daemon, outside the sandbox, so
+   * every path they take is checked against the same boundary here — else
+   * `files_list`, `site_publish`, `file_share_link` or a mail attachment would
+   * reach what the sandbox hides. Absent / null: the person's own chat, or an
+   * assistant that sees everything.
+   */
+  readonly boundary?: { readonly roots: ReadonlyArray<string>; readonly name: string } | null;
+}
+
+export { boundaryDenial, isWithinRoot } from "./pathBoundary.ts";
+
+/** What `project_keys` shows: names and where they are, never values. */
+export interface ProjectKeysView {
+  readonly synced: boolean;
+  readonly secrets: ReadonlyArray<{
+    readonly name: string;
+    readonly inVault: boolean;
+    readonly inFile: boolean;
+  }>;
+  readonly vaultError: string | null;
 }
 
 export interface BridgeReply {
@@ -136,6 +167,31 @@ export interface BridgeReply {
 
 export interface UnoWorkToolDeps {
   readonly caller: UnoWorkCaller;
+  /**
+   * The calling chat's assistant preset refuses tools that change things
+   * (an Observer's chats): the text the model reads, or null. Absent: no
+   * assistant rules.
+   */
+  readonly presetRefusal?: Effect.Effect<string | null>;
+  /**
+   * The calling chat belongs to an assistant in "Asks first" mode: its name
+   * (for the approval card), or null. Outward-acting calls then always wait
+   * for the person's Allow (`asksFirstCategory`). Absent: no assistant rules.
+   */
+  readonly asksFirst?: Effect.Effect<{ readonly name: string } | null>;
+  /**
+   * The keys of the chat's project ("On all my computers": kept in the Uno
+   * vault, written into its `.env` on every computer). `refusal`: the
+   * caller's assistant preset doesn't get project keys (Observer). Absent:
+   * this daemon has no project sync.
+   */
+  readonly projectKeys?: {
+    readonly refusal: Effect.Effect<string | null>;
+    readonly list: (
+      cwd: string,
+    ) => Effect.Effect<ProjectKeysView | null, { readonly message: string }>;
+    readonly load: (cwd: string) => Effect.Effect<ProjectKeysView, { readonly message: string }>;
+  };
   readonly home: string;
   /** `~/.uno/apps` (absolute). */
   readonly manifestDir: string;
@@ -267,6 +323,12 @@ export interface UnoWorkToolDeps {
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
   };
+  /**
+   * The assistant whose chat calls the mail tools, with its own mail rules
+   * (`mailTools.ts`, `@t3tools/shared/assistantMail`); null in the person's
+   * own chats. Absent (tests, older wiring): no assistant rules.
+   */
+  readonly mailOwner?: Effect.Effect<MailOwner | null>;
   /**
    * Uno Spark's gateway with a Spark-only token the daemon gets from the
    * console itself (`sparkClient.ts`): mints, caches, renews on 401. Absent
@@ -429,6 +491,7 @@ export type UnoWorkGroup =
   | "sites"
   | "databases"
   | "account"
+  | "mail"
   | "settings"
   | "docs";
 
@@ -498,10 +561,20 @@ const readDiskUsage = (
 /** `~/x`, `/abs` or a path relative to the chat's folder (then home). */
 export function resolveUserPath(raw: string, deps: Pick<UnoWorkToolDeps, "home" | "caller">) {
   const value = raw.trim();
-  if (value === "~") return deps.home;
-  if (value.startsWith("~/")) return path.join(deps.home, value.slice(2));
-  if (path.isAbsolute(value)) return path.normalize(value);
-  return path.resolve(deps.caller.cwd ?? deps.home, value);
+  const absolute =
+    value === "~"
+      ? deps.home
+      : value.startsWith("~/")
+        ? path.join(deps.home, value.slice(2))
+        : path.isAbsolute(value)
+          ? path.normalize(value)
+          : path.resolve(deps.caller.cwd ?? deps.home, value);
+  // A sandboxed assistant's boundary holds for the daemon-side tools too.
+  // Thrown (not returned): every tool resolves paths inline; the MCP runner
+  // turns a thrown UnoWorkToolError into the text the model reads.
+  const denial = boundaryDenial(absolute, deps.caller.boundary, deps.home);
+  if (denial !== null) throw new UnoWorkToolError({ message: denial });
+  return absolute;
 }
 
 /** Spell a path for a person: `~/projects/notes`. */
@@ -2479,6 +2552,55 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   },
 
   {
+    name: "project_keys",
+    group: "person",
+    description:
+      "The keys (API keys, tokens) of this chat's project, by name — never values: which are in its .env here and which travel with the project in the Uno vault (a project On all my computers gets them in its .env on every computer by itself). load: true re-reads the vault's keys into .env now (after the person added one on another computer). Read values from .env; never print them. A missing key: request_secret.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        load: {
+          type: "boolean",
+          description: "true: write the vault's keys into the project's .env now.",
+        },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const keys = deps.projectKeys;
+        if (!keys) return yield* toolError("Project keys aren't available on this computer.");
+        const refusal = yield* keys.refusal;
+        if (refusal !== null) return yield* toolError(refusal);
+        const cwd = deps.caller.cwd;
+        if (!cwd) return yield* toolError("This chat has no project folder.");
+        const view =
+          args.load === true
+            ? yield* keys.load(cwd).pipe(Effect.mapError((error) => toolError(error.message)))
+            : yield* keys.list(cwd).pipe(Effect.mapError((error) => toolError(error.message)));
+        if (view === null) {
+          return {
+            project: null,
+            note: "This chat's folder isn't a project in Uno Work: keys are only in its .env.",
+          };
+        }
+        return {
+          synced: view.synced,
+          keys: view.secrets.map((secret) => ({
+            name: secret.name,
+            inEnvFile: secret.inFile,
+            travelsWithProject: secret.inVault,
+          })),
+          ...(view.vaultError ? { vaultError: view.vaultError } : {}),
+          note: view.synced
+            ? "Keys travel with the project, never in its files. Values are in .env: read them from there, never print them."
+            : "This project isn't On all my computers: its keys stay in this computer's .env.",
+        };
+      }),
+  },
+
+  {
     name: "assistant_connect",
     group: "person",
     description:
@@ -2564,7 +2686,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     // Misha 02.10: a plain static site goes up without an Allow (Unpublish is
     // one click in Apps & sites). Opening an app or a port to the internet,
     // removing a password and sending forms to an outside URL still ask.
+    // An "Asks first" assistant asks (the card's title).
     level: "safe",
+    approvalTitle: (args) =>
+      str(args, "slug") ? `Publish site “${str(args, "slug")}”` : "Publish a site",
+    approvalDetail: (args) => str(args, "path"),
     run: (deps, args) =>
       asToolError(
         deps.files.publishSite({
@@ -3082,6 +3208,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     fail: toolError,
   }),
 
+  // The agent's own mailbox on uno4.me (mailTools.ts)
+  ...mailTools({
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    displayPath: (absolute, home) => displayPath(absolute, home),
+    fail: toolError,
+  }),
+
   // Account
   {
     name: "account_overview",
@@ -3274,8 +3407,14 @@ export function runUnoWorkTool(
       return yield* toolError(`Invalid arguments for ${tool.name}: ${problem}`);
     }
     const level = toolLevel(tool, args);
+    if (level !== "safe" && deps.presetRefusal) {
+      const refusal = yield* deps.presetRefusal;
+      if (refusal !== null) return yield* toolError(refusal);
+    }
     if (tool.prepare) yield* tool.prepare(deps, args);
-    if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+    const outward = asksFirstCategory(tool.name, args);
+    const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
+    if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
       const appName =
@@ -3286,8 +3425,15 @@ export function runUnoWorkTool(
             )
           : undefined;
       const described = appName ? { ...args, appId: appName } : args;
-      const title = tool.approvalTitle?.(described) ?? tool.name;
-      const detail = tool.approvalDetail?.(described);
+      const title =
+        tool.approvalTitle?.(described) ??
+        (outward !== null ? ASKS_FIRST_CATEGORY_LABEL[outward] : tool.name);
+      const ownDetail = tool.approvalDetail?.(described);
+      // Why it asks although the chat's mode would let it run: say so.
+      const detail =
+        asking !== null
+          ? [ownDetail, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+          : ownDetail;
       const clientAction = tool.approvalClientAction?.(args);
       yield* askPerson(deps, {
         tool: tool.name,
@@ -3406,12 +3552,18 @@ export function connectorMcpTool(
               : `${who} may only read ${tool.providerName}; ${tool.name} would change something. The person can allow changes on ${who}'s page in Uno Work. Tell them; don't retry.`,
           );
         }
-        if (decideUnoWorkGate(level, deps.caller.runtimeMode) === "ask") {
+        // An "Asks first" assistant asks before any change in a connected app.
+        const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
+        if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
+          const described = describeConnectorArgs(args);
           yield* askPerson(deps, {
             tool: tool.name,
             level,
             title: `${tool.providerName}: ${tool.name}`,
-            detail: describeConnectorArgs(args),
+            detail:
+              asking !== null
+                ? [described, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
+                : described,
           });
         }
         // The console validates the arguments against its own schema.
@@ -3442,9 +3594,20 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
         readOnlyHint: level === "safe",
         destructiveHint: level === "sensitive",
         openWorldHint:
-          tool.group === "sites" || tool.group === "databases" || tool.group === "account",
+          tool.group === "sites" ||
+          tool.group === "databases" ||
+          tool.group === "account" ||
+          tool.group === "mail",
       },
-      run: (deps: UnoWorkToolDeps, args: unknown) => runUnoWorkTool(tool, deps, args),
+      run: (deps: UnoWorkToolDeps, args: unknown) =>
+        runUnoWorkTool(tool, deps, args).pipe(
+          // A path outside a sandboxed assistant's boundary is thrown where
+          // the path is resolved (`resolveUserPath`): the model reads it as
+          // the tool's error, like any other refusal.
+          Effect.catchDefect((defect) =>
+            defect instanceof UnoWorkToolError ? Effect.fail(defect) : Effect.die(defect),
+          ),
+        ),
     };
   }),
   errorText: (error) => error.message,

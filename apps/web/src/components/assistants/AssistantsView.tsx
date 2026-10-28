@@ -1,8 +1,8 @@
 /**
  * Assistants — every assistant on the account.
  *
- * "New assistant" is one sentence → up to three questions → "Will do / Won't
- * do" → Create (`NewAssistantFlow.tsx`). By default (decision 02.10 evening)
+ * "New assistant" makes one in a click and opens its page
+ * (`useQuickCreateAssistant.tsx`, Misha 23.10). By default (decision 02.10 evening)
  * it lives on THIS computer, next to the others (`LocalAssistantPage.tsx`);
  * "Give it its own computer" makes it a Work computer of role `assistant`
  * (`AssistantPage.tsx`). Both pages have access, schedule, memory, models,
@@ -75,7 +75,7 @@ import { AssistantProfilePage } from "./AssistantProfilePage";
 import { DEMO } from "../../demo/demoFlag";
 import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
-import { NewAssistantFlow } from "./NewAssistantFlow";
+import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import {
   ASSISTANT_COMPUTERS_KEY,
@@ -171,8 +171,13 @@ function useMachineLabel(environmentId: EnvironmentId | null): string {
 export function AssistantsView() {
   const search = useSearch({ strict: false }) as AssistantsRouteSearch;
   const availability = useAssistantsAvailability();
-  // The team page (w0138 p7) is mock-only: the release has Uno alone (Misha 16.10).
-  if (DEMO && search.view === "profile" && search.env && search.project) {
+  // The team page (w0138 p7): with the assistants update on the account, and in the mock.
+  if (
+    (DEMO || availability === "on") &&
+    search.view === "profile" &&
+    search.env &&
+    search.project
+  ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
@@ -363,13 +368,8 @@ function AssistantsViewMvp() {
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">No computer is connected.</p>
             ) : creating ? (
-              <NewAssistantFlow
-                environmentId={environmentId}
-                boxId={activeBoxId}
-                machineLabel={machineLabel}
-                onOpen={(box) => setView("assistant", box)}
-                onOpenHere={(project) => setView("local", undefined, project)}
-              />
+              // One click (Misha 23.10): made at once, then its page.
+              <QuickCreateAssistantView />
             ) : settingUpHere && model.loading ? null : settingUpHere ? (
               <CreateAssistant
                 environmentId={environmentId}
@@ -496,9 +496,9 @@ function EmptyAssistants({ loading, onCreate }: { loading: boolean; onCreate: ()
           An assistant that works while you don't
         </h1>
         <p className="text-sm text-muted-foreground">
-          Describe it in one sentence: it answers your customers, keeps your inbox in order or
-          prepares posts. It lives on this computer, or on its own, and opens only the apps you
-          allow.
+          Describe it in one sentence: it keeps your inbox in order, tracks your invoices or
+          prepares your next video. It lives on this computer, or on its own, and opens only the
+          apps you allow.
         </p>
       </div>
       <Button onClick={onCreate} disabled={loading} data-testid="assistants-empty-create">
@@ -763,7 +763,7 @@ const WHERE_OPTIONS: ReadonlyArray<{
   {
     id: "telegram",
     title: "Telegram",
-    body: "Its own bot: about a minute in @BotFather.",
+    body: "Its own bot, made in @BotFather.",
     icon: <TelegramMark className="size-5" />,
   },
   {
@@ -887,7 +887,7 @@ function CreateAssistant({
               value={about}
               maxLength={ASSISTANT_ABOUT_MAX}
               rows={2}
-              placeholder="For example: answers my customers' questions about prices and opening hours"
+              placeholder="For example: keeps my calendar and sends me a plan for the day"
               onChange={(event) => setAbout(event.currentTarget.value)}
               data-testid="assistants-about"
             />

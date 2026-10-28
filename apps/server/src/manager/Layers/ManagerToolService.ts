@@ -11,14 +11,15 @@ import type {
   OrchestrationThreadShell,
   ProjectId,
   Reminder,
-  ThreadId,
 } from "@t3tools/contracts";
 import {
   MANAGER_PROPOSAL_TTL_MINUTES,
   MANAGER_READ_THREAD_DETAIL_DEFAULT_MESSAGES,
   MANAGER_READ_THREAD_DETAIL_MAX_MESSAGE_CHARS,
+  MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
   MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
   ManagerProposalId,
+  ThreadId,
   ManagerSlackConnectorConfig,
   ManagerTelegramConnectorConfig,
   type ReminderConnectorKind,
@@ -37,6 +38,7 @@ import { RemindersRepository } from "../../persistence/Services/Reminders.ts";
 import {
   ManagerInvalidRequestError,
   ManagerNotFoundError,
+  ManagerPresetDeniedError,
   ManagerProjectNotAllowedError,
   ManagerProposalResolutionError,
   ManagerScopeDeniedError,
@@ -47,26 +49,40 @@ import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
+import { assistantProjectOfCaller } from "../../assistants/schedules.ts";
+import { owningAssistant, readStartedChats } from "../../assistants/localAssistantStore.ts";
+import { ServerConfig } from "../../config.ts";
+import { isAssistantConversationThread } from "../assistantPush.ts";
+import { AssistantPushService } from "../Services/AssistantPush.ts";
+import {
+  finishWorkStatus,
+  pickWorkStatusCandidates,
+  workStatusRow,
+  type WorkStatusShell,
+} from "../workStatus.ts";
 import { ManagerBudgetService } from "../Services/ManagerBudgetService.ts";
 import {
   changedFilesOf,
   clipReply,
-  describePendingRequest,
-  evaluateThreadWait,
   eventTouchesThreads,
-  findTurnReply,
-  shouldHoldForReply,
   turnDurationMs,
   WAIT_EVENT_DEBOUNCE_MS,
   WAIT_FALLBACK_POLL_MS,
-  type WaitMessage,
-  type ThreadWaitVerdict,
 } from "../threadWait.ts";
+import { makeThreadSettlementProbe, type SettledProbe } from "../threadSettlement.ts";
 import {
   type ManagerCaller,
   ManagerToolService,
   type ManagerToolServiceShape,
 } from "../Services/ManagerToolService.ts";
+import type { AssistantAction } from "@t3tools/shared/assistantPreset";
+import {
+  callerPreset,
+  createRuntimeFor,
+  executesAtOnce,
+  presetDenial,
+  steerDenial,
+} from "../assistantPresetGate.ts";
 
 function requireScope(
   caller: ManagerCaller,
@@ -75,6 +91,29 @@ function requireScope(
   return caller.scopes.includes(scope)
     ? Effect.void
     : Effect.fail(new ManagerScopeDeniedError({ requiredScope: scope }));
+}
+
+/** An assistant token's preset (Full / Helper / Observer) refuses the action. */
+function requirePresetAllows(
+  caller: ManagerCaller,
+  action: AssistantAction,
+): Effect.Effect<void, ManagerPresetDeniedError> {
+  const denial = presetDenial(caller, action);
+  return denial === null
+    ? Effect.void
+    : Effect.fail(new ManagerPresetDeniedError({ detail: denial }));
+}
+
+/**
+ * Reminders go to the person's own messenger and touch no chat: every
+ * assistant preset may set them (Observer too); other tokens need write.
+ */
+function requireReminderAccess(
+  caller: ManagerCaller,
+): Effect.Effect<void, ManagerScopeDeniedError | ManagerPresetDeniedError> {
+  return callerPreset(caller) === null
+    ? requireScope(caller, "threads:write")
+    : requirePresetAllows(caller, "remind");
 }
 
 function isProjectAllowed(caller: ManagerCaller, projectId: ProjectId): boolean {
@@ -135,6 +174,23 @@ export function lastAssistantPreview(
       : text;
   }
   return null;
+}
+
+/**
+ * An assistant's own token waits at most {@link MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC}:
+ * it hands work off and ends its turn; the daemon reports the outcome
+ * (`assistantPush.ts`). Everyone else keeps the long wait.
+ */
+export function effectiveWaitTimeoutSec(
+  caller: ManagerCaller,
+  requested: number | undefined,
+): number {
+  return assistantProjectOfCaller(caller) === null
+    ? (requested ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC)
+    : Math.min(
+        requested ?? MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
+        MANAGER_WAIT_ASSISTANT_MAX_TIMEOUT_SEC,
+      );
 }
 
 function timingSafeStringEqual(a: string, b: string): boolean {
@@ -221,7 +277,7 @@ const makeManagerToolService = Effect.gen(function* () {
       // Auto-approve tier (in-app assistant): execute right away. The
       // proposal row is still written and resolved as `auto:<tokenId>`, so
       // the audit trail is identical to the manual path.
-      if (caller.autoApprove && caller.scopes.includes("threads:approve")) {
+      if (executesAtOnce(caller)) {
         const resolved = yield* approvalService.resolve({
           proposalId: proposal.proposalId,
           decision: "approved",
@@ -326,83 +382,22 @@ const makeManagerToolService = Effect.gen(function* () {
   // wait_for_thread(s): block daemon-side instead of letting the brain poll.
   // ---------------------------------------------------------------------
 
-  type SettledProbe = {
-    readonly verdict: Extract<ThreadWaitVerdict, { settled: true }>;
-    readonly reply: WaitMessage | null;
-    readonly pendingRequest: string | null;
-    readonly pendingApprovals: ReadonlyArray<ManagerPendingApprovalSummary>;
+  const { probe: probeThread } = yield* makeThreadSettlementProbe;
+  // Optional: unit wirings without the push service / a state dir.
+  const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+  const serverConfig = Option.getOrNull(yield* Effect.serviceOption(ServerConfig));
+
+  /** Tell the push which conversation hands `threadId` work (before the turn starts). */
+  const noteCaller = (caller: ManagerCaller, threadId: ThreadId) => {
+    const assistantProjectId = assistantProjectOfCaller(caller);
+    return push === null || assistantProjectId === null || caller.callerThreadId === undefined
+      ? Effect.void
+      : push.noteCaller({
+          threadId,
+          assistantProjectId,
+          conversationThreadId: caller.callerThreadId,
+        });
   };
-
-  const listPendingApprovalsOf = (threadId: ThreadId) =>
-    pendingApprovalRepository.listByThreadId({ threadId }).pipe(
-      Effect.map((rows) =>
-        rows
-          .filter((row) => row.status === "pending")
-          .map(
-            (row): ManagerPendingApprovalSummary => ({
-              threadId: row.threadId,
-              requestId: row.requestId,
-              createdAt: row.createdAt,
-            }),
-          ),
-      ),
-    );
-
-  /** One look at a thread: `null` while its turn is still in flight. */
-  const probeThread = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const shell = yield* projectionSnapshotQuery.getThreadShellById(threadId);
-      if (Option.isNone(shell)) {
-        return {
-          verdict: {
-            settled: true,
-            status: "error",
-            turn: null,
-            error: "The thread no longer exists.",
-          },
-          reply: null,
-          pendingRequest: null,
-          pendingApprovals: [],
-        } satisfies SettledProbe as SettledProbe;
-      }
-      const turns = yield* projectionTurnRepository.listByThreadId({ threadId });
-      const nowMs = yield* Clock.currentTimeMillis;
-      const session = shell.value.session;
-      const verdict = evaluateThreadWait({
-        hasPendingApprovals: shell.value.hasPendingApprovals,
-        hasPendingUserInput: shell.value.hasPendingUserInput,
-        session:
-          session === null
-            ? null
-            : {
-                status: session.status,
-                updatedAt: session.updatedAt,
-                lastError: session.lastError,
-              },
-        turns,
-        nowMs,
-      });
-      if (!verdict.settled) {
-        return null;
-      }
-      const detail = yield* projectionSnapshotQuery.getThreadDetailById(threadId);
-      const reply = Option.isSome(detail)
-        ? findTurnReply(verdict.turn, detail.value.messages)
-        : null;
-      if (shouldHoldForReply(verdict, reply, nowMs)) {
-        return null;
-      }
-      const needsUser = verdict.status === "needs_user";
-      return {
-        verdict,
-        reply,
-        pendingRequest:
-          needsUser && Option.isSome(detail)
-            ? describePendingRequest(detail.value.activities)
-            : null,
-        pendingApprovals: needsUser ? yield* listPendingApprovalsOf(threadId) : [],
-      } satisfies SettledProbe as SettledProbe;
-    });
 
   const toWaitResult = (
     threadId: ThreadId,
@@ -526,7 +521,7 @@ const makeManagerToolService = Effect.gen(function* () {
       caller,
       [input.threadId],
       "all",
-      input.timeoutSec ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
+      effectiveWaitTimeoutSec(caller, input.timeoutSec),
     ).pipe(
       Effect.map((outcome) => ({
         ...(outcome.results[0] as ManagerWaitThreadResult),
@@ -540,7 +535,7 @@ const makeManagerToolService = Effect.gen(function* () {
       caller,
       input.threadIds,
       mode,
-      input.timeoutSec ?? MANAGER_WAIT_DEFAULT_TIMEOUT_SEC,
+      effectiveWaitTimeoutSec(caller, input.timeoutSec),
     ).pipe(Effect.map((outcome) => ({ mode, ...outcome })));
   };
 
@@ -603,6 +598,7 @@ const makeManagerToolService = Effect.gen(function* () {
       if (!target.ok) {
         return yield* new ManagerInvalidRequestError({ detail: target.message });
       }
+      yield* requirePresetAllows(caller, "start-chat");
       yield* requireProjectAllowed(caller, input.projectId);
       const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId);
       if (Option.isNone(project)) {
@@ -610,21 +606,32 @@ const makeManagerToolService = Effect.gen(function* () {
       }
       // Hard v1 rule: manager-created threads default to approval-required.
       // A full-access request is representable but still lands as an explicit
-      // pending proposal like every other write.
-      const runtimeMode = input.runtimeMode ?? "approval-required";
-      return yield* fileProposal(caller, {
+      // pending proposal like every other write. A Helper's chats never run
+      // freer than approval-required (its preset), whatever it asks for.
+      const runtimeMode = createRuntimeFor(caller, input.runtimeMode ?? "approval-required");
+      // The id is chosen now, so the receipt names the new chat (no
+      // list_threads round trip) and the push knows who asked for it.
+      const threadId = ThreadId.make(crypto.randomUUID());
+      yield* noteCaller(caller, threadId);
+      const receipt = yield* fileProposal(caller, {
         kind: "create-thread",
         projectId: input.projectId,
         title: input.title,
         prompt: input.prompt,
         modelSelection: input.modelSelection ?? null,
         runtimeMode,
+        threadId,
       });
+      return receipt.status === "executed" ? { ...receipt, threadId } : receipt;
     });
 
   const sendTurn: ManagerToolServiceShape["sendTurn"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* getAllowedThreadShell(caller, input.threadId);
+      yield* requirePresetAllows(caller, "write-chat");
+      const shell = yield* getAllowedThreadShell(caller, input.threadId);
+      const steer = steerDenial(caller, shell.runtimeMode);
+      if (steer !== null) return yield* new ManagerPresetDeniedError({ detail: steer });
+      yield* noteCaller(caller, input.threadId);
       return yield* fileProposal(caller, {
         kind: "send-turn",
         threadId: input.threadId,
@@ -634,6 +641,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const interruptTurn: ManagerToolServiceShape["interruptTurn"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "stop-chat");
       yield* getAllowedThreadShell(caller, input.threadId);
       return yield* fileProposal(caller, {
         kind: "interrupt-turn",
@@ -643,6 +651,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const respondToRequest: ManagerToolServiceShape["respondToRequest"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "answer-requests");
       yield* requireScope(caller, "threads:approve");
       yield* getAllowedThreadShell(caller, input.threadId);
       return yield* fileProposal(caller, {
@@ -666,6 +675,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const resolveProposal: ManagerToolServiceShape["resolveProposal"] = (caller, input) =>
     Effect.gen(function* () {
+      yield* requirePresetAllows(caller, "resolve-proposals");
       yield* requireScope(caller, "threads:approve");
       const existing = yield* proposalRepository.getById({ proposalId: input.proposalId });
       if (Option.isNone(existing)) {
@@ -771,7 +781,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const createReminder: ManagerToolServiceShape["createReminder"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* requireScope(caller, "threads:write");
+      yield* requireReminderAccess(caller);
 
       if (input.dueAt === undefined && input.dueInSeconds === undefined) {
         return yield* new ManagerInvalidRequestError({
@@ -829,7 +839,7 @@ const makeManagerToolService = Effect.gen(function* () {
 
   const cancelReminder: ManagerToolServiceShape["cancelReminder"] = (caller, input) =>
     Effect.gen(function* () {
-      yield* requireScope(caller, "threads:write");
+      yield* requireReminderAccess(caller);
       const existing = yield* remindersRepository.getById({ reminderId: input.reminderId });
       if (Option.isNone(existing)) {
         return yield* new ManagerNotFoundError({ entity: "reminder", id: input.reminderId });
@@ -837,6 +847,66 @@ const makeManagerToolService = Effect.gen(function* () {
       yield* requireProjectAllowed(caller, existing.value.projectId);
       const cancelled = yield* remindersRepository.cancel({ reminderId: input.reminderId });
       return { cancelled };
+    });
+
+  const workStatus: ManagerToolServiceShape["workStatus"] = (caller) =>
+    Effect.gen(function* () {
+      yield* requireScope(caller, "threads:read");
+      const nowMs = yield* Clock.currentTimeMillis;
+      const me = assistantProjectOfCaller(caller);
+      const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+      const projectTitle = new Map(snapshot.projects.map((project) => [project.id, project.title]));
+      const byId = new Map(snapshot.threads.map((thread) => [thread.id, thread]));
+      const startedBy =
+        serverConfig === null
+          ? new Map<string, string>()
+          : yield* Effect.promise(() => readStartedChats(serverConfig.stateDir));
+      const watched = push === null || me === null ? [] : yield* push.watchedBy(me);
+      const pending = new Set(
+        watched.filter((entry) => entry.reportPending).map((e) => e.threadId),
+      );
+      const watchedIds = new Set<string>(watched.map((entry) => entry.threadId));
+      const visible = snapshot.threads.filter(
+        (thread) =>
+          isProjectAllowed(caller, thread.projectId) && !isAssistantConversationThread(thread),
+      );
+      const owner = (thread: OrchestrationThreadShell) =>
+        owningAssistant(thread, (id) => byId.get(id as ThreadId), startedBy);
+      const own: Array<WorkStatusShell> = [];
+      const person: Array<WorkStatusShell> = [];
+      for (const thread of visible) {
+        const ownerId = owner(thread);
+        if ((me !== null && ownerId === me) || watchedIds.has(thread.id)) own.push(thread);
+        else if (ownerId === null) person.push(thread);
+      }
+      const { picked, omitted } = pickWorkStatusCandidates({ own, person, nowMs });
+      const rows = yield* Effect.forEach(
+        picked,
+        (candidate) =>
+          Effect.gen(function* () {
+            const threadId = candidate.shell.id;
+            const detail = yield* projectionSnapshotQuery.getThreadDetailById(threadId);
+            const turns = yield* projectionTurnRepository.listByThreadId({ threadId });
+            return workStatusRow(
+              candidate,
+              {
+                projectTitle: projectTitle.get(candidate.shell.projectId) ?? "",
+                turns,
+                messages: Option.isSome(detail) ? detail.value.messages : [],
+                activities: Option.isSome(detail) ? detail.value.activities : [],
+                reportPending: pending.has(threadId),
+              },
+              nowMs,
+            );
+          }),
+        { concurrency: 4 },
+      );
+      const finished = finishWorkStatus(rows, omitted);
+      return {
+        now: new Date(nowMs).toISOString(),
+        threads: [...finished.threads],
+        omitted: finished.omitted,
+      };
     });
 
   return {
@@ -855,6 +925,7 @@ const makeManagerToolService = Effect.gen(function* () {
     createReminder,
     listReminders,
     cancelReminder,
+    workStatus,
   } satisfies ManagerToolServiceShape;
 });
 

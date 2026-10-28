@@ -30,6 +30,7 @@ import { WebClient } from "@slack/web-api";
 import {
   ASSISTANT_PROJECT_ID,
   CommandId,
+  type RuntimeMode,
   ManagerSlackConnectorConfig,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -46,6 +47,10 @@ import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import {
+  assistantAccessDepsOption,
+  readAssistantRuntimeMode,
+} from "../../assistants/assistantAccess.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { slackCommandOrigin } from "../../orchestration/commandOrigin.ts";
@@ -55,7 +60,13 @@ import { ManagerConnectorRepository } from "../../persistence/Services/ManagerCo
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
 import type { ConnectorPendingReply } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
-import { makeConnectorReplies, readMeta, type SendOutcome } from "../connectorReplies.ts";
+import {
+  makeConnectorReplies,
+  readMeta,
+  type EnqueueOutcome,
+  type SendOutcome,
+  type SystemTurnInput,
+} from "../connectorReplies.ts";
 import { detectReplyLanguage } from "../connectorReplyText.ts";
 import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "../addressing.ts";
 import type { AddressingReason } from "../addressing.ts";
@@ -137,6 +148,13 @@ export interface ManagerSlackServiceShape {
   }> | null>;
   /** Joins a public channel so the app hears it (best effort). */
   readonly joinChannel: (projectId: ProjectId, channelId: string) => Effect.Effect<boolean>;
+  /**
+   * A turn the daemon starts in a chat's conversation (the assistant's work
+   * update, `assistantPush.ts`): queued and answered like a message of that
+   * chat (`connectorReplies.ts`). Never fails: `failed` when it could not be
+   * queued.
+   */
+  readonly enqueueSystemTurn: (input: SystemTurnInput) => Effect.Effect<EnqueueOutcome | "failed">;
 }
 
 export class ManagerSlackService extends Context.Service<
@@ -381,6 +399,7 @@ const makeSlackConnector = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
+  const accessDeps = yield* assistantAccessDepsOption;
 
   // Non-image incoming files land here; the harness reads them by absolute
   // path (Slack threads always run in full-access mode).
@@ -727,8 +746,11 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly chatKey: string;
     readonly title: string;
     readonly config: ManagerSlackConnectorConfig;
-    /** Owner: full access (the assistant's own chats). Members: approval-required. */
-    readonly runtimeMode: "full-access" | "approval-required";
+    /**
+     * Owner: the assistant's own mode (full-access for "Does it itself",
+     * auto-accept-edits for "Asks first"). Members: approval-required.
+     */
+    readonly runtimeMode: RuntimeMode;
   }) =>
     Effect.gen(function* () {
       // The assistant's Slack chats run on the Uno chat's engine (Hermes +
@@ -1093,7 +1115,12 @@ const makeSlackConnector = Effect.gen(function* () {
       const ownerChatKey = slackChatKey(channel, isDM ? null : (threadTs ?? ts));
       // Members never share (or widen) the owner's session.
       const chatKey = senderRole === "member" ? `${ownerChatKey}#members` : ownerChatKey;
-      const runtimeMode = senderRole === "member" ? "approval-required" : "full-access";
+      const runtimeMode: RuntimeMode =
+        senderRole === "member"
+          ? "approval-required"
+          : accessDeps === null
+            ? "full-access"
+            : yield* readAssistantRuntimeMode(accessDeps, assistantId);
       const addressing =
         routed.find((row) => row.projectId === assistantId)?.config.addressing ??
         config.addressing ??
@@ -1495,6 +1522,17 @@ const makeSlackConnector = Effect.gen(function* () {
           Effect.orElseSucceed(() => false),
         );
       }),
+    enqueueSystemTurn: (input) =>
+      replies
+        .enqueueSystemTurn(input)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("slack system turn could not be queued").pipe(
+              Effect.annotateLogs({ threadId: input.from.threadId, cause }),
+              Effect.as("failed" as const),
+            ),
+          ),
+        ),
   } satisfies ManagerSlackServiceShape;
 });
 

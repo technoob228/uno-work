@@ -11,6 +11,7 @@ import { useShallow } from "zustand/react/shallow";
 import { accountTransport } from "../../account/unoAccount";
 import { ensureAssistantChatWhenReady } from "../../assistant/assistantChat.logic";
 import { isPrimaryEnvironmentId } from "../../environments/http/target";
+import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
 import { updateEnvironmentSettings } from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
@@ -66,6 +67,7 @@ export type AssistantsAvailability = "loading" | "on" | "not-yet" | "no-account"
  */
 export function useAssistantsAvailability(): AssistantsAvailability {
   const signedIn = canCreateAssistantComputers();
+  const primaryId = usePrimaryEnvironmentId();
   const feature = useQuery({
     queryKey: ["uno-assistants", "enabled"],
     queryFn: fetchAssistantsEnabled,
@@ -73,7 +75,20 @@ export function useAssistantsAvailability(): AssistantsAvailability {
     staleTime: 60_000,
     retry: false,
   });
-  if (!signedIn) return "no-account";
+  // Opened at the computer's own address: the account isn't reachable from
+  // the page, so ask the computer (its daemon asks the account by its key).
+  const byComputer = useQuery({
+    queryKey: ["uno-assistants", "enabled-by-computer", primaryId],
+    queryFn: async () =>
+      (await listAssistants({ environmentId: primaryId! })).assistantsEnabled === true,
+    enabled: !signedIn && primaryId !== null,
+    staleTime: 60_000,
+    retry: false,
+  });
+  if (!signedIn) {
+    if (byComputer.data === true) return "on";
+    return byComputer.isLoading ? "loading" : "no-account";
+  }
   if (feature.isLoading) return "loading";
   return feature.data === true ? "on" : "not-yet";
 }
@@ -288,12 +303,13 @@ export function makeLocalCreateDeps(
   onStage: (stage: LocalCreateStage) => void,
 ): LocalCreateDeps {
   return {
-    createAssistant: async ({ name, emoji, template }) => {
+    createAssistant: async ({ name, emoji, template, access }) => {
       const { projectId } = await createAssistantOnComputer({
         environmentId,
         name,
         emoji,
         template,
+        ...(access ? { access } : {}),
       });
       const summary = await getAssistant({ environmentId, projectId }).catch(() => null);
       return { projectId, workspaceRoot: summary?.workspaceRoot ?? null };

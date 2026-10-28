@@ -28,9 +28,13 @@ const OPTION_MAX = 60;
 
 const TEMPLATE_HINT: Record<string, string> = {
   personal: "a personal assistant (inbox, calendar, documents, reminders)",
+  finance: "a finance assistant (invoices and receipts into a sheet, what's due, never pays)",
+  sales: "a sales assistant (leads in Notion, follow-up drafts the person sends, reminders)",
+  dev: "a developer assistant (GitHub issues and pull requests, small fixes in a branch)",
+  youtube: "a content assistant (video ideas, scripts, titles, a Notion content plan)",
+  // From before the areas (22.10): older assistants only.
   marketing: "a marketing assistant (posts, pictures, Notion content plan, reports)",
   security: "a security assistant (reads GitHub, reports risks, never changes anything)",
-  support: "a customer support assistant (answers customers by email, uses a Notion FAQ)",
 };
 
 const SYSTEM_PROMPT = [

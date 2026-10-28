@@ -6,6 +6,7 @@ import {
   decidePendingReply,
   LOST_TURN_MS,
   NO_TEXT_GRACE_MS,
+  replyPauseMs,
   SETTLE_QUIET_MS,
   type ReplyProbe,
   type ReplyProbeMessage,
@@ -199,6 +200,13 @@ describe("decidePendingReply", () => {
     });
   });
 
+  it("wakes for a ready answer right after its quiet window, not on the next round", () => {
+    expect(replyPauseMs(1)).toBe(50);
+    expect(replyPauseMs(1_200)).toBe(1_225);
+    expect(replyPauseMs(SETTLE_QUIET_MS)).toBe(2_000);
+    expect(replyPauseMs(-500)).toBe(50);
+  });
+
   it("holds a just-settled answer for a moment, and waits while it still streams", () => {
     const base = {
       turns: [turn("t1", "m1", "completed", 0, 30)],
@@ -211,8 +219,8 @@ describe("decidePendingReply", () => {
           messages: [userMessage("m1", 0), assistant("a1", "t1", 30, "answer")],
           nowMs: T0 + 30_000 + SETTLE_QUIET_MS - 1,
         }),
-      ).kind,
-    ).toBe("wait");
+      ),
+    ).toEqual({ kind: "wait", turnId: "t1", readyInMs: 1 });
     expect(
       decidePendingReply(
         probe({

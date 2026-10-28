@@ -6,7 +6,9 @@ import {
   isTelegramBotTokenName,
   lateSecretMessage,
   parseUnoWorkNote,
+  SCHEDULED_TASK_PREFIX,
   secretHelp,
+  WORK_UPDATE_NOTICE_PREFIX,
 } from "./secretRequestCopy.ts";
 
 describe("secretHelp", () => {
@@ -90,5 +92,38 @@ describe("the assistant's own bot", () => {
     expect(declined?.text).toBe(
       "You skipped the assistant's Telegram bot token. You can add it later.",
     );
+  });
+});
+
+describe("parseUnoWorkNote: turns the daemon starts for the assistant", () => {
+  it("a work update reads as one line per settled chat", () => {
+    const note = parseUnoWorkNote(
+      [
+        `${WORK_UPDATE_NOTICE_PREFIX}: an automatic notice from Uno Work, not a message from the person.`,
+        "A chat you handed work to has settled.",
+        "",
+        "1. «Fix login» (threadId t-1) — finished, after 4 min.",
+        "   Next: check it.",
+      ].join("\n"),
+    );
+    expect(note).toEqual({
+      kind: "work-update",
+      text: "Uno Work told the assistant: «Fix login» finished, after 4 min.",
+    });
+  });
+
+  it("a scheduled task shows its name and prompt", () => {
+    const note = parseUnoWorkNote(
+      `${SCHEDULED_TASK_PREFIX}"Morning digest" — it runs on its own.\nIf nothing, NO_REPLY.]\n\nSummarise my inbox`,
+    );
+    expect(note).toEqual({
+      kind: "scheduled-task",
+      text: "Scheduled task “Morning digest”: Summarise my inbox",
+    });
+  });
+
+  it("the person's own text that merely mentions the markers stays theirs", () => {
+    expect(parseUnoWorkNote(`please read ${WORK_UPDATE_NOTICE_PREFIX}`)).toBeNull();
+    expect(parseUnoWorkNote("Scheduled task tomorrow?")).toBeNull();
   });
 });

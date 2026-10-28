@@ -71,7 +71,7 @@ export type PowerCard = "uno" | SubscriptionLlmProvider | "key";
 /** While a sign-in is waiting, look at the computer this often. */
 const SIGN_IN_POLL_MS = 2_500;
 
-function cardOf(provider: AssistantLlmProvider): PowerCard {
+export function cardOf(provider: AssistantLlmProvider): PowerCard {
   if (provider === "uno") return "uno";
   if (isSubscriptionLlmProvider(provider)) return provider;
   return "key";

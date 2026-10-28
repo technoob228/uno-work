@@ -39,7 +39,10 @@ import type {
   ManagerWaitForThreadResult,
   ManagerWaitForThreadsInput,
   ManagerWaitForThreadsResult,
+  ManagerWorkStatusInput,
+  ManagerWorkStatusResult,
   ManagerWriteReceipt,
+  ThreadId,
 } from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect } from "effect";
@@ -59,6 +62,12 @@ export interface ManagerCaller {
    * (see `assistantTokenLabel`). Absent in older call sites and tests.
    */
   readonly label?: string;
+  /**
+   * The assistant's conversation making the call (`MANAGER_CALLER_THREAD_HEADER`,
+   * checked to belong to the token's assistant). Work it hands off is
+   * reported back there. Absent: unknown (another harness, an external brain).
+   */
+  readonly callerThreadId?: ThreadId;
 }
 
 export interface ManagerToolServiceShape {
@@ -126,6 +135,14 @@ export interface ManagerToolServiceShape {
     caller: ManagerCaller,
     input: ManagerCancelReminderInput,
   ) => Effect.Effect<ManagerCancelReminderResult, ManagerToolError>;
+  /**
+   * One-call digest for an assistant: the chats it handed work to first, then
+   * the person's recently active chats in its projects. Bounded.
+   */
+  readonly workStatus: (
+    caller: ManagerCaller,
+    input: ManagerWorkStatusInput,
+  ) => Effect.Effect<ManagerWorkStatusResult, ManagerToolError>;
 }
 
 export class ManagerToolService extends Context.Service<
