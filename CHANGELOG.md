@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.158 — 2026-10-28
+
+- **Show the agent: record your screen and the agent does it.** A Record button in the chat box and "Show the agent" on Home: share a screen, window or tab, your camera in a corner and your voice. The recording goes to Uno Drive (up to 60 minutes), the agent gets a second-by-second timeline of what you said and where the cursor was, key frames at your clicks and at "here / this", and can look at any moment frame by frame. Your words go into the message box.
+- **A recording link opens a player.** Shared recordings play in the browser with a Download button; Safari and iPhone get an MP4 copy.
+- **Add a project, where you can see it.** On a new computer with no projects the sidebar shows a full-width "Add a project" button; it goes away after the first project.
+- **Browser fixes.** Developer tools are off by default; the ⋯ menu holds everything, with zoom − 100% +.
+
 ## v0.0.157 — 2026-10-28
 
 - **Your computer's apps and widgets open inside Uno Work.** An app the agent builds on your cloud computer opens in the panel and in its own window right inside Work, not in the agent's browser stream; its widget appears on Home by itself. The agent registers the app and opens it for you in one step.
