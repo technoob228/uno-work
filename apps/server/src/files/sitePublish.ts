@@ -24,7 +24,18 @@ export const SITE_MAX_FILES = 1000;
 export const SITE_MAX_BYTES = 50 * 1024 * 1024;
 const SITE_SKIP_DIRS = new Set(["node_modules", "__pycache__", "venv"]);
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
+/** The upload itself (up to 50 MB from a cloud computer). */
 const PUBLISH_TIMEOUT_MS = 120_000;
+/**
+ * How long to wait for a publish Uno Hosting runs in the background (202).
+ * Hosting gives a job 15 minutes; the uno-work MCP tool call ends at 900 s,
+ * so the agent gets a clear answer before its own call times out.
+ */
+const PUBLISH_WAIT_MS = 10 * 60_000;
+const POLL_DEFAULT_MS = 3_000;
+const POLL_MIN_MS = 1_000;
+const POLL_MAX_MS = 15_000;
+const STATUS_TIMEOUT_MS = 20_000;
 
 /** What stayed on the computer, and why — shown to the person and the agent. */
 export interface SiteSkip {
@@ -204,10 +215,33 @@ interface DeployResponse {
   readonly size_bytes?: number;
   readonly site_folder?: string;
   readonly left_out?: number;
+  readonly has_password?: boolean;
+  readonly ip_allowlist?: ReadonlyArray<string>;
   readonly tool?: string;
   readonly error?: string;
   readonly message?: string;
 }
+
+/**
+ * 202 from POST /api/v1/deploy, or GET /api/v1/deploy/{id} (fishcode
+ * site-deploy-async, 28.10): the publish runs in the background.
+ */
+interface DeployJobResponse {
+  readonly deploy_id?: string;
+  readonly status?: string;
+  readonly status_url?: string;
+  readonly retry_after_s?: number;
+  readonly url?: string;
+  readonly slug?: string;
+  readonly result?: DeployResponse;
+  readonly error?: string;
+  readonly message?: string;
+  readonly http_status?: number;
+  readonly details?: DeployResponse;
+}
+
+/** Uno Hosting restarted mid-publish: the files never went live, publish again. */
+const INTERRUPTED = "INTERRUPTED";
 
 function deployErrorMessage(status: number, body: DeployResponse | null): string {
   const code = body?.error ?? "";
@@ -233,7 +267,148 @@ function deployErrorMessage(status: number, body: DeployResponse | null): string
     const tool = typeof body?.tool === "string" && body.tool.length > 0 ? `${body.tool} ` : "";
     return `This folder is the source of a ${tool}project — build it first (npm run build), then publish the folder it makes (dist/ or build/ with an index.html).`;
   }
+  if (code === "INVALID_ALLOWLIST" || code === "INVALID_IP_ALLOWLIST") {
+    return body?.message ?? "Uno Hosting didn't accept the list of IPs or networks for this site.";
+  }
+  if (code === INTERRUPTED) {
+    return "Uno Hosting restarted while publishing this site and it didn't go live. Publish it again.";
+  }
   return body?.message ?? `Uno Hosting answered ${status}.`;
+}
+
+/** The status address hosting gave, on the same console as the upload. */
+function deployStatusUrl(baseUrl: string, job: DeployJobResponse): string | null {
+  const path = job.status_url;
+  if (typeof path === "string" && /^\/api\/v1\/deploy\/[A-Za-z0-9_-]+$/.test(path)) {
+    return `${baseUrl}${path}`;
+  }
+  if (typeof job.deploy_id === "string" && /^[A-Za-z0-9_-]+$/.test(job.deploy_id)) {
+    return `${baseUrl}/api/v1/deploy/${job.deploy_id}`;
+  }
+  return null;
+}
+
+function pollDelayMs(job: DeployJobResponse): number {
+  const seconds = job.retry_after_s;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return POLL_DEFAULT_MS;
+  }
+  return Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, seconds * 1000));
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+type DeployOutcome =
+  | { readonly kind: "done"; readonly body: DeployResponse | null }
+  | { readonly kind: "failed"; readonly status: number; readonly body: DeployResponse | null };
+
+/**
+ * Waits for a background publish (202) to finish. A status call that fails
+ * (network, 5xx while hosting restarts) is tried again until the deadline:
+ * the publish itself goes on server-side.
+ */
+async function waitForDeploy(input: {
+  readonly job: DeployJobResponse;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly fetchImpl: typeof fetch;
+  readonly waitMs: number;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly now: () => number;
+}): Promise<DeployOutcome> {
+  const statusUrl = deployStatusUrl(input.baseUrl, input.job);
+  if (statusUrl === null) {
+    throw new FilesPathError(
+      "forbidden",
+      "Uno Hosting took the site but didn't say where to follow it. Check the site list in a minute before publishing again.",
+    );
+  }
+  const deadline = input.now() + input.waitMs;
+  let delay = pollDelayMs(input.job);
+  for (;;) {
+    if (input.now() + delay > deadline) {
+      const where = input.job.url ? ` (${input.job.url})` : "";
+      throw new FilesPathError(
+        "forbidden",
+        `Uno Hosting is still publishing this site${where} after ${Math.round(input.waitMs / 60_000)} minutes. It may still finish: check the site list in a few minutes before publishing it again.`,
+      );
+    }
+    await input.sleep(delay);
+    let response: Response;
+    try {
+      response = await input.fetchImpl(statusUrl, {
+        headers: { authorization: `Bearer ${input.apiKey}` },
+        signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+      });
+    } catch {
+      continue;
+    }
+    const body = (await response.json().catch(() => null)) as DeployJobResponse | null;
+    if (response.status === 404) {
+      throw new FilesPathError(
+        "forbidden",
+        "Uno Hosting lost track of this publish. Check the site list before publishing it again.",
+      );
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { kind: "failed", status: response.status, body };
+    }
+    if (!response.ok || body === null) continue;
+    if (body.status === "done") {
+      return {
+        kind: "done",
+        body: body.result ?? {
+          ...(body.url !== undefined ? { url: body.url } : {}),
+          ...(body.slug !== undefined ? { slug: body.slug } : {}),
+        },
+      };
+    }
+    if (body.status === "failed") {
+      const status = typeof body.http_status === "number" ? body.http_status : 500;
+      const details = body.details ?? {};
+      return {
+        kind: "failed",
+        status,
+        body: {
+          ...details,
+          ...((details.error ?? body.error) !== undefined
+            ? { error: (details.error ?? body.error)! }
+            : {}),
+          ...((details.message ?? body.message) !== undefined
+            ? { message: (details.message ?? body.message)! }
+            : {}),
+        },
+      };
+    }
+    delay = pollDelayMs(body);
+  }
+}
+
+/** One POST /api/v1/deploy, followed to its end when hosting answers 202. */
+async function postDeploy(input: {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly form: FormData;
+  readonly fetchImpl: typeof fetch;
+  readonly waitMs: number;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly now: () => number;
+}): Promise<DeployOutcome> {
+  const response = await input.fetchImpl(`${input.baseUrl}/api/v1/deploy`, {
+    method: "POST",
+    // Answer at once and publish in the background: a big site takes minutes,
+    // longer than a request may stay open. A console without background
+    // publishes ignores both and answers 201 as before.
+    headers: { authorization: `Bearer ${input.apiKey}`, prefer: "respond-async" },
+    body: input.form,
+    signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
+  });
+  if (response.status === 202) {
+    const job = ((await response.json().catch(() => null)) ?? {}) as DeployJobResponse;
+    return waitForDeploy({ ...input, job });
+  }
+  const body = (await response.json().catch(() => null)) as DeployResponse | null;
+  return response.ok ? { kind: "done", body } : { kind: "failed", status: response.status, body };
 }
 
 /**
@@ -253,9 +428,17 @@ export function liveSiteUrl(fromHosting: string | undefined, slug: string): stri
 export async function publishToUnoHosting(input: {
   readonly path: string;
   readonly slug?: string | undefined;
+  /** Protects the site from its first second: sent with the upload. */
+  readonly password?: string | undefined;
+  /** Only these IPs/CIDRs may open it: sent with the upload. */
+  readonly ipAllowlist?: ReadonlyArray<string> | undefined;
   readonly apiKey: string;
   readonly baseUrl?: string;
   readonly fetchImpl?: typeof fetch;
+  /** Tests: how long to wait for a background publish, and the clock. */
+  readonly waitMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly now?: () => number;
 }): Promise<FilesPublishSiteResult> {
   const stats = await fsPromises.stat(input.path);
   let files: SiteFile[];
@@ -286,26 +469,49 @@ export async function publishToUnoHosting(input: {
     input.slug !== undefined && input.slug.trim().length > 0
       ? validateSiteSlug(input.slug)
       : suggestSiteSlug(nodePath.basename(input.path));
+  const password = input.password ?? "";
+  if (password.length > 0 && (password.length < 10 || password.length > 128)) {
+    throw new FilesPathError("invalid_name", "A site password is 10–128 characters.");
+  }
+  const ipAllowlist = (input.ipAllowlist ?? []).map((entry) => entry.trim()).filter(Boolean);
 
   const form = new FormData();
   form.append("slug", slug);
+  // Access goes with the upload: hosting applies it before the site (or its
+  // new files) is served, so a protected site is never open for a moment.
+  if (password.length > 0) form.append("password", password);
+  if (ipAllowlist.length > 0) form.append("ip_allowlist", ipAllowlist.join(","));
+  form.append("async", "1");
   for (const file of files) {
     const bytes = await fsPromises.readFile(file.absolutePath);
     form.append("files", new Blob([new Uint8Array(bytes)]), file.relativePath);
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
-  const response = await fetchImpl(`${input.baseUrl ?? controlPlaneBaseUrl()}/api/v1/deploy`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${input.apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
-  });
-  const body = (await response.json().catch(() => null)) as DeployResponse | null;
-  if (!response.ok) {
-    throw new FilesPathError("forbidden", deployErrorMessage(response.status, body));
+  const baseUrl = input.baseUrl ?? controlPlaneBaseUrl();
+  const deploy = () =>
+    postDeploy({
+      baseUrl,
+      apiKey: input.apiKey,
+      form,
+      fetchImpl,
+      waitMs: input.waitMs ?? PUBLISH_WAIT_MS,
+      sleep: input.sleep ?? defaultSleep,
+      now: input.now ?? Date.now,
+    });
+  let outcome = await deploy();
+  // Hosting restarted mid-publish (a release): nothing went live — once more.
+  if (outcome.kind === "failed" && outcome.body?.error === INTERRUPTED) {
+    outcome = await deploy();
   }
+  if (outcome.kind === "failed") {
+    throw new FilesPathError("forbidden", deployErrorMessage(outcome.status, outcome.body));
+  }
+  const body = outcome.body;
   const publishedSlug = body?.slug ?? slug;
+
+  const allowlist = Array.isArray(body?.ip_allowlist) ? body.ip_allowlist : undefined;
+
   return {
     slug: publishedSlug,
     // The address Uno Hosting answers with is the live one (`<slug>.uno4.me`
@@ -323,5 +529,11 @@ export async function publishToUnoHosting(input: {
       ? { siteFolder: body.site_folder }
       : {}),
     ...(typeof body?.left_out === "number" && body.left_out > 0 ? { leftOut: body.left_out } : {}),
+    ...(password.length > 0
+      ? { hasPassword: true }
+      : typeof body?.has_password === "boolean"
+        ? { hasPassword: body.has_password }
+        : {}),
+    ...(allowlist !== undefined && allowlist.length > 0 ? { ipAllowlist: [...allowlist] } : {}),
   };
 }

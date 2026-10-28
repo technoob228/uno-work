@@ -518,6 +518,57 @@ describe("approval gate", () => {
     expect(clean._tag === "Success" && JSON.stringify(clean.success)).not.toMatch(/note/);
   });
 
+  it("site_publish sends the password with the upload and hands it back to tell the person", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "approval-required", approval: "denied" });
+    const inputs: Array<Record<string, unknown>> = [];
+    const withAccess: UnoWorkToolDeps = {
+      ...deps,
+      files: {
+        ...deps.files,
+        publishSite: (input) =>
+          Effect.sync(() => {
+            inputs.push({ ...input });
+            return {
+              slug: "family",
+              url: "https://family.uno4.me/",
+              filesCount: 1,
+              sizeBytes: 10,
+              hasPassword: input.password !== undefined,
+            };
+          }),
+      },
+    };
+    const chosen = await run("site_publish", withAccess, {
+      path: "~/site",
+      slug: "family",
+      password: "correct-horse-battery",
+      ipAllowlist: ["203.0.113.7", " "],
+    });
+    expect(chosen._tag).toBe("Success");
+    expect(inputs[0]).toMatchObject({
+      slug: "family",
+      password: "correct-horse-battery",
+      ipAllowlist: ["203.0.113.7"],
+    });
+    if (chosen._tag === "Success") {
+      expect(chosen.success).toMatchObject({
+        hasPassword: true,
+        password: "correct-horse-battery",
+      });
+    }
+    // protect: true makes up a readable one; still no Allow needed.
+    const generated = await run("site_publish", withAccess, { path: "~/site", protect: true });
+    expect(inputs[1]?.password).toMatch(/^[a-z]+-[a-z]+-\d{4}-[a-z]+$/);
+    if (generated._tag === "Success") {
+      expect((generated.success as { password?: string }).password).toBe(inputs[1]?.password);
+    }
+    expect(recorded.approvals).toEqual([]);
+    // A plain publish sends no access fields.
+    await run("site_publish", withAccess, { path: "~/site" });
+    expect(inputs[2]).not.toHaveProperty("password");
+    expect(inputs[2]).not.toHaveProperty("ipAllowlist");
+  });
+
   it("drive_get copies Drive files into ~/Uploads/YYYY-MM by default and says where", async () => {
     const { deps, home } = makeDeps();
     const calls: Array<{ keys: ReadonlyArray<string>; destinationPath: string }> = [];
