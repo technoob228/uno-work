@@ -39,7 +39,6 @@ import {
   accountTransport,
 } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary/context";
-import { ensureEnvironmentApi } from "../../environmentApi";
 import { describeMachineError } from "../../machineErrors";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { UNO_BOX_CREATE_STAGES, type CreateUnoBoxResult } from "../../unoBoxCreation";
@@ -70,8 +69,18 @@ interface AccountRead {
 
 export const OWN_COMPUTER_ACCOUNT_KEY = ["assistants", "own-computer", "account"] as const;
 
-async function readAccount(environmentId: EnvironmentId | null): Promise<AccountRead> {
-  if (accountTransport() === "none") return readAccountViaComputer(environmentId);
+async function readAccount(): Promise<AccountRead> {
+  if (accountTransport() === "none") {
+    return {
+      subscription: undefined,
+      catalog: null,
+      names: [],
+      decision: {
+        kind: "unavailable",
+        message: "Computers are made in the Uno Work app or at app.uno4.work.",
+      },
+    };
+  }
   const [subscription, catalog, computers] = await Promise.allSettled([
     fetchSubscription(),
     fetchPlanCatalog(),
@@ -105,40 +114,6 @@ async function readAccount(environmentId: EnvironmentId | null): Promise<Account
     names: computers.status === "fulfilled" ? computers.value.map((computer) => computer.name) : [],
   };
   return { ...read, decision: decideOwnComputer(read) };
-}
-
-/**
- * Work opened straight from its computer's address (no account proxy, no
- * desktop app): the plan can't be read from the page, but the computer itself
- * holds the Uno key that creates computers. Linked → offer Create and let the
- * console decide (a plan limit comes back as the same upgrade card).
- */
-async function readAccountViaComputer(environmentId: EnvironmentId | null): Promise<AccountRead> {
-  const none = { subscription: undefined, catalog: null, names: [] } as const;
-  const unavailable: AccountRead = {
-    ...none,
-    decision: {
-      kind: "unavailable",
-      message: "Computers are made in the Uno Work app or at app.uno4.work.",
-    },
-  };
-  if (environmentId === null) return unavailable;
-  try {
-    const state = await ensureEnvironmentApi(environmentId).unoCloud.getState({});
-    if (!state.connected) {
-      return {
-        ...none,
-        decision: { kind: "signin", message: "Sign in with Uno to give it a computer of its own." },
-      };
-    }
-    return {
-      ...none,
-      names: state.boxes.map((box) => box.name),
-      decision: decideOwnComputer({ subscription: undefined, catalog: null }),
-    };
-  } catch {
-    return unavailable;
-  }
 }
 
 function UpgradeCard(props: {
@@ -211,8 +186,8 @@ export function OwnComputerSetup(props: {
   const navigate = useNavigate();
   const accountEnvironmentId = usePrimaryEnvironmentId();
   const account = useQuery({
-    queryKey: [...OWN_COMPUTER_ACCOUNT_KEY, accountEnvironmentId],
-    queryFn: () => readAccount(accountEnvironmentId),
+    queryKey: OWN_COMPUTER_ACCOUNT_KEY,
+    queryFn: readAccount,
     staleTime: 15_000,
     // Back from paying in the console: read the plan again.
     refetchOnWindowFocus: true,
