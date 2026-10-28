@@ -115,6 +115,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantChat: true,
       assistantLlm: true,
       assistantConversations: true,
+      worktreeCleanup: true,
     },
   } satisfies Omit<
     ExecutionEnvironmentDescriptor,

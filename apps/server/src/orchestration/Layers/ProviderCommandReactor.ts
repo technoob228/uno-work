@@ -58,6 +58,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { ServerConfig } from "../../config.ts";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
+import { WorktreeCleanup } from "../../worktreeCleanup/WorktreeCleanup.ts";
 import { appendChatAttachmentsNote, buildChatAttachmentsNote } from "../../files/chatUploads.ts";
 
 type ProviderIntentEvent = Extract<
@@ -287,6 +288,8 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
+  // Optional so reactor tests without it keep building; the runtime has it.
+  const worktreeCleanup = Option.getOrUndefined(yield* Effect.serviceOption(WorktreeCleanup));
   const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
     attachments.length === 0
       ? null
@@ -446,6 +449,11 @@ const make = Effect.gen(function* () {
     const thread = yield* resolveThread(threadId);
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
+    }
+    // A chat copy the cleanup removed comes back before the agent starts in
+    // it, with its saved changes (worktreeCleanup/).
+    if (worktreeCleanup !== undefined && thread.worktreePath !== null) {
+      yield* worktreeCleanup.ensureThreadWorktree(threadId);
     }
 
     const desiredRuntimeMode = thread.runtimeMode;

@@ -160,6 +160,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       resources: () => rpcClient.unoComputer.resources(),
       diskUsage: rpcClient.unoComputer.diskUsage,
       diskClean: rpcClient.unoComputer.diskClean,
+      worktreeCleanupStatus: rpcClient.unoComputer.worktreeCleanupStatus,
+      worktreeCleanupRun: rpcClient.unoComputer.worktreeCleanupRun,
       resourceAction: rpcClient.unoComputer.resourceAction,
     },
     files: rpcClient.files,

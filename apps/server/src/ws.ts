@@ -105,6 +105,7 @@ import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePat
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
+import { WorktreeCleanup } from "./worktreeCleanup/WorktreeCleanup.ts";
 import { EconomyPresence } from "./economy/EconomyPresence.ts";
 import { PRESENCE_OFF } from "./economy/economyReport.ts";
 import { FilesService } from "./files/FilesService.ts";
@@ -312,6 +313,16 @@ const makeWsRpcLayer = (
       const unoComputer = yield* UnoComputerService;
       // Optional: test layers and older compositions run without it (answers "off").
       const economyPresence = Option.getOrUndefined(yield* Effect.serviceOption(EconomyPresence));
+      const worktreeCleanup = Option.getOrUndefined(yield* Effect.serviceOption(WorktreeCleanup));
+      const worktreeCleanupUnavailable = Effect.fail(
+        new UnoCloudRpcError({ message: "Chat copy cleanup isn't available on this computer." }),
+      );
+      // Opening a chat's terminal brings its cleaned-up copy back first.
+      const prepareTerminal = (input: {
+        readonly threadId: string;
+        readonly cwd: string;
+        readonly worktreePath?: string | null | undefined;
+      }) => (worktreeCleanup === undefined ? Effect.void : worktreeCleanup.prepareTerminal(input));
       const files = yield* FilesService;
       const filesRecent = yield* FilesRecentService;
       const machineApps = yield* MachineAppsService;
@@ -1764,6 +1775,20 @@ const makeWsRpcLayer = (
               .pipe(Effect.mapError((cause) => new UnoCloudRpcError({ message: cause.message }))),
             { "rpc.aggregate": "uno-computer" },
           ),
+        [WS_METHODS.unoComputerWorktreeCleanupStatus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerWorktreeCleanupStatus,
+            worktreeCleanup === undefined ? worktreeCleanupUnavailable : worktreeCleanup.status,
+            { "rpc.aggregate": "uno-computer" },
+          ),
+        [WS_METHODS.unoComputerWorktreeCleanupRun]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerWorktreeCleanupRun,
+            worktreeCleanup === undefined
+              ? worktreeCleanupUnavailable
+              : worktreeCleanup.runNow.pipe(Effect.andThen(worktreeCleanup.status)),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.unoComputerResourceAction]: (input) =>
           observeRpcEffect(
             WS_METHODS.unoComputerResourceAction,
@@ -2249,9 +2274,11 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.terminalOpen]: (input) =>
-          observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
-            "rpc.aggregate": "terminal",
-          }),
+          observeRpcEffect(
+            WS_METHODS.terminalOpen,
+            prepareTerminal(input).pipe(Effect.andThen(terminalManager.open(input))),
+            { "rpc.aggregate": "terminal" },
+          ),
         [WS_METHODS.terminalWrite]: (input) =>
           observeRpcEffect(WS_METHODS.terminalWrite, terminalManager.write(input), {
             "rpc.aggregate": "terminal",
@@ -2265,9 +2292,11 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.terminalRestart]: (input) =>
-          observeRpcEffect(WS_METHODS.terminalRestart, terminalManager.restart(input), {
-            "rpc.aggregate": "terminal",
-          }),
+          observeRpcEffect(
+            WS_METHODS.terminalRestart,
+            prepareTerminal(input).pipe(Effect.andThen(terminalManager.restart(input))),
+            { "rpc.aggregate": "terminal" },
+          ),
         [WS_METHODS.terminalClose]: (input) =>
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",

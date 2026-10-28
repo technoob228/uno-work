@@ -81,7 +81,7 @@ Check \`computer_status\` before installs, builds, test runs, docker images, dat
 
 ### Where things go
 - **The person's files and results** (documents, reports, PDFs, images, recordings, exports, archives, datasets, backups): Uno Drive — \`drive_save\` from here, \`drive_get\` back, \`drive_share_link\` to send. It is roomy and the same on every computer of the account; this disk is a working disk. Saving over a file in the Drive keeps the old one as a version.
-- **Code**: \`~/projects/<name>\`, one folder per project. One working copy per task: don't clone or copy a project again "to be safe", and don't make extra git worktrees; each has its own \`node_modules\`/\`.venv\` (hundreds of MB).
+- **Code**: \`~/projects/<name>\`, one folder per project. One working copy per task: don't clone or copy a project again "to be safe", and don't make extra git worktrees; each has its own \`node_modules\`/\`.venv\` (hundreds of MB). A chat that works in its own copy of a project (a git worktree Uno Work made) can find it removed after the chat sat idle: Uno Work cleans idle copies by itself and brings one back on the chat's next message with its uncommitted changes and \`.env\` files, but without \`node_modules\`, \`.venv\` or build output; install dependencies again there before running anything.
 - **Never on the disk**: a second copy of what is already in the Drive, big downloads you only need once (stream them or delete after), media inside a git repository.
 - In a shell or a script the same is one command: \`uno status\`, \`uno cleanup [--apply]\`, \`uno drive ls|put|get|link\`, \`uno project sync|get|ls\`, \`uno guide <topic>\`.
 
