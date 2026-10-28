@@ -168,12 +168,16 @@ export function BrowserBridgeListener() {
           return;
         }
         if (event.type === "openInApp" && event.view === "app") {
-          // An app's public address (open_in_panel): framed as the app in the
-          // panel. An http address can't be framed inside https Uno Work, so
-          // it is offered in a new tab (a click: popup blockers).
+          // An app (open_in_panel with appId): framed as the app in the panel —
+          // its public address, or its local one, which the panel shows from
+          // the port's address on a cloud computer (ComputerAppFrame, P16).
+          // Another http address can't be framed inside https Uno Work, so it
+          // is offered in a new tab (a click: popup blockers).
           const url = event.path;
           const name = event.name ?? url;
-          const frameable = !(window.location.protocol === "https:" && /^http:/i.test(url));
+          const frameable =
+            isComputerLocalUrl(url) ||
+            !(window.location.protocol === "https:" && /^http:/i.test(url));
           const here =
             !event.context?.threadId || event.context.threadId === currentThreadIdRef.current;
           if (frameable && here) {

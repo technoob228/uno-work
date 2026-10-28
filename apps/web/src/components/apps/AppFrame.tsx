@@ -45,6 +45,7 @@ export function AppFrame({
   reloadKey = 0,
   firstSrc = null,
   compact = false,
+  portAddress = false,
   className,
 }: {
   url: string;
@@ -60,6 +61,11 @@ export function AppFrame({
   firstSrc?: string | null;
   /** The right panel: a smaller "can't show it here" card. */
   compact?: boolean;
+  /**
+   * A cloud computer's own page from its port address (ComputerAppFrame):
+   * Uno serves it and lets Work frame it, so there is nothing to check.
+   */
+  portAddress?: boolean;
   className?: string;
 }) {
   if (isElectron) {
@@ -71,6 +77,20 @@ export function AppFrame({
         allowpopups
         className={cn("h-full w-full", className)}
         style={{ display: "flex" }}
+      />
+    );
+  }
+  if (portAddress) {
+    return (
+      <iframe
+        key={`${url}#${reloadKey}`}
+        src={reloadKey === 0 && firstSrc ? firstSrc : url}
+        title={name}
+        allow={FRAME_ALLOW}
+        sandbox={FRAME_SANDBOX}
+        referrerPolicy="strict-origin-when-cross-origin"
+        className={cn("h-full w-full border-0 bg-background", className)}
+        data-testid="computer-app-frame"
       />
     );
   }

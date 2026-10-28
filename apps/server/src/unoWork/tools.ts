@@ -91,6 +91,7 @@ import { sparkTools } from "./sparkTools.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
+import { workAppLink } from "../workAddress.ts";
 
 export {
   UNO_WORK_APPROVAL_RESULT_PATH,
@@ -242,6 +243,15 @@ export interface UnoWorkToolDeps {
   }) => Effect.Effect<{ readonly ok: boolean }>;
   /** Uno Work runs on a cloud computer (the panel's browser is the machine's). */
   readonly hostedMachine: boolean;
+  /**
+   * The person's Uno Work address (`https://<label>.uno4.work`) once they
+   * opened it here (workAddress.ts); null — not known yet. Links to apps.
+   */
+  readonly workAddress?: () => string | null;
+  /** Uno Work is open on the person's screen right now (a panel can show things). */
+  readonly personWindowOpen?: Effect.Effect<boolean>;
+  /** Tests: how long open_in_panel waits for a just-registered app to start. */
+  readonly appStartWaitMs?: number;
   readonly account: {
     readonly cloudState: Effect.Effect<UnoCloudState>;
     readonly resizeOptions: Effect.Effect<UnoComputerResizeOptions>;
@@ -554,6 +564,25 @@ const findApp = (deps: UnoWorkToolDeps, rawId: string) =>
     }),
   );
 
+/** How long open_in_panel waits for an app Uno is about to start (it starts within ~20 s). */
+export const APP_START_WAIT_MS = 30_000;
+const APP_START_POLL_MS = 2_000;
+
+/** The app once it runs, or as it is after {@link APP_START_WAIT_MS}. */
+const waitForAppRunning = (deps: UnoWorkToolDeps, app: UnoMachineApp) =>
+  Effect.gen(function* () {
+    let current = app;
+    const wait = deps.appStartWaitMs ?? APP_START_WAIT_MS;
+    const poll = Math.min(APP_START_POLL_MS, Math.max(10, Math.floor(wait / 10)));
+    const deadline = Date.now() + wait;
+    while (current.status !== "running" && Date.now() < deadline) {
+      yield* Effect.sleep(Duration.millis(poll));
+      const apps = yield* deps.machineApps.list;
+      current = apps.apps.find((entry) => entry.id === app.id) ?? current;
+    }
+    return current;
+  });
+
 const appAction = (
   deps: UnoWorkToolDeps,
   args: Record<string, unknown>,
@@ -581,6 +610,17 @@ const appAction = (
 const appIdLabel = (args: Record<string, unknown>) => str(args, "appId") ?? "an app";
 
 const MANIFEST_ID_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$";
+
+/** "Plan limits" → "plan-limits": an app id from its name. */
+export function appIdFromName(name: string): string {
+  return name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+}
 
 const manifestPath = (deps: UnoWorkToolDeps, id: string) =>
   path.join(deps.manifestDir, `${id}.json`);
@@ -747,6 +787,37 @@ function joinUrlPath(base: string, extra: string | undefined): string {
   } catch {
     return base;
   }
+}
+
+/**
+ * An app's page on its port: `path` is a path on the port, not under the
+ * page the app opens at — an app registered with `path: "/widget"` and asked
+ * for "/widget" is `localhost:8471/widget` (P16 opened `/widget/widget`, 404).
+ */
+export function appLocalAddress(
+  app: Pick<UnoMachineApp, "port" | "localUrl">,
+  extra: string | undefined,
+): string | null {
+  if (app.port === null) return app.localUrl;
+  const root = `http://localhost:${app.port}`;
+  const wanted = extra?.trim();
+  if (!wanted) return app.localUrl ?? `${root}/`;
+  return `${root}${wanted.startsWith("/") ? wanted : `/${wanted}`}`;
+}
+
+/** The link that opens an app inside the person's Uno Work (cloud computers); null — not known yet. */
+function appLinkFor(deps: UnoWorkToolDeps, app: Pick<UnoMachineApp, "id">): string | null {
+  if (!deps.hostedMachine) return null;
+  const address = deps.workAddress?.() ?? null;
+  return address ? workAppLink(address, app.id) : null;
+}
+
+/** What to tell the person when their Uno Work isn't open to show the app. */
+function appNotShownNote(name: string, link: string | null, widget: boolean): string {
+  const where = `${name} is in their Apps${widget ? " and its widget is on their Home" : ""}`;
+  return link
+    ? `Uno Work isn't open on the person's screen right now, so nothing was shown. ${where}. Give them this link — it opens ${name} inside their Uno Work: ${link}`
+    : `Uno Work isn't open on the person's screen right now, so nothing was shown. ${where}: tell them to open Uno Work and click ${name} in Apps & sites. Don't ask them for any address.`;
 }
 
 const threadPath = (raw: string | undefined) => {
@@ -1165,7 +1236,14 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           appsFolder: apps.manifestDir,
           apps: apps.apps
             .filter((app) => bool(args, "includeHidden") || !app.hidden)
-            .map(compactApp),
+            .map((app) => {
+              // A web app of this computer: the link that opens it in the
+              // person's Uno Work (cloud computers, once known).
+              const entry: ReturnType<typeof compactApp> & { link?: string } = compactApp(app);
+              const link = app.http && app.port !== null ? appLinkFor(deps, app) : null;
+              if (link) entry.link = link;
+              return entry;
+            }),
           ...(apps.publishBlockedReason
             ? { showOnInternetUnavailable: apps.publishBlockedReason }
             : {}),
@@ -1235,7 +1313,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_show_on_internet",
     group: "computer",
     description:
-      'Give a running web app a public address (http://<computer>:<port>/ — plain http, no sign-in) so others can reach it: their phone, a friend, a webhook (the "Show on the internet" button). Not needed for the person to use the app themselves: a click on it opens it in Uno Work. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
+      'The explicit outside mode: give a running web app a PUBLIC address (http://<computer>:<port>/ — plain http, no sign-in) for other people, another device or a webhook (the "Show on the internet" button). Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -1298,7 +1376,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         id: {
           type: "string",
           pattern: MANIFEST_ID_PATTERN,
-          description: "Short lowercase id: letters, digits, - and _, e.g. notes.",
+          description:
+            "Short lowercase id: letters, digits, - and _, e.g. notes. Optional: made from the name.",
         },
         name: {
           type: "string",
@@ -1358,6 +1437,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           additionalProperties: false,
         },
         notify: { type: "boolean", description: "May put notifications into the person's Inbox." },
+        widget: {
+          type: "object",
+          description:
+            'A Home widget: a small page the app serves, e.g. {"path": "/widget"}. It appears on the person\'s Home by itself.',
+          properties: {
+            path: {
+              type: "string",
+              pattern: "^/",
+              maxLength: 300,
+              description: 'The widget page on the app\'s port, e.g. "/widget".',
+            },
+            size: { type: "string", enum: ["small", "medium", "wide"] },
+            title: { type: "string", maxLength: 60 },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        },
         type: {
           type: "string",
           enum: ["telegram-bot"],
@@ -1384,7 +1480,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             "always: keep an economy-mode computer awake for it (a bot on long polling). Ignored on the free trial — check sleep in computer_status.",
         },
       },
-      required: ["id", "name"],
+      required: ["name"],
       additionalProperties: false,
     },
     level: "change",
@@ -1392,7 +1488,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     approvalDetail: (args) => str(args, "command"),
     run: (deps, args) =>
       Effect.gen(function* () {
-        const id = str(args, "id")!;
+        // No id: one from the name (weak models often leave it out — the
+        // P16 Haiku runs did in 3 of 6). The same name gives the same id, so
+        // registering again still updates the app.
+        const id = str(args, "id") ?? appIdFromName(str(args, "name") ?? "");
+        if (!new RegExp(MANIFEST_ID_PATTERN).test(id)) {
+          return yield* toolError(
+            'Give the app an id: short, lowercase letters, digits, - and _, e.g. "notes".',
+          );
+        }
         // Keep a widget registered earlier: app_register updates, app_add_widget adds.
         const previous = yield* readManifestRecord(deps, id).pipe(
           Effect.orElseSucceed(() => ({}) as Record<string, unknown>),
@@ -1422,6 +1526,19 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           record.storage = typeof limitGb === "number" ? { limitGb } : true;
         }
         if (previous.widget !== undefined) record.widget = previous.widget;
+        const widgetArg =
+          args.widget && typeof args.widget === "object"
+            ? (args.widget as { path?: unknown; size?: unknown; title?: unknown })
+            : null;
+        if (widgetArg && typeof widgetArg.path === "string") {
+          record.widget = {
+            path: widgetArg.path,
+            size: typeof widgetArg.size === "string" ? widgetArg.size : "medium",
+            ...(typeof widgetArg.title === "string" && widgetArg.title.trim()
+              ? { title: widgetArg.title.trim() }
+              : {}),
+          };
+        }
         // Models often put a path ("/widget") or a local address in `url`,
         // which is only for apps hosted elsewhere. Be forgiving: a path
         // becomes `path`, a local address is dropped for the port.
@@ -1432,7 +1549,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             delete record.url;
             if (record.path === undefined) record.path = rawUrl;
             notes.push(
-              `"${rawUrl}" is a path, not an address, so it was saved as path. For a Home widget use app_add_widget.`,
+              `"${rawUrl}" is a path, not an address, so it was saved as path (the page the app opens at). A Home widget is widget: {"path": "${rawUrl}"} in app_register.`,
             );
           } else if (isLocalAddress(rawUrl) && record.port !== undefined) {
             delete record.url;
@@ -1520,18 +1637,22 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                     () => false,
                   ),
               );
+        const hasWidget = record.widget !== undefined && record.port !== undefined;
+        const link = record.port !== undefined ? appLinkFor(deps, { id: `manifest:${id}` }) : null;
         return {
           ok: true,
           appId: `manifest:${id}`,
           file: written.file,
+          ...(hasWidget ? { widget: "on the person's Home (it appears there by itself)" } : {}),
           next:
             botTokenIn === false
               ? BOT_WAITING_FOR_TOKEN_NEXT
               : record.type === APP_TYPE_TELEGRAM_BOT && written.manifest.command
                 ? BOT_STARTING_NEXT
                 : written.manifest.command
-                  ? "Uno starts it within ~20 seconds; check with apps_list / app_logs. Then open it with open_in_panel (appId) and tell the person it is on Home."
+                  ? `Uno starts it within ~20 seconds — don't start it yourself. Next: open_in_panel with appId "manifest:${id}": the person sees it inside Uno Work.${hasWidget ? " Its widget is already on their Home." : ""} Never publish it or ask the person for an address to show it.`
                   : 'It shows on Home, but without a command it has no Start button and won\'t come back after a reboot. Call app_register again with command (e.g. "python3 app.py") and cwd.',
+          ...(link ? { link } : {}),
           ...(notes.length > 0 ? { notes } : {}),
         };
       }),
@@ -1540,7 +1661,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_add_widget",
     group: "apps",
     description:
-      "Give a registered app a Home widget: a small live view (about 300x200 px) of a page the app serves, e.g. /widget. Serve that page first (no header, one glance of content, refreshes itself, works in light and dark). Then tell the person: Home → Customize → Add widget → the app.",
+      "Give a registered app a Home widget: a small live view (about 300x200 px) of a page the app serves, e.g. /widget. Same as widget: {\"path\": …} in app_register. It appears on the person's Home by itself — they don't add it by hand.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1600,7 +1721,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         return {
           ok: true,
           widget,
-          done: `${alreadySet ? "The widget was already set" : "Widget saved"}; don't call app_add_widget again. Tell the person: Home → Customize → Add widget → ${name}.`,
+          done: `${alreadySet ? "The widget was already set" : "Widget saved"}: it appears on the person's Home by itself — don't call app_add_widget again and don't tell them to add it by hand. Next: open_in_panel with appId "manifest:${id}" to show ${name}.`,
         };
       }),
   },
@@ -2152,7 +2273,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "open_in_panel",
     group: "person",
     description:
-      'Show something in the right panel of this chat: an app of this computer (appId — the easiest way to show an app you just made), a web page (a full url like "http://localhost:8124/"), or a local file. For a static result (report, HTML page, document) open the file — don\'t start a web server just to show it. scope: "chat" (default), "project" (all chats of this project) or "global" (only when the person asks).',
+      'Show something in the right panel of this chat. An app of this computer: appId (and path for one of its pages, e.g. "/widget") — the person sees it inside Uno Work, live from this computer; the result has a link that opens it in their Uno Work. Otherwise a web page (a full url like "https://example.com/docs") or a local file. For a static result (report, HTML page, document) open the file — don\'t start a web server just to show it. scope: "chat" (default), "project" (all chats of this project) or "global" (only when the person asks).',
     inputSchema: {
       type: "object",
       properties: {
@@ -2164,7 +2285,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         path: {
           type: "string",
           maxLength: 2000,
-          description: 'With appId: a page of the app, e.g. "/widget".',
+          description: 'With appId: a page on the app\'s port, e.g. "/widget".',
         },
         url: {
           type: "string",
@@ -2189,8 +2310,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           return yield* toolError("Give exactly one of appId, url or file.");
         }
         let localOnly = false;
+        let shownApp: { readonly name: string; readonly link: string | null } | null = null;
         if (appId !== undefined) {
-          const app = yield* findApp(deps, appId);
+          let app = yield* findApp(deps, appId);
           // A bot is opened in Telegram, never in the panel.
           if (app.telegramBot) {
             return app.telegramBot.link
@@ -2206,28 +2328,55 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                   note: `${app.name} is a Telegram bot without a username in its manifest yet. Add telegram (the username from BotFather) with app_register, then give the person https://t.me/<username>.`,
                 };
           }
-          const publicUrl = app.publication?.url ?? app.url;
-          // An address the person can open on their own device: show it as the
-          // app (the panel's app view has "Open in a new tab"), not inside the
-          // computer's own browser.
-          if (publicUrl) {
-            const target = joinUrlPath(publicUrl, str(args, "path"));
+          const local =
+            app.http && app.port !== null ? appLocalAddress(app, str(args, "path")) : null;
+          if (local === null) {
+            // An app hosted somewhere else: its own address, as the app.
+            const elsewhere = app.url ?? app.publication?.url ?? null;
+            if (!elsewhere) {
+              return yield* toolError(
+                `${app.name} has no web address (status: ${app.status}). Start it or give it a port first.`,
+              );
+            }
+            const target = joinUrlPath(elsewhere, str(args, "path"));
             const shown = yield* deps.openAppInPanel({ url: target, name: app.name });
             if (shown.ok) return { ok: true, opened: target, where: "app panel" };
+            url = target;
+          } else {
+            // An app of this computer is shown inside Uno Work from the
+            // computer itself — even when it is also on the internet (that
+            // is the separate, explicit "Show on the internet").
+            const link = appLinkFor(deps, app);
+            const widget = app.widget !== null && app.widget !== undefined;
+            if (deps.hostedMachine && deps.personWindowOpen) {
+              const open = yield* deps.personWindowOpen;
+              // Never the computer's own browser instead: the person would
+              // get a stream of it ("You're in control"), not their app.
+              if (!open) {
+                return {
+                  ok: true,
+                  opened: null,
+                  ...(link ? { link } : {}),
+                  note: appNotShownNote(app.name, link, widget),
+                };
+              }
+            }
+            // Just registered: Uno starts it within ~20 s. Wait for it here,
+            // so the panel shows the app, not "nothing is running yet".
+            if (app.status !== "running" && app.canStart && app.source === "manifest") {
+              app = yield* waitForAppRunning(deps, app);
+            }
+            shownApp = { name: app.name, link };
+            url = local;
           }
-          const base = publicUrl ?? app.localUrl;
-          if (!base) {
-            return yield* toolError(
-              `${app.name} has no web address (status: ${app.status}). Start it or give it a port first.`,
-            );
-          }
-          localOnly = publicUrl === null && deps.hostedMachine;
-          url = joinUrlPath(base, str(args, "path"));
         }
         if (url !== undefined && !isCompleteHttpUrl(url)) {
           return yield* toolError(
             `"${url}" is not a complete address. Pass the whole URL with host and port, e.g. "http://localhost:8124/", or use appId.`,
           );
+        }
+        if (url !== undefined && appId === undefined) {
+          localOnly = deps.hostedMachine && isLocalAddress(url);
         }
         const opened = yield* deps
           .bridge({
@@ -2247,19 +2396,36 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           typeof opened === "object" &&
           opened !== null &&
           (opened as { where?: unknown }).where === "panel";
+        if (inPanel && shownApp) {
+          return {
+            ok: true,
+            opened: shownApp.name,
+            where: "the person's panel, inside Uno Work",
+            ...(shownApp.link ? { link: shownApp.link } : {}),
+            note: `Done: the person sees ${shownApp.name} in their panel, live from this computer (they can comment on it). It is also in their Apps on Home${shownApp.link ? `, and this link opens it in their Uno Work: ${shownApp.link}` : ""}. Nothing to publish and no address to ask for. To look at the page yourself: browser_command openUrl ${url}.`,
+          };
+        }
         if (inPanel) {
           return {
             ok: true,
             opened: url,
             where: "the person's panel",
-            note: "This opened in the person's panel as their site: their own browser shows this computer's page through Uno, with live reload, and they can comment on any part of it. It is not open in the computer's browser: to click or read the page yourself, first browser_command openUrl with the same address. For a link they can open on a phone or share, offer app_show_on_internet (they approve it).",
+            note: "This opened in the person's panel as their site: their own browser shows this computer's page through Uno, with live reload, and they can comment on any part of it. It is not open in the computer's browser: to click or read the page yourself, first browser_command openUrl with the same address. Only if they ask for a public link (a phone, other people), offer app_show_on_internet (they approve it).",
+          };
+        }
+        if (shownApp && deps.hostedMachine) {
+          return {
+            ok: true,
+            opened: null,
+            ...(shownApp.link ? { link: shownApp.link } : {}),
+            note: appNotShownNote(shownApp.name, shownApp.link, false),
           };
         }
         if (url !== undefined && localOnly) {
           return {
             ok: true,
             opened: url,
-            note: "This opened in the computer's own browser, shown live in the panel. The person can't open this localhost address on their own phone or laptop: if they want their own link, offer app_show_on_internet (they approve it).",
+            note: "Uno Work isn't open on the person's screen, so this opened in this computer's own browser (for you: browser_command). To show the person something you built, register it as an app (app_register) and open it with open_in_panel appId: it opens inside their Uno Work.",
           };
         }
         return url !== undefined ? { ok: true, opened: url } : opened;

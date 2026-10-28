@@ -53,6 +53,7 @@ import { cn } from "../../lib/utils";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useSettings } from "../../hooks/useSettings";
+import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -415,10 +416,12 @@ function BrowserView({
   const machineAppList = machineApps.data?.apps;
   const appLocal =
     webFrame && cloudComputer !== null ? appLocalUrl(currentUrl, machineAppList ?? []) : null;
+  const [portAttempt, setPortAttempt] = useState(0);
   const portPreviewOfUrl = usePortPreview({
     url: appLocal ?? currentUrl,
     computer: cloudComputer,
     enabled: pageInPanel && !demoDesktop,
+    attempt: portAttempt,
   });
   const portPreview: PortPreviewState =
     appLocal !== null && portPreviewOfUrl.kind === "failed" ? { kind: "off" } : portPreviewOfUrl;
@@ -517,14 +520,15 @@ function BrowserView({
   const [openedWithUrl] = useState(() => tab.url ?? "");
   useEffect(() => {
     // Still in the web (Misha 17.10) where Work can't show the port itself
-    // ("Your site" off for the account, a self-hosted daemon): this device's
-    // iframe would open its own localhost. The desktop app: only a cloud
-    // computer's page that couldn't get a link (a local chat's localhost is
-    // the Mac's own, right there).
+    // (a self-hosted daemon): this device's iframe would open its own
+    // localhost. A cloud computer's page never moves to the computer's
+    // browser by itself (P16, 28.10: the person got the agent's browser —
+    // ping, a blurry picture, "You're in control"): without a link the panel
+    // says so and offers the computer's screen as an explicit choice.
     if (demoDesktop || !visible || !canOpenInAgentBrowser) return;
     if (!currentUrl || !isComputerLocalUrl(currentUrl)) return;
-    if (portPreview.kind === "ready" || portPreview.kind === "minting") return;
-    if (portPreview.kind === "off" && (isElectron || !pageToolsFlag)) return;
+    if (portPreview.kind !== "off") return;
+    if (isElectron || !pageToolsFlag) return;
     if (openedOnComputerRef.current === currentUrl) return;
     openedOnComputerRef.current = currentUrl;
     // The agent's page (agent flow 25.10): the agent keeps driving it — the
@@ -1418,7 +1422,15 @@ function BrowserView({
                 {portMode && !portLink ? (
                   <PortPreviewPlaceholder
                     opening={portPreview.kind === "minting"}
-                    canOpenOnComputer={canOpenInAgentBrowser}
+                    onRetry={() => setPortAttempt((value) => value + 1)}
+                    onOpenOnComputer={
+                      canOpenInAgentBrowser && currentUrl
+                        ? () => {
+                            openInSource("computer", currentUrl, { forAgent: false });
+                            closeFile(tab.id);
+                          }
+                        : null
+                    }
                   />
                 ) : iframeMode ? (
                   <iframe
@@ -1480,24 +1492,46 @@ function BrowserView({
   );
 }
 
-/** A cloud computer's localhost while its link comes (or when there is none). */
+/**
+ * A cloud computer's localhost while its link comes, or when this browser
+ * can't show it: an honest line, Try again, and the computer's own screen
+ * only as the person's explicit choice (P16, 28.10).
+ */
 function PortPreviewPlaceholder({
   opening,
-  canOpenOnComputer,
+  onRetry,
+  onOpenOnComputer,
 }: {
   opening: boolean;
-  canOpenOnComputer: boolean;
+  onRetry: () => void;
+  onOpenOnComputer: (() => void) | null;
 }) {
+  if (opening) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-muted-foreground">
+        <Loader2Icon className="size-5 animate-spin opacity-60" />
+        <p>Opening it from your computer…</p>
+      </div>
+    );
+  }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-xs text-muted-foreground">
-      {opening ? <Loader2Icon className="size-5 animate-spin opacity-60" /> : null}
-      <p>
-        {opening
-          ? "Opening your site from the computer…"
-          : canOpenOnComputer
-            ? "Opening it in the computer's browser…"
-            : "This site runs on your cloud computer and can't be shown here yet."}
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-xs text-muted-foreground"
+      data-testid="port-preview-unavailable"
+    >
+      <p className="max-w-xs">
+        This page runs on your cloud computer. Uno Work couldn't show it in this browser right now.
       </p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button size="xs" variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+        {onOpenOnComputer ? (
+          <Button size="xs" variant="ghost" onClick={onOpenOnComputer}>
+            View it on the computer's screen
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

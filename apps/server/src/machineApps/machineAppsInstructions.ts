@@ -39,7 +39,7 @@ When you create or run an app or long-running service on this machine, write \`$
 - Optional: \`"path": "/admin"\` — what to open on that port; \`"url"\` — an https address the app already has elsewhere.
 - Don't start it yourself (no \`nohup … &\`, no \`app_start\` right after registering): Uno starts it, and a copy you start runs next to Uno's — a Telegram bot then fights itself for updates (409). Check it with \`apps_list\` / \`app_logs\`, then tell the person it is on their home screen ("This computer").
 - Tests and trial runs never write into the app's real data (its config, orders, users): point them at a temporary folder or fixtures.
-- **On a cloud computer the right panel is a browser running on the machine** — \`http://localhost:<port>\` works there, but the person can't open it on their own phone or laptop. To give them their own link, use \`app_show_on_internet\` (they approve it).
+- **Showing it to the person:** \`open_in_panel\` with the app's \`appId\`. They see it inside their Uno Work — on a cloud computer too, Uno brings the page from this computer to their browser — and the result has a link that opens it in their Uno Work. Never publish an app just to show it, never ask the person for their address, never search Uno Work's own files for links. \`app_show_on_internet\` is only for a public link they ask for (other people, another device, a webhook).
 - **Sleep.** Check \`sleep\` in \`computer_status\`. When the computer sleeps when idle (the free trial always does), every app on it sleeps too: a web app wakes when opened, a Telegram bot on long polling does NOT — it stops answering until something wakes the computer. Never tell the person an app runs 24/7 then; say so plainly and offer an always-on plan (Small and up). Where economy mode is optional, \`"runs": "always"\` in the manifest keeps the computer awake for that app (ignored on the free trial).
 
 **A Telegram bot** has no port and nothing to show in the panel. Its manifest:
@@ -111,13 +111,14 @@ When something happens the person should know about — someone commented on the
 
 ## Home widgets — a small live view of an app on the person's Home
 
-The person can put a widget of an app on their Uno Work Home (a card next to Files, Apps…) — e.g. "today's orders", "uptime of my sites", "my to-do list". When they ask for a widget, or an app has one obvious number or list worth glancing at:
+When the person asks for a widget (or an app has one number or list worth a glance), do exactly this:
 
-1. Serve a small page from the app itself, e.g. \`/widget\` — its own route on the app's port, no new server.
-2. Add \`"widget": {"path": "/widget", "size": "medium", "title": "Orders today"}\` to the app's manifest. \`path\` must start with \`/\` (a path on the app, never a full URL). \`size\`: \`"small"\` (a quarter of the row), \`"medium"\` (half, the default) or \`"wide"\` (the whole row). \`title\` is optional (the app's name otherwise). A widget needs a \`port\` (or \`url\`) like any web app.
-3. The page must work at about **300×200 px**: no header or navigation, one glance of content, a transparent or white background, system font, readable in light and dark (\`prefers-color-scheme\`), no horizontal scroll, and it must not need a login prompt inside the frame. Refresh its data by itself (e.g. \`setInterval\` every 30–60 s); Home also reloads it when the window gets focus.
-4. It runs in a sandboxed frame on Home: it can run scripts and call its own app, but can't navigate Uno Work or read its data. Links that should open the full app: \`target="_blank"\`.
-5. Tell the person: "Add it on Home → Customize → Add widget → <app name>".
+1. In the app itself (on its port, no new server), serve a page at \`/widget\`: about **300×200 px**, no header or navigation, one glance of content, system font, transparent or white background, readable in light and dark (\`prefers-color-scheme\`), no horizontal scroll, no login inside it. It refreshes its data by itself (every 30–60 s).
+2. \`app_register\` with \`port\`, \`command\`, \`cwd\` and \`widget: {"path": "/widget"}\` (optional \`size\`: \`"small"\`, \`"medium"\` (default) or \`"wide"\`; optional \`title\`). An app registered earlier: \`app_add_widget\` with its \`appId\` and \`path\` does the same.
+3. Nothing else for Home: the widget appears on the person's Home by itself, shown from this computer inside Uno Work. Don't tell them to add it, don't publish the app, don't ask for any address.
+4. \`open_in_panel\` with the app's \`appId\` to show the whole app, then one line to the person: "It's on your Home."
+
+\`path\` is a page on the app's port and starts with \`/\` (never a full URL). The widget runs in a sandboxed frame: it can call its own app, not Uno Work; links to the full app: \`target="_blank"\`. In the manifest it is \`"widget": {"path": "/widget", "size": "medium", "title": "Orders today"}\`.
 
 ## Where an app keeps data — the person's files go to the cloud, not the disk
 

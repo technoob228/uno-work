@@ -347,7 +347,8 @@ export function AddWidgetDialog({
             <DialogHeader>
               <DialogTitle>Add a custom widget</DialogTitle>
               <DialogDescription>
-                Ask Uno to make a widget, e.g. “{example}” — it will appear here, under Add widget.
+                Ask Uno to make a widget, e.g. “{example}”. Once it's ready, it appears on your Home
+                by itself.
               </DialogDescription>
             </DialogHeader>
             <DialogPanel className="flex flex-col gap-3" data-testid="custom-widget-panel">
@@ -377,8 +378,8 @@ export function AddWidgetDialog({
                 </button>
               ))}
               <p className="text-xs text-muted-foreground">
-                Uno builds a small page in one of your apps and registers it as a widget; you check
-                the chat before anything is sent.
+                Uno builds a small page in one of your apps and puts it on your Home; it runs on
+                your computer and stays private. You check the chat before anything is sent.
               </p>
               <Button
                 variant="ghost"

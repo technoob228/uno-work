@@ -87,6 +87,7 @@ import {
 } from "./sparkClient.ts";
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
+import { currentWorkAddress } from "../workAddress.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -381,6 +382,8 @@ const makeDeps = (input: {
           return { ok: true };
         }),
       hostedMachine: serverConfig.mode === "web",
+      workAddress: currentWorkAddress,
+      personWindowOpen: browserBridge.hasSubscribers,
       account: {
         cloudState: unoCloud.getState(),
         resizeOptions: unoComputer.resizeOptions(),

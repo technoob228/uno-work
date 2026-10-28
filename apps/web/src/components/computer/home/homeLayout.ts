@@ -231,3 +231,39 @@ export function customWidgetIdeas(appNames: ReadonlyArray<string>): string[] {
   }
   return ideas;
 }
+
+// ------------------------------------------- app widgets land on Home --
+
+/** App widgets this device has already put on Home (or found there), by manifest id. */
+export const HOME_APP_WIDGETS_SEEN_KEY = "uno-work:home:app-widgets-seen:v1";
+
+/**
+ * A widget an app declares lands on Home by itself, once per device (P16,
+ * 28.10: the agent made "Plan limits", told the person "Home → Customize →
+ * Add widget", and the person had to do it by hand). Removing it with × is
+ * the person's choice and sticks: the widget isn't brought back.
+ *
+ * `seen` null — this device never recorded it. On a device with a Home
+ * layout already (an update) the widgets that exist now are taken as seen,
+ * not added: one the person removed before stays removed. A device with no
+ * layout yet (a new browser) shows them all.
+ */
+export function newAppWidgetBlocks(input: {
+  readonly widgetAppIds: ReadonlyArray<string>;
+  readonly seen: ReadonlyArray<string> | null;
+  readonly layoutSaved: boolean;
+}): { readonly add: AppWidgetBlockId[]; readonly seen: string[] } {
+  const ids = [...new Set(input.widgetAppIds.filter((id) => APP_ID_RE.test(id)))];
+  if (input.seen === null) {
+    return {
+      add: input.layoutSaved ? [] : ids.map(appWidgetBlockId),
+      seen: ids,
+    };
+  }
+  const known = new Set(input.seen);
+  const fresh = ids.filter((id) => !known.has(id));
+  return {
+    add: fresh.map(appWidgetBlockId),
+    seen: fresh.length === 0 ? [...input.seen] : [...input.seen, ...fresh],
+  };
+}

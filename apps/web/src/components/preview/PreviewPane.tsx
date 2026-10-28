@@ -93,6 +93,8 @@ import {
   type PluginPanelDescriptor,
 } from "./PluginPanelChat";
 import { AppFrame } from "../apps/AppFrame";
+import { ComputerAppFrame } from "../apps/ComputerAppFrame";
+import { isComputerLocalUrl } from "@t3tools/shared/portPreview";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
 import { PanelFilesTab } from "../files/PanelFilesTab";
@@ -1461,6 +1463,19 @@ function Body({ file }: { file: PreviewFile }) {
     return <PluginPanelBody file={file} />;
   }
   if (file.kind === "app" && file.url) {
+    // An app only the computer reaches (open_in_panel with appId, "Beside a
+    // chat"): from its port's address, never the computer's browser (P16).
+    if (isComputerLocalUrl(file.url)) {
+      return (
+        <ComputerAppFrame
+          environmentId={effectiveEnvironmentId ?? null}
+          url={file.url}
+          name={file.name}
+          icon={file.content || null}
+          compact
+        />
+      );
+    }
     return <AppFrame url={file.url} name={file.name} icon={file.content || null} compact />;
   }
   if (file.kind === "live-browser") {
