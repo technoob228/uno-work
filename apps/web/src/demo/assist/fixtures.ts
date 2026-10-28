@@ -47,6 +47,7 @@ const UNO_ROOT: Record<MachineKey, string> = {
   work: "/home/uno/.uno/assistant",
   product: "/home/uno/.uno/assistant",
   mac: "/Users/misha/.uno/assistant",
+  own: "/home/uno/.uno/assistant",
 };
 
 const REPO = {
@@ -91,6 +92,7 @@ function liveProjects(): Record<MachineKey, ProjectSpec[]> {
     ],
     // The Free computer is asleep: the page never reaches its daemon.
     product: [],
+    own: [{ id: "p-own-home", title: "Home folder", root: "/home/uno" }],
   };
 }
 
@@ -102,6 +104,7 @@ function newProjects(): Record<MachineKey, ProjectSpec[]> {
     ],
     mac: [],
     product: [],
+    own: [{ id: "p-own-home", title: "Home folder", root: "/home/uno" }],
   };
 }
 

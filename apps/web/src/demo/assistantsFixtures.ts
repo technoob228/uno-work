@@ -611,6 +611,7 @@ const SUMMARIES: Record<
   ],
   product: [{ projectId: BUILDER, title: "Builder", emoji: "🛠️" }],
   mac: [],
+  own: [],
 };
 
 const FILES: Record<string, Record<string, string>> = {

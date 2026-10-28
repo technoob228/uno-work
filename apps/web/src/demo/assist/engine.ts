@@ -366,6 +366,7 @@ const NAMES: Record<MachineKey, string> = {
   work: "uno-work",
   mac: "MacBook",
   product: "free-cloud",
+  own: "its own computer",
 };
 export const machineName = (machine: MachineKey) => NAMES[machine];
 

@@ -189,6 +189,11 @@ export interface CreateUnoBoxInput {
   /** Assistants MVP: the computer is one assistant's home (`computer_role`). */
   readonly computerRole?: "assistant";
   readonly assistant?: { readonly name: string; readonly emoji: string; readonly template: string };
+  /**
+   * An assistant's computer at the preset's size (the wizard's own computer:
+   * Uno Work's 4 GB floor) instead of the console's assistant default.
+   */
+  readonly explicitSize?: boolean;
   readonly onStatus?: (status: UnoBoxCreateJobStatus) => void;
   readonly onStage?: (stage: UnoBoxCreateStage) => void;
   readonly signal?: AbortSignal;
@@ -222,10 +227,12 @@ export async function createUnoBoxAndConnect(
   input.onStage?.("creating");
   const { jobId } = await api.unoCloud.createBox({
     name,
-    // An assistant's computer: the console picks the shape (contract §1).
-    ...(input.computerRole === "assistant"
-      ? { computerRole: input.computerRole }
+    // An assistant's computer: the console picks the shape (contract §1),
+    // unless the caller names it.
+    ...(input.computerRole === "assistant" && input.explicitSize !== true
+      ? {}
       : { ramMb: size.ramMb, vcpu: size.vcpu, diskGb: size.diskGb }),
+    ...(input.computerRole ? { computerRole: input.computerRole } : {}),
     purpose: "work",
     ...(input.assistant ? { assistant: input.assistant } : {}),
   });
