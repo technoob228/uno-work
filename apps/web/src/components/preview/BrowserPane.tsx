@@ -6,9 +6,6 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   Loader2Icon,
-  MoreVerticalIcon,
-  MinusIcon,
-  PlusIcon,
   RotateCwIcon,
   XIcon,
   MonitorSmartphoneIcon,
@@ -66,7 +63,7 @@ import { DebugDrawer } from "./annotate/DebugDrawer";
 import { IframeWebview } from "./annotate/iframeWebview";
 import { PostMessageWebview } from "./annotate/postMessageWebview";
 import { base64ToBlob } from "./annotate/liveWebview";
-import { PageToolsButtons } from "./annotate/PageToolsButtons";
+import { DevToolsButton } from "./annotate/DevToolsButton";
 import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
 import { usePageTools } from "./annotate/usePageTools";
 import { CompanionExtensionPanel } from "./CompanionExtensionPanel";
@@ -74,6 +71,19 @@ import { YourBrowserTab } from "./YourBrowserTab";
 import { browserTabMode } from "./yourBrowserTab.logic";
 import { WEB_PAGE_IN_PANEL } from "./browserSource";
 import { DEVICE_ZOOM_CHOICES, deviceScaleFor, type DeviceZoom } from "./deviceZoom";
+import {
+  BROWSER_DEVICE_SIZES,
+  BrowserMenu,
+  browserDeviceOf,
+  type BrowserDevice,
+} from "./BrowserMenu";
+import {
+  clampPageZoom,
+  isDefaultPageZoom,
+  nextPageZoom,
+  pageZoomLabel,
+  zoomedFrameStyle,
+} from "./pageZoom";
 import { localUrlToPortPreviewUrl, portPreviewUrlToLocalUrl } from "@t3tools/shared/portPreview";
 import { useCloudComputer, usePortPreview, type PortPreviewState } from "./portPreview";
 import { appLocalUrl } from "./openOutsideTarget";
@@ -135,6 +145,7 @@ interface ElectronWebviewElement extends HTMLElement {
   reloadIgnoringCache?: () => void;
   stop(): void;
   setZoomFactor?: (factor: number) => void;
+  getZoomFactor?: () => number;
   capturePage?: (rect?: { x: number; y: number; width: number; height: number }) => Promise<{
     toDataURL: () => string;
     isEmpty?: () => boolean;
@@ -170,7 +181,8 @@ const LEGACY_CREDENTIALS_QUERY_KEY = ["legacyDesktopCredentials"] as const;
 const BROWSER_RECENTS_STORAGE_KEY = "uno_browser_recent_urls";
 const MAX_BROWSER_RECENTS = 8;
 const DEFAULT_ZOOM_FACTOR = 1;
-const ZOOM_STEP = 0.1;
+/** How often a focused page is asked for its zoom (Cmd+= in it zooms it natively). */
+const ZOOM_SYNC_MS = 700;
 const SCREENSHOT_CAPTURE_ATTEMPTS = 3;
 const SCREENSHOT_RETRY_DELAY_MS = 350;
 
@@ -233,7 +245,11 @@ async function capturePanelScreenshot(view: ElectronWebviewElement): Promise<Scr
     }
   }
   throw new Error(
-    emptyFrameMessage({ capturedBy: "panel", attempts: attempt, bytes: screenshotBytes(dataUrl) }),
+    emptyFrameMessage({
+      capturedBy: "panel",
+      attempts: attempt,
+      bytes: screenshotBytes(dataUrl),
+    }),
   );
 }
 
@@ -258,7 +274,10 @@ export function useVaultCredentials() {
 export function useInvalidateBrowserCredentials() {
   const queryClient = useQueryClient();
   return useCallback(
-    () => queryClient.invalidateQueries({ queryKey: BROWSER_CREDENTIALS_QUERY_KEY }),
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: BROWSER_CREDENTIALS_QUERY_KEY,
+      }),
     [queryClient],
   );
 }
@@ -308,7 +327,10 @@ export function BrowserViews({ activeId }: { activeId: string | null }) {
     computer: primaryEnvironmentId !== null,
   });
   const visibleKeys = new Set(
-    visibleScopeKeys({ projectKey: currentProjectKey, threadId: currentChatThreadId }),
+    visibleScopeKeys({
+      projectKey: currentProjectKey,
+      threadId: currentChatThreadId,
+    }),
   );
   const views: ReactNode[] = [];
   for (const [scopeKey, bucket] of Object.entries(statesByScopeKey)) {
@@ -472,9 +494,17 @@ function BrowserView({
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The tab's own page zoom (Misha 28.10): kept across its pages — Chromium
+  // keeps zoom per site, so a new site came at 100% while the label said
+  // otherwise. The web's frame is scaled whole (any site, any origin).
   const [zoomFactor, setZoomFactor] = useState(DEFAULT_ZOOM_FACTOR);
+  const zoomRef = useRef(DEFAULT_ZOOM_FACTOR);
+  zoomRef.current = zoomFactor;
   const [deviceToolbarOpen, setDeviceToolbarOpen] = useState(false);
-  const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
+  const [viewportSize, setViewportSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   // A device size bigger than the panel renders at its real size and the
   // picture shrinks to fit, like DevTools' device mode (Misha 18.10).
   const [deviceZoom, setDeviceZoom] = useState<DeviceZoom>("fit");
@@ -737,6 +767,8 @@ function BrowserView({
     const onDomReady = () => {
       readyRef.current = true;
       syncNavState();
+      // A new page (or site) comes at its own zoom: back to the tab's.
+      if (!iframeMode) view.setZoomFactor?.(zoomRef.current);
       // Перехват логина: скрипт идемпотентен, ставим на каждую загрузку.
       void view.executeJavaScript(buildLoginCaptureScript(captureNonce), false).catch(() => {});
     };
@@ -775,6 +807,8 @@ function BrowserView({
       // that a port's page led to is the page frame's from now on.
       const url = portPreviewUrlToLocalUrl(navigateEvent.url) ?? navigateEvent.url;
       if (portModeRef.current && !isComputerLocalUrl(url)) setMountSrc(url);
+      // Another site comes at its own zoom (100%): the tab's, before it paints.
+      if (!iframeMode) view.setZoomFactor?.(zoomRef.current);
       updateBrowserTab(scopeKey, tab.id, { url });
       syncNavState();
     };
@@ -809,7 +843,30 @@ function BrowserView({
       view.removeEventListener("page-title-updated", onTitleUpdated);
       view.removeEventListener("did-fail-load", onFailLoad);
     };
-  }, [webviewNode, scopeKey, tab.id, tab.url, captureNonce, updateBrowserTab]);
+  }, [webviewNode, scopeKey, tab.id, tab.url, captureNonce, updateBrowserTab, iframeMode]);
+
+  // Chromium zooms a whole site: another tab of the same site changed it
+  // too. The tab shown again gets its own zoom back.
+  useEffect(() => {
+    const view = webviewNode;
+    if (!view || iframeMode || !visible || !readyRef.current) return;
+    if (Math.abs((view.getZoomFactor?.() ?? zoomRef.current) - zoomRef.current) > 0.005) {
+      view.setZoomFactor?.(zoomRef.current);
+    }
+  }, [webviewNode, iframeMode, visible]);
+
+  // Cmd+= / Cmd+- with the keyboard in the page zoom the page itself (the
+  // app menu's zoom acts on the focused page): the label follows it.
+  useEffect(() => {
+    const view = webviewNode;
+    if (!view || iframeMode || !visible || !view.getZoomFactor) return;
+    const timer = window.setInterval(() => {
+      if (document.activeElement !== view || !readyRef.current) return;
+      const actual = clampPageZoom(view.getZoomFactor?.() ?? zoomRef.current);
+      if (Math.abs(actual - zoomRef.current) > 0.005) setZoomFactor(actual);
+    }, ZOOM_SYNC_MS);
+    return () => window.clearInterval(timer);
+  }, [webviewNode, iframeMode, visible]);
 
   /**
    * Заполнение просит СЕРВЕР: пароль лежит в хранилище демона, и клиент его не
@@ -910,10 +967,31 @@ function BrowserView({
     void readLocalApi()?.shell.openExternal(currentUrl);
   }, [currentUrl]);
 
-  const applyZoom = useCallback((nextZoom: number) => {
-    const clamped = Math.min(2, Math.max(0.3, Number(nextZoom.toFixed(2))));
-    setZoomFactor(clamped);
-    webviewRef.current?.setZoomFactor?.(clamped);
+  const applyZoom = useCallback(
+    (nextZoom: number) => {
+      const clamped = clampPageZoom(nextZoom);
+      setZoomFactor(clamped);
+      // The web's iframe is scaled by its style (zoomedFrameStyle), not inside the page.
+      if (!iframeMode) webviewRef.current?.setZoomFactor?.(clamped);
+    },
+    [iframeMode],
+  );
+  const stepZoom = useCallback(
+    (direction: 1 | -1) => applyZoom(nextPageZoom(zoomRef.current, direction)),
+    [applyZoom],
+  );
+  const pickDevice = useCallback((device: BrowserDevice) => {
+    if (device === "off") {
+      setDeviceToolbarOpen(false);
+      setViewportSize(null);
+      return;
+    }
+    setDeviceToolbarOpen(true);
+    setViewportSize(device === "responsive" ? null : BROWSER_DEVICE_SIZES[device]);
+  }, []);
+  const hardReload = useCallback(() => {
+    if (webviewRef.current?.reloadIgnoringCache) webviewRef.current.reloadIgnoringCache();
+    else webviewRef.current?.reload();
   }, []);
 
   const captureScreenshot = useCallback(async () => {
@@ -1146,148 +1224,82 @@ function BrowserView({
               spellCheck={false}
               autoCorrect="off"
               autoCapitalize="off"
-              className={cn(
-                "h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-foreground outline-none placeholder:text-muted-foreground focus:border-ring",
-                pageToolsOn ? "text-xs" : "font-mono text-[11px]",
-              )}
+              className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
             />
           </form>
           {loading ? (
             <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
           ) : null}
-          {pageToolsOn ? (
-            <PageToolsButtons tabId={tab.id} disabled={!mountSrc} />
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => applyZoom(zoomFactor - ZOOM_STEP)}
-                disabled={!mountSrc}
-                aria-label="Zoom out"
-                title="Zoom out"
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <MinusIcon className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => applyZoom(DEFAULT_ZOOM_FACTOR)}
-                disabled={!mountSrc}
-                aria-label="Reset zoom"
-                title="Reset zoom"
-                className="inline-flex h-6 min-w-8 shrink-0 items-center justify-center rounded px-1 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {Math.round(zoomFactor * 100)}%
-              </button>
-              <button
-                type="button"
-                onClick={() => applyZoom(zoomFactor + ZOOM_STEP)}
-                disabled={!mountSrc}
-                aria-label="Zoom in"
-                title="Zoom in"
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <PlusIcon className="size-3.5" />
-              </button>
-            </>
+          {/* Zoom shows only when it isn't 100% (like Chrome's magnifier); − 100% + are in ⋯. */}
+          {isDefaultPageZoom(zoomFactor) ? null : (
+            <button
+              type="button"
+              onClick={() => applyZoom(DEFAULT_ZOOM_FACTOR)}
+              title="Zoom — click for 100%"
+              aria-label={`Zoom ${pageZoomLabel(zoomFactor)}, reset to 100%`}
+              data-testid="browser-zoom-chip"
+              className="inline-flex h-6 shrink-0 items-center rounded px-1 text-[10px] font-medium tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {pageZoomLabel(zoomFactor)}
+            </button>
           )}
-          <button
-            type="button"
-            onClick={async (event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              const choice = await readLocalApi()?.contextMenu.show(
-                [
-                  ...(launcherV2 && canOpenInAgentBrowser
-                    ? [{ id: "agent-browser", label: "Open in agent's browser" }]
-                    : []),
-                  // With Comment in the bar, zoom moves in here.
-                  ...(pageToolsOn
-                    ? [
-                        { id: "zoom-in", label: "Zoom in" },
-                        { id: "zoom-out", label: "Zoom out" },
-                        {
-                          id: "zoom-reset",
-                          label: `Actual size (now ${Math.round(zoomFactor * 100)}%)`,
-                        },
-                      ]
-                    : []),
-                  { id: "force-reload", label: "Reload without cache" },
-                  { id: "screenshot", label: "Take a screenshot" },
-                  { id: "responsive", label: "Responsive" },
-                  { id: "mobile", label: "Mobile 390x844" },
-                  { id: "tablet", label: "Tablet 768x1024" },
-                  { id: "desktop", label: "Desktop 1280x800" },
-                  { id: "cache", label: "Clear cache" },
-                  { id: "cookies", label: "Clear cookies for this site" },
-                  { id: "all", label: "Clear cookies and cache" },
-                ],
-                { x: rect.left, y: rect.bottom + 4 },
-              );
-              if (choice === "agent-browser") openInSource("computer", currentUrl);
-              else if (choice === "zoom-in") applyZoom(zoomFactor + ZOOM_STEP);
-              else if (choice === "zoom-out") applyZoom(zoomFactor - ZOOM_STEP);
-              else if (choice === "zoom-reset") applyZoom(DEFAULT_ZOOM_FACTOR);
-              else if (choice === "force-reload") {
-                if (webviewRef.current?.reloadIgnoringCache) {
-                  webviewRef.current.reloadIgnoringCache();
-                } else webviewRef.current?.reload();
-              } else if (choice === "screenshot") {
-                void captureScreenshot();
-              } else if (choice === "responsive") {
-                setDeviceToolbarOpen(true);
-                setViewportSize(null);
-              } else if (choice === "mobile") {
-                setDeviceToolbarOpen(true);
-                setViewportSize({ width: 390, height: 844 });
-              } else if (choice === "tablet") {
-                setDeviceToolbarOpen(true);
-                setViewportSize({ width: 768, height: 1024 });
-              } else if (choice === "desktop") {
-                setDeviceToolbarOpen(true);
-                setViewportSize({ width: 1280, height: 800 });
-              } else if (choice === "cache" || choice === "cookies" || choice === "all") {
-                void clearBrowserData(choice);
-              }
-            }}
-            disabled={!mountSrc}
-            aria-label="More actions"
-            title="More actions"
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <MoreVerticalIcon className="size-3.5" />
-          </button>
-          {/* Кнопка есть в обеих оболочках: пароль подставляет сервер, поэтому
-              заполнение работает и в браузерной версии (через companion), и в
-              десктопе, и в headless-браузере бокса. */}
-          {/* With Comment / Debug in the bar, the key shows only when it has a login. */}
-          {!pageToolsOn || matchedCredentials.length > 0 ? (
+          {/* Пароль подставляет сервер, поэтому заполнение работает и в
+              браузерной версии, и в десктопе, и в headless-браузере бокса.
+              The key shows only when this site has a login (all of them: ⋯ → Passwords). */}
+          {matchedCredentials.length > 0 ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
                     onClick={handleAutofillClick}
-                    disabled={matchedCredentials.length === 0}
-                    aria-label={
-                      matchedCredentials.length > 0
-                        ? "Fill in saved login"
-                        : "No saved logins for this site"
-                    }
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                    aria-label="Fill in saved login"
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                   >
                     <KeyRoundIcon className="size-3.5" />
                   </button>
                 }
               />
-              <TooltipPopup side="bottom">
-                {matchedCredentials.length > 0
-                  ? "Fill in login and password"
-                  : origin
-                    ? `No saved logins for ${origin}`
-                    : "Open a site to find a saved login"}
-              </TooltipPopup>
+              <TooltipPopup side="bottom">Fill in login and password</TooltipPopup>
             </Tooltip>
           ) : null}
+          {pageToolsOn ? <DevToolsButton tabId={tab.id} disabled={!mountSrc} /> : null}
+          <BrowserMenu
+            disabled={!mountSrc}
+            zoom={{
+              factor: zoomFactor,
+              onStep: stepZoom,
+              onReset: () => applyZoom(DEFAULT_ZOOM_FACTOR),
+            }}
+            logins={matchedCredentials}
+            onFillLogin={(credential) => void autofillCredential(credential)}
+            {...(pageToolsOn
+              ? {
+                  devtools: {
+                    open: pageTools.devtools,
+                    commenting: pageTools.commenting,
+                    onToggle: () => usePageToolsStore.getState().toggleDevtools(tab.id),
+                    onComment: () => usePageToolsStore.getState().toggleMode(tab.id),
+                  },
+                }
+              : {})}
+            device={{
+              current: browserDeviceOf({
+                toolbarOpen: deviceToolbarOpen,
+                size: viewportSize,
+              }),
+              onPick: pickDevice,
+            }}
+            // The web's iframe has no picture of its own page; the desktop's <webview> has.
+            {...(iframeMode ? {} : { onScreenshot: () => void captureScreenshot() })}
+            onHardReload={hardReload}
+            {...(window.desktopBridge ? { onClear: (kind) => void clearBrowserData(kind) } : {})}
+            {...(launcherV2 && canOpenInAgentBrowser
+              ? {
+                  onOpenInAgentBrowser: () => openInSource("computer", currentUrl),
+                }
+              : {})}
+          />
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1400,7 +1412,8 @@ function BrowserView({
               ref={stageRef}
               className={cn(
                 "min-h-0 w-full flex-1",
-                viewportSize && "overflow-auto bg-muted/20 p-4",
+                // A zoomed-out page frame is wider than the stage before its scale.
+                viewportSize ? "overflow-auto bg-muted/20 p-4" : "overflow-hidden",
                 viewportSize && deviceToolbarOpen && "flex items-start justify-center",
               )}
             >
@@ -1430,10 +1443,17 @@ function BrowserView({
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
                     title={tab.name || "Browser"}
                     className={cn(
-                      "border-0 bg-white",
-                      viewportSize ? "absolute top-0 left-0 block" : "block h-full w-full",
+                      "block border-0 bg-white",
+                      viewportSize
+                        ? "absolute top-0 left-0"
+                        : isDefaultPageZoom(zoomFactor) && "h-full w-full",
                     )}
-                    style={viewportSize ? deviceFrameStyle(viewportSize, deviceScale) : undefined}
+                    // Zoom of any site, its own or another origin's: the frame is scaled whole.
+                    style={zoomedFrameStyle({
+                      zoom: zoomFactor,
+                      deviceScale,
+                      size: viewportSize,
+                    })}
                   />
                 ) : (
                   <webview
@@ -1447,7 +1467,10 @@ function BrowserView({
                     }
                     style={
                       viewportSize
-                        ? { display: "flex", ...deviceFrameStyle(viewportSize, deviceScale) }
+                        ? {
+                            display: "flex",
+                            ...deviceFrameStyle(viewportSize, deviceScale),
+                          }
                         : { display: "flex" }
                     }
                   />
@@ -1458,7 +1481,7 @@ function BrowserView({
               <CommentLayer
                 tabId={tab.id}
                 pageRef={pageElementRef}
-                zoom={(iframeMode ? 1 : zoomFactor) * deviceScale}
+                zoom={zoomFactor * deviceScale}
               />
             ) : null}
           </div>
@@ -1466,8 +1489,8 @@ function BrowserView({
           <NewTabPlaceholder recentUrls={recentUrls} onOpenUrl={navigate} />
         )}
         {pageToolsOn && mountSrc ? <CommentBar tabId={tab.id} pageUrl={currentUrl} /> : null}
-        {/* Comment mode shows the page's console and network below (one mode). */}
-        {pageToolsOn && mountSrc && pageTools.commenting ? (
+        {/* Developer tools: Comment, the page's console and network below. */}
+        {pageToolsOn && mountSrc && pageTools.devtools ? (
           <DebugDrawer tabId={tab.id} pageUrl={currentUrl} />
         ) : null}
         {loadError ? (

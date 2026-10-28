@@ -79,6 +79,7 @@ demoShow.p2 = async () => {
   const tab = pane()?.files.find((file) => file.kind === "browser" && file.url === url);
   if (!tab) return;
   usePageToolsStore.getState().patch(tab.id, {
+    devtools: true,
     commenting: true,
     comments: COMMENTS,
     draft: null,

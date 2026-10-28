@@ -1,7 +1,7 @@
 /**
- * The page's console and network at the bottom of a browser tab while
- * comment mode is on (w0138; one mode, like Codex — no separate switch, no
- * settings). Dense like DevTools: Console (errors red, warnings amber) and
+ * The browser tab's developer tools (the </> button, Misha 28.10): Comment
+ * first — like DevTools' element picker, a click on the page leaves a note
+ * for the agent — then the page's console and network. Dense like DevTools: Console (errors red, warnings amber) and
  * Network (failed requests red), 22px lines. A line's "Ask agent to fix"
  * shows on hover or when it is open (the error with its stack, or the
  * request with what came back, as a card in the chat's composer); "Ask agent
@@ -14,9 +14,11 @@ import {
   ChevronUpIcon,
   CircleAlertIcon,
   InfoIcon,
+  MessageSquarePlusIcon,
   TrashIcon,
   TriangleAlertIcon,
   WrenchIcon,
+  XIcon,
 } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
@@ -42,11 +44,19 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
   const height = usePageToolsStore((state) => state.debugHeight);
   const sendToChat = useSendToChat();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ startY: number; startHeight: number; max: number } | null>(null);
+  const dragRef = useRef<{
+    startY: number;
+    startHeight: number;
+    max: number;
+  } | null>(null);
   const errors = tab.console.filter((entry) => entry.level === "error").length;
   const warnings = tab.console.filter((entry) => entry.level === "warn").length;
   const failed = tab.network.filter(isFailedRequest).length;
-  const all = allErrorsPayload({ page: pageUrl, console: tab.console, network: tab.network });
+  const all = allErrorsPayload({
+    page: pageUrl,
+    console: tab.console,
+    network: tab.network,
+  });
   // The same N as the count on the Comment button.
   const problems = errors + failed;
   const open = tab.debugOpen;
@@ -56,7 +66,11 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const column = rootRef.current?.parentElement?.getBoundingClientRect().height ?? 600;
-    dragRef.current = { startY: event.clientY, startHeight: height, max: column * 0.75 };
+    dragRef.current = {
+      startY: event.clientY,
+      startHeight: height,
+      max: column * 0.75,
+    };
   };
   const onResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
@@ -91,55 +105,89 @@ export function DebugDrawer({ tabId, pageUrl }: { tabId: string; pageUrl: string
       />
       <div
         className={cn(
-          "flex h-8 shrink-0 items-center gap-0.5 px-1.5",
+          "@container/devtools flex h-8 shrink-0 items-center gap-0.5 px-1.5",
           open && "border-b border-border",
         )}
       >
-        <TabButton
-          active={open && tab.debugTab === "console"}
-          onClick={() => store.getState().patch(tabId, { debugTab: "console", debugOpen: true })}
-        >
-          Console
-          {errors > 0 ? <Count tone="error">{errors}</Count> : null}
-          {warnings > 0 ? <Count tone="warn">{warnings}</Count> : null}
-        </TabButton>
-        <TabButton
-          active={open && tab.debugTab === "network"}
-          onClick={() => store.getState().patch(tabId, { debugTab: "network", debugOpen: true })}
-        >
-          Network
-          {failed > 0 ? <Count tone="error">{failed}</Count> : null}
-        </TabButton>
-        <span className="ml-auto" />
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={!all}
-          onClick={() => all && sendToChat(all, "Fix these errors on the page.")}
-          data-testid="browser-send-all-errors"
-        >
-          <WrenchIcon />
-          Ask agent to fix all{problems > 0 ? ` (${problems})` : ""}
-        </Button>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={() => store.getState().resetLogs(tabId)}
-          aria-label="Clear"
-          title="Clear"
-        >
-          <TrashIcon />
-        </Button>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={() => store.getState().patch(tabId, { debugOpen: !open })}
-          aria-label={open ? "Fold" : "Unfold"}
-          title={open ? "Fold" : "Unfold"}
-          data-testid="browser-debug-fold"
-        >
-          {open ? <ChevronDownIcon /> : <ChevronUpIcon />}
-        </Button>
+        {/* A narrow panel keeps every button: the labels go, the icons and counts stay. */}
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+          <button
+            type="button"
+            aria-pressed={tab.commenting}
+            onClick={() => store.getState().toggleMode(tabId)}
+            title="Click anything on the page to leave a note for the agent (C)"
+            data-testid="browser-comment-button"
+            className={cn(
+              "inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 font-sans text-xs",
+              tab.commenting
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <MessageSquarePlusIcon className="size-3.5" />
+            <span className="hidden @md/devtools:inline">Comment</span>
+          </button>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+          <TabButton
+            active={open && tab.debugTab === "console"}
+            onClick={() => store.getState().patch(tabId, { debugTab: "console", debugOpen: true })}
+          >
+            Console
+            {errors > 0 ? <Count tone="error">{errors}</Count> : null}
+            {warnings > 0 ? <Count tone="warn">{warnings}</Count> : null}
+          </TabButton>
+          <TabButton
+            active={open && tab.debugTab === "network"}
+            onClick={() => store.getState().patch(tabId, { debugTab: "network", debugOpen: true })}
+          >
+            Network
+            {failed > 0 ? <Count tone="error">{failed}</Count> : null}
+          </TabButton>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!all}
+            onClick={() => all && sendToChat(all, "Fix these errors on the page.")}
+            title="Ask the agent to fix every error on the page"
+            className="shrink-0"
+            data-testid="browser-send-all-errors"
+          >
+            <WrenchIcon />
+            <span className="hidden @md/devtools:inline">Fix all</span>
+            {problems > 0 ? <span className="tabular-nums">{problems}</span> : null}
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => store.getState().resetLogs(tabId)}
+            aria-label="Clear"
+            title="Clear"
+          >
+            <TrashIcon />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => store.getState().patch(tabId, { debugOpen: !open })}
+            aria-label={open ? "Fold" : "Unfold"}
+            title={open ? "Fold" : "Unfold"}
+            data-testid="browser-debug-fold"
+          >
+            {open ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => store.getState().toggleDevtools(tabId)}
+            aria-label="Close developer tools"
+            title="Close developer tools"
+            data-testid="browser-devtools-close"
+          >
+            <XIcon />
+          </Button>
+        </div>
       </div>
       <div hidden={!open} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11px]">
         {tab.debugTab === "console" ? (

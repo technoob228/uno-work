@@ -38,3 +38,48 @@ describe("a comment's picture", () => {
     expect(usePageToolsStore.getState().tabs.t?.comments[0]?.shot).toBe(shot);
   });
 });
+
+describe("developer tools of a tab (Misha 28.10)", () => {
+  beforeEach(() => usePageToolsStore.setState({ tabs: {} }));
+  const tab = () => usePageToolsStore.getState().tabs.t;
+
+  it("are off on a new page: no Comment, nothing of the page's errors on view", () => {
+    const store = usePageToolsStore.getState();
+    store.addConsole("t", {
+      id: "1",
+      level: "error",
+      message: "boom",
+      stack: null,
+      source: null,
+      at: 0,
+    });
+    expect(tab()?.devtools).toBe(false);
+    expect(tab()?.commenting).toBe(false);
+  });
+
+  it("Comment (or C) opens them; Esc ends Comment and leaves them open", () => {
+    const store = usePageToolsStore.getState();
+    store.toggleMode("t");
+    expect(tab()).toMatchObject({ devtools: true, commenting: true });
+    expect(store.escape("t")).toBe(true);
+    expect(tab()).toMatchObject({ devtools: true, commenting: false });
+    // Nothing left for Esc: the page gets it.
+    expect(store.escape("t")).toBe(false);
+  });
+
+  it("closing them ends Comment too, the notes written stay", () => {
+    const store = usePageToolsStore.getState();
+    store.toggleDevtools("t");
+    expect(tab()).toMatchObject({ devtools: true, commenting: false });
+    store.toggleMode("t");
+    store.patch("t", { draft: { kind: "new", pick: pick() } });
+    store.saveDraft("t", "Bigger");
+    store.toggleDevtools("t");
+    expect(tab()).toMatchObject({
+      devtools: false,
+      commenting: false,
+      draft: null,
+    });
+    expect(tab()?.comments).toHaveLength(1);
+  });
+});

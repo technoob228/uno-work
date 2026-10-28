@@ -1,7 +1,9 @@
 /**
- * Comment mode of each browser tab (by tab id): one mode, like Codex — on,
- * the page takes notes (crosshair, pins) and its console and network show
- * below; off, the page is just the page. No settings (Misha 16.10). In a
+ * Developer tools of each browser tab (by tab id). Off by default on every
+ * page (Misha 28.10: "why would I want to know about someone else's bugs"):
+ * the page is just the page, no Comment, no error count. The small </> button
+ * turns them on — the page's console and network show below, and Comment
+ * (pins on the page, notes for the agent) is one click there or C. In a
  * store, not in the tab's component: the chrome row, the page layer and the
  * drawer read it, and the demo's "Показать" sets it up.
  */
@@ -26,18 +28,21 @@ export type PageCommentDraft =
   | { readonly kind: "edit"; readonly commentId: string };
 
 export interface PageToolsTab {
-  /** Comment mode is on: notes on the page, its console and network below. */
+  /** Developer tools are open: the page's console and network below, Comment at hand. */
+  readonly devtools: boolean;
+  /** Comment mode is on: a click on the page leaves a note (developer tools open with it). */
   readonly commenting: boolean;
   readonly comments: ReadonlyArray<PageComment>;
   readonly draft: PageCommentDraft | null;
   readonly console: ReadonlyArray<ConsoleEntry>;
   readonly network: ReadonlyArray<NetworkEntry>;
-  /** In comment mode: the console/network list is expanded (else just its header row). */
+  /** With developer tools open: the console/network list is expanded (else just its header row). */
   readonly debugOpen: boolean;
   readonly debugTab: "console" | "network";
 }
 
 export const EMPTY_PAGE_TOOLS_TAB: PageToolsTab = {
+  devtools: false,
   commenting: false,
   comments: [],
   draft: null,
@@ -53,9 +58,11 @@ interface PageToolsStore {
   readonly debugHeight: number;
   readonly setDebugHeight: (height: number) => void;
   readonly patch: (tabId: string, patch: Partial<PageToolsTab>) => void;
-  /** The one button (and C): comment mode on/off. */
+  /** The </> button: developer tools open/closed (closing ends Comment too; notes stay). */
+  readonly toggleDevtools: (tabId: string) => void;
+  /** Comment (and C): comment mode on/off; turning it on opens developer tools. */
   readonly toggleMode: (tabId: string) => void;
-  /** Esc: a note being written goes first, then the mode. */
+  /** Esc: a note being written goes first, then the mode (developer tools stay). */
   readonly escape: (tabId: string) => boolean;
   /** A new document: its console and network start empty (pending comments stay). */
   readonly resetLogs: (tabId: string) => void;
@@ -73,14 +80,24 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
   const tab = (tabId: string) => get().tabs[tabId] ?? EMPTY_PAGE_TOOLS_TAB;
   const patch = (tabId: string, next: Partial<PageToolsTab>) =>
     set((state) => ({
-      tabs: { ...state.tabs, [tabId]: { ...(state.tabs[tabId] ?? EMPTY_PAGE_TOOLS_TAB), ...next } },
+      tabs: {
+        ...state.tabs,
+        [tabId]: { ...(state.tabs[tabId] ?? EMPTY_PAGE_TOOLS_TAB), ...next },
+      },
     }));
   return {
     tabs: {},
     debugHeight: 180,
     setDebugHeight: (height) => set({ debugHeight: Math.round(height) }),
     patch,
-    toggleMode: (tabId) => patch(tabId, { commenting: !tab(tabId).commenting, draft: null }),
+    toggleDevtools: (tabId) =>
+      tab(tabId).devtools
+        ? patch(tabId, { devtools: false, commenting: false, draft: null })
+        : patch(tabId, { devtools: true }),
+    toggleMode: (tabId) =>
+      tab(tabId).commenting
+        ? patch(tabId, { commenting: false, draft: null })
+        : patch(tabId, { commenting: true, devtools: true, draft: null }),
     escape: (tabId) => {
       const current = tab(tabId);
       if (current.draft) patch(tabId, { draft: null });

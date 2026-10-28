@@ -39,7 +39,8 @@ import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { boxPointToPage, fitFrame } from "./annotate/liveFrame.logic";
 import { LivePageView } from "./annotate/liveWebview";
-import { PageToolsButtons } from "./annotate/PageToolsButtons";
+import { DevToolsButton } from "./annotate/DevToolsButton";
+import { BrowserMenu } from "./BrowserMenu";
 import { usePageToolsStore, usePageToolsTab } from "./annotate/pageToolsStore";
 import { usePageTools } from "./annotate/usePageTools";
 import { isTypingTarget } from "./panelLauncher.logic";
@@ -109,8 +110,10 @@ export function LiveBrowserView({ file, mine = false }: { file: PreviewFile; min
   const ownerThreadId = page?.context?.threadId ?? null;
   const ownerStatus = useStore((store) =>
     environmentId && ownerThreadId
-      ? (selectThreadByRef(store, { environmentId, threadId: ownerThreadId as ThreadId })?.session
-          ?.orchestrationStatus ?? null)
+      ? (selectThreadByRef(store, {
+          environmentId,
+          threadId: ownerThreadId as ThreadId,
+        })?.session?.orchestrationStatus ?? null)
       : null,
   );
   const agentBusy = agentUsesBrowser(ownerThreadId, ownerStatus);
@@ -126,7 +129,7 @@ export function LiveBrowserView({ file, mine = false }: { file: PreviewFile; min
     pageToolsOn &&
     pageId !== null &&
     pageId !== BROWSER_LIVE_SETUP_PAGE_ID &&
-    (pageTools.commenting || pageTools.comments.length > 0);
+    (pageTools.devtools || pageTools.commenting || pageTools.comments.length > 0);
   const [toolsActivated, setToolsActivated] = useState(false);
   useEffect(() => {
     if (wantsTools) setToolsActivated(true);
@@ -253,9 +256,7 @@ export function LiveBrowserView({ file, mine = false }: { file: PreviewFile; min
         focusOnControl={!(mine && isBlankPageUrl(page.url))}
       />
       {pageToolsOn ? <CommentBar tabId={tabId} pageUrl={page.url} /> : null}
-      {pageToolsOn && pageTools.commenting ? (
-        <DebugDrawer tabId={tabId} pageUrl={page.url} />
-      ) : null}
+      {pageToolsOn && pageTools.devtools ? <DebugDrawer tabId={tabId} pageUrl={page.url} /> : null}
       <div
         hidden={mine || (launcherV2 && page.help !== null)}
         className={cn(
@@ -648,7 +649,10 @@ function Toolbar({
       }
       const rect = event.currentTarget.getBoundingClientRect();
       const picked = await readLocalApi()?.contextMenu.show(
-        matched.map((credential) => ({ id: credential.id, label: credential.username })),
+        matched.map((credential) => ({
+          id: credential.id,
+          label: credential.username,
+        })),
         { x: rect.left, y: rect.bottom },
       );
       const credential = matched.find((entry) => entry.id === picked);
@@ -659,6 +663,11 @@ function Toolbar({
 
   const navDisabled = !human;
   const navTitle = human ? undefined : "Take control to browse";
+  const pageTools = usePageToolsTab(tabId);
+  const devtools = {
+    open: pageTools.devtools,
+    commenting: pageTools.commenting,
+  };
   return (
     <div
       className={cn(
@@ -725,9 +734,9 @@ function Toolbar({
           className="h-6 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring read-only:text-muted-foreground"
         />
       </form>
-      {/* Comment (Misha 16.10 p.12): the same button as in "Your site"; the
-          page script runs in the computer's page (liveWebview.ts). */}
-      {pageToolsOn ? <PageToolsButtons tabId={tabId} disabled={false} /> : null}
+      {/* Developer tools (Misha 28.10): the same </> as in "Your site"; the
+          page script goes into the computer's page once they're opened (liveWebview.ts). */}
+      {pageToolsOn ? <DevToolsButton tabId={tabId} disabled={false} /> : null}
       {matched.length > 0 ? (
         <Button
           size="icon-xs"
@@ -739,6 +748,21 @@ function Toolbar({
           <KeyRoundIcon />
         </Button>
       ) : null}
+      <BrowserMenu
+        logins={matched}
+        onFillLogin={(credential) => void fill(credential)}
+        {...(pageToolsOn
+          ? {
+              devtools: {
+                open: devtools.open,
+                commenting: devtools.commenting,
+                onToggle: () => usePageToolsStore.getState().toggleDevtools(tabId),
+                onComment: () => usePageToolsStore.getState().toggleMode(tabId),
+              },
+            }
+          : {})}
+        {...(human ? { onHardReload: () => void navigate("reload") } : {})}
+      />
       {mine ? null : <LiveBrowserOpenOutside environmentId={environmentId} pageUrl={page.url} />}
     </div>
   );
@@ -876,7 +900,11 @@ function Screen({
         const { width, height } = surface.getBoundingClientRect();
         if (width < 50 || height < 50) return;
         void api?.browserLive
-          .resize({ pageId, width: Math.round(width), height: Math.round(height) })
+          .resize({
+            pageId,
+            width: Math.round(width),
+            height: Math.round(height),
+          })
           .catch(() => undefined);
       }, 250);
     };
@@ -935,7 +963,11 @@ function Screen({
           const now = performance.now();
           const repeat =
             now - last.at < 500 && Math.abs(point.x - last.x) < 5 && Math.abs(point.y - last.y) < 5;
-          clickRef.current = { at: now, ...point, count: repeat ? last.count + 1 : 1 };
+          clickRef.current = {
+            at: now,
+            ...point,
+            count: repeat ? last.count + 1 : 1,
+          };
           send({
             type: "mouse",
             action: "down",
@@ -988,7 +1020,12 @@ function Screen({
           lastHoverRef.current = now;
           const point = toPage(event.clientX, event.clientY);
           if (!point) return;
-          send({ type: "mouse", action: "move", ...point, modifiers: modifiersOf(event) });
+          send({
+            type: "mouse",
+            action: "move",
+            ...point,
+            modifiers: modifiersOf(event),
+          });
         }}
         onWheel={(event) => {
           // Comment mode without control: the page still scrolls (its pins follow).
@@ -999,7 +1036,12 @@ function Screen({
           if (!human) return;
           const point = toPage(event.clientX, event.clientY);
           if (!point) return;
-          send({ type: "wheel", ...point, deltaX: event.deltaX, deltaY: event.deltaY });
+          send({
+            type: "wheel",
+            ...point,
+            deltaX: event.deltaX,
+            deltaY: event.deltaY,
+          });
         }}
         onContextMenu={(event) => {
           if (human) event.preventDefault();
@@ -1023,7 +1065,12 @@ function Screen({
             });
             return;
           }
-          send({ type: "key", action: "down", key: keyFor(event), code: event.code });
+          send({
+            type: "key",
+            action: "down",
+            key: keyFor(event),
+            code: event.code,
+          });
           if (shortcut && letter === "c") void copyToClipboard();
         }}
         onKeyUp={(event) => {
@@ -1034,7 +1081,12 @@ function Screen({
             swallowKeyUpRef.current = null;
             return;
           }
-          send({ type: "key", action: "up", key: keyFor(event), code: event.code });
+          send({
+            type: "key",
+            action: "up",
+            key: keyFor(event),
+            code: event.code,
+          });
         }}
         onPaste={(event) => {
           if (!human) return;
@@ -1063,7 +1115,12 @@ function Screen({
             ref={pictureRef}
             aria-hidden
             className="pointer-events-none absolute"
-            style={{ left: fit.offsetX, top: fit.offsetY, width: fit.width, height: fit.height }}
+            style={{
+              left: fit.offsetX,
+              top: fit.offsetY,
+              width: fit.width,
+              height: fit.height,
+            }}
           />
         ) : null}
         {hint && !human && !commenting ? (
