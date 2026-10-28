@@ -28,6 +28,18 @@ export interface AssistantPushServiceShape {
     readonly conversationThreadId: ThreadId;
   }) => Effect.Effect<void>;
   /**
+   * Watch a chat the assistant started on ANOTHER computer of the account
+   * (`remoteComputers/`): its status is polled there with a growing step and
+   * a time cap; the outcome reaches the conversation like a local one.
+   */
+  readonly watchRemote: (input: {
+    readonly threadId: string;
+    readonly assistantProjectId: string;
+    readonly conversationThreadId: string;
+    readonly boxId: number;
+    readonly computerName: string;
+  }) => Effect.Effect<void>;
+  /**
    * The assistant reports this chat's outcome to the person, so per-chat
    * "finished" / "failed" notices (Telegram forwarder, Inbox) stay quiet.
    */

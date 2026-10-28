@@ -34,6 +34,7 @@ import {
   BROWSER_BRIDGE_TOKEN_ENV,
   BrowserBridge,
   requireBridgeThread,
+  type LateToolApprovalOutcome,
 } from "../browserBridge.ts";
 import { ComputerResourcesService } from "../computerResources/ComputerResourcesService.ts";
 import { FilesService } from "../files/FilesService.ts";
@@ -69,6 +70,7 @@ import {
   UNO_WORK_GUIDE_TOPICS,
 } from "../agentContext/guides.ts";
 import {
+  UNO_WORK_APPROVAL_FROM_INBOX_PATH,
   UNO_WORK_APPROVAL_RESULT_PATH,
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
@@ -91,6 +93,9 @@ import {
 } from "./sparkClient.ts";
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { UNO_WORK_MCP_SESSION_ARG } from "./constants.ts";
+import { answerApprovalFromInbox, askPersonApproval, tellChat } from "../personApproval.ts";
+import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
+import { isAssistantConversationThread } from "../manager/assistantPush.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -426,30 +431,37 @@ const makeDeps = (input: {
               message: cause instanceof Error ? cause.message : String(cause),
             }),
         }),
-      requestApproval: (approval) =>
+      // The card, the Inbox row ("Needs you" until answered) and, with no
+      // window open, the assistant's messenger; a late answer runs the call
+      // and tells this chat (personApproval.ts).
+      requestApproval: ({ later, ...approval }) =>
         Effect.gen(function* () {
-          // The bell too: the person may be looking at another chat.
-          const item = yield* inbox
-            .post({
-              kind: "agent.approval",
-              source: {
-                kind: "agent",
-                id: input.threadId,
-                name: thread?.title ?? "Chat",
-                icon: null,
-              },
-              title: approval.title,
-              body: approval.detail ?? null,
-              open: { kind: "thread", threadId: input.threadId },
-              groupKey: `uno-work-approval:${input.threadId}`,
-            })
-            .pipe(Effect.option);
-          const outcome = yield* browserBridge.requestToolApproval(approval, context);
-          if (Option.isSome(item)) {
-            yield* inbox.update({ action: "read", ids: [item.value.id] }).pipe(Effect.ignore);
-          }
-          return outcome;
+          const owner = yield* callerAssistant;
+          return yield* askPersonApproval({
+            ...approval,
+            threadId: input.threadId,
+            askerName: owner?.title ?? thread?.title ?? "Chat",
+            inboxSource: { kind: "agent", id: input.threadId },
+            context,
+            ...(later
+              ? {
+                  onLate: (outcome: LateToolApprovalOutcome) =>
+                    later(outcome).pipe(Effect.provideContext(secretServices)),
+                }
+              : {}),
+          }).pipe(Effect.provideContext(secretServices));
         }),
+      tellChat: (text) =>
+        tellChat(input.threadId, text).pipe(Effect.provideContext(secretServices)),
+      // The assistant's own conversation orchestrates: heavy work goes to a
+      // chat it starts (Misha 28.10), enforced in runUnoWorkTool.
+      orchestratorOnly: callerAssistant.pipe(
+        Effect.map((owner) =>
+          owner !== null && thread !== null && isAssistantConversationThread(thread)
+            ? { name: owner.title }
+            : null,
+        ),
+      ),
       machineApps: { list: machineApps.list, action: machineApps.action },
       resources: computerResources.snapshot,
       disk: {
@@ -803,10 +815,36 @@ export const unoWorkApprovalResultRouteLayer = HttpRouter.add(
   }),
 );
 
+/**
+ * `POST /api/uno-work/approval/from-inbox` `{inboxItemId, approved}` — Allow /
+ * Decline on an Inbox "Needs you" row (owner session): answers the open
+ * request the row belongs to. 404: nothing open behind it any more.
+ */
+export const unoWorkApprovalFromInboxRouteLayer = HttpRouter.add(
+  "POST",
+  UNO_WORK_APPROVAL_FROM_INBOX_PATH,
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* readJson(request);
+    const record =
+      typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    if (typeof record.inboxItemId !== "string" || typeof record.approved !== "boolean") {
+      return HttpServerResponse.text("Expected {inboxItemId, approved}.", { status: 400 });
+    }
+    const settled = yield* answerApprovalFromInbox({
+      inboxItemId: record.inboxItemId,
+      approved: record.approved,
+    });
+    return HttpServerResponse.jsonUnsafe({ ok: settled }, { status: settled ? 200 : 404 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const unoWorkRouteLayers = [
   unoWorkMcpRouteLayer,
   unoWorkMcpGetRouteLayer,
   unoWorkMcpDeleteRouteLayer,
   unoWorkGuideRouteLayer,
   unoWorkApprovalResultRouteLayer,
+  unoWorkApprovalFromInboxRouteLayer,
 ] as const;

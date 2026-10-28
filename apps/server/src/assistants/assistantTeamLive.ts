@@ -9,8 +9,10 @@ import {
   EventId,
   isAssistantProjectId,
   MessageId,
+  type AssistantPersona,
   type ProjectId,
   type ThreadId,
+  UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
 import { assistantOwnRuntimeMode, presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { Effect, Layer, Option } from "effect";
@@ -19,6 +21,11 @@ import { BrowserBridge } from "../browserBridge.ts";
 import { ServerConfig } from "../config.ts";
 import { InboxService } from "../inbox/InboxService.ts";
 import { ManagerAssistantService } from "../manager/Services/AssistantService.ts";
+import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
+import { askPersonApproval } from "../personApproval.ts";
+import { UnoGatewayKey } from "../unoGatewayKey.ts";
+import { avatarFormat, personaPrompt, saveAvatar } from "./assistantAvatar.ts";
+import { requestGatewayImage } from "./imageGenerate.ts";
 import { readWorkMachineIdentity } from "../manager/workConsole.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -57,8 +64,10 @@ export const AssistantTeamLive = Layer.effect(
     const settingsService = yield* ServerSettingsService;
     const schedules = yield* Effect.serviceOption(AssistantSchedules);
     const inbox = yield* Effect.serviceOption(InboxService);
+    const connectorNotify = yield* Effect.serviceOption(ConnectorNotifyService);
     const agentMail = yield* Effect.serviceOption(AgentMailService);
     const bridge = yield* Effect.serviceOption(BrowserBridge);
+    const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
 
     const shell = projections.getShellSnapshot().pipe(
       Effect.map((snapshot) => snapshot.projects),
@@ -207,37 +216,59 @@ export const AssistantTeamLive = Layer.effect(
         : {}),
       ...(Option.isSome(bridge)
         ? {
-            askPerson: ({ title, detail, threadId }) =>
+            // Same as the uno-work tools: card, Inbox row until answered,
+            // messenger when nobody looks; a late Allow runs `later`.
+            askPerson: ({ title, detail, threadId, later }) =>
+              askPersonApproval(
+                {
+                  tool: "assistant_create",
+                  title,
+                  detail,
+                  sensitive: false,
+                  threadId,
+                  askerName: "Assistants",
+                  inboxSource: { kind: "system", id: "assistant-create" },
+                  context: threadId ? { threadId } : undefined,
+                  ...(later ? { onLate: later } : {}),
+                },
+                {
+                  inbox: Option.getOrNull(inbox),
+                  notify: Option.getOrNull(connectorNotify),
+                },
+              ).pipe(Effect.provideService(BrowserBridge, bridge.value)),
+          }
+        : {}),
+      // A face drawn by Uno AI for a new assistant (assistant_create `face`):
+      // in the background, the emoji shows until it is saved.
+      ...(Option.isSome(gatewayKey)
+        ? {
+            drawFace: (projectId: ProjectId, persona: AssistantPersona) =>
               Effect.gen(function* () {
-                // The bell too: the person may be looking at another chat.
-                const item = Option.isSome(inbox)
-                  ? yield* inbox.value
-                      .post({
-                        kind: "agent.approval",
-                        source: {
-                          kind: "system",
-                          id: "assistant-create",
-                          name: "Assistants",
-                          icon: null,
-                        },
-                        title,
-                        body: detail,
-                        open: threadId ? { kind: "thread", threadId } : null,
-                        groupKey: null,
-                      })
-                      .pipe(Effect.option)
-                  : Option.none();
-                const outcome = yield* bridge.value.requestToolApproval(
-                  { tool: "assistant_create", title, detail, sensitive: false },
-                  threadId ? { threadId } : undefined,
+                const project = yield* projections
+                  .getProjectShellById(projectId)
+                  .pipe(Effect.orElseSucceed(() => Option.none()));
+                if (Option.isNone(project)) return;
+                const apiKey = yield* gatewayKey.value.harnessKey();
+                const image = yield* Effect.tryPromise(() =>
+                  requestGatewayImage({
+                    baseUrl: UNO_GATEWAY_BASE_URL,
+                    apiKey,
+                    prompt: personaPrompt(persona, Date.now()),
+                    size: "1024x1024",
+                  }),
                 );
-                if (Option.isSome(inbox) && Option.isSome(item)) {
-                  yield* inbox.value
-                    .update({ action: "read", ids: [item.value.id] })
-                    .pipe(Effect.ignore);
-                }
-                return outcome;
-              }),
+                const format = avatarFormat(image.bytes);
+                if (format === null) return;
+                yield* Effect.tryPromise(() =>
+                  saveAvatar(project.value.workspaceRoot, { bytes: image.bytes, format }),
+                );
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("assistant face not drawn", { cause }),
+                ),
+                Effect.forkDetach,
+                Effect.asVoid,
+              ),
           }
         : {}),
       assistantSandboxAvailable: () => assistantSandboxAvailable,

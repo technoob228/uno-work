@@ -69,7 +69,8 @@ import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
-import type { ToolApprovalOutcome } from "../browserBridge.ts";
+import type { LateToolApprovalOutcome, ToolApprovalOutcome } from "../browserBridge.ts";
+import { lateApprovalNote, queuedApprovalMessage } from "../personApproval.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
 import {
   buildUnoWorkGuide,
@@ -97,6 +98,7 @@ import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/as
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 
 export {
+  UNO_WORK_APPROVAL_FROM_INBOX_PATH,
   UNO_WORK_APPROVAL_RESULT_PATH,
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
@@ -212,7 +214,19 @@ export interface UnoWorkToolDeps {
     readonly detail?: string;
     readonly sensitive: boolean;
     readonly clientAction?: ToolApprovalClientAction;
+    /**
+     * The person answered after the call returned `queued`: run the call
+     * then (and tell the chat). Absent: the call waits for the answer.
+     */
+    readonly later?: (outcome: LateToolApprovalOutcome) => Effect.Effect<void>;
   }) => Effect.Effect<ToolApprovalOutcome>;
+  /** A note from Uno Work into this chat as a new turn (late answers). Absent: none. */
+  readonly tellChat?: (text: string) => Effect.Effect<void>;
+  /**
+   * The caller is an assistant's own conversation (its name): it hands heavy
+   * or outward work to a chat it starts instead of doing it (Misha 28.10).
+   */
+  readonly orchestratorOnly?: Effect.Effect<{ readonly name: string } | null>;
   readonly machineApps: {
     readonly list: Effect.Effect<UnoMachineApps>;
     readonly action: (
@@ -1050,6 +1064,16 @@ const appIdArg = {
   minLength: 1,
   maxLength: 200,
 };
+
+/** `computerId` names some computer other than this one (resolved by the bridge). */
+function namesAnotherComputer(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw === "number") return true;
+  return (
+    typeof raw === "string" &&
+    !["", "this", "self", "local", "here"].includes(raw.trim().toLowerCase())
+  );
+}
 
 export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   // This computer
@@ -2054,7 +2078,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, or with another harness. It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder (becomes a project); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in a folder that is a project; provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). Returns the threadId (and the computer).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2075,7 +2099,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         computerId: {
           type: "string",
           description:
-            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+            'Another computer of the person\'s Uno account to run the chat on: its name or id from account_overview ("stage-work", "box-2531"). Leave it out for this computer. There, cwd is a folder of THAT computer (e.g. ~/projects/site) and projectId one of its projects (or a project here: the same folder is used there). The result comes back to you by itself.',
         },
       },
       required: ["text"],
@@ -2092,7 +2116,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           body: {
             text: str(args, "text"),
             ...(str(args, "title") ? { title: str(args, "title") } : {}),
-            ...(str(args, "cwd") ? { cwd: resolveUserPath(str(args, "cwd")!, deps) } : {}),
+            // A folder of another computer is that computer's: never
+            // resolved (nor bounded) against this one.
+            ...(str(args, "cwd")
+              ? {
+                  cwd: namesAnotherComputer(args["computerId"])
+                    ? str(args, "cwd")
+                    : resolveUserPath(str(args, "cwd")!, deps),
+                }
+              : {}),
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
@@ -3220,7 +3252,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "account_overview",
     group: "account",
     description:
-      "The person's Uno account: plan and what it allows (biggest computer), the upgrade link, balances, and their computers (status, size, address). Read-only. Needs agent access Read only or Manage.",
+      "The person's Uno account: plan and what it allows (biggest computer), the upgrade link, balances, and their computers (status, size, address; thisComputer marks where you run — the others' name or id is chat_create's computerId). Read-only. Needs agent access Read only or Manage.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
@@ -3260,6 +3292,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           computers: cloud.boxes.map((box) => ({
             id: box.id,
             name: box.name,
+            // chat_create takes another one's name or id as computerId.
+            thisComputer: box.id === settings.uno.boxId,
             status: box.status,
             workComputer: box.workMachine ?? false,
             ramMb: box.ramMb,
@@ -3411,6 +3445,10 @@ export function runUnoWorkTool(
       const refusal = yield* deps.presetRefusal;
       if (refusal !== null) return yield* toolError(refusal);
     }
+    if (deps.orchestratorOnly && isWorkerTool(tool.name, args)) {
+      const owner = yield* deps.orchestratorOnly;
+      if (owner !== null) return yield* toolError(orchestratorRefusal(owner.name, tool.name));
+    }
     if (tool.prepare) yield* tool.prepare(deps, args);
     const outward = asksFirstCategory(tool.name, args);
     const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
@@ -3435,16 +3473,115 @@ export function runUnoWorkTool(
           ? [ownDetail, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
           : ownDetail;
       const clientAction = tool.approvalClientAction?.(args);
-      yield* askPerson(deps, {
+      const outcome = yield* askPerson(deps, {
         tool: tool.name,
         level,
         title,
         detail,
         ...(clientAction ? { clientAction } : {}),
+        later: lateRun(deps, title, tool.run(deps, args)),
       });
+      if (outcome === "queued")
+        return { ok: false, waiting: true, message: queuedApprovalMessage(title) };
     }
     return yield* tool.run(deps, args);
   });
+}
+
+/** Result text for the late note: the tool's answer, clipped. */
+function lateResultText(result: unknown): string {
+  const raw =
+    result instanceof McpContent
+      ? result.content
+          .map((part) =>
+            part["type"] === "text" && typeof part["text"] === "string"
+              ? part["text"]
+              : `[${String(part["type"])}]`,
+          )
+          .join("\n")
+      : typeof result === "string"
+        ? result
+        : JSON.stringify(result);
+  return raw.length > 1_500 ? `${raw.slice(0, 1_500)}…` : raw;
+}
+
+/**
+ * What runs when the person answers after the call returned: the call itself
+ * on Allow, then a note into the chat either way (none without `tellChat`).
+ */
+function lateRun(
+  deps: UnoWorkToolDeps,
+  title: string,
+  run: Effect.Effect<unknown, UnoWorkToolError>,
+): ((outcome: LateToolApprovalOutcome) => Effect.Effect<void>) | undefined {
+  const tell = deps.tellChat;
+  if (tell === undefined) return undefined;
+  return (outcome) =>
+    outcome !== "approved"
+      ? tell(lateApprovalNote(title, outcome, null))
+      : run.pipe(
+          Effect.catchDefect((defect) =>
+            defect instanceof UnoWorkToolError ? Effect.fail(defect) : Effect.die(defect),
+          ),
+          Effect.map((result) => lateApprovalNote(title, "approved", lateResultText(result))),
+          Effect.catch((error) =>
+            Effect.succeed(
+              `${lateApprovalNote(title, "approved", null)} But it failed: ${error.message}`,
+            ),
+          ),
+          Effect.flatMap(tell),
+        );
+}
+
+/**
+ * Tools an assistant's own conversation does not run itself (Misha 28.10:
+ * an assistant answers fast and orchestrates; real work — publishing,
+ * deploying, creating databases or computers, driving a site in the browser,
+ * changing apps — goes to a chat it starts with chat_create, which has them).
+ */
+const WORKER_TOOLS: ReadonlySet<string> = new Set([
+  "site_publish",
+  "site_unpublish",
+  "site_set_password",
+  "site_forms_set",
+  "app_deploy",
+  "app_register",
+  "app_remove",
+  "app_show_on_internet",
+  "app_hide_from_internet",
+  "app_add_widget",
+  "spark_deploy",
+  "spark_delete",
+  "db_create",
+  "computer_create",
+  "computer_cleanup",
+  "drive_save",
+]);
+
+/** Reading a page is fine for a quick look; acting on it is a chat's job. */
+const BROWSER_READ_COMMANDS: ReadonlySet<string> = new Set([
+  "state",
+  "screenshot",
+  "openUrl",
+  "navigate",
+  "reload",
+  "back",
+  "forward",
+]);
+
+export function isWorkerTool(name: string, args: Record<string, unknown>): boolean {
+  if (name === "browser_command") {
+    return (
+      args["login"] !== undefined ||
+      typeof args["command"] !== "string" ||
+      !BROWSER_READ_COMMANDS.has(args["command"])
+    );
+  }
+  return WORKER_TOOLS.has(name);
+}
+
+export function orchestratorRefusal(name: string, tool: string): string {
+  return `${tool} is work, and ${name}'s own conversation only orchestrates: start a chat for it with chat_create (on the right computer — computerId; it has every tool, and in Accounts work it signs in with browser_command {"login": …} there), tell the person in one short line, and end your turn. The result comes back to you by itself.`;
 }
 
 /** The approval card; a refusal fails with the message the model reads. */
@@ -3456,8 +3593,9 @@ function askPerson(
     readonly title: string;
     readonly detail: string | undefined;
     readonly clientAction?: ToolApprovalClientAction;
+    readonly later?: ((outcome: LateToolApprovalOutcome) => Effect.Effect<void>) | undefined;
   },
-): Effect.Effect<void, UnoWorkToolError> {
+): Effect.Effect<"approved" | "queued", UnoWorkToolError> {
   return Effect.gen(function* () {
     const outcome = yield* deps.requestApproval({
       tool: input.tool,
@@ -3465,10 +3603,10 @@ function askPerson(
       ...(input.detail ? { detail: input.detail } : {}),
       sensitive: input.level === "sensitive",
       ...(input.clientAction ? { clientAction: input.clientAction } : {}),
+      ...(input.later ? { later: input.later } : {}),
     });
-    if (outcome !== "approved") {
-      return yield* toolError(refusalMessage(outcome, input.title));
-    }
+    if (outcome === "approved" || outcome === "queued") return outcome;
+    return yield* toolError(refusalMessage(outcome, input.title));
   });
 }
 
@@ -3533,13 +3671,14 @@ export function connectorMcpTool(
           rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {};
-        if (!deps.connectors) {
+        const connectors = deps.connectors;
+        if (!connectors) {
           return yield* toolError(
             `${tool.providerName} isn't reachable from this computer right now.`,
           );
         }
-        const access = deps.connectors.access
-          ? yield* deps.connectors.access({
+        const access = connectors.access
+          ? yield* connectors.access({
               provider: tool.provider,
               changesThings: level !== "safe",
             })
@@ -3554,26 +3693,34 @@ export function connectorMcpTool(
         }
         // An "Asks first" assistant asks before any change in a connected app.
         const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
+        // The console validates the arguments against its own schema.
+        const call = Effect.gen(function* () {
+          const result = yield* connectors.call({
+            provider: tool.provider,
+            tool: tool.name,
+            arguments: args,
+          });
+          if (result.isError) return yield* toolError(connectorErrorText(result));
+          return new McpContent(result.content);
+        });
         if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
           const described = describeConnectorArgs(args);
-          yield* askPerson(deps, {
+          const title = `${tool.providerName}: ${tool.name}`;
+          const outcome = yield* askPerson(deps, {
             tool: tool.name,
             level,
-            title: `${tool.providerName}: ${tool.name}`,
+            title,
             detail:
               asking !== null
                 ? [described, `${asking.name} asks first (its mode).`].filter(Boolean).join(" · ")
                 : described,
+            later: lateRun(deps, title, call),
           });
+          if (outcome === "queued") {
+            return { ok: false, waiting: true, message: queuedApprovalMessage(title) };
+          }
         }
-        // The console validates the arguments against its own schema.
-        const result = yield* deps.connectors.call({
-          provider: tool.provider,
-          tool: tool.name,
-          arguments: args,
-        });
-        if (result.isError) return yield* toolError(connectorErrorText(result));
-        return new McpContent(result.content);
+        return yield* call;
       }),
   };
 }

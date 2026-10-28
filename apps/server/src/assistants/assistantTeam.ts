@@ -31,6 +31,7 @@ import {
   ManagerAssistantCreateInput,
   ManagerAssistantProfileSetInput,
   ProjectId,
+  type AssistantPersona,
   type AssistantPreset,
   type AssistantSetupStepId,
   type ManagerAssistantTeam,
@@ -70,6 +71,7 @@ import * as nodePath from "node:path";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
 import { refusalMessage } from "../unoWork/policy.ts";
+import { lateApprovalNote, queuedApprovalMessage } from "../personApproval.ts";
 import { askCardQuestion, newAskCardRequestId } from "./askCards.ts";
 import { assistantOfTokenLabel } from "./assistantAccess.ts";
 import { assistantSandboxGrantDenial } from "./assistantSandboxRules.ts";
@@ -182,7 +184,14 @@ export interface AssistantTeamDeps {
     readonly title: string;
     readonly detail: string;
     readonly threadId: ThreadId | null;
-  }) => Effect.Effect<"approved" | "denied" | "timeout" | "no_client">;
+    /** The person answered after the call returned `queued`. */
+    readonly later?: (outcome: "approved" | "denied" | "timeout") => Effect.Effect<void>;
+  }) => Effect.Effect<"approved" | "denied" | "timeout" | "queued">;
+  /**
+   * Draw a new assistant's face with Uno AI and save it as its picture; runs
+   * in the background (never fails the setup). Absent: no pictures here.
+   */
+  readonly drawFace?: (projectId: ProjectId, persona: AssistantPersona) => Effect.Effect<void>;
   /** schedule_create for this caller. */
   readonly createRoutine: (
     caller: ManagerCaller,
@@ -795,88 +804,123 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
           403,
         );
       }
-      // "Asks first" (Misha 23.10): a new assistant waits for the person's Allow.
+      // Everything after the person's Allow (or at once when it doesn't ask).
+      const build = Effect.gen(function* () {
+        const { projectId } = yield* deps.createAssistant({
+          name: input.name,
+          ...(input.emoji !== undefined ? { emoji: input.emoji } : {}),
+          preset: child.preset,
+          projects: child.projects,
+        });
+        yield* Effect.promise(() => writeAppAccess(deps.stateDir, projectId, child.apps));
+        if (input.face !== undefined && deps.drawFace) {
+          yield* deps.drawFace(projectId, input.face);
+        }
+        const now = deps.now();
+        const parentName = memberName(parent);
+        const where = projectsLine(child.projects, known);
+        const presetName = ASSISTANT_PRESET_COPY[child.preset].name;
+        yield* Effect.promise(() =>
+          updateTeam(deps.stateDir, projectId, () =>
+            withActivity(
+              {
+                ...EMPTY_TEAM,
+                roles: input.roles ?? [],
+                character: input.character ?? "",
+                createdBy: parent.projectId,
+                createdAt: now.toISOString(),
+                firstTask: input.firstTask ?? null,
+                duties: normalizeDuties(input.duties ?? []),
+                // Its mail is its creator's or narrower: never wider.
+                mail: parent.team.mail,
+                // Its creator set it up; the person can still run "Set up again".
+                setup: { ...EMPTY_TEAM.setup, state: "done", updatedAt: now.toISOString() },
+              },
+              { kind: "teammate", text: `Set up by ${parentName}`, by: "auto" },
+              now,
+            ),
+          ),
+        );
+        yield* note(parent.projectId, {
+          kind: "teammate",
+          text: `Set up ${input.name}: ${where} · ${presetName}`,
+          by: "auto",
+        });
+        // Decision 14.10 (3): no confirmation, but the person always hears of it.
+        yield* deps.inbox({
+          kind: "agent.done",
+          source: {
+            kind: "system",
+            id: `assistant-set-up:${projectId}`,
+            name: parentName,
+            icon: input.emoji ?? "🧑‍🤝‍🧑",
+          },
+          title: `${parentName} set up assistant ${input.name}`,
+          body: `Projects: ${where} · ${presetName}${appsLine(child) === "every app it's given" ? "" : ` · ${appsLine(child)}`}. Within ${parentName}'s access.`,
+          open: { kind: "url", url: assistantUrl(projectId) },
+          groupKey: null,
+        });
+        let threadId: ThreadId | null = null;
+        if (input.firstTask !== undefined) {
+          const chat = yield* deps.createConversation(projectId, input.firstTask.slice(0, 60));
+          threadId = chat.threadId;
+          yield* deps.startTurn({
+            threadId: chat.threadId,
+            text: `(Uno Work) ${parentName} set you up and hands you your first task. You take tasks only from the person; ${parentName} works for them too.\n\n${input.firstTask}`,
+            system: true,
+          });
+        }
+        return {
+          projectId,
+          name: input.name,
+          preset: child.preset,
+          projects: where,
+          apps: appsLine(child),
+          firstTaskChat: threadId,
+          note: "The person got a notice in their Inbox. They can change or revoke it on its page.",
+        };
+      });
+      // "Asks first" (Misha 23.10): a new assistant waits for the person's
+      // Allow. Nobody answering at once doesn't hold this turn: the request
+      // stays open, and a late Allow sets it up and tells the conversation.
       if (presetAsksFirst(parent.grant.preset)) {
         const title = `Set up assistant ${input.name}`;
+        const conversation = caller.callerThreadId ?? null;
+        const tell = (text: string) =>
+          conversation === null
+            ? Effect.void
+            : deps.startTurn({ threadId: conversation, text, system: true });
         const outcome = deps.askPerson
           ? yield* deps.askPerson({
               title,
               detail: `${memberName(parent)} asks first (its mode). Projects: ${projectsLine(child.projects, known)} · ${ASSISTANT_PRESET_COPY[child.preset].name}.`,
-              threadId: caller.callerThreadId ?? null,
+              threadId: conversation,
+              later: (late) =>
+                late !== "approved"
+                  ? tell(lateApprovalNote(title, late, null))
+                  : build.pipe(
+                      Effect.map((made) =>
+                        lateApprovalNote(
+                          title,
+                          "approved",
+                          `${made.name} is set up (${made.projects}).`,
+                        ),
+                      ),
+                      Effect.catch((error) =>
+                        Effect.succeed(
+                          `${lateApprovalNote(title, "approved", null)} But it failed: ${error.message}`,
+                        ),
+                      ),
+                      Effect.flatMap(tell),
+                    ),
             })
-          : "no_client";
+          : "timeout";
+        if (outcome === "queued") {
+          return { queued: true, name: input.name, note: queuedApprovalMessage(title) };
+        }
         if (outcome !== "approved") return yield* fail(refusalMessage(outcome, title), 403);
       }
-      const { projectId } = yield* deps.createAssistant({
-        name: input.name,
-        ...(input.emoji !== undefined ? { emoji: input.emoji } : {}),
-        preset: child.preset,
-        projects: child.projects,
-      });
-      yield* Effect.promise(() => writeAppAccess(deps.stateDir, projectId, child.apps));
-      const now = deps.now();
-      const parentName = memberName(parent);
-      const where = projectsLine(child.projects, known);
-      const presetName = ASSISTANT_PRESET_COPY[child.preset].name;
-      yield* Effect.promise(() =>
-        updateTeam(deps.stateDir, projectId, () =>
-          withActivity(
-            {
-              ...EMPTY_TEAM,
-              roles: input.roles ?? [],
-              character: input.character ?? "",
-              createdBy: parent.projectId,
-              createdAt: now.toISOString(),
-              firstTask: input.firstTask ?? null,
-              duties: normalizeDuties(input.duties ?? []),
-              // Its mail is its creator's or narrower: never wider.
-              mail: parent.team.mail,
-              // Its creator set it up; the person can still run "Set up again".
-              setup: { ...EMPTY_TEAM.setup, state: "done", updatedAt: now.toISOString() },
-            },
-            { kind: "teammate", text: `Set up by ${parentName}`, by: "auto" },
-            now,
-          ),
-        ),
-      );
-      yield* note(parent.projectId, {
-        kind: "teammate",
-        text: `Set up ${input.name}: ${where} · ${presetName}`,
-        by: "auto",
-      });
-      // Decision 14.10 (3): no confirmation, but the person always hears of it.
-      yield* deps.inbox({
-        kind: "agent.done",
-        source: {
-          kind: "system",
-          id: `assistant-set-up:${projectId}`,
-          name: parentName,
-          icon: input.emoji ?? "🧑‍🤝‍🧑",
-        },
-        title: `${parentName} set up assistant ${input.name}`,
-        body: `Projects: ${where} · ${presetName}${appsLine(child) === "every app it's given" ? "" : ` · ${appsLine(child)}`}. Within ${parentName}'s access.`,
-        open: { kind: "url", url: assistantUrl(projectId) },
-        groupKey: null,
-      });
-      let threadId: ThreadId | null = null;
-      if (input.firstTask !== undefined) {
-        const chat = yield* deps.createConversation(projectId, input.firstTask.slice(0, 60));
-        threadId = chat.threadId;
-        yield* deps.startTurn({
-          threadId: chat.threadId,
-          text: `(Uno Work) ${parentName} set you up and hands you your first task. You take tasks only from the person; ${parentName} works for them too.\n\n${input.firstTask}`,
-          system: true,
-        });
-      }
-      return {
-        projectId,
-        name: input.name,
-        preset: child.preset,
-        projects: where,
-        apps: appsLine(child),
-        firstTaskChat: threadId,
-        note: "The person got a notice in their Inbox. They can change or revoke it on its page.",
-      };
+      return yield* build;
     });
 
   const askUser: AssistantTeamShape["askUser"] = (caller, args) =>

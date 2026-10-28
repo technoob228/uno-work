@@ -11,6 +11,9 @@ import {
   guessConversation,
   markBatchSent,
   noticeFromProbe,
+  noticeFromRemoteStatus,
+  pruneWatches,
+  remotePollEveryMs,
   PUSH_MAX_HOLD_MS,
   PUSH_MAX_TURNS_PER_HOUR,
   PUSH_NOTICE_MARKER,
@@ -366,5 +369,71 @@ describe("watch lifecycle and the switch", () => {
   it("UNO_WORK_ASSISTANT_PUSH=0 switches it off", () => {
     expect(assistantPushEnabled({})).toBe(true);
     expect(assistantPushEnabled({ UNO_WORK_ASSISTANT_PUSH: "0" })).toBe(false);
+  });
+});
+
+describe("remote chats (another computer of the account)", () => {
+  const watch = {
+    threadId: "remote-1",
+    assistantProjectId: ASSISTANT_PROJECT_ID,
+    conversationThreadId: "uno-main",
+    via: null,
+    since: "2026-10-28T10:00:00.000Z",
+    startedAt: "2026-10-28T10:00:00.000Z",
+    remote: { boxId: 2531, computerName: "stage-work" },
+  };
+  const nowMs = Date.parse("2026-10-28T10:05:00.000Z");
+  const status = (state: string) => ({
+    state,
+    title: "Fix the build",
+    lastMessage: "Done: tests pass.",
+    updatedAt: "2026-10-28T10:04:00.000Z",
+  });
+
+  it("running says nothing; done ends the watch with the computer's name", () => {
+    expect(
+      noticeFromRemoteStatus({ watch, status: status("running"), sentKeys: new Set(), nowMs }),
+    ).toBeNull();
+    const done = noticeFromRemoteStatus({
+      watch,
+      status: status("done"),
+      sentKeys: new Set(),
+      nowMs,
+    });
+    expect(done?.endsWatch).toBe(true);
+    expect(done?.notice).toMatchObject({ outcome: "completed", computer: "stage-work" });
+    const text = formatPushNotice([done!.notice]);
+    expect(text).toContain("on the computer stage-work");
+    expect(text).toContain("Done: tests pass.");
+    expect(text).not.toContain("read_thread_detail");
+    // Told once.
+    expect(
+      noticeFromRemoteStatus({
+        watch,
+        status: status("done"),
+        sentKeys: new Set([done!.notice.key]),
+        nowMs,
+      }),
+    ).toBeNull();
+  });
+
+  it("waiting for the person keeps watching", () => {
+    const waiting = noticeFromRemoteStatus({
+      watch,
+      status: status("waiting-for-you"),
+      sentKeys: new Set(),
+      nowMs,
+    });
+    expect(waiting?.endsWatch).toBe(false);
+    expect(waiting?.notice.request).toContain("stage-work");
+  });
+
+  it("polls often while young, rarely later; a remote watch lives 12 h", () => {
+    expect(remotePollEveryMs(30_000)).toBe(10_000);
+    expect(remotePollEveryMs(5 * 60_000)).toBe(30_000);
+    expect(remotePollEveryMs(3 * 60 * 60_000)).toBe(180_000);
+    const state = { ...EMPTY_PUSH_STATE, watches: [watch] };
+    expect(pruneWatches(state, Date.parse(watch.since) + 11 * 3_600_000).watches).toHaveLength(1);
+    expect(pruneWatches(state, Date.parse(watch.since) + 13 * 3_600_000).watches).toHaveLength(0);
   });
 });

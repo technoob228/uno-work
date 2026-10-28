@@ -144,6 +144,67 @@ export function workStatusRow(
   };
 }
 
+/** A chat an assistant started on another computer, as the remote ledger last saw it. */
+export interface RemoteWorkStatusEntry {
+  readonly threadId: string;
+  readonly title: string;
+  readonly computerName: string;
+  readonly startedAt: string;
+  /** `ManagerRemoteChatStatus.state`. */
+  readonly state: string;
+  readonly lastMessage: string | null;
+  readonly checkedAt: string | null;
+}
+
+const REMOTE_STATE: Readonly<Record<string, ManagerWorkStatusState>> = {
+  running: "running",
+  "waiting-for-you": "needs_you",
+  done: "done",
+  failed: "failed",
+  stopped: "stopped",
+  idle: "running",
+};
+
+/** One digest row for a chat on another computer. */
+export function remoteWorkStatusRow(
+  entry: RemoteWorkStatusEntry,
+  input: { readonly nowMs: number; readonly reportPending: boolean },
+): ManagerWorkStatusThread {
+  const status = REMOTE_STATE[entry.state] ?? "running";
+  const answer = lastLine([{ role: "assistant", text: entry.lastMessage ?? "" }]);
+  return {
+    threadId: entry.threadId as ManagerWorkStatusThread["threadId"],
+    title: sanitizeUntrustedField(entry.title, 120),
+    project: sanitizeUntrustedField(`on ${entry.computerName}`, 80),
+    startedBy: "you",
+    status,
+    runningForSec:
+      status === "running"
+        ? Math.max(0, Math.round((input.nowMs - toMs(entry.startedAt)) / 1_000))
+        : null,
+    finishedAt: status !== "running" && status !== "idle" ? entry.checkedAt : null,
+    step: null,
+    lastAnswer: answer === null ? null : wrapUntrustedContent(answer),
+    reportPending: input.reportPending,
+    computer: sanitizeUntrustedField(entry.computerName, 80),
+  };
+}
+
+/** Remote chats worth a row: still going, or settled within {@link WORK_STATUS_OWN_RECENT_HOURS}. */
+export function pickRemoteWorkStatus(
+  entries: ReadonlyArray<RemoteWorkStatusEntry>,
+  nowMs: number,
+): ReadonlyArray<RemoteWorkStatusEntry> {
+  return entries.filter((entry) => {
+    const live =
+      entry.state === "running" || entry.state === "waiting-for-you" || entry.state === "idle";
+    const last = toMs(entry.checkedAt ?? entry.startedAt);
+    return live
+      ? nowMs - toMs(entry.startedAt) < 24 * HOUR_MS
+      : nowMs - last < WORK_STATUS_OWN_RECENT_HOURS * HOUR_MS;
+  });
+}
+
 const STATUS_RANK: Readonly<Record<ManagerWorkStatusState, number>> = {
   needs_you: 0,
   running: 1,

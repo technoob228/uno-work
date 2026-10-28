@@ -501,15 +501,95 @@ const waitForSubscribers = (expected: number) =>
     throw new Error(`Subscriber count did not reach ${expected}.`);
   });
 
-it.effect("refuses a tool approval when no app window can ask the person", () =>
+it.effect("queues a tool approval when no window is open and replays it to the next one", () =>
   Effect.gen(function* () {
     const browserBridge = yield* BrowserBridge;
+    const late: Array<string> = [];
+    // Nobody connected: the call returns at once, the request stays open.
     const outcome = yield* browserBridge.requestToolApproval({
       tool: "site_publish",
       title: "Publish a site",
       sensitive: true,
+      late: {
+        syncWaitMs: 60_000,
+        holdMs: 30 * 60_000,
+        onLateOutcome: (answer) => Effect.sync(() => void late.push(answer)),
+      },
     });
-    assert.equal(outcome, "no_client");
+    assert.equal(outcome, "queued");
+
+    // A window connects: the card is replayed to it.
+    const event = yield* browserBridge.stream.pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+    );
+    assert.equal(event.type, "toolApprovalRequest");
+    if (event.type !== "toolApprovalRequest") throw new Error("Expected an approval event.");
+    assert.isTrue(
+      yield* browserBridge.completeToolApproval({
+        requestId: event.requestId,
+        responseToken: event.responseToken,
+        approved: true,
+      }),
+    );
+    for (let attempt = 0; attempt < 1_000 && late.length === 0; attempt += 1) {
+      yield* Effect.yieldNow;
+    }
+    assert.deepEqual(late, ["approved"]);
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("answers an open approval from an Inbox row by its id", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    let requestId = "";
+    const late: Array<string> = [];
+    const outcome = yield* browserBridge.requestToolApproval({
+      tool: "app_remove",
+      title: "Remove Notes",
+      sensitive: true,
+      onRequestId: (id) => {
+        requestId = id;
+      },
+      late: {
+        syncWaitMs: 0,
+        holdMs: 60_000,
+        onLateOutcome: (answer) => Effect.sync(() => void late.push(answer)),
+      },
+    });
+    assert.equal(outcome, "queued");
+    assert.isFalse(
+      yield* browserBridge.completeToolApprovalById({ requestId: "nope", approved: true }),
+    );
+    assert.isTrue(yield* browserBridge.completeToolApprovalById({ requestId, approved: false }));
+    for (let attempt = 0; attempt < 1_000 && late.length === 0; attempt += 1) {
+      yield* Effect.yieldNow;
+    }
+    assert.deepEqual(late, ["denied"]);
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("a queued approval nobody answers expires with a timeout", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const late: Array<string> = [];
+    const outcome = yield* browserBridge.requestToolApproval({
+      tool: "db_create",
+      title: "Create a database",
+      sensitive: true,
+      late: {
+        syncWaitMs: 0,
+        holdMs: 5_000,
+        onLateOutcome: (answer) => Effect.sync(() => void late.push(answer)),
+      },
+    });
+    assert.equal(outcome, "queued");
+    yield* Effect.yieldNow;
+    yield* TestClock.adjust("10 seconds");
+    for (let attempt = 0; attempt < 1_000 && late.length === 0; attempt += 1) {
+      yield* Effect.yieldNow;
+    }
+    assert.deepEqual(late, ["timeout"]);
   }).pipe(Effect.provide(BrowserBridgeTest)),
 );
 

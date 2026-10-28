@@ -985,6 +985,11 @@ export const ManagerAssistantCreateInput = Schema.Struct({
   firstTask: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
   /** What it is always responsible for (its standing duties). */
   duties: Schema.optional(DutyList),
+  /**
+   * A face drawn by Uno AI in the background (a portrait of a person, an
+   * animal, a robot or an alien); the emoji stays until it is ready.
+   */
+  face: Schema.optional(AssistantPersona),
 });
 export type ManagerAssistantCreateInput = typeof ManagerAssistantCreateInput.Type;
 
@@ -1364,6 +1369,8 @@ export const ManagerWorkStatusThread = Schema.Struct({
   lastAnswer: Schema.NullOr(Schema.String),
   /** The daemon has news about it you have not received yet (it is on its way). */
   reportPending: Schema.Boolean,
+  /** It runs on another computer of the account (its name); absent: this computer. */
+  computer: Schema.optional(Schema.String),
 });
 export type ManagerWorkStatusThread = typeof ManagerWorkStatusThread.Type;
 
@@ -1392,9 +1399,10 @@ export const ManagerCreateThreadInput = Schema.Struct({
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: Schema.optional(RuntimeMode),
   /**
-   * The computer the chat runs on (box id, or `"this"`). Absent = this
-   * computer. Only this computer is allowed for now (assistants MVP); the
-   * cross-machine Allow comes with the next wave.
+   * The computer the chat runs on: absent / `"this"` = this computer; a box
+   * id, `"box-N"` or a computer's name (`account_overview`) = another
+   * computer of the account (assistants D, 28.10) — then `projectId` names a
+   * project there, or a project here whose folder is used there.
    */
   computerId: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
 });
@@ -1435,6 +1443,18 @@ export const ManagerWriteReceipt = Schema.Union([
     commandIds: Schema.Array(CommandId),
     /** create_thread: the new thread. */
     threadId: Schema.optional(ThreadId),
+  }),
+  /**
+   * create_thread with the `computerId` of another computer of the account
+   * (assistants D, 28.10): started there at once; its outcome comes back as a
+   * work update.
+   */
+  Schema.Struct({
+    status: Schema.Literal("started-on-another-computer"),
+    threadId: ThreadId,
+    computer: Schema.Struct({ boxId: Schema.Number, name: Schema.String }),
+    title: Schema.String,
+    note: Schema.String,
   }),
 ]);
 export type ManagerWriteReceipt = typeof ManagerWriteReceipt.Type;

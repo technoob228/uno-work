@@ -12,6 +12,9 @@
  * Authenticated with the thread-scoped browser-bridge token every harness
  * process holds (`UNO_WORK_BRIDGE_TOKEN`), like `POST /api/channels/notify`.
  */
+import * as os from "node:os";
+
+import { ProjectId } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -25,6 +28,10 @@ import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AGENT_THREADS_PATH } from "./logic.ts";
 import { ownBoxIdFromSettings } from "../assistants/targetComputer.ts";
+import { readTeam } from "../assistants/teamStore.ts";
+import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
+import { remoteComputersOption } from "../remoteComputers/RemoteComputers.ts";
+import { assistantDisplayName } from "../remoteComputers/remoteChatHost.ts";
 import { type AgentThreadsReply, makeAgentThreadsHandlers } from "./service.ts";
 
 const makeRequestContext = Effect.gen(function* () {
@@ -36,6 +43,8 @@ const makeRequestContext = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const tokenRepository = yield* ManagerCapabilityTokenRepository;
   const config = yield* ServerConfig;
+  const remoteComputers = yield* remoteComputersOption;
+  const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
@@ -62,6 +71,30 @@ const makeRequestContext = Effect.gen(function* () {
       Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
       Effect.orElseSucceed(() => null),
     ),
+    ...(remoteComputers === null
+      ? {}
+      : {
+          remote: {
+            resolveTarget: remoteComputers.resolveTarget,
+            startChat: remoteComputers.startChat,
+            assistantName: (projectId: string) =>
+              Effect.gen(function* () {
+                const project = yield* projections
+                  .getProjectShellById(ProjectId.make(projectId))
+                  .pipe(Effect.orElseSucceed(() => Option.none()));
+                const team = yield* Effect.promise(() => readTeam(config.stateDir, projectId)).pipe(
+                  Effect.orElseSucceed(() => null),
+                );
+                return assistantDisplayName(
+                  projectId,
+                  Option.isSome(project) ? project.value.title : "",
+                  team?.name ?? null,
+                );
+              }),
+            watch: (input) => (push === null ? Effect.void : push.watchRemote(input)),
+            home: os.homedir(),
+          },
+        }),
   });
   return {
     request,

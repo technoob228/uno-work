@@ -55,13 +55,11 @@ export function decideUnoWorkGate(
 }
 
 /** What the model reads when the person didn't allow a call. */
-export function refusalMessage(outcome: "denied" | "timeout" | "no_client", title: string): string {
+export function refusalMessage(outcome: "denied" | "timeout", title: string): string {
   switch (outcome) {
     case "denied":
       return `The person declined: "${title}". Don't retry it and don't work around it (no shell or curl equivalent); ask them what they'd like instead.`;
     case "timeout":
       return `Nobody answered the approval for "${title}" in time. Tell the person what you wanted to do and that it needs their Allow; don't retry in a loop.`;
-    case "no_client":
-      return `"${title}" needs the person's Allow, but Uno Work isn't open anywhere to ask them. Tell them what you want to do; they can allow it when they're back.`;
   }
 }

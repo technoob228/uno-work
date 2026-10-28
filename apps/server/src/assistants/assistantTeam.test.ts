@@ -57,7 +57,7 @@ function stand(
     readonly routines?: boolean;
     readonly sandbox?: boolean;
     /** The person's answer when an "Asks first" assistant asks (default: Allow). */
-    readonly answer?: "approved" | "denied" | "timeout" | "no_client";
+    readonly answer?: "approved" | "denied" | "timeout" | "queued";
   } = {},
 ) {
   const stateDir = tempDir();
@@ -427,6 +427,21 @@ describe("assistant_create: a helper never wider than its creator", () => {
     await run(full.team.create(callerOf(UNO), { name: "Scout" }));
     expect(full.asked).toEqual([]);
     expect(full.access.get(SCOUT)?.preset).toBe("full");
+  });
+
+  it('"Asks first" with nobody answering yet: the turn isn\'t held; a late Allow sets it up', async () => {
+    const s = stand({ answer: "queued" });
+    s.access.set(UNO, { preset: "helper", allowlist: "all" });
+    const made = await run(s.team.create(callerOf(UNO, "t-uno"), { name: "Scout" }));
+    expect(made._tag).toBe("Success");
+    expect((made as { success: unknown }).success).toMatchObject({ queued: true, name: "Scout" });
+    expect(s.access.has(SCOUT)).toBe(false);
+    const later = (s.asked[0] as { later?: (o: "approved") => Effect.Effect<void> }).later;
+    expect(later).toBeDefined();
+    await Effect.runPromise(later!("approved"));
+    expect(s.access.get(SCOUT)?.preset).toBe("helper");
+    expect(s.turns.at(-1)).toMatchObject({ threadId: "t-uno", system: true });
+    expect(s.turns.at(-1)?.text).toContain("Scout is set up");
   });
 
   it("unknown project ids are refused", async () => {

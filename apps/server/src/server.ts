@@ -33,6 +33,8 @@ import { selfUpdateStartRouteLayer, selfUpdateStatusRouteLayer } from "./selfUpd
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
+import { remoteComputersRouteLayers } from "./remoteComputers/http.ts";
+import { RemoteComputersServiceLive } from "./remoteComputers/RemoteComputers.ts";
 import { warmStatusRouteLayer } from "./warmStatus.ts";
 import { AssistantPrewarmLive } from "./manager/assistantPrewarm.ts";
 import { localPairingRouteLayer } from "./auth/localPairing.ts";
@@ -425,7 +427,9 @@ const WorkspaceLayerLive = Layer.mergeAll(
  */
 const WorkspaceRegistryLayerLive = Layer.mergeAll(
   WorkspaceServiceLive.pipe(Layer.provideMerge(WorkspaceRegistryRepositoryLive)),
-  UnoCloudServiceLive,
+  // The account's computers; chats on another computer go through it
+  // (remoteComputers/, assistants D) — the manager and the agent bridge read it.
+  RemoteComputersServiceLive.pipe(Layer.provideMerge(UnoCloudServiceLive)),
   // "This computer" reads the same account key and this machine's box id
   // (UnoBoxIdentity, provided further down the runtime pipe).
   UnoComputerServiceLive,
@@ -718,6 +722,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   previewSiteFileRouteLayer,
   ...filesShareRouteLayers,
   ...unoWorkRouteLayers,
+  // Chats an assistant of another computer of the account starts here, and
+  // the sidebar's "started by <assistant>" (assistants D).
+  ...remoteComputersRouteLayers,
   warmStatusRouteLayer,
   ...setupToolsRouteLayers,
 ).pipe(

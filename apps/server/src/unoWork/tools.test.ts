@@ -87,18 +87,21 @@ interface Recorded {
   console: ConsoleRequest[];
   createdBoxes: number;
   appPanel: Array<{ url: string; name: string }>;
+  told: string[];
+  later: Array<(outcome: "approved" | "denied" | "timeout") => Effect.Effect<void>>;
 }
 
 function makeDeps(
   options: {
     runtimeMode?: RuntimeMode;
-    approval?: "approved" | "denied" | "timeout" | "no_client";
+    approval?: "approved" | "denied" | "timeout" | "queued";
     agentAccess?: "off" | "read" | "manage";
     apiKey?: string;
     console?: (request: ConsoleRequest) => ConsoleReply;
     apps?: UnoMachineApp[];
     hostedMachine?: boolean;
     windowOpen?: boolean;
+    orchestrator?: boolean;
   } = {},
 ): { deps: UnoWorkToolDeps; recorded: Recorded; home: string } {
   const home = mkdtempSync(path.join(os.tmpdir(), "uno-work-tools-"));
@@ -111,6 +114,8 @@ function makeDeps(
     console: [],
     createdBoxes: 0,
     appPanel: [],
+    told: [],
+    later: [],
   };
   const apps = {
     apps: options.apps ?? [app()],
@@ -139,11 +144,14 @@ function makeDeps(
         recorded.bridge.push(input);
         return { status: 200, body: { ok: true } };
       }),
-    requestApproval: (input) =>
+    requestApproval: ({ later, ...input }) =>
       Effect.sync(() => {
         recorded.approvals.push(input);
+        if (later) recorded.later.push(later);
         return options.approval ?? "approved";
       }),
+    tellChat: (text) => Effect.sync(() => void recorded.told.push(text)),
+    ...(options.orchestrator ? { orchestratorOnly: Effect.succeed({ name: "Uno" }) } : {}),
     machineApps: {
       list: Effect.succeed(apps),
       action: (input) =>
@@ -734,12 +742,41 @@ describe("approval gate", () => {
     expect(chats.site).toMatchObject({ threadId: "thread-1", title: "Build notes" });
   });
 
-  it("refuses when nobody can be asked", async () => {
-    const { deps, recorded } = makeDeps({ approval: "no_client" });
+  it("doesn't hold the turn when nobody answers yet: a late Allow runs it and tells the chat", async () => {
+    const { deps, recorded } = makeDeps({ approval: "queued" });
     const result = await run("app_show_on_internet", deps, { appId: "notes" });
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") expect(result.failure.message).toContain("isn't open");
-    expect(recorded.bridge).toEqual([]);
+    expect(result._tag).toBe("Success");
+    if (result._tag === "Success") {
+      expect(result.success).toMatchObject({ ok: false, waiting: true });
+      expect(JSON.stringify(result.success)).toContain("End your turn");
+    }
+    expect(recorded.actions).toEqual([]);
+    expect(recorded.later).toHaveLength(1);
+    await Effect.runPromise(recorded.later[0]!("approved"));
+    expect(recorded.actions).toEqual([{ appId: "manifest:notes", action: "publish" }]);
+    expect(recorded.told).toHaveLength(1);
+    expect(recorded.told[0]).toContain("allowed");
+  });
+
+  it("a late Decline tells the chat and runs nothing", async () => {
+    const { deps, recorded } = makeDeps({ approval: "queued" });
+    await run("app_show_on_internet", deps, { appId: "notes" });
+    await Effect.runPromise(recorded.later[0]!("denied"));
+    expect(recorded.actions).toEqual([]);
+    expect(recorded.told[0]).toContain("declined");
+  });
+
+  it("an assistant's own conversation hands heavy work to a chat", async () => {
+    const { deps, recorded } = makeDeps({ orchestrator: true });
+    const refused = await run("site_publish", deps, { path: "~/site" });
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure") expect(refused.failure.message).toContain("chat_create");
+    const login = await run("browser_command", deps, { login: "x.com" });
+    expect(login._tag).toBe("Failure");
+    // A quick look and orchestration stay its own.
+    expect((await run("apps_list", deps, {}))._tag).toBe("Success");
+    await run("chat_create", deps, { text: "Publish the site" });
+    expect(recorded.bridge.at(-1)?.path).toBe("/api/threads");
   });
 
   it("never asks for reads", async () => {

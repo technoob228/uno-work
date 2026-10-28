@@ -82,6 +82,9 @@ function updateJson<A>(file: string, fallback: A, update: (current: A) => A): Pr
   });
 }
 
+/** The same serialized JSON files, for neighbours (remote chats' ledgers). */
+export { readJson as readStoreJson, updateJson as updateStoreJson, storeDir as assistantStoreDir };
+
 // ── Apps an assistant may open ────────────────────────────────────────
 
 export interface AppAccess {

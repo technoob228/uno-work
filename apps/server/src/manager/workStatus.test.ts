@@ -5,7 +5,9 @@ import { assistantTokenLabel } from "@t3tools/contracts";
 import { effectiveWaitTimeoutSec } from "./Layers/ManagerToolService.ts";
 import {
   finishWorkStatus,
+  pickRemoteWorkStatus,
   pickWorkStatusCandidates,
+  remoteWorkStatusRow,
   WORK_STATUS_MAX_CHARS,
   WORK_STATUS_MAX_PERSON_THREADS,
   workStatusRow,
@@ -157,5 +159,49 @@ describe("wait_for_thread for an assistant", () => {
     expect(effectiveWaitTimeoutSec(assistant, 3_600)).toBe(30);
     expect(effectiveWaitTimeoutSec(assistant, 5)).toBe(5);
     expect(effectiveWaitTimeoutSec({ ...base, label: "brain" }, undefined)).toBe(900);
+  });
+});
+
+describe("work_status: chats on another computer", () => {
+  const nowMs = Date.parse("2026-10-28T12:00:00.000Z");
+  const entry = {
+    threadId: "remote-1",
+    title: "Fix the build",
+    computerName: "stage-work",
+    startedAt: "2026-10-28T11:50:00.000Z",
+    state: "running",
+    lastMessage: null,
+    checkedAt: null,
+  };
+  it("one row with the computer's name and how long it runs", () => {
+    const row = remoteWorkStatusRow(entry, { nowMs, reportPending: false });
+    expect(row).toMatchObject({
+      status: "running",
+      computer: "stage-work",
+      startedBy: "you",
+      runningForSec: 600,
+    });
+    expect(row.project).toContain("stage-work");
+    const done = remoteWorkStatusRow(
+      {
+        ...entry,
+        state: "done",
+        lastMessage: "All green.\nDetails…",
+        checkedAt: "2026-10-28T11:59:00.000Z",
+      },
+      { nowMs, reportPending: true },
+    );
+    expect(done).toMatchObject({
+      status: "done",
+      finishedAt: "2026-10-28T11:59:00.000Z",
+      reportPending: true,
+    });
+    expect(done.lastAnswer).toContain("All green.");
+  });
+  it("keeps live ones a day, settled ones as long as its own chats", () => {
+    const old = { ...entry, startedAt: "2026-10-26T11:00:00.000Z" };
+    expect(pickRemoteWorkStatus([entry, old], nowMs)).toEqual([entry]);
+    const settled = { ...old, state: "done", checkedAt: "2026-10-27T11:00:00.000Z" };
+    expect(pickRemoteWorkStatus([settled], nowMs)).toEqual([settled]);
   });
 });
