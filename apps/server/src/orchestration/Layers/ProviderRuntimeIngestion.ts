@@ -39,6 +39,11 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { redactSecretsInText } from "../../secretRedaction.ts";
+import {
+  noteReasoningDelta,
+  reasoningProgressTaskId,
+  type ReasoningProgressState,
+} from "../reasoningProgress.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -1739,7 +1744,10 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event);
+      const activities = [
+        ...runtimeEventToActivities(event),
+        ...reasoningProgressActivities(thread.id, event),
+      ];
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({
           type: "thread.activity.append",
@@ -1750,6 +1758,63 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.asVoid);
     });
+
+  /**
+   * A long reasoning stream becomes a quiet "Thinking it through - …" row
+   * (reasoningProgress.ts). One state per reasoning part, dropped when the
+   * thread's turn ends; bounded so a stuck thread can't grow it.
+   */
+  const reasoningProgressByPart = new Map<string, ReasoningProgressState>();
+  const REASONING_PROGRESS_MAX_PARTS = 256;
+  const reasoningProgressActivities = (
+    threadId: ThreadId,
+    event: ProviderRuntimeEvent,
+  ): ReadonlyArray<OrchestrationThreadActivity> => {
+    if (event.type === "turn.completed" || event.type === "session.exited") {
+      const prefix = `${threadId}\u001f`;
+      for (const key of reasoningProgressByPart.keys()) {
+        if (key.startsWith(prefix)) reasoningProgressByPart.delete(key);
+      }
+      return [];
+    }
+    if (event.type !== "content.delta" || event.payload.streamKind !== "reasoning_text") {
+      return [];
+    }
+    const itemId = event.itemId;
+    if (!itemId || event.payload.delta.length === 0) return [];
+    const key = `${threadId}\u001f${itemId}`;
+    const nowMs = Date.parse(event.createdAt);
+    const { state, update } = noteReasoningDelta(
+      reasoningProgressByPart.get(key),
+      event.payload.delta,
+      Number.isFinite(nowMs) ? nowMs : Date.now(),
+    );
+    if (
+      !reasoningProgressByPart.has(key) &&
+      reasoningProgressByPart.size >= REASONING_PROGRESS_MAX_PARTS
+    ) {
+      const oldest = reasoningProgressByPart.keys().next();
+      if (!oldest.done) reasoningProgressByPart.delete(oldest.value);
+    }
+    reasoningProgressByPart.set(key, state);
+    if (!update) return [];
+    const detail = redactSecretsInText(update.detail);
+    return [
+      {
+        id: event.eventId,
+        createdAt: event.createdAt,
+        tone: "info",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        payload: {
+          taskId: reasoningProgressTaskId(itemId),
+          summary: update.summary,
+          detail,
+        },
+        turnId: toTurnId(event.turnId) ?? null,
+      },
+    ];
+  };
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 

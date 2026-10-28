@@ -909,6 +909,46 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("turns a long reasoning stream into one quiet 'Thinking it through' row", async () => {
+    // Agent-flow pass 25.10: Smart reasoned 5 min 43 s before its first step
+    // and the chat showed only "Thinking"; the reasoning itself was dropped.
+    const harness = await createHarness();
+    const start = Date.parse("2026-10-28T10:00:00.000Z");
+    const reasoningDelta = (index: number, atMs: number, delta: string) =>
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`evt-reasoning-${index}`),
+        provider: ProviderDriverKind.make("opencode"),
+        createdAt: new Date(atMs).toISOString(),
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-reasoning"),
+        itemId: asItemId("prt-reasoning-1"),
+        payload: { streamKind: "reasoning_text", delta },
+      });
+    const filler = "the API needs routes for todos and tests for each one ".repeat(8);
+    reasoningDelta(1, start, filler);
+    reasoningDelta(2, start + 4_000, filler);
+    reasoningDelta(3, start + 11_000, `${filler} then write server.js first`);
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-reasoning-3",
+      ),
+    );
+    const rows = thread.activities.filter(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "task.progress",
+    );
+    expect(rows.map((row: ProviderRuntimeTestActivity) => row.id)).toEqual(["evt-reasoning-3"]);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.taskId).toBe("reasoning:prt-reasoning-1");
+    expect(payload.summary).toBe("Thinking it through");
+    expect(String(payload.detail).endsWith("then write server.js first")).toBe(true);
+    // Reasoning never becomes an assistant message.
+    expect(thread.messages.some((m: ProviderRuntimeTestMessage) => m.role === "assistant")).toBe(
+      false,
+    );
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

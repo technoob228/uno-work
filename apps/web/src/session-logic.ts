@@ -665,7 +665,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
-  const collapseKey = deriveToolLifecycleCollapseKey(entry);
+  const collapseKey = deriveToolLifecycleCollapseKey(
+    entry,
+    isTaskActivity && typeof payload?.taskId === "string" ? payload.taskId : null,
+  );
   if (collapseKey) {
     entry.collapseKey = collapseKey;
   }
@@ -716,6 +719,16 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
+  // A long think: its "Thinking it through" updates are one row (the latest).
+  if (previous.activityKind === "task.progress" || next.activityKind === "task.progress") {
+    return (
+      previous.activityKind === "task.progress" &&
+      next.activityKind === "task.progress" &&
+      previous.collapseKey !== undefined &&
+      previous.collapseKey.startsWith(REASONING_COLLAPSE_PREFIX) &&
+      previous.collapseKey === next.collapseKey
+    );
+  }
   if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
     return false;
   }
@@ -780,7 +793,16 @@ function mergeChangedFiles(
   return [...new Set(merged)];
 }
 
-function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
+/** Reasoning rows (server reasoningProgress.ts: task id `reasoning:<part>`). */
+const REASONING_COLLAPSE_PREFIX = "task:reasoning:";
+
+function deriveToolLifecycleCollapseKey(
+  entry: DerivedWorkLogEntry,
+  taskId?: string | null,
+): string | undefined {
+  if (entry.activityKind === "task.progress") {
+    return taskId && taskId.startsWith("reasoning:") ? `task:${taskId}` : undefined;
+  }
   if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
     return undefined;
   }

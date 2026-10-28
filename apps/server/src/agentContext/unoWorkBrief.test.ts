@@ -110,6 +110,12 @@ describe("Uno Work environment brief", () => {
     );
   });
 
+  it("task rules: a big task starts with a short plan, not minutes of silent thinking", () => {
+    // Agent-flow pass 25.10: Smart reasoned 5–7 min before its first step.
+    expect(UNO_WORK_TASK_RULES).toMatch(/write a short plan first \(1–3 lines/);
+    expect(UNO_WORK_TASK_RULES).toMatch(/the person sees nothing while you think/);
+  });
+
   it("task rules: do what was asked, finish with Done / Checked / Your call", () => {
     expect(UNO_WORK_TASK_RULES).toMatch(/do it to the end/);
     expect(UNO_WORK_TASK_RULES).toMatch(/never a raw log/);
