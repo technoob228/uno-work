@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.156 — 2026-10-28
+
+- **Big sites publish without timing out, and a password protects them from the first second.** site_publish sends the password (or an IP allowlist) with the upload and waits while Uno finishes publishing in the background.
+- **New chat starts on your agent.** If you picked only OpenCode before Work, New chat opens on OpenCode · Smart, like Home.
+- **Reconnect for an expired connector finishes.** Gmail, Notion, Drive or GitHub with expired access: Reconnect now waits for the new sign-in, and the agent's "Connect" card no longer says it's connected.
+
 ## v0.0.155 — 2026-10-28
 
 - **A long task tells you when it's done.** If a task you started runs 2+ minutes and Uno Work isn't open, Uno sends you a note in Telegram — or by email if Telegram isn't linked: "Your agent finished … Open Uno Work to see the result".
