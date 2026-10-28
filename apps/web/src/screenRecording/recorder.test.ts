@@ -289,7 +289,9 @@ describe("recording", () => {
     const result = await recorder.stop();
     expect(result.blob.size).toBe(1010);
     expect(result.mimeType).toBe("video/webm");
-    expect(result.agentCopy?.size).toBe(110);
+    expect(result.agentParts.map((part) => part.blob.size)).toEqual([110]);
+    expect(result.agentParts[0]!.durationMs).toBe(3000);
+    expect(result.agentCopyMimeType).toBe("video/webm");
     expect(result.durationMs).toBe(3000);
     expect(result.width).toBe(1920);
     expect(result.hasCamera).toBe(true);
@@ -299,6 +301,34 @@ describe("recording", () => {
     expect(tickerStopped).toBe(true);
     // A second stop is the same result.
     expect(await recorder.stop()).toBe(result);
+  });
+
+  it("the agent copy is cut into 5-minute parts, each its own file; pauses don't count", async () => {
+    const recorder = await ScreenRecorder.start(options, makeEnv());
+    FakeRecorder.instances[1]!.emit(100);
+    clock += 4 * 60_000;
+    recorder.tick();
+    expect(FakeRecorder.instances).toHaveLength(2);
+    // A pause doesn't move a part on.
+    recorder.pause();
+    clock += 10 * 60_000;
+    recorder.tick();
+    expect(FakeRecorder.instances).toHaveLength(2);
+    recorder.resume();
+    clock += 60_000;
+    recorder.tick();
+    // At 5:00 of recording time the first part is closed and a new one opens.
+    expect(FakeRecorder.instances).toHaveLength(3);
+    expect(FakeRecorder.instances[1]!.state).toBe("inactive");
+    expect(FakeRecorder.instances[2]!.state).toBe("recording");
+    // The main video is one piece all along.
+    expect(FakeRecorder.instances[0]!.state).toBe("recording");
+    FakeRecorder.instances[2]!.emit(50);
+    clock += 90_000;
+    const result = await recorder.stop();
+    expect(result.durationMs).toBe(5 * 60_000 + 90_000);
+    expect(result.agentParts.map((part) => part.durationMs)).toEqual([5 * 60_000, 90_000]);
+    expect(result.agentParts.map((part) => part.blob.size)).toEqual([110, 60]);
   });
 
   it("the browser's 'Stop sharing' tells the app", async () => {

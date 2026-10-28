@@ -9,12 +9,20 @@
  * message carries for the agent and its parsing back for the chat.
  */
 
-/** `POST /video/describe` watches up to 10 minutes, so a recording stops there. */
-export const RECORDING_MAX_MS = 10 * 60 * 1000;
+/**
+ * A recording stops at 60 minutes (Misha 28.10: longer than 10 right away;
+ * the gateway's /video/describe/drive takes up to 60). Watching is billed
+ * like dictation, ~$0.0025 a minute upstream — $0.15 for a full hour.
+ */
+export const RECORDING_MAX_MS = 60 * 60 * 1000;
 /** A minute before the limit the bar says so. */
 export const RECORDING_WARN_MS = RECORDING_MAX_MS - 60 * 1000;
-/** The agent copy must fit the gateway's 25 MB. */
+/** Each part of the agent copy must fit the gateway's 25 MB. */
 export const AGENT_COPY_MAX_BYTES = 25 * 1024 * 1024;
+/** Where the agent copy's parts wait in Drive while the gateway reads them. */
+export function agentPartsDrivePrefix(itemId: string): string {
+  return `${RECORDINGS_FOLDER}.agent-${itemId}/`;
+}
 export const RECORDINGS_FOLDER = "Recordings/";
 /** Where the browser stages the files on the computer before Drive takes them. */
 export const RECORDING_STAGING_DIR = ".uno-recordings";

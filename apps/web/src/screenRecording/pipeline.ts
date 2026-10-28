@@ -5,8 +5,11 @@
  *   computer (chunked `projects.writeFile`, like chat uploads), moved into the
  *   Drive bucket (`files.cloud.copyToCloud` with removeSource), then a share
  *   link. Drive's free space is checked first.
- * - **Watch** — the small agent copy is staged too and the daemon sends it to
- *   the gateway's `/video/describe` (speech + what was on screen).
+ * - **Watch** — the small agent copy (5-minute parts) is staged too. One part:
+ *   the daemon sends it to the gateway's `/video/describe` (speech + what was
+ *   on screen). Several (a recording over 5 minutes, up to 60): the parts go
+ *   to Uno Drive (`Recordings/.agent-<id>/`), the gateway reads them there
+ *   (`/video/describe/drive`) and glues the answer; the parts are deleted after.
  *
  * The browser keeps the recording in memory until the card is sent or
  * removed, so a Retry never needs the person to record again.
@@ -16,6 +19,7 @@ import { uploadFilesIntoDirectory } from "../projectUpload";
 import {
   AGENT_COPY_MAX_BYTES,
   RECORDING_MAX_MS,
+  agentPartsDrivePrefix,
   RECORDINGS_FOLDER,
   RECORDING_STAGING_DIR,
   driveSpaceProblem,
@@ -52,7 +56,8 @@ export interface RecordingItem {
   readonly durationMs: number;
   readonly blob: Blob;
   readonly previewUrl: string;
-  readonly agentCopy: Blob | null;
+  /** The agent copy in self-contained parts (recorder.ts AGENT_PART_MS). */
+  readonly agentParts: ReadonlyArray<{ readonly blob: Blob; readonly durationMs: number }>;
   readonly agentCopyMimeType: string | null;
   readonly hasVoice: boolean;
   readonly createdAt: string;
@@ -86,11 +91,14 @@ export interface PipelineDeps {
     expiresInHours?: number;
   }) => Promise<{ url: string | null }>;
   readonly describe: (input: {
-    path: string;
+    path?: string;
+    driveParts?: Array<{ key: string; durationSec: number }>;
     mimeType: string;
     durationSec: number;
   }) => Promise<{ speech: string; visual: string }>;
   readonly removePaths: (paths: string[]) => Promise<unknown>;
+  /** Deletes a key or a folder prefix ("…/") from a bucket. */
+  readonly deleteCloud: (input: { bucketId: number; key: string }) => Promise<unknown>;
 }
 
 export const INITIAL_SAVE: SaveStep = {
@@ -202,19 +210,21 @@ export async function runSave(
 
 /** Why the agent copy can't be watched, or null. */
 export function watchSkipReason(
-  item: Pick<RecordingItem, "agentCopy" | "durationMs">,
+  item: Pick<RecordingItem, "agentParts" | "durationMs">,
 ): string | null {
-  if (!item.agentCopy || item.agentCopy.size === 0) {
+  if (item.agentParts.length === 0) {
     return "This browser couldn't make the small copy the agent watches.";
   }
-  if (item.agentCopy.size > AGENT_COPY_MAX_BYTES) {
-    return "The recording is too big for the agent to watch in one go.";
+  if (item.agentParts.some((part) => part.blob.size > AGENT_COPY_MAX_BYTES)) {
+    return "The recording is too big for the agent to watch.";
   }
   if (item.durationMs > RECORDING_MAX_MS + 5_000) {
-    return "Recordings up to 10 minutes can be watched.";
+    return "Recordings up to 60 minutes can be watched.";
   }
   return null;
 }
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /** Watch: the agent copy → speech + what was on screen. */
 export async function runWatch(
@@ -229,20 +239,68 @@ export async function runWatch(
     return;
   }
   patch({ status: "running", error: null });
-  let stagedPath: string | null = null;
+  const mime = item.agentCopyMimeType ?? item.mimeType;
+  const ext = extensionForMime(mime);
+  const staged: string[] = [];
+  let driveFolder: { bucketId: number; key: string } | null = null;
   try {
     const home = await deps.homePath();
-    const mime = item.agentCopyMimeType ?? item.mimeType;
-    stagedPath = await stageBlob(
-      deps,
-      home,
-      `${stagingRelativeDir(item.id)}/agent-copy.${extensionForMime(mime)}`,
-      item.agentCopy!,
-      () => undefined,
-      signal,
-    );
+    if (item.agentParts.length === 1) {
+      const part = item.agentParts[0]!;
+      const path = await stageBlob(
+        deps,
+        home,
+        `${stagingRelativeDir(item.id)}/agent-copy.${ext}`,
+        part.blob,
+        () => undefined,
+        signal,
+      );
+      staged.push(path);
+      const result = await deps.describe({
+        path,
+        mimeType: mime,
+        durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
+      });
+      patch({ status: "done", speech: result.speech, visual: result.visual, error: null });
+      return;
+    }
+    // A long recording: its parts through Uno Drive.
+    const drive = await deps.driveState();
+    const partsBytes = item.agentParts.reduce((sum, part) => sum + part.blob.size, 0);
+    const problem = driveSpaceProblem(drive, partsBytes);
+    if (problem) throw new Error(`The agent watches long recordings through Uno Drive. ${problem}`);
+    if (drive.bucketId === null)
+      throw new Error("Uno Drive isn't ready yet. Try again in a minute.");
+    const names = item.agentParts.map((_, index) => `part-${pad2(index + 1)}.${ext}`);
+    for (const [index, part] of item.agentParts.entries()) {
+      staged.push(
+        await stageBlob(
+          deps,
+          home,
+          `${stagingRelativeDir(item.id)}/agent/${names[index]}`,
+          part.blob,
+          () => undefined,
+          signal,
+        ),
+      );
+    }
+    const prefix = agentPartsDrivePrefix(item.id);
+    driveFolder = { bucketId: drive.bucketId, key: prefix };
+    const copied = await deps.copyToCloud({
+      paths: [...staged],
+      bucketId: drive.bucketId,
+      prefix,
+      removeSource: true,
+    });
+    staged.length = 0;
+    if (copied.files < item.agentParts.length) {
+      throw new Error("Uno Drive didn't take the parts the agent watches.");
+    }
     const result = await deps.describe({
-      path: stagedPath,
+      driveParts: item.agentParts.map((part, index) => ({
+        key: `${prefix}${names[index]}`,
+        durationSec: Math.max(1, Math.round(part.durationMs / 1000)),
+      })),
       mimeType: mime,
       durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
     });
@@ -250,7 +308,8 @@ export async function runWatch(
   } catch (error) {
     patch({ status: "failed", error: errorText(error, "The agent couldn't watch the recording.") });
   } finally {
-    if (stagedPath) await deps.removePaths([stagedPath]).catch(() => undefined);
+    if (staged.length > 0) await deps.removePaths(staged).catch(() => undefined);
+    if (driveFolder) await deps.deleteCloud(driveFolder).catch(() => undefined);
   }
 }
 

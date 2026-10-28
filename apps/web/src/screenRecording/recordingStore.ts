@@ -223,7 +223,9 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
       });
       clearLimitTimer();
       limitTimer = setInterval(() => {
-        if (recorder && recorder.elapsedMs() >= RECORDING_MAX_MS) void get().stop("limit");
+        if (!recorder) return;
+        recorder.tick();
+        if (recorder.elapsedMs() >= RECORDING_MAX_MS) void get().stop("limit");
       }, 500);
       return true;
     },
@@ -257,7 +259,7 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
       if (by === "limit") {
         notify({
           kind: "info",
-          title: "Stopped at 10 minutes",
+          title: "Stopped at 60 minutes",
           description: "That's the longest recording for now.",
         });
       }
@@ -286,7 +288,7 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
         durationMs: result.durationMs,
         blob: result.blob,
         previewUrl: createObjectUrl(result.blob),
-        agentCopy: result.agentCopy,
+        agentParts: result.agentParts,
         agentCopyMimeType: result.agentCopyMimeType,
         hasVoice: result.hasVoice,
         createdAt: now().toISOString(),

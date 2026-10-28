@@ -51,6 +51,7 @@ export function realPipelineDeps(environmentId: string): PipelineDeps {
       return media.describeVideo(input);
     },
     removePaths: (paths) => filesApi(id).delete({ paths }),
+    deleteCloud: (input) => filesApi(id).cloudDelete(input),
   };
 }
 

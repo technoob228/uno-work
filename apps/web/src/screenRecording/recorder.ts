@@ -6,8 +6,9 @@
  *   is, or — with the camera on — composited on a canvas with the camera in a
  *   circle bottom-left. One file anyone can play; no second track to sync.
  * - The **agent copy**: the same screen, small and slow (≤1280 px, ≤5 fps,
- *   ~0.35 Mbit/s) with the voice — fits the gateway's 25 MB for 10 minutes,
- *   so the agent can watch the whole recording in one call.
+ *   ~0.35 Mbit/s) with the voice, cut into self-contained 5-minute parts
+ *   (~14 MB each): one part is watched in one gateway call, a longer
+ *   recording (up to 60 minutes) part by part from Uno Drive.
  *
  * The compositing loop is driven by a Worker timer, not requestAnimationFrame:
  * the person switches to the tab/app they are showing, Work's tab goes to the
@@ -64,7 +65,8 @@ export interface RecordingResult {
   readonly blob: Blob;
   readonly mimeType: string;
   readonly durationMs: number;
-  readonly agentCopy: Blob | null;
+  /** The agent copy in self-contained parts of ≤ AGENT_PART_MS (each its own file). */
+  readonly agentParts: ReadonlyArray<AgentPart>;
   readonly agentCopyMimeType: string | null;
   readonly width: number;
   readonly height: number;
@@ -73,6 +75,19 @@ export interface RecordingResult {
 }
 
 export type RecorderState = "recording" | "paused" | "stopped";
+
+/** One self-contained piece of the agent copy. */
+export interface AgentPart {
+  readonly blob: Blob;
+  readonly durationMs: number;
+}
+
+/**
+ * The agent copy is cut into parts of 5 minutes while recording: each part is
+ * a whole file (a new MediaRecorder on the same stream), so long recordings
+ * are watched part by part (≤ 25 MB, ≤ 10 min each) with no re-encoding.
+ */
+export const AGENT_PART_MS = 5 * 60 * 1000;
 
 export interface RecorderEvents {
   /** The screen share ended from outside (the browser's "Stop sharing", window closed). */
@@ -149,7 +164,8 @@ export class ScreenRecorder {
       readonly camera: MediaStream | null;
       readonly microphone: MediaStream | null;
       readonly main: Capture;
-      readonly agent: Capture | null;
+      /** Starts a new part of the agent copy; null when the clone failed. */
+      readonly startAgentPart: (() => Capture) | null;
       readonly mainMime: string;
       readonly agentMime: string | null;
       readonly ticker: Ticker | null;
@@ -161,6 +177,42 @@ export class ScreenRecorder {
     },
   ) {
     this.startedAt = env.now();
+    if (parts.startAgentPart) {
+      try {
+        this.agentParts.push({ capture: parts.startAgentPart(), startMs: 0 });
+      } catch {
+        // No agent copy in this browser: the recording still goes to Drive.
+      }
+    }
+  }
+
+  private readonly agentParts: Array<{ capture: Capture; startMs: number; endMs?: number }> = [];
+
+  private get agent(): Capture | null {
+    return this.agentParts.at(-1)?.capture ?? null;
+  }
+
+  /**
+   * Called about twice a second by the session: closes the agent copy's part
+   * at AGENT_PART_MS of recording time and opens the next.
+   */
+  tick(): void {
+    if (this.stateValue !== "recording" || !this.parts.startAgentPart) return;
+    const current = this.agentParts.at(-1);
+    if (!current) return;
+    const now = this.elapsedMs();
+    if (now - current.startMs < AGENT_PART_MS) return;
+    current.endMs = now;
+    try {
+      current.capture.recorder.stop();
+    } catch {
+      // already stopped
+    }
+    try {
+      this.agentParts.push({ capture: this.parts.startAgentPart(), startMs: now });
+    } catch {
+      // The rest of the recording has no agent copy; what was cut stays.
+    }
   }
 
   /** The camera stream, for the preview circle in the control bar. */
@@ -188,7 +240,7 @@ export class ScreenRecorder {
 
   pause(): void {
     if (this.stateValue !== "recording") return;
-    for (const capture of [this.parts.main, this.parts.agent]) {
+    for (const capture of [this.parts.main, this.agent]) {
       if (capture?.recorder.state === "recording") capture.recorder.pause();
     }
     this.pausedAt = this.env.now();
@@ -197,7 +249,7 @@ export class ScreenRecorder {
 
   resume(): void {
     if (this.stateValue !== "paused") return;
-    for (const capture of [this.parts.main, this.parts.agent]) {
+    for (const capture of [this.parts.main, this.agent]) {
       if (capture?.recorder.state === "paused") capture.recorder.resume();
     }
     if (this.pausedAt !== null) this.pausedTotal += this.env.now() - this.pausedAt;
@@ -211,8 +263,10 @@ export class ScreenRecorder {
     const durationMs = this.elapsedMs();
     this.stateValue = "stopped";
     this.finished = (async () => {
-      const { main, agent } = this.parts;
-      for (const capture of [main, agent]) {
+      const { main } = this.parts;
+      const last = this.agentParts.at(-1);
+      if (last) last.endMs = durationMs;
+      for (const capture of [main, last?.capture ?? null]) {
         if (capture && capture.recorder.state !== "inactive") {
           try {
             capture.recorder.stop();
@@ -221,20 +275,25 @@ export class ScreenRecorder {
           }
         }
       }
-      await Promise.all([main.stopped, agent?.stopped]);
+      await Promise.all([main.stopped, ...this.agentParts.map((part) => part.capture.stopped)]);
       this.release();
       const mainType = baseMimeType(main.recorder.mimeType || this.parts.mainMime);
       const blob = new Blob(main.blobs, { type: mainType });
-      const agentType = agent
-        ? baseMimeType(agent.recorder.mimeType || this.parts.agentMime || mainType)
+      const agentType = last
+        ? baseMimeType(last.capture.recorder.mimeType || this.parts.agentMime || mainType)
         : null;
-      const agentBlob = agent ? new Blob(agent.blobs, { type: agentType ?? mainType }) : null;
+      const agentParts = this.agentParts
+        .map((part) => ({
+          blob: new Blob(part.capture.blobs, { type: agentType ?? mainType }),
+          durationMs: Math.max(0, (part.endMs ?? durationMs) - part.startMs),
+        }))
+        .filter((part) => part.blob.size > 0);
       return {
         blob,
         mimeType: mainType,
         durationMs,
-        agentCopy: agentBlob && agentBlob.size > 0 ? agentBlob : null,
-        agentCopyMimeType: agentBlob && agentBlob.size > 0 ? agentType : null,
+        agentParts,
+        agentCopyMimeType: agentParts.length > 0 ? agentType : null,
         width: this.parts.width,
         height: this.parts.height,
         hasVoice: this.parts.hasVoice,
@@ -249,7 +308,7 @@ export class ScreenRecorder {
     if (this.cancelled) return;
     this.cancelled = true;
     this.stateValue = "stopped";
-    for (const capture of [this.parts.main, this.parts.agent]) {
+    for (const capture of [this.parts.main, this.agent]) {
       if (capture && capture.recorder.state !== "inactive") {
         try {
           capture.recorder.stop();
@@ -415,8 +474,8 @@ export class ScreenRecorder {
         events.onRecorderError,
       );
 
-      // The agent copy: a clone of the screen, small and slow.
-      let agent: Capture | null = null;
+      // The agent copy: a clone of the screen, small and slow, in parts.
+      let startAgentPart: (() => Capture) | null = null;
       try {
         const small = screenTrack.clone();
         await small
@@ -424,12 +483,13 @@ export class ScreenRecorder {
           .catch(() => undefined);
         const agentStream = new MediaStream(audioTrack ? [small, audioTrack.clone()] : [small]);
         extra.push(agentStream);
-        agent = startCapture(env, agentStream, mainMime, {
-          video: AGENT_VIDEO_BPS,
-          audio: AGENT_AUDIO_BPS,
-        });
+        startAgentPart = () =>
+          startCapture(env, agentStream, mainMime, {
+            video: AGENT_VIDEO_BPS,
+            audio: AGENT_AUDIO_BPS,
+          });
       } catch {
-        agent = null;
+        startAgentPart = null;
       }
 
       const recorder = new ScreenRecorder(env, {
@@ -437,7 +497,7 @@ export class ScreenRecorder {
         camera,
         microphone,
         main,
-        agent,
+        startAgentPart,
         mainMime: mainMime ?? "video/webm",
         agentMime: mainMime,
         ticker,

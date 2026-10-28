@@ -4,7 +4,12 @@ import nodePath from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { parseDescribeResponse, postDescribe, resolveRecordingPath } from "./unoVideoDescribe.ts";
+import {
+  parseDescribeResponse,
+  postDescribe,
+  postDescribeDrive,
+  resolveRecordingPath,
+} from "./unoVideoDescribe.ts";
 
 describe("parseDescribeResponse", () => {
   it("reads speech and visual, trims them", () => {
@@ -85,6 +90,62 @@ describe("postDescribe", () => {
       fetchImpl: async () => new Response("not found", { status: 404 }),
     }).catch((e: unknown) => e as { reason: string });
     expect(error).toMatchObject({ reason: "unsupported" });
+  });
+});
+
+describe("postDescribeDrive (recordings over 10 minutes)", () => {
+  const parts = [
+    { key: "Recordings/.agent-r1/part-01.webm", durationSec: 300 },
+    { key: "Recordings/.agent-r1/part-02.webm", durationSec: 149.6 },
+  ];
+  it("posts the parts' Drive keys as JSON to {gateway}/video/describe/drive", async () => {
+    let seen: { url: string; init?: RequestInit } | null = null;
+    const result = await postDescribeDrive({
+      baseUrl: "https://api.getuno.xyz/v1",
+      apiKey: "k",
+      parts,
+      fetchImpl: async (url, init) => {
+        seen = { url, ...(init ? { init } : {}) };
+        return new Response(JSON.stringify({ speech: "[0:00] a\n\n[5:00] b", visual: "x" }));
+      },
+    });
+    expect(result.speech).toContain("[5:00] b");
+    expect(seen!.url).toBe("https://api.getuno.xyz/v1/video/describe/drive");
+    const headers = seen!.init!.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer k");
+    expect(headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(seen!.init!.body as string)).toEqual({
+      parts: [
+        { key: "Recordings/.agent-r1/part-01.webm", duration_sec: 300 },
+        { key: "Recordings/.agent-r1/part-02.webm", duration_sec: 150 },
+      ],
+    });
+  });
+
+  it("a console without the route says so plainly", async () => {
+    const error = await postDescribeDrive({
+      baseUrl: "https://g/v1",
+      apiKey: "k",
+      parts,
+      fetchImpl: async () => new Response("404 page not found", { status: 404 }),
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ reason: "unsupported" });
+    expect((error as Error).message).toContain("longer than 10 minutes");
+  });
+
+  it("the gateway's sentence (which part failed) comes through", async () => {
+    const error = await postDescribeDrive({
+      baseUrl: "https://g/v1",
+      apiKey: "k",
+      parts,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({ error: { message: "Part 2 of the recording isn't in Uno Drive." } }),
+          { status: 404 },
+        ),
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ reason: "gateway" });
+    expect((error as Error).message).toContain("Part 2");
   });
 });
 

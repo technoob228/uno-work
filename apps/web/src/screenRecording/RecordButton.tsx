@@ -155,7 +155,7 @@ export function RecordButton(props: {
             Start recording
           </Button>
           <div className="text-[11px] leading-snug text-muted-foreground">
-            Up to 10 minutes. {isElectron ? "macOS" : "Your browser"} asks what to share next.
+            Up to 60 minutes. {isElectron ? "macOS" : "Your browser"} asks what to share next.
           </div>
         </div>
       </PopoverPopup>

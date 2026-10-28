@@ -39,11 +39,27 @@ export class UnoTranscriptionError extends Schema.TaggedErrorClass<UnoTranscript
  * no 20 MB frame goes over the WebSocket and the key stays server-side.
  */
 export const UNO_DESCRIBE_VIDEO_MAX_BYTES = 25 * 1024 * 1024;
+/** One part (and a recording in one call). */
 export const UNO_DESCRIBE_VIDEO_MAX_SECONDS = 10 * 60;
+/** A long recording, watched from its parts in Uno Drive. */
+export const UNO_DESCRIBE_VIDEO_LONG_MAX_SECONDS = 60 * 60;
+
+export const UnoDescribeVideoDrivePart = Schema.Struct({
+  key: TrimmedNonEmptyString.check(Schema.isMaxLength(900)),
+  durationSec: Schema.Number,
+});
+export type UnoDescribeVideoDrivePart = typeof UnoDescribeVideoDrivePart.Type;
 
 export const UnoDescribeVideoInput = Schema.Struct({
-  /** Inside the home folder: `~/.uno-recordings/<id>/agent.webm` or an absolute path. */
-  path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+  /**
+   * One file inside the home folder (`~/.uno-recordings/<id>/agent.webm` or
+   * absolute) — sent to `/video/describe`. Or:
+   */
+  path: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))),
+  /** …the parts of a long recording already in Uno Drive, in order — `/video/describe/drive`. */
+  driveParts: Schema.optional(
+    Schema.Array(UnoDescribeVideoDrivePart).check(Schema.isMaxLength(24)),
+  ),
   mimeType: TrimmedNonEmptyString,
   durationSec: Schema.Number,
 });

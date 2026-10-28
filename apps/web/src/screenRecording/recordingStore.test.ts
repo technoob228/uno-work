@@ -11,6 +11,7 @@ const engine = vi.hoisted(() => ({
   stopped: 0,
   cancelled: 0,
   hasVoice: true,
+  ticks: 0,
   result: null as RecordingResult | null,
 }));
 
@@ -32,6 +33,9 @@ vi.mock("./recorder", async () => {
     }
     elapsedMs() {
       return engine.elapsed;
+    }
+    tick() {
+      engine.ticks += 1;
     }
     pause() {
       this.state = "paused";
@@ -76,6 +80,7 @@ function deps(): PipelineDeps {
     shareCreate: async () => ({ url: "https://api.getuno.xyz/d/tok" }),
     describe: (input) => describeImpl(input),
     removePaths: async () => ({}),
+    deleteCloud: async () => ({}),
   };
 }
 
@@ -94,12 +99,15 @@ beforeEach(() => {
     stopped: 0,
     cancelled: 0,
     hasVoice: true,
+    ticks: 0,
   });
   engine.result = {
     blob: new Blob([new Uint8Array(2048)], { type: "video/mp4" }),
     mimeType: "video/mp4",
     durationMs: 12_000,
-    agentCopy: new Blob([new Uint8Array(512)], { type: "video/mp4" }),
+    agentParts: [
+      { blob: new Blob([new Uint8Array(512)], { type: "video/mp4" }), durationMs: 12_000 },
+    ],
     agentCopyMimeType: "video/mp4",
     width: 1920,
     height: 1080,
@@ -180,13 +188,22 @@ describe("a session", () => {
     expect(store().items["t1"]).toBeDefined();
   });
 
-  it("stops by itself at 10 minutes and says so", async () => {
+  it("stops by itself at 60 minutes and says so", async () => {
     vi.useFakeTimers();
     await store().start({ threadKey: "t1", environmentId: "e1" });
-    engine.elapsed = 10 * 60 * 1000;
+    engine.elapsed = 60 * 60 * 1000;
     await vi.advanceTimersByTimeAsync(600);
     expect(engine.stopped).toBe(1);
-    expect(notices.some((n) => n.title === "Stopped at 10 minutes")).toBe(true);
+    expect(notices.some((n) => n.title === "Stopped at 60 minutes")).toBe(true);
+  });
+
+  it("keeps the recorder ticking (it cuts the agent copy into parts)", async () => {
+    vi.useFakeTimers();
+    await store().start({ threadKey: "t1", environmentId: "e1" });
+    engine.elapsed = 6 * 60 * 1000;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(engine.ticks).toBeGreaterThan(1);
+    expect(engine.stopped).toBe(0);
   });
 
   it("Discard leaves no card", async () => {

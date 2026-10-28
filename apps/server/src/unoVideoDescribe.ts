@@ -13,7 +13,9 @@ import nodePath from "node:path";
 
 import {
   UNO_DESCRIBE_VIDEO_MAX_BYTES,
+  UNO_DESCRIBE_VIDEO_LONG_MAX_SECONDS,
   UNO_DESCRIBE_VIDEO_MAX_SECONDS,
+  type UnoDescribeVideoDrivePart,
   UNO_GATEWAY_BASE_URL,
   type UnoDescribeVideoInput,
   type UnoDescribeVideoResult,
@@ -92,6 +94,50 @@ export async function postDescribe(input: {
   return parsed;
 }
 
+/** The gateway reads the parts of a long recording from Uno Drive and glues them. */
+export async function postDescribeDrive(input: {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly parts: ReadonlyArray<UnoDescribeVideoDrivePart>;
+  readonly fetchImpl?: DescribeFetch;
+}): Promise<UnoDescribeVideoResult> {
+  const response = await (input.fetchImpl ?? fetch)(
+    `${input.baseUrl.replace(/\/$/, "")}/video/describe/drive`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        parts: input.parts.map((part) => ({
+          key: part.key,
+          duration_sec: Math.max(1, Math.round(part.durationSec)),
+        })),
+      }),
+    },
+  );
+  if (!response.ok) {
+    const errorBody: unknown = await response.json().catch(() => null);
+    const said = readGatewayErrorMessage(errorBody);
+    // An older console has no long describe: the route is unknown there.
+    const unsupported = response.status === 405 || (response.status === 404 && said === null);
+    throw new UnoDescribeVideoError({
+      message:
+        said ??
+        (unsupported
+          ? "Your Uno account can't watch recordings longer than 10 minutes yet."
+          : `Watching the recording failed (HTTP ${response.status}).`),
+      reason: unsupported ? "unsupported" : "gateway",
+    });
+  }
+  const parsed = parseDescribeResponse(await response.json().catch(() => null));
+  if (!parsed) {
+    throw new UnoDescribeVideoError({
+      message: "The recording came back without any speech or picture.",
+      reason: "gateway",
+    });
+  }
+  return parsed;
+}
+
 export const describeUnoVideo = (
   input: UnoDescribeVideoInput,
   options: { readonly fetchImpl?: DescribeFetch; readonly root?: string } = {},
@@ -114,16 +160,49 @@ export const describeUnoVideo = (
         reason: "missing-api-key",
       });
     }
-    if (input.durationSec > UNO_DESCRIBE_VIDEO_MAX_SECONDS) {
+    const gatewayError = (cause: unknown) =>
+      cause instanceof UnoDescribeVideoError
+        ? cause
+        : new UnoDescribeVideoError({
+            message: `Watching the recording failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+            reason: "gateway",
+          });
+    if (input.driveParts && input.driveParts.length > 0) {
+      if (input.durationSec > UNO_DESCRIBE_VIDEO_LONG_MAX_SECONDS + 5) {
+        return yield* new UnoDescribeVideoError({
+          message: "Recordings up to 60 minutes can be watched.",
+          reason: "too-large",
+        });
+      }
+      const parts = input.driveParts;
+      return yield* Effect.tryPromise({
+        try: () =>
+          postDescribeDrive({
+            baseUrl: UNO_GATEWAY_BASE_URL,
+            apiKey,
+            parts,
+            ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+          }),
+        catch: gatewayError,
+      });
+    }
+    if (!input.path) {
       return yield* new UnoDescribeVideoError({
-        message: "Recordings up to 10 minutes can be watched.",
+        message: "Name the recording: a file on this computer or its parts in Uno Drive.",
+        reason: "invalid-path",
+      });
+    }
+    const path = input.path;
+    if (input.durationSec > UNO_DESCRIBE_VIDEO_MAX_SECONDS + 5) {
+      return yield* new UnoDescribeVideoError({
+        message: "One file up to 10 minutes can be watched; longer ones go part by part.",
         reason: "too-large",
       });
     }
     const bytes = yield* Effect.tryPromise({
       try: async () => {
         const root = options.root ?? (await resolveFilesRoot(configuredFilesRoot()));
-        const file = await resolveRecordingPath(root, input.path);
+        const file = await resolveRecordingPath(root, path);
         const stat = await fsPromises.stat(file);
         if (stat.size > UNO_DESCRIBE_VIDEO_MAX_BYTES) {
           throw new UnoDescribeVideoError({
@@ -155,12 +234,6 @@ export const describeUnoVideo = (
           durationSec: input.durationSec,
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         }),
-      catch: (cause) =>
-        cause instanceof UnoDescribeVideoError
-          ? cause
-          : new UnoDescribeVideoError({
-              message: `Watching the recording failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-              reason: "gateway",
-            }),
+      catch: gatewayError,
     });
   });

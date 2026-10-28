@@ -95,7 +95,9 @@ function demoDeps(): PipelineDeps {
       return { url: `https://api.getuno.xyz/d/demo${Math.random().toString(36).slice(2, 10)}` };
     },
     describe: async (input) => {
-      demoLog.push(`describe ${input.path} ${input.durationSec}s`);
+      demoLog.push(
+        `describe ${input.path ?? `${input.driveParts?.length ?? 0} drive parts`} ${input.durationSec}s`,
+      );
       await wait(2600);
       if (loomScenario() === "watch-fails" && !failedOnce.has("watch")) {
         failedOnce.add("watch");
@@ -106,6 +108,10 @@ function demoDeps(): PipelineDeps {
     },
     removePaths: async (paths) => {
       demoLog.push(`remove ${paths.join(",")}`);
+      return {};
+    },
+    deleteCloud: async (input) => {
+      demoLog.push(`drive-delete ${input.key}`);
       return {};
     },
   };

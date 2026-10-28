@@ -24,7 +24,9 @@ function item(overrides: Partial<RecordingItem> = {}): RecordingItem {
     durationMs: 42_000,
     blob,
     previewUrl: "blob:preview",
-    agentCopy: new Blob([new Uint8Array(300_000)], { type: "video/mp4" }),
+    agentParts: [
+      { blob: new Blob([new Uint8Array(300_000)], { type: "video/mp4" }), durationMs: 42_000 },
+    ],
     agentCopyMimeType: "video/mp4",
     hasVoice: true,
     createdAt: "2026-10-28T14:05:07Z",
@@ -59,6 +61,7 @@ function deps(overrides: Partial<PipelineDeps> = {}) {
     shareCreate: vi.fn(async () => ({ url: "https://api.getuno.xyz/d/tok" })),
     describe: vi.fn(async () => ({ speech: "Make it green", visual: "A landing page" })),
     removePaths: vi.fn(async () => ({})),
+    deleteCloud: vi.fn(async () => ({})),
     ...overrides,
   };
   return { deps: base, writes };
@@ -193,11 +196,17 @@ describe("Watch — the agent copy through /video/describe", () => {
   });
 
   it("skips (not fails) when there is no copy, it is too big or too long", () => {
-    expect(watchSkipReason(item({ agentCopy: null }))).toContain("couldn't make");
+    expect(watchSkipReason(item({ agentParts: [] }))).toContain("couldn't make");
     expect(
-      watchSkipReason(item({ agentCopy: new Blob([new Uint8Array(26 * 1024 * 1024)]) })),
+      watchSkipReason(
+        item({
+          agentParts: [{ blob: new Blob([new Uint8Array(26 * 1024 * 1024)]), durationMs: 42_000 }],
+        }),
+      ),
     ).toContain("too big");
-    expect(watchSkipReason(item({ durationMs: 11 * 60 * 1000 }))).toContain("10 minutes");
+    expect(watchSkipReason(item({ durationMs: 61 * 60 * 1000 }))).toContain("60 minutes");
+    // 40 minutes is fine now: it goes part by part.
+    expect(watchSkipReason(item({ durationMs: 40 * 60 * 1000 }))).toBeNull();
     expect(watchSkipReason(item())).toBeNull();
   });
 
@@ -214,6 +223,96 @@ describe("Watch — the agent copy through /video/describe", () => {
     expect(watch.last()).toMatchObject({ status: "failed" });
     expect(watch.last().error).toContain("Top up AI hours");
     expect(d.removePaths).toHaveBeenCalled();
+  });
+});
+
+describe("Watch — a long recording, part by part through Uno Drive", () => {
+  const part = (seconds: number) => ({
+    blob: new Blob([new Uint8Array(200_000)], { type: "video/webm" }),
+    durationMs: seconds * 1000,
+  });
+  const long = () =>
+    item({
+      durationMs: 12 * 60 * 1000 + 30_000,
+      agentCopyMimeType: "video/webm",
+      agentParts: [part(300), part(300), part(150)],
+    });
+
+  it("stages the parts, moves them to Drive, asks with their keys, deletes them after", async () => {
+    const { deps: d, writes } = deps({
+      copyToCloud: vi.fn(async () => ({ files: 3, skipped: [] })),
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(long(), d, watch.patch);
+    expect(writes.map((w) => w.relativePath)).toEqual([
+      ".uno-recordings/rec1/agent/part-01.webm",
+      ".uno-recordings/rec1/agent/part-02.webm",
+      ".uno-recordings/rec1/agent/part-03.webm",
+    ]);
+    expect(d.copyToCloud).toHaveBeenCalledWith({
+      paths: [
+        "/home/me/.uno-recordings/rec1/agent/part-01.webm",
+        "/home/me/.uno-recordings/rec1/agent/part-02.webm",
+        "/home/me/.uno-recordings/rec1/agent/part-03.webm",
+      ],
+      bucketId: 77,
+      prefix: "Recordings/.agent-rec1/",
+      removeSource: true,
+    });
+    expect(d.describe).toHaveBeenCalledWith({
+      driveParts: [
+        { key: "Recordings/.agent-rec1/part-01.webm", durationSec: 300 },
+        { key: "Recordings/.agent-rec1/part-02.webm", durationSec: 300 },
+        { key: "Recordings/.agent-rec1/part-03.webm", durationSec: 150 },
+      ],
+      mimeType: "video/webm",
+      durationSec: 750,
+    });
+    expect(watch.last()).toMatchObject({ status: "done", speech: "Make it green" });
+    expect(d.deleteCloud).toHaveBeenCalledWith({ bucketId: 77, key: "Recordings/.agent-rec1/" });
+    // Moved with removeSource: nothing left to remove on the computer.
+    expect(d.removePaths).not.toHaveBeenCalled();
+  });
+
+  it("a full Drive fails before sending a byte, with a reason", async () => {
+    const { deps: d, writes } = deps({
+      driveState: async () => ({
+        available: true,
+        message: null,
+        bucketId: 77,
+        usedBytes: 10 * 1024 ** 3,
+        quotaBytes: 10 * 1024 ** 3,
+      }),
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(long(), d, watch.patch);
+    expect(writes).toHaveLength(0);
+    expect(watch.last().status).toBe("failed");
+    expect(watch.last().error).toContain("through Uno Drive");
+    expect(d.describe).not.toHaveBeenCalled();
+  });
+
+  it("a gateway error still deletes the parts from Drive", async () => {
+    const { deps: d } = deps({
+      copyToCloud: vi.fn(async () => ({ files: 3, skipped: [] })),
+      describe: async () => {
+        throw new Error("Part 2 of the recording: the gateway took too long.");
+      },
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(long(), d, watch.patch);
+    expect(watch.last()).toMatchObject({ status: "failed" });
+    expect(watch.last().error).toContain("Part 2");
+    expect(d.deleteCloud).toHaveBeenCalledWith({ bucketId: 77, key: "Recordings/.agent-rec1/" });
+  });
+
+  it("Drive taking fewer parts than sent is an error", async () => {
+    const { deps: d } = deps({ copyToCloud: vi.fn(async () => ({ files: 2, skipped: [] })) });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(long(), d, watch.patch);
+    expect(watch.last().status).toBe("failed");
+    expect(d.describe).not.toHaveBeenCalled();
+    expect(d.deleteCloud).toHaveBeenCalled();
   });
 });
 
