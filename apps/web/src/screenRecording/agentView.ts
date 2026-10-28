@@ -337,5 +337,9 @@ const REASON_WORDS: Record<KeyFrameReason, string> = {
 
 /** "[0:12] a click (yellow ring)" — one line per attached picture, in order. */
 export function keyFrameLegend(frames: ReadonlyArray<KeyFrameCandidate>): string {
-  return frames.map((frame, index) => `${index + 1}. [${clockSec(frame.t / 1000)}] ${REASON_WORDS[frame.reason]}`).join("\n");
+  return frames
+    .map(
+      (frame, index) => `${index + 1}. [${clockSec(frame.t / 1000)}] ${REASON_WORDS[frame.reason]}`,
+    )
+    .join("\n");
 }

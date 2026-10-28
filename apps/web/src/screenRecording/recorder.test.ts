@@ -377,7 +377,11 @@ describe("second by second (28.10): pointer, click rings, key frames", () => {
     const canvasTracks: FakeTrack[] = [];
     const env = makeEnv({
       screen: new FakeStream([
-        new FakeTrack("video", "screen", { width: 1440, height: 820, displaySurface: "browser" } as MediaTrackSettings),
+        new FakeTrack("video", "screen", {
+          width: 1440,
+          height: 820,
+          displaySurface: "browser",
+        } as MediaTrackSettings),
       ]),
       createCanvas: () => {
         const track = new FakeTrack("video", `canvas-${canvasTracks.length}`);

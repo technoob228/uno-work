@@ -24,7 +24,7 @@ import {
   type UnoDescribeVideoResult,
   UnoDescribeVideoError,
 } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
 import { configuredFilesRoot, resolveFilesRoot, resolveInsideRoot } from "./files/filesPaths.ts";
 import { readGatewayErrorMessage } from "./manager/telegramTranscription.ts";
@@ -214,7 +214,7 @@ export const describeUnoVideo = (
       });
     }
     const gatewayError = (cause: unknown) =>
-      cause instanceof UnoDescribeVideoError
+      Schema.is(UnoDescribeVideoError)(cause)
         ? cause
         : new UnoDescribeVideoError({
             message: `Watching the recording failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -271,7 +271,7 @@ export const describeUnoVideo = (
         };
       },
       catch: (cause) =>
-        cause instanceof UnoDescribeVideoError
+        Schema.is(UnoDescribeVideoError)(cause)
           ? cause
           : new UnoDescribeVideoError({
               message: "The recording isn't on this computer.",

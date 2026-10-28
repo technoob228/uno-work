@@ -31,13 +31,20 @@ for (const item of flows) {
   if (process.env.DEMO_URL) {
     // A real origin (not localhost): Chrome's fake media UI doesn't answer for
     // camera/microphone after a screen pick there — grant them like a person would.
-    await context.grantPermissions(["camera", "microphone"], { origin: new URL(server.url).origin });
+    await context.grantPermissions(["camera", "microphone"], {
+      origin: new URL(server.url).origin,
+    });
   }
   if (process.env.DEMO_URL && process.env.DEMO_PASSWORD) {
     // The site is behind Uno Sites' password page: unlock once per context.
     await page.goto(server.url, { waitUntil: "domcontentloaded", timeout: 90_000 });
     const input = page.locator('input[name="password"]');
-    if (await input.waitFor({ timeout: 15_000 }).then(() => true, () => false)) {
+    if (
+      await input.waitFor({ timeout: 15_000 }).then(
+        () => true,
+        () => false,
+      )
+    ) {
       await input.fill(process.env.DEMO_PASSWORD);
       await input.press("Enter");
       await input.waitFor({ state: "detached", timeout: 60_000 });

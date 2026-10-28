@@ -51,7 +51,10 @@ export async function grabFramesFromBlob(
       await seek(video, 0);
     }
     const width = Math.min(maxWidth, video.videoWidth || maxWidth);
-    const height = Math.max(2, Math.round(((video.videoHeight || 720) * width) / (video.videoWidth || 1280)));
+    const height = Math.max(
+      2,
+      Math.round(((video.videoHeight || 720) * width) / (video.videoWidth || 1280)),
+    );
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;

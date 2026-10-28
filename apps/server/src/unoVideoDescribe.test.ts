@@ -176,12 +176,24 @@ describe("resolveRecordingPath", () => {
 
 describe("timeline mode (28.10)", () => {
   it("parses the timeline: junk out, in order", () => {
-    expect(parseTimeline([{ t: 9, say: "b" }, { t: 2, see: " cursor on Save " }, { t: -1, say: "x" }, { t: 3 }, "x"])).toEqual([
+    expect(
+      parseTimeline([
+        { t: 9, say: "b" },
+        { t: 2, see: " cursor on Save " },
+        { t: -1, say: "x" },
+        { t: 3 },
+        "x",
+      ]),
+    ).toEqual([
       { t: 2, say: "", see: "cursor on Save", do: "" },
       { t: 9, say: "b", see: "", do: "" },
     ]);
     expect(
-      parseDescribeResponse({ speech: "", visual: "", timeline: [{ t: 1, say: "", see: "", do: "click" }] }),
+      parseDescribeResponse({
+        speech: "",
+        visual: "",
+        timeline: [{ t: 1, say: "", see: "", do: "click" }],
+      }),
     ).toEqual({ speech: "", visual: "", timeline: [{ t: 1, say: "", see: "", do: "click" }] });
   });
 
@@ -202,7 +214,11 @@ describe("timeline mode (28.10)", () => {
       fetchImpl: async (_url, init) => {
         form = init!.body as FormData;
         return new Response(
-          JSON.stringify({ speech: "вот тут", visual: "x", timeline: [{ t: 12.4, say: "вот тут", see: "cursor on Pricing", do: "" }] }),
+          JSON.stringify({
+            speech: "вот тут",
+            visual: "x",
+            timeline: [{ t: 12.4, say: "вот тут", see: "cursor on Pricing", do: "" }],
+          }),
         );
       },
     });
@@ -211,7 +227,9 @@ describe("timeline mode (28.10)", () => {
       { t: 12.4, kind: "click", x: 0.833, y: 0.081 },
       { t: 13, kind: "click" },
     ]);
-    expect(result.timeline).toEqual([{ t: 12.4, say: "вот тут", see: "cursor on Pricing", do: "" }]);
+    expect(result.timeline).toEqual([
+      { t: 12.4, say: "вот тут", see: "cursor on Pricing", do: "" },
+    ]);
   });
 
   it("the long path carries mode and events in the JSON", async () => {

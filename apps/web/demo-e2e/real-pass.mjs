@@ -186,11 +186,13 @@ if (step === "home") {
   await page.waitForTimeout(800);
   await shot(page, "home-03-card");
   console.log(JSON.stringify({ key: (await items()).length, ...item }, null, 2));
-  const box = await page.locator('[contenteditable="true"], textarea').first().inputValue().catch(async () =>
-    page.locator('[contenteditable="true"], textarea').first().innerText());
+  const box = await page
+    .locator('[contenteditable="true"], textarea')
+    .first()
+    .inputValue()
+    .catch(async () => page.locator('[contenteditable="true"], textarea').first().innerText());
   console.log("home box:", box.slice(0, 300));
 }
-
 
 if (step === "pointing") {
   // 28.10 «вот тут криво»: Work's own tab is shared; a chip on Home is made
@@ -270,14 +272,38 @@ if (step === "pointing") {
       name: it.name,
       width: it.width,
       height: it.height,
-      events: { total: it.events.length, clicks: it.events.filter((e) => e.kind === "click").length, moves: it.events.filter((e) => e.kind === "move").length, scenes: it.events.filter((e) => e.kind === "scene").length },
+      events: {
+        total: it.events.length,
+        clicks: it.events.filter((e) => e.kind === "click").length,
+        moves: it.events.filter((e) => e.kind === "move").length,
+        scenes: it.events.filter((e) => e.kind === "scene").length,
+      },
       live: it.liveFrames.map((f) => `${f.reason}@${f.t}`),
       timeline: it.watch.timeline,
-      frames: it.watch.frames.map((f) => ({ t: f.t, reason: f.reason, bytes: f.blob.size, w: f.width })),
-      shim: window.__loomShimAnswer ? { cost: window.__loomShimAnswer.cost, model: window.__loomShimAnswer.model } : null,
+      frames: it.watch.frames.map((f) => ({
+        t: f.t,
+        reason: f.reason,
+        bytes: f.blob.size,
+        w: f.width,
+      })),
+      shim: window.__loomShimAnswer
+        ? { cost: window.__loomShimAnswer.cost, model: window.__loomShimAnswer.model }
+        : null,
     };
   });
-  console.log(JSON.stringify({ save: item.save, watchStatus: item.watch.status, speech: item.watch.speech, visual: item.watch.visual, ...detail }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        save: item.save,
+        watchStatus: item.watch.status,
+        speech: item.watch.speech,
+        visual: item.watch.visual,
+        ...detail,
+      },
+      null,
+      2,
+    ),
+  );
   // The key frames as files, to look at.
   const frameFiles = await page.evaluate(async () => {
     const { useScreenRecordingStore } = await import("/src/screenRecording/recordingStore.ts");
@@ -291,12 +317,16 @@ if (step === "pointing") {
     }
     return out;
   });
-  for (const file of frameFiles) writeFileSync(join(out, `pointing-frame-${file.name}`), Buffer.from(file.data, "base64"));
+  for (const file of frameFiles)
+    writeFileSync(join(out, `pointing-frame-${file.name}`), Buffer.from(file.data, "base64"));
   await page.waitForTimeout(800);
   await shot(page, "pointing-03-home-card");
   if (process.env.SEND) {
     const homeBox = page.locator('[contenteditable="true"], textarea').first();
-    console.log("home box:", (await homeBox.inputValue().catch(() => homeBox.innerText())).slice(0, 200));
+    console.log(
+      "home box:",
+      (await homeBox.inputValue().catch(() => homeBox.innerText())).slice(0, 200),
+    );
     await homeBox.click();
     // NOTE=<text>: typed after the transcript (e.g. "only name the place,
     // change nothing" — so the pass checks what the agent understood).
@@ -311,15 +341,23 @@ if (step === "pointing") {
     let answer = "";
     for (;;) {
       answer = await page.evaluate(() => {
-        const rows = [...document.querySelectorAll('[data-message-role="assistant"], [data-role="assistant"]')];
+        const rows = [
+          ...document.querySelectorAll('[data-message-role="assistant"], [data-role="assistant"]'),
+        ];
         return rows.map((row) => row.innerText).join("\n---\n");
       });
-      const busy = await page.locator('[data-testid="stop-button"], button[aria-label="Stop generation"]').count();
+      const busy = await page
+        .locator('[data-testid="stop-button"], button[aria-label="Stop generation"]')
+        .count();
       if (answer.length > 40 && busy === 0) break;
       if (Date.now() - startedAnswer > Number(process.env.ANSWER_TIMEOUT ?? 240_000)) break;
       await page.waitForTimeout(2000);
     }
-    await page.getByTestId("recording-message-what").first().click().catch(() => undefined);
+    await page
+      .getByTestId("recording-message-what")
+      .first()
+      .click()
+      .catch(() => undefined);
     await page.waitForTimeout(500);
     await shot(page, "pointing-05-answer");
     console.log("AGENT ANSWER:\n" + answer.slice(0, 3000));

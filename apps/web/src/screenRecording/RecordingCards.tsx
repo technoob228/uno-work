@@ -284,7 +284,10 @@ export function RecordingMessageCard(props: {
             {copied ? "Copied" : "Copy link"}
           </button>
         ) : null}
-        {recording.speech || recording.visual || recording.timeline || (props.frames?.length ?? 0) > 0 ? (
+        {recording.speech ||
+        recording.visual ||
+        recording.timeline ||
+        (props.frames?.length ?? 0) > 0 ? (
           <button
             type="button"
             className="inline-flex items-center gap-1 hover:text-foreground"

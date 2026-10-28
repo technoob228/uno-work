@@ -358,9 +358,9 @@ class AgentViewTracker {
 
   private lookForNewScreen(now: number) {
     try {
-      const context = this.lumaCanvas!.getContext("2d", { willReadFrequently: true } as never) as
-        | CanvasRenderingContext2D
-        | null;
+      const context = this.lumaCanvas!.getContext("2d", {
+        willReadFrequently: true,
+      } as never) as CanvasRenderingContext2D | null;
       if (!context) return;
       context.drawImage(this.screenVideo, 0, 0, 32, 18);
       const data = context.getImageData(0, 0, 32, 18).data;
@@ -395,7 +395,14 @@ class AgentViewTracker {
     if (!encode || !this.drawAgentFrame()) return;
     const job = encode(this.snapCanvas)
       .then((blob) => {
-        if (blob && blob.size > 0) this.frames.push({ t, reason, blob, width: this.snapSize.width, height: this.snapSize.height });
+        if (blob && blob.size > 0)
+          this.frames.push({
+            t,
+            reason,
+            blob,
+            width: this.snapSize.width,
+            height: this.snapSize.height,
+          });
       })
       .catch(() => undefined)
       .finally(() => this.encoding.delete(job));
@@ -948,7 +955,12 @@ function documentPointer(onSample: (sample: PointerSample) => void): () => void 
 }
 
 function browserViewport(): ViewportInfo {
-  const screenInfo = window.screen as Screen & { left?: number; top?: number; availLeft?: number; availTop?: number };
+  const screenInfo = window.screen as Screen & {
+    left?: number;
+    top?: number;
+    availLeft?: number;
+    availTop?: number;
+  };
   return {
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,

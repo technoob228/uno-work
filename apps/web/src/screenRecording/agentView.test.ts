@@ -42,19 +42,26 @@ const at = (clientX: number, clientY: number, screenX = clientX, screenY = clien
 
 describe("where a pointer event is on the video", () => {
   it("the whole screen: by screen coordinates", () => {
-    expect(mapPointerToFrame(at(720, 370), "monitor", view, { width: 2880, height: 1800 })).toEqual({
-      x: 0.5,
-      y: 0.5,
-    });
+    expect(mapPointerToFrame(at(720, 370), "monitor", view, { width: 2880, height: 1800 })).toEqual(
+      {
+        x: 0.5,
+        y: 0.5,
+      },
+    );
   });
   it("a second screen to the right: its own origin", () => {
     const right = { ...view, screenLeft: 1440 };
     expect(
-      mapPointerToFrame(at(100, 100, 1440 + 360, 450), "monitor", right, { width: 1440, height: 900 }),
+      mapPointerToFrame(at(100, 100, 1440 + 360, 450), "monitor", right, {
+        width: 1440,
+        height: 900,
+      }),
     ).toEqual({ x: 0.25, y: 0.5 });
   });
   it("a screen of another shape is not guessed", () => {
-    expect(mapPointerToFrame(at(10, 10), "monitor", view, { width: 1920, height: 1080 })).toBeNull();
+    expect(
+      mapPointerToFrame(at(10, 10), "monitor", view, { width: 1920, height: 1080 }),
+    ).toBeNull();
   });
   it("Work's own tab: by the page", () => {
     expect(mapPointerToFrame(at(1440, 0), "browser", view, { width: 1440, height: 820 })).toEqual({
@@ -69,7 +76,9 @@ describe("where a pointer event is on the video", () => {
     });
   });
   it("outside the frame: nothing", () => {
-    expect(mapPointerToFrame(at(-5, 10, -5, 10), "monitor", view, { width: 1440, height: 900 })).toBeNull();
+    expect(
+      mapPointerToFrame(at(-5, 10, -5, 10), "monitor", view, { width: 1440, height: 900 }),
+    ).toBeNull();
   });
 });
 
@@ -84,7 +93,13 @@ describe("the event track", () => {
     expect(recordingEventsName("Screen recording 2026-10-28 at 14.05.07.webm")).toBe(
       "Screen recording 2026-10-28 at 14.05.07.events.json",
     );
-    const file = recordingEventsFile({ videoName: "a.webm", width: 1920, height: 1080, durationMs: 30_000.4, events });
+    const file = recordingEventsFile({
+      videoName: "a.webm",
+      width: 1920,
+      height: 1080,
+      durationMs: 30_000.4,
+      events,
+    });
     expect(file).toMatchObject({ version: 1, video: "a.webm", durationMs: 30_000 });
     expect(file.events[2]).toEqual({ t: 13_000, kind: "click" });
   });
@@ -119,7 +134,14 @@ describe("timeline", () => {
     expect(normalizeTimeline("nope")).toEqual([]);
   });
   it("pointing words in Russian and English", () => {
-    for (const said of ["вот тут криво", "Эта кнопка", "здесь", "click this", "here it breaks", "put it there"]) {
+    for (const said of [
+      "вот тут криво",
+      "Эта кнопка",
+      "здесь",
+      "click this",
+      "here it breaks",
+      "put it there",
+    ]) {
       expect(isPointingSpeech(said), said).toBe(true);
     }
     for (const said of ["сделай зелёным", "вотсап", "thistle", "where", "make it green"]) {
@@ -216,7 +238,13 @@ describe("the block the agent reads", () => {
     const parsed = extractRecordingBlock(
       appendRecordingToPrompt("", { ...recording, timeline: [], frames: [] }),
     );
-    expect(parsed.recording).toMatchObject({ speech: "вот тут криво", visual: "A pricing page", timeline: "" });
-    expect(buildRecordingBlock({ ...recording, timeline: [], frames: [] })).not.toContain("Timeline");
+    expect(parsed.recording).toMatchObject({
+      speech: "вот тут криво",
+      visual: "A pricing page",
+      timeline: "",
+    });
+    expect(buildRecordingBlock({ ...recording, timeline: [], frames: [] })).not.toContain(
+      "Timeline",
+    );
   });
 });
