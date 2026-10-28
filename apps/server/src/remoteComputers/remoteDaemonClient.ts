@@ -75,6 +75,12 @@ export interface RemoteDaemonClientDeps {
   readonly controlPlane: ((path: string, init?: RequestInit) => Promise<unknown>) | null;
   /** Which key that is: a machine token gets "Settings → Computer access" on a 403. */
   readonly keyKind: "account" | "machine" | "none";
+  /**
+   * How this computer names itself in the other computer's list of signed-in
+   * clients ("Uno on stage-work"); the console takes it with `work/session`
+   * (older consoles ignore it and say "console").
+   */
+  readonly sessionLabel?: () => Promise<string>;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
@@ -183,13 +189,19 @@ export function makeRemoteDaemonClient(deps: RemoteDaemonClientDeps) {
         "This computer isn't signed in to an Uno account, so it can't reach your other computers.",
       );
     }
+    const label = deps.sessionLabel
+      ? await deps.sessionLabel().then(
+          (name) => `Uno on ${name}`.slice(0, 60),
+          () => null,
+        )
+      : null;
     let raw: unknown;
     try {
       raw = await retryWhileWorkMachineStarts(
         () =>
           controlPlane(`/api/v1/boxes/${boxId}/work/session`, {
             method: "POST",
-            body: "{}",
+            body: JSON.stringify(label === null ? {} : { label }),
           }),
         deps.sleep ? { sleep: deps.sleep, now } : { now },
       );

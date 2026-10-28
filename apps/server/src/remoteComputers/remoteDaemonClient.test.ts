@@ -67,6 +67,26 @@ describe("remote daemon client", () => {
     expect(consoleCalls).toEqual(["/api/v1/boxes/7/work/session"]);
   });
 
+  it("names itself on the other computer: “Uno on <this computer>”", async () => {
+    const bodies: unknown[] = [];
+    const daemon = fakeDaemon((call) =>
+      call.url.endsWith("/api/auth/bootstrap/bearer")
+        ? { status: 200, body: { sessionToken: "s1" } }
+        : { status: 200, body: {} },
+    );
+    const client = makeRemoteDaemonClient({
+      controlPlane: async (_path, init) => {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")));
+        return pairingOk;
+      },
+      keyKind: "account",
+      sessionLabel: async () => "stage-work",
+      fetch: daemon.fetchImpl,
+    });
+    await client.request({ boxId: 7, computerName: "b", method: "GET", path: "/x" });
+    expect(bodies).toEqual([{ label: "Uno on stage-work" }]);
+  });
+
   it("a forgotten session (401) is re-paired once", async () => {
     let sessions = 0;
     const daemon = fakeDaemon((call) => {

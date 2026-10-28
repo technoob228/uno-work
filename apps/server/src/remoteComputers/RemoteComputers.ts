@@ -177,6 +177,7 @@ export const makeRemoteComputersService = (options?: {
             ? null
             : (path, init) => fetchControlPlane(credential.key, path, init),
         keyKind: credential.kind,
+        sessionLabel: () => Effect.runPromise(ownName),
         ...(options?.fetch ? { fetch: options.fetch } : {}),
       });
       current = { key: credential.key, client };
