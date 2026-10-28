@@ -159,15 +159,7 @@ export function useCreateUnoBoxFlow(
         setStage(null);
       }
     },
-    [
-      createBox,
-      environmentId,
-      handleStatus,
-      isPending,
-      onCreated,
-      refreshBoxList,
-      stillStarting,
-    ],
+    [createBox, environmentId, handleStatus, isPending, onCreated, refreshBoxList, stillStarting],
   );
 
   const retryNow = useCallback(() => {

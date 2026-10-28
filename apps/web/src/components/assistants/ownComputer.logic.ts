@@ -28,7 +28,11 @@ import { planHasUnoAi } from "../../account/aiHours";
 import { formatRam, planTitle } from "../../account/billingModel";
 import { CHOOSE_PLAN_URL } from "../../account/planStatus";
 import { describeMachineError } from "../../machineErrors";
-import { UNO_BOX_NAME_MAX_LENGTH, UNO_BOX_SIZE_PRESETS, normalizeUnoBoxName } from "../../unoBoxCreation";
+import {
+  UNO_BOX_NAME_MAX_LENGTH,
+  UNO_BOX_SIZE_PRESETS,
+  normalizeUnoBoxName,
+} from "../../unoBoxCreation";
 
 /** Uno Work's own floor (the Work image needs 4 GB): the smallest that runs it, nothing to pick. */
 export const OWN_COMPUTER_SHAPE = {
@@ -237,7 +241,11 @@ export function decideOwnComputer(input: {
   }
   const name = planTitle(sub.limits, sub.plan);
   if (sub.planEndedAt) {
-    return card("ended", "Needs a plan", `Your ${name} plan has ended. Choose a plan to add computers.`);
+    return card(
+      "ended",
+      "Needs a plan",
+      `Your ${name} plan has ended. Choose a plan to add computers.`,
+    );
   }
   if (sub.status === "suspended" || sub.status === "past_due") {
     return card(
@@ -318,7 +326,12 @@ export function describeOwnComputerFailure(
   const raw = textOf(error);
   const has = (code: string) => raw.includes(code);
   const sub = context.subscription ?? null;
-  const card = (reason: OwnComputerUpgradeReason, title: string, message: string, tryAnyway = false) =>
+  const card = (
+    reason: OwnComputerUpgradeReason,
+    title: string,
+    message: string,
+    tryAnyway = false,
+  ) =>
     upgradeCard({
       reason,
       title,
@@ -328,14 +341,34 @@ export function describeOwnComputerFailure(
       canTryAnyway: tryAnyway,
       checkoutUrl: checkoutUrlIn(raw),
     });
-  if (has("NO_SUBSCRIPTION") || has("SUBSCRIPTION_REQUIRED") || /"reason"\s*:\s*"no_plan"/.test(raw)) {
-    return card("no_plan", "Needs a plan", "A computer of its own comes with a plan. Nothing was created.");
+  if (
+    has("NO_SUBSCRIPTION") ||
+    has("SUBSCRIPTION_REQUIRED") ||
+    /"reason"\s*:\s*"no_plan"/.test(raw)
+  ) {
+    return card(
+      "no_plan",
+      "Needs a plan",
+      "A computer of its own comes with a plan. Nothing was created.",
+    );
   }
   if (has("WORK_TRIAL_ENDED") || has("PLAN_ENDED") || /"reason"\s*:\s*"trial_ended"/.test(raw)) {
-    return card("ended", "Needs a plan", "Your free time has ended. Choose a plan to add computers.");
+    return card(
+      "ended",
+      "Needs a plan",
+      "Your free time has ended. Choose a plan to add computers.",
+    );
   }
-  if (has("PAYMENT_OVERDUE") || has("SUBSCRIPTION_INACTIVE") || /"reason"\s*:\s*"plan_paused"/.test(raw)) {
-    return card("paused", "Needs a payment", "Your plan is waiting for a payment. Nothing was created.");
+  if (
+    has("PAYMENT_OVERDUE") ||
+    has("SUBSCRIPTION_INACTIVE") ||
+    /"reason"\s*:\s*"plan_paused"/.test(raw)
+  ) {
+    return card(
+      "paused",
+      "Needs a payment",
+      "Your plan is waiting for a payment. Nothing was created.",
+    );
   }
   if (has("PLAN_WORK_ONLY") || /"reason"\s*:\s*"trial_limit"/.test(raw)) {
     return card(
@@ -360,13 +393,25 @@ export function describeOwnComputerFailure(
     );
   }
   if (has("POOL_EXHAUSTED")) {
-    return card("busy", "Needs an upgrade", "This month's computer hours on your plan are used up.");
+    return card(
+      "busy",
+      "Needs an upgrade",
+      "This month's computer hours on your plan are used up.",
+    );
   }
   if (has("DISK_QUOTA_EXCEEDED")) {
     return card("disk", "Needs an upgrade", "Your plan's disk is full. Nothing was created.");
   }
-  if (has("INSUFFICIENT_BALANCE") || has("NO_BALANCE") || /"reason"\s*:\s*"balance_short"/.test(raw)) {
-    return card("balance", "Needs money on the balance", "Your Uno balance is short. Nothing was created.");
+  if (
+    has("INSUFFICIENT_BALANCE") ||
+    has("NO_BALANCE") ||
+    /"reason"\s*:\s*"balance_short"/.test(raw)
+  ) {
+    return card(
+      "balance",
+      "Needs money on the balance",
+      "Your Uno balance is short. Nothing was created.",
+    );
   }
   const details = raw.length > 0 ? raw.slice(0, 600) : null;
   if (has("BUDGET_GUARD")) {
@@ -381,11 +426,16 @@ export function describeOwnComputerFailure(
     return {
       kind: "error",
       title: "Too many assistants",
-      message: "This account already has the most assistants with their own computers. Remove one first.",
+      message:
+        "This account already has the most assistants with their own computers. Remove one first.",
       details,
     };
   }
-  if (has("INVALID_COMPUTER_ROLE") || has("ASSISTANT_NEEDS_WORK_IMAGE") || has("INVALID_ASSISTANT")) {
+  if (
+    has("INVALID_COMPUTER_ROLE") ||
+    has("ASSISTANT_NEEDS_WORK_IMAGE") ||
+    has("INVALID_ASSISTANT")
+  ) {
     return {
       kind: "error",
       title: "Not available on this account yet",

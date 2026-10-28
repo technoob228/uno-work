@@ -30,8 +30,10 @@ export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
 export const ENV_WORK = EnvironmentId.make("env-demo-uno-work");
 export const ENV_PRODUCT = EnvironmentId.make("env-demo-uno-product");
 export const ENV_MAC = EnvironmentId.make("env-demo-macbook");
+/** Assistants D: the computer the wizard makes for an assistant (demo/assist/ownComputer.ts). */
+export const ENV_OWN = EnvironmentId.make("env-demo-assistant-own");
 
-export type MachineKey = "work" | "product" | "mac";
+export type MachineKey = "work" | "product" | "mac" | "own";
 
 export interface DemoMachine {
   readonly key: MachineKey;
@@ -76,6 +78,16 @@ const W0138_MACHINES: Record<MachineKey, DemoMachine> = {
     machineKind: "computer",
     boxId: null,
   },
+  own: {
+    key: "own",
+    environmentId: ENV_OWN,
+    label: "assistant-computer",
+    host: "own.demo.uno4.me",
+    home: "/home/uno",
+    os: "linux",
+    machineKind: "uno_box",
+    boxId: 2701,
+  },
 };
 
 /**
@@ -93,6 +105,8 @@ const ASSIST_MACHINES: Record<MachineKey, DemoMachine> = {
     boxId: 2650,
   },
   mac: { ...W0138_MACHINES.mac, host: "macbook.demo.uno4.me" },
+  // Exists (and answers) only once "Create its computer" made it.
+  own: W0138_MACHINES.own,
 };
 
 export const MACHINES: Record<MachineKey, DemoMachine> = DEMO_ASSIST
@@ -106,6 +120,7 @@ export const MACHINE_LIST: ReadonlyArray<DemoMachine> = [
   MACHINES.mac,
   MACHINES.work,
   MACHINES.product,
+  ...(DEMO_ASSIST ? [MACHINES.own] : []),
 ];
 
 export function machineByEnv(environmentId: string): DemoMachine | null {
@@ -307,6 +322,7 @@ export const PROJECTS: Record<MachineKey, ProjectSpec[]> = {
       repo: REPO.workspace,
     },
   ],
+  own: [{ id: "p-own-home", title: "Home folder", root: "/home/uno" }],
 };
 
 /** Project name by its id, on any computer. */

@@ -22,6 +22,7 @@ import { HttpResponse, http, type HttpHandler } from "msw";
 
 import { MACHINES, PROJECTS, type DemoMachine, type MachineKey } from "../heavyFixtures";
 import { type DemoPersona, assistantsOn } from "./fixtures";
+import { ownComputerHandlers, ownComputerRunning, withOwnComputer } from "./ownComputer";
 import { startedByOn } from "./startedBy";
 import {
   type AssistWorld,
@@ -342,6 +343,7 @@ export function drawPortrait(persona: string, seed: number): string {
 export function machineAwake(key: MachineKey): boolean {
   if (key === "work") return true;
   if (key === "mac") return macOnline(world);
+  if (key === "own") return ownComputerRunning();
   return false;
 }
 
@@ -393,10 +395,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
   const machineOf = (request: Request) => hooks.machineForHost(new URL(request.url).host);
   const projectParam = (request: Request) =>
     new URL(request.url).searchParams.get("projectId") ?? ASSISTANT_PROJECT_ID;
-  const asleepHosts = (Object.keys(MACHINES) as MachineKey[])
-    .filter((key) => !machineAwake(key))
-    .map((key) => MACHINES[key].host)
-    .filter((host) => host !== "");
+  // Read on every request: the assistant's own computer wakes up when the wizard makes it.
+  const asleepHost = (host: string) =>
+    host !== "" &&
+    (Object.keys(MACHINES) as MachineKey[]).some(
+      (key) => MACHINES[key].host === host && !machineAwake(key),
+    );
   const json = HttpResponse.json;
   const summary = (machine: DemoMachine, projectId: string) => {
     const record = recordOf(machine.key, projectId);
@@ -407,7 +411,7 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
   return [
     // An asleep computer: no answer at all (the page shows it offline).
     http.all(
-      ({ request }) => asleepHosts.includes(new URL(request.url).host),
+      ({ request }) => asleepHost(new URL(request.url).host),
       () => HttpResponse.error(),
     ),
     http.get("*/api/manager/assistants", ({ request }) => {
@@ -730,9 +734,11 @@ export function accountHandlers(): HttpHandler[] {
     const list = [wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier)];
     if (live())
       list.push(wire(MACHINES.product.boxId!, MACHINES.product.label, "sleeping", "free"));
-    return list;
+    return withOwnComputer(list);
   };
   return [
+    // The plan, the catalog and the assistant's own computer (wizard, edit 1).
+    ...ownComputerHandlers(),
     http.get("*/_account/auth/me", () =>
       HttpResponse.json({
         id: 1001,
@@ -750,18 +756,6 @@ export function accountHandlers(): HttpHandler[] {
       const found = boxes().find((item) => String(item.id) === String(params.id));
       return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });
     }),
-    http.get("*/_account/api/v1/box-subscription", () =>
-      HttpResponse.json(
-        world.tier === "plus"
-          ? {
-              plan: "plus",
-              status: "active",
-              price_usd: 20,
-              renews_at: new Date(Date.now() + 86_400_000 * 12).toISOString(),
-            }
-          : { plan: "free", status: "active", price_usd: 0 },
-      ),
-    ),
   ];
 }
 

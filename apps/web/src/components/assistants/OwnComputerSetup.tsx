@@ -97,7 +97,10 @@ async function readAccount(): Promise<AccountRead> {
       decision: { kind: "signin", message: "Sign in with Uno to give it a computer of its own." },
     };
   }
-  if (subscription.status === "rejected" && subscription.reason instanceof AccountUnavailableError) {
+  if (
+    subscription.status === "rejected" &&
+    subscription.reason instanceof AccountUnavailableError
+  ) {
     return {
       subscription: undefined,
       catalog: null,
@@ -191,9 +194,7 @@ export function OwnComputerSetup(props: {
     retry: false,
   });
   const [anyway, setAnyway] = useState(false);
-  const [ready, setReady] = useState<{ environmentId: EnvironmentId; label: string } | null>(
-    null,
-  );
+  const [ready, setReady] = useState<{ environmentId: EnvironmentId; label: string } | null>(null);
   const handleCreated = useCallback(
     ({ record }: CreateUnoBoxResult) => {
       const target = { environmentId: record.environmentId, label: record.label };
