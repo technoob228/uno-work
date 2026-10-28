@@ -153,6 +153,8 @@ import {
   agentThreadsGetRouteLayer,
   agentThreadsListRouteLayer,
   agentThreadsReleaseRouteLayer,
+  agentThreadsCallPersonRouteLayer,
+  agentThreadsPersonNotNeededRouteLayer,
   agentThreadsSendMessageRouteLayer,
 } from "./agentThreads/http.ts";
 import {
@@ -644,6 +646,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   agentThreadsGetRouteLayer,
   agentThreadsListRouteLayer,
   agentThreadsReleaseRouteLayer,
+  agentThreadsCallPersonRouteLayer,
+  agentThreadsPersonNotNeededRouteLayer,
   agentThreadsSendMessageRouteLayer,
   attachmentsRouteLayer,
   officeEngineRouteLayer,

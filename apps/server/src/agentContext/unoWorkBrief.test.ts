@@ -37,8 +37,10 @@ describe("Uno Work environment brief", () => {
     // (Misha 19.10: a Codex chat asked to deploy on uno.place went to click
     // the site and hit the sign-in page instead of reading llms.txt); ~15
     // for `recording_frames` (Loom Work 28.10); +60 for the agent's own
-    // mailbox (spec 20.10: one line, own mail vs Gmail); ~6 for `github_pr_comment` (Automations).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(1985);
+    // mailbox (spec 20.10: one line, own mail vs Gmail); ~6 for `github_pr_comment` (Automations);
+    // ~15 for `chat_call_person` / `chat_person_not_needed` (Misha 28.10: chats
+    // agents start can be hidden, so an agent has to call the person into one).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2000);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

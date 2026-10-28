@@ -217,7 +217,7 @@ export function buildUnoWorkGuide(
     case "chats":
       return [
         "## Chats",
-        "`chats_list` (scope children, project or all), `chat_create` (a new chat with a first message; `cwd` puts it in any folder, e.g. a project), `chat_message`, `chat_status` (with `waitMs` to wait for an answer). A chat you create starts at once; the person sees you created it and can write in it too. You may write into any free chat, even one the person wrote in — except a chat the person closed to agents (409 `agents_closed`: don't retry, tell the person).",
+        "`chats_list` (scope children, project or all), `chat_create` (a new chat with a first message; `cwd` puts it in any folder, e.g. a project), `chat_message`, `chat_status` (with `waitMs` to wait for an answer). A chat you create starts at once; the person sees you created it and can write in it too. You may write into any free chat, even one the person wrote in — except a chat the person closed to agents (409 `agents_closed`: don't retry, tell the person). The person can hide chats started by agents or by Uno; `chat_call_person` (this chat or another by `threadId`, with a short `reason`) shows one as theirs until they open it, and `chat_person_not_needed` takes it back. A question or an approval calls them anyway.",
         HTTP_FALLBACK_NOTE,
         buildAgentThreadsInstructions(),
       ].join("\n\n");

@@ -9,7 +9,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - This computer: `computer_status`, `computer_cleanup`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
 - Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`; frames of a screen recording: `recording_frames`; a project's keys: `project_keys`
-- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`; a PR an automation reviews: `github_pr_comment`
+- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`, `chat_call_person`, `chat_person_not_needed`; a PR an automation reviews: `github_pr_comment`
 - The person: `notify` (Inbox), `open_in_panel` (app, URL or file, right panel), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_forms_get`, `site_forms_set` (where form answers go)
 - Spark: `spark_deploy`, `spark_logs`, `spark_list`, `spark_delete`: one JS/Python file → `https://<name>.spark.uno4.me`, free, no server: `uno_guide("spark")`

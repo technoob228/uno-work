@@ -29,6 +29,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThread,
   type OrchestrationThreadShell,
+  PERSON_CALL_REASON_MAX_CHARS,
   ProjectId,
   type ServerProvider,
   ThreadId,
@@ -959,6 +960,18 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           },
           caller.id,
         );
+        // Handing a chat over is calling the person into it: it shows as
+        // theirs in the sidebar until they open it.
+        yield* dispatch(
+          {
+            type: "thread.person.call",
+            commandId: commandId("release-call"),
+            threadId: child.id,
+            reason: null,
+            createdAt: new Date(nowMs()).toISOString(),
+          },
+          caller.id,
+        );
         yield* Effect.logInfo("agent threads: control released", {
           callerThreadId: caller.id,
           threadId: child.id,
@@ -967,5 +980,87 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       }),
     );
 
-  return { createThread, listThreads, getThread, sendMessage, releaseThread };
+  /** The caller itself ("self") or any thread it may reach. */
+  const loadSelfOrReachable = (
+    caller: OrchestrationThreadShell,
+    rawThreadId: string | undefined,
+  ) => {
+    const trimmed = rawThreadId?.trim() ?? "";
+    return trimmed === "self" || trimmed === caller.id
+      ? Effect.succeed(caller)
+      : loadReachable(caller, trimmed);
+  };
+
+  /**
+   * An agent says the person should look at a chat (its own or another one):
+   * the chat counts as the person's in the sidebar until they open it, write
+   * there or mark it done. A chat the person started is theirs anyway.
+   */
+  const callPerson = (
+    authorization: BridgeAuthorization | null,
+    input: { readonly threadId: string | undefined; readonly body: unknown },
+  ) =>
+    run("call-person", authorization, (caller) =>
+      Effect.gen(function* () {
+        const target = yield* loadSelfOrReachable(caller, input.threadId);
+        const rawReason = asBody(input.body)?.reason;
+        if (rawReason !== undefined && rawReason !== null && typeof rawReason !== "string") {
+          return yield* fail(400, "invalid_payload", "reason должен быть строкой.");
+        }
+        const reason =
+          typeof rawReason === "string"
+            ? rawReason.trim().slice(0, PERSON_CALL_REASON_MAX_CHARS).trim()
+            : "";
+        yield* dispatch(
+          {
+            type: "thread.person.call",
+            commandId: commandId("call-person"),
+            threadId: target.id,
+            reason: reason.length > 0 ? reason : null,
+            createdAt: new Date(nowMs()).toISOString(),
+          },
+          caller.id,
+        );
+        yield* Effect.logInfo("agent threads: person called", {
+          callerThreadId: caller.id,
+          threadId: target.id,
+        });
+        return ok({ threadId: target.id, owner: "person" });
+      }),
+    );
+
+  /** An agent takes back a chat it (or another agent) called the person into. */
+  const personNotNeeded = (
+    authorization: BridgeAuthorization | null,
+    input: { readonly threadId: string | undefined },
+  ) =>
+    run("person-not-needed", authorization, (caller) =>
+      Effect.gen(function* () {
+        const target = yield* loadSelfOrReachable(caller, input.threadId);
+        yield* dispatch(
+          {
+            type: "thread.person.release",
+            commandId: commandId("person-not-needed"),
+            threadId: target.id,
+            createdAt: new Date(nowMs()).toISOString(),
+          },
+          caller.id,
+        );
+        yield* Effect.logInfo("agent threads: person not needed", {
+          callerThreadId: caller.id,
+          threadId: target.id,
+        });
+        return ok({ threadId: target.id });
+      }),
+    );
+
+  return {
+    createThread,
+    listThreads,
+    getThread,
+    sendMessage,
+    releaseThread,
+    callPerson,
+    personNotNeeded,
+  };
 }

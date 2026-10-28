@@ -362,6 +362,12 @@ function mapThreadShell(
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
     assistantRole: thread.assistantRole ?? null,
+    // Kept undefined from a server before 28.10: Sidebar.owner falls back.
+    startedBy: thread.startedBy,
+    latestPersonMessageAt: thread.latestPersonMessageAt ?? null,
+    personCalledAt: thread.personCalledAt ?? null,
+    personCalledByThreadId: thread.personCalledByThreadId ?? null,
+    personCallReason: thread.personCallReason ?? null,
   };
   return {
     shell,
@@ -482,7 +488,12 @@ function sidebarThreadSummariesEqual(
     (left.controller ?? "human") === (right.controller ?? "human") &&
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&
-    (left.assistantRole ?? null) === (right.assistantRole ?? null)
+    (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
+    (left.startedBy ?? null) === (right.startedBy ?? null) &&
+    (left.latestPersonMessageAt ?? null) === (right.latestPersonMessageAt ?? null) &&
+    (left.personCalledAt ?? null) === (right.personCalledAt ?? null) &&
+    (left.personCalledByThreadId ?? null) === (right.personCalledByThreadId ?? null) &&
+    (left.personCallReason ?? null) === (right.personCallReason ?? null)
   );
 }
 

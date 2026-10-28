@@ -179,6 +179,7 @@ import {
   resolveThreadActivityMs,
   type SidebarSection,
 } from "./Sidebar.sections";
+import { threadOwner } from "./Sidebar.owner";
 import { isYourTurn } from "./Sidebar.yourTurn";
 import { toSortableTimestamp } from "../lib/threadSort";
 import {
@@ -264,6 +265,7 @@ import {
   projectRowComputers,
   resolveGroupLevels,
   sidebarDTitle,
+  hiddenAgentChatsLabel,
   type SidebarDGroupNode,
   type SidebarGroupLevel,
 } from "./sidebar/sidebarDView.logic";
@@ -571,6 +573,8 @@ const SIDEBAR_D_PROJECT_FILTER_KEY = "uno-work:sidebar:project-filter";
 const SIDEBAR_D_COMPUTER_FILTER_KEY = "uno-work:sidebar:computer-filter";
 /** "Assistants' chats" off in the title menu (28.10): only the person's own chats. */
 const SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY = "uno-work:sidebar:hide-assistant-chats";
+/** "Only mine" in the title menu (28.10): hide the chats agents, Uno or apps run on their own. */
+const SIDEBAR_D_ONLY_MINE_KEY = "uno-work:sidebar:only-mine";
 
 /** Sidebar D: "Projects", "Recents" — quiet labels between the groups. */
 function SidebarDSectionLabel(props: { label: string }) {
@@ -672,6 +676,8 @@ function SidebarDProjectRow(props: {
   name: string;
   /** The Home folder: chats outside any project folder. */
   home?: boolean;
+  /** Whose icon it shows (its favicon, else two letters, as on the chat rows); none — a folder. */
+  iconProject?: Project | null;
   /** Computer chips of a project that lives elsewhere. */
   computers?: ReactNode;
   folded: boolean;
@@ -707,6 +713,15 @@ function SidebarDProjectRow(props: {
           <span className="relative flex size-4 shrink-0 items-center justify-center">
             {props.home ? (
               <HouseIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
+            ) : props.iconProject ? (
+              <span className="inline-flex transition-opacity group-hover/project:opacity-0">
+                <ProjectFavicon
+                  environmentId={props.iconProject.environmentId}
+                  cwd={props.iconProject.cwd}
+                  name={props.name}
+                  className="size-4"
+                />
+              </span>
             ) : (
               <FolderIcon className="size-4 text-muted-foreground transition-opacity group-hover/project:opacity-0" />
             )}
@@ -839,8 +854,14 @@ interface SidebarThreadRowProps {
    * (SidebarDComputerChip); off — the 0.0.137 machine chip.
    */
   computerIcon?: boolean;
-  /** Sidebar D: the project, muted after the title, when the list is not grouped by it. */
-  placeLabel?: string | null;
+  /**
+   * Sidebar D: the project, when the list is not grouped by it — its icon
+   * before the title, the name in a tooltip (Misha 28.10, as in T3 Code; it
+   * was a muted label after the title). Plain values: the row is memoized.
+   */
+  placeName?: string | null;
+  /** Sidebar D: the place is the home folder (chats outside any project). */
+  placeHome?: boolean;
   section: SidebarSection;
   isActive: boolean;
   jumpLabel: string | null;
@@ -1252,6 +1273,30 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
             className={cn("flex min-w-0 flex-1 items-center gap-2", hasActions && D_ROW_FADE)}
           >
+            {props.placeName ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className="inline-flex shrink-0 items-center"
+                      aria-label={props.placeName}
+                      data-testid="sidebar-row-place"
+                    />
+                  }
+                >
+                  {props.placeHome || !props.project ? (
+                    <HouseIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+                  ) : (
+                    <ProjectFavicon
+                      environmentId={props.project.environmentId}
+                      cwd={props.project.cwd}
+                      name={props.placeName}
+                    />
+                  )}
+                </TooltipTrigger>
+                <TooltipPopup side="top">{props.placeName}</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {props.startedBy ? (
               <StartedByFace startedBy={props.startedBy} threadId={thread.id} />
             ) : props.fromUno ? (
@@ -1263,9 +1308,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <span
                 data-testid={`thread-title-${thread.id}`}
                 className={cn(
-                  "min-w-0 truncate text-sm",
-                  // A place label after the title gives way first (Misha 16.10).
-                  props.placeLabel ? "min-w-[45%] shrink" : "flex-1",
+                  "min-w-0 flex-1 truncate text-sm",
                   props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
                     ? "text-foreground"
                     : shouldRecede
@@ -1279,17 +1322,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </span>
             )}
             {pinIndicator}
-            {props.placeLabel ? (
-              <span
-                className={cn(
-                  "max-w-[45%] min-w-[2.75rem] shrink-[6] truncate rounded-[4px] bg-muted/70 px-1 py-px text-[10.5px] leading-none text-muted-foreground",
-                  tailHide,
-                )}
-                data-testid="sidebar-row-place"
-              >
-                {props.placeLabel}
-              </span>
-            ) : null}
             {props.computerIcon ? (
               (props.showMachine ?? isRemote) ? (
                 <span className={cn("contents", tailHide)}>
@@ -2232,6 +2264,13 @@ export default function Sidebar() {
     },
     [dIsHomeProject, projectByKey, projectDisplayNameByKey, projectGroupKeyByKey],
   );
+  const dRowPlace = useCallback(
+    (thread: SidebarThreadSummary) => {
+      const group = dGroupOf(thread);
+      return { name: group.name, home: group.key === HOME_FOLDER_GROUP_KEY };
+    },
+    [dGroupOf],
+  );
   // Every project the person added, by group, with the computers it lives on.
   const dProjectInfo = useMemo(() => {
     const map = new Map<
@@ -2345,6 +2384,12 @@ export default function Sidebar() {
     ReadonlyArray<string> | null,
     ReadonlyArray<string> | null
   >(SIDEBAR_D_COMPUTER_FILTER_KEY, null, Schema.NullOr(Schema.Array(Schema.String)));
+  // Only mine (Misha 28.10): hide the chats agents, Uno or apps run on their own.
+  const [dOnlyMine, setDOnlyMine] = useLocalStorage<boolean, boolean>(
+    SIDEBAR_D_ONLY_MINE_KEY,
+    false,
+    Schema.Boolean,
+  );
   const dHasHomeChats = useMemo(
     () => dLiveChats.some((thread) => dGroupOf(thread).key === HOME_FOLDER_GROUP_KEY),
     [dGroupOf, dLiveChats],
@@ -2388,15 +2433,21 @@ export default function Sidebar() {
     [dComputerPicks, dComputers],
   );
   // The live chats the filters let through (the chip under the title says so).
-  const dShownChats = useMemo(
-    () =>
-      dLiveChats.filter(
-        (thread) =>
-          passes(dProjectPicks, dGroupOf(thread).key) &&
-          passes(dComputerPicks, thread.environmentId),
-      ),
-    [dComputerPicks, dGroupOf, dLiveChats, dProjectPicks],
-  );
+  // Only mine keeps the open chat and pinned ones in view, and counts the rest.
+  const { dShownChats, dHiddenAgentChats } = useMemo(() => {
+    const placed = dLiveChats.filter(
+      (thread) =>
+        passes(dProjectPicks, dGroupOf(thread).key) && passes(dComputerPicks, thread.environmentId),
+    );
+    if (!dOnlyMine) return { dShownChats: placed, dHiddenAgentChats: 0 };
+    const mine = placed.filter(
+      (thread) =>
+        threadOwner(thread) === "you" ||
+        thread.pinnedAt !== null ||
+        threadKeyOf(thread) === routeThreadKey,
+    );
+    return { dShownChats: mine, dHiddenAgentChats: placed.length - mine.length };
+  }, [dComputerPicks, dGroupOf, dLiveChats, dOnlyMine, dProjectPicks, routeThreadKey]);
   // The groups, in the order picked; null — one list, newest first.
   const dTree = useMemo(
     () =>
@@ -3632,8 +3683,8 @@ export default function Sidebar() {
       readonly underUno?: boolean;
       /** Sidebar D: the computer's mark (see chatRowShowsComputer). */
       readonly showMachine?: boolean;
-      /** Sidebar D: the project after the title (see placeShown). */
-      readonly placeLabel?: string | null;
+      /** Sidebar D: the project's icon before the title (see placeShown). */
+      readonly place?: { readonly name: string; readonly home: boolean } | null;
     },
   ) => {
     const threadKey = threadKeyOf(thread);
@@ -3652,7 +3703,9 @@ export default function Sidebar() {
           : options?.underUno && sidebarViewMenu
             ? { showMachine: dUnoShowsComputer(thread) }
             : {})}
-        {...(options?.placeLabel ? { placeLabel: options.placeLabel } : {})}
+        {...(options?.place
+          ? { placeName: options.place.name, placeHome: options.place.home }
+          : {})}
         computerIcon={sidebarViewMenu}
         fromUno={
           options?.d === true && !options.underUno
@@ -4007,7 +4060,7 @@ export default function Sidebar() {
           d: true,
           nested: place.nested,
           showMachine: dChatChip(thread, place.underComputer, place.projectComputers),
-          placeLabel: dPlace.project ? dGroupOf(thread).name : null,
+          place: dPlace.project ? dRowPlace(thread) : null,
         }),
       )}
       {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
@@ -4098,6 +4151,7 @@ export default function Sidebar() {
                   />
                 )
               }
+              iconProject={block.newChatProject ?? block.members[0] ?? null}
               computers={dRowChips(block.computers, underComputer)}
               folded={folded}
               mark={foldedProjectMark(
@@ -4185,6 +4239,7 @@ export default function Sidebar() {
                     />
                   ) : null
                 }
+                iconProject={project}
                 folded={folded}
                 mark={foldedProjectMark(
                   group.chats.map((thread) =>
@@ -4308,6 +4363,7 @@ export default function Sidebar() {
                   projectNames: dPickedProjectNames,
                   computerNames: dPickedComputerNames,
                   assistantChatsHidden: dStartedByInList && dHideAssistantChats,
+                  onlyMine: dOnlyMine,
                 })}
                 groupInHeader={dGroupInHeader}
                 levels={dLevelsChosen}
@@ -4321,6 +4377,8 @@ export default function Sidebar() {
                 computers={dComputerOptions}
                 pickedComputers={dComputerPicks}
                 onComputersChange={setDComputerPicks}
+                onlyMine={dOnlyMine}
+                onOnlyMineChange={setDOnlyMine}
                 onOpenSettings={() => {
                   if (isMobile) setOpenMobile(false);
                   void router.navigate({ to: "/settings" });
@@ -4329,6 +4387,7 @@ export default function Sidebar() {
                   setDProjectPicks(null);
                   setDComputerPicks(null);
                   setDHideAssistantChats(false);
+                  setDOnlyMine(false);
                 }}
                 assistantChatsFilter={
                   dStartedByInList
@@ -4342,6 +4401,22 @@ export default function Sidebar() {
             )}
             {dShowAddProject ? <SidebarAddProjectButton onAddProject={handleAddProject} /> : null}
             {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
+            {sidebarViewMenu && dHiddenAgentChats > 0 ? (
+              <li
+                className="flex h-7 list-none items-center gap-1 pr-1 pl-2.5 text-xs text-muted-foreground/80"
+                data-testid="sidebar-d-hidden-agent-chats"
+              >
+                <span className="truncate">{hiddenAgentChatsLabel(dHiddenAgentChats)}</span>
+                <span aria-hidden>·</span>
+                <button
+                  type="button"
+                  onClick={() => setDOnlyMine(false)}
+                  className="cursor-pointer rounded-sm text-muted-foreground hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
+                >
+                  Show
+                </button>
+              </li>
+            ) : null}
             {dThisComputer
               ? (() => {
                   const here = projectSync.statuses.find(

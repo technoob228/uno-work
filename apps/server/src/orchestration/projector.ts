@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 
+import { isPersonOrigin, startedByFromOrigin } from "./commandOrigin.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
@@ -20,6 +21,8 @@ import {
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
+  ThreadPersonCalledPayload,
+  ThreadPersonReleasedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
@@ -278,6 +281,11 @@ export function projectEvent(
             controlChangedAt: null,
             agentsClosedAt: null,
             assistantRole: payload.assistantRole ?? null,
+            startedBy: startedByFromOrigin(event.metadata.origin),
+            latestPersonMessageAt: null,
+            personCalledAt: null,
+            personCalledByThreadId: null,
+            personCallReason: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -412,6 +420,32 @@ export function projectEvent(
         })),
       );
 
+    case "thread.person-called":
+      return decodeForEvent(ThreadPersonCalledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            personCalledAt: payload.calledAt,
+            personCalledByThreadId: payload.calledByThreadId,
+            personCallReason: payload.reason,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.person-released":
+      return decodeForEvent(ThreadPersonReleasedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            personCalledAt: null,
+            personCalledByThreadId: null,
+            personCallReason: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
     case "thread.runtime-mode-set":
       return decodeForEvent(ThreadRuntimeModeSetPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
@@ -493,11 +527,19 @@ export function projectEvent(
             )
           : [...thread.messages, message];
         const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
+        // The person's own message (not an agent's, Uno's or an app's): what
+        // the chat does next answers them.
+        const personWrote =
+          existingMessage === undefined &&
+          payload.role === "user" &&
+          isPersonOrigin(event.metadata.origin) &&
+          (thread.latestPersonMessageAt ?? "") < payload.createdAt;
 
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
+            ...(personWrote ? { latestPersonMessageAt: payload.createdAt } : {}),
             updatedAt: event.occurredAt,
           }),
         };

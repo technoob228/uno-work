@@ -333,6 +333,30 @@ export type ThreadController = typeof ThreadController.Type;
 export const ThreadAssistantRole = Schema.Literals(["chat", "spawned"]);
 export type ThreadAssistantRole = typeof ThreadAssistantRole.Type;
 
+/**
+ * Who started a chat, read from the command that created it: "agent" —
+ * another chat's agent (the bridge); "assistant" — Uno (its schedules too);
+ * "app" — an app on this computer (App SDK tasks, plugin panels). Absent /
+ * null: the person (here, through Telegram / Slack, or from their other
+ * computer) or the daemon on their behalf (the first chat it opens).
+ */
+export const ThreadStartedBy = Schema.Literals(["agent", "assistant", "app"]);
+export type ThreadStartedBy = typeof ThreadStartedBy.Type;
+
+/**
+ * Who a chat answers to right now, for the sidebar's "Mine" filter (Misha
+ * 28.10). Fields on the thread and its shell, all optional so older servers
+ * decode:
+ * - `startedBy` — see ThreadStartedBy;
+ * - `latestPersonMessageAt` — the latest user-role message the person wrote
+ *   (not one an agent, Uno or an app sent): a turn after it answers them;
+ * - `personCalledAt` / `personCalledByThreadId` / `personCallReason` — an
+ *   agent (the chat itself, the chat that started it, any other chat, Uno)
+ *   asked the person to look at this chat; cleared when an agent says they
+ *   are no longer needed. The person's own message, Read or Done after
+ *   `personCalledAt` answers the call (derived on the client).
+ */
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -509,6 +533,12 @@ export const OrchestrationThread = Schema.Struct({
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See ThreadAssistantRole. Optional so pre-assistant-chat servers decode.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
+  // See ThreadStartedBy and the note under it.
+  startedBy: Schema.optional(Schema.NullOr(ThreadStartedBy)),
+  latestPersonMessageAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -572,6 +602,12 @@ export const OrchestrationThreadShell = Schema.Struct({
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See ThreadAssistantRole.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
+  // See ThreadStartedBy and the note under it.
+  startedBy: Schema.optional(Schema.NullOr(ThreadStartedBy)),
+  latestPersonMessageAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -1022,7 +1058,31 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Longest reason an agent may give when it calls the person into a chat. */
+export const PERSON_CALL_REASON_MAX_CHARS = 200;
+
+// An agent asks the person to look at a chat (`thread.person.call`) or says
+// they are no longer needed there (`thread.person.release`). Server-only:
+// the bridge (`/api/threads/:id/call-person`, `/person-not-needed`) and Uno
+// dispatch them; the person answers with a message, Read or Done.
+const ThreadPersonCallCommand = Schema.Struct({
+  type: Schema.Literal("thread.person.call"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const ThreadPersonReleaseCommand = Schema.Struct({
+  type: Schema.Literal("thread.person.release"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  ThreadPersonCallCommand,
+  ThreadPersonReleaseCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1054,6 +1114,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.settled",
   "thread.unsettled",
   "thread.control-changed",
+  "thread.person-called",
+  "thread.person-released",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -1188,6 +1250,20 @@ export const ThreadControlChangedPayload = Schema.Struct({
   // into an agent-driven thread and the decider took control for them.
   reason: Schema.Literals(["handoff", "human-message"]),
   changedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadPersonCalledPayload = Schema.Struct({
+  threadId: ThreadId,
+  calledAt: IsoDateTime,
+  // The chat whose agent called; null for Uno or the daemon.
+  calledByThreadId: Schema.NullOr(ThreadId),
+  reason: Schema.NullOr(Schema.String),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadPersonReleasedPayload = Schema.Struct({
+  threadId: ThreadId,
   updatedAt: IsoDateTime,
 });
 
@@ -1488,6 +1564,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.control-changed"),
     payload: ThreadControlChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.person-called"),
+    payload: ThreadPersonCalledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.person-released"),
+    payload: ThreadPersonReleasedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -2447,6 +2447,53 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         .pipe(Effect.flatMap(bridgeOk));
     },
   },
+  {
+    name: "chat_call_person",
+    group: "chats",
+    description:
+      "Call the person into a chat (this one by default, or another chat by threadId): a chat started by an agent or by Uno then shows as theirs in the sidebar until they open it, write there or mark it done. Use it when they should look at a result there; a question or an approval calls them anyway. reason: a few words they will see.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadId: { type: "string", minLength: 1 },
+        reason: { type: "string", maxLength: 200 },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) => {
+      const id = threadPath(str(args, "threadId") ?? "self");
+      if (id === null) return Effect.fail(toolError("threadId is not a valid chat id."));
+      return deps
+        .bridge({
+          method: "POST",
+          path: `/api/threads/${id}/call-person`,
+          body: str(args, "reason") ? { reason: str(args, "reason") } : {},
+        })
+        .pipe(Effect.flatMap(bridgeOk));
+    },
+  },
+  {
+    name: "chat_person_not_needed",
+    group: "chats",
+    description:
+      "Take back a chat the person was called into (this one by default, or another chat by threadId) when they are no longer needed there: it shows as an agent's chat again.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadId: { type: "string", minLength: 1 },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) => {
+      const id = threadPath(str(args, "threadId") ?? "self");
+      if (id === null) return Effect.fail(toolError("threadId is not a valid chat id."));
+      return deps
+        .bridge({ method: "POST", path: `/api/threads/${id}/person-not-needed`, body: {} })
+        .pipe(Effect.flatMap(bridgeOk));
+    },
+  },
 
   // The person
   {
