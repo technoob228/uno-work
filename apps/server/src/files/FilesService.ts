@@ -430,13 +430,22 @@ export const makeFilesService = (
           });
         }
         const result = yield* attempt(
-          () => publishToUnoHosting({ path: target, slug: input.slug, apiKey }),
+          () =>
+            publishToUnoHosting({
+              path: target,
+              slug: input.slug,
+              password: input.password,
+              ipAllowlist: input.ipAllowlist,
+              apiKey,
+            }),
           "Publishing didn't work.",
         );
         yield* Effect.logInfo("files.site.published", {
           slug: result.slug,
           files: result.filesCount,
           bytes: result.sizeBytes,
+          password: result.hasPassword === true,
+          ipAllowlist: result.ipAllowlist?.length ?? 0,
         });
         return result;
       });

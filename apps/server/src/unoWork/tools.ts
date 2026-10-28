@@ -188,6 +188,8 @@ export interface UnoWorkToolDeps {
     readonly publishSite: (input: {
       readonly path: string;
       readonly slug?: string;
+      readonly password?: string;
+      readonly ipAllowlist?: ReadonlyArray<string>;
     }) => Effect.Effect<FilesPublishSiteResult, { readonly message: string }>;
     readonly cloudState: Effect.Effect<FilesCloudState, { readonly message: string }>;
     readonly cloudList: (input: {
@@ -2543,7 +2545,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site. A page that is personal by nature (a schedule, notes, family or client details) is the one case to ask first, once: open to everyone or only with a password (then site_set_password right after publishing); a landing page, a business site or a menu goes up open without the question, and a password is never set silently. After publishing a site with a form, say that new entries arrive at the person's email and give them `entriesUrl` from the result.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site. A page that is personal by nature (a schedule, notes, family or client details) is the one case to ask first, once: open to everyone or only with a password; for a password, pass `password` (or `protect: true` to generate a readable one) right here, so the site is protected from its first second — not site_set_password afterwards. A landing page, a business site or a menu goes up open without the question, and a password is never set silently. A big site can take a few minutes: the call waits until it is live. After publishing a site with a form, say that new entries arrive at the person's email and give them `entriesUrl` from the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2557,6 +2559,25 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           pattern: "^[a-z0-9][a-z0-9-]{0,29}$",
           description: "Site name: lowercase letters, digits, dashes.",
         },
+        password: {
+          type: "string",
+          minLength: 10,
+          maxLength: 128,
+          description:
+            "Protect the site with this password (10–128 characters) from the moment it is published.",
+        },
+        protect: {
+          type: "boolean",
+          description:
+            "true without `password`: protect the site with a generated readable password.",
+        },
+        ipAllowlist: {
+          type: "array",
+          maxItems: 50,
+          items: { type: "string", minLength: 1, maxLength: 64 },
+          description:
+            'Only these IPs or networks may open the site, e.g. ["203.0.113.7", "10.0.0.0/8"]. Only when the person asks for it.',
+        },
       },
       required: ["path"],
       additionalProperties: false,
@@ -2565,13 +2586,28 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     // one click in Apps & sites). Opening an app or a port to the internet,
     // removing a password and sending forms to an outside URL still ask.
     level: "safe",
-    run: (deps, args) =>
-      asToolError(
+    run: (deps, args) => {
+      const password =
+        str(args, "password") ?? (bool(args, "protect") === true ? readablePassword() : undefined);
+      const ipAllowlist = strArray(args, "ipAllowlist")?.filter((entry) => entry.trim() !== "");
+      return asToolError(
         deps.files.publishSite({
           path: resolveUserPath(str(args, "path")!, deps),
           ...(str(args, "slug") ? { slug: str(args, "slug")! } : {}),
+          ...(password ? { password } : {}),
+          ...(ipAllowlist && ipAllowlist.length > 0 ? { ipAllowlist } : {}),
         }),
       ).pipe(
+        // The password goes back to the agent: the person needs it to open the site.
+        Effect.map((site) =>
+          password
+            ? {
+                ...site,
+                password,
+                passwordNote: "Tell the person this password; visitors type it to open the site.",
+              }
+            : site,
+        ),
         // The moment the agent decides what to say about the files left out.
         Effect.map((site) =>
           (site.skippedCount ?? 0) > 0 ? { ...site, note: SITE_SKIPPED_NOTE } : site,
@@ -2587,7 +2623,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             }),
           ),
         ),
-      ),
+      );
+    },
   },
   {
     name: "site_unpublish",
@@ -2683,7 +2720,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_set_password",
     group: "sites",
     description:
-      "Protect a published site with a password, or remove the password (remove: true; then anyone can open it). Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. Setting a password runs right away; removing one waits for the person's Allow.",
+      "Protect an already published site with a password, or remove the password (remove: true; then anyone can open it). For a site you are publishing now, pass `password` to site_publish instead: it is protected from its first second. Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. Setting a password runs right away; removing one waits for the person's Allow.",
     inputSchema: {
       type: "object",
       properties: {

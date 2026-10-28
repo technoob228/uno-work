@@ -149,3 +149,274 @@ describe("what stays on the computer", () => {
     ).rejects.toThrow(/source of a Vite project — build it first/);
   });
 });
+
+/** A scripted console: each call takes the next answer; records what was sent. */
+function scriptedFetch(answers: Array<{ status: number; body: unknown } | "network-error">) {
+  const calls: Array<{
+    url: string;
+    method: string;
+    prefer: string | null;
+    fields: Record<string, string>;
+  }> = [];
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    const fields: Record<string, string> = {};
+    if (init?.body instanceof FormData) {
+      for (const [key, value] of init.body.entries()) {
+        if (typeof value === "string") fields[key] = value;
+      }
+    }
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      prefer: new Headers(init?.headers).get("prefer"),
+      fields,
+    });
+    const answer = answers.shift();
+    if (answer === undefined) throw new Error(`unexpected call ${url}`);
+    if (answer === "network-error") throw new TypeError("fetch failed");
+    return new Response(JSON.stringify(answer.body), { status: answer.status });
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+/** A fake clock: sleeping moves it on, nothing really waits. */
+function fakeClock() {
+  let now = 0;
+  const slept: number[] = [];
+  return {
+    slept,
+    now: () => now,
+    sleep: async (ms: number) => {
+      slept.push(ms);
+      now += ms;
+    },
+  };
+}
+
+const accepted = {
+  deploy_id: "dpl_abc",
+  status: "processing",
+  status_url: "/api/v1/deploy/dpl_abc",
+  retry_after_s: 2,
+  slug: "team-site",
+  url: "https://team-site.uno4.me/",
+};
+
+describe("background publish (28.10)", () => {
+  it("sends the password and IP list with the upload and asks for a background publish", async () => {
+    const { calls, fetchImpl } = scriptedFetch([
+      {
+        status: 201,
+        body: { slug: "team-site", has_password: true, ip_allowlist: ["203.0.113.7/32"] },
+      },
+    ]);
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      password: "correct-horse-battery",
+      ipAllowlist: [" 203.0.113.7 ", ""],
+      apiKey: "k",
+      baseUrl: "https://console.test",
+      fetchImpl,
+    });
+    // One call: no separate password PUT after the publish.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.prefer).toBe("respond-async");
+    expect(calls[0]?.fields).toMatchObject({
+      slug: "team-site",
+      password: "correct-horse-battery",
+      ip_allowlist: "203.0.113.7",
+      async: "1",
+    });
+    expect(result.hasPassword).toBe(true);
+    expect(result.ipAllowlist).toEqual(["203.0.113.7/32"]);
+  });
+
+  it("sends no access fields when none were asked for", async () => {
+    const { calls, fetchImpl } = scriptedFetch([{ status: 201, body: { slug: "team-site" } }]);
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      apiKey: "k",
+      baseUrl: "https://console.test",
+      fetchImpl,
+    });
+    expect(calls[0]?.fields).not.toHaveProperty("password");
+    expect(calls[0]?.fields).not.toHaveProperty("ip_allowlist");
+    expect(result.hasPassword).toBeUndefined();
+  });
+
+  it("refuses a password hosting would refuse, before uploading", async () => {
+    const { calls, fetchImpl } = scriptedFetch([]);
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        password: "short",
+        apiKey: "k",
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/10–128 characters/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("follows a 202 to done and returns hosting's result", async () => {
+    const clock = fakeClock();
+    const { calls, fetchImpl } = scriptedFetch([
+      { status: 202, body: accepted },
+      { status: 200, body: { deploy_id: "dpl_abc", status: "processing", retry_after_s: 5 } },
+      // Hosting restarting under us: keep polling.
+      { status: 502, body: { error: "bad gateway" } },
+      "network-error",
+      {
+        status: 200,
+        body: {
+          deploy_id: "dpl_abc",
+          status: "done",
+          url: "https://team-site.uno4.me/",
+          result: {
+            slug: "team-site",
+            url: "https://team-site.uno4.me/",
+            files_count: 2,
+            size_bytes: 15,
+            has_password: true,
+          },
+        },
+      },
+    ]);
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      password: "correct-horse-battery",
+      apiKey: "k",
+      baseUrl: "https://console.test",
+      fetchImpl,
+      ...clock,
+    });
+    expect(calls.slice(1).map((call) => call.url)).toEqual(
+      Array(4).fill("https://console.test/api/v1/deploy/dpl_abc"),
+    );
+    // retry_after_s from each answer: 2 s, then 5 s.
+    expect(clock.slept.slice(0, 2)).toEqual([2000, 5000]);
+    expect(result).toMatchObject({
+      slug: "team-site",
+      url: "https://team-site.uno4.me/",
+      filesCount: 2,
+      sizeBytes: 15,
+      hasPassword: true,
+    });
+  });
+
+  it("explains a background publish that failed like the same error answered at once", async () => {
+    const clock = fakeClock();
+    const { fetchImpl } = scriptedFetch([
+      { status: 202, body: accepted },
+      {
+        status: 200,
+        body: {
+          deploy_id: "dpl_abc",
+          status: "failed",
+          error: "BUILD_NEEDED",
+          message: "build first",
+          http_status: 422,
+          details: { error: "BUILD_NEEDED", tool: "Vite" },
+        },
+      },
+    ]);
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        apiKey: "k",
+        baseUrl: "https://console.test",
+        fetchImpl,
+        ...clock,
+      }),
+    ).rejects.toThrow(/source of a Vite project — build it first/);
+  });
+
+  it("publishes once more when hosting restarted mid-publish", async () => {
+    const clock = fakeClock();
+    const { calls, fetchImpl } = scriptedFetch([
+      { status: 202, body: accepted },
+      {
+        status: 200,
+        body: {
+          deploy_id: "dpl_abc",
+          status: "failed",
+          error: "INTERRUPTED",
+          http_status: 503,
+          message: "restarted",
+        },
+      },
+      { status: 201, body: { slug: "team-site", files_count: 2 } },
+    ]);
+    const result = await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      apiKey: "k",
+      baseUrl: "https://console.test",
+      fetchImpl,
+      ...clock,
+    });
+    expect(calls.map((call) => call.method)).toEqual(["POST", "GET", "POST"]);
+    expect(calls[2]?.fields).toMatchObject({ slug: "team-site", async: "1" });
+    expect(result.slug).toBe("team-site");
+  });
+
+  it("gives up on a second interruption with a plain message", async () => {
+    const interrupted = { status: 503, body: { error: "INTERRUPTED", message: "restarted" } };
+    const { calls, fetchImpl } = scriptedFetch([interrupted, interrupted]);
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        apiKey: "k",
+        baseUrl: "https://console.test",
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/restarted while publishing this site/);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stops waiting after its deadline and says the site may still go live", async () => {
+    const clock = fakeClock();
+    const processing = {
+      status: 200,
+      body: { deploy_id: "dpl_abc", status: "processing", retry_after_s: 3 },
+    };
+    const { fetchImpl } = scriptedFetch([
+      { status: 202, body: accepted },
+      ...Array.from({ length: 10 }, () => processing),
+    ]);
+    await expect(
+      publishToUnoHosting({
+        path: nodePath.join(dir, "site"),
+        apiKey: "k",
+        baseUrl: "https://console.test",
+        fetchImpl,
+        waitMs: 10_000,
+        ...clock,
+      }),
+    ).rejects.toThrow(/still publishing this site \(https:\/\/team-site\.uno4\.me\/\)/);
+    expect(clock.now()).toBeLessThanOrEqual(10_000);
+  });
+
+  it("never follows a status address to another host", async () => {
+    const clock = fakeClock();
+    const { calls, fetchImpl } = scriptedFetch([
+      {
+        status: 202,
+        body: { ...accepted, status_url: "https://evil.test/api/v1/deploy/dpl_abc" },
+      },
+      { status: 200, body: { status: "done", result: { slug: "team-site" } } },
+    ]);
+    await publishToUnoHosting({
+      path: nodePath.join(dir, "site"),
+      slug: "team-site",
+      apiKey: "k",
+      baseUrl: "https://console.test",
+      fetchImpl,
+      ...clock,
+    });
+    expect(calls[1]?.url).toBe("https://console.test/api/v1/deploy/dpl_abc");
+  });
+});

@@ -235,6 +235,13 @@ export const FilesPublishSiteInput = Schema.Struct({
   path: FilesPath,
   /** Optional site name: lowercase letters, digits and dashes. */
   slug: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(30))),
+  /**
+   * Protect the site with this password (10–128 characters). Sent with the
+   * upload itself, so the site is never open, not even for a moment.
+   */
+  password: Schema.optional(Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(128))),
+  /** Only these IPs or networks (CIDR) may open the site. Sent with the upload. */
+  ipAllowlist: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type FilesPublishSiteInput = typeof FilesPublishSiteInput.Type;
 
@@ -254,6 +261,10 @@ export const FilesPublishSiteResult = Schema.Struct({
   siteFolder: Schema.optional(Schema.String),
   /** How many uploaded files hosting left out of the site (an app's source around its site folder). */
   leftOut: Schema.optional(NonNegativeInt),
+  /** A password protects the site (as Uno Hosting answered). */
+  hasPassword: Schema.optional(Schema.Boolean),
+  /** The networks that may open the site, when it is limited to some. */
+  ipAllowlist: Schema.optional(Schema.Array(Schema.String)),
 });
 export type FilesPublishSiteResult = typeof FilesPublishSiteResult.Type;
 
