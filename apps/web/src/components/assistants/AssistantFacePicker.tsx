@@ -52,7 +52,7 @@ function errorText(cause: unknown, fallback: string): string {
 }
 
 /** A picture cut to its centered square, AVATAR_SIZE_PX wide, as a data URL (WebP, else PNG). */
-async function squarePicture(src: string): Promise<string> {
+export async function squarePicture(src: string): Promise<string> {
   const image = new Image();
   image.decoding = "async";
   image.src = src;
@@ -70,7 +70,7 @@ async function squarePicture(src: string): Promise<string> {
   return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
 }
 
-function readFile(file: File): Promise<string> {
+export function readFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => resolve(String(reader.result)));

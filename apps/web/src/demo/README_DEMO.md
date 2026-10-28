@@ -66,3 +66,15 @@ else the system Chrome. Typecheck: `cd apps/web && tsc --noEmit`.
   and the Free computer is only in the account's list (never connected).
 - Onboarding (first run) is skipped in both worlds (`onboardingCompleted: true`).
 - Avatars/pictures, Slack, the assistant's own mail are stubs (empty answers).
+
+## Variant D (branch `demo/assistants-d-1028`)
+
+One Uno per account on the cloud computer + persona channels (Mia · Secretary,
+Bolt · Developer) next to it. Story: `assist/variant.ts` (personas, first run,
+one summary with a line per persona, Mia's decision, Bolt's tasks on the
+MacBook, Free catch-up). UI: `components/assistants/PersonaCreator.tsx`
+(Grok-style gallery → "Make it yours"), `PersonaMode.tsx` (the two modes as a
+chip in the chat and a switch on the page, Free plaque, who/where in the
+Inbox), `personaChannels.ts` (gallery, character line, where a project limit
+is a real lock). Extra address params: `personas=N`, `facegen=fail`.
+Flows: `demo-e2e/flows/d.flow.mjs` (`node demo-e2e/run.mjs d-`).

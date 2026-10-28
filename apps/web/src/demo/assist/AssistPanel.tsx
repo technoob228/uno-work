@@ -9,11 +9,12 @@ import { ChevronDownIcon, EyeIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { waitForThreadInStore } from "../../assistant/useAssistantChat";
 import type { getRouter } from "../../router";
 import { useActiveFollowsOpenChat } from "../DemoPanel";
 import { assistDemo } from "../demoBoot";
 import type { MachineKey } from "../heavyFixtures";
-import { listScenes, play } from "./engine";
+import { demoReady, listScenes, play } from "./engine";
 import { personaOf } from "./daemon";
 import { VARIANT } from "./variant";
 import {
@@ -122,8 +123,8 @@ export async function runScene(
 ) {
   const scene = listScenes().find((item) => item.id === sceneId);
   if (!scene) throw new Error(`No scene ${sceneId}`);
-  const machine = target?.machine ?? "work";
-  const projectId = target?.projectId ?? ASSISTANT_PROJECT_ID;
+  const machine = target?.machine ?? scene.target?.machine ?? "work";
+  const projectId = target?.projectId ?? scene.target?.projectId ?? ASSISTANT_PROJECT_ID;
   const persona = personaOf(machine, projectId);
   if (!persona) throw new Error(`No assistant ${projectId} on ${machine}`);
   const threadId = assistDemo.mainChat(machine, projectId);
@@ -158,6 +159,20 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
       environmentOf: assistDemo.environmentOf,
       switchWorld,
     };
+    demoReady({
+      hash: location.hash,
+      openChat: (machine, threadId) => {
+        const environmentId = assistDemo.environmentOf(machine);
+        // A chat made just now: wait until it reaches the page, like the real app does.
+        void waitForThreadInStore(environmentId as never, threadId as never, 5_000).then(
+          () =>
+            void router.navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId, threadId },
+            } as never),
+        );
+      },
+    });
   }, [router]);
   useEffect(() => {
     if (!open) return;

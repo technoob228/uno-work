@@ -784,7 +784,10 @@ export function useConnectorActions(environmentId: ReturnType<typeof usePrimaryE
   }, [pending, queryClient]);
   useEffect(() => {
     if (pending?.action !== "connect") return;
-    if (byProvider.get(pending.provider)?.connected) {
+    // An expired one is listed as connected until the new grant lands: wait for that,
+    // else the watch stopped at once and the list kept saying "Reconnect" (28.10).
+    const connector = byProvider.get(pending.provider);
+    if (connector?.connected && connector.needsReconnect !== true) {
       toastManager.add({
         type: "success",
         title: `${PROVIDERS.find((meta) => meta.provider === pending.provider)?.name} connected`,

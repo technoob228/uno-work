@@ -36,8 +36,10 @@ import {
   onAnswer,
   onApproval,
   onTurn,
+  restorePersona,
   setEngineSpeed,
   startEngine,
+  stopPersona,
 } from "./assist/engine";
 import {
   accountHandlers,
@@ -45,8 +47,12 @@ import {
   connectorState,
   daemonHandlers,
   machineAwake,
+  onAssistantModeChanged,
+  onAssistantRevoked,
   personaOf,
   presetOf,
+  setMode,
+  setPortraitsFail,
   setTelegram,
   startDaemons,
   telegramLinked,
@@ -1373,7 +1379,25 @@ const assistOps = {
   connectorState,
   asksFirst,
   telegramLinked,
+  setMode: (key: MachineKey, projectId: string, mode: "itself" | "asks-first") => {
+    setMode(key, projectId, mode);
+    followMode(key, projectId);
+  },
+  mainChatOf: (key: MachineKey, projectId: string) =>
+    assistDaemonHooks.ensureChat(MACHINES[key], projectId).threadId,
 };
+
+/** Its chats run in its new mode from the next turn, as the daemon does. */
+function followMode(key: MachineKey, projectId: string) {
+  const model = modelFor(MACHINES[key]);
+  for (const thread of model.threads) {
+    if (String(thread.projectId) === projectId) {
+      (thread as MutableThread).runtimeMode = assistantRuntimeMode(key, projectId);
+      publishThread(MACHINES[key], String(thread.id));
+    }
+  }
+  touch(model);
+}
 
 /** The assistant's main chat on that computer (the daemon makes it on a fresh one). */
 function mainChatOf(machine: DemoMachine, projectId: string) {
@@ -1425,6 +1449,12 @@ function startAssist() {
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });
+  // Variant D: a removed persona stops what it was doing (its chats stay).
+  onAssistantModeChanged(followMode);
+  onAssistantRevoked((key, projectId, revoked) =>
+    revoked ? stopPersona(key, projectId) : restorePersona(key, projectId),
+  );
+  setPortraitsFail(/[?&]facegen=fail\b/.test(location.search));
   const speed = Number(new URLSearchParams(location.search).get("speed") ?? "1");
   if (Number.isFinite(speed) && speed > 0) setEngineSpeed(speed);
   // Work in the browser on uno-work, or the desktop app (the 16.10 switch).

@@ -89,6 +89,10 @@ export interface ChatOps {
   /** Ask first (Helper/Observer) or does it itself (Full) — its daemon's preset. */
   readonly asksFirst: (machine: MachineKey, projectId: string) => boolean;
   readonly telegramLinked: (machine: MachineKey, projectId: string) => boolean;
+  /** Its mode, from a chat card (variant D's first run: "Ask me first" / "Just do it"). */
+  readonly setMode: (machine: MachineKey, projectId: string, mode: "itself" | "asks-first") => void;
+  /** Its main chat on that computer (made now if there is none). */
+  readonly mainChatOf: (machine: MachineKey, projectId: string) => string;
 }
 
 // ── Scripts ───────────────────────────────────────────────────────────────
@@ -133,7 +137,11 @@ export type Step =
         readonly prompt: string;
         readonly steps: ReadonlyArray<string>;
         readonly result: string;
+        /** It fails there with this error: the chat there shows it, the Inbox says so, and this script goes on with `afterFail`. */
+        readonly fails?: string;
       };
+      /** What it says here after the job failed there (only with `fails`). */
+      readonly afterFail?: Script;
       readonly delay?: number;
     }
   /** The turn fails with this error. */
@@ -169,15 +177,53 @@ const pending = new Map<
 >();
 const keyOf = (machine: MachineKey, threadId: string) => `${machine}:${threadId}`;
 
+/** Assistants removed while a script of theirs runs: the script stops at its next step. */
+const stopped = new Set<string>();
+const stopKey = (ctx: ScriptContext) => `${ctx.persona.machine}:${ctx.persona.projectId}`;
+/** Who is in the middle of something (a running script), by chat. */
+const running = new Map<string, ScriptContext>();
+
+/** The assistant was removed: what it was doing stops, its running chats say so. */
+export function stopPersona(machine: MachineKey, projectId: string) {
+  stopped.add(`${machine}:${projectId}`);
+  for (const [key, ctx] of running) {
+    if (stopKey(ctx) !== `${machine}:${projectId}`) continue;
+    running.delete(key);
+    pending.delete(key);
+    ctx.ops.say(
+      ctx.machine,
+      ctx.threadId,
+      `Stopped: ${ctx.persona.name} was removed. Nothing else will run; this chat stays.`,
+    );
+  }
+}
+export function restorePersona(machine: MachineKey, projectId: string) {
+  stopped.delete(`${machine}:${projectId}`);
+}
+
 async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
+  const key = keyOf(ctx.machine, ctx.threadId);
+  running.set(key, ctx);
+  try {
+    await runStepsInner(ctx, script);
+  } finally {
+    if (running.get(key) === ctx) running.delete(key);
+  }
+}
+
+async function runStepsInner(ctx: ScriptContext, script: Script): Promise<void> {
   const { ops, machine, threadId } = ctx;
+  const gone = () => stopped.has(stopKey(ctx));
   for (const step of script) {
+    if (gone()) return;
     if ("say" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? replyDelay(step.say));
+      if (gone()) return;
       ops.say(machine, threadId, step.say);
     } else if ("work" in step) {
       await wait(step.delay ?? replyDelay(step.work));
+      if (gone()) return;
       ops.working(machine, threadId, step.work);
     } else if ("ask" in step) {
       ops.working(machine, threadId);
@@ -191,8 +237,10 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
       return;
     } else if ("act" in step) {
       await wait(step.delay ?? 900);
-      if (!ops.asksFirst(machine, ctx.persona.projectId)) {
-        await runSteps(ctx, step.allowed);
+      if (gone()) return;
+      // Read at this moment: a mode changed in the middle of a task counts from here.
+      if (!ops.asksFirst(ctx.persona.machine, ctx.persona.projectId)) {
+        await runStepsInner(ctx, step.allowed);
         return;
       }
       pending.set(keyOf(machine, threadId), {
@@ -202,7 +250,7 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
         declined: step.declined,
       });
       ops.askApproval(machine, threadId, step.act.command, step.act.why);
-      const viaTelegram = ops.telegramLinked(machine, ctx.persona.projectId);
+      const viaTelegram = ops.telegramLinked(ctx.persona.machine, ctx.persona.projectId);
       ops.addInbox({
         id: `i-allow-${threadId}-${Date.now()}`,
         machine,
@@ -217,6 +265,7 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
     } else if ("elsewhere" in step) {
       const job = step.elsewhere;
       await wait(step.delay ?? 900);
+      if (gone()) return;
       const childId = `${job.machine}-job-${Date.now().toString(36)}`;
       ops.createThread(job.machine, {
         threadId: childId,
@@ -231,31 +280,60 @@ async function runSteps(ctx: ScriptContext, script: Script): Promise<void> {
         threadId,
         `Started “${job.title}” on ${machineName(job.machine)}. I'll tell you when it's done.`,
       );
+      const who = ctx.persona.projectId === "assistant-home" ? "" : `${ctx.persona.name} · `;
       for (const line of job.steps) {
         await wait(1500);
+        if (gone()) {
+          ops.fail(job.machine, childId, `Stopped: ${ctx.persona.name} was removed.`);
+          return;
+        }
         ops.working(job.machine, childId, line);
       }
       await wait(1400);
+      if (gone()) {
+        ops.fail(job.machine, childId, `Stopped: ${ctx.persona.name} was removed.`);
+        return;
+      }
+      if (job.fails) {
+        ops.fail(job.machine, childId, job.fails);
+        ops.addInbox({
+          id: `i-job-${childId}`,
+          machine: job.machine,
+          kind: "agent.error",
+          chat: childId,
+          title: `${who}Failed on ${machineName(job.machine)}: ${job.title}`,
+          body: job.fails,
+        });
+        await wait(900);
+        await runStepsInner(
+          ctx,
+          step.afterFail ?? [{ say: `It failed on ${machineName(job.machine)}: ${job.fails}` }],
+        );
+        return;
+      }
       ops.say(job.machine, childId, job.result);
       ops.addInbox({
         id: `i-job-${childId}`,
         machine: job.machine,
         kind: "agent.done",
         chat: childId,
-        title: `Finished on ${machineName(job.machine)}: ${job.title}`,
+        title: `${who}Finished on ${machineName(job.machine)}: ${job.title}`,
         body: job.result,
       });
       await wait(900);
+      if (gone()) return;
       ops.say(machine, threadId, `Done on ${machineName(job.machine)}: ${job.result}`);
     } else if ("fail" in step) {
       ops.working(machine, threadId);
       await wait(step.delay ?? 2200);
+      if (gone()) return;
       ops.fail(machine, threadId, step.fail);
       return;
     } else if ("inbox" in step) {
       ops.addInbox({ machine, ...step.inbox });
     } else if ("run" in step) {
       if (step.delay) await wait(step.delay);
+      if (gone()) return;
       step.run(ctx);
     }
   }
@@ -285,6 +363,8 @@ export interface Scene {
   /** For the panel (Russian, for Misha). */
   readonly title: string;
   readonly hint: string;
+  /** Whose chat it plays in by default (Uno on uno-work if not set). */
+  readonly target?: { readonly machine: MachineKey; readonly projectId: string };
   readonly run: (input: SceneInput) => void;
 }
 
@@ -308,7 +388,20 @@ export function addTrigger(trigger: Trigger) {
   triggers.unshift(trigger);
 }
 export function addScene(scene: Scene) {
-  scenes.push(scene);
+  const at = scenes.findIndex((item) => item.id === scene.id);
+  if (at >= 0) scenes.splice(at, 1, scene);
+  else scenes.push(scene);
+}
+/** A variant keeps only these of the base's scenes (and its own, added after). */
+export function keepScenes(ids: ReadonlyArray<string>) {
+  const keep = scenes.filter((scene) => ids.includes(scene.id));
+  scenes.length = 0;
+  scenes.push(...keep);
+}
+/** A variant drops a base trigger (its own one answers instead). */
+export function dropTrigger(id: string) {
+  const at = triggers.findIndex((item) => item.id === id);
+  if (at >= 0) triggers.splice(at, 1);
 }
 export function listScenes(): ReadonlyArray<Scene> {
   return scenes;
@@ -708,3 +801,38 @@ scenes.push(
     },
   },
 );
+
+// ── When the page is up (a variant's first moves: open a chat, catch up) ──
+
+export interface DemoReadyInput {
+  /** Opens a chat of that computer in the app. */
+  readonly openChat: (machine: MachineKey, threadId: string) => void;
+  /** The current address hash (empty on a fresh open). */
+  readonly hash: string;
+}
+const readyHooks: Array<(input: DemoReadyInput) => void> = [];
+/** Runs once the app is on screen (variant.ts). */
+export function onDemoReady(hook: (input: DemoReadyInput) => void) {
+  readyHooks.push(hook);
+}
+let readyDone = false;
+export function demoReady(input: DemoReadyInput) {
+  if (readyDone) return;
+  readyDone = true;
+  for (const hook of readyHooks) hook(input);
+}
+
+/** Plays a script made for that chat's assistant (it needs its context: name, mode, world). */
+export function playWith(
+  machine: MachineKey,
+  threadId: string,
+  script: (ctx: ScriptContext) => Script,
+): Promise<void> {
+  const ctx = contextOf(machine, threadId);
+  return ctx ? runSteps(ctx, script(ctx)) : Promise.resolve();
+}
+
+/** An assistant's main chat (made now if there is none — the daemon would). */
+export function mainChatOf(machine: MachineKey, projectId: string): string | null {
+  return ops ? ops.mainChatOf(machine, projectId) : null;
+}

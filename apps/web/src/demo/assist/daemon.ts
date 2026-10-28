@@ -34,6 +34,8 @@ import {
 
 interface AssistantRecord {
   persona: DemoPersona;
+  /** Its picture (base64 WebP/PNG), or its emoji. */
+  avatar: string | null;
   preset: AssistantPreset;
   projects: "all" | ReadonlyArray<string>;
   telegram: boolean;
@@ -75,11 +77,13 @@ function teamOf(persona: DemoPersona, createdAt: string): ManagerAssistantTeam {
 }
 
 function addRecord(machine: MachineKey, persona: DemoPersona) {
+  // A second apart, in the order they were added (the sidebar sorts by it).
   const createdAt = new Date(
-    Date.now() - 86_400_000 * (world.account === "live" ? 30 : 0),
+    Date.now() - 86_400_000 * (world.account === "live" ? 30 : 0) - (1000 - records.size) * 1000,
   ).toISOString();
   records.set(recordKey(machine, persona.projectId), {
     persona,
+    avatar: null,
     preset: world.mode === "asks-first" ? "helper" : "full",
     projects: "all",
     // Uno on uno-work is the one Telegram talks to.
@@ -97,6 +101,8 @@ function recordOf(machine: MachineKey, projectId: string): AssistantRecord | nul
 }
 
 function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssistantSummary {
+  // Variant D: one Telegram bot for the account — Uno's; the personas write there under their names.
+  const linked = telegramLinked(machine.key, record.persona.projectId);
   const access = presetTokenAccess(
     record.preset,
     record.projects as never,
@@ -119,12 +125,12 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       revokedAt: record.revokedAt,
     },
     telegram: {
-      configured: record.telegram,
-      enabled: record.telegram,
-      allowedChatIds: record.telegram ? ["100200300"] : [],
-      botUsername: record.telegram ? "uno_team_bot" : null,
+      configured: linked,
+      enabled: linked,
+      allowedChatIds: linked ? ["100200300"] : [],
+      botUsername: linked ? "uno_team_bot" : null,
       lastError: null,
-      health: record.telegram
+      health: linked
         ? { status: "ok", lastOkAt: new Date().toISOString(), lastError: null, lastErrorAt: null }
         : null,
       defaultModelSelection: null,
@@ -147,7 +153,7 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       emoji: record.persona.emoji,
       template: null,
       createdAt: record.createdAt,
-      avatar: null,
+      avatar: record.avatar ? `avatar-${record.avatar.length}-${record.avatar.slice(-8)}` : null,
     },
     team: {
       team: record.team,
@@ -210,6 +216,8 @@ function connectorsList() {
         ...CONNECTOR_META[provider],
         available: true,
         connected,
+        // The console marks a connection whose sign-in Google ended (variant D: the real list shows it).
+        needsReconnect: state === "expired",
         account: connected ? CONNECTOR_META[provider].account : null,
         connectedAt: connected ? new Date(Date.now() - 86_400_000 * 12).toISOString() : null,
         toolCount: connected ? 12 : 0,
@@ -244,13 +252,81 @@ export function asksFirst(machine: MachineKey, projectId: string): boolean {
   return record !== null && record.preset !== "full";
 }
 
+/** The account's one Telegram link: Uno's on uno-work (variant D — personas share it). */
+function telegramRecord(machine: MachineKey, projectId: string): AssistantRecord | null {
+  if (projectId !== ASSISTANT_PROJECT_ID) return recordOf("work", ASSISTANT_PROJECT_ID);
+  return recordOf(machine, projectId);
+}
+
 export function telegramLinked(machine: MachineKey, projectId: string): boolean {
-  return recordOf(machine, projectId)?.telegram === true;
+  return telegramRecord(machine, projectId)?.telegram === true;
 }
 
 export function setTelegram(machine: MachineKey, projectId: string, linked: boolean) {
-  const record = recordOf(machine, projectId);
+  const record = telegramRecord(machine, projectId);
   if (record) record.telegram = linked;
+}
+
+/** Its mode from a chat card: "Does it itself" = Full, "Asks first" = Helper. */
+export function setMode(machine: MachineKey, projectId: string, mode: "itself" | "asks-first") {
+  const record = recordOf(machine, projectId);
+  if (record) record.preset = mode === "asks-first" ? "helper" : "full";
+}
+
+/** What the person removed (the engine stops its scripts), or brought back. */
+let onRevoked: (machine: MachineKey, projectId: string, revoked: boolean) => void = () => {};
+export function onAssistantRevoked(
+  listener: (machine: MachineKey, projectId: string, revoked: boolean) => void,
+) {
+  onRevoked = listener;
+}
+
+/** Its mode changed from the page or the chat chip: its chats follow (demoBoot). */
+let onModeChanged: (machine: MachineKey, projectId: string) => void = () => {};
+export function onAssistantModeChanged(listener: (machine: MachineKey, projectId: string) => void) {
+  onModeChanged = listener;
+}
+
+/** A drawn portrait failing (variant D's edge flow: `?facegen=fail`). */
+let portraitsFail = false;
+export function setPortraitsFail(fail: boolean) {
+  portraitsFail = fail;
+}
+
+const PORTRAIT_SKIN = ["#f6d3b3", "#e0ac83", "#c68642", "#8d5524", "#f1c27d"];
+const PORTRAIT_BG = [
+  ["#fde68a", "#f59e0b"],
+  ["#bfdbfe", "#3b82f6"],
+  ["#bbf7d0", "#10b981"],
+  ["#fbcfe8", "#ec4899"],
+  ["#ddd6fe", "#8b5cf6"],
+];
+
+/** A friendly portrait (made-up "Uno AI" drawing): a face in one flat style, per kind and seed. */
+export function drawPortrait(persona: string, seed: number): string {
+  const bg = PORTRAIT_BG[seed % PORTRAIT_BG.length]!;
+  const skin =
+    persona === "robot"
+      ? "#cbd5e1"
+      : persona === "alien"
+        ? "#86efac"
+        : persona === "animal"
+          ? ["#f59e0b", "#a16207", "#d6d3d1", "#fb923c"][seed % 4]!
+          : PORTRAIT_SKIN[seed % PORTRAIT_SKIN.length]!;
+  const ears =
+    persona === "animal"
+      ? `<path d="M70 70 L88 30 L104 74 Z" fill="${skin}"/><path d="M186 70 L168 30 L152 74 Z" fill="${skin}"/>`
+      : persona === "robot"
+        ? `<rect x="122" y="28" width="12" height="30" fill="#64748b"/><circle cx="128" cy="26" r="9" fill="#ef4444"/>`
+        : persona === "alien"
+          ? `<circle cx="84" cy="44" r="10" fill="${skin}"/><circle cx="172" cy="44" r="10" fill="${skin}"/>`
+          : `<path d="M62 112 Q64 40 128 38 Q192 40 194 112 Q170 70 128 72 Q86 70 62 112 Z" fill="${["#3f2a1d", "#111827", "#b45309", "#7c2d12", "#6b7280"][seed % 5]}"/>`;
+  const face =
+    persona === "robot"
+      ? `<rect x="66" y="66" width="124" height="120" rx="22" fill="${skin}"/><rect x="88" y="104" width="26" height="18" rx="4" fill="#0ea5e9"/><rect x="142" y="104" width="26" height="18" rx="4" fill="#0ea5e9"/><rect x="100" y="148" width="56" height="8" rx="4" fill="#475569"/>`
+      : `<ellipse cx="128" cy="128" rx="64" ry="${persona === "alien" ? 70 : 62}" fill="${skin}"/><ellipse cx="104" cy="122" rx="${persona === "alien" ? 14 : 7}" ry="${persona === "alien" ? 10 : 8}" fill="#1f2937"/><ellipse cx="152" cy="122" rx="${persona === "alien" ? 14 : 7}" ry="${persona === "alien" ? 10 : 8}" fill="#1f2937"/><path d="M104 152 Q128 ${168 + (seed % 3) * 3} 152 152" stroke="#1f2937" stroke-width="6" fill="none" stroke-linecap="round"/><circle cx="92" cy="146" r="8" fill="#f87171" opacity=".35"/><circle cx="164" cy="146" r="8" fill="#f87171" opacity=".35"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${bg[0]}"/><stop offset="1" stop-color="${bg[1]}"/></linearGradient></defs><rect width="256" height="256" fill="url(#g)"/>${persona === "human" ? "" : ears}${face}${persona === "human" ? ears : ""}<rect x="78" y="196" width="100" height="70" rx="40" fill="#ffffff" opacity=".8"/></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
 /** Is that computer reachable from the page (asleep ones aren't). */
@@ -328,7 +404,7 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
       const list = [...records.values()]
-        .filter((record) => record.persona.machine === machine.key && record.revokedAt === null)
+        .filter((record) => record.persona.machine === machine.key)
         .map((record) => summaryOf(machine, record));
       return json({ assistants: list, assistantSandbox: true, assistantsEnabled: true });
     }),
@@ -350,11 +426,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
         machine: machine.key,
         name,
         emoji: typeof body.emoji === "string" ? body.emoji : "🙂",
-        tone: "teal",
+        tone: typeof body.tone === "string" ? body.tone : "teal",
         roles: [],
         character: "",
         duties: [],
-        setUp: false,
+        // Variant D: made in the gallery, it is set up already and writes first in its chat.
+        setUp: true,
         chats: [],
       };
       addRecord(machine.key, persona);
@@ -370,8 +447,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       return json({ projectId });
     }),
     http.delete("*/api/manager/assistants", ({ request }) => {
-      const record = recordOf(machineOf(request).key, projectParam(request));
-      if (record) record.revokedAt = new Date().toISOString();
+      const machine = machineOf(request);
+      const record = recordOf(machine.key, projectParam(request));
+      if (record) {
+        record.revokedAt = new Date().toISOString();
+        onRevoked(machine.key, record.persona.projectId, true);
+      }
       return json({ ok: true });
     }),
     http.get("*/api/manager/assistant", ({ request }) =>
@@ -408,6 +489,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       if (body.setup === "again")
         team.setup = { ...team.setup, state: "in-progress", answered: [], skipped: [] };
       if (typeof body.emoji === "string") record.persona = { ...record.persona, emoji: body.emoji };
+      if (typeof body.tone === "string") record.persona = { ...record.persona, tone: body.tone };
+      if (Array.isArray(body.roles))
+        record.persona = { ...record.persona, roles: body.roles as string[] };
+      if (typeof body.character === "string")
+        record.persona = { ...record.persona, character: body.character };
       if (typeof body.name === "string") record.persona = { ...record.persona, name: body.name };
       return json({ team: record.team });
     }),
@@ -419,6 +505,7 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       if (typeof body.preset === "string") record.preset = body.preset as AssistantPreset;
       if (body.projects === "all" || Array.isArray(body.projects))
         record.projects = body.projects as never;
+      onModeChanged(machine.key, record.persona.projectId);
       return json({ token: summaryOf(machine, record).token, losses: [] });
     }),
     http.post("*/api/manager/assistant/access", async ({ request }) => {
@@ -455,10 +542,16 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       });
     }),
     http.post("*/api/manager/assistant/revoke", async ({ request }) => {
+      const machine = machineOf(request);
       const body = await bodyOf(request);
-      const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
-      if (record) record.revokedAt = new Date().toISOString();
-      return json({ ok: true });
+      const record = recordOf(machine.key, String(body.projectId ?? ""));
+      const revoked = body.revoked !== false;
+      if (record) {
+        record.revokedAt = revoked ? new Date().toISOString() : null;
+        record.team = { ...record.team, revokedAt: record.revokedAt };
+        onRevoked(machine.key, record.persona.projectId, revoked);
+      }
+      return json({ affected: record ? [record.persona.projectId] : [] });
     }),
     http.post("*/api/manager/assistant/telegram/pair", async ({ request }) => {
       const machine = machineOf(request);
@@ -509,7 +602,29 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       );
       return json({ ok: true });
     }),
-    http.get("*/api/manager/assistant/avatar", () => new HttpResponse(null, { status: 404 })),
+    http.get("*/api/manager/assistant/avatar", ({ request }) => {
+      const record = recordOf(machineOf(request).key, projectParam(request));
+      if (!record?.avatar) return new HttpResponse(null, { status: 404 });
+      const bytes = Uint8Array.from(atob(record.avatar), (char) => char.charCodeAt(0));
+      return new HttpResponse(bytes, { headers: { "content-type": "image/webp" } });
+    }),
+    http.post("*/api/manager/assistant/avatar/generate", async ({ request }) => {
+      const body = await bodyOf(request);
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      if (portraitsFail) {
+        return json({ error: "Uno AI is busy drawing for others" }, { status: 503 });
+      }
+      return json({
+        image: drawPortrait(String(body.persona ?? "human"), Number(body.seed ?? 0)),
+      });
+    }),
+    http.post("*/api/manager/assistant/avatar", async ({ request }) => {
+      const body = await bodyOf(request);
+      const record = recordOf(machineOf(request).key, String(body.projectId ?? ""));
+      if (!record) return json({ error: "not found" }, { status: 404 });
+      record.avatar = typeof body.image === "string" ? body.image : null;
+      return json({ avatar: summaryOf(machineOf(request), record).profile?.avatar ?? null });
+    }),
     http.get("*/api/manager/assistant/instructions", () => json({ state: "current", content: "" })),
     http.get("*/api/manager/assistant/chats", () => json({ chats: [] })),
     http.get("*/api/manager/connector-bindings", () => json({ bindings: [] })),
@@ -584,4 +699,11 @@ export function accountHandlers(): HttpHandler[] {
       ),
     ),
   ];
+}
+
+/** The assistants on uno-work that are not removed (the morning summary's lines, variant D). */
+export function activeAssistants(machine: MachineKey = "work"): ReadonlyArray<DemoPersona> {
+  return [...records.values()]
+    .filter((record) => record.persona.machine === machine && record.revokedAt === null)
+    .map((record) => record.persona);
 }

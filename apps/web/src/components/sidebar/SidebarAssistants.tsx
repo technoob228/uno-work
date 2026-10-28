@@ -236,11 +236,21 @@ const AssistantRow = memo(function AssistantRow(props: {
           data-testid="sidebar-assistant-open"
           className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md pl-1 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          <span className="min-w-0 truncate text-sm font-medium text-foreground" title={name}>
+            {name}
+          </span>
           {/* One signal for "waits for you": the dot (the Inbox counts it too). */}
           {!member.configured ? (
             <span className="shrink-0 text-xs text-primary">Set up</span>
-          ) : null}
+          ) : (
+            // Variant D: a persona is a channel with a role; Uno's is everything.
+            <span
+              className="ml-auto max-w-[45%] shrink-0 truncate pr-1.5 text-[11px] text-sidebar-muted-foreground/60 group-hover/assistant:hidden"
+              data-testid="sidebar-assistant-role"
+            >
+              {member.isUno ? "Everything" : (member.profile.roles[0] ?? "")}
+            </span>
+          )}
         </button>
         {chats.length > 0 ? (
           <HoverButton
@@ -334,8 +344,21 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   const unfolded = useUnfoldedStore((state) => state.keys);
   const setUnfolded = useUnfoldedStore((state) => state.set);
   const quick = useQuickCreateAssistant();
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
   const live = team.filter((member) => !member.revoked);
   const header = assistantsHeaderState({ teamShown });
+  const [showAllPersonas, setShowAllPersonas] = useState(false);
+  // Variant D: many personas fold after the first few (Uno always shows).
+  const FOLD = 7;
+  const shown = showAllPersonas ? live : live.slice(0, FOLD);
+  const hidden = live.length - shown.length;
+  // "+" opens the gallery of personas (Grok-style), not a nameless one-click assistant.
+  const openGallery = () => {
+    if (isMobile) setOpenMobile(false);
+    sidebarDPanel.closeNow();
+    void navigate({ to: "/assistants", search: { view: "new" } });
+  };
 
   return (
     <li className="list-none pb-1" data-testid="sidebar-assistants">
@@ -354,7 +377,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
                     size="icon-xs"
                     aria-label="New assistant"
                     disabled={quick.creating || !quick.available}
-                    onClick={() => void quick.create()}
+                    onClick={openGallery}
                     data-testid="sidebar-new-assistant"
                     className="text-muted-foreground hover:text-foreground"
                   />
@@ -372,7 +395,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
         </div>
       ) : null}
       <ul role="list" className="flex flex-col gap-px">
-        {live.map((member) => (
+        {shown.map((member) => (
           <AssistantRow
             key={member.key}
             member={member}
@@ -384,6 +407,31 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
           />
         ))}
         {live.length === 0 ? <UnoFallbackRow /> : null}
+        {hidden > 0 || (showAllPersonas && live.length > FOLD) ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={() => setShowAllPersonas((value) => !value)}
+              className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-9 text-left text-xs text-sidebar-muted-foreground/60 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="sidebar-assistants-more"
+            >
+              {hidden > 0 ? `Show ${hidden} more` : "Show less"}
+            </button>
+          </li>
+        ) : null}
+        {header.showCreate ? (
+          <li className="list-none">
+            <button
+              type="button"
+              onClick={openGallery}
+              className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pl-2.5 text-left text-[13px] text-sidebar-muted-foreground/70 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="sidebar-new-assistant-row"
+            >
+              <PlusIcon className="size-3.5" />
+              New assistant
+            </button>
+          </li>
+        ) : null}
       </ul>
       <AssistantOnboardingDialog />
     </li>
