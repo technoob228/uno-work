@@ -244,6 +244,14 @@ export function personaOf(machine: MachineKey, projectId: string): DemoPersona |
 }
 
 /** Its preset (Full = "Does it itself", Helper/Observer = "Asks first"); null: not an assistant. */
+/** Assistants the person set up on the setup screen (`setup: "done"` from the page). */
+const setUpByPerson = new Set<string>();
+
+/** The person finished its setup screen (Uno's first click). */
+export function setupDone(machine: MachineKey, projectId: string): boolean {
+  return setUpByPerson.has(recordKey(machine, projectId));
+}
+
 export function presetOf(machine: MachineKey, projectId: string): AssistantPreset | null {
   return recordOf(machine, projectId)?.preset ?? null;
 }
@@ -488,8 +496,10 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       }
       if (Array.isArray(body.roles)) team.roles = body.roles as string[];
       if (Array.isArray(body.duties)) team.duties = body.duties as string[];
-      if (body.setup === "done")
+      if (body.setup === "done") {
         team.setup = { ...team.setup, state: "done", updatedAt: new Date().toISOString() };
+        setUpByPerson.add(recordKey(machine.key, record.persona.projectId));
+      }
       if (body.setup === "again")
         team.setup = { ...team.setup, state: "in-progress", answered: [], skipped: [] };
       if (typeof body.emoji === "string") record.persona = { ...record.persona, emoji: body.emoji };

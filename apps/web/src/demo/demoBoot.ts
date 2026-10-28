@@ -58,6 +58,7 @@ import {
   telegramLinked,
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
+import { answerVaultRpc } from "./assist/vault";
 import { WORLD, worldStamp } from "./assist/world";
 import "./assist/variant";
 import {
@@ -242,6 +243,11 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
   const fileAnswer = answerFileRpc(machine, body);
   if (fileAnswer !== undefined) return fileAnswer;
+  // Assistants D: each computer's own vault — list + the account form's upsert.
+  if (DEMO_ASSIST) {
+    const vaultAnswer = answerVaultRpc(machine.environmentId, String(tag), body);
+    if (vaultAnswer !== undefined) return vaultAnswer;
+  }
   // p9: the vault's entries for the teammate's access (assistantsFixtures.ts).
   const teamAnswer = answerTeamRpc(String(body._tag));
   if (teamAnswer !== undefined) return teamAnswer;
@@ -1418,7 +1424,15 @@ const assistDaemonHooks = {
     const threadId = `${projectId}-main-${Date.now().toString(36)}`;
     const name = personaOf(machine.key, projectId)?.name ?? "Uno";
     newThread(machine, { threadId, projectId, title: name, assistantRole: "chat" });
-    setTimeout(() => void greet(machine.key, threadId), 400);
+    // A new assistant made with a job gets its first message from the page
+    // right away: then it answers that instead of greeting.
+    setTimeout(() => {
+      const thread = modelFor(machine).threads.find((item) => String(item.id) === threadId);
+      const written = ((thread?.messages ?? []) as ReadonlyArray<{ role?: string }>).some(
+        (message) => message.role === "user",
+      );
+      if (!written) void greet(machine.key, threadId);
+    }, 1200);
     return { threadId, created: true };
   },
   newConversation: (machine: DemoMachine, projectId: string, title: string) => {

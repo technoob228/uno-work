@@ -34,6 +34,10 @@ import { Loader2Icon, MailIcon, ServerIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
+import {
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../../environments/settings/serverSettings";
 import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import {
   addAssistantMcp,
@@ -758,9 +762,22 @@ function McpAddRow({
 }
 
 /** The computer's own servers (`settings.mcpServers` of the window's computer). */
-function McpServers({ environmentId }: { environmentId: EnvironmentId | null }) {
-  const servers = useSettings((settings) => settings.mcpServers);
-  const { updateSettings } = useUpdateSettings();
+function McpServers({
+  environmentId,
+  scoped = false,
+}: {
+  environmentId: EnvironmentId | null;
+  /** The servers of that computer (an assistant's), not of the one serving this page. */
+  scoped?: boolean;
+}) {
+  const pageServers = useSettings((settings) => settings.mcpServers);
+  const { updateSettings: updatePageSettings } = useUpdateSettings();
+  const scopedSettings = useEnvironmentSettings(scoped ? environmentId : null);
+  const { updateSettings: updateScopedSettings } = useUpdateEnvironmentSettings(
+    scoped ? environmentId : null,
+  );
+  const servers = scoped ? (scopedSettings?.mcpServers ?? []) : pageServers;
+  const updateSettings = scoped ? updateScopedSettings : updatePageSettings;
 
   // What each added server offers, checked on this page (cached briefly).
   const probes = useQuery({
@@ -1042,6 +1059,7 @@ export function ConnectorsList(
   } = {},
 ) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const scoped = props.environmentId != null && props.environmentId !== primaryEnvironmentId;
   const environmentId = props.environmentId ?? primaryEnvironmentId;
   const navigate = useNavigate();
   const { connectors, byProvider, pending, connect, disconnect } =
@@ -1092,7 +1110,7 @@ export function ConnectorsList(
           />
         ),
       )}
-      {showOwnServers ? <McpServers environmentId={environmentId} /> : null}
+      {showOwnServers ? <McpServers environmentId={environmentId} scoped={scoped} /> : null}
     </div>
   );
 }

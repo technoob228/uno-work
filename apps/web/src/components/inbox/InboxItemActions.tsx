@@ -17,6 +17,7 @@ import {
   SKIP_FOR_NOW_LABEL,
   skipForNowPresets,
 } from "../../inbox/inboxActions.logic";
+import { answerFromInbox } from "../../inbox/answerFromInbox";
 import { markInboxItemDone } from "../../inbox/inboxDone";
 import { type InboxEntry, isSnoozed, updateInbox } from "../../inbox/inboxStore";
 import {
@@ -53,6 +54,17 @@ export function WithInboxItemActions({
   children: (resolved: ResolvedInboxActions) => ReactNode;
 }) {
   const threadId = itemThreadId(item);
+  if (item.kind === "agent.approval" && threadId === null) {
+    // An "Asks first" request with no chat: answered by the row itself.
+    const actions = resolveInboxItemActions({
+      kind: item.kind,
+      hasThread: false,
+      unread: item.readAt === null,
+      open: undefined,
+      answerableByRow: true,
+    });
+    return <>{children({ actions, approval: null })}</>;
+  }
   if (item.kind === "agent.approval" && threadId !== null) {
     return <ApprovalResolver item={item} threadId={threadId as ThreadId} render={children} />;
   }
@@ -87,6 +99,7 @@ function ApprovalResolver(props: {
     unread: props.item.readAt === null,
     open,
     approvalPhase: approval.phase,
+    answerableByRow: true,
   });
   return <>{props.render({ actions, approval })}</>;
 }
@@ -112,7 +125,38 @@ export function InboxActionButtons({
   const { actions, approval } = resolved;
   const pending = approval?.approval ?? null;
   const question = pending ? approvalQuestion(pending) : null;
-  const responding = approval?.responding ?? false;
+  const [answering, setAnswering] = useState(false);
+  const responding = (approval?.responding ?? false) || answering;
+  // No card in the chat for it: the row answers it (assistants D, "Asks first" waits).
+  const byRow = pending === null && actions.reason === "approval";
+  const answer = async (approved: boolean) => {
+    if (pending) {
+      await approval?.respond(approved ? "accept" : "decline");
+      return;
+    }
+    setAnswering(true);
+    try {
+      const answered = await answerFromInbox({
+        environmentId: item.environmentId,
+        inboxItemId: item.id,
+        approved,
+      });
+      if (!answered) {
+        toastManager.add({ type: "info", title: "It's not waiting any more" });
+      }
+      await updateInbox(item.environmentId, { action: "read", ids: [item.id] }).catch(
+        () => undefined,
+      );
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: approved ? "Couldn't allow it" : "Couldn't decline it",
+        description: cause instanceof Error ? cause.message : "Its computer didn't answer.",
+      });
+    } finally {
+      setAnswering(false);
+    }
+  };
   const button = (id: InboxButton, index: number) => {
     switch (id) {
       case "allow":
@@ -120,8 +164,8 @@ export function InboxActionButtons({
           <Button
             key={id}
             size="xs"
-            disabled={responding || !pending}
-            onClick={() => void approval?.respond("accept")}
+            disabled={responding || (!pending && !byRow)}
+            onClick={() => void answer(true)}
             data-testid="inbox-approve"
           >
             <CheckIcon />
@@ -134,8 +178,8 @@ export function InboxActionButtons({
             key={id}
             size="xs"
             variant="outline"
-            disabled={responding || !pending}
-            onClick={() => void approval?.respond("decline")}
+            disabled={responding || (!pending && !byRow)}
+            onClick={() => void answer(false)}
             data-testid="inbox-deny"
           >
             {INBOX_BUTTON_LABEL.decline}

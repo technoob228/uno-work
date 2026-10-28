@@ -331,10 +331,24 @@ export function TeammateAccess(props: {
           <ShieldCheckIcon className="size-3.5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">Full access to this computer</div>
-          <div className="text-xs text-muted-foreground">
-            Every project, connected app, browser login, key and skill here — like you.
-          </div>
+          {props.projects === "all" ? (
+            <>
+              <div className="text-sm font-medium">Full access to this computer</div>
+              <div className="text-xs text-muted-foreground">
+                Every project, connected app, browser login, key and skill here — like you.
+              </div>
+            </>
+          ) : (
+            // Audit 27.10 #12: its projects are limited above — say only what is full.
+            <>
+              <div className="text-sm font-medium">Every app in its projects</div>
+              <div className="text-xs text-muted-foreground">
+                Only its{" "}
+                {props.projects.length === 1 ? "project" : `${props.projects.length} projects`};
+                there it uses every connected app, browser login, key and skill.
+              </div>
+            </>
+          )}
         </div>
         {readOnly ? null : (
           <Button

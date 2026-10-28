@@ -32,7 +32,7 @@ import { AssistantTelegramPanel } from "../setup/steps/ChannelsStep";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { AssistantAiChoice, aiChoiceHeading } from "./AssistantAiChoice";
 import { EmojiAvatar, LevelPicker, nextEmoji } from "./AssistantBits";
 import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
 import { AssistantPresetPicker } from "./AssistantPresetPicker";
@@ -667,9 +667,9 @@ function ReviewCard({
       {home === "here" ? (
         <div className="rounded-2xl border border-border/70 px-4 py-3">
           <h2 className="pb-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-            What powers {name}
+            {aiChoiceHeading(name)}
           </h2>
-          <AssistantPowerPicker environmentId={environmentId} />
+          <AssistantAiChoice environmentId={environmentId} computer="this computer" />
         </div>
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="assistant-review-power-own">

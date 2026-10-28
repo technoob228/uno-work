@@ -77,7 +77,8 @@ import { findTemplate } from "./assistantTemplates";
 import { LocalAssistantPage } from "./LocalAssistantPage";
 import { QuickCreateAssistantView } from "./useQuickCreateAssistant";
 import { PersonaCreatorPage } from "./PersonaCreator";
-import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { UnoSetupPage } from "./UnoSetupPage";
+import { AssistantAiChoice } from "./AssistantAiChoice";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -118,9 +119,10 @@ export interface AssistantsRouteSearch {
    * default assistant; "card" — that assistant's card; "assistant" — the
    * page of the assistant on its own computer `box`; "local" — the page of
    * assistant `project` that lives on this computer; "profile" — the team
-   * page of assistant `project` on computer `env` (w0138 p7).
+   * page of assistant `project` on computer `env` (w0138 p7); "uno-setup" —
+   * Uno's first-run screen on computer `env` (AI, mode, apps; assistants D).
    */
-  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile";
+  readonly view?: "new" | "here" | "card" | "assistant" | "local" | "profile" | "uno-setup";
   readonly box?: number;
   readonly project?: string;
   readonly env?: string;
@@ -180,6 +182,10 @@ export function AssistantsView() {
     search.project
   ) {
     return <AssistantProfilePage environmentId={search.env} projectId={search.project} />;
+  }
+  // Variant D: Uno's first click when it isn't set up — AI, mode, apps, then its chat.
+  if ((DEMO || availability === "on") && search.view === "uno-setup") {
+    return <UnoSetupPage environmentId={search.env} />;
   }
   // Variant D: a new assistant is a persona from the gallery (Grok-style), next to Uno.
   if ((DEMO || availability === "on") && search.view === "new") {
@@ -962,9 +968,10 @@ function CreateAssistant({
               </p>
             )}
           </div>
-          <AssistantPowerPicker
+          <AssistantAiChoice
             environmentId={environmentId}
-            heading={`What powers ${name.trim() || DEFAULT_ASSISTANT_NAME}`}
+            name={name.trim() || DEFAULT_ASSISTANT_NAME}
+            computer={machineLabel}
             className="rounded-2xl border border-border p-4"
           />
           <div className="flex items-center justify-between gap-2">

@@ -10,7 +10,7 @@
  * assistant. Who it is, its duties, its own email and where it works are in
  * `AssistantProfileBlocks.tsx`.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { ASSISTANT_PRESET_COPY } from "@t3tools/shared/assistantPreset";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -33,10 +33,13 @@ import {
 } from "../../lib/managerApi";
 import { useStore } from "../../store";
 import type { MachineRow } from "../settings/machineRows";
-import { AssistantPowerPicker, cardOf } from "../assistant/AssistantPowerPicker";
+import { cardOf } from "../assistant/AssistantPowerPicker";
+import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
+import { AssistantAiChoice, aiChoiceNote } from "./AssistantAiChoice";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assistantChatSupport";
+import { useOwnBoxId } from "./useAssistants";
 import { AssistantPresetPicker } from "./AssistantPresetPicker";
 import {
   type PresetForm,
@@ -165,19 +168,18 @@ export function TeamRunsOn(props: { readonly member: TeamMember; readonly changi
   const computer = member.computerLabel || "this computer";
   if (props.changing) {
     return (
-      <AssistantPowerPicker
-        environmentId={member.environmentId as EnvironmentId}
-        className="p-2 [&_[role=radiogroup]]:grid-cols-1"
+      <AssistantAiChoice
+        environmentId={member.environmentId}
+        computer={computer}
+        narrow
+        className="p-2"
       />
     );
   }
   return (
     <div className="px-3 py-2" data-testid="assistant-profile-brain">
       <p className="text-sm">{llm.loading ? "…" : BRAIN_NAME[card]}</p>
-      <p className="text-xs text-muted-foreground">
-        One choice for every assistant on {computer} for now.
-        {card === "uno" ? " Counted in your plan." : " Uno doesn't charge for it."}
-      </p>
+      <p className="text-xs text-muted-foreground">{aiChoiceNote(computer)}</p>
     </div>
   );
 }
@@ -186,13 +188,14 @@ export function TeamRunsOn(props: { readonly member: TeamMember; readonly changi
 
 export function TeamChannels(props: { readonly member: TeamMember }) {
   const { member } = props;
-  const openSettings = useOpenAssistantSettings();
+  // Linking happens right here (audit 27.10 #14), not on the older page.
+  const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const telegram = member.summary?.telegram;
   const slack = member.summary?.slack;
-  const link = (
+  const linkTo = (channel: ConnectChannel) => (
     <button
       type="button"
-      onClick={() => openSettings(member)}
+      onClick={() => setConnecting(channel)}
       className="cursor-pointer text-xs text-primary hover:underline"
     >
       Link
@@ -210,7 +213,7 @@ export function TeamChannels(props: { readonly member: TeamMember }) {
             {telegram.botUsername ? `@${telegram.botUsername}` : "linked"}
           </span>
         ) : (
-          link
+          linkTo("telegram")
         )}
       </div>
       <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
@@ -221,7 +224,7 @@ export function TeamChannels(props: { readonly member: TeamMember }) {
             {slack.botUserName ? slack.botUserName : "linked"}
           </span>
         ) : (
-          link
+          linkTo("slack")
         )}
       </div>
       <div className="flex h-9 items-center gap-2 border-b border-border/70 px-3 text-sm">
@@ -233,9 +236,17 @@ export function TeamChannels(props: { readonly member: TeamMember }) {
         className="px-3 py-2 text-xs text-muted-foreground"
         data-testid="assistant-profile-uno-bot"
       >
-        A Uno bot of its own for each assistant comes later — for now, link a Telegram bot you made
-        or Slack.
+        {member.isUno
+          ? "Uno talks through our Telegram bot — Link shows its code."
+          : "Its own Telegram bot (you make it in @BotFather) or Slack."}
       </p>
+      <ConnectChannelDialog
+        environmentId={member.environmentId as EnvironmentId}
+        projectId={member.projectId as ProjectId}
+        channel={connecting}
+        telegramMode={member.isUno ? "shared" : "own"}
+        onClose={() => setConnecting(null)}
+      />
     </>
   );
 }
@@ -305,8 +316,11 @@ export function TeamRoutines(props: {
 }) {
   const { member, machine } = props;
   const navigate = useNavigate();
-  const boxId = machine?.box?.id ?? null;
-  const onCloud = boxId !== null && machine?.kind !== "computer";
+  // Its computer's own box id counts too (audit 27.10 #11): opened by its
+  // direct address, the account's list isn't there, but the daemon knows its box.
+  const ownBoxId = useOwnBoxId(member.environmentId);
+  const boxId = machine?.box?.id ?? ownBoxId;
+  const onCloud = boxId !== null && (machine?.kind !== "computer" || ownBoxId !== null);
   const schedules = useQuery({
     queryKey: ["uno-assistants", "schedules", boxId],
     queryFn: () => listAssistantSchedules(boxId!),

@@ -154,6 +154,8 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       assistantChat: true,
       // p7: the assistant's AI and sign-ins (assistantsFixtures.ts answers them).
       assistantLlm: true,
+      // Assistants D: a project limit is a sandbox lock on the cloud computers, a note on the Mac.
+      assistantSandbox: machine.os !== "darwin",
     },
     machineKind: machine.machineKind,
     ...(machine.boxId !== null ? { unoBoxId: machine.boxId } : {}),

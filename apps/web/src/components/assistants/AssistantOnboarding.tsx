@@ -47,6 +47,7 @@ import { createAssistant, startAssistantSetupChat } from "../../lib/managerApi";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../store";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
+import { AssistantAiChoice, aiChoiceHeading } from "./AssistantAiChoice";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
@@ -254,10 +255,10 @@ function UnoIntroDialog() {
             ) : (
               <div className="flex flex-col gap-4">
                 <StepHeading
-                  title={`What does ${name} run on?`}
-                  line="Any AI on this computer: Uno AI, your Claude or ChatGPT plan, or your own key. Change it any time in Settings → AI."
+                  title={aiChoiceHeading(name)}
+                  line="Uno AI, your Claude or ChatGPT plan, or your own key."
                 />
-                <AssistantPowerPicker environmentId={target.environmentId as EnvironmentId} />
+                <AssistantAiChoice environmentId={target.environmentId} computer={computer} />
                 <div
                   className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 p-3 text-sm"
                   data-testid="uno-setup-access"
@@ -329,6 +330,9 @@ function TeamOnboardingDialog() {
   const isUno = target.kind === "existing" && target.projectId === "assistant-home";
   const homeEnvironmentId =
     target.kind === "existing" ? target.environmentId : (activeEnvironmentId ?? null);
+  const homeLabel =
+    useMachineRows().find((machine) => machine.environmentId === homeEnvironmentId)?.label ??
+    "this computer";
   const existing =
     target.kind === "existing"
       ? team.find(
@@ -532,7 +536,7 @@ function TeamOnboardingDialog() {
 
           <section className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">
-              What does {name || "it"} run on?
+              {aiChoiceHeading(name)}
             </span>
             {homeEnvironmentId ? (
               DEMO_PROTOTYPE ? (
@@ -544,7 +548,7 @@ function TeamOnboardingDialog() {
                 />
               ) : (
                 // One AI per computer for now: the computer-wide choice, said so.
-                <AssistantPowerPicker environmentId={homeEnvironmentId as EnvironmentId} />
+                <AssistantAiChoice environmentId={homeEnvironmentId} computer={homeLabel} />
               )
             ) : (
               <p className="text-sm text-muted-foreground">

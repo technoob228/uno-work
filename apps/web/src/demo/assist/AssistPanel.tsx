@@ -4,6 +4,7 @@
  * (things that happen without the person typing). Only in `VITE_DEMO=assist`.
  * Playwright drives the same through `window.__assistDemo` (e2e/README).
  */
+import { demoVault } from "./vault";
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 import { ChevronDownIcon, EyeIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -157,6 +158,10 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
       mainChat: (machine?: MachineKey, projectId?: string) =>
         assistDemo.mainChat(machine, projectId),
       environmentOf: assistDemo.environmentOf,
+      vault: (machine: MachineKey) => demoVault(assistDemo.environmentOf(machine)),
+      /** Opens a page of the app the way its own links do (flows). */
+      go: (to: string, search?: Record<string, string>) =>
+        void router.navigate({ to, ...(search ? { search } : {}) } as never),
       switchWorld,
     };
     demoReady({

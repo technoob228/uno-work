@@ -161,3 +161,44 @@ describe("Home: skipped questions", () => {
     expect(questionItemIdsToSkip([], "env", "t1", NOW)).toEqual([]);
   });
 });
+
+describe("approvals answered by the row (assistants D)", () => {
+  it("an unread approval with no chat card: Allow / Decline by the row", () => {
+    expect(
+      resolveInboxItemActions({
+        kind: "agent.approval",
+        hasThread: true,
+        unread: true,
+        open: undefined,
+        approvalPhase: "answered",
+        answerableByRow: true,
+      }).buttons,
+    ).toEqual(["allow", "decline", "view"]);
+    expect(
+      resolveInboxItemActions({
+        kind: "agent.approval",
+        hasThread: false,
+        unread: true,
+        open: undefined,
+        answerableByRow: true,
+      }).buttons,
+    ).toEqual(["allow", "decline"]);
+  });
+  it("read, loading or answerable in the chat: as before", () => {
+    const base = {
+      kind: "agent.approval" as const,
+      hasThread: true,
+      open: undefined,
+      answerableByRow: true,
+    };
+    expect(
+      resolveInboxItemActions({ ...base, unread: false, approvalPhase: "answered" }).buttons,
+    ).toEqual(["view"]);
+    expect(
+      resolveInboxItemActions({ ...base, unread: true, approvalPhase: "loading" }).buttons,
+    ).toEqual(["view"]);
+    expect(
+      resolveInboxItemActions({ ...base, unread: true, approvalPhase: "pending" }).buttons,
+    ).toEqual(["allow", "decline", "view"]);
+  });
+});

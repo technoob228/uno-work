@@ -42,6 +42,7 @@ import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { SidebarThreadSummary } from "../../types";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
+import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { TelegramWizard } from "../assistant/TelegramWizard";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
@@ -154,10 +155,15 @@ function TalkRow(props: {
   );
 }
 
-/** Telegram (once linked), Slack and its own email as small rows; here in Uno Work always. */
+/**
+ * Telegram, Slack and its own email as small rows; here in Uno Work always.
+ * "Link" opens the channel right here (audit 27.10 #14: it used to open a
+ * second, older page of the same assistant). A persona's Telegram is a bot of
+ * its own — Uno's shared bot is Uno's only (Misha 28.10).
+ */
 function WhereYouTalk(props: { readonly member: TeamMember }) {
   const { member } = props;
-  const openSettings = useOpenAssistantSettings();
+  const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const telegram = member.summary?.telegram;
   const slack = member.summary?.slack;
   const mail = useQuery({
@@ -170,11 +176,12 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
     retry: false,
     staleTime: 30_000,
   });
-  const link = (
+  const link = (channel: ConnectChannel) => (
     <button
       type="button"
-      onClick={() => openSettings(member)}
+      onClick={() => setConnecting(channel)}
       className="cursor-pointer text-primary hover:underline"
+      data-testid={`assistant-talk-${channel}-link`}
     >
       Link
     </button>
@@ -186,7 +193,11 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
         <TalkRow
           icon={<SendIcon className="size-3.5" />}
           label={
-            member.isUno ? "Telegram" : `Telegram · Uno's bot, signed “${member.profile.name}”`
+            member.isUno
+              ? "Telegram"
+              : telegram.shared
+                ? "Telegram · Uno's bot"
+                : "Telegram · its own bot"
           }
           value={telegram.botUsername ? `@${telegram.botUsername}` : "linked"}
           testId="assistant-talk-telegram"
@@ -194,20 +205,23 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
       ) : !member.isUno ? (
         <TalkRow
           icon={<SendIcon className="size-3.5" />}
-          label="Telegram · not linked yet"
-          value="Link it in Uno's chat"
+          label="Telegram · its own bot"
+          value={member.revoked ? "not linked" : link("telegram")}
           testId="assistant-talk-telegram"
         />
       ) : null}
-      {/* Variant D: personas talk through Uno's channels; Slack is Uno's to link. */}
-      {member.isUno ? (
-        <TalkRow
-          icon={<SlackIcon className="size-3.5" />}
-          label="Slack"
-          value={slack?.configured ? (slack.botUserName ?? "linked") : link}
-          testId="assistant-talk-slack"
-        />
-      ) : null}
+      <TalkRow
+        icon={<SlackIcon className="size-3.5" />}
+        label="Slack"
+        value={
+          slack?.configured
+            ? (slack.botUserName ?? "linked")
+            : member.revoked
+              ? "not linked"
+              : link("slack")
+        }
+        testId="assistant-talk-slack"
+      />
       {view?.available && view.address ? (
         <TalkRow
           icon={<MailIcon className="size-3.5" />}
@@ -220,6 +234,13 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
         icon={<MessageCircleIcon className="size-3.5" />}
         label="Here in Uno Work"
         value="always"
+      />
+      <ConnectChannelDialog
+        environmentId={member.environmentId as EnvironmentId}
+        projectId={member.projectId as ProjectId}
+        channel={connecting}
+        telegramMode="own"
+        onClose={() => setConnecting(null)}
       />
     </div>
   );
@@ -448,7 +469,7 @@ export function AssistantProfileSimple(props: {
                 <p className="text-xs text-muted-foreground" data-testid="assistant-profile-line">
                   {member.isUno
                     ? `Your main assistant · sees all your computers and apps · lives on ${member.computerLabel || "your cloud computer"}`
-                    : `${profile.roles[0] ? `${profile.roles[0]} · ` : ""}works next to Uno · shares its memory, apps and Telegram · lives on ${member.computerLabel || "your cloud computer"}`}
+                    : `${profile.roles[0] ? `${profile.roles[0]} · ` : ""}works next to Uno · shares its memory · lives on ${member.computerLabel || "your cloud computer"}`}
                 </p>
                 {setupLine ? (
                   <p

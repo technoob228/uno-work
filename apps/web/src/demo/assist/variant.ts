@@ -19,7 +19,7 @@
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
 
 import type { ChatSpec } from "../heavyFixtures";
-import { activeAssistants } from "./daemon";
+import { activeAssistants, setupDone } from "./daemon";
 import {
   type Script,
   type ScriptContext,
@@ -368,6 +368,15 @@ function firstRun(ctx: ScriptContext): Script {
 
 setGreeting((ctx) => {
   if (!isUno(ctx.persona)) return personaHello(ctx);
+  // A new account set up on its screen (AI, mode, apps) — straight to work.
+  if (ctx.world.account === "new" && setupDone(ctx.machine, ASSISTANT_PROJECT_ID)) {
+    return [
+      {
+        say: "Hi, I'm Uno. I live on your cloud computer and hand the work to chats on your computers. So — what's burning today?",
+        delay: 600,
+      },
+    ];
+  }
   if (ctx.world.account === "new") return firstRun(ctx);
   return [
     { say: "Hi again. Say “morning summary”, or tell me what to do — on any of your computers." },
@@ -667,6 +676,85 @@ addTrigger({
   id: "d-bolt-tests",
   match: /\btests?\b|\bci\b|check ci/i,
   script: (ctx) => boltTests(ctx),
+});
+
+// ── A new assistant's first message (the setup's "What should it do?") ────
+// The page sends it as the person; the assistant hands the work to a chat on
+// its computer and tells the result — like the real ones are asked to.
+
+function firstJob(ctx: ScriptContext, text: string): Script {
+  const where = machineName(ctx.machine);
+  if (/Your job: work in my accounts/.test(text)) {
+    const sites = [...text.matchAll(/browser_command \{"login": "([^"]+)"\}/g)].map(
+      (match) => match[1] ?? "",
+    );
+    const site = sites[0] ?? "the site";
+    const cron = /cron "([^"]+)"/.exec(text)?.[1] ?? null;
+    const when = /make it regular — (.+?) \(/.exec(text)?.[1] ?? null;
+    return [
+      {
+        work: `On it — a chat on ${where} signs in to ${sites.join(", ") || site}. The password stays in its vault; I never see it.`,
+      },
+      {
+        elsewhere: {
+          machine: ctx.machine,
+          projectId: ctx.persona.projectId,
+          title: `Sign in to ${site}`,
+          prompt: `Sign in with browser_command {"login": "${site}"} and do the task.`,
+          steps: [
+            `browser_command {"login": "${site}"} — the computer typed the saved password`,
+            `Signed in to ${site}. Doing the task…`,
+          ],
+          result: `Signed in to ${site} and did it: 2 posts drafted, 5 new comments answered.`,
+        },
+      },
+      ...(cron && when
+        ? ([
+            {
+              act: {
+                command: `schedule_create · cron "${cron}" · ${when}`,
+                why: "Make it a regular task — the console wakes the computer for it.",
+              },
+              allowed: [{ say: `Scheduled: ${when}. You'll get the result each time.` }],
+              declined: [{ say: "OK — no schedule. Just this once." }],
+            },
+          ] satisfies Script)
+        : [{ say: "Done for now. Say when you want it again." }]),
+    ];
+  }
+  if (/Your job: lead development/.test(text)) {
+    const what = /lead development of (.+?)\./.exec(text)?.[1] ?? "your projects";
+    return [
+      { work: `Starting a chat on ${where} for ${what}.` },
+      {
+        elsewhere: {
+          machine: ctx.machine,
+          projectId: ctx.machine === "work" ? "p-work-landing" : ctx.persona.projectId,
+          title: `Where ${what} stands`,
+          prompt: `Look at ${what}: branches, open PRs, tests.`,
+          steps: ["git status · 2 open PRs…", "npm test — 48 tests…"],
+          result: "main is green (48/48), 2 PRs wait for review.",
+        },
+      },
+      {
+        say: `${what}: main is green, 2 PRs wait for your review. Want me to start on the first one?`,
+      },
+    ];
+  }
+  const tools = /using (.+?)\. They're connected/.exec(text)?.[1] ?? null;
+  return [
+    {
+      say: tools
+        ? `Got it — I'll use ${tools}. Ask me anything: I start a chat on ${where} for the real work and tell you the result here.`
+        : `Got it. Tell me the first thing — I start a chat on ${where} for it and tell you the result here.`,
+    },
+  ];
+}
+
+addTrigger({
+  id: "d-first-job",
+  match: /Your job: (lead development|work in my accounts|help me with)/i,
+  script: firstJob,
 });
 
 // ── Scenes for the panel (what happens without typing) ───────────────────

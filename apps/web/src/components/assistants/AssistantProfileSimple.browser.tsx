@@ -10,8 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 /**
- * Misha 23.10: one click on "+" makes an assistant (the "+" is always there
- * with the team), its page leads with Connect Telegram, and everything else
+ * Misha 23.10 / assistants D 28.10: the "+" is always there with the team and
+ * opens the gallery of characters; its page shows where you talk as rows —
+ * Telegram (its own bot) and Slack linked right there — and everything else
  * — the two modes, projects, apps — is folded under Advanced.
  */
 
@@ -142,8 +143,8 @@ beforeEach(() => {
   members = [member("assistant-home", "Uno"), member("assistant-scout", "Scout")];
 });
 
-describe("sidebar: '+' makes an assistant in one click", () => {
-  it("is there with several assistants, and one click creates", async () => {
+describe("sidebar: '+' opens the gallery", () => {
+  it("is there with several assistants, and one click opens the gallery", async () => {
     members = [
       member("assistant-home", "Uno"),
       member("assistant-scout", "Scout"),
@@ -156,7 +157,8 @@ describe("sidebar: '+' makes an assistant in one click", () => {
     );
     await expect.element(screen.getByTestId("sidebar-assistants-header")).toBeInTheDocument();
     await screen.getByTestId("sidebar-new-assistant").click();
-    expect(quickCreate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith({ to: "/assistants", search: { view: "new" } });
+    expect(quickCreate).not.toHaveBeenCalled();
   });
 
   it("without the team on the account: Uno alone, no '+'", async () => {
@@ -173,14 +175,18 @@ describe("sidebar: '+' makes an assistant in one click", () => {
 });
 
 describe("its page", () => {
-  it("leads with Connect Telegram; the rest is under Advanced", async () => {
+  it("links its own Telegram bot right on the page; the rest is under Advanced", async () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
-    await expect.element(screen.getByTestId("assistant-connect-telegram")).toBeInTheDocument();
-    expect(screen.getByTestId("telegram-wizard").query()).toBeNull();
-    await screen.getByTestId("assistant-connect-telegram-start").click();
-    await expect.element(screen.getByTestId("telegram-wizard")).toBeInTheDocument();
+    await expect
+      .element(screen.getByTestId("assistant-talk-telegram"))
+      .toHaveTextContent("its own bot");
+    // Audit 27.10 #14: "Link" opens the channel here, not the older page.
+    await screen.getByTestId("assistant-talk-telegram-link").click();
+    await expect.element(screen.getByTestId("uno-connect-telegram-dialog")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+    await screen.getByRole("button", { name: "Close" }).first().click();
     // Advanced is folded until asked.
     expect(screen.getByTestId("assistant-profile-preset").query()).toBeNull();
     await screen.getByTestId("assistant-advanced-toggle").click();
