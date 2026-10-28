@@ -7,6 +7,31 @@
 /** Where the chat is while a panel tab has the whole window. */
 export type ChatDockMode = "peek" | "expanded" | "minimized";
 
+/**
+ * CSS variable on the document root: how much room the full-screen tab leaves
+ * at the bottom for the chat dock (PreviewPane reads it; ChatView writes it).
+ * Unset — nothing to leave room for (the chat is folded away or not docked).
+ */
+export const CHAT_DOCK_INSET_VAR = "--chat-dock-inset";
+
+/** A hair of air between the tab's last line and the dock's top edge. */
+const CHAT_DOCK_INSET_GAP_PX = 8;
+
+/**
+ * The room the dock needs, from its top edge to the bottom of the window.
+ * `null` — leave the variable unset (no dock on screen, or it is folded).
+ */
+export function chatDockInsetPx(input: {
+  readonly mode: ChatDockMode;
+  readonly viewportHeight: number;
+  /** Top edge of the dock block (the latest step + composer), px from the window top. */
+  readonly dockTop: number | null;
+}): number | null {
+  if (input.mode === "minimized" || input.dockTop === null) return null;
+  const inset = Math.ceil(input.viewportHeight - input.dockTop + CHAT_DOCK_INSET_GAP_PX);
+  return inset > 0 ? inset : null;
+}
+
 /** What the folded chat says about itself (status dot + a word). */
 export type ChatDockStatus = "working" | "needs-approval" | "needs-answer" | "your-turn";
 

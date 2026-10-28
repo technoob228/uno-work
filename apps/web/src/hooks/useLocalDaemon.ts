@@ -3,7 +3,10 @@
  *
  * `useLocalDaemonDiscovery` looks once per page session for a Uno Work
  * desktop daemon on the computer the browser runs on (see
- * localDaemonDiscovery.ts); `refresh()` looks again on demand.
+ * localDaemonDiscovery.ts) — but only when the browser lets it look without
+ * its "access other apps and services on this device" window (P5, 28.10).
+ * Otherwise nothing is probed until the person asks: `lookWithPermission()`
+ * (a button that says why first); `refresh()` looks again within the same rule.
  *
  * `useUseThisComputer` does the whole thing on click: if the daemon is
  * already a saved machine, just switch to it; otherwise ask the desktop app
@@ -14,13 +17,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { addSavedEnvironment, getSavedEnvironmentRecord } from "../environments/runtime";
-import { discoverLocalDaemon, type LocalDaemonDescriptor } from "../localDaemonDiscovery";
+import {
+  discoverLocalDaemon,
+  loopbackProbeWithoutPrompt,
+  type LocalDaemonDescriptor,
+} from "../localDaemonDiscovery";
 import { describeBrowserForLink, requestLocalDaemonLink } from "../localDaemonLink";
 import { isWebApp } from "../webMode";
 import { useSwitchEnvironment } from "./useSwitchEnvironment";
 
 let discoveryPromise: Promise<LocalDaemonDescriptor | null> | null = null;
 let discovered: LocalDaemonDescriptor | null | undefined;
+/** The look was skipped: it would have made the browser ask the person. */
+let heldForPermission = false;
 const discoveryListeners = new Set<() => void>();
 
 function notifyDiscovery() {
@@ -29,7 +38,10 @@ function notifyDiscovery() {
   }
 }
 
-function runDiscovery(force: boolean): Promise<LocalDaemonDescriptor | null> {
+function runDiscovery(
+  force: boolean,
+  options: { readonly askBrowser?: boolean } = {},
+): Promise<LocalDaemonDescriptor | null> {
   if (!isWebApp) {
     return Promise.resolve(null);
   }
@@ -39,7 +51,15 @@ function runDiscovery(force: boolean): Promise<LocalDaemonDescriptor | null> {
   if (!force && discovered !== undefined) {
     return Promise.resolve(discovered);
   }
-  const next = discoverLocalDaemon().then((result) => {
+  const next = (async () => {
+    // A look the person didn't ask for must not pop the browser's window.
+    if (!options.askBrowser && !(await loopbackProbeWithoutPrompt())) {
+      heldForPermission = true;
+      return null;
+    }
+    heldForPermission = false;
+    return discoverLocalDaemon();
+  })().then((result) => {
     discovered = result;
     if (discoveryPromise === next) {
       discoveryPromise = null;
@@ -55,13 +75,19 @@ function runDiscovery(force: boolean): Promise<LocalDaemonDescriptor | null> {
 export function resetLocalDaemonDiscoveryForTests() {
   discoveryPromise = null;
   discovered = undefined;
+  heldForPermission = false;
   discoveryListeners.clear();
 }
 
 export interface LocalDaemonDiscoveryState {
   readonly daemon: LocalDaemonDescriptor | null;
   readonly isProbing: boolean;
+  /** Looks again — without making the browser ask (see the file comment). */
   readonly refresh: () => Promise<LocalDaemonDescriptor | null>;
+  /** Not looked: the browser would ask first. Offer `lookWithPermission` with a reason. */
+  readonly heldForPermission: boolean;
+  /** From the person's click: look, and let the browser ask if it must. */
+  readonly lookWithPermission: () => Promise<LocalDaemonDescriptor | null>;
 }
 
 export function useLocalDaemonDiscovery(options?: {
@@ -83,11 +109,14 @@ export function useLocalDaemonDiscovery(options?: {
   }, [enabled]);
 
   const refresh = useCallback(() => runDiscovery(true), []);
+  const lookWithPermission = useCallback(() => runDiscovery(true, { askBrowser: true }), []);
 
   return {
     daemon: enabled ? (discovered ?? null) : null,
     isProbing: enabled && discoveryPromise !== null,
     refresh,
+    heldForPermission: enabled && heldForPermission && discoveryPromise === null,
+    lookWithPermission,
   };
 }
 

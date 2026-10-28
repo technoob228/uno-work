@@ -15,6 +15,7 @@ import { useEffect, useRef } from "react";
 
 import { cn } from "~/lib/utils";
 import type { ChatMessage } from "../../types";
+import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import {
   CHAT_DOCK_STATUS_DOT,
@@ -45,13 +46,20 @@ export function ChatDockStatusDot({
   );
 }
 
-/** Messages of the chat, dense: the person's on the right, the agent's as plain text. */
+/**
+ * Messages of the chat, dense: the person's on the right as typed, the
+ * agent's rendered like in the chat (P13, 28.10: `**Notetaker**` showed raw),
+ * smaller and cut after six lines.
+ */
 export function ChatDockMessages({
   messages,
   className,
+  markdownCwd,
 }: {
   messages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "text">>;
   className?: string;
+  /** The chat's folder: file links in the agent's words open from it. */
+  markdownCwd?: string | undefined;
 }) {
   if (messages.length === 0) {
     return (
@@ -73,9 +81,10 @@ export function ChatDockMessages({
         ) : (
           <div
             key={message.id}
-            className="line-clamp-6 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground/90"
+            data-chat-dock-reply="true"
+            className="line-clamp-6 break-words text-[13px] leading-5 text-foreground/90 [&_.chat-markdown]:text-[13px] [&_.chat-markdown]:leading-5 [&_.chat-markdown]:text-foreground/90 [&_.chat-markdown_ol]:my-1 [&_.chat-markdown_p]:my-1 [&_.chat-markdown_ul]:my-1"
           >
-            {message.text.trim() || "…"}
+            <ChatMarkdown text={message.text.trim() || "…"} cwd={markdownCwd} />
           </div>
         ),
       )}
@@ -96,11 +105,13 @@ export function FullscreenChatDockHeader({
   onToggleExpanded,
   onMinimize,
   detached = false,
+  markdownCwd,
 }: {
   status: ChatDockStatus;
   latestStep: string;
   expanded: boolean;
   messages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "text">>;
+  markdownCwd?: string | undefined;
   onToggleExpanded: () => void;
   onMinimize: () => void;
   /** The composer has its own frame (an approval / a question is open): a slim row of its own. */
@@ -168,7 +179,7 @@ export function FullscreenChatDockHeader({
           ref={scrollRef}
           className="max-h-[min(16rem,32vh)] overflow-y-auto border-border/50 border-t px-3.5 py-2"
         >
-          <ChatDockMessages messages={messages} />
+          <ChatDockMessages messages={messages} markdownCwd={markdownCwd} />
         </div>
       ) : null}
     </div>
@@ -275,9 +286,13 @@ export function LegacyFocusChatPreview({
                       <div className="mb-1 text-[11px] font-medium opacity-65">
                         {message.role === "user" ? "You" : "Assistant"}
                       </div>
-                      <div className="whitespace-pre-wrap break-words">
-                        {message.text.trim() || "(empty)"}
-                      </div>
+                      {message.role === "user" ? (
+                        <div className="whitespace-pre-wrap break-words">
+                          {message.text.trim() || "(empty)"}
+                        </div>
+                      ) : (
+                        <ChatMarkdown text={message.text.trim() || "(empty)"} cwd={undefined} />
+                      )}
                     </div>
                   ))}
                 </div>

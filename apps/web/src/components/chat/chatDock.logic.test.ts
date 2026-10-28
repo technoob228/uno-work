@@ -4,6 +4,7 @@ import {
   chatDockApprovalPhrase,
   chatDockFirstLine,
   chatDockInitialSeenReplyId,
+  chatDockInsetPx,
   chatDockLatestReply,
   chatDockStatus,
   chatDockStepPreview,
@@ -201,5 +202,20 @@ describe("when the mini window shows a hint", () => {
         writing,
       ),
     ).toEqual([null, "a1", null]);
+  });
+});
+
+describe("chatDockInsetPx — room the full-screen tab leaves for the dock (P1, 28.10)", () => {
+  it("is the dock's height from its top edge to the window bottom, plus a hair", () => {
+    expect(chatDockInsetPx({ mode: "peek", viewportHeight: 926, dockTop: 840 })).toBe(94);
+  });
+
+  it("is nothing while the chat is folded away — the tab goes all the way down", () => {
+    expect(chatDockInsetPx({ mode: "minimized", viewportHeight: 926, dockTop: 840 })).toBeNull();
+  });
+
+  it("is nothing without a dock on screen", () => {
+    expect(chatDockInsetPx({ mode: "peek", viewportHeight: 926, dockTop: null })).toBeNull();
+    expect(chatDockInsetPx({ mode: "peek", viewportHeight: 926, dockTop: 2000 })).toBeNull();
   });
 });

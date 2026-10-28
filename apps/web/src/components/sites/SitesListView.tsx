@@ -138,7 +138,7 @@ export function SitesListView() {
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
             {tab === "apps" ? (
               <div className="flex flex-1 flex-col" data-testid="apps-list">
-                <SidebarAppsList />
+                <SidebarAppsList variant="page" />
               </div>
             ) : (
               <SitesList environmentId={environmentId} sites={sites} />

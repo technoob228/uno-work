@@ -206,11 +206,14 @@ export interface ThreadTitlePromptInput {
 
 export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   const prompt = buildPromptFromMessage({
-    instruction: "You write concise thread titles for coding conversations.",
+    instruction:
+      "You write short titles for chats between a person and an AI assistant that works on their computer.",
     responseShape: "Return a JSON object with key: title.",
     rules: [
-      "Title should summarize the user's request, not restate it verbatim.",
-      "Keep it short and specific (3-8 words).",
+      "Name the chat by what the person wants, the way they would name it themselves.",
+      "Keep it short and specific (3-8 words), in the language of the message.",
+      "Never describe the message itself: no 'Greeting…', 'User asks…', 'Request for…', 'No coding request'.",
+      "If the message is only a greeting or small talk, return it as written (e.g. 'Hi').",
       "Avoid quotes, filler, prefixes, and trailing punctuation.",
       "If images are attached, use them as primary context for visual/UI issues.",
     ],

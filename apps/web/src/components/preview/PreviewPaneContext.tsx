@@ -26,9 +26,11 @@ import {
   collectVisibleTabs,
   DEFAULT_PREVIEW_BUCKET_STATE,
   dropChatBuckets,
+  effectivePreviewLayoutMode,
   EMPTY_BROWSER_CONTEXT,
   findTabScopeKey,
   getPreviewBucketState,
+  isPanelOpen,
   moveTabScope,
   openBrowserTab,
   openTab,
@@ -560,12 +562,15 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
   );
 
   const togglePreviewLayoutMode = useCallback(() => {
-    transition((prev) =>
-      updatePanelView(setPanelOpen(prev, currentTarget, true), currentTarget, (current) => ({
+    transition((prev) => {
+      // A closed panel shows no full screen whatever is stored: the button
+      // said "Full screen", so that is what it does.
+      const wasOpen = isPanelOpen(prev, currentTarget);
+      return updatePanelView(setPanelOpen(prev, currentTarget, true), currentTarget, (current) => ({
         ...current,
-        previewLayoutMode: current.previewLayoutMode === "focus" ? "sidebar" : "focus",
-      })),
-    );
+        previewLayoutMode: wasOpen && current.previewLayoutMode === "focus" ? "sidebar" : "focus",
+      }));
+    });
   }, [currentTarget, transition]);
 
   const setWidth = useCallback(
@@ -850,10 +855,19 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     [statesByScopeKey, currentTarget],
   );
 
+  // What every reader (ChatView, PreviewPane, Files) sees: "focus" only while
+  // the panel is on screen. In a chat an open panel always shows (tabs or the
+  // launcher); outside a chat only with tabs.
+  const previewLayoutMode = effectivePreviewLayoutMode({
+    stored: viewState.previewLayoutMode,
+    panelShown: open && (files.length > 0 || currentChatThreadId !== null),
+    panelIsSheet,
+  });
+
   const value = useMemo<PreviewPaneState>(
     () => ({
       open,
-      previewLayoutMode: viewState.previewLayoutMode,
+      previewLayoutMode,
       files,
       activeFileId: viewState.activeFileId,
       browserOpen: viewState.browserOpen,
@@ -903,6 +917,7 @@ export function PreviewPaneProvider({ children }: { children: ReactNode }) {
     }),
     [
       open,
+      previewLayoutMode,
       viewState,
       files,
       tabScopeById,

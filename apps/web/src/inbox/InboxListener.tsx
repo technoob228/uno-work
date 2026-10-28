@@ -13,11 +13,7 @@ import {
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
-import {
-  askForPermissionOnFirstGesture,
-  showSystemNotification,
-  windowIsInFront,
-} from "./systemNotifications";
+import { showSystemNotification, windowIsInFront } from "./systemNotifications";
 import { useOpenInboxItem } from "./useOpenInboxItem";
 
 /** Items that are new or changed since the last snapshot, still unread. */
@@ -46,8 +42,9 @@ export function InboxListener() {
   const viewingRef = useRef(params);
   viewingRef.current = params;
 
-  // Notifications are on by default; a browser still has to be allowed once.
-  useEffect(() => askForPermissionOnFirstGesture(), []);
+  // Notifications are on by default; a browser still has to be allowed once —
+  // asked with a reason while Uno works (useNotificationSoftAsk), not on the
+  // first click anywhere (P5, 28.10).
 
   const [connectionsVersion, setConnectionsVersion] = useState(0);
   useEffect(

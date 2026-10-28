@@ -39,6 +39,7 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import {
+  messageIsItsOwnTitle,
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
@@ -593,6 +594,48 @@ describe("ProviderCommandReactor", () => {
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Generated title");
+  });
+
+  it("keeps a short first message as the title — no title call (P12, 28.10)", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    harness.generateThreadTitle.mockReturnValue(
+      Effect.succeed({ title: "Greeting with no coding request" }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-seed-hi"),
+        threadId: ThreadId.make("thread-1"),
+        title: "Hi",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-title-hi"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-title-hi"),
+          role: "user",
+          text: "Hi",
+          attachments: [],
+        },
+        titleSeed: "Hi",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+    const readModel = await harness.readModel();
+    expect(readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.title).toBe(
+      "Hi",
+    );
   });
 
   it("does not overwrite an existing custom thread title on the first turn", async () => {
@@ -1464,6 +1507,11 @@ describe("ProviderCommandReactor", () => {
       await Effect.runPromise(
         harness.engine.dispatch({
           ...turn(1),
+          // Long enough to want a title (a short line stays the title, P12).
+          message: {
+            ...turn(1).message,
+            text: "assistant turn 1: plan the week around the release",
+          },
           threadId: ThreadId.make("thread-conversation"),
           titleSeed: "assistant turn 1",
         }),
@@ -2389,5 +2437,20 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+});
+
+describe("messageIsItsOwnTitle (P12, 28.10)", () => {
+  it("a short line is already a title", () => {
+    expect(messageIsItsOwnTitle("Hi", [])).toBe(true);
+    expect(messageIsItsOwnTitle("  Fix login  ", undefined)).toBe(true);
+    expect(messageIsItsOwnTitle("Привет, как дела", [])).toBe(true);
+  });
+
+  it("a request worth summarising still gets a title", () => {
+    expect(messageIsItsOwnTitle("Please investigate reconnect failures", [])).toBe(false);
+    expect(messageIsItsOwnTitle("Hi\nfix the build", [])).toBe(false);
+    expect(messageIsItsOwnTitle("", [])).toBe(false);
+    expect(messageIsItsOwnTitle("See this", [{ type: "image" }])).toBe(false);
   });
 });

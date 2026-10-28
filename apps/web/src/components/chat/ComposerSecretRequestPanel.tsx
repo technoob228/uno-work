@@ -6,6 +6,11 @@
  * into the project env file — it never touches the chat transcript (the
  * agent can still read the file). The card names the asking thread and the
  * exact file so the person knows who gets what, and where.
+ *
+ * P15 (28.10): the field is not a password field — Chrome offered the saved
+ * Uno Work password for "Paste the Stripe secret key" — and once the agent's
+ * turn is over the card says the key is still wanted and what saving it does
+ * (the request stays open; the answer comes back to the chat as a message).
  */
 
 import type { ThreadId } from "@t3tools/contracts";
@@ -14,8 +19,8 @@ import {
   humanSecretLabel,
   secretHelp,
 } from "@t3tools/shared/secretRequestCopy";
-import { memo, useState } from "react";
-import { ExternalLinkIcon, LockIcon } from "lucide-react";
+import { memo, useState, type CSSProperties } from "react";
+import { ExternalLinkIcon, EyeIcon, EyeOffIcon, LockIcon } from "lucide-react";
 
 import { environmentFetchJson, isEnvironmentHttpError } from "../../environments/http/target";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
@@ -28,10 +33,22 @@ import { Button } from "../ui/button";
 
 const SECRET_RESULT_PATH = "/api/secrets/result";
 
+/**
+ * Mask the value with CSS on a plain text field where the browser can: a
+ * password field makes password managers offer the site's saved password.
+ * Firefox without `-webkit-text-security` keeps a password field.
+ */
+function canMaskTextField(): boolean {
+  return typeof CSS !== "undefined" && CSS.supports("-webkit-text-security", "disc");
+}
+
 export const ComposerSecretRequestPanel = memo(function ComposerSecretRequestPanel({
   threadId,
+  agentWorking = false,
 }: {
   threadId: string | undefined;
+  /** The chat on screen is working right now (its turn isn't over). */
+  agentWorking?: boolean;
 }) {
   const requests = useSecretRequests();
   const matching = requests.filter((request) => {
@@ -45,6 +62,7 @@ export const ComposerSecretRequestPanel = memo(function ComposerSecretRequestPan
       key={active.event.requestId}
       request={active}
       pendingCount={matching.length}
+      agentWorking={agentWorking}
     />
   );
 });
@@ -52,11 +70,15 @@ export const ComposerSecretRequestPanel = memo(function ComposerSecretRequestPan
 const SecretRequestCard = memo(function SecretRequestCard({
   request,
   pendingCount,
+  agentWorking,
 }: {
   request: ActiveSecretRequest;
   pendingCount: number;
+  agentWorking: boolean;
 }) {
   const [value, setValue] = useState("");
+  const [revealed, setRevealed] = useState(false);
+  const [maskWithCss] = useState(canMaskTextField);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { event } = request;
@@ -168,6 +190,16 @@ const SecretRequestCard = memo(function SecretRequestCard({
           <p className="mt-1 text-xs text-muted-foreground/65">
             Not the chat. The agent can read it from this file.
           </p>
+          <p
+            className="mt-2 flex items-start gap-1.5 text-xs text-foreground/80"
+            data-testid="secret-request-status"
+          >
+            <span
+              aria-hidden
+              className={`mt-1 size-1.5 shrink-0 rounded-full ${agentWorking ? "bg-sky-500" : "bg-amber-500"}`}
+            />
+            {secretRequestStatusLine(agentWorking)}
+          </p>
         </>
       )}
       {/*
@@ -179,29 +211,56 @@ const SecretRequestCard = memo(function SecretRequestCard({
         implicit submission of the outer composer form.
       */}
       <div className="mt-3 flex items-center gap-2">
-        <input
-          type="password"
-          autoComplete="new-password"
-          spellCheck={false}
-          autoFocus
-          value={value}
-          disabled={isSubmitting}
-          onChange={(changeEvent) => setValue(changeEvent.currentTarget.value)}
-          onKeyDown={(keyEvent) => {
-            if (keyEvent.key !== "Enter" || keyEvent.nativeEvent.isComposing) return;
-            keyEvent.preventDefault();
-            keyEvent.stopPropagation();
-            void submit(false);
-          }}
-          placeholder={
-            assistantBot
-              ? ASSISTANT_BOT_CARD.placeholder
-              : label === event.name
-                ? `Paste ${event.name} here`
-                : `Paste the ${label} here`
-          }
-          className="h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/20 px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
-        />
+        <div className="relative min-w-0 flex-1">
+          <input
+            // A plain text field masked with CSS: password managers leave it alone.
+            type={maskWithCss || revealed ? "text" : "password"}
+            name="uno-secret-value"
+            autoComplete={maskWithCss ? "off" : "new-password"}
+            autoCorrect="off"
+            autoCapitalize="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            aria-label={assistantBot ? "Bot token" : `${label} value`}
+            style={
+              maskWithCss && !revealed
+                ? ({ WebkitTextSecurity: "disc" } as CSSProperties)
+                : undefined
+            }
+            spellCheck={false}
+            autoFocus
+            value={value}
+            disabled={isSubmitting}
+            onChange={(changeEvent) => setValue(changeEvent.currentTarget.value)}
+            onKeyDown={(keyEvent) => {
+              if (keyEvent.key !== "Enter" || keyEvent.nativeEvent.isComposing) return;
+              keyEvent.preventDefault();
+              keyEvent.stopPropagation();
+              void submit(false);
+            }}
+            placeholder={
+              assistantBot
+                ? ASSISTANT_BOT_CARD.placeholder
+                : label === event.name
+                  ? `Paste ${event.name} here`
+                  : `Paste the ${label} here`
+            }
+            className="h-9 w-full rounded-lg border border-border/60 bg-muted/20 pr-9 pl-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
+          />
+          {value.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setRevealed((shown) => !shown)}
+              aria-label={revealed ? "Hide" : "Show"}
+              title={revealed ? "Hide" : "Show what you pasted"}
+              className="absolute top-1/2 right-1.5 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {revealed ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+            </button>
+          ) : null}
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -224,6 +283,18 @@ const SecretRequestCard = memo(function SecretRequestCard({
     </div>
   );
 });
+
+/**
+ * What happens with the request now (P15, 28.10: after "Done" the card hung
+ * on with no word on whether anyone still waits for the key). The request
+ * stays open after the agent's turn; a later answer reaches the chat as a
+ * message and the agent goes on from there.
+ */
+export function secretRequestStatusLine(agentWorking: boolean): string {
+  return agentWorking
+    ? "Uno picks it up as soon as you save it."
+    : "Still needed. Uno finished this turn without it — save it any time, and Uno gets a message in this chat and carries on.";
+}
 
 /** Full path of the env file the server writes: the request's folder + file name. */
 export function secretTargetPath(cwd: string, targetFile: string): string {

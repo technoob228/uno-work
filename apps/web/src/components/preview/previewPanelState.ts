@@ -334,9 +334,34 @@ export function setPanelOpen(
 ): PreviewStates {
   return patchView(states, viewScopeKey(target), (view) => {
     if (open) return shownView(view, null);
-    if (view.viewTouched && !view.open && view.dismissed) return view;
-    return { ...view, open: false, viewTouched: true, dismissed: true };
+    if (view.viewTouched && !view.open && view.dismissed && view.previewLayoutMode === "sidebar") {
+      return view;
+    }
+    // Closing the panel also ends its full screen (P1, 28.10): the chat must not
+    // stay folded into the full-screen dock over a panel that is gone, and the
+    // next open lands beside the chat.
+    return {
+      ...view,
+      open: false,
+      viewTouched: true,
+      dismissed: true,
+      previewLayoutMode: "sidebar",
+    };
   });
+}
+
+/**
+ * The layout the screen actually shows: "focus" (a tab over the whole window,
+ * the chat folded into the dock) only while the panel is on screen, and never
+ * on a phone, where the panel is a sheet. A stored "focus" with the panel
+ * closed must not keep the chat without its header and with the dock (P1, 28.10).
+ */
+export function effectivePreviewLayoutMode(input: {
+  readonly stored: PreviewBucketState["previewLayoutMode"];
+  readonly panelShown: boolean;
+  readonly panelIsSheet: boolean;
+}): PreviewBucketState["previewLayoutMode"] {
+  return input.stored === "focus" && input.panelShown && !input.panelIsSheet ? "focus" : "sidebar";
 }
 
 /** The person waved away "the agent opened X" (the phone chip): the badge goes, the tab stays. */

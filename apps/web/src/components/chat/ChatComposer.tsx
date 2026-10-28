@@ -3103,7 +3103,10 @@ export const ChatComposer = memo(
               scheduleComposerCollapseCheck();
             }}
           >
-            <ComposerSecretRequestPanel threadId={activeThread?.id} />
+            <ComposerSecretRequestPanel
+              threadId={activeThread?.id}
+              agentWorking={phase === "running"}
+            />
             <ComposerBrowserHelpPanel environmentId={environmentId} threadId={activeThread?.id} />
             <ComposerToolApprovalPanel threadId={activeThread?.id} />
             <PremiumCreditNotice

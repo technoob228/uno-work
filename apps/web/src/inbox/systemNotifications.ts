@@ -12,8 +12,11 @@
  * only-needed, or off.
  *
  * A browser only shows them after the person allowed it, and only asks from a
- * click: with the default on and nothing decided yet, the first click in the
- * window asks once. The desktop app is allowed from the start.
+ * click. It is not asked on the first click anywhere any more (P5, 28.10: the
+ * system window popped up over the Claude sign-in on the very first screen):
+ * while Uno works on a chat, a line above the composer says what they are for
+ * and "Turn on" asks the browser (`useNotificationSoftAsk`); the bell and
+ * Settings → Notifications ask too. The desktop app is allowed from the start.
  */
 import type { InboxItemKind } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
@@ -161,31 +164,58 @@ export async function setSystemNotifications(on: boolean): Promise<SystemNotific
   return setNotificationMode(on ? (mode === "off" ? "smart" : mode) : "off");
 }
 
-/**
- * Default on in a browser that hasn't been asked: ask once, on the first
- * click or key press in the window. Returns the cleanup.
- */
-export function askForPermissionOnFirstGesture(): () => void {
-  if (!systemNotificationsSupported() || window.Notification.permission !== "default") {
-    return () => undefined;
-  }
-  if (readNotificationMode() === "off") return () => undefined;
+function softAskSettled(): boolean {
   try {
-    if (window.localStorage.getItem(ASKED_KEY) === "1") return () => undefined;
+    return window.localStorage.getItem(ASKED_KEY) === "1";
   } catch {
-    return () => undefined;
+    // Private mode: don't ask in a loop.
+    return true;
   }
-  const onGesture = () => {
-    cleanup();
-    void askPermission().finally(notify);
+}
+
+/**
+ * Should the "get a ping" line show? Only while it is useful (Uno is working
+ * on a chat), only in a browser that hasn't been asked (on by default, the
+ * browser hasn't decided), and only until the person answered it once.
+ */
+export function shouldSoftAskNotifications(input: {
+  readonly state: SystemNotificationsState;
+  readonly settled: boolean;
+  readonly agentWorking: boolean;
+}): boolean {
+  return input.agentWorking && input.state === "ask" && !input.settled;
+}
+
+/** "Not now": the line goes away for good; the bell and Settings still turn them on. */
+export function dismissNotificationSoftAsk(): void {
+  try {
+    window.localStorage.setItem(ASKED_KEY, "1");
+  } catch {
+    // private mode
+  }
+  notify();
+}
+
+/**
+ * The explained ask (P5, 28.10): `visible` while Uno works and the browser
+ * hasn't been asked; `turnOn` must run from the click — that is what makes the
+ * browser show its window.
+ */
+export function useNotificationSoftAsk(agentWorking: boolean): {
+  readonly visible: boolean;
+  readonly turnOn: () => Promise<void>;
+  readonly notNow: () => void;
+} {
+  const state = useSystemNotificationsState();
+  const settled = useSyncExternalStore(subscribe, softAskSettled, () => true);
+  return {
+    visible: shouldSoftAskNotifications({ state, settled, agentWorking }),
+    turnOn: async () => {
+      await askPermission();
+      notify();
+    },
+    notNow: dismissNotificationSoftAsk,
   };
-  const cleanup = () => {
-    window.removeEventListener("pointerdown", onGesture, true);
-    window.removeEventListener("keydown", onGesture, true);
-  };
-  window.addEventListener("pointerdown", onGesture, true);
-  window.addEventListener("keydown", onGesture, true);
-  return cleanup;
 }
 
 const APPROVAL_PREFIX = "Waits for your OK";

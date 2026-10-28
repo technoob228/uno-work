@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseNotificationMode, shouldNotify, systemNotificationBody } from "./systemNotifications";
+import {
+  parseNotificationMode,
+  shouldNotify,
+  shouldSoftAskNotifications,
+  systemNotificationBody,
+} from "./systemNotifications";
 
 describe("what a notification says", () => {
   it("an approval asks for the OK, with the command", () => {
@@ -87,6 +92,30 @@ describe("which inbox items pop up", () => {
   it("off is off", () => {
     for (const kind of ["agent.approval", "agent.input", "agent.error", "agent.done", "app"]) {
       expect(shouldNotify({ ...base, mode: "off", kind })).toBe(false);
+    }
+  });
+});
+
+describe("asking the browser to allow notifications (P5, 28.10)", () => {
+  it("asks with a reason while Uno works — not on the first screen", () => {
+    expect(shouldSoftAskNotifications({ state: "ask", settled: false, agentWorking: true })).toBe(
+      true,
+    );
+    // Nothing is running (the first screen, the Claude sign-in): no ask at all.
+    expect(shouldSoftAskNotifications({ state: "ask", settled: false, agentWorking: false })).toBe(
+      false,
+    );
+  });
+
+  it("asks once: after Turn on or Not now it stays quiet", () => {
+    expect(shouldSoftAskNotifications({ state: "ask", settled: true, agentWorking: true })).toBe(
+      false,
+    );
+  });
+
+  it("doesn't ask when the browser decided or the person turned them off", () => {
+    for (const state of ["on", "blocked", "off", "unsupported"] as const) {
+      expect(shouldSoftAskNotifications({ state, settled: false, agentWorking: true })).toBe(false);
     }
   });
 });
