@@ -921,8 +921,14 @@ function webAudioMix(tracks: MediaStreamTrack[]) {
 /** Clicks and moves anywhere in Work's page (capture phase: nothing hides them). */
 function documentPointer(onSample: (sample: PointerSample) => void): () => void {
   if (typeof document === "undefined") return () => undefined;
+  // The recording's own controls (the bar, the popup) are not what is shown.
+  const ownControls = '[data-testid="recording-bar"],[data-testid="record-popup"]';
   const handler = (kind: "click" | "move") => (event: PointerEvent) => {
     if (kind === "click" && event.button !== 0) return;
+    const target = event.target as Element | null;
+    if (kind === "click" && typeof target?.closest === "function" && target.closest(ownControls)) {
+      return;
+    }
     onSample({
       kind,
       clientX: event.clientX,

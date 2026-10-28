@@ -13,7 +13,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { SHOTS, dismissBanners, launch, startRecording } from "./harness.mjs";
+import { chromium } from "playwright";
+
+import { MEDIA_ARGS, SHOTS, dismissBanners, launch, startRecording } from "./harness.mjs";
 
 const url = process.env.REAL_URL;
 if (!url) throw new Error("REAL_URL=http://localhost:<web>/pair#token=… is required");
@@ -23,16 +25,30 @@ const out = join(SHOTS, "real");
 mkdirSync(out, { recursive: true });
 const shot = (page, name) => page.screenshot({ path: join(out, `${name}.png`) });
 
-const browser = await launch({
-  extraArgs: process.env.FAKE_AUDIO
-    ? [`--use-file-for-fake-audio-capture=${process.env.FAKE_AUDIO}`]
-    : [],
-});
+const fakeAudio = process.env.FAKE_AUDIO
+  ? [`--use-file-for-fake-audio-capture=${process.env.FAKE_AUDIO}`]
+  : [];
+// CAPTURE_TITLE=<tab title>: share that real tab (Work's own) instead of the
+// fake screen — the picture, Work's pointer arrow and click rings are real.
+const browser = process.env.CAPTURE_TITLE
+  ? await chromium.launch({
+      channel: "chrome",
+      headless: !process.env.HEADED,
+      args: [
+        ...MEDIA_ARGS.filter((arg) => !arg.startsWith("--auto-select-desktop-capture-source")),
+        `--auto-select-desktop-capture-source=${process.env.CAPTURE_TITLE}`,
+        // The tab's real size: an emulated viewport differs from the captured
+        // tab, the frame's shape stops matching and Work drops the pointer.
+        "--window-size=1440,900",
+        ...fakeAudio,
+      ],
+    })
+  : await launch({ extraArgs: fakeAudio });
 // STATE=<file>: the session cookie from the first pairing (pairing tokens are one-time).
 const statePath = process.env.STATE;
 const { existsSync } = await import("node:fs");
 const context = await browser.newContext({
-  viewport: { width: 1440, height: 900 },
+  viewport: process.env.CAPTURE_TITLE ? null : { width: 1440, height: 900 },
   ...(statePath && existsSync(statePath) ? { storageState: statePath } : {}),
 });
 await context.grantPermissions(["camera", "microphone"], { origin });
@@ -173,6 +189,141 @@ if (step === "home") {
   const box = await page.locator('[contenteditable="true"], textarea').first().inputValue().catch(async () =>
     page.locator('[contenteditable="true"], textarea').first().innerText());
   console.log("home box:", box.slice(0, 300));
+}
+
+
+if (step === "pointing") {
+  // 28.10 «вот тут криво»: Work's own tab is shared; a chip on Home is made
+  // crooked; the pointer circles it while the voice (FAKE_AUDIO, 4.0–7.4 s)
+  // says «Вот тут криво. Эта кнопка съехала, поправь.»; then the message goes
+  // to a new chat and the agent answers. SHIM=http://127.0.0.1:18930 stands
+  // in for the gateway's timeline mode (the branch's Go code, not deployed).
+  await page.getByText("Home", { exact: true }).first().click();
+  await page.getByTestId("home-show-agent").waitFor({ timeout: 60_000 });
+  const target = page.getByTestId("home-upload-project");
+  await page.addStyleTag({
+    content:
+      '[data-testid="home-upload-project"]{transform:rotate(7deg) translateY(7px);outline:2px dashed #e11d48}',
+  });
+  if (process.env.SHIM) {
+    await page.evaluate(async (shim) => {
+      const runtime = await import("/src/screenRecording/recordingRuntime.ts");
+      const store = await import("/src/screenRecording/recordingStore.ts");
+      runtime.overrideRecordingDeps((environmentId) => ({
+        ...runtime.realPipelineDeps(environmentId),
+        describe: async (input) => {
+          const item = Object.values(store.useScreenRecordingStore.getState().items).at(-1);
+          const part = item.agentParts[0];
+          const form = new FormData();
+          form.append("file", part.blob, "agent-copy.webm");
+          form.append("duration_sec", String(Math.max(1, Math.round(input.durationSec))));
+          if (input.mode) form.append("mode", input.mode);
+          if (input.events?.length) form.append("events", JSON.stringify(input.events));
+          const response = await fetch(`${shim}/video/describe`, { method: "POST", body: form });
+          if (!response.ok) throw new Error(`shim ${response.status}: ${await response.text()}`);
+          const body = await response.json();
+          window.__loomShimAnswer = body;
+          return body;
+        },
+      }));
+    }, process.env.SHIM);
+  }
+  await shot(page, "pointing-01-home-crooked");
+  const box = await target.boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(300, 300);
+  await page.getByTestId("home-show-agent").click();
+  await page.getByTestId("record-popup").waitFor();
+  await page.getByTestId("record-source-tab").click();
+  const started = Date.now();
+  await page.getByTestId("record-start").click();
+  await page
+    .locator('[data-testid="recording-bar"][data-phase="recording"]')
+    .waitFor({ timeout: 15_000 });
+  const until = async (ms) => {
+    const wait = ms - (Date.now() - started);
+    if (wait > 0) await page.waitForTimeout(wait);
+  };
+  // 0–3 s: the pointer wanders over the page's top.
+  await page.mouse.move(700, 160, { steps: 20 });
+  await until(2500);
+  // 3–8 s: to the chip and around it while «вот тут криво» is said.
+  await page.mouse.move(cx, cy, { steps: 25 });
+  for (let i = 0; i < 24 && Date.now() - started < 8000; i += 1) {
+    const a = (i / 6) * Math.PI;
+    await page.mouse.move(cx + Math.cos(a) * box.width * 0.35, cy + Math.sin(a) * 8, { steps: 3 });
+    await page.waitForTimeout(120);
+  }
+  await until(8500);
+  // 8.5–12 s: away to the right, still.
+  await page.mouse.move(1250, 700, { steps: 20 });
+  await until(Number(process.env.SECONDS ?? 13) * 1000);
+  await shot(page, "pointing-02-recording");
+  await page.getByTestId("recording-stop").click();
+  await page.getByTestId("home-recording").waitFor({ timeout: 30_000 });
+  const item = await waitSettled();
+  const detail = await page.evaluate(async () => {
+    const { useScreenRecordingStore } = await import("/src/screenRecording/recordingStore.ts");
+    const it = Object.values(useScreenRecordingStore.getState().items).at(-1);
+    return {
+      name: it.name,
+      width: it.width,
+      height: it.height,
+      events: { total: it.events.length, clicks: it.events.filter((e) => e.kind === "click").length, moves: it.events.filter((e) => e.kind === "move").length, scenes: it.events.filter((e) => e.kind === "scene").length },
+      live: it.liveFrames.map((f) => `${f.reason}@${f.t}`),
+      timeline: it.watch.timeline,
+      frames: it.watch.frames.map((f) => ({ t: f.t, reason: f.reason, bytes: f.blob.size, w: f.width })),
+      shim: window.__loomShimAnswer ? { cost: window.__loomShimAnswer.cost, model: window.__loomShimAnswer.model } : null,
+    };
+  });
+  console.log(JSON.stringify({ save: item.save, watchStatus: item.watch.status, speech: item.watch.speech, visual: item.watch.visual, ...detail }, null, 2));
+  // The key frames as files, to look at.
+  const frameFiles = await page.evaluate(async () => {
+    const { useScreenRecordingStore } = await import("/src/screenRecording/recordingStore.ts");
+    const it = Object.values(useScreenRecordingStore.getState().items).at(-1);
+    const out = [];
+    for (const f of it.watch.frames) {
+      const bytes = new Uint8Array(await f.blob.arrayBuffer());
+      let binary = "";
+      for (const b of bytes) binary += String.fromCharCode(b);
+      out.push({ name: `${f.reason}-${f.t}.jpg`, data: btoa(binary) });
+    }
+    return out;
+  });
+  for (const file of frameFiles) writeFileSync(join(out, `pointing-frame-${file.name}`), Buffer.from(file.data, "base64"));
+  await page.waitForTimeout(800);
+  await shot(page, "pointing-03-home-card");
+  if (process.env.SEND) {
+    const homeBox = page.locator('[contenteditable="true"], textarea').first();
+    console.log("home box:", (await homeBox.inputValue().catch(() => homeBox.innerText())).slice(0, 200));
+    await homeBox.click();
+    // NOTE=<text>: typed after the transcript (e.g. "only name the place,
+    // change nothing" — so the pass checks what the agent understood).
+    if (process.env.NOTE) {
+      await page.keyboard.press("End");
+      await page.keyboard.type(` ${process.env.NOTE}`);
+    }
+    await page.keyboard.press("Enter");
+    await page.getByTestId("recording-message-card").first().waitFor({ timeout: 60_000 });
+    await shot(page, "pointing-04-sent");
+    const startedAnswer = Date.now();
+    let answer = "";
+    for (;;) {
+      answer = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('[data-message-role="assistant"], [data-role="assistant"]')];
+        return rows.map((row) => row.innerText).join("\n---\n");
+      });
+      const busy = await page.locator('[data-testid="stop-button"], button[aria-label="Stop generation"]').count();
+      if (answer.length > 40 && busy === 0) break;
+      if (Date.now() - startedAnswer > Number(process.env.ANSWER_TIMEOUT ?? 240_000)) break;
+      await page.waitForTimeout(2000);
+    }
+    await page.getByTestId("recording-message-what").first().click().catch(() => undefined);
+    await page.waitForTimeout(500);
+    await shot(page, "pointing-05-answer");
+    console.log("AGENT ANSWER:\n" + answer.slice(0, 3000));
+  }
 }
 
 if (step === "probe") {
