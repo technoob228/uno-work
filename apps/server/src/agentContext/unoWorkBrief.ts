@@ -26,11 +26,14 @@ export function buildUnoWorkBrief(): string {
  * (reports/harness_bench_2026-09) found Hermes ending finished work with a raw
  * verification log instead of an answer, and OpenCode stopping at "Shall I?"
  * right after "do it". Kept out of the brief itself (its ~1.5k-token budget).
+ * "A short plan first" (agent-flow pass 25.10): on a big task Smart reasoned
+ * for 5–7 minutes before its first step and the chat showed only "Thinking".
  * "Saving context" (01.10.2026): Qwen on Private GPU read whole files itself,
  * hit its 120k window in every long chat on 30.09 and almost never delegated.
  */
 export const UNO_WORK_TASK_RULES = `## Doing the task
 
+- A task of more than a couple of steps: write a short plan first (1–3 lines: what you will do, in order), then do it step by step. Don't work the whole task out in your head before the first step: the person sees nothing while you think.
 - When the person tells you to do something, do it to the end. Don't stop to ask "Shall I?" or hand back a plan instead. Ask only when the choice is really theirs or a step can't be undone; sensitive tools ask for Allow on their own.
 - Finish every task (not a quick answer) with a short summary for the person, in their language and plain words, never a raw log, diff or test output:
   - **Done:** what you did and the result.

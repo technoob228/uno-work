@@ -613,6 +613,63 @@ describe("findSidebarProposedPlan", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("collapses the updates of one long think into one row, the latest", () => {
+    const thinking = (id: string, at: string, partId: string, detail: string) =>
+      makeActivity({
+        id,
+        createdAt: at,
+        kind: "task.progress",
+        summary: "Reasoning update",
+        tone: "info",
+        payload: { taskId: `reasoning:${partId}`, summary: "Thinking it through", detail },
+      });
+    const entries = deriveWorkLogEntries(
+      [
+        thinking("r1", "2026-10-28T10:00:10.000Z", "p1", "…routes for todos"),
+        thinking("r2", "2026-10-28T10:00:40.000Z", "p1", "…then tests"),
+        thinking("r3", "2026-10-28T10:01:10.000Z", "p1", "…write server.js first"),
+        makeActivity({
+          id: "tool",
+          createdAt: "2026-10-28T10:01:20.000Z",
+          kind: "tool.completed",
+          summary: "Write",
+          payload: { itemType: "file_change", detail: "server.js" },
+        }),
+        thinking("r4", "2026-10-28T10:02:00.000Z", "p2", "…now the tests"),
+      ],
+      undefined,
+    );
+    expect(entries.map((entry) => [entry.label, entry.detail ?? null, entry.tone])).toEqual([
+      ["Thinking it through", "…write server.js first", "thinking"],
+      ["Write", "server.js", "tool"],
+      ["Thinking it through", "…now the tests", "thinking"],
+    ]);
+  });
+
+  it("keeps other task progress rows (Codex) one per update", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "c1",
+          kind: "task.progress",
+          tone: "info",
+          payload: { taskId: "task-1", summary: "Reading the repo" },
+        }),
+        makeActivity({
+          id: "c2",
+          kind: "task.progress",
+          tone: "info",
+          payload: { taskId: "task-1", summary: "Planning the change" },
+        }),
+      ],
+      undefined,
+    );
+    expect(entries.map((entry) => entry.label)).toEqual([
+      "Reading the repo",
+      "Planning the change",
+    ]);
+  });
+
   it("omits tool started entries and keeps completed entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
