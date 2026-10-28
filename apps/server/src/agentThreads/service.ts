@@ -46,6 +46,17 @@ import * as crypto from "node:crypto";
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
+import type {
+  RemoteChatStarted,
+  RemoteChatStartInput,
+  RemoteTarget,
+} from "../remoteComputers/RemoteComputers.ts";
+import type { RemoteComputerError } from "../remoteComputers/remoteDaemonClient.ts";
+import {
+  portableFolder,
+  remoteChatPermission,
+  remoteChatStartedNote,
+} from "../remoteComputers/remoteChatPolicy.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import {
@@ -84,6 +95,25 @@ import {
 
 export type AgentThreadsScope = "own-project" | "any-project";
 
+export interface AgentThreadsRemoteDeps {
+  readonly resolveTarget: (computerId: unknown) => Effect.Effect<RemoteTarget, RemoteComputerError>;
+  readonly startChat: (
+    input: RemoteChatStartInput,
+  ) => Effect.Effect<RemoteChatStarted, RemoteComputerError>;
+  /** The assistant's name as the person sees it. */
+  readonly assistantName: (projectId: string) => Effect.Effect<string>;
+  /** Report the chat's outcome back to the assistant's conversation (assistantPush). */
+  readonly watch: (input: {
+    readonly threadId: string;
+    readonly assistantProjectId: string;
+    readonly conversationThreadId: string;
+    readonly boxId: number;
+    readonly computerName: string;
+  }) => Effect.Effect<void>;
+  /** This computer's home, to send a local project's folder portably. */
+  readonly home: string;
+}
+
 export interface AgentThreadsReply {
   readonly status: number;
   readonly body: unknown;
@@ -119,6 +149,11 @@ export interface AgentThreadsDeps {
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
    */
   readonly getOwnBoxId?: Effect.Effect<number | null>;
+  /**
+   * Chats on another computer of the account (`remoteComputers/`). Absent:
+   * only this computer (the old `checkTargetComputer` rule).
+   */
+  readonly remote?: AgentThreadsRemoteDeps;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -135,6 +170,9 @@ const ok = (body: Record<string, unknown>, status = 200): AgentThreadsReply => (
   status,
   body: { ok: true, ...body },
 });
+
+const expandHome = (raw: string, home: string) =>
+  raw === "~" ? home : raw.startsWith("~/") ? `${home}${raw.slice(1)}` : raw;
 
 const commandId = (tag: string) => CommandId.make(`agent:${tag}:${crypto.randomUUID()}`);
 
@@ -462,6 +500,90 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       );
     });
 
+  /**
+   * The chat goes to another computer of the account: same preset check,
+   * the assistant's "selected projects" boundary stays here (refused), the
+   * mode never wider than the caller's own. A conversation of an assistant
+   * hears the outcome by itself (assistantPush remote watch).
+   */
+  const startRemote = (
+    caller: OrchestrationThreadShell,
+    remote: AgentThreadsRemoteDeps,
+    target: { readonly boxId: number; readonly name: string },
+    input: {
+      readonly text: string;
+      readonly title: string | undefined;
+      readonly provider: string | undefined;
+      readonly model: string | undefined;
+      readonly projectId: string | undefined;
+      readonly cwd: string | undefined;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const { assistant } = yield* callerAccess(caller);
+      yield* presetCheck(assistant, "start-chat");
+      const assistantName =
+        assistant === null ? null : yield* remote.assistantName(assistant.projectId);
+      const permission = remoteChatPermission({
+        allowlist: assistant === null ? null : assistant.allowlist,
+        assistantName,
+        computerName: target.name,
+      });
+      if (!permission.ok) return yield* fail(403, permission.code, permission.message);
+      // A project of THIS computer named by id goes as its folder: synced
+      // projects keep the same folder under the home on every computer.
+      let cwd = input.cwd;
+      let projectId = input.projectId;
+      if (projectId !== undefined) {
+        const local = yield* deps.projections.getProjectShellById(ProjectId.make(projectId));
+        if (Option.isSome(local)) {
+          cwd = portableFolder(local.value.workspaceRoot, remote.home);
+          projectId = undefined;
+        }
+      }
+      const started = yield* remote
+        .startChat({
+          target,
+          text: input.text,
+          title: input.title,
+          cwd,
+          projectId,
+          provider: input.provider,
+          model: input.model,
+          runtimeMode: effectiveRuntime(caller, assistant),
+          startedBy: {
+            assistantName: assistantName ?? `Chat “${caller.title}”`,
+            assistantProjectId: assistant?.projectId ?? null,
+            fromThreadId: caller.id,
+          },
+        })
+        .pipe(
+          Effect.catch((error) =>
+            fail(error.code === "not_found" ? 404 : 409, `computer_${error.code}`, error.message),
+          ),
+        );
+      const conversation =
+        assistant !== null &&
+        (isAssistantConversation(caller) || caller.projectId === assistant.projectId);
+      if (conversation) {
+        yield* remote.watch({
+          threadId: started.threadId,
+          assistantProjectId: assistant.projectId,
+          conversationThreadId: caller.id,
+          boxId: target.boxId,
+          computerName: target.name,
+        });
+      }
+      return ok({
+        threadId: started.threadId,
+        projectId: started.projectId,
+        title: started.title,
+        computer: { id: target.boxId, name: target.name },
+        controller: "agent",
+        note: remoteChatStartedNote(target.name, conversation),
+      });
+    });
+
   const createThread = (authorization: BridgeAuthorization | null, rawBody: unknown) =>
     run("create", authorization, (caller) =>
       Effect.gen(function* () {
@@ -475,29 +597,59 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         }
         const text = checkMessageText(body.text);
         if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
-        const target = checkTargetComputer(
-          body.computerId,
-          deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
-        );
-        if (!target.ok) return yield* fail(403, target.code, target.message);
         const title = optionalString(body, "title", AGENT_THREAD_MAX_TITLE_CHARS);
         const provider = optionalString(body, "provider", 200);
         const model = optionalString(body, "model", 500);
         const projectId = optionalString(body, "projectId", 500);
-        const cwd = optionalString(body, "cwd", 4096);
-        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !cwd.ok) {
+        const rawCwd = optionalString(body, "cwd", 4096);
+        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok) {
           return yield* fail(
             400,
             "invalid_payload",
             `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd" — строки.`,
           );
         }
+        if (deps.remote === undefined) {
+          const target = checkTargetComputer(
+            body.computerId,
+            deps.getOwnBoxId ? yield* deps.getOwnBoxId : null,
+          );
+          if (!target.ok) return yield* fail(403, target.code, target.message);
+        } else {
+          const remote = deps.remote;
+          const target = yield* remote
+            .resolveTarget(body.computerId)
+            .pipe(
+              Effect.catch((error) =>
+                fail(
+                  error.code === "not_found" ? 404 : 409,
+                  `computer_${error.code}`,
+                  error.message,
+                ),
+              ),
+            );
+          if (target.kind === "box") {
+            return yield* startRemote(caller, remote, target, {
+              text: text.value,
+              title: title.value,
+              provider: provider.value,
+              model: model.value,
+              projectId: projectId.value,
+              cwd: rawCwd.value,
+            });
+          }
+        }
+        // A folder sent for another computer comes unexpanded ("~/site").
+        const cwd =
+          rawCwd.value !== undefined && deps.remote !== undefined
+            ? expandHome(rawCwd.value, deps.remote.home)
+            : rawCwd.value;
 
         const { assistant } = yield* callerAccess(caller);
         yield* presetCheck(assistant, "start-chat");
         const project = yield* resolveTargetProject(caller, {
           projectId: projectId.value,
-          cwd: cwd.value,
+          cwd,
         });
         const sameProject = project.id === caller.projectId;
 

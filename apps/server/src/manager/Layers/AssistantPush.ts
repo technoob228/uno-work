@@ -41,6 +41,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorPendingReplyRepository } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import { remoteComputersOption } from "../../remoteComputers/RemoteComputers.ts";
 import {
   assistantPushEnabled,
   decideTurnStart,
@@ -52,7 +53,9 @@ import {
   guessConversation,
   markBatchSent,
   noticeFromProbe,
+  noticeFromRemoteStatus,
   pruneWatches,
+  remotePollEveryMs,
   PUSH_CALLER_ROUTE_TTL_MS,
   rememberSent,
   upsertWatch,
@@ -127,6 +130,8 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
     const telegram = yield* ManagerTelegramService;
     const slack = yield* ManagerSlackService;
     const { probe } = yield* makeThreadSettlementProbe;
+    // Chats on other computers of the account (assistants D): polled there.
+    const remoteComputers = yield* remoteComputersOption;
     const serverConfig = Option.getOrNull(yield* Effect.serviceOption(ServerConfig));
     const file = serverConfig === null ? null : stateFile(serverConfig.stateDir);
 
@@ -318,6 +323,50 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         const sentKeys = new Set(state.sentKeys);
         let changed = state !== (yield* Ref.get(stateRef));
         for (const watch of state.watches) {
+          if (watch.remote !== undefined) {
+            const remote = watch.remote;
+            const ageMs = nowMs - Date.parse(watch.startedAt);
+            if (
+              remoteComputers === null ||
+              nowMs - (probedAt.get(watch.threadId) ?? 0) < remotePollEveryMs(ageMs)
+            ) {
+              continue;
+            }
+            nextProbedAt.set(watch.threadId, nowMs);
+            const status = yield* remoteComputers
+              .chatStatus({
+                boxId: remote.boxId,
+                computerName: remote.computerName,
+                threadId: watch.threadId,
+              })
+              .pipe(
+                Effect.timeoutOption("25 seconds"),
+                Effect.map(Option.getOrNull),
+                Effect.catch((error) =>
+                  Effect.logDebug("assistant push: remote chat status unavailable").pipe(
+                    Effect.annotateLogs({ threadId: watch.threadId, code: error.code }),
+                    Effect.as(null),
+                  ),
+                ),
+              );
+            if (status === null) continue;
+            yield* remoteComputers.noteStatus(watch.threadId, status);
+            const result = noticeFromRemoteStatus({ watch, status, sentKeys, nowMs });
+            if (result === null) continue;
+            sentKeys.add(result.notice.key);
+            state = rememberSent(state, result.notice.key);
+            state = { ...state, outbox: [...state.outbox, result.notice] };
+            if (result.endsWatch) state = dropWatch(state, watch.threadId);
+            changed = true;
+            yield* Effect.logInfo("assistant push: remote outcome noticed").pipe(
+              Effect.annotateLogs({
+                threadId: watch.threadId,
+                boxId: remote.boxId,
+                outcome: result.notice.outcome,
+              }),
+            );
+            continue;
+          }
           const due =
             dirty.has(watch.threadId) ||
             nowMs - (probedAt.get(watch.threadId) ?? 0) >= PROBE_EVERY_MS;
@@ -530,6 +579,28 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           )
         : Effect.void;
 
+    const watchRemote: AssistantPushServiceShape["watchRemote"] = (input) =>
+      enabled
+        ? exclusive(
+            Effect.gen(function* () {
+              const nowMs = yield* Clock.currentTimeMillis;
+              const at = new Date(nowMs).toISOString();
+              const via = yield* viaOf(input.conversationThreadId);
+              yield* commit(
+                upsertWatch(yield* Ref.get(stateRef), {
+                  threadId: input.threadId,
+                  assistantProjectId: input.assistantProjectId,
+                  conversationThreadId: input.conversationThreadId,
+                  via,
+                  since: at,
+                  startedAt: at,
+                  remote: { boxId: input.boxId, computerName: input.computerName },
+                }),
+              );
+            }),
+          )
+        : Effect.void;
+
     const reportsOutcomeOf: AssistantPushServiceShape["reportsOutcomeOf"] = (threadId) =>
       Effect.gen(function* () {
         if (!enabled) return false;
@@ -564,6 +635,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
     return {
       enabled,
       noteCaller,
+      watchRemote,
       reportsOutcomeOf,
       watchedBy,
     } satisfies AssistantPushServiceShape;

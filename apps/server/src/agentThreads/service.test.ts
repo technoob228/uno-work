@@ -21,7 +21,13 @@ import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
 import { AGENTS_CLOSED_MESSAGE, HUMAN_ACTIVE_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
-import { type AgentThreadsScope, makeAgentThreadsHandlers } from "./service.ts";
+import {
+  type AgentThreadsRemoteDeps,
+  type AgentThreadsScope,
+  makeAgentThreadsHandlers,
+} from "./service.ts";
+import type { RemoteChatStartInput } from "../remoteComputers/RemoteComputers.ts";
+import { remoteError } from "../remoteComputers/remoteDaemonClient.ts";
 
 const OWN_PROJECT = "project-own" as ProjectId;
 const OTHER_PROJECT = "project-other" as ProjectId;
@@ -124,6 +130,7 @@ function makeFixture(options?: {
   readonly callerAssistant?: (caller: OrchestrationThreadShell) => AssistantAccessView | null;
   /** Thread every project inherits its modes from (default: none). */
   readonly inheritModesFrom?: ThreadId;
+  readonly remote?: AgentThreadsRemoteDeps;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -205,6 +212,7 @@ function makeFixture(options?: {
           }
         : {}),
     getProviders: Effect.succeed(providers),
+    ...(options?.remote ? { remote: options.remote } : {}),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
     sleep: (ms) =>
@@ -1153,6 +1161,112 @@ describe("agent threads bridge: computerId (assistants MVP)", () => {
       assert.strictEqual(other.status, 403);
       assert.strictEqual(body(other).error, "computer_not_allowed");
       assert.match(String(body(other).message), /not allowed yet/);
+      assert.strictEqual(dispatched.length, 2);
+    }),
+  );
+});
+
+describe("agent threads bridge: chats on another computer (assistants D)", () => {
+  const UNO = "assistant-uno" as ProjectId;
+  const CONVERSATION = "thread-uno" as ThreadId;
+  const remoteFixture = (allowlist: AssistantAccessView["allowlist"] = "all") => {
+    const started: RemoteChatStartInput[] = [];
+    const watched: unknown[] = [];
+    const remote: AgentThreadsRemoteDeps = {
+      resolveTarget: (computerId) =>
+        computerId === "stage-work"
+          ? Effect.succeed({ kind: "box", boxId: 2531, name: "stage-work" } as const)
+          : computerId === "gone"
+            ? Effect.fail(remoteError("not_found", "There is no computer gone."))
+            : Effect.succeed({ kind: "this" } as const),
+      startChat: (input) =>
+        Effect.sync(() => {
+          started.push(input);
+          return {
+            threadId: "remote-thread" as ThreadId,
+            projectId: "remote-project" as ProjectId,
+            title: input.title ?? "Remote",
+            computer: { boxId: input.target.boxId, name: input.target.name },
+          };
+        }),
+      assistantName: () => Effect.succeed("Uno"),
+      watch: (input) => Effect.sync(() => void watched.push(input)),
+      home: "/home/uno",
+    };
+    const fixture = makeFixture({
+      threads: [
+        threadShell(CONVERSATION, { projectId: UNO, runtimeMode: "auto-accept-edits" }),
+        threadShell(CALLER),
+      ],
+      projects: [
+        projectShell(OWN_PROJECT, { workspaceRoot: "/home/uno/projects/site" }),
+        projectShell(UNO),
+      ],
+      callerAssistant: (caller) =>
+        caller.projectId === UNO ? { projectId: UNO, preset: "helper", allowlist } : null,
+      remote,
+    });
+    return { ...fixture, started, watched };
+  };
+
+  it.effect(
+    "starts there in at most the assistant's mode and reports back to its conversation",
+    () =>
+      Effect.gen(function* () {
+        const { handlers, dispatched, started, watched } = remoteFixture();
+        const reply = yield* handlers.createThread(scoped(CONVERSATION), {
+          text: "Fix the build",
+          computerId: "stage-work",
+          projectId: OWN_PROJECT,
+        });
+        assert.strictEqual(reply.status, 200);
+        assert.strictEqual(body(reply).threadId, "remote-thread");
+        assert.deepStrictEqual(body(reply).computer, { id: 2531, name: "stage-work" });
+        assert.match(String(body(reply).note), /end your turn/);
+        assert.strictEqual(dispatched.length, 0);
+        assert.strictEqual(started[0]?.runtimeMode, "auto-accept-edits");
+        // A project of this computer goes as its folder, portable across homes.
+        assert.strictEqual(started[0]?.cwd, "~/projects/site");
+        assert.strictEqual(started[0]?.projectId, undefined);
+        assert.deepStrictEqual(started[0]?.startedBy, {
+          assistantName: "Uno",
+          assistantProjectId: UNO,
+          fromThreadId: CONVERSATION,
+        });
+        assert.deepStrictEqual(watched, [
+          {
+            threadId: "remote-thread",
+            assistantProjectId: UNO,
+            conversationThreadId: CONVERSATION,
+            boxId: 2531,
+            computerName: "stage-work",
+          },
+        ]);
+      }),
+  );
+
+  it.effect("an assistant held to selected projects stays on this computer", () =>
+    Effect.gen(function* () {
+      const { handlers, started } = remoteFixture([OWN_PROJECT]);
+      const reply = yield* handlers.createThread(scoped(CONVERSATION), {
+        text: "hi",
+        computerId: "stage-work",
+      });
+      assert.strictEqual(reply.status, 403);
+      assert.strictEqual(body(reply).error, "remote_not_allowed");
+      assert.match(String(body(reply).message), /selected projects/);
+      assert.strictEqual(started.length, 0);
+    }),
+  );
+
+  it.effect("an unknown computer is a plain-words 404; this computer runs here", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = remoteFixture();
+      const gone = yield* handlers.createThread(scoped(CALLER), { text: "hi", computerId: "gone" });
+      assert.strictEqual(gone.status, 404);
+      assert.strictEqual(body(gone).error, "computer_not_found");
+      const here = yield* handlers.createThread(scoped(CALLER), { text: "hi", computerId: "this" });
+      assert.strictEqual(here.status, 200);
       assert.strictEqual(dispatched.length, 2);
     }),
   );

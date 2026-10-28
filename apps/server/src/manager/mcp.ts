@@ -243,7 +243,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         computerId: {
           type: "string",
           description:
-            'Computer the chat runs on (box id or "this"). Leave it out: for now only this computer is allowed.',
+            'Another computer of the person\'s Uno account to run the chat on: its name or id ("stage-work", "box-2531"; account_overview lists them). Leave it out for this computer. There, projectId is a project of that computer, or one of this computer (its folder is used there). It starts at once; the result comes back to you as a work update.',
         },
       },
       required: ["projectId", "title", "prompt"],
@@ -482,8 +482,19 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
       properties: {
         name: { type: "string" },
         emoji: { type: "string" },
-        roles: { type: "array", items: { type: "string" } },
-        character: { type: "string" },
+        roles: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            'What it takes on, e.g. ["Development"], ["Accounts: X, Instagram"], ["Tasks"].',
+        },
+        character: { type: "string", description: "How it talks: its persona in a sentence." },
+        face: {
+          type: "string",
+          enum: ["human", "animal", "robot", "alien"],
+          description:
+            "Draw it a face (Uno AI, in the background; the emoji shows until it is ready).",
+        },
         skills: { type: "array", items: { type: "string" } },
         channel: { type: "string", enum: ["here", "telegram", "slack"] },
         preset: {
@@ -547,7 +558,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "assistant_create",
     description:
-      "Set up a helper assistant for the person, on this computer, by yourself (no confirmation; the person gets an Inbox notice and sees it on their team). It can never get more than you have: preset, projects and app levels default to yours and may only be narrower — anything wider is refused. Give it a name, optionally an emoji, roles, character, a narrower preset / projects / apps, and its first task. Do this only when the person asked for a helper or clearly needs one.",
+      'Set up another assistant for the person, on this computer (the person gets an Inbox notice and sees it in the sidebar; in "Asks first" mode it waits for their Allow). It can never get more than you have: preset, projects and app levels default to yours and may only be narrower — anything wider is refused. Give it a name, optionally an emoji or a drawn face, roles, character, a narrower preset / projects / apps, and its first task. Do this only when the person asked for one or clearly needs one.',
     inputSchema: {
       type: "object",
       properties: {

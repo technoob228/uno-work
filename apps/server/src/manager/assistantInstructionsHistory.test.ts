@@ -72,8 +72,8 @@ describe("AGENTS.md of assistants made by older versions", () => {
     });
   });
 
-  it("2026-10-22.2: a dispatcher that hands off and ends its turn, status from one work_status", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-22.2");
+  it("2026-10-28.1: an orchestrator that hands off and ends its turn, status from one work_status", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-28.1");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("END YOUR TURN");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Uno Work — work update");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("call `work_status` once");
@@ -95,7 +95,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-22.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
     expect(instructionsVersion(branch)).toBe("2026-10-22.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -122,7 +122,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
     expect(instructionsVersion(branch)).toBe("2026-10-21.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -143,9 +143,35 @@ describe("AGENTS.md of assistants made by older versions", () => {
         known: SHIPPED_ASSISTANT_INSTRUCTIONS,
       });
       expect(plan.state).toBe("current");
-      expect(plan.write).toContain("2026-10-22.2");
+      expect(plan.write).toContain("2026-10-28.1");
       expect(plan.write).toContain("Your name is Ana.");
     }
+  });
+
+  it("2026-10-28.1: orchestrates through chats on any computer, one Uno thread, waits for Allow without holding", () => {
+    for (const words of [
+      "# Uno Assistant (orchestrator)",
+      "`computerId`",
+      "`account_overview`",
+      "Settings → Computer access",
+      "lives in ONE conversation",
+      "## Waiting for the person's Allow",
+      '`{"login": "<site>"}`',
+      "`face`",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("For now only this computer");
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    expect(instructionsVersion(previous)).toBe("2026-10-22.2");
+    const plan = planInstructions({
+      current: joinAgentsProfile(previous, profile),
+      base: previous,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("## Waiting for the person's Allow");
   });
 
   it("an edited 2026-10-14.1 file is offered the update, not overwritten", () => {

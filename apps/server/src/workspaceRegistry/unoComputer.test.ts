@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { ControlPlaneHttpError } from "./unoCloudParse.ts";
+import { boxesFailureMessage } from "./UnoCloudService.ts";
 import {
+  accountWideKeyFor,
+  isMachineScopeDisabled,
+  MACHINES_READ_DISABLED_MESSAGE,
   NOT_LINKED_MESSAGE,
   classifyFailure,
   installComputerApp,
@@ -1173,5 +1177,31 @@ describe("App Store v3: publisher and phone apps", () => {
     expect(parseTemplateMobile(null)).toBeNull();
     const [none] = parseAppTemplates({ templates: [{ id: "memos" }] });
     expect(none?.mobile).toBeNull();
+  });
+});
+
+describe("accountWideKeyFor (audit 27.10 #1)", () => {
+  it("the account key on a laptop; the machine's token where settings hold the AI key", () => {
+    expect(accountWideKeyFor({ accountKey: "uno_acc", boxToken: "uno_agt_m" })).toEqual({
+      key: "uno_acc",
+      kind: "account",
+    });
+    expect(accountWideKeyFor({ accountKey: "unollm_ai", boxToken: " uno_agt_m " })).toEqual({
+      key: "uno_agt_m",
+      kind: "machine",
+    });
+    expect(accountWideKeyFor({ accountKey: "unollm_ai", boxToken: "" }).kind).toBe("none");
+  });
+
+  it("a machine without machines:read gets the way to allow it, not 401/403", () => {
+    const disabled = new ControlPlaneHttpError(
+      403,
+      '403: {"error":"WORK_MACHINE_SCOPE_DISABLED: the account owner has not allowed this machine machines:read"}',
+    );
+    expect(isMachineScopeDisabled(disabled)).toBe(true);
+    expect(boxesFailureMessage(disabled, "machine")).toBe(MACHINES_READ_DISABLED_MESSAGE);
+    expect(boxesFailureMessage(new ControlPlaneHttpError(401, "401: x"), "account")).toBe(
+      "Uno refused this machine's key.",
+    );
   });
 });

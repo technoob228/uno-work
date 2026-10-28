@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 import { Clock, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -49,6 +50,14 @@ import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
+import { readTeam } from "../../assistants/teamStore.ts";
+import { remoteComputersOption } from "../../remoteComputers/RemoteComputers.ts";
+import { assistantDisplayName } from "../../remoteComputers/remoteChatHost.ts";
+import {
+  portableFolder,
+  remoteChatPermission,
+  remoteChatStartedNote,
+} from "../../remoteComputers/remoteChatPolicy.ts";
 import { assistantProjectOfCaller } from "../../assistants/schedules.ts";
 import { owningAssistant, readStartedChats } from "../../assistants/localAssistantStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -56,7 +65,9 @@ import { isAssistantConversationThread } from "../assistantPush.ts";
 import { AssistantPushService } from "../Services/AssistantPush.ts";
 import {
   finishWorkStatus,
+  pickRemoteWorkStatus,
   pickWorkStatusCandidates,
+  remoteWorkStatusRow,
   workStatusRow,
   type WorkStatusShell,
 } from "../workStatus.ts";
@@ -592,11 +603,117 @@ const makeManagerToolService = Effect.gen(function* () {
       ),
   });
 
+  const remoteComputers = yield* remoteComputersOption;
+
+  /** The assistant's name as the person sees it (its team name, else its project's title). */
+  const assistantNameOf = (projectId: string) =>
+    Effect.gen(function* () {
+      const project = yield* projectionSnapshotQuery
+        .getProjectShellById(projectId as ProjectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const team =
+        serverConfig === null
+          ? null
+          : yield* Effect.promise(() => readTeam(serverConfig.stateDir, projectId)).pipe(
+              Effect.orElseSucceed(() => null),
+            );
+      return assistantDisplayName(
+        projectId,
+        Option.isSome(project) ? project.value.title : "",
+        team?.name ?? null,
+      );
+    });
+
+  /** create_thread on another computer of the account (assistants D). */
+  const createRemoteThread = (
+    caller: ManagerCaller,
+    input: Parameters<ManagerToolServiceShape["createThread"]>[1],
+    target: { readonly boxId: number; readonly name: string },
+  ) =>
+    Effect.gen(function* () {
+      if (remoteComputers === null) {
+        return yield* new ManagerInvalidRequestError({
+          detail: "Starting chats on another computer isn't available in this Uno Work.",
+        });
+      }
+      yield* requirePresetAllows(caller, "start-chat");
+      const assistantProjectId = assistantProjectOfCaller(caller);
+      const assistantName =
+        assistantProjectId === null ? null : yield* assistantNameOf(assistantProjectId);
+      const permission = remoteChatPermission({
+        allowlist: caller.projectAllowlist,
+        assistantName,
+        computerName: target.name,
+      });
+      if (!permission.ok) {
+        return yield* new ManagerInvalidRequestError({ detail: permission.message });
+      }
+      if (!executesAtOnce(caller)) {
+        return yield* new ManagerInvalidRequestError({
+          detail:
+            "Only an assistant's own token starts chats on another computer (they can't wait as a proposal). Start it on this computer instead.",
+        });
+      }
+      // A project of this computer goes as its folder; otherwise the id is
+      // the other computer's project.
+      const local = yield* projectionSnapshotQuery
+        .getProjectShellById(input.projectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const started = yield* remoteComputers
+        .startChat({
+          target,
+          text: input.prompt,
+          title: input.title,
+          ...(Option.isSome(local)
+            ? { cwd: portableFolder(local.value.workspaceRoot, os.homedir()) }
+            : { projectId: input.projectId }),
+          ...(input.modelSelection
+            ? { provider: input.modelSelection.instanceId, model: input.modelSelection.model }
+            : {}),
+          runtimeMode: createRuntimeFor(caller, input.runtimeMode ?? "approval-required"),
+          startedBy: {
+            assistantName: assistantName ?? "Uno manager",
+            assistantProjectId,
+            fromThreadId: caller.callerThreadId ?? "",
+          },
+        })
+        .pipe(
+          Effect.mapError((error) => new ManagerInvalidRequestError({ detail: error.message })),
+        );
+      const watched =
+        push !== null && assistantProjectId !== null && caller.callerThreadId !== undefined;
+      if (watched) {
+        yield* push.watchRemote({
+          threadId: started.threadId,
+          assistantProjectId,
+          conversationThreadId: caller.callerThreadId,
+          boxId: target.boxId,
+          computerName: target.name,
+        });
+      }
+      return {
+        status: "started-on-another-computer",
+        threadId: started.threadId,
+        computer: { boxId: target.boxId, name: target.name },
+        title: started.title,
+        note: remoteChatStartedNote(target.name, watched),
+      } satisfies ManagerWriteReceipt;
+    });
+
   const createThread: ManagerToolServiceShape["createThread"] = (caller, input) =>
     Effect.gen(function* () {
-      const target = checkTargetComputer(input.computerId, yield* ownBoxId);
-      if (!target.ok) {
-        return yield* new ManagerInvalidRequestError({ detail: target.message });
+      if (remoteComputers === null) {
+        const target = checkTargetComputer(input.computerId, yield* ownBoxId);
+        if (!target.ok) {
+          return yield* new ManagerInvalidRequestError({ detail: target.message });
+        }
+      } else {
+        const target = yield* remoteComputers
+          .resolveTarget(input.computerId)
+          .pipe(
+            Effect.mapError((error) => new ManagerInvalidRequestError({ detail: error.message })),
+          );
+        if (target.kind === "box") return yield* createRemoteThread(caller, input, target);
       }
       yield* requirePresetAllows(caller, "start-chat");
       yield* requireProjectAllowed(caller, input.projectId);
@@ -901,7 +1018,58 @@ const makeManagerToolService = Effect.gen(function* () {
           }),
         { concurrency: 4 },
       );
-      const finished = finishWorkStatus(rows, omitted);
+      // Chats this assistant started on other computers (assistants D): the
+      // last status the done push read there, refreshed now when still going.
+      const remoteRows =
+        remoteComputers === null || me === null
+          ? []
+          : yield* Effect.gen(function* () {
+              const outgoing = (yield* remoteComputers.outgoing).filter(
+                (entry) => entry.assistantProjectId === me,
+              );
+              const picked = new Set(
+                pickRemoteWorkStatus(outgoing, nowMs).map((entry) => entry.threadId),
+              );
+              const mine = outgoing.filter((entry) => picked.has(entry.threadId));
+              return yield* Effect.forEach(
+                mine,
+                (entry) =>
+                  Effect.gen(function* () {
+                    const live =
+                      entry.state === "running" ||
+                      entry.state === "idle" ||
+                      entry.state === "waiting-for-you";
+                    const fresh = live
+                      ? yield* remoteComputers
+                          .chatStatus({
+                            boxId: entry.boxId,
+                            computerName: entry.computerName,
+                            threadId: entry.threadId,
+                          })
+                          .pipe(
+                            Effect.timeoutOption("4 seconds"),
+                            Effect.map(Option.getOrNull),
+                            Effect.orElseSucceed(() => null),
+                          )
+                      : null;
+                    if (fresh !== null) yield* remoteComputers.noteStatus(entry.threadId, fresh);
+                    return remoteWorkStatusRow(
+                      fresh === null
+                        ? entry
+                        : {
+                            ...entry,
+                            state: fresh.state,
+                            lastMessage: fresh.lastMessage,
+                            title: fresh.title || entry.title,
+                            checkedAt: new Date(nowMs).toISOString(),
+                          },
+                      { nowMs, reportPending: pending.has(entry.threadId as ThreadId) },
+                    );
+                  }),
+                { concurrency: 4 },
+              );
+            });
+      const finished = finishWorkStatus([...rows, ...remoteRows], omitted);
       return {
         now: new Date(nowMs).toISOString(),
         threads: [...finished.threads],
