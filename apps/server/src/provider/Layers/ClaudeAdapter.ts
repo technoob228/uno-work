@@ -93,6 +93,7 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { describeClaudeSystemMessage } from "./claudeSystemNotices.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -1362,6 +1363,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     message: string,
     detail?: unknown,
+    /** One line for the Work log instead of "Runtime warning". */
+    summary?: string,
   ) {
     const turnState = context.turnState;
     const stamp = yield* makeEventStamp();
@@ -1375,6 +1378,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         message,
         ...(detail !== undefined ? { detail } : {}),
+        ...(summary !== undefined ? { summary } : {}),
       },
       providerRefs: nativeProviderRefs(context),
     });
@@ -2288,13 +2292,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         });
         return;
-      default:
-        yield* emitRuntimeWarning(
-          context,
-          `Unhandled Claude system message subtype '${message.subtype}'.`,
-          message,
-        );
+      default: {
+        // Claude Code's bookkeeping (git state, background tasks, command
+        // lists…) and subtypes newer than this adapter stay out of the Work
+        // log; a few say something a person can use (P11, 28.10).
+        const notice = describeClaudeSystemMessage(message as Record<string, unknown>);
+        if (notice.kind === "notice") {
+          yield* emitRuntimeWarning(context, notice.summary, message, notice.summary);
+        } else if (!notice.known) {
+          yield* Effect.logDebug("claude: system message not shown", {
+            subtype: (message as { subtype?: unknown }).subtype,
+          });
+        }
         return;
+      }
     }
   });
 
@@ -2403,11 +2414,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* handleSdkTelemetryMessage(context, message);
         return;
       default:
-        yield* emitRuntimeWarning(
-          context,
-          `Unhandled Claude SDK message type '${message.type}'.`,
-          message,
-        );
+        // A message type newer than this adapter (`prompt_suggestion`,
+        // `command_lifecycle`…): kept in the native log, not in the Work log.
+        yield* Effect.logDebug("claude: SDK message not shown", {
+          type: (message as { type?: unknown }).type,
+        });
         return;
     }
   });

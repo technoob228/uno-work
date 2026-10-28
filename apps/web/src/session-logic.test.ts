@@ -613,6 +613,33 @@ describe("findSidebarProposedPlan", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("drops the old Claude bookkeeping warnings, keeps warnings written for people (P11, 28.10)", () => {
+    const warning = (id: string, message: string, summary = "Runtime warning") =>
+      makeActivity({
+        id,
+        kind: "runtime.warning",
+        summary,
+        tone: "info",
+        payload: { message, detail: { type: "system" } },
+      });
+    const entries = deriveWorkLogEntries(
+      [
+        warning("w1", "Unhandled Claude system message subtype 'vcs_state_changed'."),
+        warning("w2", "Unhandled Claude system message subtype 'task_updated'."),
+        warning("w3", "Unhandled Claude SDK message type 'command_lifecycle'."),
+        warning(
+          "w4",
+          "Claude's servers are busy — trying again (2 of 10)",
+          "Claude's servers are busy — trying again (2 of 10)",
+        ),
+        warning("w5", "Reconnecting... 2/5"),
+      ],
+      undefined,
+    );
+    expect(entries.map((entry) => entry.id)).toEqual(["w4", "w5"]);
+    expect(entries[0]?.label).toBe("Claude's servers are busy — trying again (2 of 10)");
+  });
+
   it("collapses the updates of one long think into one row, the latest", () => {
     const thinking = (id: string, at: string, partId: string, detail: string) =>
       makeActivity({

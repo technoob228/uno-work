@@ -3,9 +3,10 @@
  * exactly what "New chat" would give now — the person's "New chats start on"
  * (Settings → AI) when it can run here, else the model last picked in any
  * chat composer (the draft store's sticky pick) when that harness is still
- * there, else the machine's usable default (the Uno gateway on a fresh Work
- * box). A harness not signed in on this computer is skipped: a new chat on it
- * opens straight into "Sign in to Codex" (Misha 18.10, uno-product).
+ * there, else Claude Code when the person's Claude plan is signed in here,
+ * else the machine's usable default (the Uno gateway on a fresh Work box). A
+ * harness not signed in on this computer is skipped: a new chat on it opens
+ * straight into "Sign in to Codex" (Misha 18.10, uno-product).
  */
 import type {
   ModelSelection,
@@ -112,6 +113,29 @@ export function ownAgentStartSelection(input: {
   return openCodeSmart();
 }
 
+/**
+ * Claude Code signed in to the person's Claude plan here (not Uno AI, not an
+ * API key): with no pick of theirs, new chats start there (Misha 28.10, P2:
+ * "Claude just signed in, the new chat said uno · Smart"). The rule: a Claude
+ * subscription on this computer → Claude; none → Uno · Smart as before.
+ */
+export function claudePlanStartSelection(input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
+}): ModelSelection | null {
+  const claude = input.providers.find((candidate) => candidate.instanceId === "claudeAgent");
+  if (!claude || !claude.enabled || !signedInWithOwnAccount(claude)) return null;
+  const type = claude.auth.type;
+  if (type === undefined || type === "apiKey") return null;
+  const model = resolveAppModelSelectionForInstance(
+    claude.instanceId,
+    input.settings,
+    input.providers,
+    null,
+  );
+  return model ? { instanceId: claude.instanceId, model } : null;
+}
+
 /** The person came for their own agent (useOwnAgentStart): where their chats start. */
 export interface OwnAgentStart {
   readonly picked: ProviderAuthDriver | null;
@@ -150,7 +174,9 @@ export function homeStartModelSelection(input: {
         ...(input.ownAgent.openCodeFirst ? { openCodeFirst: true } : {}),
       })
     : null;
-  return ownAgent ?? pickUsableDefaultModelSelection(input.providers);
+  return (
+    ownAgent ?? claudePlanStartSelection(input) ?? pickUsableDefaultModelSelection(input.providers)
+  );
 }
 
 /** The chat would open on a sign-in or install card here, not an answer. */
@@ -189,6 +215,12 @@ export function newThreadStartSelection(input: {
       ...(input.ownAgent.openCodeFirst ? { openCodeFirst: true } : {}),
     });
     if (ownAgent) return ownAgent;
+  }
+  // No pick of theirs yet and their Claude plan signed in here: Claude, not
+  // the project's default (seeded by the machine, often before the sign-in).
+  if (input.stickyActiveProvider === null) {
+    const claudePlan = claudePlanStartSelection(input);
+    if (claudePlan) return claudePlan;
   }
   const opensOn = input.stickyActiveProvider ?? input.projectDefault?.instanceId ?? null;
   if (opensOn === null || input.providers.length === 0) return null;

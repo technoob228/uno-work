@@ -13,8 +13,10 @@
  * Pictures are not a project: a screenshot pasted, dropped or picked with the
  * paperclip is attached to the first message, as in the chat itself.
  * A newcomer's first screen
- * (`minimal`) is only the box and the pills: no folder chip, model or
- * permissions pickers — the defaults a new chat gets.
+ * (`minimal`) is the box, the model with its reasoning, and the pills: no
+ * folder chip or permissions picker — the defaults a new chat gets. The model
+ * shows from the start (Misha 28.10: after signing in to Claude the box had
+ * "no model, no reasoning" — he couldn't see Claude was there and picked).
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -379,26 +381,30 @@ export function HomeComposer({
           )}
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
-          {minimal ? null : (
+          {
             // The chips never push past the box: on a phone (390) they used to
             // run over its right edge and shove the send button out. They
             // shrink, the permission chip keeps only its icon, and anything
             // still too wide scrolls inside the row (same as the chat composer).
+            // The first screen shows the model and its reasoning too (Misha
+            // 28.10, P2: "why can't I pick?") — folder and permissions stay off.
             <div
               className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
-              <FolderChipMenu
-                environmentId={environmentId}
-                folder={folder}
-                onPick={(next) => {
-                  // A folder the chip just made is a project already; the
-                  // chat finds it by path when the task starts.
-                  setFolder(next);
-                  ref.current?.focus();
-                }}
-                testId="home-folder-chip"
-              />
+              {minimal ? null : (
+                <FolderChipMenu
+                  environmentId={environmentId}
+                  folder={folder}
+                  onPick={(next) => {
+                    // A folder the chip just made is a project already; the
+                    // chat finds it by path when the task starts.
+                    setFolder(next);
+                    ref.current?.focus();
+                  }}
+                  testId="home-folder-chip"
+                />
+              )}
               {picker.selection ? (
                 <ProviderModelPicker
                   compact
@@ -431,44 +437,46 @@ export function HomeComposer({
                   triggerClassName="h-7 rounded-full text-xs"
                 />
               ) : null}
-              <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
-                <SelectTrigger
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-auto shrink-0 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
-                  aria-label="Permissions"
-                  title={PERMISSION_MODES[runtimeMode].consequence}
-                  data-testid="home-permissions"
-                >
-                  {(() => {
-                    const Icon = RUNTIME_MODE_ICON[runtimeMode];
-                    return <Icon className="size-3.5" />;
-                  })()}
-                  <span className="hidden min-[440px]:inline">
-                    <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
-                  </span>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  {PERMISSION_MODE_ORDER.map((mode) => {
-                    const Icon = RUNTIME_MODE_ICON[mode];
-                    return (
-                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                        <div className="grid min-w-0 gap-0.5">
-                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                            <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                            {PERMISSION_MODES[mode].label}
-                          </span>
-                          <span className="text-xs leading-4 text-muted-foreground">
-                            {PERMISSION_MODES[mode].consequence}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectPopup>
-              </Select>
+              {minimal ? null : (
+                <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
+                  <SelectTrigger
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-auto shrink-0 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                    aria-label="Permissions"
+                    title={PERMISSION_MODES[runtimeMode].consequence}
+                    data-testid="home-permissions"
+                  >
+                    {(() => {
+                      const Icon = RUNTIME_MODE_ICON[runtimeMode];
+                      return <Icon className="size-3.5" />;
+                    })()}
+                    <span className="hidden min-[440px]:inline">
+                      <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
+                    </span>
+                  </SelectTrigger>
+                  <SelectPopup alignItemWithTrigger={false}>
+                    {PERMISSION_MODE_ORDER.map((mode) => {
+                      const Icon = RUNTIME_MODE_ICON[mode];
+                      return (
+                        <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                          <div className="grid min-w-0 gap-0.5">
+                            <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                              {PERMISSION_MODES[mode].label}
+                            </span>
+                            <span className="text-xs leading-4 text-muted-foreground">
+                              {PERMISSION_MODES[mode].consequence}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectPopup>
+                </Select>
+              )}
             </div>
-          )}
+          }
           <input
             ref={fileInputRef}
             type="file"
@@ -487,10 +495,7 @@ export function HomeComposer({
             aria-label="Attach files"
             title="Attach files or pictures — or paste a screenshot"
             data-testid="home-attach"
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-              minimal && "ml-auto",
-            )}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <PaperclipIcon className="size-4" />
           </button>

@@ -72,6 +72,15 @@ const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
     "Handed to `codex login --with-api-key`; Codex stores it in its own config on that machine.",
 };
 
+/** After this long checking a pasted code, say so and offer a new link. */
+export const CODE_CHECK_SLOW_MS = 30_000;
+
+/** Who checks the pasted code, in the person's words. */
+const CODE_CHECKER: Readonly<Record<ProviderAuthDriver, string>> = {
+  claudeAgent: "Claude",
+  codex: "OpenAI",
+};
+
 /** One-line lead for the sign-in surface, shared by the dialog and the picker pane. */
 export function describeSignInState(label: string, job: AuthJobView | undefined): string {
   return job?.state === "succeeded"
@@ -99,6 +108,28 @@ export function HarnessSignInPanel({
   const active = isJobActive(job);
   const succeeded = job?.state === "succeeded";
   const failed = job?.state === "failed";
+  // The pasted code went to the CLI and it is trading it for a sign-in
+  // (P4, 28.10: nothing on screen moved for 25 s, the box stayed as it was).
+  const checking = active && job?.codeCheck === "checking" && !job.needsCodeInput;
+  const rejected = active && job?.codeCheck === "rejected" && job.needsCodeInput;
+  // A Submit the computer refused (the sign-in isn't waiting any more…).
+  const submitError = active && !checking ? (job?.error ?? null) : null;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!checking) return;
+    const timer = setTimeout(() => setSlow(true), CODE_CHECK_SLOW_MS);
+    return () => clearTimeout(timer);
+  }, [checking]);
+  // That code didn't work: the box starts empty for the next one.
+  useEffect(() => {
+    if (rejected) setCode("");
+  }, [rejected]);
+  const submit = () => {
+    const value = code.trim();
+    if (value.length === 0 || checking) return;
+    onSubmitCode(value);
+  };
 
   const [linkCopied, setLinkCopied] = useState(false);
   const inApp = inAppBrowserName();
@@ -185,7 +216,13 @@ export function HarnessSignInPanel({
               <label className="text-xs font-medium" htmlFor={`harness-code-${driver}`}>
                 Paste the code from the browser
               </label>
-              <div className="flex items-center gap-2">
+              <form
+                className="flex items-center gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submit();
+                }}
+              >
                 <Input
                   id={`harness-code-${driver}`}
                   value={code}
@@ -193,15 +230,52 @@ export function HarnessSignInPanel({
                   placeholder="Authorization code"
                   autoComplete="off"
                   spellCheck={false}
+                  data-testid="harness-sign-in-code"
                 />
                 <Button
                   size="sm"
+                  type="submit"
                   disabled={code.trim().length === 0}
-                  onClick={() => onSubmitCode(code.trim())}
+                  data-testid="harness-sign-in-submit"
                 >
                   Submit
                 </Button>
+              </form>
+              {rejected ? (
+                <p
+                  className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300"
+                  data-testid="harness-sign-in-rejected"
+                >
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  {CODE_CHECKER[driver]} didn&apos;t take that code. Copy the code from the newest
+                  sign-in page and paste it again, or get a new link.
+                </p>
+              ) : null}
+              {submitError ? (
+                <p
+                  className="flex items-start gap-1.5 text-xs text-destructive"
+                  data-testid="harness-sign-in-submit-error"
+                >
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">{submitError}</span>
+                </p>
+              ) : null}
+            </div>
+          ) : checking ? (
+            <div
+              className="flex flex-col gap-1 rounded-lg border border-border bg-muted/30 px-3 py-2.5"
+              data-testid="harness-sign-in-checking"
+              role="status"
+            >
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                Checking the code with {CODE_CHECKER[driver]}…
               </div>
+              <span className="pl-6 text-xs text-muted-foreground">
+                {slow
+                  ? "Taking longer than usual. Keep this open — or get a new link below."
+                  : "Usually a few seconds. Keep this window open."}
+              </span>
             </div>
           ) : active ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

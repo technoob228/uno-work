@@ -11,8 +11,10 @@
  * - The Next step card's "Sign in to Claude Code" opens it too
  *   (`openAgentSignIn`).
  * - Signed in: new chats start on that agent (the "last picked" model, like
- *   setup's AI step — a fixed "New chats start on" still wins), and the account
- *   hears `agent_signed_in` once, so the console moves on as well.
+ *   setup's AI step — a fixed "New chats start on" still wins), Claude's plan
+ *   powers the assistant too (useAdoptSignedInAgent, for every sign-in
+ *   dialog), and the account hears `agent_signed_in` once, so the console
+ *   moves on as well.
  *
  * @module components/computer/home/HomeAgentSignIn
  */
@@ -26,11 +28,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 
 import { useAccountDefaultAi } from "../../../assistant/useAccountDefaultAi";
-import { useComposerDraftStore } from "../../../composerDraftStore";
-import { useSettings } from "../../../hooks/useSettings";
 import { trackFunnel } from "../../../lib/funnel";
 import { isWebLite } from "../../../lite/webLite";
-import { resolveAppModelSelectionForInstance } from "../../../modelSelection";
 import { useServerConfigReady, useServerProviders } from "../../../rpc/serverState";
 import { arrivedAgent } from "../../../unoai/arrivedAgent";
 import { HarnessSignInDialog } from "../../harness/HarnessSignInDialog";
@@ -128,9 +127,6 @@ export function HomeAgentSignIn() {
   const update = useUpdateSetupProgress();
   const settingsReady = useServerConfigReady();
   const setup = useHarnessSetup();
-  const settings = useSettings();
-  const providers = useServerProviders();
-  const setSticky = useComposerDraftStore((store) => store.setStickyModelSelection);
   const accountDefault = agentDriverFromAccountDefault(
     useAccountDefaultAi(ownAgentGoal && !isWebLite),
   );
@@ -182,16 +178,9 @@ export function HomeAgentSignIn() {
     );
   }, [agent.anySignedIn, agent.noSignIn, answers, ownAgentGoal, settingsReady, update]);
 
-  // A sign-in finished in this dialog: new chats start on that agent.
+  // A sign-in finished in this dialog: new chats start on that agent, and
+  // Claude's plan powers the assistant too (useHarnessSetup → useAdoptSignedInAgent).
   const job = openDriver ? setup.authJobs[openDriver] : undefined;
-  const stuck = useRef<string | null>(null);
-  useEffect(() => {
-    if (!openDriver || job?.state !== "succeeded" || stuck.current === openDriver) return;
-    stuck.current = openDriver;
-    const instanceId = ProviderInstanceId.make(openDriver);
-    const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
-    if (model) setSticky({ instanceId, model });
-  }, [job?.state, openDriver, providers, setSticky, settings]);
 
   if (!openDriver) return null;
   return (

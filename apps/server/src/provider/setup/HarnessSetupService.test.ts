@@ -272,6 +272,64 @@ describe("auth jobs", () => {
     expect(harness.runner.authStatus({ jobId: id }).state).toBe("succeeded");
   });
 
+  it("keeps the code box down while the pasted code is checked (P4, 28.10)", async () => {
+    const harness = makeHarness();
+    const { jobId: id } = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick();
+    harness
+      .latest()
+      .input.onOutput(
+        "visit: https://claude.com/cai/oauth/authorize?code=true&state=abc\nPaste code here if prompted > ",
+      );
+    expect(harness.runner.authStatus({ jobId: id }).codeCheck).toBeUndefined();
+
+    const afterSubmit = harness.runner.authSubmitCode({ jobId: id, code: "code-123" });
+    expect(afterSubmit.codeCheck).toBe("checking");
+    expect(afterSubmit.needsCodeInput).toBe(false);
+
+    // Claude Code echoes and works on the code: the old prompt is still in
+    // the log, and used to bring the code box back on every new line.
+    harness.latest().input.onOutput("\n");
+    harness.latest().input.onOutput("Logging in…\n");
+    const checking = harness.runner.authStatus({ jobId: id });
+    expect(checking.needsCodeInput).toBe(false);
+    expect(checking.codeCheck).toBe("checking");
+
+    harness.latest().input.onOutput("Login successful.\n");
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await harness.runner.drain();
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("succeeded");
+  });
+
+  it("asks for the code again when the CLI didn't take it", async () => {
+    const harness = makeHarness();
+    const { jobId: id } = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick();
+    harness
+      .latest()
+      .input.onOutput(
+        "visit: https://claude.com/cai/oauth/authorize?code=true&state=abc\nPaste code here if prompted > ",
+      );
+    harness.runner.authSubmitCode({ jobId: id, code: "stale-code" });
+    harness
+      .latest()
+      .input.onOutput(
+        "OAuth error: Invalid code. Please try again.\nPaste code here if prompted > ",
+      );
+    const rejected = harness.runner.authStatus({ jobId: id });
+    expect(rejected.state).toBe("running");
+    expect(rejected.needsCodeInput).toBe(true);
+    expect(rejected.codeCheck).toBe("rejected");
+
+    // The next code is checked like the first one.
+    const again = harness.runner.authSubmitCode({ jobId: id, code: "fresh-code" });
+    expect(again.codeCheck).toBe("checking");
+    expect(again.needsCodeInput).toBe(false);
+    expect(harness.latest().stdin).toEqual(["stale-code\n", "fresh-code\n"]);
+    harness.latest().input.onOutput("Login successful.\n");
+    expect(harness.runner.authStatus({ jobId: id }).needsCodeInput).toBe(false);
+  });
+
   it("rejects an empty api key before starting a job", () => {
     const harness = makeHarness();
     expect(() =>
