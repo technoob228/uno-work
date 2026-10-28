@@ -1063,6 +1063,14 @@ function addDemoInbox(spec: (typeof INBOX)[number]) {
 }
 
 export async function startDemo(): Promise<void> {
+  // For scripted walks of the demo (Playwright): the same module instance the
+  // app uses — an `import()` from the page may get a second copy of it.
+  (window as unknown as { __unoDemo?: unknown }).__unoDemo = {
+    demoAgentRepliesIn,
+    demoAgentWorksIn,
+    demoAgentAsksApprovalIn,
+    demoResetChatIn,
+  };
   seedLocalStorage();
   seedAssistantTeam({ addInbox: addDemoInbox });
   void loadAgentFrame();

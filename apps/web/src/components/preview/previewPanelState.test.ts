@@ -6,6 +6,7 @@ import {
   closeTab,
   DEFAULT_PREVIEW_BUCKET_STATE,
   dropChatBuckets,
+  effectivePreviewLayoutMode,
   getPreviewBucketState,
   isPanelOpen,
   moveTabScope,
@@ -92,6 +93,45 @@ describe("tabs opened in a chat live in that chat", () => {
     states = openTab(states, chatB, "chat", notes, "agent");
     expect(resolvePanelView(states, chatA).view.activeFileId).toBe("report");
     expect(resolvePanelView(states, chatB).visible).toBe(true);
+  });
+});
+
+describe("full screen ends with the panel (P1, 28.10)", () => {
+  function fullScreen(states: PreviewStates) {
+    return updatePanelView(states, chatA, (view) => ({ ...view, previewLayoutMode: "focus" }));
+  }
+
+  it("closing the panel on full screen brings the chat back beside it", () => {
+    let states = fullScreen(openTab({}, chatA, "chat", report, "person"));
+    states = setPanelOpen(states, chatA, false);
+    const view = resolvePanelView(states, chatA);
+    expect(view.open).toBe(false);
+    expect(view.view.previewLayoutMode).toBe("sidebar");
+    // Opened again — beside the chat, not over it.
+    states = togglePanelOpen(states, chatA);
+    expect(resolvePanelView(states, chatA).view.previewLayoutMode).toBe("sidebar");
+  });
+
+  it("closing an already closed panel still drops a stored full screen", () => {
+    let states = setPanelOpen(openTab({}, chatA, "chat", report, "person"), chatA, false);
+    states = fullScreen(states);
+    states = setPanelOpen(states, chatA, false);
+    expect(resolvePanelView(states, chatA).view.previewLayoutMode).toBe("sidebar");
+  });
+
+  it("the screen shows full screen only while the panel is on it, and never on a phone", () => {
+    expect(
+      effectivePreviewLayoutMode({ stored: "focus", panelShown: true, panelIsSheet: false }),
+    ).toBe("focus");
+    expect(
+      effectivePreviewLayoutMode({ stored: "focus", panelShown: false, panelIsSheet: false }),
+    ).toBe("sidebar");
+    expect(
+      effectivePreviewLayoutMode({ stored: "focus", panelShown: true, panelIsSheet: true }),
+    ).toBe("sidebar");
+    expect(
+      effectivePreviewLayoutMode({ stored: "sidebar", panelShown: true, panelIsSheet: false }),
+    ).toBe("sidebar");
   });
 });
 

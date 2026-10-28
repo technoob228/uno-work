@@ -101,6 +101,7 @@ import { PanelLauncher } from "./PanelLauncher";
 import { PanelTabStrip } from "./PanelTabStrip";
 import { FileOpenShareButton } from "./FileShareMenu";
 import { useCurrentProjectName } from "./usePanelChats";
+import { CHAT_DOCK_INSET_VAR } from "../chat/chatDock.logic";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { BrowserViews } from "./BrowserPane";
 import { useSidebar } from "../ui/sidebar";
@@ -2359,7 +2360,15 @@ export function PreviewPane({ suppressed = false }: { suppressed?: boolean }) {
       !isFilesTab(active) ? (
         <PathBar file={active} onOpenAt={handleOpenAt} />
       ) : null}
-      <div className={cn("relative min-h-0 flex-1", isFocusMode && "pb-36")}>
+      <div
+        className="relative min-h-0 flex-1"
+        data-preview-pane-body="true"
+        // Full screen: room for the chat dock under the tab — exactly its
+        // height while it is shown, nothing while it is folded away (P1, 28.10:
+        // a fixed 9rem left a blank strip under a hidden chat). ChatView keeps
+        // the variable (CHAT_DOCK_INSET_VAR) up to date.
+        style={isFocusMode ? { paddingBottom: `var(${CHAT_DOCK_INSET_VAR}, 0px)` } : undefined}
+      >
         {showLauncher ? (
           <PanelLauncher
             panels={panels}

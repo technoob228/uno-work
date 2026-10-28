@@ -225,6 +225,7 @@ import { useSidebar } from "./ui/sidebar";
 import { ChatMiniWindow } from "./chat/ChatMiniWindow";
 import { FullscreenChatDockHeader, LegacyFocusChatPreview } from "./chat/FullscreenChatDock";
 import { chatDockStatus, type ChatDockMode } from "./chat/chatDock.logic";
+import { useChatDockInset } from "./chat/useChatDockInset";
 import { useDemoSwitch } from "~/demo/demoFlag";
 import { useFeatureFlag } from "~/hooks/useFeatureFlags";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
@@ -4019,6 +4020,13 @@ export default function ChatView(props: ChatViewProps) {
     setFocusChatPanelMode("peek");
     setPreviewLayoutMode("sidebar");
   }, [setPreviewLayoutMode]);
+  // The full-screen tab leaves exactly the dock's height at the bottom — and
+  // nothing once the chat is folded away (P1, 28.10).
+  const [focusComposerElement, setFocusComposerElement] = useState<HTMLDivElement | null>(null);
+  useChatDockInset(focusComposerElement, {
+    active: isPreviewFocusMode && showComposer,
+    mode: isFocusChatMinimized ? "minimized" : focusChatPanelMode,
+  });
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -4203,6 +4211,7 @@ export default function ChatView(props: ChatViewProps) {
           {/* Input bar */}
           {showComposer ? (
             <div
+              ref={setFocusComposerElement}
               className={cn(
                 "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
                 isEmbedded && "px-2 pb-2 sm:px-2",
@@ -4244,6 +4253,7 @@ export default function ChatView(props: ChatViewProps) {
                     }
                     onMinimize={() => setFocusChatPanelMode("minimized")}
                     detached={!focusChatComposerIsStrip}
+                    markdownCwd={gitCwd ?? undefined}
                   />
                 ) : null}
                 {isServerThread &&
