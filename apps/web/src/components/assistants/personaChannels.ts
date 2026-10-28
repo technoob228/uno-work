@@ -11,11 +11,15 @@
  *   On the MacBook nothing locks the chats it starts there yet (seatbelt is
  *   later, Misha 23.10): the UI says so instead of pretending.
  */
+import type { AssistantJobKind } from "@t3tools/contracts";
+
 import { type WorksOnMachine, type WorksOnOption, worksOnOptions } from "./assistantPage.logic";
 import type { AvatarTone } from "./assistantTeam.logic";
 
 export interface GalleryPersona {
   readonly id: string;
+  /** What it does — the role decides the "What should it do?" step (Misha 28.10). */
+  readonly job: AssistantJobKind;
   readonly name: string;
   readonly emoji: string;
   readonly tone: AvatarTone;
@@ -27,65 +31,45 @@ export interface GalleryPersona {
   readonly sliders: readonly [number, number, number];
 }
 
+/**
+ * Three roles, each with its own default character (Misha 28.10 evening:
+ * "only 3 roles"). The role is the choice of what it does; the name, face and
+ * character are the person's to change on the next step.
+ */
 export const GALLERY: ReadonlyArray<GalleryPersona> = [
   {
-    id: "mia",
-    name: "Mia",
-    emoji: "🦉",
-    tone: "amber",
-    role: "Secretary",
-    quote: "Your 11:00 moved. I told them you're fine with 15:00.",
-    tags: ["Warm", "Brief", "Careful"],
-    sliders: [30, 40, 65],
-  },
-  {
-    id: "leo",
-    name: "Leo",
-    emoji: "🦊",
-    tone: "orange",
-    role: "Marketer",
-    quote: "Tuesday's post got 3× the clicks. Want two more like it?",
-    tags: ["Playful", "Bold", "Chatty"],
-    sliders: [75, 75, 80],
-  },
-  {
-    id: "bolt",
+    id: "developer",
+    job: "development",
     name: "Bolt",
     emoji: "🤖",
     tone: "sky",
     role: "Developer",
-    quote: "CI is red on shop-site. Fixed the test, PR is up.",
+    quote: "CI was red on shop-site. A chat on uno-work fixed the test — the PR is up.",
     tags: ["Direct", "Brief", "Nerdy"],
     sliders: [15, 55, 40],
   },
   {
-    id: "nova",
-    name: "Nova",
-    emoji: "👽",
-    tone: "violet",
-    role: "Researcher",
-    quote: "Three suppliers compared. The cheapest one has bad reviews — here's why.",
-    tags: ["Curious", "Careful", "Chatty"],
-    sliders: [65, 30, 45],
+    id: "accounts-manager",
+    job: "accounts",
+    name: "Leo",
+    emoji: "🦊",
+    tone: "orange",
+    role: "Accounts manager",
+    quote: "Posted Thursday's update and answered 5 comments. One wants a refund — that's yours.",
+    tags: ["Playful", "Bold", "Chatty"],
+    sliders: [75, 75, 80],
   },
   {
-    id: "juno",
-    name: "Juno",
-    emoji: "🐼",
-    tone: "teal",
-    role: "Support",
-    quote: "Answered 6 customers. One wants a refund — that one's yours.",
-    tags: ["Patient", "Warm", "Formal"],
-    sliders: [50, 25, 20],
+    id: "helper",
+    job: "tasks",
+    name: "Mia",
+    emoji: "🦉",
+    tone: "amber",
+    role: "Helper",
+    quote: "Your 11:00 moved. I put the new time in your calendar and told them.",
+    tags: ["Warm", "Brief", "Careful"],
+    sliders: [30, 40, 65],
   },
-];
-
-export const ROLES: ReadonlyArray<string> = [
-  "Secretary",
-  "Marketer",
-  "Developer",
-  "Researcher",
-  "Support",
 ];
 
 export const TAGS: ReadonlyArray<string> = [
@@ -125,18 +109,6 @@ export const QUICK_FACES: ReadonlyArray<{ readonly emoji: string; readonly tone:
   { emoji: "🐙", tone: "violet" },
   { emoji: "🌿", tone: "emerald" },
 ];
-
-/** A blank persona for "Build your own". */
-export const BLANK: GalleryPersona = {
-  id: "own",
-  name: "",
-  emoji: "🧑‍🚀",
-  tone: "slate",
-  role: "",
-  quote: "",
-  tags: [],
-  sliders: [50, 50, 50],
-};
 
 /** The tags first, then what the sliders lean to: "Warm · Brief · Careful". */
 export function characterLine(

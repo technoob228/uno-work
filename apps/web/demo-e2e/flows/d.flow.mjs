@@ -204,8 +204,8 @@ export const flows = [
     await step("open live", () => openDemo(page, url));
     await step("+ → the gallery", () => openGallery(page));
     await shot("gallery");
-    await step("pick Leo · Marketer", async () => {
-      await page.getByTestId("persona-card-leo").click();
+    await step("pick Accounts manager (Leo)", async () => {
+      await page.getByTestId("persona-card-accounts-manager").click();
       await page.getByTestId("persona-builder").waitFor();
       await seeText(page, "Make Leo yours");
     });
@@ -214,23 +214,21 @@ export const flows = [
       await createPersona(page);
       await seeText(page, "Leo here ✨", 25_000);
       await sidebarRow(page, "assistant-leo").waitFor();
-      await sidebarRow(page, "assistant-leo").getByText("Marketer").waitFor();
+      await sidebarRow(page, "assistant-leo").getByText("Accounts manager").waitFor();
     });
     await shot("leo-writes-first");
   }),
 
   flow("d-build-own", async ({ page, url, step, shot }) => {
     await step("open live", () => openDemo(page, url));
-    await step("gallery → Build your own", async () => {
+    await step("gallery → Helper", async () => {
       await openGallery(page);
-      await page.getByTestId("persona-card-own").click();
-      await seeText(page, "Build your own");
+      await page.getByTestId("persona-card-helper").click();
+      await seeText(page, "Make Mia yours");
     });
-    await step("name, role, character, face, mode — no prompt", async () => {
+    await step("name, character, face, mode — no prompt", async () => {
       await page.getByTestId("persona-name").fill("Ms. Pepper");
-      await page.getByTestId("persona-role-something-else").click();
-      await page.getByTestId("persona-role-own").fill("Bookkeeper");
-      await page.getByRole("button", { name: "Careful", exact: true }).click();
+      await page.getByRole("button", { name: "Warm", exact: true }).click();
       await page.getByRole("button", { name: "Formal", exact: true }).click();
       await page.getByRole("slider", { name: "Brief or Chatty" }).fill("15");
       await page.getByRole("button", { name: "Face 🦁" }).click();
@@ -240,8 +238,8 @@ export const flows = [
     await shot("built");
     await step("Create → she greets in character", async () => {
       await createPersona(page);
-      await seeText(page, "Good day. I'm Ms. Pepper, your bookkeeper", 25_000);
-      await sidebarRow(page, "assistant-ms-pepper").getByText("Bookkeeper").waitFor();
+      await seeText(page, "Good day. I'm Ms. Pepper, your helper", 25_000);
+      await sidebarRow(page, "assistant-ms-pepper").getByText("Helper").waitFor();
     });
     await shot("greets");
   }),
@@ -501,27 +499,26 @@ export const flows = [
     await step("open live", () => openDemo(page, url));
     await step("a very long name stops at 40", async () => {
       await openGallery(page);
-      await page.getByTestId("persona-card-own").click();
+      await page.getByTestId("persona-card-developer").click();
       await page
         .getByTestId("persona-name")
         .fill("Maximiliana-Alexandra the Extremely Thorough Research Assistant of Everything");
       const value = await page.getByTestId("persona-name").inputValue();
       if (value.length > 40) throw new Error(`name is ${value.length} long`);
-      await page.getByTestId("persona-role-researcher").click();
     });
     await shot("field");
     await step("create → the sidebar and header cut it neatly", async () => {
       await createPersona(page);
-      await seeText(page, "your researcher", 25_000);
+      await seeText(page, ". Developer.", 25_000);
     });
     await shot("sidebar-header");
   }),
 
   flow("d-edge-facegen-fail", async ({ page, url, step, shot }) => {
     await step("open live (drawing fails)", () => openDemo(page, url, { facegen: "fail" }));
-    await step("Mia → Portrait → Human fails, the emoji stays", async () => {
+    await step("Helper (Mia) → Portrait → Human fails, the emoji stays", async () => {
       await openGallery(page);
-      await page.getByTestId("persona-card-mia").click();
+      await page.getByTestId("persona-card-helper").click();
       await page.getByTestId("persona-face-tab-portrait").click();
       await page.getByTestId("persona-draw-human").click();
       await page.getByTestId("persona-face-problem").waitFor({ timeout: 15_000 });
@@ -537,9 +534,9 @@ export const flows = [
 
   flow("d-edge-facegen-ok", async ({ page, url, step, shot }) => {
     await step("open live", () => openDemo(page, url));
-    await step("Nova → Portrait → Alien draws one", async () => {
+    await step("Helper → Portrait → Alien draws one", async () => {
       await openGallery(page);
-      await page.getByTestId("persona-card-nova").click();
+      await page.getByTestId("persona-card-helper").click();
       await page.getByTestId("persona-face-tab-portrait").click();
       await page.getByTestId("persona-draw-alien").click();
       await page
@@ -554,7 +551,7 @@ export const flows = [
     await step("open live", () => openDemo(page, url));
     await step("Bolt limited to a MacBook project: a note, not a lock", async () => {
       await openGallery(page);
-      await page.getByTestId("persona-card-bolt").click();
+      await page.getByTestId("persona-card-developer").click();
       await page.getByTestId("persona-name").fill("Bolt Mac");
       await page.getByTestId("persona-next").click();
       await page.getByTestId("persona-where-some").click();

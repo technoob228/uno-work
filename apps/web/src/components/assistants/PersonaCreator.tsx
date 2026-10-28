@@ -2,16 +2,17 @@
  * Variant D (28.10): a new persona, the way Grok makes companions — Misha
  * 27.10: "name, personality and role set like in the Grok bot".
  *
- * 1. A gallery of ready characters, each with a role, a line in its voice and
- *    its character tags — or "Build your own".
- * 2. Make it yours: face (emoji / a drawn portrait / a picture), name, role,
+ * 1. A gallery of three roles (Misha 28.10 evening): Developer, Accounts
+ *    manager, Helper — each with its default character. The role is the
+ *    choice of what it does.
+ * 2. Make it yours: face (emoji / a drawn portrait / a picture), name,
  *    character with sliders and tags (never a prompt).
  * 3. Where it works (this computer, another computer of the account, a new
  *    one), what it thinks with (the one AI picker), where it can look (a
  *    project limit is a real lock only where its commands run in a sandbox)
  *    and its mode — "Does it itself" / "Asks first".
- * 4. What should it do? Development / Accounts / Tasks (`PersonaJob.tsx`).
- *    Create.
+ * 4. What should it do? — what its role needs (`PersonaJob.tsx`), and when
+ *    it starts: only when you ask (default) or now. Create.
  * 5. Where you talk: its own Telegram bot, Slack, or here (Uno's shared bot
  *    is Uno's only, Misha 28.10). Then its chat, with the first message made
  *    from the answers — it hands the work to chats on your computers.
@@ -29,7 +30,6 @@ import {
   ImageUpIcon,
   LoaderCircleIcon,
   MessageCircleIcon,
-  PlusIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -61,10 +61,11 @@ import { AssistantAvatar } from "./AssistantAvatar";
 import { readFile, squarePicture } from "./AssistantFacePicker";
 import { avatarFileProblem, base64OfDataUrl, PERSONAS } from "./assistantAvatar.logic";
 import {
-  EMPTY_JOB,
+  JOB_COPY,
   type JobDraft,
   dutyOf,
-  firstMessage,
+  emptyJob,
+  firstMessageOf,
   jobOf,
   jobProblem,
 } from "./assistantJob.logic";
@@ -75,12 +76,10 @@ import { PersonaJob, useJobTools } from "./PersonaJob";
 import type { AssistantMode } from "./PersonaMode";
 import { Chip, Label, ModeCard, ModePicker, WhereItLooks, WhereItWorks } from "./PersonaParts";
 import {
-  BLANK,
   GALLERY,
   type GalleryPersona,
   MAX_TAGS,
   QUICK_FACES,
-  ROLES,
   SLIDERS,
   TAGS,
   characterLine,
@@ -140,6 +139,9 @@ function GalleryCard(props: { readonly persona: GalleryPersona; readonly onPick:
           <span className="block text-xs font-medium text-primary">{persona.role}</span>
         </span>
       </span>
+      <span className="text-xs leading-snug text-muted-foreground">
+        {JOB_COPY[persona.job].line}
+      </span>
       <span className="text-[13px] leading-snug text-foreground/80 italic">“{persona.quote}”</span>
       <span className="mt-auto flex flex-wrap gap-1">
         {persona.tags.map((tag) => (
@@ -161,23 +163,13 @@ function Gallery(props: { readonly onPick: (persona: GalleryPersona) => void }) 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Who do you need?</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pick a character — it starts in that role right away. Or build your own in a minute.
+          Pick a role. Its name, face and character are yours to change next.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         {GALLERY.map((persona) => (
           <GalleryCard key={persona.id} persona={persona} onPick={() => props.onPick(persona)} />
         ))}
-        <button
-          type="button"
-          onClick={() => props.onPick(BLANK)}
-          data-testid="persona-card-own"
-          className="flex min-h-40 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-border p-4 text-center transition-colors hover:border-primary/50 hover:bg-primary/[0.03] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
-        >
-          <PlusIcon className="size-6 text-primary" />
-          <span className="text-[15px] font-semibold">Build your own</span>
-          <span className="text-xs text-muted-foreground">Name, character, role, face</span>
-        </button>
       </div>
       <p className="text-xs text-muted-foreground">
         Every helper works next to Uno and shares its memory. Each has its own face, role, mode and
@@ -506,10 +498,6 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   const rows = useMachineRows();
   const [step, setStep] = useState<Step>("who");
   const [name, setName] = useState(start.name);
-  const [role, setRole] = useState(start.role);
-  const [ownRole, setOwnRole] = useState(
-    start.role && !ROLES.includes(start.role) ? start.role : "",
-  );
   const [tags, setTags] = useState<ReadonlyArray<string>>(start.tags);
   const [sliders, setSliders] = useState<[number, number, number]>([...start.sliders]);
   const [face, setFace] = useState<FaceState>({
@@ -522,7 +510,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
   const [where, setWhere] = useState<string | null | undefined>(undefined);
   const [limited, setLimited] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const [job, setJob] = useState<JobDraft>(EMPTY_JOB);
+  const [job, setJob] = useState<JobDraft>(() => emptyJob(start.job));
   const [made, setMade] = useState<Made | null>(null);
   const [busy, setBusy] = useState(false);
   const [tried, setTried] = useState(false);
@@ -538,7 +526,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
     [team],
   );
   const problem = nameProblem(name, taken);
-  const finalRole = role === "Something else" ? ownRole.trim() : role;
+  const finalRole = start.role;
   const shown = name.trim() || "your helper";
   const whereProblem =
     environmentId === null
@@ -587,7 +575,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
           roles: finalRole ? [finalRole] : [],
           character: characterLine(tags, sliders),
           setup: "done",
-          ...(theJob ? { duties: [dutyOf(theJob)] } : {}),
+          duties: [dutyOf(theJob)],
         }),
         setAssistantPreset({ environmentId: env, projectId, preset, projects }),
         face.picture
@@ -597,7 +585,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
               image: base64OfDataUrl(face.picture),
             })
           : Promise.resolve(null),
-        theJob?.kind === "tasks" && job.appsOff.length > 0
+        theJob.kind === "tasks" && job.appsOff.length > 0
           ? putAssistantApps({
               environmentId: env,
               projectId,
@@ -615,15 +603,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
       setMade({
         environmentId: env,
         projectId,
-        text: theJob
-          ? firstMessage({
-              name: name.trim(),
-              role: finalRole,
-              computer,
-              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-              job: theJob,
-            })
-          : null,
+        text: firstMessageOf(job, theJob, { name: name.trim(), role: finalRole, computer }),
       });
       setStep("channel");
     } catch (cause) {
@@ -675,11 +655,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
     <div className="flex flex-col gap-5" data-testid="persona-builder" data-step={step}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          {step === "channel"
-            ? `${shown} is ready`
-            : start.id === "own"
-              ? "Build your own"
-              : `Make ${start.name} yours`}
+          {step === "channel" ? `${shown} is ready` : `Make ${start.name} yours`}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Step {STEP_NUMBER[step]} of 5. You can change all of it later.
@@ -722,33 +698,12 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
                     </p>
                   ) : null}
                 </div>
-                <div>
+                <div data-testid="persona-role">
                   <Label>Role</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[...ROLES, "Something else"].map((item) => (
-                      <Chip
-                        key={item}
-                        on={
-                          role === item ||
-                          (item === "Something else" && role !== "" && !ROLES.includes(role))
-                        }
-                        onClick={() => setRole(item)}
-                        testId={`persona-role-${item.toLowerCase().replace(/\s+/g, "-")}`}
-                      >
-                        {item}
-                      </Chip>
-                    ))}
-                  </div>
-                  {role === "Something else" || (role !== "" && !ROLES.includes(role)) ? (
-                    <Input
-                      className="mt-2"
-                      value={ownRole}
-                      maxLength={30}
-                      placeholder="Bookkeeper, recruiter, tutor…"
-                      onChange={(event) => setOwnRole(event.target.value)}
-                      data-testid="persona-role-own"
-                    />
-                  ) : null}
+                  <p className="text-sm">
+                    <b className="font-medium">{start.role}</b>{" "}
+                    <span className="text-muted-foreground">· {JOB_COPY[start.job].line}</span>
+                  </p>
                 </div>
                 <div>
                   <Label hint={`up to ${MAX_TAGS} tags`}>Character</Label>
@@ -843,11 +798,7 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
                 computer={computer}
                 projects={limited ? picked : "all"}
                 draft={job}
-                onChange={(draft) => {
-                  // Accounts act outside: "Asks first" unless the person chose otherwise.
-                  if (draft.kind === "accounts" && job.kind !== "accounts") setMode("asks-first");
-                  setJob(draft);
-                }}
+                onChange={setJob}
                 problem={tried ? doProblem : null}
               />
             ) : null}
@@ -879,11 +830,6 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
               >
                 {step === "who" ? "Back to characters" : "Back"}
               </Button>
-              {step === "job" && job.kind === null ? (
-                <span className="text-xs text-muted-foreground">
-                  Lives on {computer}. {mode === "itself" ? "Does it itself" : "Asks first"}.
-                </span>
-              ) : null}
             </div>
           </div>
         </div>

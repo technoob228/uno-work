@@ -2,9 +2,11 @@
  * Assistants D (28.10): "What should it do?" — the answers of a new persona's
  * setup the web turns into its first message (`assistantJob.logic.ts`).
  *
- * Three jobs (Misha 28.10): leading development (projects / repos), working
- * in accounts (sign in in a browser, then a task once or on a schedule) and
- * helping with tasks through connectors or an MCP server of your own. Every
+ * Three roles, three jobs (Misha 28.10): Developer leads development
+ * (projects / repos), Accounts manager works in accounts (signs in in a
+ * browser), Helper helps with tasks through connectors or an MCP server of
+ * your own. It starts only when asked, or at once with a first task — regular
+ * tasks are a separate feature (Automations), not part of the setup. Every
  * assistant hands the real work to chats on the person's computers and tells
  * the result — the first message asks for that, never "do it yourself".
  *
@@ -21,23 +23,6 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const AssistantJobKind = Schema.Literals(["development", "accounts", "tasks"]);
 export type AssistantJobKind = typeof AssistantJobKind.Type;
-
-/** How often an accounts task runs: once now, every day, or one weekday. */
-export const AssistantJobRepeat = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("once") }),
-  Schema.Struct({
-    kind: Schema.Literal("daily"),
-    /** "HH:MM", 24 h, the person's own time zone. */
-    time: TrimmedNonEmptyString,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("weekly"),
-    /** 0 = Sunday … 6 = Saturday (cron's numbering). */
-    weekday: Schema.Number,
-    time: TrimmedNonEmptyString,
-  }),
-]);
-export type AssistantJobRepeat = typeof AssistantJobRepeat.Type;
 
 /** One account it works in, without the password (that one is in the vault). */
 export const AssistantJobAccount = Schema.Struct({
@@ -64,7 +49,6 @@ export const AssistantJob = Schema.Union([
     kind: Schema.Literal("accounts"),
     accounts: Schema.Array(AssistantJobAccount),
     task: Schema.String,
-    repeat: AssistantJobRepeat,
   }),
   Schema.Struct({
     kind: Schema.Literal("tasks"),

@@ -1,29 +1,20 @@
 /**
- * "What should it do?" (Misha 28.10) — three cards, each with what it needs:
+ * "What should it do?" (Misha 28.10) — what the role picked in the gallery needs:
  *
- * - Development: the projects it leads on its computer, repos to clone first
+ * - Developer: the projects it leads on its computer, repos to clone first
  *   (its chat clones them), the first thing to lead.
- * - Accounts: which accounts — the logins go through a form in a window
- *   (never the chat) straight into the password vault of its computer; then
- *   the task, once or on a schedule. Signing in happens in a chat it starts
+ * - Accounts manager: which accounts — the logins go through a form in a window
+ *   (never the chat) straight into the password vault of its computer. Signing in happens in a chat it starts
  *   there with `browser_command {login}`: the password is typed into the page
  *   by the computer, the model never sees it; 2FA and captchas come to you.
- * - Tasks: Gmail, Drive, Notion… connected on its computer (the same cards as
+ * - Helper: Gmail, Drive, Notion… connected on its computer (the same cards as
  *   Settings → Connectors) or an MCP server of your own; which of them it uses.
  *
- * Templates come later (Misha 28.10).
+ * Then when it starts: only when you ask (default) or now, with a task.
+ * Regular tasks are a separate feature (Automations) — not here.
  */
-import type { AssistantJobKind, AssistantJobRepeat, EnvironmentId } from "@t3tools/contracts";
-import {
-  BriefcaseIcon,
-  CodeIcon,
-  KeyRoundIcon,
-  LoaderCircleIcon,
-  LockIcon,
-  PlusIcon,
-  Trash2Icon,
-  UsersIcon,
-} from "lucide-react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { KeyRoundIcon, LoaderCircleIcon, LockIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../environments/settings/serverSettings";
@@ -46,9 +37,9 @@ import {
   type AccountProblems,
   EMPTY_ACCOUNT,
   HANDS_WORK_LINE,
-  JOB_COPY,
   type JobDraft,
-  WEEKDAYS,
+  type JobStart,
+  START_COPY,
   accountProblems,
   filledAccounts,
   hasProblems,
@@ -56,12 +47,6 @@ import {
 } from "./assistantJob.logic";
 import { saveLoginsToVault } from "./assistantStart";
 import { Chip, Label, ModeCard, usePersonaProjects } from "./PersonaParts";
-
-const ICONS: Record<AssistantJobKind, typeof CodeIcon> = {
-  development: CodeIcon,
-  accounts: UsersIcon,
-  tasks: BriefcaseIcon,
-};
 
 /** Connected apps on that computer and its own MCP servers (for the first message). */
 export function useJobTools(environmentId: string | null) {
@@ -252,77 +237,22 @@ function Field(props: {
   );
 }
 
-function RepeatPicker(props: {
-  readonly value: AssistantJobRepeat;
-  readonly onChange: (repeat: AssistantJobRepeat) => void;
+function StartPicker(props: {
+  readonly value: JobStart;
+  readonly onChange: (start: JobStart) => void;
 }) {
-  const { value } = props;
-  const time = value.kind === "once" ? "09:00" : value.time;
-  const weekday = value.kind === "weekly" ? value.weekday : 1;
   return (
-    <div className="flex flex-col gap-2" data-testid="persona-repeat">
-      <div className="flex flex-wrap gap-1.5">
-        <Chip
-          on={value.kind === "once"}
-          onClick={() => props.onChange({ kind: "once" })}
-          testId="persona-repeat-once"
-        >
-          Once, now
-        </Chip>
-        <Chip
-          on={value.kind === "daily"}
-          onClick={() => props.onChange({ kind: "daily", time })}
-          testId="persona-repeat-daily"
-        >
-          Every day
-        </Chip>
-        <Chip
-          on={value.kind === "weekly"}
-          onClick={() => props.onChange({ kind: "weekly", weekday, time })}
-          testId="persona-repeat-weekly"
-        >
-          Every week
-        </Chip>
-      </div>
-      {value.kind === "once" ? null : (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {value.kind === "weekly" ? (
-            <select
-              value={weekday}
-              onChange={(event) =>
-                props.onChange({ kind: "weekly", weekday: Number(event.target.value), time })
-              }
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              data-testid="persona-repeat-weekday"
-              aria-label="Day"
-            >
-              {WEEKDAYS.map((day, index) => (
-                <option key={day} value={index}>
-                  {day}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <span className="text-muted-foreground">at</span>
-          <input
-            type="time"
-            value={time}
-            onChange={(event) =>
-              props.onChange(
-                value.kind === "weekly"
-                  ? { kind: "weekly", weekday, time: event.target.value }
-                  : { kind: "daily", time: event.target.value },
-              )
-            }
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            data-testid="persona-repeat-time"
-            aria-label="Time"
-          />
-          <span className="text-xs text-muted-foreground">
-            your time · its computer wakes for it
-          </span>
-        </div>
-      )}
+    <div className="grid gap-2 sm:grid-cols-2" data-testid="persona-start">
+      {(["ask", "now"] as const).map((start) => (
+        <ModeCard
+          key={start}
+          on={props.value === start}
+          onClick={() => props.onChange(start)}
+          title={START_COPY[start].label}
+          line={START_COPY[start].line}
+          testId={`persona-start-${start}`}
+        />
+      ))}
     </div>
   );
 }
@@ -357,26 +287,6 @@ export function PersonaJob(props: {
         <h2 className="text-lg font-semibold tracking-tight">What should {who} do?</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{HANDS_WORK_LINE}</p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {(["development", "accounts", "tasks"] as const).map((kind) => {
-          const Icon = ICONS[kind];
-          return (
-            <ModeCard
-              key={kind}
-              on={draft.kind === kind}
-              onClick={() => set({ kind: draft.kind === kind ? null : kind })}
-              title={
-                <>
-                  <Icon className="size-4 text-primary" /> {JOB_COPY[kind].title}
-                </>
-              }
-              line={JOB_COPY[kind].line}
-              testId={`persona-job-${kind}`}
-            />
-          );
-        })}
-      </div>
-
       {draft.kind === "development" ? (
         <div className="flex flex-col gap-4" data-testid="persona-job-development-form">
           <div>
@@ -416,12 +326,6 @@ export function PersonaJob(props: {
               data-testid="persona-dev-repos"
             />
           </div>
-          <TaskField
-            value={draft.task}
-            onChange={(task) => set({ task })}
-            label="What to lead first"
-            placeholder="Get the checkout tests green and open a PR"
-          />
         </div>
       ) : null}
 
@@ -468,18 +372,8 @@ export function PersonaJob(props: {
               </Button>
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              It signs in in a chat on {props.computer}. A 2FA code or a captcha — it asks you.
+              It signs in from a chat on {props.computer}. A 2FA code or a captcha — it asks you.
             </p>
-          </div>
-          <TaskField
-            value={draft.task}
-            onChange={(task) => set({ task })}
-            label="What it does there"
-            placeholder="Post the weekly update and answer new comments"
-          />
-          <div>
-            <Label>How often</Label>
-            <RepeatPicker value={draft.repeat} onChange={(repeat) => set({ repeat })} />
           </div>
           {accountsOpen ? (
             <AccountsDialog
@@ -531,19 +425,19 @@ export function PersonaJob(props: {
               </div>
             </div>
           ) : null}
-          <TaskField
-            value={draft.task}
-            onChange={(task) => set({ task })}
-            label="First task"
-            placeholder="Every morning, sum up new mail and today's meetings"
-          />
         </div>
       ) : null}
 
-      {draft.kind === null ? (
-        <p className="text-xs text-muted-foreground">
-          Not sure yet? Skip it — tell {who} in its chat.
-        </p>
+      <div>
+        <Label>When it starts</Label>
+        <StartPicker value={draft.start} onChange={(start) => set({ start })} />
+      </div>
+      {draft.start === "now" ? (
+        <TaskField
+          value={draft.task}
+          onChange={(task) => set({ task })}
+          {...TASK_FIELD[draft.kind]}
+        />
       ) : null}
       {props.problem ? (
         <p
@@ -557,6 +451,18 @@ export function PersonaJob(props: {
     </div>
   );
 }
+
+const TASK_FIELD: Record<JobDraft["kind"], { label: string; placeholder: string }> = {
+  development: {
+    label: "What to lead first",
+    placeholder: "Get the checkout tests green and open a PR",
+  },
+  accounts: {
+    label: "What it does there",
+    placeholder: "Post the weekly update and answer new comments",
+  },
+  tasks: { label: "First task", placeholder: "Sum up today's new mail and meetings" },
+};
 
 function TaskField(props: {
   readonly value: string;

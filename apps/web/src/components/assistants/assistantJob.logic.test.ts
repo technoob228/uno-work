@@ -2,19 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   EMPTY_ACCOUNT,
-  EMPTY_JOB,
   type AccountDraft,
   accountProblems,
-  cronOf,
   dutyOf,
+  emptyJob,
   filledAccounts,
   firstMessage,
+  firstMessageOf,
   hasProblems,
   jobAccountOf,
   jobOf,
   jobProblem,
   parseRepos,
-  repeatLine,
   siteOf,
   vaultInputOf,
 } from "./assistantJob.logic";
@@ -27,7 +26,8 @@ const ROW: AccountDraft = {
   username: "leo@shop.example",
   password: PASSWORD,
 };
-const BASE = { name: "Leo", role: "Marketer", computer: "uno-work", timeZone: "Europe/Berlin" };
+const BASE = { name: "Leo", role: "Accounts manager", computer: "uno-work" };
+const EMPTY_JOB = emptyJob("development");
 
 describe("siteOf", () => {
   it("keeps the host of an address or a domain", () => {
@@ -79,24 +79,6 @@ describe("the account form", () => {
   });
 });
 
-describe("repeat", () => {
-  it("makes a five-field cron", () => {
-    expect(cronOf({ kind: "once" })).toBeNull();
-    expect(cronOf({ kind: "daily", time: "09:30" })).toBe("30 9 * * *");
-    expect(cronOf({ kind: "weekly", weekday: 1, time: "18:05" })).toBe("5 18 * * 1");
-  });
-  it("refuses a bad time or day", () => {
-    expect(cronOf({ kind: "daily", time: "25:00" })).toBeNull();
-    expect(cronOf({ kind: "daily", time: "9am" })).toBeNull();
-    expect(cronOf({ kind: "weekly", weekday: 7, time: "09:00" })).toBeNull();
-  });
-  it("says it plainly", () => {
-    expect(repeatLine({ kind: "once" })).toBe("once, now");
-    expect(repeatLine({ kind: "daily", time: "09:00" })).toBe("every day at 09:00");
-    expect(repeatLine({ kind: "weekly", weekday: 1, time: "09:00" })).toBe("every Monday at 09:00");
-  });
-});
-
 describe("firstMessage", () => {
   it("accounts: signs in with the vault in a chat on its computer — never the password", () => {
     const text = firstMessage({
@@ -105,25 +87,25 @@ describe("firstMessage", () => {
         kind: "accounts",
         accounts: [jobAccountOf(ROW)],
         task: "Post the weekly update",
-        repeat: { kind: "weekly", weekday: 1, time: "09:00" },
       },
     });
     expect(text).not.toContain(PASSWORD);
     expect(text).not.toContain("leo@shop.example");
-    expect(text).toContain("Hi Leo! You're my marketer.");
+    expect(text).toContain("Hi Leo! You're my accounts manager.");
     expect(text).toContain('browser_command {"login": "instagram.com"}');
-    expect(text).toContain("Start a chat on uno-work");
+    expect(text).toContain("Start a chat on uno-work for this (chat_create)");
     expect(text).toContain("requestHelp");
-    expect(text).toContain('cron "0 9 * * 1", timezone "Europe/Berlin"');
     expect(text).toContain("Then: Post the weekly update");
-  });
-  it("accounts once: no schedule", () => {
-    const text = firstMessage({
-      ...BASE,
-      job: { kind: "accounts", accounts: [jobAccountOf(ROW)], task: "", repeat: { kind: "once" } },
-    });
+    // Regular tasks are Automations, not the setup.
     expect(text).not.toContain("schedule_create");
-    expect(text).toContain("one-time task");
+    expect(text).not.toContain("cron");
+  });
+  it("only when I ask (the default): no first message at all", () => {
+    const draft = emptyJob("accounts");
+    expect(draft.start).toBe("ask");
+    const job = { kind: "accounts" as const, accounts: [jobAccountOf(ROW)], task: "" };
+    expect(firstMessageOf(draft, job, BASE)).toBeNull();
+    expect(firstMessageOf({ ...draft, start: "now" }, job, BASE)).toContain("Your job:");
   });
   it("development: projects and repos, handed to a chat", () => {
     const text = firstMessage({
@@ -151,7 +133,10 @@ describe("firstMessage", () => {
 describe("the step's draft", () => {
   const where = { environmentId: "env-cloud", computer: "uno-work" };
   it("accounts need one saved on this computer", () => {
-    expect(jobProblem({ ...EMPTY_JOB, kind: "accounts" }, where)).toBe("Add at least one account.");
+    expect(jobProblem({ ...EMPTY_JOB, kind: "accounts", start: "now" }, where)).toBe(
+      "Add at least one account.",
+    );
+    expect(jobProblem({ ...EMPTY_JOB, kind: "accounts" }, where)).toBeNull();
     expect(
       jobProblem(
         { ...EMPTY_JOB, kind: "accounts", accounts: [jobAccountOf(ROW)], accountsOn: "env-mac" },
@@ -182,8 +167,13 @@ describe("the step's draft", () => {
       "isn't a repo address",
     );
   });
-  it("no job picked: it just greets", () => {
-    expect(jobOf(EMPTY_JOB, { apps: [], servers: [] })).toBeNull();
+  it("the role decides the job", () => {
+    expect(jobOf(emptyJob("development"), { apps: [], servers: [] })).toEqual({
+      kind: "development",
+      projects: [],
+      repos: [],
+      task: "",
+    });
   });
   it("tasks: apps switched off are left out", () => {
     const job = jobOf(
@@ -203,10 +193,11 @@ describe("the step's draft", () => {
       kind: "accounts",
       accounts: [jobAccountOf(ROW)],
       task: "x".repeat(400),
-      repeat: { kind: "daily", time: "09:00" },
     });
     expect(duty.length).toBeLessThanOrEqual(200);
-    expect(duty.startsWith("Works in Instagram: x")).toBe(true);
+    expect(duty.startsWith("Works in Instagram (instagram.com), signed in from the vault")).toBe(
+      true,
+    );
   });
 });
 
@@ -241,5 +232,16 @@ describe("where it works", () => {
     const options = personaWorksOn({ homeEnvironmentId: "env-mac", machines });
     expect(options[0]?.laptop).toBe(true);
     expect(personaWorksOn({ homeEnvironmentId: null, machines })).toEqual([]);
+  });
+});
+
+describe("the gallery", () => {
+  it("three roles, each with its job", async () => {
+    const { GALLERY } = await import("./personaChannels");
+    expect(GALLERY.map((persona) => [persona.role, persona.job])).toEqual([
+      ["Developer", "development"],
+      ["Accounts manager", "accounts"],
+      ["Helper", "tasks"],
+    ]);
   });
 });
