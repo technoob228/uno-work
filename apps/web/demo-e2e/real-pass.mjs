@@ -153,6 +153,28 @@ if (step === "short" || step === "long") {
   }
 }
 
+if (step === "home") {
+  // Home's "Show the agent": record, Done, the card and the words in Home's
+  // box. Stops before Enter (that would start a real agent on this machine).
+  await page.getByText("Home", { exact: true }).first().click();
+  await page.getByTestId("home-show-agent").waitFor({ timeout: 60_000 });
+  await shot(page, "home-01");
+  await page.getByTestId("home-show-agent").click();
+  await page.getByTestId("record-popup").waitFor();
+  await page.getByTestId("record-start").click();
+  await page.waitForTimeout(Number(process.env.SECONDS ?? 12) * 1000);
+  await shot(page, "home-02-recording");
+  await page.getByTestId("recording-stop").click();
+  await page.getByTestId("home-recording").waitFor({ timeout: 30_000 });
+  const item = await waitSettled();
+  await page.waitForTimeout(800);
+  await shot(page, "home-03-card");
+  console.log(JSON.stringify({ key: (await items()).length, ...item }, null, 2));
+  const box = await page.locator('[contenteditable="true"], textarea').first().inputValue().catch(async () =>
+    page.locator('[contenteditable="true"], textarea').first().innerText());
+  console.log("home box:", box.slice(0, 300));
+}
+
 if (step === "probe") {
   // A 6 MB file through the same chunked writeFile as Save, timed.
   const result = await page.evaluate(
