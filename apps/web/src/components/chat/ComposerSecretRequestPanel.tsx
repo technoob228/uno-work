@@ -212,54 +212,54 @@ const SecretRequestCard = memo(function SecretRequestCard({
       */}
       <div className="mt-3 flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
-        <input
-          // A plain text field masked with CSS: password managers leave it alone.
-          type={maskWithCss || revealed ? "text" : "password"}
-          name="uno-secret-value"
-          autoComplete={maskWithCss ? "off" : "new-password"}
-          autoCorrect="off"
-          autoCapitalize="off"
-          data-1p-ignore="true"
-          data-lpignore="true"
-          data-bwignore="true"
-          data-form-type="other"
-          aria-label={assistantBot ? "Bot token" : `${label} value`}
-          style={
-            maskWithCss && !revealed
-              ? ({ WebkitTextSecurity: "disc" } as CSSProperties)
-              : undefined
-          }
-          spellCheck={false}
-          autoFocus
-          value={value}
-          disabled={isSubmitting}
-          onChange={(changeEvent) => setValue(changeEvent.currentTarget.value)}
-          onKeyDown={(keyEvent) => {
-            if (keyEvent.key !== "Enter" || keyEvent.nativeEvent.isComposing) return;
-            keyEvent.preventDefault();
-            keyEvent.stopPropagation();
-            void submit(false);
-          }}
-          placeholder={
-            assistantBot
-              ? ASSISTANT_BOT_CARD.placeholder
-              : label === event.name
-                ? `Paste ${event.name} here`
-                : `Paste the ${label} here`
-          }
-          className="h-9 w-full rounded-lg border border-border/60 bg-muted/20 pr-9 pl-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
-        />
-        {value.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setRevealed((shown) => !shown)}
-            aria-label={revealed ? "Hide" : "Show"}
-            title={revealed ? "Hide" : "Show what you pasted"}
-            className="absolute top-1/2 right-1.5 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {revealed ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
-          </button>
-        ) : null}
+          <input
+            // A plain text field masked with CSS: password managers leave it alone.
+            type={maskWithCss || revealed ? "text" : "password"}
+            name="uno-secret-value"
+            autoComplete={maskWithCss ? "off" : "new-password"}
+            autoCorrect="off"
+            autoCapitalize="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            aria-label={assistantBot ? "Bot token" : `${label} value`}
+            style={
+              maskWithCss && !revealed
+                ? ({ WebkitTextSecurity: "disc" } as CSSProperties)
+                : undefined
+            }
+            spellCheck={false}
+            autoFocus
+            value={value}
+            disabled={isSubmitting}
+            onChange={(changeEvent) => setValue(changeEvent.currentTarget.value)}
+            onKeyDown={(keyEvent) => {
+              if (keyEvent.key !== "Enter" || keyEvent.nativeEvent.isComposing) return;
+              keyEvent.preventDefault();
+              keyEvent.stopPropagation();
+              void submit(false);
+            }}
+            placeholder={
+              assistantBot
+                ? ASSISTANT_BOT_CARD.placeholder
+                : label === event.name
+                  ? `Paste ${event.name} here`
+                  : `Paste the ${label} here`
+            }
+            className="h-9 w-full rounded-lg border border-border/60 bg-muted/20 pr-9 pl-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground/45 focus:border-blue-500/40"
+          />
+          {value.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setRevealed((shown) => !shown)}
+              aria-label={revealed ? "Hide" : "Show"}
+              title={revealed ? "Hide" : "Show what you pasted"}
+              className="absolute top-1/2 right-1.5 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {revealed ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+            </button>
+          ) : null}
         </div>
         <Button
           type="button"

@@ -125,15 +125,15 @@ describe("discoverLocalDaemon", () => {
   });
 });
 
-describe("loopbackProbeWithoutPrompt (P5, 28.10)", () => {
-  const permissionsWith = (states: Record<string, PermissionState>) => ({
-    query: async ({ name }: { name: string }) => {
-      const state = states[name];
-      if (state === undefined) throw new TypeError(`Unknown permission ${name}`);
-      return { state } as PermissionStatus;
-    },
-  });
+const permissionsWith = (states: Record<string, PermissionState>) => ({
+  query: async ({ name }: { name: string }) => {
+    const state = states[name];
+    if (state === undefined) throw new TypeError(`Unknown permission ${name}`);
+    return { state } as PermissionStatus;
+  },
+});
 
+describe("loopbackProbeWithoutPrompt (P5, 28.10)", () => {
   it("looks on its own only once the person allowed it", async () => {
     expect(
       await loopbackProbeWithoutPrompt(permissionsWith({ "local-network-access": "granted" })),
@@ -147,9 +147,9 @@ describe("loopbackProbeWithoutPrompt (P5, 28.10)", () => {
   });
 
   it("knows the newer split name too", async () => {
-    expect(await loopbackProbeWithoutPrompt(permissionsWith({ "loopback-network": "prompt" }))).toBe(
-      false,
-    );
+    expect(
+      await loopbackProbeWithoutPrompt(permissionsWith({ "loopback-network": "prompt" })),
+    ).toBe(false);
   });
 
   it("a browser without such a permission doesn't ask — looking is fine", async () => {

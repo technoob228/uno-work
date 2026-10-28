@@ -13,10 +13,7 @@ import {
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
-import {
-  showSystemNotification,
-  windowIsInFront,
-} from "./systemNotifications";
+import { showSystemNotification, windowIsInFront } from "./systemNotifications";
 import { useOpenInboxItem } from "./useOpenInboxItem";
 
 /** Items that are new or changed since the last snapshot, still unread. */
