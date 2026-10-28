@@ -483,3 +483,63 @@ it.live(
     ),
   60_000,
 );
+
+it.live(
+  "late Allow: the step's outcome reaches the Telegram chat the request came from",
+  () =>
+    run(
+      nodePath.join(tmpDir, "state.sqlite"),
+      Effect.gen(function* () {
+        yield* connect;
+        world.script = (text) =>
+          text.includes("Allowed later")
+            ? { durationMs: 2_000, answer: "ответ: письмо отправлено" }
+            : { durationMs: 5_000, answer: "ответ: жду Allow в Uno Work" };
+        say("отправь письмо Ане");
+        expect(yield* waitFor(() => world.running !== null, real(2 * MINUTE))).toBe(true);
+        const push = yield* AssistantPushService;
+        // Read while the turn runs: the chat it answers to.
+        const chat = yield* push.chatOf(mainThreadId);
+        expect(chat).toMatchObject({ kind: "telegram" });
+        // The turn ends with "waiting for Allow".
+        expect(
+          yield* waitFor(() => sent.some((entry) => entry.text.includes("жду")), real(MINUTE)),
+        ).toBe(true);
+
+        // Much later the person allows in Work: the outcome goes to Telegram too.
+        const told = yield* push.tellViaChat({
+          threadId: mainThreadId,
+          chat: chat!,
+          text: "Allowed later: email sent",
+          fallbackText: "Your answer in Uno Work went through.",
+        });
+        expect(told).toBe(true);
+        expect(
+          yield* waitFor(
+            () => sent.some((entry) => entry.text.includes("письмо отправлено")),
+            real(2 * MINUTE),
+          ),
+        ).toBe(true);
+        // Its own message, not a reply to the old request.
+        expect(sent.find((entry) => entry.text.includes("письмо отправлено"))?.replyTo).toBeNull();
+      }),
+    ),
+  60_000,
+);
+
+it.live("late Allow from the desktop: no chat, the caller tells the conversation itself", () =>
+  run(
+    nodePath.join(tmpDir, "state.sqlite"),
+    Effect.gen(function* () {
+      const push = yield* AssistantPushService;
+      expect(yield* push.chatOf(mainThreadId)).toBeNull();
+      const told = yield* push.tellViaChat({
+        threadId: mainThreadId,
+        chat: { kind: "telegram", connectorProjectId: "assistant-uno", replyKey: "gone" },
+        text: "Allowed later",
+        fallbackText: "",
+      });
+      expect(told).toBe(false);
+    }),
+  ),
+);

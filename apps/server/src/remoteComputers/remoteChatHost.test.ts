@@ -162,6 +162,19 @@ describe("remote chat host", () => {
     ]);
   });
 
+  it("records the assistant's app levels so this computer limits its chat", async () => {
+    const { remoteHost, incoming } = host({ threads: [thread("earlier")] });
+    const apps = { restricted: true, permissions: { gmail: "read" as const } };
+    await Effect.runPromise(
+      remoteHost.create({
+        text: "Fix",
+        cwd: "~/projects/project-site",
+        startedBy: { ...startedBy, apps, preset: "helper" },
+      }),
+    );
+    expect(incoming[0]).toMatchObject({ apps, preset: "helper" });
+  });
+
   it("an assistant's own folder and a missing folder are refused", async () => {
     const { remoteHost } = host({});
     const own = await Effect.runPromise(

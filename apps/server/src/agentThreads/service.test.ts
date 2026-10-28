@@ -1232,6 +1232,7 @@ describe("agent threads bridge: chats on another computer (assistants D)", () =>
           assistantName: "Uno",
           assistantProjectId: UNO,
           fromThreadId: CONVERSATION,
+          preset: "helper",
         });
         assert.deepStrictEqual(watched, [
           {

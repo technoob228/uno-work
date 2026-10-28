@@ -15,6 +15,7 @@
 import * as os from "node:os";
 
 import type {
+  AssistantPreset,
   ManagerRemoteChatCreateInput,
   ManagerRemoteChatResult,
   ManagerRemoteChatStatus,
@@ -22,6 +23,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option } from "effect";
 
+import { readAppAccess } from "../assistants/localAssistantStore.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
@@ -65,6 +67,8 @@ export interface RemoteChatStartInput {
     /** Null: the person's own chat asked (no assistant). */
     readonly assistantProjectId: string | null;
     readonly fromThreadId: string;
+    /** Its mode; its app levels are read here and go along. */
+    readonly preset?: AssistantPreset | null | undefined;
   };
 }
 
@@ -225,6 +229,15 @@ export const makeRemoteComputersService = (options?: {
         const { credential, ownBoxId } = yield* identity;
         const client = clientFor(credential);
         const name = input.target.name;
+        // Its app levels go along: that computer's connected apps open no
+        // wider for this chat than they do for the assistant here.
+        const assistantId = input.startedBy.assistantProjectId;
+        const apps =
+          assistantId === null
+            ? null
+            : yield* Effect.promise(() => readAppAccess(config.stateDir, assistantId)).pipe(
+                Effect.orElseSucceed(() => ({ permissions: {}, restricted: true })),
+              );
         const body: ManagerRemoteChatCreateInput = {
           text: input.text,
           ...(input.title !== undefined ? { title: input.title } : {}),
@@ -239,6 +252,8 @@ export const makeRemoteComputersService = (options?: {
             fromComputerName: yield* ownName,
             fromBoxId: ownBoxId,
             fromThreadId: input.startedBy.fromThreadId,
+            ...(apps !== null ? { apps } : {}),
+            ...(input.startedBy.preset ? { preset: input.startedBy.preset } : {}),
           },
         };
         const reply = yield* fromPromise(() =>

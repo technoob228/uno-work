@@ -14,10 +14,13 @@
  */
 import * as nodePath from "node:path";
 
+import type { AssistantPreset } from "@t3tools/contracts";
+
 import {
   assistantStoreDir,
   readStoreJson,
   updateStoreJson,
+  type AppAccess,
 } from "../assistants/localAssistantStore.ts";
 
 /** Newest entries kept in each ledger. */
@@ -31,6 +34,31 @@ export interface IncomingRemoteChat {
   readonly fromBoxId: number | null;
   readonly fromThreadId: string;
   readonly startedAt: string;
+  /** The assistant's app levels there (absent: the person's chat, no limits). */
+  readonly apps?: AppAccess | undefined;
+  readonly preset?: AssistantPreset | undefined;
+}
+
+/**
+ * The remote assistant a chat of this computer acts for: the chat itself
+ * came from another computer, or one of its ancestors did (a chat it
+ * started). Null: not a remote assistant's chat.
+ */
+export function remoteStarterOf(
+  threadId: string,
+  threadById: (
+    id: string,
+  ) => { readonly spawnedByThreadId?: string | null | undefined } | undefined,
+  incoming: ReadonlyArray<IncomingRemoteChat>,
+): IncomingRemoteChat | null {
+  const byThread = new Map(incoming.map((entry) => [entry.threadId, entry]));
+  let current: string | null = threadId;
+  for (let depth = 0; current !== null && depth < 6; depth += 1) {
+    const found = byThread.get(current);
+    if (found !== undefined) return found;
+    current = threadById(current)?.spawnedByThreadId ?? null;
+  }
+  return null;
 }
 
 export interface OutgoingRemoteChat {
