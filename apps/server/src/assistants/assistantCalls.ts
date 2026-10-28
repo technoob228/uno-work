@@ -574,6 +574,69 @@ export function nextCall(state: AssistantCallsState, nowMs: number): CallView | 
   );
 }
 
+/** Wake the computer this long before a call: the bot opens the call page at the start. */
+export const CALLS_WAKE_BEFORE_MS = 3 * 60_000;
+/**
+ * A sleeping computer reads no calendar: wake it this often to see meetings
+ * added meanwhile (aligned to the clock, so the report doesn't change every tick).
+ */
+export const CALLS_RECHECK_MS = 2 * 3600_000;
+/** After the bot's "done" the notes take a few minutes (speech to text, summary). */
+const NOTES_WAIT_S = 30 * 60;
+/** A status older than this no longer holds the computer (the notetaker died mid-call). */
+const ACTIVE_MAX_S = 4 * 3600;
+/** The bot may wait in the lobby up to 15 minutes after the start. */
+const JOIN_WINDOW_MS = 15 * 60_000;
+const ACTIVE = new Set(["queued", "joining", "lobby", "recording", "leaving"]);
+
+/**
+ * When the computer should wake up for calls (economy mode sleeps it after
+ * ~10 idle minutes): a few minutes before the next call it joins, and at
+ * least every couple of hours to re-read the calendar. Null — calls are off.
+ */
+export function callsWakeAt(state: AssistantCallsState, nowMs: number): number | null {
+  if (!state.enabled) return null;
+  let best = (Math.floor(nowMs / CALLS_RECHECK_MS) + 1) * CALLS_RECHECK_MS;
+  for (const c of state.upcoming) {
+    if (!c.join) continue;
+    const at = Date.parse(c.start) - CALLS_WAKE_BEFORE_MS;
+    if (Number.isFinite(at) && at > nowMs && at < best) best = at;
+  }
+  return best;
+}
+
+/**
+ * Whether calls hold the computer awake now: a call is about to start or the
+ * bot may still be knocking, the bot is in a call, or the notes of a call it
+ * just left are not in yet.
+ */
+export function callsBusy(state: AssistantCallsState, nowMs: number): boolean {
+  if (!state.enabled) return false;
+  for (const c of state.upcoming) {
+    if (!c.join) continue;
+    const start = Date.parse(c.start);
+    if (start - CALLS_WAKE_BEFORE_MS <= nowMs && nowMs <= start + JOIN_WINDOW_MS) return true;
+  }
+  const nowSec = nowMs / 1000;
+  const latest = new Map<string, CallStatus>();
+  for (const s of state.statuses) {
+    const prev = latest.get(s.session);
+    if (!prev || s.at >= prev.at) latest.set(s.session, s);
+  }
+  const noted = new Set(state.notes.map((n) => n.meetingId));
+  for (const s of latest.values()) {
+    if (ACTIVE.has(s.status) && nowSec - s.at < ACTIVE_MAX_S) return true;
+    if (
+      s.status === "done" &&
+      nowSec - s.at < NOTES_WAIT_S &&
+      !(s.meetingId && noted.has(s.meetingId))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The newest failure of the last day ("Couldn't join Pilot sync: waiting room …"). */
 export function lastProblem(state: AssistantCallsState, nowSec: number): CallStatus | null {
   const recent = state.statuses.filter((s) => nowSec - s.at < 24 * 3600);

@@ -27,8 +27,10 @@ import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import {
   applyCallsEvent,
+  callsBusy,
   CALLS_SOURCE,
   CALLS_THREAD_TITLE,
+  callsWakeAt,
   disableCalls,
   emptyCallsState,
   enableCalls,
@@ -47,6 +49,7 @@ import {
   type CallStatus,
   type CallView,
 } from "./assistantCalls.ts";
+import { setCallsWake } from "./callsWake.ts";
 import { AssistantScheduledTurns } from "./scheduledTurn.ts";
 
 export type NotetakerState = "running" | "installing" | "failed" | "missing" | "unknown";
@@ -330,6 +333,12 @@ export const makeAssistantCallsService = (options?: {
       caller.appId === NOTETAKER_TEMPLATE_ID
         ? null
         : appErr(403, "calls_not_allowed", "Join my calls is for the Uno Notetaker app.");
+
+    // Economy mode sleeps an idle computer: wake it before a call, hold it during one.
+    setCallsWake({
+      wakeAt: (nowMs) => callsWakeAt(state, nowMs),
+      busy: (nowMs) => callsBusy(state, nowMs),
+    });
 
     setAppCallsCore({
       link: async (caller) => {
