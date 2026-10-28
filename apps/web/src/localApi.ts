@@ -187,6 +187,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.transcribeAudio(input)
           : Promise.reject(unavailableLocalBackendError()),
+      describeVideo: (input) =>
+        rpcClient
+          ? rpcClient.server.describeVideo(input)
+          : Promise.reject(unavailableLocalBackendError()),
     },
     vault: {
       list: () =>

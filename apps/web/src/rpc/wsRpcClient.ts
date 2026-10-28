@@ -173,6 +173,7 @@ export interface WsRpcClient {
     readonly getUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoGetDigest>;
     readonly packUnoVideoDigest: RpcUnaryMethod<typeof WS_METHODS.unoVideoPackDigest>;
     readonly transcribeAudio: RpcUnaryMethod<typeof WS_METHODS.unoTranscribeAudio>;
+    readonly describeVideo: RpcUnaryMethod<typeof WS_METHODS.unoDescribeVideo>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -528,6 +529,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.unoVideoPackDigest](input)),
       transcribeAudio: (input) =>
         transport.request((client) => client[WS_METHODS.unoTranscribeAudio](input)),
+      describeVideo: (input) =>
+        transport.request((client) => client[WS_METHODS.unoDescribeVideo](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,

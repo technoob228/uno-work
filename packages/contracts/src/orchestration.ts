@@ -141,6 +141,14 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
+/**
+ * A screen recording's key frames ride along as pictures on top of what the
+ * person attached (Loom Work 28.10: a few by default, never more than this).
+ */
+export const PROVIDER_SEND_TURN_MAX_RECORDING_FRAMES = 24;
+/** What one turn may carry in all: the person's attachments + recording frames. */
+export const PROVIDER_SEND_TURN_MAX_TURN_ATTACHMENTS =
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS + PROVIDER_SEND_TURN_MAX_RECORDING_FRAMES;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 /**
  * A non-image file attached to a message (pdf, docx, xlsx, zip…). It is not

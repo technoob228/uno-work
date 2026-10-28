@@ -29,3 +29,6 @@ squashfs-root/
 .vercel
 *.zip
 dist-tarball/
+
+# Demo builds (VITE_DEMO=…, demo-e2e/build-demo.sh)
+apps/web/dist-demo

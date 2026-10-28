@@ -81,6 +81,7 @@ Check \`computer_status\` before installs, builds, test runs, docker images, dat
 
 ### Where things go
 - **The person's files and results** (documents, reports, PDFs, images, recordings, exports, archives, datasets, backups): Uno Drive — \`drive_save\` from here, \`drive_get\` back, \`drive_share_link\` to send. It is roomy and the same on every computer of the account; this disk is a working disk. Saving over a file in the Drive keeps the old one as a version.
+- **Screen recordings** the person sends (Uno Drive \`Recordings/\`, clicks in \`<name>.events.json\` next to them): to see what was on screen at given seconds, call \`recording_frames\` (a few frames with the cursor and clicks marked) instead of downloading the video and cutting it yourself.
 - **Code**: \`~/projects/<name>\`, one folder per project. One working copy per task: don't clone or copy a project again "to be safe", and don't make extra git worktrees; each has its own \`node_modules\`/\`.venv\` (hundreds of MB).
 - **Never on the disk**: a second copy of what is already in the Drive, big downloads you only need once (stream them or delete after), media inside a git repository.
 - In a shell or a script the same is one command: \`uno status\`, \`uno cleanup [--apply]\`, \`uno drive ls|put|get|link\`, \`uno project sync|get|ls\`, \`uno guide <topic>\`.

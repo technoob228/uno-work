@@ -305,7 +305,12 @@ import type {
   VideoContextPackInput,
   VideoDigest,
 } from "./video.ts";
-import type { UnoTranscribeAudioInput, UnoTranscribeAudioResult } from "./transcription.ts";
+import type {
+  UnoDescribeVideoInput,
+  UnoDescribeVideoResult,
+  UnoTranscribeAudioInput,
+  UnoTranscribeAudioResult,
+} from "./transcription.ts";
 import type {
   ThreadContinueCompleteInput,
   ThreadContinueCompleteResult,
@@ -747,6 +752,8 @@ export interface LocalApi {
     packUnoVideoDigest: (input: VideoContextPackInput) => Promise<VideoContextPack>;
     /** Dictation: audio is transcribed server-side via the Uno Gateway. */
     transcribeAudio: (input: UnoTranscribeAudioInput) => Promise<UnoTranscribeAudioResult>;
+    /** Loom Work: a staged screen recording watched by the gateway (speech + screen). */
+    describeVideo: (input: UnoDescribeVideoInput) => Promise<UnoDescribeVideoResult>;
   };
   /**
    * Credentials vault. Website logins managed from Settings instead of being
@@ -781,6 +788,13 @@ export interface LocalApi {
  * `environmentId` rather than reaching through the local desktop bridge.
  */
 export interface EnvironmentApi {
+  /**
+   * Loom Work: a screen recording staged on this computer, watched by the
+   * gateway (speech + screen). Optional: older test doubles leave it out.
+   */
+  media?: {
+    describeVideo: (input: UnoDescribeVideoInput) => Promise<UnoDescribeVideoResult>;
+  };
   terminal: {
     open: (input: typeof TerminalOpenInput.Encoded) => Promise<TerminalSessionSnapshot>;
     write: (input: typeof TerminalWriteInput.Encoded) => Promise<void>;

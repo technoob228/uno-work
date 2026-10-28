@@ -631,6 +631,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      // Loom Work + dictation: what macOS shows when it asks for the camera/microphone.
+      extendInfo: {
+        NSMicrophoneUsageDescription:
+          "Uno Work uses the microphone when you dictate or record your screen for the agent.",
+        NSCameraUsageDescription:
+          "Uno Work shows your camera in a circle when you record your screen for the agent.",
+      },
     };
     const identity = resolveMacSigningIdentity(signed);
     if (identity) {
