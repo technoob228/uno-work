@@ -41,7 +41,8 @@ zip="$(mktemp -d)/site.zip"
 (cd "$out" && zip -qr "$zip" .)
 echo "uploading $(du -h "$zip" | cut -f1) as $slug…"
 # The console may answer 524 while the upload is still being unpacked: check the page after.
-curl -sS -o /dev/null -w "deploy: HTTP %{http_code}\n" --max-time 600 \
+# No "Expect: 100-continue": through the tunnel curl would report 100 and hang.
+curl -sS -o /dev/null -w "deploy: HTTP %{http_code}\n" --max-time 900 -H "Expect:" \
   -H "Authorization: Bearer $key" -F "file=@$zip" -F "slug=$slug" "$console/api/v1/deploy" || true
 
 for _ in $(seq 1 30); do
