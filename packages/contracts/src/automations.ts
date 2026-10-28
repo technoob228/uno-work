@@ -171,9 +171,7 @@ export type AutomationListResult = typeof AutomationListResult.Type;
 export const AutomationCreateInput = Schema.Struct({
   /** The assistant's project id. The assistant tool takes it from the caller's token instead. */
   assistant: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
-  name: Schema.optional(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_NAME_MAX_CHARS)),
-  ),
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_NAME_MAX_CHARS))),
   instruction: TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_INSTRUCTION_MAX_CHARS)),
   trigger: AutomationTrigger,
   enabled: Schema.optional(Schema.Boolean),
@@ -183,9 +181,7 @@ export type AutomationCreateInput = typeof AutomationCreateInput.Type;
 /** `PATCH /api/manager/automations/:id`, `automation_update`. */
 export const AutomationUpdateInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
-  name: Schema.optional(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_NAME_MAX_CHARS)),
-  ),
+  name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_NAME_MAX_CHARS))),
   instruction: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_INSTRUCTION_MAX_CHARS)),
   ),
@@ -232,6 +228,10 @@ export const AutomationGithubReposResult = Schema.Struct({
   repos: Schema.Array(Schema.Struct({ fullName: Schema.String, private: Schema.Boolean })),
   /** Where to add a repository to the Uno GitHub app. */
   manageUrl: Schema.NullOr(Schema.String),
+  /** The GitHub accounts the app is installed on, each with its own settings link. */
+  accounts: Schema.optional(
+    Schema.Array(Schema.Struct({ login: Schema.String, manageUrl: Schema.NullOr(Schema.String) })),
+  ),
 });
 export type AutomationGithubReposResult = typeof AutomationGithubReposResult.Type;
 
@@ -246,7 +246,15 @@ export type GithubPrCommentInput = typeof GithubPrCommentInput.Type;
 /** Simple schedule choices of the dialog → cron. */
 export type AutomationCadence = "daily" | "weekdays" | "weekly" | "hourly";
 
-const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
 /** "09:00" + cadence (+ weekday 0–6 for weekly) → cron and its label. */
 export function automationCronFor(input: {
@@ -260,12 +268,18 @@ export function automationCronFor(input: {
   const hhmm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   switch (input.cadence) {
     case "hourly":
-      return { cron: `${minute} * * * *`, label: `Every hour at :${String(minute).padStart(2, "0")}` };
+      return {
+        cron: `${minute} * * * *`,
+        label: `Every hour at :${String(minute).padStart(2, "0")}`,
+      };
     case "weekdays":
       return { cron: `${minute} ${hour} * * 1-5`, label: `Weekdays at ${hhmm}` };
     case "weekly": {
       const day = Math.min(6, Math.max(0, input.weekday ?? 1));
-      return { cron: `${minute} ${hour} * * ${day}`, label: `Every ${WEEKDAY_NAMES[day]} at ${hhmm}` };
+      return {
+        cron: `${minute} ${hour} * * ${day}`,
+        label: `Every ${WEEKDAY_NAMES[day]} at ${hhmm}`,
+      };
     }
     case "daily":
       return { cron: `${minute} ${hour} * * *`, label: `Every day at ${hhmm}` };

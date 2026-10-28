@@ -182,6 +182,9 @@ describe("AGENTS.md of assistants made by older versions", () => {
       '`{"kind": "call.ended"}`',
       "`github_pr_comment`",
       "give them the\n  link it returns",
+      "`chat_create` on the computer that has the project",
+      "When the work update says that chat finished",
+      "Tell the person ONE line with the link",
       "Recurring work is not a setup step",
       "on the Automations page",
     ]) {

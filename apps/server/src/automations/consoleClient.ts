@@ -140,7 +140,9 @@ export function automationErrorMessage(
     case "INVALID_TRIGGER":
       return `The "when" isn't right${said}. A schedule is a five-field cron (minute hour day month weekday, at most once an hour) with an IANA time zone like Europe/Berlin; a repository is owner/name.`;
     case "GITHUB_NOT_CONNECTED":
-      return `GitHub isn't connected to this Uno account yet: connect it once${links.connectUrl ? ` — ${links.connectUrl}` : " (Connect GitHub in Uno Work)"}.`;
+      return links.connectUrl
+        ? `GitHub isn't connected to this Uno account yet: connect it once — ${links.connectUrl}.`
+        : "GitHub isn't connected to this Uno account yet.";
     case "GITHUB_REPO_NOT_ALLOWED":
       return `Uno's GitHub app can't see this repository${said}. Add it on GitHub${links.manageUrl ? `: ${links.manageUrl}` : " (the Uno app's settings)"}.`;
     case "GITHUB_NOT_ALLOWED_FOR_ASSISTANT":
@@ -373,6 +375,42 @@ export function parseRepos(body: unknown): AutomationGithubReposResult["repos"] 
   });
 }
 
+/** The GitHub accounts the Uno app is installed on, each with its own settings link. */
+export function parseRepoAccounts(
+  body: unknown,
+): ReadonlyArray<{ readonly login: string; readonly manageUrl: string | null }> {
+  const list = record(body)?.["accounts"];
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((raw) => {
+    const r = record(raw);
+    const login = text(r?.["login"]);
+    return login === null ? [] : [{ login, manageUrl: githubUrl(r?.["manage_url"]) ?? null }];
+  });
+}
+
+/**
+ * Where "Add it on GitHub" goes: the settings of the account that owns the
+ * repository the person typed (`owner/…`), else the only account's, else
+ * the console's general link.
+ */
+export function repoManageUrl(
+  body: unknown,
+  accounts: ReadonlyArray<{ readonly login: string; readonly manageUrl: string | null }>,
+  query: string,
+): string | null {
+  const owner = query.trim().includes("/") ? query.trim().split("/")[0]!.toLowerCase() : null;
+  const own =
+    owner !== null ? accounts.find((account) => account.login.toLowerCase() === owner) : undefined;
+  const only = accounts.length === 1 ? accounts[0] : undefined;
+  return (
+    own?.manageUrl ??
+    only?.manageUrl ??
+    githubUrl(record(body)?.["manage_url"]) ??
+    accounts.find((account) => account.manageUrl !== null)?.manageUrl ??
+    null
+  );
+}
+
 // ── camelCase → snake_case ─────────────────────────────────────────────
 
 export interface AutomationCreateBody {
@@ -395,8 +433,11 @@ export function createBodyToConsole(input: AutomationCreateBody): Record<string,
   };
 }
 
-export function updateBodyToConsole(input: AutomationUpdateInput): Record<string, unknown> {
+export function updateBodyToConsole(
+  input: AutomationUpdateInput & { readonly assistantName?: string | undefined },
+): Record<string, unknown> {
   return {
+    ...(input.assistantName !== undefined ? { assistant_name: input.assistantName } : {}),
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
     ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
@@ -444,7 +485,8 @@ export interface AutomationsClient {
   ) => Effect.Effect<Automation, AutomationClientError>;
   readonly update: (
     id: number,
-    input: AutomationUpdateInput,
+    /** `assistantName`: the assistant was renamed (the console keeps it for lists and Inbox). */
+    input: AutomationUpdateInput & { readonly assistantName?: string | undefined },
   ) => Effect.Effect<Automation, AutomationClientError>;
   readonly remove: (
     id: number,
@@ -595,14 +637,13 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
         `git/github/repos${query.trim() ? `?q=${encodeURIComponent(query.trim().slice(0, 100))}` : ""}`,
       ).pipe(
         Effect.flatMap((response) => {
-          const parsed = readConsoleError(response.body);
-          const manageUrl =
-            githubUrl(record(response.body)?.["manage_url"]) ?? parsed.manageUrl ?? null;
           if (ok(response.status)) {
+            const accounts = parseRepoAccounts(response.body);
             return Effect.succeed<AutomationGithubReposResult>({
               connected: record(response.body)?.["connected"] !== false,
               repos: parseRepos(response.body),
-              manageUrl,
+              manageUrl: repoManageUrl(response.body, accounts, query),
+              ...(accounts.length > 0 ? { accounts } : {}),
             });
           }
           const refusal = consoleRefusal(response);

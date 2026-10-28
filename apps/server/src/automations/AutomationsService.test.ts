@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { ManagerTokenId } from "@t3tools/contracts";
 import { Effect, Layer, Option } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { handleManagerMcpMessage, isAssistantsOnlyManagerTool } from "../manager/mcp.ts";
@@ -222,6 +222,33 @@ describe("automation_* for an assistant", () => {
     );
     expect(made._tag).toBe("Success");
     expect(calls[0]!.body).toMatchObject({ assistant: "assistant-ada", assistant_name: "Ada" });
+  });
+
+  it("the web's list shows a renamed assistant's new name and tells the console", async () => {
+    const { calls, run } = setup((method) =>
+      method === "GET"
+        ? json(200, {
+            automations: [
+              automation({ assistant_name: "Ada (old)" }),
+              automation({ id: 9, assistant: "assistant-home", assistant_name: "Uno" }),
+            ],
+          })
+        : json(200, automation()),
+    );
+    const result = await run((service) => service.list);
+    expect(result._tag).toBe("Success");
+    if (result._tag === "Success") {
+      expect(result.success.automations.map((a) => a.assistantName)).toEqual(["Ada", "Uno"]);
+    }
+    await vi.waitFor(() =>
+      expect(calls.filter((c) => c.method === "PATCH")).toEqual([
+        {
+          method: "PATCH",
+          path: "/api/v1/boxes/7/work/automations/7",
+          body: { assistant_name: "Ada" },
+        },
+      ]),
+    );
   });
 
   it("after a call: the enabled call.ended automations of that assistant", async () => {

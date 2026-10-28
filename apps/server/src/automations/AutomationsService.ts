@@ -271,9 +271,38 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
         ),
       );
 
+    /**
+     * The list with each assistant's name as its profile says now: a renamed
+     * assistant shows its new name at once, and the console is told in the
+     * background (`assistant_name` in PATCH) for its own lists and Inbox.
+     */
+    const listFresh: Effect.Effect<AutomationListResult> = Effect.gen(function* () {
+      const result = yield* client.list;
+      if (!result.available) return result;
+      const names = new Map<string, string | null>();
+      const automations: Automation[] = [];
+      for (const automation of result.automations) {
+        if (!names.has(automation.assistant)) {
+          names.set(automation.assistant, yield* assistantName(automation.assistant));
+        }
+        const current = names.get(automation.assistant) ?? null;
+        if (current === null || current === automation.assistantName) {
+          automations.push(automation);
+          continue;
+        }
+        yield* Effect.forkDetach(
+          client
+            .update(automation.id, { assistantName: current })
+            .pipe(Effect.ignoreCause({ log: true })),
+        );
+        automations.push({ ...automation, assistantName: current });
+      }
+      return { ...result, automations };
+    });
+
     const service: AutomationsServiceShape = {
       client,
-      list: client.list,
+      list: listFresh,
       create: (args) =>
         Effect.gen(function* () {
           const input = yield* decode(AutomationCreateInput, args);

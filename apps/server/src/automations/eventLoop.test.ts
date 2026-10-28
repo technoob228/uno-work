@@ -296,6 +296,49 @@ describe("automation event loop", () => {
   });
 });
 
+describe("reporting a result", () => {
+  it("retries only when the console didn't answer; a 4xx is final", async () => {
+    const attempts: number[] = [];
+    let answer: AutomationClientError | null = null;
+    const loop = Effect.runSync(
+      makeAutomationEventLoop({
+        client: {
+          events: () => Effect.succeed([]),
+          claim: () => Effect.succeed("claimed" as const),
+          result: (id) =>
+            Effect.suspend(() => {
+              attempts.push(id);
+              return answer ? Effect.fail(answer) : Effect.void;
+            }),
+        },
+        journal: makeMemoryJournal(),
+        linked: Effect.succeed(true),
+        assistantName: () => Effect.succeed("Ada"),
+        runTurn: () =>
+          Effect.succeed({
+            status: "delivered" as const,
+            threadId: ThreadId.make("t"),
+            delivered: 1,
+            reply: "ok",
+          }),
+      }),
+    );
+    answer = new AutomationClientError({ status: 409, code: "ALREADY_FINISHED", message: "done" });
+    await Effect.runPromise(loop.processEvent(event(1)));
+    expect(attempts).toEqual([1]);
+    answer = new AutomationClientError({ status: 404, code: "NOT_FOUND", message: "gone" });
+    await Effect.runPromise(loop.processEvent(event(2)));
+    expect(attempts).toEqual([1, 2]);
+    answer = new AutomationClientError({
+      status: 502,
+      code: "CONSOLE_UNREACHABLE",
+      message: "down",
+    });
+    await Effect.runPromise(loop.processEvent(event(3)));
+    expect(attempts).toEqual([1, 2, 3, 3, 3]);
+  });
+});
+
 describe("processed journal", () => {
   it("survives a restart and keeps the last N ids", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "automations-journal-"));

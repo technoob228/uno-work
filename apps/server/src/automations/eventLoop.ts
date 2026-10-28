@@ -142,6 +142,11 @@ export interface AutomationEventLoopDeps {
   readonly now?: () => number;
 }
 
+/** 5xx or no answer: worth another try. A 4xx is the console's final word. */
+export function isRetryableConsoleError(error: AutomationClientError): boolean {
+  return error.code === "CONSOLE_UNREACHABLE" || error.status >= 500;
+}
+
 /** What one poll means for the next one. */
 export type PollOutcome =
   | { readonly kind: "events"; readonly count: number }
@@ -208,7 +213,9 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
     /** The result, a few times over a short outage; the console's janitor covers the rest. */
     const report = (event: AutomationEvent, body: AutomationResultBody) =>
       deps.client.result(event.id, body).pipe(
-        Effect.retry({ times: RESULT_ATTEMPTS - 1 }),
+        // Only a console that didn't answer is asked again; a 4xx (409
+        // ALREADY_FINISHED, 404) is final.
+        Effect.retry({ times: RESULT_ATTEMPTS - 1, while: isRetryableConsoleError }),
         Effect.tap(() =>
           Effect.logInfo("automation run finished").pipe(
             Effect.annotateLogs({

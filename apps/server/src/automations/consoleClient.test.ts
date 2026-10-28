@@ -327,4 +327,47 @@ describe("automations client (console mocked)", () => {
     const { client } = stand(() => json(404, { error: "NOT_FOUND" }));
     expect(await Effect.runPromise(client.remove(7))).toEqual({ deleted: false });
   });
+
+  it("repos: the Add-on-GitHub link of the account that owns the repository", async () => {
+    const body = {
+      repos: [{ full_name: "getuno/x", private: true }],
+      manage_url: "https://github.com/settings/installations/1",
+      accounts: [
+        {
+          login: "getuno",
+          manage_url: "https://github.com/organizations/getuno/settings/installations/2",
+        },
+        { login: "misha", manage_url: "https://github.com/settings/installations/3" },
+        { login: "evil", manage_url: "https://evil.example/x" },
+      ],
+    };
+    const { client } = stand(() => json(200, body));
+    const owned = await Effect.runPromise(client.repos("GetUno/new-repo"));
+    expect(owned.manageUrl).toBe(
+      "https://github.com/organizations/getuno/settings/installations/2",
+    );
+    expect(owned.accounts).toEqual([
+      {
+        login: "getuno",
+        manageUrl: "https://github.com/organizations/getuno/settings/installations/2",
+      },
+      { login: "misha", manageUrl: "https://github.com/settings/installations/3" },
+      { login: "evil", manageUrl: null },
+    ]);
+    // No owner typed: the console's general link.
+    expect((await Effect.runPromise(client.repos("x"))).manageUrl).toBe(
+      "https://github.com/settings/installations/1",
+    );
+  });
+
+  it("PATCH carries a renamed assistant's name", async () => {
+    const { client, calls } = stand(() => json(200, CONSOLE_AUTOMATION));
+    await Effect.runPromise(client.update(7, { assistantName: "Ada Lovelace" }));
+    expect(calls[0]).toMatchObject({ method: "PATCH", body: { assistant_name: "Ada Lovelace" } });
+  });
+
+  it("GitHub not connected without a link: a neutral line", () => {
+    const refusal = consoleRefusal({ status: 409, body: { error: "GITHUB_NOT_CONNECTED" } });
+    expect(refusal.message).toBe("GitHub isn't connected to this Uno account yet.");
+  });
 });
