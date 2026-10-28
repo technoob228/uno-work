@@ -78,3 +78,37 @@ chip in the chat and a switch on the page, Free plaque, who/where in the
 Inbox), `personaChannels.ts` (gallery, character line, where a project limit
 is a real lock). Extra address params: `personas=N`, `facegen=fail`.
 Flows: `demo-e2e/flows/d.flow.mjs` (`node demo-e2e/run.mjs d-`).
+
+## Automations (28.10, branch `feat/automations-web-1028`)
+
+What assistants do by themselves — on a schedule or when something happens
+(a GitHub pull request, after a call; Gmail "Soon"). Contract:
+`reports/day_2026-10-28/automations/CONTRACT.md`.
+
+| What                                                                                        | File                                                                      |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| The daemon's `/api/manager/automations*` (kept per computer), runs, scenes, the chat phrase | `assist/automations.ts` (routes spread into `daemon.ts`)                  |
+| Client + react-query hooks                                                                  | `../lib/automationsApi.ts`, `../components/automations/useAutomations.ts` |
+| Words, the dialog's draft ↔ trigger, grouping (pure, tested)                                | `../components/automations/automations.logic.ts`                          |
+| Card · dialog · section on the assistant's page · `/automations` screen · chat card         | `../components/automations/*`                                             |
+
+Extra address params: `automations=none|some` (live has 3: Uno "Sum up my day",
+Bolt "Review PRs in getuno/web", Mia "Follow-up after calls"), `gh=ok|norepo|noperm|off`
+(the Uno GitHub app sees the repos / doesn't see getuno/web / lacks "Pull requests:
+write" / isn't installed), `macassistant=on` (Kit lives on the MacBook — its page
+says "Automations run on a cloud computer"). Both are rows in the "what to look at" card.
+
+Scenes (Bolt's chat in the live account): `auto-pr-opened` (PR #12 → the turn →
+a "Review PR #12" chat on uno-work → "Asks first": the Allow card "Comment on PR #12
+in getuno/web" + Needs you; "Does it itself": commented at once), `auto-pr-twice`
+(two pushes: the first `superseded`, one run), `auto-asleep` (the run waits —
+"Waiting — uno-work is asleep…" — ~15 s at speed 1, then runs). The phrase "every
+time a PR comes to owner/x, review it" (or «каждый раз, когда приходит PR …») in an
+assistant's chat makes one: the "Automation created · When … · Open" card comes
+from the `automation_create` tool call's result (`MessagesTimeline` → `AutomationCreatedCard`).
+
+Flows: `demo-e2e/flows/automations.flow.mjs` (`node demo-e2e/run.mjs auto-`; one at 390 px).
+
+Known gaps: the demo doesn't fake "Join my calls", so "After a call" always shows
+the hint to turn it on; Gmail is "Soon" only; a run's "Open chat" goes to the
+assistant's main chat (the daemon's "Automations" thread for personas isn't faked).

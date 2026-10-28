@@ -21,6 +21,7 @@ import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { HttpResponse, http, type HttpHandler } from "msw";
 
 import { MACHINES, PROJECTS, type DemoMachine, type MachineKey } from "../heavyFixtures";
+import { automationHandlers, resetAutomations } from "./automations";
 import { type DemoPersona, assistantsOn } from "./fixtures";
 import { startedByOn } from "./startedBy";
 import {
@@ -237,6 +238,7 @@ export function startDaemons(input: { readonly world: AssistWorld }) {
   for (const key of Object.keys(MACHINES) as MachineKey[]) {
     for (const persona of assistantsOn(key, world)) addRecord(key, persona);
   }
+  resetAutomations({ world });
 }
 
 export function personaOf(machine: MachineKey, projectId: string): DemoPersona | null {
@@ -410,6 +412,11 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       ({ request }) => asleepHosts.includes(new URL(request.url).host),
       () => HttpResponse.error(),
     ),
+    // Automations (28.10): kept per computer in assist/automations.ts.
+    ...automationHandlers({
+      machineOf,
+      nameOf: (machine, projectId) => recordOf(machine, projectId)?.persona.name ?? null,
+    }),
     http.get("*/api/manager/assistants", ({ request }) => {
       const machine = machineOf(request);
       const list = [...records.values()]
