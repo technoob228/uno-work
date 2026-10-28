@@ -23,7 +23,9 @@ export function ProjectFavicon(input: {
       return resolveEnvironmentHttpUrl({
         environmentId: input.environmentId,
         pathname: "/api/project-favicon",
-        searchParams: { cwd: input.cwd },
+        // `v`: browsers keep an hour of the grey stand-in folder that servers
+        // before 0.0.157 answered for "no icon"; a new address skips it.
+        searchParams: { cwd: input.cwd, v: "2" },
       });
     } catch {
       return null;
