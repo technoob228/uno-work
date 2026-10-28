@@ -11,6 +11,10 @@
  * console (404) or no linked Telegram: not delivered — the Inbox item the
  * caller already posted is all there is.
  *
+ * `emailSubject` (a finished task, taskDoneNotify.ts): without a linked
+ * Telegram the console mails the text to the account's address instead
+ * (fishcode `notify-owner` `email_subject`; an older console ignores it).
+ *
  * @module manager/unoServiceNotify
  */
 import { Effect } from "effect";
@@ -28,6 +32,7 @@ export const UNO_SERVICE_CHAT_ID = "uno-bot";
 export const sendUnoServiceNotification = (input: {
   readonly identity: WorkMachineIdentity | null;
   readonly text: string;
+  readonly emailSubject?: string;
   readonly fetchImpl?: FetchLike;
 }): Effect.Effect<{ readonly delivered: boolean }> =>
   Effect.gen(function* () {
@@ -36,7 +41,10 @@ export const sendUnoServiceNotification = (input: {
       identity: input.identity,
       method: "POST",
       subpath: "notify-owner",
-      body: { text: input.text },
+      body: {
+        text: input.text,
+        ...(input.emailSubject !== undefined ? { email_subject: input.emailSubject } : {}),
+      },
       ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
     }).pipe(
       Effect.catchTag("WorkConsoleUnreachable", (error) =>
