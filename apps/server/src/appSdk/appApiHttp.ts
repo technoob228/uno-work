@@ -60,6 +60,8 @@ export interface AppApiCaller {
   readonly notify?: boolean;
   /** The manifest's icon (emoji / letters), shown next to its notifications. */
   readonly appIcon?: string | null;
+  /** The manifest asks for an assistant's calls (`"calls": true`, Notetaker). */
+  readonly calls?: boolean;
 }
 
 export interface AppApiTaskDetail {
@@ -110,7 +112,29 @@ export interface AppApiCore {
     caller: AppApiCaller,
     notification: ParsedNotify,
   ) => Promise<{ readonly id: string }>;
+  /**
+   * "Join my calls" of an assistant (assistants/assistantCalls.ts): the link,
+   * the person's calendar, the events of a notetaker. Absent = not here.
+   */
+  readonly calls?: AppCallsCore;
 }
+
+/** A reply of the calls core: status + JSON body (errors already OpenAI-shaped). */
+export interface AppCallsReply {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+export interface AppCallsCore {
+  readonly link: (caller: AppApiCaller) => Promise<AppCallsReply>;
+  readonly calendar: (
+    caller: AppApiCaller,
+    range: { readonly from: string | null; readonly to: string | null },
+  ) => Promise<AppCallsReply>;
+  readonly event: (caller: AppApiCaller, body: unknown) => Promise<AppCallsReply>;
+}
+
+const CALLS_EVENT_MAX_BYTES = 256 * 1024;
 
 class BodyTooLarge extends Error {}
 
@@ -682,6 +706,50 @@ export function makeAppApiHandler(core: AppApiCore) {
         return await transcriptions(caller, req, res);
       }
       if (method === "POST" && route === "/v1/notify") return await notify(caller, req, res);
+      if (
+        route === "/v1/assistant/link" ||
+        route === "/v1/assistant/events" ||
+        route === "/v1/calendar/events"
+      ) {
+        if (!caller.calls) {
+          return send(
+            res,
+            err(
+              403,
+              "calls_not_allowed",
+              'This app\'s manifest does not ask for calls. Add "calls": true to ~/.uno/apps/<id>.json.',
+            ),
+          );
+        }
+        if (!core.calls) {
+          return send(
+            res,
+            err(503, "calls_unavailable", "Join my calls isn't available on this computer."),
+          );
+        }
+        if (method === "GET" && route === "/v1/assistant/link") {
+          return send(res, await core.calls.link(caller));
+        }
+        if (method === "GET" && route === "/v1/calendar/events") {
+          return send(
+            res,
+            await core.calls.calendar(caller, {
+              from: url.searchParams.get("from"),
+              to: url.searchParams.get("to"),
+            }),
+          );
+        }
+        if (method === "POST" && route === "/v1/assistant/events") {
+          const raw = await readBody(req, CALLS_EVENT_MAX_BYTES);
+          let body: unknown;
+          try {
+            body = JSON.parse(raw.toString("utf8"));
+          } catch {
+            return send(res, err(400, "invalid_request", "The body must be JSON."));
+          }
+          return send(res, await core.calls.event(caller, body));
+        }
+      }
       if (route === "/v1/tasks") {
         if (method === "POST") return await createTask(caller, req, res);
         if (method === "GET") return await listTasks(caller, res);

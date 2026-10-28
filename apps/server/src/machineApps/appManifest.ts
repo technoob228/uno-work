@@ -15,6 +15,7 @@
  *     "ai": {"chat": true}          // optional: use the machine's AI through the App SDK (docs/app-sdk.md)
  *     "storage": {"limitGb": 5}     // optional: keep files in the account's cloud (App SDK)
  *     "notify": true                // optional: put notifications into the person's Inbox (App SDK)
+ *     "calls": true                 // optional: an assistant's "Join my calls" (Notetaker; App SDK)
  *     "widget": {"path": "/widget", "size": "medium", "title": "Orders"}  // optional: a Home widget
  *     "runs": "always"              // optional: keep an economy-mode computer awake for it
  *   }
@@ -77,6 +78,12 @@ export interface AppManifest {
   readonly storage: AppStorageRequest | null;
   /** May put notifications into the person's Inbox (`"notify": true`, App SDK). */
   readonly notify?: boolean;
+  /**
+   * Takes notes on the person's calls for an assistant (`"calls": true`, App
+   * SDK, assistants/assistantCalls.ts): reads the link and — only while the
+   * person has "Join my calls" on — their calendar, and reports what happened.
+   */
+  readonly calls?: boolean;
   /** A Home widget (`"widget": {"path": "/widget"}`); absent = none. */
   readonly widget?: AppWidget;
   /** `"type": "telegram-bot"` — a bot: no port, opened in Telegram. Absent = a regular app. */
@@ -369,6 +376,7 @@ export function validateManifest(
       ai: parseAppAiRequest(record["ai"]),
       storage: parseAppStorageRequest(record["storage"]),
       ...(parseAppNotifyRequest(record["notify"]) ? { notify: true } : {}),
+      ...(record["calls"] === true ? { calls: true } : {}),
       ...(widget ? { widget } : {}),
       ...(isTelegramBot
         ? {

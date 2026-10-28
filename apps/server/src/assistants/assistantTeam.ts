@@ -926,7 +926,7 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
   const askUser: AssistantTeamShape["askUser"] = (caller, args) =>
     Effect.gen(function* () {
       const input = yield* decode(ManagerAskUserInput, args);
-      yield* ownMember(caller);
+      const member = yield* ownMember(caller);
       const threadId = caller.callerThreadId;
       if (threadId === undefined) {
         return yield* fail(
@@ -934,7 +934,19 @@ export const makeAssistantTeam = (deps: AssistantTeamDeps): AssistantTeamShape =
         );
       }
       const requestId = newAskCardRequestId();
-      yield* deps.showCard({ threadId, requestId, question: askCardQuestion(input) });
+      const question = askCardQuestion(input);
+      yield* deps.showCard({
+        threadId,
+        requestId,
+        // "Join my calls" is set up for the assistant that asks (calls:<its project>).
+        question:
+          question.connect && input.connect === "calls"
+            ? {
+                ...question,
+                connect: { ...question.connect, provider: `calls:${member.projectId}` },
+              }
+            : question,
+      });
       return {
         asked: true,
         next: `The card is on the person's screen. End your turn now with no other text. Their answer comes as their next message: "${input.header}: <answer>" (or "${input.header}: Skip").`,

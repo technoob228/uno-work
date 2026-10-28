@@ -54,6 +54,7 @@ import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
 import { AssistantModeSwitch } from "./PersonaMode";
+import { JoinCallsSection } from "./JoinCallsSection";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import {
   TeamConnectors,
@@ -524,6 +525,13 @@ export function AssistantProfileSimple(props: {
               <ConnectTelegramCard member={member} />
             ) : null}
             <WhereYouTalk member={member} />
+            {!member.revoked ? (
+              <JoinCallsSection
+                environmentId={member.environmentId}
+                projectId={member.projectId}
+                name={name}
+              />
+            ) : null}
 
             {/* Variant D: its mode and where it looks, in plain sight. */}
             <Section title="How it works" testId="assistant-profile-mode">

@@ -60,7 +60,7 @@ export interface ManagerConnectorView {
   readonly account: string | null;
   readonly connectedAt: string | null;
   /** Listed as connected, but the provider refused it: the row says Reconnect. */
-  readonly needsReconnect?: boolean;
+  readonly needsReconnect: boolean;
   readonly toolCount: number;
 }
 
