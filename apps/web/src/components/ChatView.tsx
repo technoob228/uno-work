@@ -156,6 +156,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { recordingFrameAttachments } from "../screenRecording/frameAttachments";
 import { appendRecordingToPrompt } from "../screenRecording/recordingLogic";
 import { recordingReadiness } from "../screenRecording/pipeline";
 import { useScreenRecordingStore } from "../screenRecording/recordingStore";
@@ -2881,6 +2882,7 @@ export default function ChatView(props: ChatViewProps) {
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
+      imageSupport: ctxImageSupport,
     } = sendCtx;
     const promptForSend = promptRef.current;
     // Loom Work: the chat's screen recording goes with the message as a block.
@@ -2999,8 +3001,18 @@ export default function ChatView(props: ChatViewProps) {
     const takenRecording = composerRecording
       ? useScreenRecordingStore.getState().take(activeThread.id)
       : null;
+    // Loom Work: the key frames go as pictures — when the model takes them.
+    const recordingFrames =
+      takenRecording && ctxImageSupport !== "unsupported"
+        ? recordingFrameAttachments(takenRecording.item)
+        : [];
+    const recordingForAgent = takenRecording
+      ? recordingFrames.length > 0
+        ? takenRecording.forAgent
+        : { ...takenRecording.forAgent, frames: [] }
+      : null;
     const messageTextForSend = appendTerminalContextsToPrompt(
-      appendRecordingToPrompt(promptForSend, takenRecording?.forAgent ?? null),
+      appendRecordingToPrompt(promptForSend, recordingForAgent),
       composerTerminalContextsSnapshot,
     );
     const messageIdForSend = newMessageId();
@@ -3020,6 +3032,13 @@ export default function ChatView(props: ChatViewProps) {
         sizeBytes: image.sizeBytes,
         dataUrl: await readFileAsDataUrl(image.file),
       })),
+      ...recordingFrames.map(async (frame) => ({
+        type: "image" as const,
+        name: frame.name,
+        mimeType: "image/jpeg",
+        sizeBytes: frame.blob.size,
+        dataUrl: await readFileAsDataUrl(frame.blob),
+      })),
       ...composerVideosSnapshot.map(async (video) => ({
         type: "video_digest" as const,
         digestId: video.digestId!,
@@ -3029,14 +3048,24 @@ export default function ChatView(props: ChatViewProps) {
       // Staged on the chat's computer; the server files them in ~/Uploads.
       ...composerFilesSnapshot.map((file) => stageChatFileUpload(environmentId, file)),
     ]);
-    const optimisticImageAttachments = composerImagesSnapshot.map((image) => ({
-      type: "image" as const,
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      previewUrl: image.previewUrl,
-    }));
+    const optimisticImageAttachments = [
+      ...composerImagesSnapshot.map((image) => ({
+        type: "image" as const,
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        previewUrl: image.previewUrl,
+      })),
+      ...recordingFrames.map((frame) => ({
+        type: "image" as const,
+        id: frame.id,
+        name: frame.name,
+        mimeType: "image/jpeg",
+        sizeBytes: frame.blob.size,
+        previewUrl: frame.previewUrl,
+      })),
+    ];
     const optimisticVideoAttachments = composerVideosSnapshot.map((video) => ({
       type: "video_digest" as const,
       id: video.id,

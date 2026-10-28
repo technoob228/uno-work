@@ -9,6 +9,13 @@
  * message carries for the agent and its parsing back for the chat.
  */
 
+import {
+  type KeyFrameCandidate,
+  type TimelineEntry,
+  formatTimeline,
+  keyFrameLegend,
+} from "./agentView";
+
 /**
  * A recording stops at 60 minutes (Misha 28.10: longer than 10 right away;
  * the gateway's /video/describe/drive takes up to 60). Watching is billed
@@ -250,10 +257,21 @@ export interface RecordingForAgent {
   readonly shareUrl: string | null;
   readonly speech: string;
   readonly visual: string;
+  /** Second by second (the gateway's timeline mode); empty for older daemons. */
+  readonly timeline?: ReadonlyArray<TimelineEntry>;
+  /** The key frames that go with the message as pictures, in order. */
+  readonly frames?: ReadonlyArray<KeyFrameCandidate>;
 }
 
 const OPEN = "<screen_recording";
 const CLOSE = "</screen_recording>";
+
+const SAID = "What they said:";
+const SEEN = "What was on screen:";
+const TIMELINE = "Timeline (time from the start; where the cursor is and what happens):";
+const FRAMES = "Key frames attached as pictures, in this order:";
+const LOOK_CLOSER = "To look closer at any moment";
+const FULL_VIDEO = "The full video is in";
 
 function attr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -268,14 +286,18 @@ function unattr(value: string): string {
 
 /**
  * The block after the person's words. Plain text the agent reads (no tool
- * needed), with where the full video is if it wants a closer look.
+ * needed): speech, the picture, the timeline with time marks, the legend of
+ * the attached key frames, and how to look closer (`recording_frames`).
  */
 export function buildRecordingBlock(recording: RecordingForAgent): string {
+  const frames = recording.frames ?? [];
+  const timeline = recording.timeline ?? [];
   const attrs = [
     `name="${attr(recording.name)}"`,
     `duration="${formatClock(recording.durationMs)}"`,
     recording.driveKey ? `drive_key="${attr(recording.driveKey)}"` : null,
     recording.shareUrl ? `link="${attr(recording.shareUrl)}"` : null,
+    frames.length > 0 ? `frames="${frames.length}"` : null,
   ]
     .filter(Boolean)
     .join(" ");
@@ -283,16 +305,23 @@ export function buildRecordingBlock(recording: RecordingForAgent): string {
     `${OPEN} ${attrs}>`,
     "The person recorded their screen and talked you through it. Do what they showed and asked; if something is unclear, ask before acting.",
     "",
-    "What they said:",
+    SAID,
     recording.speech.trim() || "(nothing — the recording has no speech)",
     "",
-    "What was on screen:",
+    SEEN,
     recording.visual.trim() || "(no description)",
   ];
+  if (timeline.length > 0) {
+    lines.push("", TIMELINE, formatTimeline(timeline));
+  }
+  if (frames.length > 0) {
+    lines.push("", FRAMES, keyFrameLegend(frames));
+  }
   if (recording.driveKey) {
     lines.push(
       "",
-      `The full video is in their Uno Drive at ${recording.driveKey}${recording.shareUrl ? ` (link: ${recording.shareUrl})` : ""} — open it with the Drive tools if you need a detail the summary misses.`,
+      `${LOOK_CLOSER}, call the uno-work tool recording_frames with recording="${recording.driveKey}", from and to (e.g. "0:12" and "0:15") and fps — the frames come back as pictures (about 1.2k tokens each, so ask for a few). The cursor is in the picture; a yellow ring marks a click.`,
+      `${FULL_VIDEO} their Uno Drive at ${recording.driveKey}${recording.shareUrl ? ` (link: ${recording.shareUrl})` : ""}.`,
     );
   }
   lines.push(CLOSE);
@@ -316,7 +345,11 @@ export interface ParsedRecording {
   readonly shareUrl: string | null;
   readonly speech: string;
   readonly visual: string;
+  /** The timeline lines as the agent got them ("" when none). */
+  readonly timeline: string;
 }
+
+const SECTION_STARTS = [SAID, SEEN, TIMELINE, FRAMES, LOOK_CLOSER, FULL_VIDEO];
 
 /** The person's own words and the recording block, as the chat shows them. */
 export function extractRecordingBlock(text: string): {
@@ -335,19 +368,20 @@ export function extractRecordingBlock(text: string): {
     return match ? unattr(match[1] ?? "") : null;
   };
   const body = text.slice(headerEnd + 1, end);
-  const section = (label: string, next: string | null) => {
-    const at = body.indexOf(`${label}\n`);
+  // A section runs from its label to the next known label at a line start.
+  const section = (label: string) => {
+    const at = body.startsWith(label) ? 0 : body.indexOf(`\n${label}`);
     if (at === -1) return "";
-    const from = at + label.length + 1;
-    const to = next ? body.indexOf(`\n\n${next}`, from) : -1;
-    const raw = body.slice(from, to === -1 ? undefined : to).trim();
+    const from = (at === 0 ? 0 : at + 1) + label.length;
+    let to = body.length;
+    for (const other of SECTION_STARTS) {
+      if (other === label) continue;
+      const next = body.indexOf(`\n${other}`, from);
+      if (next !== -1 && next < to) to = next;
+    }
+    const raw = body.slice(from, to).trim();
     return raw.startsWith("(") && raw.endsWith(")") ? "" : raw;
   };
-  const speech = section("What they said:", "What was on screen:");
-  let visual = section("What was on screen:", null);
-  const fullVideoAt = visual.indexOf("\n\nThe full video is in");
-  if (fullVideoAt !== -1) visual = visual.slice(0, fullVideoAt).trim();
-  if (visual.startsWith("The full video is in")) visual = "";
   const before = text.slice(0, start).replace(/\s+$/, "");
   const after = text.slice(end + CLOSE.length).replace(/^\s+/, "");
   return {
@@ -357,8 +391,9 @@ export function extractRecordingBlock(text: string): {
       duration: read("duration") ?? "",
       driveKey: read("drive_key"),
       shareUrl: read("link"),
-      speech,
-      visual,
+      speech: section(SAID),
+      visual: section(SEEN),
+      timeline: section(TIMELINE),
     },
   };
 }

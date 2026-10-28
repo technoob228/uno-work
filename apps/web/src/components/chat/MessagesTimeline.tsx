@@ -1,4 +1,5 @@
 import { RecordingMessageCard } from "../../screenRecording/RecordingCards";
+import { KEY_FRAME_PREFIX } from "../../screenRecording/agentView";
 import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
 import { localRecordingUrl } from "../../screenRecording/recordingStore";
 import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
@@ -375,8 +376,15 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const note = parseUnoWorkNote(row.message.text);
           if (note) return <UnoWorkNoteLine note={note} raw={row.message.text} />;
           const userAttachments = row.message.attachments ?? [];
-          const userImages = userAttachments.filter(
+          const allUserImages = userAttachments.filter(
             (attachment): attachment is ChatImageAttachment => attachment.type === "image",
+          );
+          // A screen recording's key frames show inside its card, not as photos.
+          const recordingFrames = allUserImages.filter((image) =>
+            image.name.startsWith(KEY_FRAME_PREFIX),
+          );
+          const userImages = allUserImages.filter(
+            (image) => !image.name.startsWith(KEY_FRAME_PREFIX),
           );
           const userVideos = userAttachments.filter(
             (attachment): attachment is ChatVideoDigestAttachment =>
@@ -453,6 +461,11 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 {recordingPart.recording ? (
                   <RecordingMessageCard
                     recording={recordingPart.recording}
+                    frames={recordingFrames.map((image) => ({
+                      id: image.id,
+                      name: image.name,
+                      previewUrl: image.previewUrl ?? null,
+                    }))}
                     localUrl={localRecordingUrl(recordingPart.recording.name)}
                   />
                 ) : null}

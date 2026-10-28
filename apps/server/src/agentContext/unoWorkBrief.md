@@ -8,7 +8,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 
 - This computer: `computer_status`, `computer_cleanup`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
-- Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`
+- Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`; frames of a screen recording: `recording_frames`
 - Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`
 - The person: `notify` (Inbox), `open_in_panel` (URL or file, right panel), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_forms_get`, `site_forms_set` (where form answers go)

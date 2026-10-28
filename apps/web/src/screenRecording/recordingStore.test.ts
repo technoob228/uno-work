@@ -113,6 +113,8 @@ beforeEach(() => {
     height: 1080,
     hasVoice: true,
     hasCamera: true,
+    events: [],
+    keyFrames: [],
   };
   describeImpl = async () => ({ speech: "Rename the button to Start", visual: "A form" });
   let n = 0;

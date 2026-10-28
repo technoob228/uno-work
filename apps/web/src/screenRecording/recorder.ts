@@ -18,6 +18,17 @@
  * machine is tested without a browser.
  */
 import {
+  type DisplaySurface,
+  type KeyFrameCandidate,
+  type KeyFrameReason,
+  MOVE_SAMPLE_MS,
+  type PointerSample,
+  RECORDING_EVENTS_MAX,
+  type RecordingEvent,
+  type ViewportInfo,
+  mapPointerToFrame,
+} from "./agentView";
+import {
   type CaptureProblem,
   type RecordingOptions,
   baseMimeType,
@@ -50,7 +61,33 @@ export interface RecorderEnv {
     tracks: MediaStreamTrack[],
   ) => { track: MediaStreamTrack; close(): void } | null;
   readonly platform?: { readonly mac: boolean; readonly desktopApp: boolean };
+  /**
+   * Clicks and moves of the pointer inside Work (its tab or window); returns
+   * the unsubscribe. Absent: no event track, no click rings, no key frames.
+   */
+  readonly subscribePointer?: (onSample: (sample: PointerSample) => void) => () => void;
+  /** Work's window and screen, to place a pointer event on the video. */
+  readonly viewport?: () => ViewportInfo;
+  /** A canvas → JPEG (key frames); null when the engine can't. */
+  readonly encodeJpeg?: (canvas: HTMLCanvasElement) => Promise<Blob | null>;
 }
+
+/** A key frame grabbed while recording (the screen only, ≤ 1280 px wide). */
+export interface LiveKeyFrame extends KeyFrameCandidate {
+  readonly blob: Blob;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Key frames held in memory while recording (~100–200 KB each). */
+export const LIVE_KEY_FRAMES_MAX = 60;
+/** The screen counts as changed when a 32×18 thumbnail moves this much (0..255 mean). */
+export const SCENE_CHANGE_THRESHOLD = 12;
+const SCENE_MIN_GAP_MS = 2000;
+const SCENE_SETTLE_MS = 500;
+const CLICK_FRAME_DELAY_MS = 250;
+const RIPPLE_MS = 700;
+const KEY_FRAME_MAX_WIDTH = 1280;
 
 export class CaptureError extends Error {
   readonly problem: CaptureProblem;
@@ -72,6 +109,10 @@ export interface RecordingResult {
   readonly height: number;
   readonly hasVoice: boolean;
   readonly hasCamera: boolean;
+  /** Clicks, cursor moves and screen changes Work saw (times in ms of recording). */
+  readonly events: ReadonlyArray<RecordingEvent>;
+  /** Pictures grabbed at clicks, screen changes and the start. */
+  readonly keyFrames: ReadonlyArray<LiveKeyFrame>;
 }
 
 export type RecorderState = "recording" | "paused" | "stopped";
@@ -149,6 +190,231 @@ function startCapture(
   return { blobs, recorder, stopped };
 }
 
+/**
+ * What the agent sees beyond the video (28.10): the event track (clicks and
+ * moves inside Work, placed on the frame), a ring drawn into the video where
+ * a click lands, and key frames grabbed live — at the start, ~¼ s after a
+ * click (the ring and what the click did) and after the screen changes.
+ * Driven by the compositing ticker (30 fps, also in a background tab).
+ */
+class AgentViewTracker {
+  readonly events: RecordingEvent[] = [];
+  readonly frames: LiveKeyFrame[] = [];
+  private ripples: Array<{ x: number; y: number; at: number }> = [];
+  private pointer: { x: number; y: number; at: number } | null = null;
+  private pending: Array<{ due: number; reason: KeyFrameReason }> = [];
+  private readonly encoding = new Set<Promise<void>>();
+  private lastMoveAt = -Infinity;
+  private lastSceneAt = -Infinity;
+  private prevLuma: Float32Array | null = null;
+  private ticks = 0;
+  private unsubscribe: (() => void) | null = null;
+  private readonly snapSize: { width: number; height: number };
+
+  constructor(
+    private readonly env: RecorderEnv,
+    private readonly screenVideo: HTMLVideoElement,
+    private readonly frame: { width: number; height: number },
+    private readonly surface: DisplaySurface,
+    private readonly elapsed: () => number,
+    private readonly recording: () => boolean,
+    private readonly snapCanvas: HTMLCanvasElement,
+    private readonly lumaCanvas: HTMLCanvasElement | null,
+  ) {
+    const scale = Math.min(1, KEY_FRAME_MAX_WIDTH / Math.max(1, frame.width));
+    this.snapSize = {
+      width: Math.max(2, Math.round(frame.width * scale)),
+      height: Math.max(2, Math.round(frame.height * scale)),
+    };
+    snapCanvas.width = this.snapSize.width;
+    snapCanvas.height = this.snapSize.height;
+    if (lumaCanvas) {
+      lumaCanvas.width = 32;
+      lumaCanvas.height = 18;
+    }
+    this.pending.push({ due: 800, reason: "start" });
+    try {
+      this.unsubscribe = env.subscribePointer?.((sample) => this.onSample(sample)) ?? null;
+    } catch {
+      this.unsubscribe = null;
+    }
+  }
+
+  private push(event: RecordingEvent) {
+    if (this.events.length < RECORDING_EVENTS_MAX) this.events.push(event);
+  }
+
+  onSample(sample: PointerSample) {
+    if (!this.recording()) return;
+    const t = this.elapsed();
+    let at: { x: number; y: number } | null = null;
+    try {
+      const view = this.env.viewport?.();
+      at = view ? mapPointerToFrame(sample, this.surface, view, this.frame) : null;
+    } catch {
+      at = null;
+    }
+    if (at) this.pointer = { x: at.x, y: at.y, at: this.env.now() };
+    if (sample.kind === "move") {
+      if (!at || t - this.lastMoveAt < MOVE_SAMPLE_MS) return;
+      this.lastMoveAt = t;
+      this.push({ t, kind: "move", x: at.x, y: at.y });
+      return;
+    }
+    this.push(at ? { t, kind: "click", x: at.x, y: at.y } : { t, kind: "click" });
+    if (at) this.ripples.push({ x: at.x, y: at.y, at: this.env.now() });
+    this.pending.push({ due: t + CLICK_FRAME_DELAY_MS, reason: "click" });
+  }
+
+  /** The rings of recent clicks, on a frame of width×height. */
+  drawRipples(context: CanvasRenderingContext2D, width: number, height: number) {
+    if (this.ripples.length === 0) return;
+    const now = this.env.now();
+    this.ripples = this.ripples.filter((ripple) => now - ripple.at < RIPPLE_MS);
+    const unit = Math.max(1, width / 1280);
+    for (const ripple of this.ripples) {
+      const age = (now - ripple.at) / RIPPLE_MS;
+      const cx = ripple.x * width;
+      const cy = ripple.y * height;
+      context.save();
+      context.beginPath();
+      context.arc(cx, cy, (12 + 30 * age) * unit, 0, Math.PI * 2);
+      context.lineWidth = 4 * unit;
+      context.strokeStyle = `rgba(255, 196, 0, ${(1 - age * 0.8).toFixed(3)})`;
+      context.stroke();
+      context.beginPath();
+      context.arc(cx, cy, 5 * unit, 0, Math.PI * 2);
+      context.fillStyle = `rgba(255, 196, 0, ${(0.9 - age * 0.6).toFixed(3)})`;
+      context.fill();
+      context.restore();
+    }
+  }
+
+  /**
+   * A shared tab has no mouse pointer in it (screens and windows do): Work
+   * draws the arrow where its own page last saw the pointer (≤ 5 s ago).
+   */
+  drawPointer(context: CanvasRenderingContext2D, width: number, height: number) {
+    const pointer = this.pointer;
+    if (this.surface !== "browser" || !pointer || this.env.now() - pointer.at > 5000) return;
+    const unit = Math.max(1, width / 1280) * 1.4;
+    const x = pointer.x * width;
+    const y = pointer.y * height;
+    context.save();
+    context.translate(x, y);
+    context.scale(unit, unit);
+    context.beginPath();
+    context.moveTo(0, 0);
+    context.lineTo(0, 17);
+    context.lineTo(4.2, 13);
+    context.lineTo(7.2, 19.6);
+    context.lineTo(10, 18.4);
+    context.lineTo(7.1, 11.9);
+    context.lineTo(12.6, 11.9);
+    context.closePath();
+    context.fillStyle = "#ffffff";
+    context.fill();
+    context.lineWidth = 1.2;
+    context.strokeStyle = "#000000";
+    context.stroke();
+    context.restore();
+  }
+
+  /** The agent's picture (≤ 1280 px, no camera circle): the screen, the pointer, click rings. */
+  private drawAgentFrame(): boolean {
+    try {
+      const context = this.snapCanvas.getContext("2d") as CanvasRenderingContext2D | null;
+      if (!context) return false;
+      const { width, height } = this.snapSize;
+      context.drawImage(this.screenVideo, 0, 0, width, height);
+      this.drawRipples(context, width, height);
+      this.drawPointer(context, width, height);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Every compositing tick: due key frames, and twice a second a look for a new screen. */
+  tick() {
+    this.ticks += 1;
+    // The agent copy is this canvas at 5 fps (30 fps ticks).
+    if (this.ticks % 6 === 0) this.drawAgentFrame();
+    if (!this.recording()) return;
+    const now = this.elapsed();
+    const due = this.pending.filter((item) => item.due <= now);
+    if (due.length > 0) {
+      this.pending = this.pending.filter((item) => item.due > now);
+      // One picture for everything due at once; the most telling reason names it.
+      const reason = due.some((item) => item.reason === "click")
+        ? "click"
+        : due.some((item) => item.reason === "scene")
+          ? "scene"
+          : due[0]!.reason;
+      this.snap(reason, now);
+    }
+    if (this.lumaCanvas && this.ticks % 15 === 0) this.lookForNewScreen(now);
+  }
+
+  private lookForNewScreen(now: number) {
+    try {
+      const context = this.lumaCanvas!.getContext("2d", { willReadFrequently: true } as never) as
+        | CanvasRenderingContext2D
+        | null;
+      if (!context) return;
+      context.drawImage(this.screenVideo, 0, 0, 32, 18);
+      const data = context.getImageData(0, 0, 32, 18).data;
+      const luma = new Float32Array(32 * 18);
+      for (let i = 0; i < luma.length; i += 1) {
+        luma[i] = 0.299 * data[i * 4]! + 0.587 * data[i * 4 + 1]! + 0.114 * data[i * 4 + 2]!;
+      }
+      const prev = this.prevLuma;
+      this.prevLuma = luma;
+      if (!prev) return;
+      let sum = 0;
+      for (let i = 0; i < luma.length; i += 1) sum += Math.abs(luma[i]! - prev[i]!);
+      const change = sum / luma.length;
+      if (change < SCENE_CHANGE_THRESHOLD || now - this.lastSceneAt < SCENE_MIN_GAP_MS) return;
+      this.lastSceneAt = now;
+      this.push({ t: now, kind: "scene" });
+      this.pending.push({ due: now + SCENE_SETTLE_MS, reason: "scene" });
+    } catch {
+      // A tainted or lost canvas: no scene detection, the rest goes on.
+    }
+  }
+
+  private snap(reason: KeyFrameReason, t: number) {
+    if (this.frames.length + this.encoding.size >= LIVE_KEY_FRAMES_MAX) {
+      if (reason === "scene" || reason === "start") return;
+      // A click is worth more than a screen change: make room.
+      const index = this.frames.findIndex((frame) => frame.reason === "scene");
+      if (index === -1) return;
+      this.frames.splice(index, 1);
+    }
+    const encode = this.env.encodeJpeg;
+    if (!encode || !this.drawAgentFrame()) return;
+    const job = encode(this.snapCanvas)
+      .then((blob) => {
+        if (blob && blob.size > 0) this.frames.push({ t, reason, blob, width: this.snapSize.width, height: this.snapSize.height });
+      })
+      .catch(() => undefined)
+      .finally(() => this.encoding.delete(job));
+    this.encoding.add(job);
+  }
+
+  async finish(): Promise<void> {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    await Promise.all([...this.encoding]);
+    this.frames.sort((a, b) => a.t - b.t);
+  }
+
+  detach() {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+}
+
 export class ScreenRecorder {
   private stateValue: RecorderState = "recording";
   private startedAt: number;
@@ -174,6 +440,8 @@ export class ScreenRecorder {
       readonly width: number;
       readonly height: number;
       readonly hasVoice: boolean;
+      /** Set right after construction (it needs the recorder's clock). */
+      tracker: AgentViewTracker | null;
     },
   ) {
     this.startedAt = env.now();
@@ -276,6 +544,7 @@ export class ScreenRecorder {
         }
       }
       await Promise.all([main.stopped, ...this.agentParts.map((part) => part.capture.stopped)]);
+      await this.parts.tracker?.finish().catch(() => undefined);
       this.release();
       const mainType = baseMimeType(main.recorder.mimeType || this.parts.mainMime);
       const blob = new Blob(main.blobs, { type: mainType });
@@ -298,6 +567,8 @@ export class ScreenRecorder {
         height: this.parts.height,
         hasVoice: this.parts.hasVoice,
         hasCamera: this.parts.camera !== null,
+        events: this.parts.tracker ? [...this.parts.tracker.events] : [],
+        keyFrames: this.parts.tracker ? [...this.parts.tracker.frames] : [],
       };
     })();
     return this.finished;
@@ -324,6 +595,7 @@ export class ScreenRecorder {
   private release() {
     if (this.released) return;
     this.released = true;
+    this.parts.tracker?.detach();
     this.parts.ticker?.stop();
     this.parts.mixer?.close();
     stopAll(this.parts.display);
@@ -387,26 +659,64 @@ export class ScreenRecorder {
       const settings = screenTrack.getSettings?.() ?? {};
       const size = compositeSize(settings.width ?? 0, settings.height ?? 0);
 
-      // Video: the screen as is, or screen + camera circle on a canvas.
+      // Video: the screen as is, or composited on a canvas: + the camera
+      // circle, + a ring where a click lands (when Work follows the pointer).
       let videoTrack: MediaStreamTrack = screenTrack;
-      const canvas = camera ? env.createCanvas() : null;
+      const tracking = Boolean(env.encodeJpeg && env.subscribePointer);
+      const canvas = camera || tracking ? env.createCanvas() : null;
       if (camera && !canvas) {
         events.onWarning?.("The camera circle isn't available here — recording the screen only.");
         stopAll(camera);
         camera = null;
       }
-      if (camera && canvas) {
+      let makeTracker: ((recorder: ScreenRecorder) => AgentViewTracker) | null = null;
+      /** The agent copy from Work's own small canvas (pointer + click rings in it). */
+      let agentCanvasTrack: MediaStreamTrack | null = null;
+      const holder: { tracker: AgentViewTracker | null } = { tracker: null };
+      if (canvas) {
         canvas.width = size.width;
         canvas.height = size.height;
         const context = canvas.getContext("2d");
+        const cameraStream = camera;
         const [screenVideo, cameraVideo] = await Promise.all([
           env.createVideo(new MediaStream([screenTrack])),
-          env.createVideo(camera),
+          cameraStream ? env.createVideo(cameraStream) : Promise.resolve(null),
         ]);
+        if (tracking) {
+          const snapCanvas = env.createCanvas();
+          const lumaCanvas = env.createCanvas();
+          const rawSurface = (settings as { displaySurface?: string }).displaySurface;
+          const surface: DisplaySurface =
+            rawSurface === "monitor" || rawSurface === "window" || rawSurface === "browser"
+              ? rawSurface
+              : "unknown";
+          if (snapCanvas) {
+            const scale = Math.min(1, KEY_FRAME_MAX_WIDTH / Math.max(1, size.width));
+            snapCanvas.width = Math.max(2, Math.round(size.width * scale));
+            snapCanvas.height = Math.max(2, Math.round(size.height * scale));
+            try {
+              const agentStream = snapCanvas.captureStream(5);
+              extra.push(agentStream);
+              agentCanvasTrack = agentStream.getVideoTracks()[0] ?? null;
+            } catch {
+              agentCanvasTrack = null;
+            }
+            makeTracker = (recorder) =>
+              new AgentViewTracker(
+                env,
+                screenVideo,
+                size,
+                // Electron's picker doesn't say: a screen of the same shape is assumed.
+                surface === "unknown" ? "monitor" : surface,
+                () => recorder.elapsedMs(),
+                () => recorder.state === "recording",
+                snapCanvas,
+                lumaCanvas,
+              );
+          }
+        }
         const bubble = cameraBubbleRect(size.width, size.height);
-        const draw = () => {
-          if (!context) return;
-          context.drawImage(screenVideo, 0, 0, size.width, size.height);
+        const drawBubble = (context: CanvasRenderingContext2D, cameraVideo: HTMLVideoElement) => {
           const vw = cameraVideo.videoWidth || 1;
           const vh = cameraVideo.videoHeight || 1;
           const side = Math.min(vw, vh);
@@ -448,6 +758,14 @@ export class ScreenRecorder {
           context.strokeStyle = "rgba(255,255,255,0.9)";
           context.stroke();
         };
+        const draw = () => {
+          if (!context) return;
+          context.drawImage(screenVideo, 0, 0, size.width, size.height);
+          holder.tracker?.drawRipples(context, size.width, size.height);
+          holder.tracker?.drawPointer(context, size.width, size.height);
+          if (cameraVideo) drawBubble(context, cameraVideo);
+          holder.tracker?.tick();
+        };
         draw();
         ticker = env.createTicker(COMPOSITE_FPS, draw);
         const canvasStream = canvas.captureStream(COMPOSITE_FPS);
@@ -477,10 +795,15 @@ export class ScreenRecorder {
       // The agent copy: a clone of the screen, small and slow, in parts.
       let startAgentPart: (() => Capture) | null = null;
       try {
-        const small = screenTrack.clone();
-        await small
-          .applyConstraints({ width: { max: 1280 }, frameRate: { max: 5 } })
-          .catch(() => undefined);
+        let small: MediaStreamTrack;
+        if (agentCanvasTrack) {
+          small = agentCanvasTrack;
+        } else {
+          small = screenTrack.clone();
+          await small
+            .applyConstraints({ width: { max: 1280 }, frameRate: { max: 5 } })
+            .catch(() => undefined);
+        }
         const agentStream = new MediaStream(audioTrack ? [small, audioTrack.clone()] : [small]);
         extra.push(agentStream);
         startAgentPart = () =>
@@ -506,7 +829,16 @@ export class ScreenRecorder {
         width: size.width,
         height: size.height,
         hasVoice: audioTrack !== null,
+        tracker: null,
       });
+      if (makeTracker) {
+        try {
+          holder.tracker = makeTracker(recorder);
+          recorder.parts.tracker = holder.tracker;
+        } catch {
+          holder.tracker = null;
+        }
+      }
       screenTrack.addEventListener("ended", () => {
         if (recorder.state !== "stopped") events.onSourceEnded?.();
       });
@@ -586,8 +918,58 @@ function webAudioMix(tracks: MediaStreamTrack[]) {
   return { track, close: () => void context.close().catch(() => undefined) };
 }
 
+/** Clicks and moves anywhere in Work's page (capture phase: nothing hides them). */
+function documentPointer(onSample: (sample: PointerSample) => void): () => void {
+  if (typeof document === "undefined") return () => undefined;
+  const handler = (kind: "click" | "move") => (event: PointerEvent) => {
+    if (kind === "click" && event.button !== 0) return;
+    onSample({
+      kind,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      screenX: event.screenX,
+      screenY: event.screenY,
+    });
+  };
+  const down = handler("click");
+  const move = handler("move");
+  document.addEventListener("pointerdown", down, true);
+  document.addEventListener("pointermove", move, { capture: true, passive: true });
+  return () => {
+    document.removeEventListener("pointerdown", down, true);
+    document.removeEventListener("pointermove", move, true);
+  };
+}
+
+function browserViewport(): ViewportInfo {
+  const screenInfo = window.screen as Screen & { left?: number; top?: number; availLeft?: number; availTop?: number };
+  return {
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    outerWidth: window.outerWidth || window.innerWidth,
+    outerHeight: window.outerHeight || window.innerHeight,
+    screenWidth: screenInfo.width,
+    screenHeight: screenInfo.height,
+    screenLeft: screenInfo.left ?? screenInfo.availLeft ?? 0,
+    screenTop: screenInfo.top ?? screenInfo.availTop ?? 0,
+  };
+}
+
+function canvasJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.82);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 export function browserRecorderEnv(platform: { mac: boolean; desktopApp: boolean }): RecorderEnv {
   return {
+    subscribePointer: documentPointer,
+    viewport: browserViewport,
+    encodeJpeg: canvasJpeg,
     mediaDevices: navigator.mediaDevices,
     MediaRecorder,
     now: () => performance.now(),

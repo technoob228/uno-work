@@ -297,6 +297,10 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
         agentParts: result.agentParts,
         agentCopyMimeType: result.agentCopyMimeType,
         hasVoice: result.hasVoice,
+        width: result.width,
+        height: result.height,
+        events: result.events ?? [],
+        liveFrames: result.keyFrames ?? [],
         createdAt: now().toISOString(),
         save: { ...INITIAL_SAVE },
         watch: { ...INITIAL_WATCH },
@@ -379,6 +383,11 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
         shareUrl: item.save.status === "done" ? item.save.shareUrl : null,
         speech: item.watch.speech,
         visual: item.watch.visual,
+        timeline: item.watch.status === "done" ? item.watch.timeline : [],
+        frames:
+          item.watch.status === "done"
+            ? item.watch.frames.map((frame) => ({ t: frame.t, reason: frame.reason }))
+            : [],
       };
       for (const key of [item.id, `${item.id}:save`, `${item.id}:watch`]) controllers.delete(key);
       set((state) => {

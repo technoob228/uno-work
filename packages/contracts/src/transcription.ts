@@ -50,6 +50,25 @@ export const UnoDescribeVideoDrivePart = Schema.Struct({
 });
 export type UnoDescribeVideoDrivePart = typeof UnoDescribeVideoDrivePart.Type;
 
+export const UNO_DESCRIBE_VIDEO_MAX_EVENTS = 2000;
+
+export const UnoDescribeVideoEvent = Schema.Struct({
+  t: Schema.Number,
+  kind: Schema.Literal("click"),
+  x: Schema.optional(Schema.Number),
+  y: Schema.optional(Schema.Number),
+});
+export type UnoDescribeVideoEvent = typeof UnoDescribeVideoEvent.Type;
+
+export const UnoDescribeVideoTimelineEntry = Schema.Struct({
+  /** Seconds from the start of the recording. */
+  t: Schema.Number,
+  say: Schema.String,
+  see: Schema.String,
+  do: Schema.String,
+});
+export type UnoDescribeVideoTimelineEntry = typeof UnoDescribeVideoTimelineEntry.Type;
+
 export const UnoDescribeVideoInput = Schema.Struct({
   /**
    * One file inside the home folder (`~/.uno-recordings/<id>/agent.webm` or
@@ -62,6 +81,15 @@ export const UnoDescribeVideoInput = Schema.Struct({
   ),
   mimeType: TrimmedNonEmptyString,
   durationSec: Schema.Number,
+  /**
+   * "timeline": also second by second — what is said, where the cursor is
+   * and what happens (the gateway's timeline mode; an older gateway ignores it).
+   */
+  mode: Schema.optional(Schema.Literal("timeline")),
+  /** Clicks Work saw: seconds from the start, x/y as fractions of the frame. */
+  events: Schema.optional(
+    Schema.Array(UnoDescribeVideoEvent).check(Schema.isMaxLength(UNO_DESCRIBE_VIDEO_MAX_EVENTS)),
+  ),
 });
 export type UnoDescribeVideoInput = typeof UnoDescribeVideoInput.Type;
 
@@ -70,6 +98,8 @@ export const UnoDescribeVideoResult = Schema.Struct({
   speech: Schema.String,
   /** What was on screen, with readable text quoted. */
   visual: Schema.String,
+  /** Second by second (mode "timeline", from a gateway that has it). */
+  timeline: Schema.optional(Schema.Array(UnoDescribeVideoTimelineEntry)),
 });
 export type UnoDescribeVideoResult = typeof UnoDescribeVideoResult.Type;
 

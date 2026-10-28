@@ -88,6 +88,7 @@ import { appServerTools } from "./appServerTools.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
+import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
@@ -1822,6 +1823,130 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ...(result.skipped.length > 0 ? { skipped: result.skipped } : {}),
         };
       }),
+  },
+  {
+    name: "recording_frames",
+    group: "files",
+    description: `Look closer at the person's screen recording: frames between two moments, e.g. from "0:12" to "0:15" at 2 per second. Use it for a recording from their message (an Uno Drive key like "Recordings/<name>.webm", or a path on this computer) when the timeline and key frames you got aren't enough: to see exactly what was on screen, where the cursor was, what a click did. Frames already show the cursor and a ring where a click happened; the JSON after them lists clicks and the cursor position (x/y 0–1 of the frame). Each picture costs you ~1–1.5k tokens: ask for the seconds that matter, few frames (default 6, at most ${RECORDING_FRAMES.maxFrames.cap}); one call covers at most ${RECORDING_FRAMES.maxSpanSec} s. Frames are also saved as JPEG files (paths in the JSON) if you can't see pictures here. Needs ffmpeg on this computer.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        recording: {
+          type: "string",
+          minLength: 1,
+          maxLength: 1024,
+          description:
+            'Uno Drive key, e.g. "Recordings/Screen recording 2026-10-28 at 14.42.54.webm", or a path like ~/Videos/demo.mp4.',
+        },
+        from: {
+          type: "string",
+          minLength: 1,
+          maxLength: 32,
+          description: 'Start: "m:ss", "m:ss.s", "h:mm:ss" or seconds as text ("12.5").',
+        },
+        to: {
+          type: "string",
+          minLength: 1,
+          maxLength: 32,
+          description: `End, same format; default from + ${RECORDING_FRAMES.defaultSpanSec} s, at most ${RECORDING_FRAMES.maxSpanSec} s after from.`,
+        },
+        fps: {
+          type: "number",
+          minimum: RECORDING_FRAMES.fps.min,
+          maximum: RECORDING_FRAMES.fps.max,
+          description: `Frames per second (default ${RECORDING_FRAMES.fps.default}).`,
+        },
+        maxFrames: {
+          type: "integer",
+          minimum: 1,
+          maximum: RECORDING_FRAMES.maxFrames.cap,
+          description: `At most this many frames (default ${RECORDING_FRAMES.maxFrames.default}).`,
+        },
+        width: {
+          type: "integer",
+          minimum: RECORDING_FRAMES.width.min,
+          maximum: RECORDING_FRAMES.width.max,
+          description: `Frame width in pixels (default ${RECORDING_FRAMES.width.default}; never upscaled).`,
+        },
+      },
+      required: ["recording", "from"],
+      additionalProperties: false,
+    },
+    // Reads the person's own recording; writes only into ~/.uno-recordings.
+    level: "safe",
+    run: (deps, args) => {
+      const drive = deps.files;
+      const driveState = drive.driveState;
+      const copyToComputer = drive.cloudCopyToComputer;
+      const driveDownload =
+        driveState && copyToComputer
+          ? async (key: string, folder: string): Promise<string> => {
+              const outcome = await Effect.runPromise(
+                Effect.result(
+                  Effect.gen(function* () {
+                    const state = yield* asToolError(driveState);
+                    if (!state.available || state.bucketId === null) {
+                      return yield* toolError(state.message ?? "Uno Drive isn't available.");
+                    }
+                    // Same refusal as drive_get when the disk would be almost full.
+                    const result = yield* copyToComputer({
+                      bucketId: state.bucketId,
+                      keys: [key],
+                      destinationPath: folder,
+                    }).pipe(
+                      Effect.mapError((cause) => toolError(agentDiskSpaceMessage(cause.message))),
+                    );
+                    const landed = result.paths?.[0];
+                    if (!landed || result.files === 0) {
+                      return yield* toolError(
+                        `Couldn't get "${key}" from Uno Drive${result.skipped[0] ? `: ${result.skipped[0].reason}` : "."}`,
+                      );
+                    }
+                    return landed;
+                  }),
+                ),
+              );
+              if (outcome._tag === "Failure") throw new Error(outcome.failure.message);
+              return outcome.success;
+            }
+          : undefined;
+      return Effect.tryPromise({
+        try: () =>
+          recordingFrames({
+            home: deps.home,
+            recording: str(args, "recording") ?? "",
+            from: args["from"],
+            to: args["to"],
+            fps: num(args, "fps"),
+            maxFrames: num(args, "maxFrames"),
+            width: num(args, "width"),
+            resolveLocalPath: (raw) => resolveUserPath(raw, deps),
+            ...(driveDownload ? { driveDownload } : {}),
+          }),
+        catch: (cause) => toolError(cause instanceof Error ? cause.message : String(cause)),
+      }).pipe(
+        Effect.map((result) => {
+          const display = (absolute: string) => displayPath(absolute, deps.home);
+          const count = result.frames.length;
+          return new McpContent([
+            ...result.frames.flatMap((frame, index) => [
+              { type: "image", mimeType: "image/jpeg", data: frame.jpegBase64 },
+              {
+                type: "text",
+                text: `Frame ${index + 1} of ${count} at ${frame.t} (${display(frame.file)})${frame.clicks
+                  .map((click) =>
+                    click.x !== undefined
+                      ? `; click at ${click.t} (x ${click.x}, y ${click.y})`
+                      : `; click at ${click.t}`,
+                  )
+                  .join("")}`,
+              },
+            ]),
+            { type: "text", text: JSON.stringify(recordingFramesSummary(result, display)) },
+          ]);
+        }),
+      );
+    },
   },
   {
     name: "drive_share_link",

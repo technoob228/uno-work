@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
+import { parseKeyFrameName } from "./agentView";
 import type { RecordingItem } from "./pipeline";
 import { type ParsedRecording, formatBytes, formatClock } from "./recordingLogic";
 import { useScreenRecordingStore } from "./recordingStore";
@@ -232,6 +233,8 @@ export function RecordingComposerCard(props: { readonly item: RecordingItem }) {
 /** The recording in a sent message. */
 export function RecordingMessageCard(props: {
   readonly recording: ParsedRecording;
+  /** The key frames that went with the message as pictures. */
+  readonly frames?: ReadonlyArray<{ id: string; name: string; previewUrl: string | null }>;
   /** This session still has the bytes (plays even before Drive answers). */
   readonly localUrl?: string | null;
 }) {
@@ -281,7 +284,7 @@ export function RecordingMessageCard(props: {
             {copied ? "Copied" : "Copy link"}
           </button>
         ) : null}
-        {recording.speech || recording.visual ? (
+        {recording.speech || recording.visual || recording.timeline || (props.frames?.length ?? 0) > 0 ? (
           <button
             type="button"
             className="inline-flex items-center gap-1 hover:text-foreground"
@@ -311,6 +314,46 @@ export function RecordingMessageCard(props: {
             <div>
               <div className="font-medium text-foreground/80">On screen</div>
               <div className="whitespace-pre-wrap text-muted-foreground">{recording.visual}</div>
+            </div>
+          ) : null}
+          {recording.timeline ? (
+            <div data-testid="recording-message-timeline">
+              <div className="font-medium text-foreground/80">Second by second</div>
+              <div className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+                {recording.timeline}
+              </div>
+            </div>
+          ) : null}
+          {props.frames && props.frames.length > 0 ? (
+            <div data-testid="recording-message-frames">
+              <div className="font-medium text-foreground/80">
+                Key frames the agent got ({props.frames.length})
+              </div>
+              <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1">
+                {props.frames.map((frame) => {
+                  const moment = parseKeyFrameName(frame.name);
+                  return (
+                    <figure key={frame.id} className="shrink-0" title={frame.name}>
+                      {frame.previewUrl ? (
+                        <img
+                          src={frame.previewUrl}
+                          alt={frame.name}
+                          className="h-16 w-auto rounded border border-border/70"
+                        />
+                      ) : (
+                        <div className="flex h-16 w-24 items-center justify-center rounded border border-border/70 text-[10px]">
+                          picture
+                        </div>
+                      )}
+                      {moment ? (
+                        <figcaption className="mt-0.5 text-center text-[10px] tabular-nums text-muted-foreground">
+                          {formatClock(moment.t)} · {moment.reason}
+                        </figcaption>
+                      ) : null}
+                    </figure>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
         </div>

@@ -15,6 +15,19 @@
  * removed, so a Retry never needs the person to record again.
  */
 import type { ProjectUploadWriteInput } from "../projectUpload";
+import {
+  type KeyFrameCandidate,
+  type RecordingEvent,
+  type TimelineEntry,
+  clicksForDescribe,
+  keyFrameBudget,
+  normalizeTimeline,
+  pointingMoments,
+  recordingEventsFile,
+  recordingEventsName,
+  selectKeyFrames,
+} from "./agentView";
+import type { LiveKeyFrame } from "./recorder";
 import { uploadFilesIntoDirectory } from "../projectUpload";
 import {
   AGENT_COPY_MAX_BYTES,
@@ -43,6 +56,10 @@ export interface WatchStep {
   readonly error: string | null;
   readonly speech: string;
   readonly visual: string;
+  /** Second by second (empty from an older daemon/gateway). */
+  readonly timeline: ReadonlyArray<TimelineEntry>;
+  /** The key frames that go with the message as pictures (selected, in order). */
+  readonly frames: ReadonlyArray<LiveKeyFrame>;
 }
 
 export interface RecordingItem {
@@ -60,6 +77,13 @@ export interface RecordingItem {
   readonly agentParts: ReadonlyArray<{ readonly blob: Blob; readonly durationMs: number }>;
   readonly agentCopyMimeType: string | null;
   readonly hasVoice: boolean;
+  /** The video frame's size (the event track's x/y are fractions of it). */
+  readonly width: number;
+  readonly height: number;
+  /** Clicks, cursor moves and screen changes Work saw while recording. */
+  readonly events: ReadonlyArray<RecordingEvent>;
+  /** Pictures grabbed while recording (clicks, screen changes, the start). */
+  readonly liveFrames: ReadonlyArray<LiveKeyFrame>;
   readonly createdAt: string;
   readonly save: SaveStep;
   readonly watch: WatchStep;
@@ -95,7 +119,20 @@ export interface PipelineDeps {
     driveParts?: Array<{ key: string; durationSec: number }>;
     mimeType: string;
     durationSec: number;
-  }) => Promise<{ speech: string; visual: string }>;
+    /** Second by second, with where the cursor is (the gateway's timeline mode). */
+    mode?: "timeline";
+    /** Clicks Work saw (seconds from the start, x/y fractions of the frame). */
+    events?: Array<{ t: number; kind: "click"; x?: number; y?: number }>;
+  }) => Promise<{ speech: string; visual: string; timeline?: unknown }>;
+  /**
+   * Pictures of the video at the given moments (ms), ≤ maxWidth wide —
+   * the browser seeks its own copy. Absent: only the live key frames.
+   */
+  readonly grabFrames?: (
+    blob: Blob,
+    timesMs: number[],
+    maxWidth: number,
+  ) => Promise<Array<{ t: number; blob: Blob; width: number; height: number }>>;
   readonly removePaths: (paths: string[]) => Promise<unknown>;
   /** Deletes a key or a folder prefix ("…/") from a bucket. */
   readonly deleteCloud: (input: { bucketId: number; key: string }) => Promise<unknown>;
@@ -109,7 +146,14 @@ export const INITIAL_SAVE: SaveStep = {
   shareUrl: null,
 };
 
-export const INITIAL_WATCH: WatchStep = { status: "waiting", error: null, speech: "", visual: "" };
+export const INITIAL_WATCH: WatchStep = {
+  status: "waiting",
+  error: null,
+  speech: "",
+  visual: "",
+  timeline: [],
+  frames: [],
+};
 
 function errorText(error: unknown, fallback: string): string {
   if (error instanceof DOMException && error.name === "AbortError") return "Stopped.";
@@ -152,6 +196,50 @@ export function stagingRelativeDir(itemId: string): string {
   return `${RECORDING_STAGING_DIR}/${itemId}`;
 }
 
+/**
+ * The event track next to the video (`… .events.json`): clicks and cursor
+ * moves with time and place, for the agent's `recording_frames`. Best effort —
+ * the video is what matters.
+ */
+async function saveEventTrack(
+  item: RecordingItem,
+  deps: PipelineDeps,
+  home: string,
+  bucketId: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (item.events.length === 0) return;
+  let staged: string | null = null;
+  try {
+    const json = JSON.stringify(
+      recordingEventsFile({
+        videoName: item.name,
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        events: item.events,
+      }),
+    );
+    staged = await stageBlob(
+      deps,
+      home,
+      `${stagingRelativeDir(item.id)}/${recordingEventsName(item.name)}`,
+      new Blob([json], { type: "application/json" }),
+      () => undefined,
+      signal,
+    );
+    await deps.copyToCloud({
+      paths: [staged],
+      bucketId,
+      prefix: RECORDINGS_FOLDER,
+      removeSource: true,
+    });
+    staged = null;
+  } catch {
+    if (staged) await deps.removePaths([staged]).catch(() => undefined);
+  }
+}
+
 /** Save: the video into Uno Drive `Recordings/` and a share link. */
 export async function runSave(
   item: RecordingItem,
@@ -190,6 +278,7 @@ export async function runSave(
     }
     stagedPath = null;
     const driveKey = recordingDriveKey(item.name);
+    await saveEventTrack(item, deps, home, drive.bucketId, signal);
     patch({ progress: 0.98, driveKey });
     // A link is a nice-to-have: the file is safe in Drive even if it fails.
     let shareUrl: string | null = null;
@@ -226,6 +315,82 @@ export function watchSkipReason(
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
+function timelineRequest(item: RecordingItem): {
+  mode: "timeline";
+  events?: Array<{ t: number; kind: "click"; x?: number; y?: number }>;
+} {
+  const clicks = clicksForDescribe(item.events);
+  return clicks.length > 0 ? { mode: "timeline", events: clicks } : { mode: "timeline" };
+}
+
+/**
+ * The key frames for the message: the live ones (clicks, screen changes, the
+ * start) and the moments the person points with words (from the timeline,
+ * grabbed from the video now) — a few, by priority (agentView.ts).
+ */
+export async function pickKeyFrames(
+  item: RecordingItem,
+  deps: PipelineDeps,
+  timeline: ReadonlyArray<TimelineEntry>,
+): Promise<LiveKeyFrame[]> {
+  type Candidate = KeyFrameCandidate & { frame?: LiveKeyFrame };
+  const candidates: Candidate[] = item.liveFrames.map((frame) => ({
+    t: frame.t,
+    reason: frame.reason,
+    frame,
+  }));
+  for (const seconds of pointingMoments(timeline)) {
+    const t = Math.round(seconds * 1000);
+    if (t <= item.durationMs) candidates.push({ t, reason: "pointing" });
+  }
+  const selected = selectKeyFrames(candidates, keyFrameBudget(item.durationMs));
+  const toGrab = selected.filter((candidate) => !candidate.frame).map((candidate) => candidate.t);
+  const grabbed = new Map<number, LiveKeyFrame>();
+  if (toGrab.length > 0 && deps.grabFrames) {
+    try {
+      for (const shot of await deps.grabFrames(item.blob, toGrab, 1280)) {
+        grabbed.set(shot.t, { ...shot, reason: "pointing" });
+      }
+    } catch {
+      // The pictures of the pointing moments are a bonus; the timeline stays.
+    }
+  }
+  const used = new Set<LiveKeyFrame>();
+  const out: LiveKeyFrame[] = [];
+  for (const candidate of selected) {
+    let frame = candidate.frame ?? grabbed.get(candidate.t) ?? null;
+    if (!frame) {
+      // No picture of that moment: the live one taken within the same moment, if any.
+      frame =
+        item.liveFrames
+          .filter((live) => Math.abs(live.t - candidate.t) < 1500 && !used.has(live))
+          .sort((a, b) => Math.abs(a.t - candidate.t) - Math.abs(b.t - candidate.t))[0] ?? null;
+    }
+    if (frame && !used.has(frame)) {
+      used.add(frame);
+      out.push(frame);
+    }
+  }
+  return out;
+}
+
+async function watched(
+  item: RecordingItem,
+  deps: PipelineDeps,
+  result: { speech: string; visual: string; timeline?: unknown },
+): Promise<Partial<WatchStep>> {
+  const timeline = normalizeTimeline(result.timeline);
+  const frames = await pickKeyFrames(item, deps, timeline);
+  return {
+    status: "done",
+    speech: result.speech,
+    visual: result.visual,
+    timeline,
+    frames,
+    error: null,
+  };
+}
+
 /** Watch: the agent copy → speech + what was on screen. */
 export async function runWatch(
   item: RecordingItem,
@@ -260,8 +425,9 @@ export async function runWatch(
         path,
         mimeType: mime,
         durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
+        ...timelineRequest(item),
       });
-      patch({ status: "done", speech: result.speech, visual: result.visual, error: null });
+      patch(await watched(item, deps, result));
       return;
     }
     // A long recording: its parts through Uno Drive.
@@ -303,8 +469,9 @@ export async function runWatch(
       })),
       mimeType: mime,
       durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
+      ...timelineRequest(item),
     });
-    patch({ status: "done", speech: result.speech, visual: result.visual, error: null });
+    patch(await watched(item, deps, result));
   } catch (error) {
     patch({ status: "failed", error: errorText(error, "The agent couldn't watch the recording.") });
   } finally {

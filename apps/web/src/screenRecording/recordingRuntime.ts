@@ -9,6 +9,7 @@ import { toastManager } from "../components/ui/toast";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { randomUUID } from "../lib/utils";
+import { grabFramesFromBlob } from "./frameGrab";
 import type { PipelineDeps } from "./pipeline";
 import { browserRecorderEnv } from "./recorder";
 import { configureRecordingRuntime } from "./recordingStore";
@@ -50,6 +51,7 @@ export function realPipelineDeps(environmentId: string): PipelineDeps {
       if (!media) throw new Error("This computer can't watch recordings yet — update Uno Work.");
       return media.describeVideo(input);
     },
+    grabFrames: grabFramesFromBlob,
     removePaths: (paths) => filesApi(id).delete({ paths }),
     deleteCloud: (input) => filesApi(id).cloudDelete(input),
   };

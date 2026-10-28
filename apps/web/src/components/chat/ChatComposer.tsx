@@ -542,6 +542,8 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+    /** Whether the chosen model takes pictures (a screen recording's key frames). */
+    imageSupport: "supported" | "unsupported" | "unknown";
   };
 }
 
@@ -2795,6 +2797,7 @@ export const ChatComposer = memo(
           selectedProvider,
           selectedModel,
           selectedProviderModels,
+          imageSupport: imageAttachmentSupport,
         }),
       }),
       [
@@ -2816,6 +2819,7 @@ export const ChatComposer = memo(
         selectedPromptEffort,
         selectedProvider,
         selectedProviderModels,
+        imageAttachmentSupport,
         setComposerFilesState,
         setComposerVideosState,
         setPromptFromTraits,

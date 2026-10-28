@@ -29,6 +29,10 @@ function item(overrides: Partial<RecordingItem> = {}): RecordingItem {
     ],
     agentCopyMimeType: "video/mp4",
     hasVoice: true,
+    width: 1280,
+    height: 720,
+    events: [],
+    liveFrames: [],
     createdAt: "2026-10-28T14:05:07Z",
     save: INITIAL_SAVE,
     watch: INITIAL_WATCH,
@@ -186,6 +190,7 @@ describe("Watch — the agent copy through /video/describe", () => {
       path: "/home/me/.uno-recordings/rec1/agent-copy.mp4",
       mimeType: "video/mp4",
       durationSec: 42,
+      mode: "timeline",
     });
     expect(watch.last()).toMatchObject({
       status: "done",
@@ -267,6 +272,7 @@ describe("Watch — a long recording, part by part through Uno Drive", () => {
       ],
       mimeType: "video/webm",
       durationSec: 750,
+      mode: "timeline",
     });
     expect(watch.last()).toMatchObject({ status: "done", speech: "Make it green" });
     expect(d.deleteCloud).toHaveBeenCalledWith({ bucketId: 77, key: "Recordings/.agent-rec1/" });
@@ -355,5 +361,124 @@ describe("can the card go with the message", () => {
     );
     expect(state).toMatchObject({ ready: false, busy: false });
     expect(state.blocking).toContain("Retry");
+  });
+});
+
+describe("Second by second (28.10): timeline, key frames, the event track", () => {
+  const jpeg = (label: string) => new Blob([label], { type: "image/jpeg" });
+  const live = (t: number, reason: "click" | "scene" | "start") => ({
+    t,
+    reason,
+    blob: jpeg(`${reason}@${t}`),
+    width: 1280,
+    height: 720,
+  });
+
+  it("asks for the timeline with the clicks Work saw, in seconds", async () => {
+    const { deps: d } = deps();
+    await runWatch(
+      item({
+        events: [
+          { t: 1000, kind: "move", x: 0.5, y: 0.5 },
+          { t: 12_400, kind: "click", x: 0.83, y: 0.08 },
+          { t: 20_000, kind: "scene" },
+        ],
+      }),
+      d,
+      () => undefined,
+    );
+    expect(d.describe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "timeline",
+        events: [{ t: 12.4, kind: "click", x: 0.83, y: 0.08 }],
+      }),
+    );
+  });
+
+  it("keeps the timeline and picks key frames: pointing words grabbed from the video, clicks live", async () => {
+    const grabFrames = vi.fn(async (_blob: Blob, times: number[]) =>
+      times.map((t) => ({ t, blob: jpeg(`grab@${t}`), width: 1280, height: 720 })),
+    );
+    const { deps: d } = deps({
+      describe: vi.fn(async () => ({
+        speech: "вот тут криво",
+        visual: "A pricing page",
+        timeline: [
+          { t: 3, say: "смотри", see: "cursor on the header", do: "" },
+          { t: 12.5, say: "вот тут криво", see: 'cursor on "Pricing" card, right', do: "" },
+          { t: "junk", say: "x" },
+        ],
+      })),
+      grabFrames,
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(
+      item({ liveFrames: [live(800, "start"), live(5000, "click"), live(5600, "scene")] }),
+      d,
+      watch.patch,
+    );
+    const done = watch.last();
+    expect(done.status).toBe("done");
+    expect(done.timeline).toEqual([
+      { t: 3, say: "смотри", see: "cursor on the header", do: "" },
+      { t: 12.5, say: "вот тут криво", see: 'cursor on "Pricing" card, right', do: "" },
+    ]);
+    expect(grabFrames).toHaveBeenCalledWith(expect.any(Blob), [12_500], 1280);
+    // The scene 0.6 s after the click is the same moment: the click stays.
+    expect(done.frames!.map((frame) => [frame.t, frame.reason])).toEqual([
+      [800, "start"],
+      [5000, "click"],
+      [12_500, "pointing"],
+    ]);
+  });
+
+  it("a frame grab that fails leaves the live frames and the timeline", async () => {
+    const { deps: d } = deps({
+      describe: vi.fn(async () => ({
+        speech: "this one",
+        visual: "",
+        timeline: [{ t: 2, say: "this one", see: "", do: "" }],
+      })),
+      grabFrames: vi.fn(async () => {
+        throw new Error("decode failed");
+      }),
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(item({ liveFrames: [live(800, "start")] }), d, watch.patch);
+    expect(watch.last().status).toBe("done");
+    expect(watch.last().frames!.map((frame) => frame.reason)).toEqual(["start"]);
+  });
+
+  it("an older gateway (no timeline): live frames still go", async () => {
+    const { deps: d } = deps();
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(item({ liveFrames: [live(800, "start"), live(9000, "click")] }), d, watch.patch);
+    expect(watch.last().timeline).toEqual([]);
+    expect(watch.last().frames).toHaveLength(2);
+  });
+
+  it("saves the event track next to the video in Recordings/", async () => {
+    const { deps: d, writes } = deps();
+    await runSave(
+      item({ events: [{ t: 12_400, kind: "click", x: 0.83, y: 0.08 }] }),
+      d,
+      () => undefined,
+    );
+    const track = writes.find((write) => write.relativePath.endsWith(".events.json"));
+    expect(track?.relativePath).toBe(
+      ".uno-recordings/rec1/Screen recording 2026-10-28 at 14.05.07.events.json",
+    );
+    expect(d.copyToCloud).toHaveBeenCalledWith({
+      paths: ["/home/me/.uno-recordings/rec1/Screen recording 2026-10-28 at 14.05.07.events.json"],
+      bucketId: 77,
+      prefix: "Recordings/",
+      removeSource: true,
+    });
+  });
+
+  it("no events: no track file", async () => {
+    const { deps: d, writes } = deps();
+    await runSave(item(), d, () => undefined);
+    expect(writes.some((write) => write.relativePath.endsWith(".events.json"))).toBe(false);
   });
 });

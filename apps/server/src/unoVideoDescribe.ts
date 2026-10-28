@@ -16,6 +16,9 @@ import {
   UNO_DESCRIBE_VIDEO_LONG_MAX_SECONDS,
   UNO_DESCRIBE_VIDEO_MAX_SECONDS,
   type UnoDescribeVideoDrivePart,
+  type UnoDescribeVideoEvent,
+  type UnoDescribeVideoTimelineEntry,
+  UNO_DESCRIBE_VIDEO_MAX_EVENTS,
   UNO_GATEWAY_BASE_URL,
   type UnoDescribeVideoInput,
   type UnoDescribeVideoResult,
@@ -29,7 +32,25 @@ import { ServerSettingsService } from "./serverSettings.ts";
 
 export type DescribeFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-/** `{"speech","visual"}` of `/video/describe`; null when it says nothing at all. */
+/** `{"t","say","see","do"}` entries; junk dropped, in time order, ≤ 400. */
+export function parseTimeline(raw: unknown): UnoDescribeVideoTimelineEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UnoDescribeVideoTimelineEntry[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    const t = record.t;
+    if (typeof t !== "number" || !Number.isFinite(t) || t < 0) continue;
+    const text = (key: string) =>
+      typeof record[key] === "string" ? String(record[key]).trim().slice(0, 600) : "";
+    const entry = { t, say: text("say"), see: text("see"), do: text("do") };
+    if (!entry.say && !entry.see && !entry.do) continue;
+    out.push(entry);
+  }
+  return out.sort((a, b) => a.t - b.t).slice(0, 400);
+}
+
+/** `{"speech","visual","timeline"?}` of `/video/describe`; null when it says nothing at all. */
 export function parseDescribeResponse(body: unknown): UnoDescribeVideoResult | null {
   if (typeof body !== "object" || body === null) return null;
   const read = (key: string) => {
@@ -38,7 +59,27 @@ export function parseDescribeResponse(body: unknown): UnoDescribeVideoResult | n
   };
   const speech = read("speech");
   const visual = read("visual");
-  return speech.length === 0 && visual.length === 0 ? null : { speech, visual };
+  const timeline = parseTimeline((body as Record<string, unknown>).timeline);
+  if (speech.length === 0 && visual.length === 0 && timeline.length === 0) return null;
+  return timeline.length > 0 ? { speech, visual, timeline } : { speech, visual };
+}
+
+/** The clicks as the gateway takes them (fractions rounded, junk dropped). */
+function eventsForGateway(events: ReadonlyArray<UnoDescribeVideoEvent> | undefined) {
+  return (events ?? [])
+    .filter((event) => Number.isFinite(event.t) && event.t >= 0)
+    .slice(0, UNO_DESCRIBE_VIDEO_MAX_EVENTS)
+    .map((event) => {
+      const inside = (value: number | undefined) =>
+        value !== undefined && Number.isFinite(value) && value >= 0 && value <= 1;
+      return {
+        t: Math.round(event.t * 10) / 10,
+        kind: "click",
+        ...(inside(event.x) && inside(event.y)
+          ? { x: Math.round(event.x! * 1000) / 1000, y: Math.round(event.y! * 1000) / 1000 }
+          : {}),
+      };
+    });
 }
 
 /** `~/x` or an absolute path → an absolute path inside the home (or a typed error). */
@@ -55,6 +96,8 @@ export async function postDescribe(input: {
   readonly fileName: string;
   readonly mimeType: string;
   readonly durationSec: number;
+  readonly mode?: "timeline";
+  readonly events?: ReadonlyArray<UnoDescribeVideoEvent>;
   readonly fetchImpl?: DescribeFetch;
 }): Promise<UnoDescribeVideoResult> {
   const form = new FormData();
@@ -64,6 +107,11 @@ export async function postDescribe(input: {
     input.fileName,
   );
   form.append("duration_sec", String(Math.max(1, Math.round(input.durationSec))));
+  if (input.mode === "timeline") {
+    form.append("mode", "timeline");
+    const events = eventsForGateway(input.events);
+    if (events.length > 0) form.append("events", JSON.stringify(events));
+  }
   const response = await (input.fetchImpl ?? fetch)(
     `${input.baseUrl.replace(/\/$/, "")}/video/describe`,
     {
@@ -99,8 +147,11 @@ export async function postDescribeDrive(input: {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly parts: ReadonlyArray<UnoDescribeVideoDrivePart>;
+  readonly mode?: "timeline";
+  readonly events?: ReadonlyArray<UnoDescribeVideoEvent>;
   readonly fetchImpl?: DescribeFetch;
 }): Promise<UnoDescribeVideoResult> {
+  const events = input.mode === "timeline" ? eventsForGateway(input.events) : [];
   const response = await (input.fetchImpl ?? fetch)(
     `${input.baseUrl.replace(/\/$/, "")}/video/describe/drive`,
     {
@@ -111,6 +162,8 @@ export async function postDescribeDrive(input: {
           key: part.key,
           duration_sec: Math.max(1, Math.round(part.durationSec)),
         })),
+        ...(input.mode === "timeline" ? { mode: "timeline" } : {}),
+        ...(events.length > 0 ? { events } : {}),
       }),
     },
   );
@@ -181,6 +234,8 @@ export const describeUnoVideo = (
             baseUrl: UNO_GATEWAY_BASE_URL,
             apiKey,
             parts,
+            ...(input.mode ? { mode: input.mode } : {}),
+            ...(input.events ? { events: input.events } : {}),
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
           }),
         catch: gatewayError,
@@ -232,6 +287,8 @@ export const describeUnoVideo = (
           fileName: bytes.name,
           mimeType: input.mimeType.split(";")[0] ?? input.mimeType,
           durationSec: input.durationSec,
+          ...(input.mode ? { mode: input.mode } : {}),
+          ...(input.events ? { events: input.events } : {}),
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         }),
       catch: gatewayError,

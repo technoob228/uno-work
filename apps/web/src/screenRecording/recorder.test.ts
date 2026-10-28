@@ -348,3 +348,127 @@ describe("recording", () => {
     expect(env.screen.getTracks()[0]!.stopped).toBe(true);
   });
 });
+
+describe("second by second (28.10): pointer, click rings, key frames", () => {
+  function trackedEnv() {
+    let onSample: ((sample: import("./agentView").PointerSample) => void) | null = null;
+    let tick: (() => void) | null = null;
+    let lumaValue = 10;
+    const drawn: string[] = [];
+    const context = {
+      drawImage: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(() => drawn.push("arc")),
+      closePath: vi.fn(),
+      clip: vi.fn(),
+      translate: vi.fn(),
+      scale: vi.fn(),
+      stroke: vi.fn(),
+      fill: vi.fn(() => drawn.push("fill")),
+      moveTo: vi.fn(() => drawn.push("pointer")),
+      lineTo: vi.fn(),
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(32 * 18 * 4).fill(lumaValue) })),
+      lineWidth: 0,
+      strokeStyle: "",
+      fillStyle: "",
+    };
+    const canvasTracks: FakeTrack[] = [];
+    const env = makeEnv({
+      screen: new FakeStream([
+        new FakeTrack("video", "screen", { width: 1440, height: 820, displaySurface: "browser" } as MediaTrackSettings),
+      ]),
+      createCanvas: () => {
+        const track = new FakeTrack("video", `canvas-${canvasTracks.length}`);
+        canvasTracks.push(track);
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => context,
+          captureStream: () => new FakeStream([track]),
+        } as unknown as HTMLCanvasElement;
+      },
+      createTicker: (_fps, onTick) => {
+        tick = onTick;
+        return { stop: () => void (tickerStopped = true) };
+      },
+      subscribePointer: (handler) => {
+        onSample = handler;
+        return () => void (onSample = null);
+      },
+      viewport: () => ({
+        innerWidth: 1440,
+        innerHeight: 820,
+        outerWidth: 1440,
+        outerHeight: 900,
+        screenWidth: 1440,
+        screenHeight: 900,
+        screenLeft: 0,
+        screenTop: 0,
+      }),
+      encodeJpeg: async () => new Blob(["jpeg"], { type: "image/jpeg" }),
+    });
+    return {
+      env,
+      drawn,
+      sample: (kind: "click" | "move", clientX: number, clientY: number) =>
+        onSample?.({ kind, clientX, clientY, screenX: clientX, screenY: clientY + 80 }),
+      ticks: (n: number, msEach = 33) => {
+        for (let i = 0; i < n; i += 1) {
+          clock += msEach;
+          tick?.();
+        }
+      },
+      setLuma: (value: number) => void (lumaValue = value),
+      subscribed: () => onSample !== null,
+    };
+  }
+
+  it("composites even without the camera; the agent copy is Work's small canvas", async () => {
+    const t = trackedEnv();
+    await ScreenRecorder.start({ ...options, camera: false }, t.env);
+    const [main, agent] = FakeRecorder.instances;
+    expect(main!.stream.getVideoTracks()[0]!.label).toBe("canvas-0");
+    expect(agent!.stream.getVideoTracks()[0]!.label).toBe("canvas-1");
+  });
+
+  it("clicks and moves land on the frame; a click gets a ring and a key frame", async () => {
+    const t = trackedEnv();
+    const recorder = await ScreenRecorder.start({ ...options, camera: false }, t.env);
+    t.ticks(30); // 1 s: the first picture
+    t.sample("move", 720, 410);
+    t.sample("click", 1080, 205);
+    t.ticks(15);
+    expect(t.drawn).toContain("arc");
+    expect(t.drawn).toContain("pointer");
+    const result = await recorder.stop();
+    expect(result.events.filter((e) => e.kind !== "scene")).toEqual([
+      { t: 990, kind: "move", x: 0.5, y: 0.5 },
+      { t: 990, kind: "click", x: 0.75, y: 0.25 },
+    ]);
+    expect(result.keyFrames.map((frame) => frame.reason)).toEqual(["start", "click"]);
+    expect(result.keyFrames[1]!.t).toBeGreaterThanOrEqual(990 + 250);
+    expect(t.subscribed()).toBe(false);
+  });
+
+  it("a new screen is noticed (twice a second) and pictured after it settles", async () => {
+    const t = trackedEnv();
+    const recorder = await ScreenRecorder.start({ ...options, camera: false }, t.env);
+    t.ticks(30);
+    t.setLuma(200);
+    t.ticks(60);
+    const result = await recorder.stop();
+    expect(result.events.some((e) => e.kind === "scene")).toBe(true);
+    expect(result.keyFrames.map((frame) => frame.reason)).toEqual(["start", "scene"]);
+  });
+
+  it("paused: nothing is tracked", async () => {
+    const t = trackedEnv();
+    const recorder = await ScreenRecorder.start({ ...options, camera: false }, t.env);
+    recorder.pause();
+    t.sample("click", 10, 10);
+    const result = await recorder.stop();
+    expect(result.events).toEqual([]);
+  });
+});
