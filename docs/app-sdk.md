@@ -367,8 +367,8 @@ the Notetaker from the App Store on this computer and turns it on. The
 Notetaker then asks this API (only the app with id `notetaker`; others get
 403 `calls_not_allowed`; while nobody turned it on — 409 `calls_off`):
 
-- `GET /v1/assistant/link` → `{enabled, assistant:{projectId,name}, owner:{name,email},
-  botName:"Ada (Uno notes)", rule:"mine", choices:{<meetingKey>:{choice,at}}}`;
+- `GET /v1/assistant/link` → `{enabled, assistant:{projectId,name}, owner:{name,email}, …}`
+  with `botName:"Ada (Uno notes)"`, `rule:"mine"`, `choices:{<meetingKey>:{choice,at}}`;
 - `GET /v1/calendar/events?from=&to=` → the person's Google Calendar as JSON
   (the console's `calendar_feed`; 424 `google_reconnect` / `google_not_connected`);
 - `POST /v1/assistant/events` `{id, kind, at, …}` → 202 (a repeated `id` → 200
