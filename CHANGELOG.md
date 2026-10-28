@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.155 — 2026-10-28
+
+- **A long task tells you when it's done.** If a task you started runs 2+ minutes and Uno Work isn't open, Uno sends you a note in Telegram — or by email if Telegram isn't linked: "Your agent finished … Open Uno Work to see the result".
+- **You see the agent thinking.** When the model thinks for a long time, the chat shows one quiet line "Thinking it through — …" with its latest words instead of only "Thinking · 5m". Big tasks start with a short 1–3 line plan.
+- **"Answered by Smart: no Premium credit" in OpenCode too.** A premium model picked on Uno AI with no premium credit left now says so in OpenCode, with "Add credit" when there's nothing to continue from.
+- **Agent names under the picker icons**; in OpenCode the Uno AI models come first, Smart on top.
+- **Home starts on your agent.** If you came to Uno for your own agent, Home's box starts on it (or OpenCode · Smart). Picked OpenCode before Work — Home no longer asks you to sign in to Claude Code.
+
 ## v0.0.154 — 2026-10-28
 
 - **A long task keeps going when Uno AI hiccups.** If the model doesn't answer in time or is busy, Uno Work tries the turn again by itself (up to 2 times; after "didn't answer" in 15 s, then 45 s) and continues where it stopped, with a line in the chat. You don't need the tab open; the chat shows "working" while it retries.
