@@ -37,7 +37,6 @@ import {
   FolderGit2Icon,
   ChevronRightIcon,
   FolderIcon,
-  FolderPlusIcon,
   GitBranchIcon,
   HouseIcon,
   MessageCircleQuestionIcon,
@@ -234,6 +233,8 @@ import {
   SidebarDChatsBar,
   type SidebarDPickOption,
 } from "./sidebar/SidebarDChatsBar";
+import { SidebarAddProjectButton } from "./sidebar/SidebarAddProjectButton";
+import { countOwnProjects, showSidebarAddProject } from "./sidebar/sidebarAddProject.logic";
 import {
   SidebarDComputerChip,
   SidebarDComputerHeader,
@@ -3703,6 +3704,14 @@ export default function Sidebar() {
     sidebarDPanel.closeNow();
     openNewProject();
   };
+  // No project of the person's own yet (Uno's folder and the home folder
+  // don't count): a full-width "Add a project" under the chats bar, not only
+  // the small icon (Misha 28.10).
+  const dShowAddProject = showSidebarAddProject({
+    ownProjectCount: countOwnProjects(projects, dIsHomeProject),
+    loading: chatsLoading,
+    projectBeingSetUp: setupPreviewName !== null,
+  });
   // What a chat row still says about its place: the project unless grouped by it.
   const dPlace = placeShown(dLevels, dMultiComputer);
   const dRowChips = (computers: ReadonlyArray<string>, underComputer: boolean) => {
@@ -4096,6 +4105,7 @@ export default function Sidebar() {
                 onAddProject={handleAddProject}
               />
             )}
+            {dShowAddProject ? <SidebarAddProjectButton onAddProject={handleAddProject} /> : null}
             {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
             {!dLegacyInbox && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
@@ -4147,17 +4157,8 @@ export default function Sidebar() {
                 <PlusIcon className="-mx-0.5 size-3" />
                 New chat
               </Button>
-              {/* A fresh computer (08.10): the way to bring your own folder in. */}
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => openNewProject()}
-                data-testid="sidebar-empty-add-folder"
-              >
-                <FolderPlusIcon className="-mx-0.5 size-3" />
-                Add a project
-              </Button>
-              <span className="text-[11px]">Your folders live in ~/projects</span>
+              {/* Add a project: the full-width button under the chats bar
+                  (dShowAddProject) — it is always there in this case. */}
             </div>
           ) : (sidebarViewMenu ? dLevels.includes("project") : !dInboxSetting) ? null : (
             <SidebarEmptyProjects
