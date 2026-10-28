@@ -12,6 +12,12 @@
  *   the team: one click makes an assistant and opens its page
  *   (`useQuickCreateAssistant.tsx`) — no dialog.
  *
+ * Variant D (Misha 28.10): the gear next to "+" opens the assistants'
+ * settings; the eye hides the whole block (one "Show assistants" line stays);
+ * an assistant's group of chats folds even while one of them is open; one Uno
+ * per account (the home computer's), personas from other computers say which.
+ * The chats an assistant started are in the common list ("started by").
+ *
  * Without the assistants update on the account (`useTeamShown`) it is Uno
  * alone: no "New assistant", the face opens Uno's page under Assistants, the
  * first click introduces Uno. With it (22.10) — the team, as the daemon keeps
@@ -21,9 +27,18 @@
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRightIcon, LoaderCircleIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LoaderCircleIcon,
+  PlusIcon,
+  SettingsIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -40,50 +55,107 @@ import {
   latestConversation,
   previewChats,
 } from "../assistants/assistantTeam.logic";
+import { useAccountHomeEnvironmentId } from "../assistants/accountUno";
 import { useQuickCreateAssistant } from "../assistants/useQuickCreateAssistant";
 import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { assistantsHeaderState } from "./sidebarAssistants.logic";
+import { SIMPLE_SETTINGS_PATHS } from "../settings/settingsNavGroups";
+import {
+  type AssistantFoldChoice,
+  assistantChatsUnfolded,
+  assistantRowNote,
+  assistantRowTarget,
+  assistantsHeaderState,
+  toggledFoldChoice,
+  unoSetupHref,
+} from "./sidebarAssistants.logic";
 import { sidebarDPanel } from "./sidebarDState";
 
 const OPEN_KEY = "sidebar:assistants-open:v1";
+/** Groups the person folded while one of their chats was open (28.10). */
+const CLOSED_KEY = "sidebar:assistants-closed:v1";
+/** The whole block hidden by the person (28.10). */
+const HIDDEN_KEY = "sidebar:assistants-hidden:v1";
 
-function readOpen(): ReadonlyArray<string> {
+function readKeys(storageKey: string): ReadonlyArray<string> {
   try {
-    const raw = localStorage.getItem(OPEN_KEY);
+    const raw = localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
     return [];
   }
 }
 
+function writeKeys(storageKey: string, keys: ReadonlySet<string>) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...keys]));
+  } catch {
+    // fine: kept for this session
+  }
+}
+
 const threadKeyOf = (thread: SidebarThreadSummary) =>
   scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
 
-/** Unfolded assistants, kept across reloads. */
+/** The person's fold choice per assistant, kept across reloads. */
 const useUnfoldedStore = create<{
-  readonly keys: ReadonlySet<string>;
-  readonly set: (key: string, open: boolean) => void;
+  readonly open: ReadonlySet<string>;
+  readonly closed: ReadonlySet<string>;
+  readonly set: (key: string, choice: "open" | "closed") => void;
 }>((set, get) => ({
-  keys: new Set(typeof localStorage === "undefined" ? [] : readOpen()),
-  set: (key, open) => {
-    const keys = new Set(get().keys);
-    if (open) keys.add(key);
-    else keys.delete(key);
-    try {
-      localStorage.setItem(OPEN_KEY, JSON.stringify([...keys]));
-    } catch {
-      // fine: unfolded for this session
+  open: new Set(typeof localStorage === "undefined" ? [] : readKeys(OPEN_KEY)),
+  closed: new Set(typeof localStorage === "undefined" ? [] : readKeys(CLOSED_KEY)),
+  set: (key, choice) => {
+    const open = new Set(get().open);
+    const closed = new Set(get().closed);
+    if (choice === "open") {
+      open.add(key);
+      closed.delete(key);
+    } else {
+      open.delete(key);
+      closed.add(key);
     }
-    set({ keys });
+    writeKeys(OPEN_KEY, open);
+    writeKeys(CLOSED_KEY, closed);
+    set({ open, closed });
+  },
+}));
+
+const foldChoiceOf = (
+  state: { readonly open: ReadonlySet<string>; readonly closed: ReadonlySet<string> },
+  key: string,
+): AssistantFoldChoice =>
+  state.open.has(key) ? "open" : state.closed.has(key) ? "closed" : undefined;
+
+function readHidden(): boolean {
+  try {
+    return localStorage.getItem(HIDDEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** The assistants block hidden or shown (this device; shown by default). */
+export const useAssistantsSectionStore = create<{
+  readonly hidden: boolean;
+  readonly setHidden: (hidden: boolean) => void;
+}>((set) => ({
+  hidden: typeof localStorage === "undefined" ? false : readHidden(),
+  setHidden: (hidden) => {
+    try {
+      localStorage.setItem(HIDDEN_KEY, String(hidden));
+    } catch {
+      // fine: for this session
+    }
+    set({ hidden });
   },
 }));
 
 /** Unfolds an assistant's chats from outside the sidebar (its page, the demo). */
 export function unfoldAssistantInSidebar(key: string) {
-  useUnfoldedStore.getState().set(key, true);
+  useUnfoldedStore.getState().set(key, "open");
 }
 
 function HoverButton(props: {
@@ -119,8 +191,10 @@ function HoverButton(props: {
 
 const AssistantRow = memo(function AssistantRow(props: {
   readonly member: TeamMember;
-  readonly unfolded: boolean;
-  readonly onToggle: () => void;
+  readonly foldChoice: AssistantFoldChoice;
+  readonly onFoldChange: (choice: "open" | "closed") => void;
+  /** The small line after the name: its role (and its computer, when not home). */
+  readonly note: { readonly text: string; readonly computer: string | null };
   readonly routeThreadKey: string | null;
   readonly extraChats: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
@@ -138,11 +212,17 @@ const AssistantRow = memo(function AssistantRow(props: {
   const chats = [...props.extraChats, ...member.chats.conversations];
   const isOpen = (thread: SidebarThreadSummary) => threadKeyOf(thread) === props.routeThreadKey;
   const holdsOpenChat = chats.some(isOpen);
-  // A folded assistant with the open chat in it stays unfolded, so the chat is seen.
-  const unfolded = (props.unfolded || holdsOpenChat) && chats.length > 0;
+  // Untouched, the group opens while one of its chats is open; the person's
+  // own fold wins (28.10: a group holding the open chat could not be folded).
+  const unfolded = assistantChatsUnfolded({
+    choice: props.foldChoice,
+    holdsOpenChat,
+    chatCount: chats.length,
+  });
   const preview = previewChats(chats, { showAll, isOpen });
   const latest = latestConversation(member.chats);
-  const rowActive = !unfolded && latest !== null && isOpen(latest);
+  // Folded with its open chat inside: the row itself says "you are here".
+  const rowActive = !unfolded && holdsOpenChat;
 
   const leave = () => {
     if (isMobile) setOpenMobile(false);
@@ -156,7 +236,20 @@ const AssistantRow = memo(function AssistantRow(props: {
     );
   };
   const openRow = () => {
-    if (!member.configured) {
+    const target = assistantRowTarget({
+      configured: member.configured,
+      isUno: member.isUno,
+      teamShown,
+      environmentId: member.environmentId,
+    });
+    if (target.kind === "uno-setup") {
+      // Uno's first run lives on the assistants page, not in a dialog that
+      // opened on every click (audit 27.10, line 15).
+      leave();
+      void navigate({ href: unoSetupHref(target.environmentId) });
+      return;
+    }
+    if (target.kind === "setup") {
       openSetup(member);
       return;
     }
@@ -226,7 +319,8 @@ const AssistantRow = memo(function AssistantRow(props: {
             />
           </TooltipTrigger>
           <TooltipPopup side="right">
-            {name} · {member.configured ? status : "Not set up yet"} — open its page
+            {name} · {member.configured ? status : "Not set up yet"}
+            {props.note.computer ? ` · on ${props.note.computer}` : ""} — open its page
           </TooltipPopup>
         </Tooltip>
         <button
@@ -248,14 +342,14 @@ const AssistantRow = memo(function AssistantRow(props: {
               className="ml-auto max-w-[45%] shrink-0 truncate pr-1.5 text-[11px] text-sidebar-muted-foreground/60 group-hover/assistant:hidden"
               data-testid="sidebar-assistant-role"
             >
-              {member.isUno ? "Everything" : (member.profile.roles[0] ?? "")}
+              {props.note.text}
             </span>
           )}
         </button>
         {chats.length > 0 ? (
           <HoverButton
-            label={unfolded ? `Hide ${name}'s chats` : `${name}'s chats (${chats.length})`}
-            onClick={props.onToggle}
+            label={unfolded ? `Fold ${name}'s chats` : `${name}'s chats (${chats.length})`}
+            onClick={() => props.onFoldChange(toggledFoldChoice(unfolded))}
             visible={unfolded}
             testId="sidebar-assistant-toggle"
           >
@@ -277,7 +371,12 @@ const AssistantRow = memo(function AssistantRow(props: {
         ) : null}
       </div>
       {unfolded ? (
-        <ul role="list" className="flex flex-col gap-px" data-testid="sidebar-assistant-chats">
+        <ul
+          role="list"
+          className="flex flex-col gap-px"
+          data-testid="sidebar-assistant-chats"
+          data-assistant={member.projectId}
+        >
           {preview.visible.map((thread) =>
             // The main chat (Telegram / Slack talk to it) is named after the
             // assistant: under its own row it reads as "Main chat".
@@ -333,6 +432,41 @@ function UnoFallbackRow() {
   );
 }
 
+/** A small icon button of the "Assistants" header. */
+function HeaderButton(props: {
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly testId: string;
+  readonly disabled?: boolean;
+  readonly hoverOnly?: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={props.label}
+            disabled={props.disabled}
+            onClick={props.onClick}
+            data-testid={props.testId}
+            className={cn(
+              "text-muted-foreground hover:text-foreground",
+              props.hoverOnly &&
+                "opacity-0 transition-opacity group-hover/assistants-header:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100",
+            )}
+          />
+        }
+      >
+        {props.children}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export const SidebarAssistants = memo(function SidebarAssistants(props: {
   readonly routeThreadKey: string | null;
   /** Uno's work chats that are still running (the sidebar keeps them under Uno). */
@@ -341,56 +475,95 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
 }) {
   const team = useAssistantTeam();
   const teamShown = useTeamShown();
-  const unfolded = useUnfoldedStore((state) => state.keys);
-  const setUnfolded = useUnfoldedStore((state) => state.set);
+  const foldState = useUnfoldedStore(
+    useShallow((state) => ({ open: state.open, closed: state.closed })),
+  );
+  const setFold = useUnfoldedStore((state) => state.set);
+  const hidden = useAssistantsSectionStore((state) => state.hidden);
+  const setHidden = useAssistantsSectionStore((state) => state.setHidden);
   const quick = useQuickCreateAssistant();
   const navigate = useNavigate();
+  const homeEnvironmentId = useAccountHomeEnvironmentId();
   const { isMobile, setOpenMobile } = useSidebar();
   const live = team.filter((member) => !member.revoked);
-  const header = assistantsHeaderState({ teamShown });
+  const multiComputer = new Set(live.map((member) => member.environmentId)).size > 1;
+  const header = assistantsHeaderState({ teamShown, hidden });
   const [showAllPersonas, setShowAllPersonas] = useState(false);
   // Variant D: many personas fold after the first few (Uno always shows).
   const FOLD = 7;
   const shown = showAllPersonas ? live : live.slice(0, FOLD);
-  const hidden = live.length - shown.length;
-  // "+" opens the gallery of personas (Grok-style), not a nameless one-click assistant.
-  const openGallery = () => {
+  const more = live.length - shown.length;
+  const leave = () => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
+  };
+  // "+" opens the gallery of personas (Grok-style), not a nameless one-click assistant.
+  const openGallery = () => {
+    leave();
     void navigate({ to: "/assistants", search: { view: "new" } });
   };
+  const openSettings = () => {
+    leave();
+    void navigate({ to: SIMPLE_SETTINGS_PATHS.assistants });
+  };
+
+  if (header.showRestore) {
+    // Hidden by the person: one small line brings the block back.
+    return (
+      <li className="list-none pb-1" data-testid="sidebar-assistants">
+        <button
+          type="button"
+          onClick={() => setHidden(false)}
+          className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pl-2.5 text-left text-xs text-sidebar-muted-foreground/60 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="sidebar-show-assistants"
+        >
+          <EyeIcon className="size-3" />
+          Show assistants
+        </button>
+      </li>
+    );
+  }
 
   return (
     <li className="list-none pb-1" data-testid="sidebar-assistants">
       {header.showHeader ? (
         <div
-          className="flex h-6 items-center justify-between pr-1 pl-2.5"
+          className="group/assistants-header flex h-6 items-center gap-0.5 pr-1 pl-2.5"
           data-testid="sidebar-assistants-header"
         >
-          <span className="text-xs font-medium text-sidebar-muted-foreground/70">Assistants</span>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
+            Assistants
+          </span>
+          <HeaderButton
+            label="Hide assistants"
+            onClick={() => setHidden(true)}
+            testId="sidebar-hide-assistants"
+            hoverOnly
+          >
+            <EyeOffIcon className="size-3.5" />
+          </HeaderButton>
+          {header.showSettings ? (
+            <HeaderButton
+              label="Assistant settings"
+              onClick={openSettings}
+              testId="sidebar-assistants-settings"
+            >
+              <SettingsIcon className="size-3.5" />
+            </HeaderButton>
+          ) : null}
           {header.showCreate ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="New assistant"
-                    disabled={quick.creating || !quick.available}
-                    onClick={openGallery}
-                    data-testid="sidebar-new-assistant"
-                    className="text-muted-foreground hover:text-foreground"
-                  />
-                }
-              >
-                {quick.creating ? (
-                  <LoaderCircleIcon className="size-3.5 animate-spin" />
-                ) : (
-                  <PlusIcon className="size-3.5" />
-                )}
-              </TooltipTrigger>
-              <TooltipPopup side="right">New assistant</TooltipPopup>
-            </Tooltip>
+            <HeaderButton
+              label="New assistant"
+              onClick={openGallery}
+              disabled={quick.creating || !quick.available}
+              testId="sidebar-new-assistant"
+            >
+              {quick.creating ? (
+                <LoaderCircleIcon className="size-3.5 animate-spin" />
+              ) : (
+                <PlusIcon className="size-3.5" />
+              )}
+            </HeaderButton>
           ) : null}
         </div>
       ) : null}
@@ -399,15 +572,23 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
           <AssistantRow
             key={member.key}
             member={member}
-            unfolded={unfolded.has(member.key)}
-            onToggle={() => setUnfolded(member.key, !unfolded.has(member.key))}
+            foldChoice={foldChoiceOf(foldState, member.key)}
+            onFoldChange={(choice) => setFold(member.key, choice)}
+            note={assistantRowNote({
+              isUno: member.isUno,
+              role: member.profile.roles[0] ?? null,
+              environmentId: member.environmentId,
+              homeEnvironmentId,
+              computerLabel: member.computerLabel,
+              multiComputer,
+            })}
             routeThreadKey={props.routeThreadKey}
             extraChats={member.isUno ? props.unoRunning : []}
             renderChat={props.renderChat}
           />
         ))}
         {live.length === 0 ? <UnoFallbackRow /> : null}
-        {hidden > 0 || (showAllPersonas && live.length > FOLD) ? (
+        {more > 0 || (showAllPersonas && live.length > FOLD) ? (
           <li className="list-none">
             <button
               type="button"
@@ -415,20 +596,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
               className="flex h-6 w-full cursor-pointer items-center rounded-md pr-2 pl-9 text-left text-xs text-sidebar-muted-foreground/60 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
               data-testid="sidebar-assistants-more"
             >
-              {hidden > 0 ? `Show ${hidden} more` : "Show less"}
-            </button>
-          </li>
-        ) : null}
-        {header.showCreate ? (
-          <li className="list-none">
-            <button
-              type="button"
-              onClick={openGallery}
-              className="flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md pl-2.5 text-left text-[13px] text-sidebar-muted-foreground/70 outline-hidden hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              data-testid="sidebar-new-assistant-row"
-            >
-              <PlusIcon className="size-3.5" />
-              New assistant
+              {more > 0 ? `Show ${more} more` : "Show less"}
             </button>
           </li>
         ) : null}

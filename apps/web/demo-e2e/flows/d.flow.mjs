@@ -16,8 +16,14 @@ async function pick(page, label) {
 }
 
 async function openInbox(page) {
-  await page.getByText("Needs you", { exact: true }).first().click();
+  // An icon in the row on top since 28.10 (its name on hover).
+  await page.getByTestId("sidebar-needs-you").first().click();
   await page.waitForTimeout(800);
+}
+
+/** The tooltip on screen (Base UI's popup has no tooltip role). */
+function tooltip(page) {
+  return page.locator('[data-slot="tooltip-popup"]');
 }
 
 /** A persona's row in the sidebar. */
@@ -26,7 +32,8 @@ function sidebarRow(page, projectId) {
 }
 
 async function openGallery(page) {
-  await page.getByTestId("sidebar-new-assistant-row").click();
+  // "+" in the Assistants header (the "New assistant" line is gone, 28.10).
+  await page.getByTestId("sidebar-new-assistant").click();
   await page.getByTestId("persona-gallery").waitFor({ timeout: 10_000 });
 }
 
@@ -183,7 +190,7 @@ export const flows = [
 
   flow("d-gallery-create", async ({ page, url, step, shot }) => {
     await step("open live", () => openDemo(page, url));
-    await step("+ New assistant → the gallery", () => openGallery(page));
+    await step("+ → the gallery", () => openGallery(page));
     await shot("gallery");
     await step("pick Leo · Marketer", async () => {
       await page.getByTestId("persona-card-leo").click();
@@ -381,6 +388,8 @@ export const flows = [
     });
     await shot("inbox-failed");
     await step("fix it there → green", async () => {
+      // Needs you opens under its icon now, over the sidebar: close it first.
+      await page.keyboard.press("Escape");
       await sidebarRow(page, BOLT).getByTestId("sidebar-assistant-open").click();
       await pick(page, "Fix them on the MacBook");
       await seeText(page, "Done on MacBook: Fixed", 30_000);
@@ -573,5 +582,124 @@ export const flows = [
       await page.getByTestId("inbox-item-who").first().waitFor();
     });
     await shot("inbox");
+  }),
+
+  // ── Sidebar (Misha 28.10) ─────────────────────────────────────────────
+
+  flow("d-sidebar-places-and-header", async ({ page, url, step, shot }) => {
+    await step("open live", () => openDemo(page, url));
+    await step("Home, Files, Apps & sites are icons in one row, named on hover", async () => {
+      const tops = await Promise.all(
+        ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(async (id) => {
+          const box = await page.getByTestId(id).boundingBox();
+          return Math.round(box?.y ?? -1);
+        }),
+      );
+      if (new Set(tops).size !== 1) throw new Error(`places not in one row: ${tops}`);
+      await page.getByTestId("sidebar-nav-files").hover();
+      await tooltip(page).filter({ hasText: "Files" }).waitFor({ timeout: 5_000 });
+    });
+    await shot("places-hover");
+    await step("no “New assistant” line, only “+” and the gear", async () => {
+      if (await page.getByTestId("sidebar-new-assistant-row").count()) {
+        throw new Error("the New assistant line is still there");
+      }
+      await page.getByTestId("sidebar-assistants-settings").hover();
+      await tooltip(page).filter({ hasText: "Assistant settings" }).waitFor();
+    });
+    await shot("header-gear");
+    await step("the gear opens the assistants' settings", async () => {
+      await page.getByTestId("sidebar-assistants-settings").click();
+      await page.waitForFunction(() => location.hash.includes("/settings/assistants-phone"));
+      await seeText(page, "Assistants & phone");
+    });
+    await shot("settings");
+    await step("hide the assistants → one small line", async () => {
+      await page.evaluate(() => {
+        location.hash = "#/";
+      });
+      await page.getByTestId("sidebar-assistants-header").hover();
+      await page.getByTestId("sidebar-hide-assistants").click();
+      await page.getByTestId("sidebar-show-assistants").waitFor();
+      if (await page.getByTestId("sidebar-assistant").count()) {
+        throw new Error("assistants still listed while hidden");
+      }
+    });
+    await shot("hidden");
+    await step("it stays hidden after a reload, and comes back", async () => {
+      await page.reload();
+      await page.getByTestId("sidebar-show-assistants").waitFor({ timeout: 30_000 });
+      await page.getByTestId("sidebar-show-assistants").click();
+      await sidebarRow(page, MIA).waitFor();
+    });
+    await shot("shown-again");
+  }),
+
+  flow("d-sidebar-started-by", async ({ page, url, step, shot }) => {
+    await step("open live", () => openDemo(page, url));
+    const startedBy = (name) =>
+      page
+        .getByTestId("sidebar-d-chats")
+        .locator(`[data-testid="sidebar-row-started-by"][data-started-by="${name}"]`);
+    await step("a chat Uno started is in the common list, marked", async () => {
+      await startedBy("Uno").first().waitFor({ timeout: 15_000 });
+      await startedBy("Uno").first().hover();
+      await tooltip(page).filter({ hasText: "Started by Uno" }).waitFor();
+    });
+    await shot("started-by-uno");
+    await step("Bolt starts tests on the MacBook → that chat shows here too", async () => {
+      await scene(page, "d-bolt-mac");
+      await seeText(page, "on MacBook. I'll tell you when it's done", 20_000);
+      await startedBy("Bolt").first().waitFor({ timeout: 20_000 });
+      await seeText(page, "Done on MacBook", 30_000);
+      // Bolt lives on uno-work; the chat is on the MacBook — it says where from.
+      const label = await startedBy("Bolt").first().getAttribute("aria-label");
+      if (label !== "Started by Bolt · from uno-work") throw new Error(`label: ${label}`);
+      await startedBy("Bolt").first().hover();
+      await tooltip(page).filter({ hasText: "Started by Bolt" }).first().waitFor();
+    });
+    await shot("started-by-bolt-on-mac");
+    await page.mouse.move(900, 650);
+    await page.waitForTimeout(500);
+    await shot("list-with-computer");
+    await step("one switch in the chats' menu hides them", async () => {
+      await page.getByTestId("sidebar-d-view-trigger").click();
+      await page.getByTestId("sidebar-d-assistant-chats").click();
+      await page.keyboard.press("Escape");
+      await page.getByTestId("sidebar-d-view-trigger").filter({ hasText: "Your chats" }).waitFor();
+      await page.waitForTimeout(400);
+      const left = (await startedBy("Uno").count()) + (await startedBy("Bolt").count());
+      // The open chat stays (Bolt's channel is not a started chat).
+      if (left > 0) throw new Error(`${left} assistants' chats still listed`);
+    });
+    await shot("hidden-filter");
+    await step("× shows them again", async () => {
+      await page.getByTestId("sidebar-d-clear-filter").click();
+      await startedBy("Uno").first().waitFor();
+    });
+  }),
+
+  flow("d-sidebar-fold-group", async ({ page, url, step, shot }) => {
+    await step("open live, Uno's main chat", async () => {
+      await openDemo(page, url);
+      await openMainChat(page);
+    });
+    const unoChats = page.locator(
+      '[data-testid="sidebar-assistant-chats"][data-assistant="assistant-home"]',
+    );
+    await step("Uno's chats are unfolded around the open one", () =>
+      unoChats.waitFor({ timeout: 15_000 }),
+    );
+    await shot("unfolded");
+    await step("the chevron folds the group, even with its chat open", async () => {
+      await sidebarRow(page, "assistant-home").getByTestId("sidebar-assistant-toggle").click();
+      await unoChats.waitFor({ state: "detached", timeout: 5_000 });
+    });
+    await shot("folded");
+    await step("and unfolds it again", async () => {
+      await sidebarRow(page, "assistant-home").hover();
+      await sidebarRow(page, "assistant-home").getByTestId("sidebar-assistant-toggle").click();
+      await unoChats.waitFor({ timeout: 5_000 });
+    });
   }),
 ];

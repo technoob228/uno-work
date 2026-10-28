@@ -10,8 +10,11 @@
  * computer) in its context, and a variant can add triggers and scenes of its
  * own (`addTrigger`, `addScene`) — see README_DEMO.md.
  */
+import type { ThreadId } from "@t3tools/contracts";
+
 import type { MachineKey } from "../heavyFixtures";
 import type { DemoPersona } from "./fixtures";
+import { recordStartedBy } from "./startedBy";
 import { type AssistWorld, type ConnectorProvider, WORLD, macOnline } from "./world";
 
 // ── What demoBoot gives the engine (its chats and Inbox) ──────────────────
@@ -273,6 +276,15 @@ async function runStepsInner(ctx: ScriptContext, script: Script): Promise<void> 
         title: job.title,
         assistantRole: "spawned",
         spawnedBy: threadId,
+      });
+      recordStartedBy(job.machine, {
+        threadId: childId as ThreadId,
+        assistantName: ctx.persona.name,
+        assistantProjectId: ctx.persona.projectId,
+        local: job.machine === machine,
+        fromComputerName: job.machine === machine ? null : machineName(machine),
+        fromBoxId: null,
+        startedAt: new Date().toISOString(),
       });
       ops.userSays(job.machine, childId, `${ctx.persona.name}: ${job.prompt}`);
       ops.working(
