@@ -100,8 +100,10 @@ checkout_and_build "$WORK_REF"
 start_daemon
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 bench measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
+sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 BENCH_EXPAND=0 bench measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
+sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 NEWEST=$("$NODE" -e 'const a=require(process.argv[1]);console.log(a[a.length-1])' "$B/turn-ids.json")
@@ -109,6 +111,7 @@ bench phone "$BASEURL" "$(pair)" "$NEWEST" > "$B/phone.log" 2>&1 &
 PHONE=$!
 sleep 5
 bench measure "$BASEURL" "$(pair)" "C after, v2 phone subscribed" "$B/turn-ids.json" "$B/C.json"
+sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 kill -TERM $PHONE 2>/dev/null || true
 wait $PHONE 2>/dev/null || true
 PHONE=
@@ -116,6 +119,7 @@ tail -2 "$B/phone.log"
 
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 bench measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.json" "$B/B2.json"
+sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 stop_daemon
 
 "$NODE" -e '

@@ -5,6 +5,7 @@
 //
 //   node v2-sidebar-bench.mjs seed      <base> <pairToken> <chats> <turnChats> <out.json>
 //   node v2-sidebar-bench.mjs unread    <base> <pairToken> <ids.json>
+//   node v2-sidebar-bench.mjs visited   <base> <pairToken> <ids.json>
 //   node v2-sidebar-bench.mjs phone     <base> <pairToken> <threadId>
 //   node v2-sidebar-bench.mjs measure   <base> <pairToken> <label> <ids.json> <out.json>
 //
@@ -118,6 +119,13 @@ async function unread(idsFile) {
   console.log("server read marks cleared");
 }
 
+async function visited(idsFile) {
+  const token = await bearer(PAIR);
+  const ids = new Set(JSON.parse(readFileSync(idsFile, "utf8")));
+  const rows = (await shell(token)).threads.filter((t) => ids.has(t.id));
+  console.log(`server read marks: ${rows.filter((t) => t.lastVisitedAt).length}/${ids.size}`);
+}
+
 async function phone(threadId) {
   const token = await bearer(PAIR);
   const { ticket } = await (
@@ -197,6 +205,9 @@ async function measure(label, idsFile, out) {
   });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => {
+    // Headless has no focused window; Work marks a chat read only when the
+    // window is in front (useWindowInFront), as a person looking at it.
+    Document.prototype.hasFocus = () => true;
     window.__benchCommits = 0;
     window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
       supportsFiber: true,
@@ -213,6 +224,7 @@ async function measure(label, idsFile, out) {
     };
   });
   const page = await context.newPage();
+  await page.bringToFront();
   await page.goto(`${BASE}/pair#token=${PAIR}`);
   await page.waitForFunction(
     (first) => document.querySelector(`[data-testid="thread-title-${first}"]`) !== null,
@@ -333,6 +345,9 @@ switch (mode) {
     break;
   case "unread":
     await unread(rest[0]);
+    break;
+  case "visited":
+    await visited(rest[0]);
     break;
   case "phone":
     await phone(rest[0]);
