@@ -76,6 +76,9 @@ pair() {
     | "$NODE" -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>console.log(JSON.parse(s).credential))'
 }
 bench() { "$NODE" "$B/scripts/v2-sidebar-bench.mjs" "$@"; }
+# measure: a second pairing finishes a turn in each target chat after the page
+# loaded, so they are unread for real (see finishTurnsNow).
+measure() { BENCH_TURN_PAIR="$(pair)" bench measure "$@"; }
 
 # --- A: before ---------------------------------------------------------------
 checkout_and_build "$BASE_REF"
@@ -91,18 +94,18 @@ HOME="$B/userhome" "$NODE" "$W/apps/server/src/bin.ts" project add --base-dir "$
   --title "T3 smoke" "$B/project" >/dev/null 2>&1
 start_daemon
 bench seed "$BASEURL" "$(pair)" "$CHATS" "$TURNS" "$B/turn-ids.json"
-bench measure "$BASEURL" "$(pair)" "A before ($BASE_REF)" "$B/turn-ids.json" "$B/A.json"
-BENCH_EXPAND=0 bench measure "$BASEURL" "$(pair)" "A before, short list" "$B/turn-ids.json" "$B/A0.json"
+measure "$BASEURL" "$(pair)" "A before ($BASE_REF)" "$B/turn-ids.json" "$B/A.json"
+BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "A before, short list" "$B/turn-ids.json" "$B/A0.json"
 stop_daemon
 
 # --- B / C / B2: after -------------------------------------------------------
 checkout_and_build "$WORK_REF"
 start_daemon
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-bench measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
+measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
 sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-BENCH_EXPAND=0 bench measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
+BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
 sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
@@ -110,7 +113,7 @@ NEWEST=$("$NODE" -e 'const a=require(process.argv[1]);console.log(a[a.length-1])
 bench phone "$BASEURL" "$(pair)" "$NEWEST" > "$B/phone.log" 2>&1 &
 PHONE=$!
 sleep 5
-bench measure "$BASEURL" "$(pair)" "C after, v2 phone subscribed" "$B/turn-ids.json" "$B/C.json"
+measure "$BASEURL" "$(pair)" "C after, v2 phone subscribed" "$B/turn-ids.json" "$B/C.json"
 sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 kill -TERM $PHONE 2>/dev/null || true
 wait $PHONE 2>/dev/null || true
@@ -118,7 +121,7 @@ PHONE=
 tail -2 "$B/phone.log"
 
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-bench measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.json" "$B/B2.json"
+measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.json" "$B/B2.json"
 sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 stop_daemon
 

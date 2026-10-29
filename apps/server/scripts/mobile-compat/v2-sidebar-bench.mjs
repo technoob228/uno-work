@@ -63,6 +63,31 @@ async function shell(token) {
   return response.json();
 }
 
+async function runTurn(token, threadId) {
+  const before = (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn?.completedAt ?? null;
+  await dispatch(token, {
+    type: "thread.turn.start",
+    threadId,
+    message: { messageId: randomUUID(), role: "user", text: "hi", attachments: [] },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    createdAt: now(),
+  });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const completedAt = (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn?.completedAt;
+    if (completedAt && completedAt !== before) break;
+    if (Date.now() > deadline) throw new Error(`turn in ${threadId} did not finish`);
+    await sleep(250);
+  }
+  await dispatch(token, { type: "thread.session.stop", threadId, createdAt: now() }).catch(() => {});
+}
+
+async function finishTurnsNow(pairToken, ids) {
+  const token = await bearer(pairToken);
+  for (const threadId of ids) await runTurn(token, threadId);
+}
+
 async function seed(chats, turnChats, out) {
   const token = await bearer(PAIR);
   const snapshot = await shell(token);
@@ -89,24 +114,7 @@ async function seed(chats, turnChats, out) {
   // The last `turnChats` get one finished turn each (one agent at a time, so
   // the machine never runs more than one fake agent).
   const turnIds = ids.slice(-turnChats);
-  for (const threadId of turnIds) {
-    await dispatch(token, {
-      type: "thread.turn.start",
-      threadId,
-      message: { messageId: randomUUID(), role: "user", text: "hi", attachments: [] },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      createdAt: now(),
-    });
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const row = (await shell(token)).threads.find((t) => t.id === threadId);
-      if (row?.latestTurn?.completedAt) break;
-      if (Date.now() > deadline) throw new Error(`turn in ${threadId} did not finish`);
-      await sleep(250);
-    }
-    await dispatch(token, { type: "thread.session.stop", threadId, createdAt: now() }).catch(() => {});
-  }
+  for (const threadId of turnIds) await runTurn(token, threadId);
   writeFileSync(out, JSON.stringify(turnIds));
   console.log(`seeded ${chats} chats, ${turnIds.length} with a finished turn`);
 }
@@ -247,6 +255,10 @@ async function measure(label, idsFile, out) {
     }
   }
   const rows = await page.evaluate(() => document.querySelectorAll("[data-thread-item]").length);
+  // Work seeds every chat as seen on load (lastVisitedAt = updatedAt), so a
+  // chat is unread only when a turn finishes while this page is open — as
+  // when an agent answers while the person is elsewhere. Make that happen.
+  if (process.env.BENCH_TURN_PAIR) await finishTurnsNow(process.env.BENCH_TURN_PAIR, ids);
   await sleep(8_000); // first sync, backfill, late snapshots
   const idleCommits = await page.evaluate(async () => {
     const start = window.__benchCommits;
