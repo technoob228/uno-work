@@ -183,7 +183,6 @@ export function useSwitcherMachines(): SwitcherMachine[] {
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,
   ]);
-
 }
 
 /**

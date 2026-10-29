@@ -1446,18 +1446,6 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
-  // A new chat not sent yet: the composer in the middle under "What should we
-  // do in [folder] on [computer]?" (upstream draft hero, #4055).
-  const isDraftHeroState = resolveDraftHeroState({
-    isLocalDraftThread: routeKind === "draft" && draftId !== null && isLocalDraftThread,
-    hasTimelineEntries: visibleTimelineEntries.length > 0,
-    isWorking,
-    isEmbedded,
-    isPreviewFocusMode,
-    isAssistantConversation: activeThread ? isAssistantConversation(activeThread) : false,
-    showComposer,
-  });
-  const draftHeroTransitionGroupRef = useDraftHeroLayoutTransition(isDraftHeroState);
   // P5 (28.10): the browser's "Show notifications" window comes after a line
   // that says what for, at the moment it is useful — Uno works, the person may
   // switch tabs — not on the first click of the first screen.
@@ -1692,6 +1680,18 @@ export default function ChatView(props: ChatViewProps) {
     () => filterTimelineEntriesForVisibility(timelineEntries, embeddedVisibility),
     [embeddedVisibility, timelineEntries],
   );
+  // A new chat not sent yet: the composer in the middle under "What should we
+  // do in [folder] on [computer]?" (upstream draft hero, #4055).
+  const isDraftHeroState = resolveDraftHeroState({
+    isLocalDraftThread: routeKind === "draft" && draftId !== null && isLocalDraftThread,
+    hasTimelineEntries: visibleTimelineEntries.length > 0,
+    isWorking,
+    isEmbedded,
+    isPreviewFocusMode,
+    isAssistantConversation: activeThread ? isAssistantConversation(activeThread) : false,
+    showComposer,
+  });
+  const draftHeroTransitionGroupRef = useDraftHeroLayoutTransition(isDraftHeroState);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {

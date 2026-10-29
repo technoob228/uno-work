@@ -67,7 +67,10 @@ export function NewChatFolderPicker({
   const filter = useComboboxFilter();
 
   const folderByValue = useMemo(
-    () => new Map(folders.map((project) => [`project:${project.id}`, project] as const)),
+    () =>
+      new Map<string, (typeof folders)[number]>(
+        folders.map((project) => [`project:${project.id}`, project] as const),
+      ),
     [folders],
   );
   const items = useMemo<PickerItem[]>(

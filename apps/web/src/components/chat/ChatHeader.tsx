@@ -296,7 +296,9 @@ export const ChatHeader = memo(function ChatHeader({
               Talks to you in Telegram or Slack, starts and watches other chats for you.
             </span>
           </>
-        ) : draftId && hideDraftFolderChip ? null : draftId && activeProjectName && activeProjectCwd ? (
+        ) : draftId && hideDraftFolderChip ? null : draftId &&
+          activeProjectName &&
+          activeProjectCwd ? (
           <DraftFolderChip
             environmentId={activeThreadEnvironmentId}
             draftId={draftId}
