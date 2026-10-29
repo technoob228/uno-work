@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.164 — 2026-10-29
+
+- Claude Code no longer dies in the middle of a long task: when Claude moves a slow command (over 2 minutes) to the background, Uno Work now counts it as work in progress and keeps Claude running until the command finishes and Claude reports the result.
+
+---
+
 ## v0.0.163 — 2026-10-29
 
 - Slow or unstable internet no longer drops you out of Work every few seconds: the connection waits out 30-40 s of silence instead of 5 s, coming back to the window doesn't reconnect a working link, and a saved computer that can't be reached anymore (address gone, key changed) stops retrying and says so until you press Reconnect.
