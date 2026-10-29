@@ -7,10 +7,12 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
+  type OrchestrationThreadStreamItem,
   type ServerConfig,
   type TerminalEvent,
   ThreadId,
 } from "@t3tools/contracts";
+import { coalesceOrchestrationMessageDeltas } from "@t3tools/shared/orchestrationEvents";
 import { type QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 import {
@@ -102,6 +104,12 @@ type ThreadDetailSubscriptionEntry = {
   refCount: number;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
+  /**
+   * Highest sequence of this chat's detail the store holds (snapshot sequence
+   * or last applied event). Resume cursor for the next subscribe; events at
+   * or below it are duplicates and are dropped.
+   */
+  lastAppliedSequence: number;
 };
 
 const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
@@ -388,15 +396,41 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
 
   entry.unsubscribe = connection.client.orchestration.subscribeThread(
     { threadId: entry.threadId },
-    (item) => {
-      if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
-        return;
-      }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+    (item) => applyThreadDetailStreamItem(entry, item),
+    {
+      resumeFrom: () => (entry.lastAppliedSequence > 0 ? entry.lastAppliedSequence : null),
+      // After a reconnect only chats someone is looking at (or that are
+      // working / waiting for the person) re-subscribe right away. Idle cached
+      // chats stay parked and resume from their cursor when opened again.
+      shouldResubscribe: () => !shouldEvictThreadDetailSubscription(entry),
+      onSuspended: () => {
+        entry.unsubscribe = NOOP;
+      },
     },
   );
   return true;
+}
+
+export function applyThreadDetailStreamItem(
+  entry: Pick<ThreadDetailSubscriptionEntry, "environmentId" | "lastAppliedSequence">,
+  item: OrchestrationThreadStreamItem,
+): void {
+  switch (item.kind) {
+    case "snapshot":
+      useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+      entry.lastAppliedSequence = item.snapshot.snapshotSequence;
+      return;
+    case "resumed":
+      entry.lastAppliedSequence = Math.max(entry.lastAppliedSequence, item.sequence);
+      return;
+    case "event":
+      if (item.event.sequence <= entry.lastAppliedSequence) {
+        return;
+      }
+      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+      entry.lastAppliedSequence = item.event.sequence;
+      return;
+  }
 }
 
 function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
@@ -512,6 +546,19 @@ function reconcileThreadDetailSubscriptionEvictionState(
 ): void {
   clearThreadDetailSubscriptionEviction(entry);
   if (!shouldEvictThreadDetailSubscription(entry)) {
+    // A chat parked after a reconnect started working (or now waits for the
+    // person): bring its live detail back.
+    if (
+      entry.unsubscribe === NOOP &&
+      entry.unsubscribeConnectionListener === null &&
+      threadDetailSubscriptions.get(
+        getThreadDetailSubscriptionKey(entry.environmentId, entry.threadId),
+      ) === entry
+    ) {
+      if (!attachThreadDetailSubscription(entry)) {
+        watchThreadDetailSubscriptionConnection(entry);
+      }
+    }
     return;
   }
 
@@ -579,6 +626,7 @@ export function retainThreadDetailSubscription(
     refCount: 1,
     lastAccessedAt: Date.now(),
     evictionTimeoutId: null,
+    lastAppliedSequence: 0,
   };
   threadDetailSubscriptions.set(key, entry);
   if (!attachThreadDetailSubscription(entry)) {
@@ -932,43 +980,6 @@ function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
   });
 }
 
-function coalesceOrchestrationUiEvents(
-  events: ReadonlyArray<OrchestrationEvent>,
-): OrchestrationEvent[] {
-  if (events.length < 2) {
-    return [...events];
-  }
-
-  const coalesced: OrchestrationEvent[] = [];
-  for (const event of events) {
-    const previous = coalesced.at(-1);
-    if (
-      previous?.type === "thread.message-sent" &&
-      event.type === "thread.message-sent" &&
-      previous.payload.threadId === event.payload.threadId &&
-      previous.payload.messageId === event.payload.messageId
-    ) {
-      coalesced[coalesced.length - 1] = {
-        ...event,
-        payload: {
-          ...event.payload,
-          attachments: event.payload.attachments ?? previous.payload.attachments,
-          createdAt: previous.payload.createdAt,
-          text:
-            !event.payload.streaming && event.payload.text.length > 0
-              ? event.payload.text
-              : previous.payload.text + event.payload.text,
-        },
-      };
-      continue;
-    }
-
-    coalesced.push(event);
-  }
-
-  return coalesced;
-}
-
 function syncProjectUiFromStore() {
   const projects = selectProjectsAcrossEnvironments(useStore.getState());
   const clientSettings = getClientSettings();
@@ -1030,7 +1041,7 @@ function applyRecoveredEventBatch(
   }
 
   const batchEffects = deriveOrchestrationBatchEffects(events);
-  const uiEvents = coalesceOrchestrationUiEvents(events);
+  const uiEvents = coalesceOrchestrationMessageDeltas(events);
   const needsProjectUiSync = events.some(
     (event) =>
       event.type === "project.created" ||
@@ -1158,6 +1169,14 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 function createEnvironmentConnectionHandlers() {
   return {
     applyShellEvent,
+    readShellResumeCursor: (environmentId: EnvironmentId) => {
+      const version = readLastAppliedProjectionVersion(environmentId);
+      return version !== null && version.sequence > 0 ? version.sequence : null;
+    },
+    markShellResumed: (sequence: number, environmentId: EnvironmentId) => {
+      markAppliedProjectionEvent(environmentId, sequence);
+      reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+    },
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
       if (
         !shouldApplyProjectionSnapshot({
@@ -1382,7 +1401,10 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
-  lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  // The applied version is kept: the store still holds this environment's
+  // data, so the replacement connection resumes from it instead of
+  // re-downloading every chat. It is dropped with the data
+  // (removeSavedEnvironment).
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
@@ -1976,6 +1998,7 @@ export async function removeSavedEnvironment(environmentId: EnvironmentId): Prom
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
+  lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
 }
 

@@ -1,4 +1,4 @@
-import { CommandId, EventId, ProjectId } from "@t3tools/contracts";
+import { CommandId, EventId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Schema, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -62,6 +62,63 @@ layer("OrchestrationEventStore", (it) => {
       assert.equal(replayed.length, 1);
       assert.equal(replayed[0]?.type, "project.created");
       assert.equal(replayed[0]?.metadata.adapterKey, "codex");
+    }),
+  );
+
+  it.effect("reads one aggregate's events after a cursor, oldest first and bounded", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const now = new Date().toISOString();
+      const appendMessage = (threadId: string, index: number) =>
+        eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make(`evt-agg-${threadId}-${index}`),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make(threadId),
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make(threadId),
+            messageId: MessageId.make(`msg-${threadId}-${index}`),
+            role: "assistant",
+            text: `text ${index}`,
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+      const a1 = yield* appendMessage("thread-agg-a", 1);
+      yield* appendMessage("thread-agg-b", 1);
+      const a2 = yield* appendMessage("thread-agg-a", 2);
+      yield* appendMessage("thread-agg-b", 2);
+      const a3 = yield* appendMessage("thread-agg-a", 3);
+
+      const afterFirst = yield* eventStore.readAggregateFromSequence({
+        aggregateKind: "thread",
+        aggregateId: "thread-agg-a",
+        sequenceExclusive: a1.sequence,
+        limit: 10,
+      });
+      assert.deepEqual(
+        afterFirst.map((event) => event.sequence),
+        [a2.sequence, a3.sequence],
+      );
+
+      const bounded = yield* eventStore.readAggregateFromSequence({
+        aggregateKind: "thread",
+        aggregateId: "thread-agg-a",
+        sequenceExclusive: 0,
+        limit: 2,
+      });
+      assert.deepEqual(
+        bounded.map((event) => event.sequence),
+        [a1.sequence, a2.sequence],
+      );
     }),
   );
 

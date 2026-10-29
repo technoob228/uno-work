@@ -46,6 +46,18 @@ export interface OrchestrationEventStoreShape {
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
   /**
+   * Read one aggregate's events after the provided sequence, oldest first,
+   * at most `limit` of them (uses the aggregate/sequence index). Used to
+   * resume a client subscription without re-sending a full snapshot.
+   */
+  readonly readAggregateFromSequence: (input: {
+    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
+    readonly aggregateId: string;
+    readonly sequenceExclusive: number;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError>;
+
+  /**
    * Read all events from the beginning of the stream.
    *
    * @returns Stream containing all stored events.
