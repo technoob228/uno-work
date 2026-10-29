@@ -128,6 +128,8 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
+  /** Call before opening/closing a part of the feed: at the end, the end stays in view. */
+  onDisclosureToggle: () => void;
   respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
   onRespondToApproval:
     | ((requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => Promise<void>)
@@ -217,14 +219,35 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
-  const onToggleTurnFold = useCallback((turnId: TurnId) => {
-    setExpandedTurnIds((current) => {
-      const next = new Set(current);
-      if (next.has(turnId)) next.delete(turnId);
-      else next.add(turnId);
-      return next;
+  // A toggle made at the end keeps the end in view while rows re-measure;
+  // anywhere else the list holds the toggled row in place (upstream 1cfd1c1a44).
+  const pinEndUntilRef = useRef(0);
+  const pinToEnd = useCallback(() => {
+    void listRef.current?.scrollToEnd?.({ animated: false });
+  }, [listRef]);
+  const onDisclosureToggle = useCallback(() => {
+    if (listRef.current?.getState?.()?.isAtEnd !== true) return;
+    pinEndUntilRef.current = performance.now() + 500;
+    requestAnimationFrame(() => {
+      pinToEnd();
+      requestAnimationFrame(pinToEnd);
     });
-  }, []);
+  }, [listRef, pinToEnd]);
+  const handleItemSizeChanged = useCallback(() => {
+    if (performance.now() < pinEndUntilRef.current) pinToEnd();
+  }, [pinToEnd]);
+  const onToggleTurnFold = useCallback(
+    (turnId: TurnId) => {
+      onDisclosureToggle();
+      setExpandedTurnIds((current) => {
+        const next = new Set(current);
+        if (next.has(turnId)) next.delete(turnId);
+        else next.add(turnId);
+        return next;
+      });
+    },
+    [onDisclosureToggle],
+  );
   const latestTurnId = latestTurn?.turnId ?? null;
   const latestTurnState = latestTurn?.state ?? null;
   const latestTurnStartedAt = latestTurn?.startedAt ?? null;
@@ -311,6 +334,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
     }),
@@ -330,6 +354,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
     ],
@@ -370,6 +395,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         maintainScrollAtEndThreshold={0.1}
         maintainVisibleContentPosition
         onScroll={handleScroll}
+        onItemSizeChanged={handleItemSizeChanged}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
         ListHeaderComponent={TIMELINE_LIST_HEADER}
         ListFooterComponent={
@@ -812,7 +838,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
   live: boolean;
 }) {
-  const { workspaceRoot } = use(TimelineRowCtx);
+  const { workspaceRoot, onDisclosureToggle, timestampFormat } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const { summary, hasFailure } = useMemo(
@@ -859,26 +885,35 @@ const WorkGroupSection = memo(function WorkGroupSection({
 
   return (
     <div data-testid="work-group">
-      <button
-        type="button"
-        data-scroll-anchor-ignore
-        data-testid="work-group-summary"
-        aria-expanded={isExpanded}
-        className="group/summary flex max-w-full items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
-        onClick={() => setIsExpanded((value) => !value)}
-      >
-        <span className="truncate">
-          {summary}
-          {live ? "…" : null}
-        </span>
-        {hasFailure ? (
-          <CircleAlertIcon
-            aria-label="A step failed"
-            className="size-3 shrink-0 text-amber-600/80 dark:text-amber-400/80"
-          />
-        ) : null}
-        <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/summary:opacity-100" />
-      </button>
+      <div className="group/timeline-row flex items-center gap-2">
+        <button
+          type="button"
+          data-scroll-anchor-ignore
+          data-testid="work-group-summary"
+          aria-expanded={isExpanded}
+          className="group/summary flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => {
+            onDisclosureToggle();
+            setIsExpanded((value) => !value);
+          }}
+        >
+          <span className="truncate">
+            {summary}
+            {live ? "…" : null}
+          </span>
+          {hasFailure ? (
+            <CircleAlertIcon
+              aria-label="A step failed"
+              className="size-3 shrink-0 text-amber-600/80 dark:text-amber-400/80"
+            />
+          ) : null}
+          <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/summary:opacity-100" />
+        </button>
+        <TimelineRowTimestamp
+          createdAt={groupedEntries[0]?.createdAt ?? ""}
+          timestampFormat={timestampFormat}
+        />
+      </div>
       {isExpanded ? (
         <div className="mt-1 ml-2 space-y-0.5 border-l border-border/60 pl-2">
           {hiddenCount > 0 ? (
@@ -886,7 +921,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
               type="button"
               data-scroll-anchor-ignore
               className="px-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
-              onClick={() => setShowAll(true)}
+              onClick={() => {
+                onDisclosureToggle();
+                setShowAll(true);
+              }}
             >
               Show {hiddenCount} earlier {hiddenCount === 1 ? "step" : "steps"}
             </button>
@@ -900,6 +938,19 @@ const WorkGroupSection = memo(function WorkGroupSection({
   );
 });
 
+/**
+ * The time of a step or a fold, shown on hover or focus of its row (the row
+ * carries `group/timeline-row`; upstream b900fc94eb). Takes no room while hidden.
+ */
+function TimelineRowTimestamp(props: { createdAt: string; timestampFormat: TimestampFormat }) {
+  if (!props.createdAt) return null;
+  return (
+    <span className="pointer-events-none shrink-0 text-[10px] whitespace-nowrap text-muted-foreground/60 tabular-nums opacity-0 transition-opacity duration-100 group-hover/timeline-row:opacity-100 group-focus-within/timeline-row:opacity-100">
+      {formatTimestamp(props.createdAt, props.timestampFormat)}
+    </span>
+  );
+}
+
 /** "Worked for 2m 10s" — a finished turn's steps and notes, folded (upstream 1916ac6d55). */
 const TurnFoldRow = memo(function TurnFoldRow(props: {
   turnId: TurnId;
@@ -910,19 +961,19 @@ const TurnFoldRow = memo(function TurnFoldRow(props: {
   const { onToggleTurnFold, timestampFormat } = use(TimelineRowCtx);
   const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   return (
-    <div className="flex items-center gap-3" data-testid="turn-fold">
+    <div className="group/timeline-row flex items-center gap-3" data-testid="turn-fold">
       <button
         type="button"
         data-scroll-anchor-ignore
         aria-expanded={props.expanded}
         className="group/fold flex items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => onToggleTurnFold(props.turnId)}
-        title={formatTimestamp(props.createdAt, timestampFormat)}
       >
         <span>{props.label}</span>
         <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/fold:opacity-100" />
       </button>
       <span className="h-px flex-1 bg-border/60" />
+      <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={timestampFormat} />
     </div>
   );
 });
@@ -1472,7 +1523,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
-  const { activeThreadEnvironmentId } = use(TimelineRowCtx);
+  const { activeThreadEnvironmentId, timestampFormat } = use(TimelineRowCtx);
   const { openFile } = usePreviewPane();
   const handleOpenWorkFile = useCallback(
     (filePath: string) => {
@@ -1515,7 +1566,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
 
   return (
-    <div className="rounded-lg px-1 py-1">
+    <div className="group/timeline-row rounded-lg px-1 py-1">
       <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
         <span
           className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
@@ -1589,6 +1640,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </Tooltip>
           )}
         </div>
+        <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
         {hasRaw && (
           <button
             type="button"
@@ -1602,17 +1654,21 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         )}
       </div>
       {hasRaw && rawOpen && (
-        <pre
-          className="mt-1 ml-6 max-h-64 overflow-auto rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[10px] leading-4 whitespace-pre-wrap wrap-break-word text-muted-foreground"
+        // The call on top, its result muted under it, no card around either
+        // (upstream df4ae529ea).
+        <div
+          className="mt-1 ml-6 max-h-64 overflow-auto font-mono text-[10px] leading-4 whitespace-pre-wrap wrap-break-word"
           data-testid="work-entry-raw"
         >
-          {[
-            workEntry.rawInput ? `Input\n${workEntry.rawInput}` : null,
-            workEntry.rawResult ? `Result\n${workEntry.rawResult}` : null,
-          ]
-            .filter((part) => part !== null)
-            .join("\n\n")}
-        </pre>
+          {workEntry.rawInput ? (
+            <div className="text-foreground/80">{workEntry.rawInput}</div>
+          ) : null}
+          {workEntry.rawResult ? (
+            <div className="mt-1 border-l border-border/60 pl-2 text-muted-foreground/70">
+              {workEntry.rawResult}
+            </div>
+          ) : null}
+        </div>
       )}
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
