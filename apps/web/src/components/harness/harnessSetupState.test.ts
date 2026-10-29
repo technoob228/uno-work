@@ -2,6 +2,7 @@ import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  describeSignInFailure,
   HARNESS_ROW_DRIVERS,
   HARNESS_STATUS_LABEL,
   isAuthableDriver,
@@ -10,7 +11,10 @@ import {
   progressLine,
   resolveHarnessAction,
   resolveHarnessStatus,
+  LOST_SIGN_IN_MESSAGE,
   runsOnUnoAi,
+  SIGN_IN_CODE_REJECTED_MESSAGE,
+  SIGN_IN_FAILED_MESSAGE,
 } from "./harnessSetupState";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
@@ -173,5 +177,70 @@ describe("Claude on Uno AI", () => {
       false,
     );
     expect(runsOnUnoAi(undefined)).toBe(false);
+  });
+});
+
+describe("describeSignInFailure", () => {
+  // What the daemon reported for a wrong Claude code (walk 29.10).
+  const WRONG_CODE =
+    "Sign-in exited with code 1. Login failed: Request failed with status code 400";
+
+  it("turns a wrong one-time code into a human message with a new link as the way on", () => {
+    const view = describeSignInFailure({
+      driver: "claudeAgent",
+      method: "oauth",
+      codeCheck: "checking",
+      error: WRONG_CODE,
+      log: "$ claude auth login\nLogin failed: Request failed with status code 400\n",
+    });
+    expect(view.message).toBe(SIGN_IN_CODE_REJECTED_MESSAGE);
+    expect(view.message).not.toMatch(/exited|status code/);
+    expect(view.codeRejected).toBe(true);
+    // The raw text stays one click away.
+    expect(view.details).toContain(WRONG_CODE);
+    expect(view.details).toContain("$ claude auth login");
+  });
+
+  it("knows Claude's 400 without codeCheck (an older daemon)", () => {
+    const view = describeSignInFailure({
+      driver: "claudeAgent",
+      method: "oauth",
+      error: WRONG_CODE,
+    });
+    expect(view.codeRejected).toBe(true);
+    expect(view.details).toBe(WRONG_CODE);
+  });
+
+  it("anything else: a generic line, the reason under Details", () => {
+    const codex = describeSignInFailure({
+      driver: "codex",
+      method: "oauth",
+      error: "Sign-in exited with code 1. Error: getaddrinfo ENOTFOUND auth.openai.com",
+    });
+    expect(codex).toMatchObject({ message: SIGN_IN_FAILED_MESSAGE, codeRejected: false });
+    expect(codex.details).toContain("ENOTFOUND");
+
+    const apiKey = describeSignInFailure({
+      driver: "codex",
+      method: "apiKey",
+      error: "Sign-in exited with code 1. status code 400",
+    });
+    expect(apiKey).toMatchObject({ message: SIGN_IN_FAILED_MESSAGE, codeRejected: false });
+
+    expect(describeSignInFailure({ driver: "claudeAgent", method: "oauth" })).toMatchObject({
+      message: SIGN_IN_FAILED_MESSAGE,
+      codeRejected: false,
+      details: "",
+    });
+  });
+
+  it("keeps our own sentences as they are", () => {
+    const view = describeSignInFailure({
+      driver: "claudeAgent",
+      method: "oauth",
+      codeCheck: "checking",
+      error: LOST_SIGN_IN_MESSAGE,
+    });
+    expect(view).toEqual({ message: LOST_SIGN_IN_MESSAGE, codeRejected: false, details: "" });
   });
 });

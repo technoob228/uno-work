@@ -29,7 +29,7 @@ import { refreshEnvironmentProviders } from "~/environments/settings/serverSetti
 import { usePrimaryEnvironmentId } from "~/environments/primary/context";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
-import { isJobActive } from "./harnessSetupState";
+import { isJobActive, LOST_SIGN_IN_MESSAGE } from "./harnessSetupState";
 import { type AdoptSignedInAgentOptions, useAdoptSignedInAgent } from "./useAdoptSignedInAgent";
 
 export const HARNESS_SETUP_POLL_MS = 1_000;
@@ -90,10 +90,6 @@ export function isLostJobError(error: unknown): boolean {
   if (code === "notFound") return true;
   return /unknown sign-in job|unknown install job/i.test(errorMessage(error));
 }
-
-/** What a sign-in that the computer forgot reads as. */
-export const LOST_SIGN_IN_MESSAGE =
-  "This sign-in stopped on the computer (it may have restarted). Get a new link and sign in again.";
 
 /**
  * @param explicitEnvironmentId the machine to act on. Omit (or pass `null`)

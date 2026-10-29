@@ -106,6 +106,66 @@ export interface SetupJobView {
 export const isJobActive = (job: SetupJobView | undefined): boolean =>
   job?.state === "queued" || job?.state === "running";
 
+/** What a sign-in that the computer forgot reads as. */
+export const LOST_SIGN_IN_MESSAGE =
+  "This sign-in stopped on the computer (it may have restarted). Get a new link and sign in again.";
+
+/** The pasted one-time code is what failed. */
+export const SIGN_IN_CODE_REJECTED_MESSAGE =
+  "That code didn't work. Open the sign-in page again and paste the new code.";
+/** Anything else that ended a sign-in; the CLI's own words stay under Details. */
+export const SIGN_IN_FAILED_MESSAGE = "Sign-in didn't finish. Try again.";
+
+/** Our own sentences: shown as they are. */
+const OWN_SIGN_IN_MESSAGES: ReadonlySet<string> = new Set([LOST_SIGN_IN_MESSAGE]);
+
+export interface SignInFailureView {
+  /** What the person reads. */
+  readonly message: string;
+  /** The pasted code didn't work: the way on is a new link (one click). */
+  readonly codeRejected: boolean;
+  /** Under "Details": the raw reason (when it isn't the message), then the CLI's output. */
+  readonly details: string;
+}
+
+/**
+ * A failed sign-in in the person's words. The daemon reports the CLI as it
+ * ended — "Sign-in exited with code 1. Login failed: Request failed with
+ * status code 400" for a wrong Claude code (walk 29.10) — and that text only
+ * belongs in the details.
+ *
+ * Code rejected: a code went in (`codeCheck` set) and the CLI then failed, or
+ * Claude's CLI answered 400 (an older daemon without `codeCheck`).
+ */
+export function describeSignInFailure(job: {
+  readonly driver: string;
+  readonly method?: string | undefined;
+  readonly error?: string | undefined;
+  readonly log?: string | undefined;
+  readonly codeCheck?: "checking" | "rejected" | undefined;
+}): SignInFailureView {
+  const error = job.error?.trim() ?? "";
+  const log = job.log?.trim() ?? "";
+  if (OWN_SIGN_IN_MESSAGES.has(error)) {
+    return { message: error, codeRejected: false, details: log };
+  }
+  const details =
+    error.length === 0 || log.includes(error)
+      ? log
+      : log.length === 0
+        ? error
+        : `${error}\n\n${log}`;
+  const codeRejected =
+    job.method === "oauth" &&
+    (job.codeCheck !== undefined ||
+      (job.driver === "claudeAgent" && /\bstatus code 400\b/i.test(error)));
+  return {
+    message: codeRejected ? SIGN_IN_CODE_REJECTED_MESSAGE : SIGN_IN_FAILED_MESSAGE,
+    codeRejected,
+    details,
+  };
+}
+
 /**
  * Last meaningful line of a job log, for the one-line progress hint under a
  * spinner. Strips ANSI so npm/uv colour codes do not leak into the DOM.
