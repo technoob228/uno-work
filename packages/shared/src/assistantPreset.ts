@@ -131,6 +131,16 @@ export function assistantOwnRuntimeMode(preset: AssistantPreset): RuntimeMode {
   return capRuntimeToPreset("full-access", preset);
 }
 
+/**
+ * An app's level when the person never set one: full ("write", decision
+ * 02.10), except read-only connectors. Outlook & Teams calendar is
+ * Calendars.Read only, so "write" would promise what it can't do; the
+ * console's templates give it "read" too (29.10).
+ */
+export function defaultAppLevel(provider: string): AssistantAppLevel {
+  return provider === "microsoft" ? "read" : "write";
+}
+
 /** The highest app (connector) level the preset allows: Observer only reads. */
 export function presetConnectorCeiling(preset: AssistantPreset): AssistantAppLevel {
   return preset === "observer" ? "read" : "write";

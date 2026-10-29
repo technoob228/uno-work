@@ -25,7 +25,7 @@ import type {
 } from "@t3tools/contracts";
 import { ASSISTANT_PROJECT_ID_PREFIX } from "@t3tools/contracts";
 
-import { ASSISTANT_PRESET_COPY, capAppLevel } from "./assistantPreset.ts";
+import { ASSISTANT_PRESET_COPY, capAppLevel, defaultAppLevel } from "./assistantPreset.ts";
 
 /** What an assistant may do and reach — the parts the daemon enforces. */
 export interface TeamGrant {
@@ -35,7 +35,7 @@ export interface TeamGrant {
    * assistant's workspace: each one's own is implied, the others' aren't given.
    */
   readonly projects: "all" | ReadonlyArray<string>;
-  /** Level per app provider; an app not listed is at "write" (full by default). */
+  /** Level per app provider; an app not listed is at its default (`defaultAppLevel`: full, Outlook reads). */
   readonly apps: Readonly<Record<string, AssistantAppLevel>>;
 }
 
@@ -61,7 +61,7 @@ export function presetRank(preset: AssistantPreset): number {
 
 /** The level an app is really at for this grant: what is set, at most the preset's cap. */
 export function grantAppLevel(grant: TeamGrant, provider: string): AssistantAppLevel {
-  return capAppLevel(grant.apps[provider] ?? "write", grant.preset);
+  return capAppLevel(grant.apps[provider] ?? defaultAppLevel(provider), grant.preset);
 }
 
 /** Projects without assistant workspaces (those are never given to another assistant). */
