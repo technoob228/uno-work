@@ -9,6 +9,7 @@ import {
   CopyIcon,
   EyeIcon,
   HardDriveIcon,
+  NotebookPenIcon,
   LoaderCircleIcon,
   RotateCcwIcon,
   TriangleAlertIcon,
@@ -211,6 +212,16 @@ export function RecordingComposerCard(props: { readonly item: RecordingItem }) {
                 : "Watched — add what to do and send"
             }
           />
+          {item.meetingFolder ? (
+            <div
+              className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+              data-testid="recording-notetaker"
+              title={`~/${item.meetingFolder}`}
+            >
+              <NotebookPenIcon className="size-3 shrink-0" />
+              Also in Notetaker — notes and to-dos are on their way
+            </div>
+          ) : null}
         </div>
         <Button
           variant="ghost"

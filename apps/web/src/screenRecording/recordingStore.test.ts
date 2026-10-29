@@ -64,11 +64,18 @@ const {
 
 const notices: Array<{ kind: string; title: string; description?: string }> = [];
 let describeImpl: PipelineDeps["describe"];
+// Notetaker on the computer: ~/Meetings exists; what Work wrote there.
+let hasMeetings = false;
+const meetingWrites: string[] = [];
 
 function deps(): PipelineDeps {
   return {
     homePath: async () => "/home/me",
-    writeFile: async () => ({}),
+    writeFile: async (input) => {
+      if (input.relativePath.startsWith("Meetings/")) meetingWrites.push(input.relativePath);
+      return {};
+    },
+    folderExists: async (path) => hasMeetings && path === "/home/me/Meetings",
     driveState: async () => ({
       available: true,
       message: null,
@@ -92,6 +99,8 @@ const flush = async () => {
 beforeEach(() => {
   resetScreenRecordingStoreForTests();
   notices.length = 0;
+  hasMeetings = false;
+  meetingWrites.length = 0;
   Object.assign(engine, {
     startError: null,
     elapsed: 0,
@@ -142,6 +151,30 @@ describe("a session", () => {
     const done = store().items["t1"]!;
     expect(done.save).toMatchObject({ status: "done", shareUrl: "https://api.getuno.xyz/d/tok" });
     expect(done.watch).toMatchObject({ status: "done", speech: "Rename the button to Start" });
+  });
+
+  it("lands in Notetaker once, when it is on the computer", async () => {
+    hasMeetings = true;
+    await store().start({ threadKey: "t1", environmentId: "e1" });
+    await store().stop();
+    await flush();
+    expect(meetingWrites).toEqual([
+      "Meetings/2026-10-28 14-05 Screen recording/transcript.json",
+      "Meetings/2026-10-28 14-05 Screen recording/transcript.md",
+      "Meetings/2026-10-28 14-05 Screen recording/meeting.json",
+    ]);
+    expect(store().items["t1"]!.meetingFolder).toBe("Meetings/2026-10-28 14-05 Screen recording");
+    store().retrySave("t1");
+    await flush();
+    expect(meetingWrites).toHaveLength(3);
+  });
+
+  it("no Notetaker: nothing in ~/Meetings", async () => {
+    await store().start({ threadKey: "t1", environmentId: "e1" });
+    await store().stop();
+    await flush();
+    expect(meetingWrites).toEqual([]);
+    expect(store().items["t1"]!.meetingFolder ?? null).toBeNull();
   });
 
   it("only one recording at a time", async () => {

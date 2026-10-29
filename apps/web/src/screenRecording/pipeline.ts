@@ -29,6 +29,7 @@ import {
 } from "./agentView";
 import type { LiveKeyFrame } from "./recorder";
 import { uploadFilesIntoDirectory } from "../projectUpload";
+import { copyToMeetings, newMeetingId } from "./meetingCopy";
 import {
   AGENT_COPY_MAX_BYTES,
   RECORDING_MAX_MS,
@@ -49,6 +50,8 @@ export interface SaveStep {
   readonly error: string | null;
   readonly driveKey: string | null;
   readonly shareUrl: string | null;
+  /** When the share link stops working (Uno Drive's default: 7 days). */
+  readonly shareExpiresAt?: string | null;
 }
 
 export interface WatchStep {
@@ -89,6 +92,11 @@ export interface RecordingItem {
   readonly watch: WatchStep;
   /** The words were put into the box once (not again after the person edits). */
   readonly prefilled: boolean;
+  /**
+   * Also in Notetaker's library (`Meetings/<folder>`), once saved and watched:
+   * undefined until tried, "" while writing, null when not there (no Notetaker).
+   */
+  readonly meetingFolder?: string | null;
 }
 
 export interface DriveInfo {
@@ -113,7 +121,7 @@ export interface PipelineDeps {
   readonly shareCreate: (input: {
     key: string;
     expiresInHours?: number;
-  }) => Promise<{ url: string | null }>;
+  }) => Promise<{ url: string | null; expiresAt?: string | null }>;
   readonly describe: (input: {
     path?: string;
     driveParts?: Array<{ key: string; durationSec: number }>;
@@ -136,6 +144,8 @@ export interface PipelineDeps {
   readonly removePaths: (paths: string[]) => Promise<unknown>;
   /** Deletes a key or a folder prefix ("…/") from a bucket. */
   readonly deleteCloud: (input: { bucketId: number; key: string }) => Promise<unknown>;
+  /** Whether a folder exists on the computer (absolute path). Absent: no Notetaker copy. */
+  readonly folderExists?: (path: string) => Promise<boolean>;
 }
 
 export const INITIAL_SAVE: SaveStep = {
@@ -282,12 +292,15 @@ export async function runSave(
     patch({ progress: 0.98, driveKey });
     // A link is a nice-to-have: the file is safe in Drive even if it fails.
     let shareUrl: string | null = null;
+    let shareExpiresAt: string | null = null;
     try {
-      shareUrl = (await deps.shareCreate({ key: driveKey })).url || null;
+      const share = await deps.shareCreate({ key: driveKey });
+      shareUrl = share.url || null;
+      shareExpiresAt = share.expiresAt ?? null;
     } catch {
       shareUrl = null;
     }
-    patch({ status: "done", progress: 1, driveKey, shareUrl, error: null });
+    patch({ status: "done", progress: 1, driveKey, shareUrl, shareExpiresAt, error: null });
   } catch (error) {
     if (stagedPath) await deps.removePaths([stagedPath]).catch(() => undefined);
     patch({
@@ -492,6 +505,42 @@ export async function runPipeline(
     runWatch(item, deps, (watch) => patch({ watch }), signal),
   ]);
   await cleanupStaging(item, deps);
+}
+
+/**
+ * Notetaker's library: the saved and watched recording as a meeting folder in
+ * `~/Meetings` (meetingCopy.ts). Null when Notetaker isn't on the computer,
+ * there was nothing to write notes from, or it failed — never an error: the
+ * recording is already in Drive.
+ */
+export async function fileRecordingMeeting(
+  item: RecordingItem,
+  deps: PipelineDeps,
+  newMeetingIdFn: () => string = newMeetingId,
+): Promise<string | null> {
+  const folderExists = deps.folderExists;
+  if (!folderExists || item.save.status !== "done" || !item.save.driveKey) return null;
+  if (item.watch.status !== "done") return null;
+  try {
+    return await copyToMeetings(
+      {
+        id: newMeetingIdFn(),
+        createdAt: new Date(item.createdAt),
+        durationMs: item.durationMs,
+        width: item.width,
+        height: item.height,
+        driveKey: item.save.driveKey,
+        shareUrl: item.save.shareUrl,
+        shareExpiresAt: item.save.shareExpiresAt ?? null,
+        speech: item.watch.speech,
+        visual: item.watch.visual,
+        timeline: item.watch.timeline,
+      },
+      { homePath: deps.homePath, folderExists, writeFile: deps.writeFile },
+    );
+  } catch {
+    return null;
+  }
 }
 
 export async function cleanupStaging(item: Pick<RecordingItem, "id">, deps: PipelineDeps) {

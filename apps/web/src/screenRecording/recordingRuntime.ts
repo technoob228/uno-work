@@ -41,11 +41,13 @@ export function realPipelineDeps(environmentId: string): PipelineDeps {
       };
     },
     copyToCloud: (input) => filesApi(id).cloudCopyToCloud(input),
-    shareCreate: (input) =>
-      filesApi(id).driveShareCreate({
+    shareCreate: async (input) => {
+      const share = await filesApi(id).driveShareCreate({
         key: input.key,
         ...(input.expiresInHours !== undefined ? { expiresInHours: input.expiresInHours } : {}),
-      }),
+      });
+      return { url: share.url, expiresAt: share.expiresAt };
+    },
     describe: async (input) => {
       const media = ensureEnvironmentApi(id).media;
       if (!media) throw new Error("This computer can't watch recordings yet — update Uno Work.");
@@ -54,6 +56,11 @@ export function realPipelineDeps(environmentId: string): PipelineDeps {
     grabFrames: grabFramesFromBlob,
     removePaths: (paths) => filesApi(id).delete({ paths }),
     deleteCloud: (input) => filesApi(id).cloudDelete(input),
+    folderExists: (path) =>
+      filesApi(id)
+        .stat({ path })
+        .then((entry) => entry.kind === "directory")
+        .catch(() => false),
   };
 }
 

@@ -14,6 +14,7 @@ import {
   type SaveStep,
   type WatchStep,
   cleanupStaging,
+  fileRecordingMeeting,
   recordingReadiness,
   runPipeline,
   runSave,
@@ -131,6 +132,24 @@ function rt(): RecordingRuntime {
 }
 
 export const useScreenRecordingStore = create<StoreState>((set, get) => {
+  // Hands a saved and watched recording to Notetaker once: `meetingFolder`
+  // is undefined until tried, "" while writing, then the folder or null.
+  const setMeetingFolder = (threadKey: string, id: string, folder: string | null) =>
+    set((state) => {
+      const current = state.items[threadKey];
+      if (!current || current.id !== id) return state;
+      return { items: { ...state.items, [threadKey]: { ...current, meetingFolder: folder } } };
+    });
+  const fileMeetingWhenReady = (threadKey: string, id: string) => {
+    const item = get().items[threadKey];
+    if (!item || item.id !== id || item.meetingFolder !== undefined) return;
+    if (item.save.status !== "done" || item.watch.status !== "done") return;
+    setMeetingFolder(threadKey, id, "");
+    void fileRecordingMeeting(item, rt().deps(item.environmentId)).then((folder) =>
+      setMeetingFolder(threadKey, id, folder),
+    );
+  };
+
   const patchItem = (
     threadKey: string,
     id: string,
@@ -150,6 +169,9 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
         },
       };
     });
+    if (update.save?.status === "done" || update.watch?.status === "done") {
+      fileMeetingWhenReady(threadKey, id);
+    }
   };
 
   const controllerFor = (id: string) => {
