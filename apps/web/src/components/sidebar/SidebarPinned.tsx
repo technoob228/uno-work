@@ -38,6 +38,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { useSidebar } from "../ui/sidebar";
+import { PinWidgetPeek, usePeekHover, usePinnedApp } from "./PinPeek";
 
 export const SidebarPinned = memo(function SidebarPinned({
   pinnedChats,
@@ -186,7 +187,14 @@ function PinRow({
   const { openBeside } = useOpenApp();
   const active = usePinActive(item);
   const openPin = useOpenPin();
-  const open = () => openPin(item);
+  // An app with a Home widget: hover shows the widget beside the pin (PinPeek.tsx).
+  const { app, environmentId } = usePinnedApp(item);
+  const peekable = (app?.widget ?? null) !== null;
+  const hover = usePeekHover(peekable);
+  const open = () => {
+    hover.close();
+    openPin(item);
+  };
 
   const showMenu = async (position: { x: number; y: number }) => {
     const api = readLocalApi();
@@ -216,7 +224,11 @@ function PinRow({
   };
 
   return (
-    <li className="group/pin relative list-none">
+    <li
+      className="group/pin relative list-none"
+      {...hover.triggerProps}
+      data-peek={peekable ? "widget" : undefined}
+    >
       <button
         type="button"
         onClick={open}
@@ -224,7 +236,7 @@ function PinRow({
           event.preventDefault();
           void showMenu({ x: event.clientX, y: event.clientY });
         }}
-        title={item.target}
+        title={peekable ? undefined : item.target}
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg pr-7 pl-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2",
@@ -250,6 +262,9 @@ function PinRow({
       >
         <XIcon className="size-3.5" />
       </button>
+      {peekable && app ? (
+        <PinWidgetPeek hover={hover} app={app} environmentId={environmentId} onOpen={open} />
+      ) : null}
     </li>
   );
 }
