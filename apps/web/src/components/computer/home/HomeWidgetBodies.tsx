@@ -552,7 +552,7 @@ function PlanLimitRow({
             style={{ width: `${Math.max(2, percent)}%` }}
           />
         </div>
-        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+        <span className="w-16 shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-muted-foreground">
           {percent}% used
         </span>
       </div>
