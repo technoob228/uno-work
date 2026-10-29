@@ -108,10 +108,16 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       arch: platformArch(),
     },
     serverVersion: packageJson.version,
+    // Upstream T3 negotiation (store phone app). Our web ignores it; a socket
+    // opts into the v2 adapter with ?orchestrationProtocol=2 (compat/v2).
+    orchestrationProtocolVersion: 2,
     capabilities: {
       repositoryIdentity: true,
       threadSnooze: true,
       threadSettlement: true,
+      threadPinning: true,
+      threadVisitedTracking: true,
+      threadStop: true,
       agentThreads: true,
       agentsCloseChat: true,
       threadContinueDirect: true,

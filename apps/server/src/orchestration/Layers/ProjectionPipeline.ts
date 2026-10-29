@@ -580,6 +580,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             snoozedAt: null,
             settledOverride: null,
             settledAt: null,
+            lastVisitedAt: null,
             spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
             controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -712,6 +713,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             settledOverride: event.payload.reason === "user" ? "active" : null,
             settledAt: null,
             updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.visited":
+        case "thread.marked-unread": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // Read state only: updatedAt stays, so reading never reorders.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            lastVisitedAt:
+              event.type === "thread.visited" ? event.payload.lastVisitedAt : null,
           });
           return;
         }

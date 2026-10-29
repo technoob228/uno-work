@@ -44,6 +44,8 @@ export const ProjectionThread = Schema.Struct({
   // Manual settle lifecycle (migration 045). Optional for the same reason.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Read watermark (migration 052). Optional for the same reason.
+  lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Agent-spawned threads (migration 044). Optional for the same reason;
   // absent spawnedByThreadId/controlChangedAt persist as NULL, absent
   // controller as NULL (read back as "human").

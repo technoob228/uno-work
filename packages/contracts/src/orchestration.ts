@@ -497,6 +497,10 @@ export const OrchestrationThread = Schema.Struct({
   // Optional so payloads from pre-settle servers still decode.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Read watermark (migration 052): the last time the person opened this chat
+  // on any client (web Work or the T3 phone app). Null: never visited, or
+  // marked unread. Optional so payloads from older servers still decode.
+  lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // The thread whose agent created this one (bridge `POST /api/threads`);
   // null for threads a human (or the manager) created. Immutable.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
@@ -564,6 +568,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.settledOverride.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Read watermark (migration 052): the last time the person opened this chat
+  // on any client (web Work or the T3 phone app). Null: never visited, or
+  // marked unread. Optional so payloads from older servers still decode.
+  lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.spawnedByThreadId / controller.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(ThreadController),
@@ -756,6 +764,22 @@ const ThreadUnsettleCommand = Schema.Struct({
   reason: Schema.Literal("user"),
 });
 
+// Read state, wire-compatible with upstream T3 Code's thread.visit /
+// thread.mark-unread. visit moves the watermark forward only (an older
+// visitedAt is a no-op); mark-unread clears it.
+const ThreadVisitCommand = Schema.Struct({
+  type: Schema.Literal("thread.visit"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  visitedAt: IsoDateTime,
+});
+
+const ThreadMarkUnreadCommand = Schema.Struct({
+  type: Schema.Literal("thread.mark-unread"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 // Handoff between the human and the spawning agent. A human may set either
 // value; an agent (origin kind "agent") may only release control to "human".
 // The app no longer offers "Hand back to agent" (0.0.115): the command stays
@@ -903,6 +927,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadVisitCommand,
+  ThreadMarkUnreadCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -929,6 +955,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadVisitCommand,
+  ThreadMarkUnreadCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1053,6 +1081,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unsnoozed",
   "thread.settled",
   "thread.unsettled",
+  "thread.visited",
+  "thread.marked-unread",
   "thread.control-changed",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -1179,6 +1209,17 @@ export const ThreadUnsettledPayload = Schema.Struct({
   // request) and the decider reset the override to neutral.
   reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
+});
+
+export const ThreadVisitedPayload = Schema.Struct({
+  threadId: ThreadId,
+  // Never moves backwards: the decider drops a visit older than the stored one.
+  // Does not touch updatedAt, so reading a chat never reorders the sidebar.
+  lastVisitedAt: IsoDateTime,
+});
+
+export const ThreadMarkedUnreadPayload = Schema.Struct({
+  threadId: ThreadId,
 });
 
 export const ThreadControlChangedPayload = Schema.Struct({
@@ -1483,6 +1524,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unsettled"),
     payload: ThreadUnsettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.visited"),
+    payload: ThreadVisitedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.marked-unread"),
+    payload: ThreadMarkedUnreadPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -23,6 +23,8 @@ import {
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
+  ThreadVisitedPayload,
+  ThreadMarkedUnreadPayload,
   ThreadSnoozedPayload,
   ThreadUnarchivedPayload,
   ThreadUnsettledPayload,
@@ -273,6 +275,7 @@ export function projectEvent(
             snoozedAt: null,
             settledOverride: null,
             settledAt: null,
+            lastVisitedAt: null,
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -396,6 +399,26 @@ export function projectEvent(
             settledOverride: payload.reason === "user" ? "active" : null,
             settledAt: null,
             updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.visited":
+      return decodeForEvent(ThreadVisitedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            lastVisitedAt: payload.lastVisitedAt,
+          }),
+        })),
+      );
+
+    case "thread.marked-unread":
+      return decodeForEvent(ThreadMarkedUnreadPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            lastVisitedAt: null,
           }),
         })),
       );
