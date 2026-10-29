@@ -1169,7 +1169,7 @@ function createEnvironmentConnectionHandlers() {
 
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
       markAppliedProjectionSnapshot(environmentId, snapshot);
-      mergeServerThreadReadState(environmentId, snapshot.threads, { backfill: true });
+      mergeServerThreadReadState(environmentId, snapshot.threads);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),

@@ -86,10 +86,10 @@ describe("thread read state ↔ server", () => {
     expect(dispatchCommand.mock.calls[0]?.[0]).toMatchObject({ type: "thread.mark-unread" });
   });
 
-  it("first sync sends local visits the server lacks", async () => {
+  it("a snapshot never sends the local (seeded) marks back to the server", async () => {
     useUiStateStore.setState({ threadLastVisitedAtById: { [key("e")]: T3 } });
-    mergeServerThreadReadState(ENV, [shell("e", null)], { backfill: true });
+    mergeServerThreadReadState(ENV, [shell("e", null)]);
     await vi.advanceTimersByTimeAsync(700);
-    expect(dispatchCommand.mock.calls[0]?.[0]).toMatchObject({ type: "thread.visit", visitedAt: T3 });
+    expect(dispatchCommand).not.toHaveBeenCalled();
   });
 });

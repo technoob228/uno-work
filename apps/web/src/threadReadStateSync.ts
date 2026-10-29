@@ -11,8 +11,10 @@
  *    taken only when it is NEWER than the local one (max), in one store write,
  *    so an echo can never flip a chat back to unread and an unchanged value
  *    costs no render;
- *  - first sync: local visits the server does not know yet are sent once,
- *    throttled, so the phone sees what Work already read.
+ *  - no backfill: the local map is not persisted and Work seeds every chat
+ *    as seen on load (updatedAt), so "local visits the server lacks" would
+ *    only ever be those seeds — a burst of one command per chat on every
+ *    reconnect. Real visits reach the server live through the sink.
  */
 import { type EnvironmentId, type OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
 import { parseScopedThreadKey, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
@@ -124,13 +126,11 @@ export function installThreadReadStateSync() {
 
 /**
  * Take server read marks that are newer than the local ones (one store write
- * for the whole list; nothing when nothing is newer). With `backfill`, local
- * marks the server lacks or has older are queued to it (first sync).
+ * for the whole list; nothing when nothing is newer).
  */
 export function mergeServerThreadReadState(
   environmentId: EnvironmentId,
-  threads: ReadonlyArray<Pick<OrchestrationThreadShell, "id" | "lastVisitedAt" | "latestTurn">>,
-  options: { readonly backfill?: boolean } = {},
+  threads: ReadonlyArray<Pick<OrchestrationThreadShell, "id" | "lastVisitedAt">>,
 ) {
   const local = useUiStateStore.getState().threadLastVisitedAtById;
   let newer: Record<string, string> | null = null;
@@ -148,14 +148,6 @@ export function mergeServerThreadReadState(
     if (serverAt !== null && Number.isFinite(serverMs) && !(localMs >= serverMs)) {
       newer ??= {};
       newer[threadKey] = serverAt;
-    } else if (
-      options.backfill &&
-      localAt !== undefined &&
-      Number.isFinite(localMs) &&
-      !(serverMs >= localMs) &&
-      thread.latestTurn?.completedAt
-    ) {
-      queue(threadKey, { kind: "visit", visitedAt: localAt, attempts: 0 });
     }
   }
   if (newer !== null) {
