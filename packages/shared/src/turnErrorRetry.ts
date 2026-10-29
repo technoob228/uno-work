@@ -40,6 +40,10 @@ const BUSY_PATTERNS: ReadonlyArray<RegExp> = [
 
 const NO_ANSWER_PATTERNS: ReadonlyArray<RegExp> = [
   /uno ai didn.t answer in time/i,
+  // The gateway's broken stream (fishcode api/llm.go streamFailureMessage,
+  // type upstream_error): continued like a timeout (Misha 29.10). Only the
+  // sentence: `upstream_error` alone also names a provider's refusals.
+  /uno ai stopped answering/i,
   /uno did not answer this time/i,
   /\bupstream_timeout\b/i,
   /\b(?:model|provider|upstream) (?:did not|didn.t) (?:answer|respond)/i,
