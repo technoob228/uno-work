@@ -1636,7 +1636,7 @@ function stopActiveService() {
 
 function reconnectEnvironmentConnectionsAfterBrowserResume(
   reason: string,
-  options: { readonly force: boolean },
+  options: { readonly force: boolean; readonly forceSavedOnly?: boolean },
 ): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
@@ -1654,7 +1654,8 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(
         ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
         : null;
     const runtimeReportsHealthy = runtimeState === null || runtimeState === "connected";
-    if (!options.force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
+    const force = options.force && (!options.forceSavedOnly || connection.kind === "saved");
+    if (!force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
       continue;
     }
     if (connection.kind === "saved" && runtimeState !== "connected") {
@@ -1756,11 +1757,28 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
   };
 
+  // The network came back (Wi-Fi switch, VPN, laptop off a dead hotspot):
+  // sockets opened on the old network may look alive but are dead, and saved
+  // environments may be sitting in a long self-heal backoff. Reconnect them
+  // now instead of waiting it out. Upstream t3code 990bb0b689 (idea: no dead
+  // time on the path back to reachability).
+  const handleOnline = () => {
+    // A local (primary) socket that still looks healthy is left alone: the
+    // network change does not touch 127.0.0.1, and WebSocketConnectionSurface
+    // already reconnects the primary one when it is down.
+    reconnectEnvironmentConnectionsAfterBrowserResume("online", {
+      force: true,
+      forceSavedOnly: true,
+    });
+  };
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handlePageShow);
+  window.addEventListener("online", handleOnline);
   return () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pageshow", handlePageShow);
+    window.removeEventListener("online", handleOnline);
   };
 }
 

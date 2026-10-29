@@ -38,9 +38,20 @@ export function configureSelfHeal(nextDeps: SelfHealDeps): void {
   deps = nextDeps;
 }
 
-export function getSelfHealBackoffDelayMs(consecutiveFailures: number): number {
+/**
+ * The ceiling doubles 1s -> 64s; the delay is a random point in the upper half
+ * of it ("equal jitter"): never quicker than half the ceiling, and machines
+ * that dropped together (a node or Contabo restart) do not all come back in
+ * the same second. `random` is in [0, 1). Upstream t3code 9333509c91.
+ */
+export function getSelfHealBackoffDelayMs(
+  consecutiveFailures: number,
+  random: number = Math.random(),
+): number {
   const exponent = Math.min(Math.max(consecutiveFailures, 1) - 1, 6);
-  return Math.min(SELF_HEAL_BACKOFF_BASE_MS * 2 ** exponent, SELF_HEAL_BACKOFF_MAX_MS);
+  const ceiling = Math.min(SELF_HEAL_BACKOFF_BASE_MS * 2 ** exponent, SELF_HEAL_BACKOFF_MAX_MS);
+  const clamped = Math.min(Math.max(random, 0), 1);
+  return Math.round(ceiling / 2 + (ceiling / 2) * clamped);
 }
 
 function getEntry(environmentId: EnvironmentId): SelfHealEntry {
