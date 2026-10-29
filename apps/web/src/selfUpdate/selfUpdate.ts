@@ -27,6 +27,13 @@ export interface SelfUpdateStatus {
   readonly rolledBack: boolean;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
+  /**
+   * Agents working right now (counted while an update is on offer). Absent
+   * from an older Uno Work on the computer: it can only update now.
+   */
+  readonly workingAgents?: number;
+  /** "Update when they finish" is waiting for the agents (until `deadlineAt` at most). */
+  readonly waiting?: { readonly requestedAt: string; readonly deadlineAt: string } | null;
 }
 
 export async function fetchSelfUpdateStatus(
@@ -59,13 +66,35 @@ function isSelfUpdateStatus(value: unknown): value is SelfUpdateStatus {
   );
 }
 
-export function requestSelfUpdate(environmentId: EnvironmentId): Promise<SelfUpdateStatus> {
+/** "now" restarts at once; "after-agents" waits for the working agents (30 min at most). */
+export type SelfUpdateWhen = "now" | "after-agents";
+
+export function requestSelfUpdate(
+  environmentId: EnvironmentId,
+  when: SelfUpdateWhen = "now",
+): Promise<SelfUpdateStatus> {
   return environmentFetchJson<SelfUpdateStatus>({
     environmentId,
     pathname: "/api/self-update/start",
     method: "POST",
-    body: { confirm: "update" },
+    body: when === "after-agents" ? { confirm: "update", when } : { confirm: "update" },
   });
+}
+
+/** Call off the update that waits for the agents. */
+export function cancelWaitingSelfUpdate(environmentId: EnvironmentId): Promise<SelfUpdateStatus> {
+  return environmentFetchJson<SelfUpdateStatus>({
+    environmentId,
+    pathname: "/api/self-update/cancel",
+    method: "POST",
+    body: { confirm: "cancel" },
+  });
+}
+
+/** How many agents an update would interrupt; 0 for a computer that can't tell. */
+export function workingAgentsOf(status: SelfUpdateStatus | null | undefined): number {
+  const count = status?.workingAgents;
+  return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 export const selfUpdateQueryKey = (environmentId: EnvironmentId | null) =>
@@ -73,6 +102,8 @@ export const selfUpdateQueryKey = (environmentId: EnvironmentId | null) =>
 
 const IDLE_REFETCH_MS = 30 * 60_000;
 const UPDATING_REFETCH_MS = 2_000;
+/** Waiting for the agents: notice when the update starts and how many still work. */
+const WAITING_REFETCH_MS = 10_000;
 
 export function selfUpdateQueryOptions(environmentId: EnvironmentId | null) {
   return queryOptions({
@@ -83,7 +114,11 @@ export function selfUpdateQueryOptions(environmentId: EnvironmentId | null) {
     // While it updates the daemon restarts: requests fail for a moment and the
     // last answer ("updating") keeps the fast polling going until it is back.
     refetchInterval: (query) =>
-      query.state.data?.state === "updating" ? UPDATING_REFETCH_MS : IDLE_REFETCH_MS,
+      query.state.data?.state === "updating"
+        ? UPDATING_REFETCH_MS
+        : query.state.data?.waiting
+          ? WAITING_REFETCH_MS
+          : IDLE_REFETCH_MS,
     refetchOnWindowFocus: true,
     retry: false,
   });
@@ -99,6 +134,15 @@ export type SelfUpdateView =
   | {
       readonly kind: "available";
       readonly version: string;
+      readonly canUpdate: boolean;
+      readonly key: string;
+    }
+  | {
+      /** "Update when they finish": the update starts once the agents are done. */
+      readonly kind: "waiting";
+      readonly version: string;
+      readonly agents: number;
+      readonly deadlineAt: string;
       readonly canUpdate: boolean;
       readonly key: string;
     }
@@ -154,6 +198,16 @@ export function resolveSelfUpdateView(input: {
       key: `failed:${status.finishedAt ?? status.startedAt ?? "now"}`,
     };
   }
+  if (status.available && status.latestVersion && status.waiting) {
+    return {
+      kind: "waiting",
+      version: status.latestVersion,
+      agents: workingAgentsOf(status),
+      deadlineAt: status.waiting.deadlineAt,
+      canUpdate: status.canUpdate,
+      key: `waiting:${status.waiting.requestedAt}`,
+    };
+  }
   if (status.available && status.latestVersion) {
     return {
       kind: "available",
@@ -191,6 +245,18 @@ export const SELF_UPDATE_COPY = {
   confirmSafety:
     "If the new version doesn't start, this computer goes back to the current one by itself.",
   confirm: "Update now",
+  agentsWorking: (agents: number) =>
+    agents === 1 ? "1 agent is working right now." : `${agents} agents are working right now.`,
+  confirmBodyAgents:
+    "Update after they finish, or update now and they'll continue on their own after the restart.",
+  updateWhenDone: (agents: number) =>
+    agents === 1 ? "Update when it finishes" : "Update when they finish",
+  waitingTitle: (version: string) => `Uno Work updates to ${version} when the agents finish`,
+  waitingBody: (agents: number, deadline: string | null) =>
+    agents === 0
+      ? "The agents are done. The update starts in a moment."
+      : `${agents === 1 ? "1 agent is" : `${agents} agents are`} still working. The update starts when they're done, ${deadline ? `by ${deadline} at the latest` : "within half an hour"}.`,
+  cancelWaiting: "Don't update",
   updatingTitle: (version: string | null) =>
     version ? `Updating Uno Work to ${version}…` : "Updating Uno Work…",
   updatingBody: (step: string) =>

@@ -9,7 +9,7 @@
  * with {@link parseUnoWorkNote} and shows one quiet line instead.
  */
 
-import { turnAutoRetryNoteLine } from "./turnErrorRetry.ts";
+import { turnAutoRetryNoteLine, updateRestartNoteLine } from "./turnErrorRetry.ts";
 
 /** Marks a message the computer (not the person) put into a chat for its agent. */
 export const UNO_WORK_NOTE_PREFIX = "(Uno Work) ";
@@ -146,6 +146,7 @@ export function lateSecretMessage(input: {
 export type UnoWorkNote =
   | { readonly kind: "assistant-bot-connected"; readonly text: string }
   | { readonly kind: "auto-retry"; readonly text: string }
+  | { readonly kind: "update-restart"; readonly text: string }
   | { readonly kind: "secret-saved"; readonly name: string; readonly text: string }
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "work-update"; readonly text: string }
@@ -201,6 +202,8 @@ export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const autoRetry = turnAutoRetryNoteLine(body);
   if (autoRetry !== null) return { kind: "auto-retry", text: autoRetry };
+  const updateRestart = updateRestartNoteLine(body);
+  if (updateRestart !== null) return { kind: "update-restart", text: updateRestart };
   const bot =
     /^The person connected the assistant's own Telegram bot (@[A-Za-z0-9_]+|its bot)\./.exec(body);
   if (bot) {

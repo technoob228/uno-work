@@ -1,9 +1,13 @@
-import { CircleAlertIcon, HourglassIcon, RotateCwIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon, CirclePauseIcon, HourglassIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { TURN_ERROR_COPY as COPY, classifyTurnError } from "./turnErrorNotice";
+import {
+  TURN_ERROR_COPY as COPY,
+  classifyTurnError,
+  isRestartCutOffError,
+} from "./turnErrorNotice";
 
 /**
  * A failed turn above the composer.
@@ -42,6 +46,20 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
       <XIcon className="size-3.5" />
     </button>
   ) : null;
+
+  // Cut off by a restart: a plain line, not a red error and not "Try again"
+  // (that would send the person's message again and start the work over).
+  if (isRestartCutOffError(error)) {
+    return (
+      <div className="pt-3 mx-auto max-w-3xl">
+        <Alert variant="default" data-testid="turn-error-notice" data-kind="restart">
+          <CirclePauseIcon />
+          <AlertDescription>{COPY.restart}</AlertDescription>
+          {dismiss ? <AlertAction className="items-center">{dismiss}</AlertAction> : null}
+        </Alert>
+      </div>
+    );
+  }
 
   if (notice.kind === "other" && !onRetry) {
     return (

@@ -37,6 +37,8 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { UnoBoxIdentity } from "./unoBoxIdentity.ts";
 import { reportSelfUpdateAfterStartToConsole } from "./selfUpdateHttp.ts";
+import { continueTurnsAfterSelfUpdate, runSelfUpdateWatcher } from "./selfUpdateTurnsRuntime.ts";
+import { ManagerConnectorPendingReplyRepositoryLive } from "./persistence/Layers/ManagerConnectorPendingReplies.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { PluginRegistry } from "./plugins/PluginRegistry.ts";
@@ -510,6 +512,20 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
     );
 
     yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+    // An update of Uno Work cut agents off: each gets one continuation, once
+    // the updater is happy with this daemon (selfUpdateTurns.ts). Then the
+    // watcher holds "Update when they finish" and, while an update is on its
+    // way, remembers who is working. Forked: neither may hold the start.
+    yield* Effect.forkScoped(
+      runStartupPhase(
+        "self-update.continue",
+        continueTurnsAfterSelfUpdate.pipe(
+          Effect.provide(ManagerConnectorPendingReplyRepositoryLive),
+          Effect.ignore,
+        ),
+      ),
+    );
+    yield* Effect.forkScoped(runSelfUpdateWatcher.pipe(Effect.ignore));
 
     // Логины из аккаунта Uno: новый бокс/новая машина подхватывает сохранённые
     // входы сама, не дожидаясь, пока пользователь введёт их заново. Работает

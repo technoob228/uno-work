@@ -5,7 +5,13 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  CircleCheckIcon,
+  DownloadIcon,
+  HourglassIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "../branding";
@@ -26,6 +32,7 @@ import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import {
   PAGE_LOADED_AT,
+  cancelWaitingSelfUpdate,
   dismissSelfUpdateNotice,
   isSelfUpdateNoticeDismissed,
   requestSelfUpdate,
@@ -35,6 +42,8 @@ import {
   selfUpdateQueryOptions,
   type SelfUpdateStatus,
   type SelfUpdateView,
+  type SelfUpdateWhen,
+  workingAgentsOf,
 } from "./selfUpdate";
 
 export interface SelfUpdateController {
@@ -44,6 +53,10 @@ export interface SelfUpdateController {
   readonly starting: boolean;
   readonly startError: string | null;
   readonly askToUpdate: () => void;
+  /** Start right away, no question (the "Update now" of a waiting update). */
+  readonly updateNow: () => void;
+  /** Call off "Update when they finish". */
+  readonly cancelWaiting: () => void;
   readonly dismiss: () => void;
   readonly reload: () => void;
   /** Mount once next to the notice: the confirmation dialog. */
@@ -60,9 +73,9 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
   const startedHere = useRef(false);
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (when: SelfUpdateWhen) => {
       if (!environmentId) throw new Error("No computer to update.");
-      return requestSelfUpdate(environmentId);
+      return requestSelfUpdate(environmentId, when);
     },
     onMutate: () => setStartError(null),
     onSuccess: (status: SelfUpdateStatus) => {
@@ -74,6 +87,24 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
         error instanceof Error && error.message
           ? error.message
           : "Couldn't start the update. Try again in a minute.",
+      );
+      void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => {
+      if (!environmentId) throw new Error("No computer to update.");
+      return cancelWaitingSelfUpdate(environmentId);
+    },
+    onMutate: () => setStartError(null),
+    onSuccess: (status: SelfUpdateStatus) => {
+      startedHere.current = false;
+      queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
+    },
+    onError: (error: unknown) => {
+      setStartError(
+        error instanceof Error && error.message ? error.message : "Couldn't cancel. Try again.",
       );
       void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
     },
@@ -109,25 +140,53 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
   }, [environmentId, key]);
 
   const version = view?.kind === "available" || view?.kind === "failed" ? view.version : null;
+  // Agents at work: ask whether to wait for them (the count is refreshed when
+  // the dialog opens). None — the same question as always.
+  const agents = workingAgentsOf(query.data);
+  const start = (when: SelfUpdateWhen) => {
+    setConfirmOpen(false);
+    mutation.mutate(when);
+  };
   const dialog = (
     <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
       <AlertDialogPopup>
         <AlertDialogHeader>
           <AlertDialogTitle>{COPY.confirmTitle(version ?? "the new version")}</AlertDialogTitle>
-          <AlertDialogDescription>{COPY.confirmBody}</AlertDialogDescription>
+          {agents > 0 ? (
+            <AlertDialogDescription data-testid="self-update-agents-working">
+              {COPY.agentsWorking(agents)} {COPY.confirmBodyAgents}
+            </AlertDialogDescription>
+          ) : (
+            <AlertDialogDescription>{COPY.confirmBody}</AlertDialogDescription>
+          )}
           <p className="text-muted-foreground text-sm">{COPY.confirmSafety}</p>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>{COPY.later}</AlertDialogClose>
-          <Button
-            data-testid="self-update-confirm"
-            onClick={() => {
-              setConfirmOpen(false);
-              mutation.mutate();
-            }}
-          >
-            {COPY.confirm}
-          </Button>
+          <AlertDialogClose render={<Button variant={agents > 0 ? "ghost" : "outline"} />}>
+            {COPY.later}
+          </AlertDialogClose>
+          {agents > 0 ? (
+            <>
+              <Button
+                variant="outline"
+                data-testid="self-update-confirm-now"
+                onClick={() => start("now")}
+              >
+                {COPY.confirm}
+              </Button>
+              <Button
+                autoFocus
+                data-testid="self-update-confirm"
+                onClick={() => start("after-agents")}
+              >
+                {COPY.updateWhenDone(agents)}
+              </Button>
+            </>
+          ) : (
+            <Button data-testid="self-update-confirm" onClick={() => start("now")}>
+              {COPY.confirm}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>
@@ -136,9 +195,14 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
   return {
     view,
     dismissed,
-    starting: mutation.isPending,
+    starting: mutation.isPending || cancelMutation.isPending,
     startError,
-    askToUpdate: () => setConfirmOpen(true),
+    askToUpdate: () => {
+      void query.refetch();
+      setConfirmOpen(true);
+    },
+    updateNow: () => mutation.mutate("now"),
+    cancelWaiting: () => cancelMutation.mutate(),
     dismiss,
     reload,
     dialog,
@@ -152,6 +216,14 @@ interface NoticeParts {
   readonly description: string;
   readonly actions: ReactNode;
   readonly dismissable: boolean;
+}
+
+/** "14:35" in the person's own clock. */
+function formatClock(iso: string): string | null {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime())
+    ? null
+    : at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 /** One wording for the banner and the card. */
@@ -177,6 +249,37 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
           </Button>
         ) : null,
         dismissable: true,
+      };
+    case "waiting":
+      return {
+        variant: "info",
+        icon: <HourglassIcon />,
+        title: COPY.waitingTitle(view.version),
+        description:
+          update.startError ?? COPY.waitingBody(view.agents, formatClock(view.deadlineAt)),
+        actions: view.canUpdate ? (
+          <>
+            <Button
+              size={size}
+              variant="ghost"
+              data-testid="self-update-cancel-waiting"
+              disabled={update.starting}
+              onClick={update.cancelWaiting}
+            >
+              {COPY.cancelWaiting}
+            </Button>
+            <Button
+              size={size}
+              variant="outline"
+              data-testid="self-update-now"
+              disabled={update.starting}
+              onClick={update.updateNow}
+            >
+              {COPY.confirm}
+            </Button>
+          </>
+        ) : null,
+        dismissable: false,
       };
     case "updating":
       return {

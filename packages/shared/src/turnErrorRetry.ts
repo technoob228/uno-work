@@ -153,3 +153,37 @@ export function turnAutoRetryNoteLine(body: string): string | null {
     ? `Uno AI was busy — trying again automatically ${counter}…`
     : `Uno AI didn't answer — trying again automatically ${counter}…`;
 }
+
+// ── A turn cut off by a restart ─────────────────────────────────────────
+
+/**
+ * The `lastError` the daemon's startup reconciliation stamps on a chat whose
+ * agent was working when Uno Work went down (apps/server
+ * orchestration/orphanedSession.ts). Here so the client can show it in the
+ * person's words ({@link isRestartCutOffError}).
+ */
+export const ORPHANED_PROVIDER_SESSION_ERROR =
+  "Provider session did not survive a server restart. Send a new message to continue.";
+
+/** The chat's agent was cut off by a restart of Uno Work, not by a failure of its own. */
+export function isRestartCutOffError(error: string | null | undefined): boolean {
+  return typeof error === "string" && /did not survive a server restart/i.test(error);
+}
+
+const UPDATE_RESTART_NOTE_OPENING =
+  "Uno Work restarted for an update and your last response was cut off";
+
+/**
+ * What the daemon sends an agent whose turn an update of Uno Work cut off
+ * (after the "(Uno Work) " prefix of secretRequestCopy), once per chat per
+ * update. Like {@link turnAutoRetryNoteBody}: a continuation, not the
+ * person's message again.
+ */
+export const UPDATE_RESTART_NOTE_BODY = `${UPDATE_RESTART_NOTE_OPENING}. Continue the task from where you stopped; don't repeat finished steps.`;
+
+/** The person's words for {@link UPDATE_RESTART_NOTE_BODY}; null for any other text. */
+export function updateRestartNoteLine(body: string): string | null {
+  return body.startsWith(UPDATE_RESTART_NOTE_OPENING)
+    ? "Uno Work restarted for an update. The agent goes on where it stopped."
+    : null;
+}
