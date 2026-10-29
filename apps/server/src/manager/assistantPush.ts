@@ -506,7 +506,7 @@ const OUTCOME_HINT: Readonly<Record<PushOutcome, string>> = {
   failed: "Tell the person what failed and what you will do (retry, another model, or ask them).",
   stopped: "Someone stopped it. Tell the person only if it matters.",
   needs_you:
-    "Relay the question/approval to the person in plain words; after their answer use respond_to_request or send_turn.",
+    "An approval (Allow / Deny) already reaches the person's Telegram with buttons by itself — when you talk with them in Telegram, don't repeat it: answer NO_REPLY, or one line only if they need more to decide. Elsewhere relay it in plain words. A question: relay it in plain words, its options as buttons (messenger_send, then answer NO_REPLY) when there are clear choices. After their answer use respond_to_request or send_turn.",
 };
 
 /** A chat on another computer: its transcript is there, not readable from here. */
