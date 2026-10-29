@@ -17,6 +17,8 @@ export interface EnvironmentConnection {
   readonly client: WsRpcClient;
   readonly ensureBootstrapped: () => Promise<void>;
   readonly isConnectionHealthy: () => boolean;
+  readonly hasRecentInbound: () => boolean;
+  readonly probeLiveness: (timeoutMs?: number) => Promise<boolean>;
   readonly reconnect: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
@@ -31,6 +33,10 @@ interface OrchestrationHandlers {
     environmentId: EnvironmentId,
   ) => void;
   readonly applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => void;
+  /** Last shell sequence applied for this environment (resume cursor), if any. */
+  readonly readShellResumeCursor?: (environmentId: EnvironmentId) => number | null;
+  /** The server replayed the gap up to `sequence`; record it as applied. */
+  readonly markShellResumed?: (sequence: number, environmentId: EnvironmentId) => void;
 }
 
 interface EnvironmentConnectionInput extends OrchestrationHandlers {
@@ -135,9 +141,19 @@ export function createEnvironmentConnection(
         bootstrapGate.resolve();
         return;
       }
+      if (item.kind === "resumed") {
+        // Incremental resync finished: the changes since our cursor are in.
+        input.markShellResumed?.(item.sequence, environmentId);
+        input.onSynchronized?.();
+        bootstrapGate.resolve();
+        return;
+      }
       input.applyShellEvent(item, environmentId);
     },
     {
+      ...(input.readShellResumeCursor
+        ? { resumeFrom: () => input.readShellResumeCursor?.(environmentId) ?? null }
+        : {}),
       onResubscribe: () => {
         if (disposed) {
           return;
@@ -169,6 +185,8 @@ export function createEnvironmentConnection(
     client: input.client,
     ensureBootstrapped: () => bootstrapGate.wait(),
     isConnectionHealthy: () => input.client.isConnectionHealthy(),
+    hasRecentInbound: () => input.client.hasRecentInbound(),
+    probeLiveness: (timeoutMs) => input.client.probeLiveness(timeoutMs),
     reconnect: async () => {
       bootstrapGate.reset();
       try {

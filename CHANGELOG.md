@@ -8,6 +8,17 @@
 
 ---
 
+## v0.0.163 — 2026-10-29
+
+- Slow or unstable internet no longer drops you out of Work every few seconds: the connection waits out 30-40 s of silence instead of 5 s, coming back to the window doesn't reconnect a working link, and a saved computer that can't be reached anymore (address gone, key changed) stops retrying and says so until you press Reconnect.
+- Reconnecting is much faster on a long chat: Work fetches only what you missed instead of the whole history again. On the first load you see "Loading chat…" instead of an empty pane.
+- A message you send while the computer is unreachable is no longer lost: it shows in the chat as "waiting to send" and goes out by itself when the link is back (Retry or Discard if the computer refuses it).
+- The agent's "open this page" and browser commands sent during a short disconnect are not lost: they arrive after the reconnect.
+- Automations: a turn where the assistant paused for a moment is no longer reported as "stopped before finishing" when it did answer. Opening Automations by a direct link or after a reload no longer jumps to Home.
+- Join my calls: a sleeping computer now wakes up a few minutes before the call so the notetaker joins it; "next call" skips a call the notetaker is already done with.
+
+---
+
 ## v0.0.162 — 2026-10-29
 
 - Apps you or your agent run on the cloud computer show their real data inside Uno Work: Work's page tools now go only into real pages, not into an app's data answers (a counter showed "Count: …" instead of the number).

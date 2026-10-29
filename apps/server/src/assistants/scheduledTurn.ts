@@ -48,6 +48,8 @@ export const SCHEDULED_THREAD_TITLE = "Scheduled tasks";
 /** How long a scheduled turn waits for a busy thread before giving up. */
 const BUSY_WAIT_MS = 5 * 60_000;
 const POLL_MS = 2_000;
+/** How long a "lost" turn may come back before the run counts as cut off. */
+const LOST_GRACE_MS = 90_000;
 
 export class AssistantTurnError extends Data.TaggedError("AssistantTurnError")<{
   readonly message: string;
@@ -229,6 +231,10 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     ) =>
       Effect.gen(function* () {
         let knownTurnId: string | null = null;
+        // A harness session can show "stopped" for a moment mid-turn (Uno's
+        // hermes between steps — live on stage 28.10): a "lost" verdict gets
+        // a grace before it counts, the turn usually comes back with its answer.
+        let lostSinceMs: number | null = null;
         while (Date.now() < deadlineMs) {
           yield* Effect.sleep(pollMs);
           const detail = yield* projections
@@ -252,12 +258,16 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           knownTurnId = verdict.turnId;
           switch (verdict.kind) {
             case "wait":
+              lostSinceMs = null;
               continue;
             case "answer":
               return { text: verdict.text };
             case "stopped":
               return { text: verdict.partial ?? stoppedText("en") };
             case "lost":
+              lostSinceMs ??= Date.now();
+              if (Date.now() - lostSinceMs < LOST_GRACE_MS && Date.now() < deadlineMs) continue;
+              return { text: `${failurePrefix}: ${verdict.reason}` };
             case "failed":
               return { text: `${failurePrefix}: ${verdict.reason}` };
           }

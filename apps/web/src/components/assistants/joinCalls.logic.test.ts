@@ -79,10 +79,17 @@ describe("join calls words", () => {
     ).toBe("reconnect");
     expect(
       joinCallsStage(
-        view({ notetaker: { state: "installing", deploymentId: 2 } }),
+        view({ notetaker: { state: "installing", deploymentId: 2 }, upcomingAt: null, recent: [] }),
         "assistant-ada",
       ),
     ).toBe("setting-up");
+    // a store reinstall still "installing", but the notetaker already reported: it runs
+    expect(
+      joinCallsStage(
+        view({ notetaker: { state: "installing", deploymentId: 2 }, upcomingAt: 1793204506 }),
+        "assistant-ada",
+      ),
+    ).toBe("on");
     expect(joinCallsStage(view({ enabled: false }), "assistant-ada")).toBe("off");
   });
 });

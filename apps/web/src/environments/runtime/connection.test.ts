@@ -168,6 +168,53 @@ describe("createEnvironmentConnection", () => {
     await connection.dispose();
   });
 
+  it("resumes the shell from the applied cursor and treats `resumed` as synchronized", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client } = createTestClient();
+    const subscribeShell = client.orchestration.subscribeShell as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    subscribeShell.mockImplementationOnce(
+      (listener: (event: any) => void, options?: { resumeFrom?: () => number | null }) => {
+        queueMicrotask(() => {
+          listener({ kind: "resumed", sequence: options?.resumeFrom?.() ?? -1 });
+        });
+        return () => undefined;
+      },
+    );
+    const markShellResumed = vi.fn();
+    const onSynchronized = vi.fn();
+    const syncShellSnapshot = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot,
+      applyTerminalEvent: vi.fn(),
+      readShellResumeCursor: () => 41,
+      markShellResumed,
+      onSynchronized,
+    });
+
+    await connection.ensureBootstrapped();
+    expect(markShellResumed).toHaveBeenCalledWith(41, environmentId);
+    expect(onSynchronized).toHaveBeenCalledTimes(1);
+    expect(syncShellSnapshot).not.toHaveBeenCalled();
+
+    await connection.dispose();
+  });
+
   it("marks an environment synchronized only after its shell snapshot arrives", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, emitShellSnapshot } = createTestClient();

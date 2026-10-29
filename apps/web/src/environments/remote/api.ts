@@ -57,6 +57,13 @@ async function readRemoteAuthErrorMessage(
  */
 export const REMOTE_REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Cap for minting a ws token. It gates every socket (re)connect attempt, so
+ * it must never hang; it is a bit longer than the general cap because on a
+ * slow link (RTT ~0.5 s) a cold TLS + POST already costs several seconds.
+ */
+export const REMOTE_WS_TOKEN_TIMEOUT_MS = 20_000;
+
 /** Statuses an edge answers while the machine behind it is starting or asleep. */
 const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
@@ -150,6 +157,7 @@ async function fetchRemoteJson<T>(input: {
   readonly bearerToken?: string;
   readonly body?: unknown;
   readonly retries?: number;
+  readonly timeoutMs?: number;
 }): Promise<T> {
   const retries = input.retries ?? ((input.method ?? "GET") === "GET" ? 2 : 0);
   for (let attempt = 0; ; attempt += 1) {
@@ -205,6 +213,7 @@ export async function issueRemoteWebSocketToken(input: {
     pathname: "/api/auth/ws-token",
     method: "POST",
     bearerToken: input.bearerToken,
+    timeoutMs: REMOTE_WS_TOKEN_TIMEOUT_MS,
   });
 }
 

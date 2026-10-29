@@ -22,6 +22,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { UnoEconomyPresence } from "@t3tools/contracts";
 
+import { CALLS_KEEP_AWAKE, callsWake } from "../assistants/callsWake.ts";
 import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
 import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
@@ -145,8 +146,16 @@ export const EconomyPresenceLive = Layer.effect(
           rows.map((r) => r.thread_id),
         );
       }).pipe(Effect.orElseSucceed(() => 0));
-      const keepAwake = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
-      const nextWakeAt = reminders
+      const manifestKeepAwake = yield* Effect.promise(() => readKeepAwakeApps(manifestDir));
+      // "Join my calls": a call about to start, going on, or its notes still coming.
+      const calls = callsWake();
+      const nowMs = Date.now();
+      const keepAwake =
+        calls?.busy(nowMs) && !manifestKeepAwake.includes(CALLS_KEEP_AWAKE)
+          ? [...manifestKeepAwake, CALLS_KEEP_AWAKE].toSorted()
+          : manifestKeepAwake;
+      const callsWakeAt = calls?.wakeAt(nowMs) ?? null;
+      const reminderWakeAt = reminders
         ? yield* reminders.list({ includeInactive: false }).pipe(
             Effect.map((rows) =>
               earliestFuture(
@@ -157,6 +166,12 @@ export const EconomyPresenceLive = Layer.effect(
             Effect.orElseSucceed(() => null),
           )
         : null;
+      const nextWakeAt = earliestFuture(
+        [reminderWakeAt, callsWakeAt === null ? null : new Date(callsWakeAt).toISOString()].filter(
+          (t): t is string => t !== null,
+        ),
+        nowMs,
+      );
       // What a turn left behind or a Work terminal runs: a build, a script
       // started with nohup, a background shell of the harness (commandScan.ts).
       // Travels as running_terminals — the console holds the computer for it.
@@ -194,7 +209,12 @@ export const EconomyPresenceLive = Layer.effect(
       const backedOff = !woke && now < state.unavailableUntil;
       if (backedOff && !state.appsWhileUnavailable) return;
       const current = yield* probe;
-      const apps = now < state.appsRefusedUntil ? null : yield* reportedApps(current.keepAwake);
+      // The calls hold is not "this app runs always" — keep it off the apps list
+      // (the Notetaker manifest never asks for runs: always).
+      const apps =
+        now < state.appsRefusedUntil
+          ? null
+          : yield* reportedApps(current.keepAwake.filter((k) => k !== CALLS_KEEP_AWAKE));
       const appsSig = apps === null ? null : appsSignature(apps);
       const sendApps =
         apps !== null &&

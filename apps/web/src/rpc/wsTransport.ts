@@ -25,11 +25,25 @@ import {
   isTransportInterruptErrorMessage,
   TransportConnectionLostError,
 } from "./transportError";
+import {
+  WS_LIVENESS_PROBE_TIMEOUT_MS,
+  WS_RECENT_INBOUND_MS,
+  type WsHeartbeatConfig,
+} from "./wsHeartbeat";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
   readonly onResubscribe?: () => void;
   readonly tag?: string;
+  /**
+   * Checked before re-running a subscription that already delivered values
+   * and then lost its connection. Returning false ends the subscription
+   * instead of re-subscribing (so a reconnect does not re-open every cached
+   * stream at once) and calls `onSuspended`; the owner subscribes again when
+   * it needs the data.
+   */
+  readonly shouldResubscribe?: () => boolean;
+  readonly onSuspended?: () => void;
 }
 
 interface RequestOptions {
@@ -50,6 +64,8 @@ export interface WsTransportOptions {
    * tunnel) once WS-level reconnects are clearly not enough.
    */
   readonly onRecoveryFailed?: (consecutiveFailures: number) => void;
+  /** Overrides the app-wide heartbeat (tests use a fast one). */
+  readonly heartbeat?: WsHeartbeatConfig;
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
@@ -110,7 +126,8 @@ export class WsTransport {
   private nextSessionId = 0;
   private activeSessionId = 0;
   private session: TransportSession;
-  private lastHeartbeatPongAt = 0;
+  private lastInboundAt = 0;
+  private readonly inboundWaiters = new Set<(alive: boolean) => void>();
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
 
   constructor(
@@ -205,12 +222,24 @@ export class WsTransport {
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
     let cancelCurrentStream: () => void = NOOP;
+    let lostConnection = false;
 
     void (async () => {
       for (;;) {
         if (!active || this.disposed) {
           return;
         }
+
+        if (lostConnection && hasReceivedValue && options?.shouldResubscribe?.() === false) {
+          active = false;
+          try {
+            options.onSuspended?.();
+          } catch {
+            // Swallow suspend hook errors; the subscription is over either way.
+          }
+          return;
+        }
+        lostConnection = false;
 
         const session = this.session;
         try {
@@ -250,6 +279,7 @@ export class WsTransport {
           }
 
           if (session !== this.session) {
+            lostConnection = true;
             continue;
           }
 
@@ -267,6 +297,7 @@ export class WsTransport {
             });
           }
           this.hasReportedTransportDisconnect = true;
+          lostConnection = true;
           transportFailureStreak += 1;
           if (!this.connectionHealthy) {
             // Keep the transport self-healing even after the protocol layer
@@ -302,7 +333,10 @@ export class WsTransport {
       }
 
       clearAllTrackedRpcRequests();
-      this.lastHeartbeatPongAt = 0;
+      this.lastInboundAt = 0;
+      // A probe pending on the replaced session is moot: the connection is
+      // being re-established anyway, so its caller must not reconnect again.
+      this.settleInboundWaiters(true);
       const previousSession = this.session;
       this.session = this.createSession();
       await this.closeSession(previousSession);
@@ -312,8 +346,30 @@ export class WsTransport {
     await reconnectOperation;
   }
 
-  isHeartbeatFresh(maxAgeMs = 15_000): boolean {
-    return this.lastHeartbeatPongAt > 0 && Date.now() - this.lastHeartbeatPongAt <= maxAgeMs;
+  /** True when the current socket received any frame within `maxAgeMs`. */
+  hasRecentInbound(maxAgeMs = WS_RECENT_INBOUND_MS): boolean {
+    return !this.disposed && this.lastInboundAt > 0 && Date.now() - this.lastInboundAt <= maxAgeMs;
+  }
+
+  /**
+   * Non-destructive liveness check: resolves true as soon as any frame
+   * arrives (the heartbeat guarantees a pong within one interval on a live
+   * socket), false if nothing arrives within `timeoutMs`. Never tears the
+   * socket down itself; the caller decides whether to reconnect.
+   */
+  probeLiveness(timeoutMs = WS_LIVENESS_PROBE_TIMEOUT_MS): Promise<boolean> {
+    if (this.disposed) {
+      return Promise.resolve(false);
+    }
+    return new Promise<boolean>((resolve) => {
+      const settle = (alive: boolean) => {
+        clearTimeout(timer);
+        this.inboundWaiters.delete(settle);
+        resolve(alive);
+      };
+      const timer = setTimeout(() => settle(false), timeoutMs);
+      this.inboundWaiters.add(settle);
+    });
   }
 
   isConnectionHealthy(): boolean {
@@ -325,6 +381,7 @@ export class WsTransport {
       return;
     }
     this.disposed = true;
+    this.settleInboundWaiters(false);
     await this.closeSession(this.session);
   }
 
@@ -385,6 +442,13 @@ export class WsTransport {
     return error;
   }
 
+  private settleInboundWaiters(alive: boolean): void {
+    // Each settle removes itself; deleting the current Set entry mid-iteration is safe.
+    for (const settle of this.inboundWaiters) {
+      settle(alive);
+    }
+  }
+
   private closeSession(session: TransportSession) {
     this.intentionalCloseDepth += 1;
     return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
@@ -427,50 +491,55 @@ export class WsTransport {
     };
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
-        createWsRpcProtocolLayer(this.url, {
-          ...this.lifecycleHandlers,
-          isActive: () => !this.disposed && this.activeSessionId === sessionId,
-          isCloseIntentional: () =>
-            this.disposed ||
-            this.intentionalCloseDepth > 0 ||
-            this.lifecycleHandlers?.isCloseIntentional?.() === true,
-          onAttempt: (socketUrl) => {
-            attemptOpened = false;
-            attemptFailureNoted = false;
-            this.lifecycleHandlers?.onAttempt?.(socketUrl);
-          },
-          onOpen: () => {
-            this.connectionHealthy = true;
-            attemptOpened = true;
-            this.consecutiveRecoveryFailures = 0;
-            this.lifecycleHandlers?.onOpen?.();
-          },
-          onError: (message) => {
-            this.connectionHealthy = false;
-            noteAttemptFailure();
-            this.lifecycleHandlers?.onError?.(message);
-          },
-          onClose: (details, context) => {
-            if (!context.intentional) {
+        createWsRpcProtocolLayer(
+          this.url,
+          {
+            ...this.lifecycleHandlers,
+            isActive: () => !this.disposed && this.activeSessionId === sessionId,
+            isCloseIntentional: () =>
+              this.disposed ||
+              this.intentionalCloseDepth > 0 ||
+              this.lifecycleHandlers?.isCloseIntentional?.() === true,
+            onAttempt: (socketUrl) => {
+              attemptOpened = false;
+              attemptFailureNoted = false;
+              this.lifecycleHandlers?.onAttempt?.(socketUrl);
+            },
+            onOpen: () => {
+              this.connectionHealthy = true;
+              attemptOpened = true;
+              this.consecutiveRecoveryFailures = 0;
+              this.lifecycleHandlers?.onOpen?.();
+            },
+            onError: (message) => {
               this.connectionHealthy = false;
               noteAttemptFailure();
-            }
-            this.lifecycleHandlers?.onClose?.(details, context);
+              this.lifecycleHandlers?.onError?.(message);
+            },
+            onClose: (details, context) => {
+              if (!context.intentional) {
+                this.connectionHealthy = false;
+                noteAttemptFailure();
+              }
+              this.lifecycleHandlers?.onClose?.(details, context);
+            },
+            onInbound: () => {
+              this.lastInboundAt = Date.now();
+              this.settleInboundWaiters(true);
+              this.lifecycleHandlers?.onInbound?.();
+            },
+            onRequestStart: (info) => {
+              this.lifecycleHandlers?.onRequestStart?.(info);
+              if (!info.stream) {
+                return;
+              }
+              for (const listener of this.streamRequestStartListeners) {
+                listener(info);
+              }
+            },
           },
-          onHeartbeatPong: () => {
-            this.lastHeartbeatPongAt = Date.now();
-            this.lifecycleHandlers?.onHeartbeatPong?.();
-          },
-          onRequestStart: (info) => {
-            this.lifecycleHandlers?.onRequestStart?.(info);
-            if (!info.stream) {
-              return;
-            }
-            for (const listener of this.streamRequestStartListeners) {
-              listener(info);
-            }
-          },
-        }),
+          this.options?.heartbeat === undefined ? undefined : { heartbeat: this.options.heartbeat },
+        ),
         ClientTracingLive,
       ),
     );

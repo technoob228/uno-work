@@ -318,8 +318,20 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     Effect.annotateLogs({ sequence: commandReadModel.snapshotSequence }),
   );
 
-  const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
-    eventStore.readFromSequence(fromSequenceExclusive);
+  const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, options) => {
+    if (options?.aggregate !== undefined) {
+      const aggregate = options.aggregate;
+      return Stream.fromIterableEffect(
+        eventStore.readAggregateFromSequence({
+          aggregateKind: aggregate.kind,
+          aggregateId: aggregate.id,
+          sequenceExclusive: fromSequenceExclusive,
+          limit: options.limit ?? 1_000,
+        }),
+      );
+    }
+    return eventStore.readFromSequence(fromSequenceExclusive, options?.limit);
+  };
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
     Effect.gen(function* () {

@@ -116,8 +116,10 @@ export function shouldQueueSend(input: {
   readonly agentWorking: boolean;
   readonly hasAttachments: boolean;
   readonly sendNow: boolean;
+  /** Computer unreachable: the message goes to the outbox, not "Up next". */
+  readonly linkDown?: boolean;
 }): boolean {
-  return input.agentWorking && !input.hasAttachments && !input.sendNow;
+  return input.agentWorking && !input.hasAttachments && !input.sendNow && !input.linkDown;
 }
 
 /**

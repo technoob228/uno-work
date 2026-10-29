@@ -7,10 +7,12 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
+  type OrchestrationThreadStreamItem,
   type ServerConfig,
   type TerminalEvent,
   ThreadId,
 } from "@t3tools/contracts";
+import { coalesceOrchestrationMessageDeltas } from "@t3tools/shared/orchestrationEvents";
 import { type QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 import {
@@ -58,10 +60,12 @@ import { createEnvironmentConnection, type EnvironmentConnection } from "./conne
 import { publishShellEvent } from "./shellEventBus";
 import {
   configureSelfHeal,
+  getSelfHealNeedsAttention,
   healSavedEnvironment,
   markSelfHealAuthRequired,
+  noteSavedEnvironmentFailure,
+  noteSavedEnvironmentHealthy,
   resetSelfHeal,
-  resetSelfHealBackoffs,
 } from "./selfHeal";
 import {
   useStore,
@@ -100,6 +104,12 @@ type ThreadDetailSubscriptionEntry = {
   refCount: number;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
+  /**
+   * Highest sequence of this chat's detail the store holds (snapshot sequence
+   * or last applied event). Resume cursor for the next subscribe; events at
+   * or below it are duplicates and are dropped.
+   */
+  lastAppliedSequence: number;
 };
 
 const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
@@ -154,7 +164,8 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 12;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
-const BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS = 15_000;
+/** Hidden at least this long: a healthy-looking socket gets a liveness probe. */
+const BROWSER_RESUME_PROBE_AFTER_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -389,15 +400,41 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
 
   entry.unsubscribe = connection.client.orchestration.subscribeThread(
     { threadId: entry.threadId },
-    (item) => {
-      if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
-        return;
-      }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+    (item) => applyThreadDetailStreamItem(entry, item),
+    {
+      resumeFrom: () => (entry.lastAppliedSequence > 0 ? entry.lastAppliedSequence : null),
+      // After a reconnect only chats someone is looking at (or that are
+      // working / waiting for the person) re-subscribe right away. Idle cached
+      // chats stay parked and resume from their cursor when opened again.
+      shouldResubscribe: () => !shouldEvictThreadDetailSubscription(entry),
+      onSuspended: () => {
+        entry.unsubscribe = NOOP;
+      },
     },
   );
   return true;
+}
+
+export function applyThreadDetailStreamItem(
+  entry: Pick<ThreadDetailSubscriptionEntry, "environmentId" | "lastAppliedSequence">,
+  item: OrchestrationThreadStreamItem,
+): void {
+  switch (item.kind) {
+    case "snapshot":
+      useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+      entry.lastAppliedSequence = item.snapshot.snapshotSequence;
+      return;
+    case "resumed":
+      entry.lastAppliedSequence = Math.max(entry.lastAppliedSequence, item.sequence);
+      return;
+    case "event":
+      if (item.event.sequence <= entry.lastAppliedSequence) {
+        return;
+      }
+      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+      entry.lastAppliedSequence = item.event.sequence;
+      return;
+  }
 }
 
 function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
@@ -513,6 +550,19 @@ function reconcileThreadDetailSubscriptionEvictionState(
 ): void {
   clearThreadDetailSubscriptionEviction(entry);
   if (!shouldEvictThreadDetailSubscription(entry)) {
+    // A chat parked after a reconnect started working (or now waits for the
+    // person): bring its live detail back.
+    if (
+      entry.unsubscribe === NOOP &&
+      entry.unsubscribeConnectionListener === null &&
+      threadDetailSubscriptions.get(
+        getThreadDetailSubscriptionKey(entry.environmentId, entry.threadId),
+      ) === entry
+    ) {
+      if (!attachThreadDetailSubscription(entry)) {
+        watchThreadDetailSubscriptionConnection(entry);
+      }
+    }
     return;
   }
 
@@ -580,6 +630,7 @@ export function retainThreadDetailSubscription(
     refCount: 1,
     lastAccessedAt: Date.now(),
     evictionTimeoutId: null,
+    lastAppliedSequence: 0,
   };
   threadDetailSubscriptions.set(key, entry);
   if (!attachThreadDetailSubscription(entry)) {
@@ -907,6 +958,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
     lastError: null,
     lastErrorAt: null,
   });
+  noteSavedEnvironmentHealthy(environmentId);
   useSavedEnvironmentRegistryStore.getState().markConnected(environmentId, connectedAt);
 }
 
@@ -930,43 +982,6 @@ function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
     connectedAt: null,
     ...getRuntimeErrorFields(error),
   });
-}
-
-function coalesceOrchestrationUiEvents(
-  events: ReadonlyArray<OrchestrationEvent>,
-): OrchestrationEvent[] {
-  if (events.length < 2) {
-    return [...events];
-  }
-
-  const coalesced: OrchestrationEvent[] = [];
-  for (const event of events) {
-    const previous = coalesced.at(-1);
-    if (
-      previous?.type === "thread.message-sent" &&
-      event.type === "thread.message-sent" &&
-      previous.payload.threadId === event.payload.threadId &&
-      previous.payload.messageId === event.payload.messageId
-    ) {
-      coalesced[coalesced.length - 1] = {
-        ...event,
-        payload: {
-          ...event.payload,
-          attachments: event.payload.attachments ?? previous.payload.attachments,
-          createdAt: previous.payload.createdAt,
-          text:
-            !event.payload.streaming && event.payload.text.length > 0
-              ? event.payload.text
-              : previous.payload.text + event.payload.text,
-        },
-      };
-      continue;
-    }
-
-    coalesced.push(event);
-  }
-
-  return coalesced;
 }
 
 function syncProjectUiFromStore() {
@@ -1030,7 +1045,7 @@ function applyRecoveredEventBatch(
   }
 
   const batchEffects = deriveOrchestrationBatchEffects(events);
-  const uiEvents = coalesceOrchestrationUiEvents(events);
+  const uiEvents = coalesceOrchestrationMessageDeltas(events);
   const needsProjectUiSync = events.some(
     (event) =>
       event.type === "project.created" ||
@@ -1158,6 +1173,14 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 function createEnvironmentConnectionHandlers() {
   return {
     applyShellEvent,
+    readShellResumeCursor: (environmentId: EnvironmentId) => {
+      const version = readLastAppliedProjectionVersion(environmentId);
+      return version !== null && version.sequence > 0 ? version.sequence : null;
+    },
+    markShellResumed: (sequence: number, environmentId: EnvironmentId) => {
+      markAppliedProjectionEvent(environmentId, sequence);
+      reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+    },
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
       if (
         !shouldApplyProjectionSnapshot({
@@ -1255,8 +1278,12 @@ function createSavedEnvironmentClient(
         } catch (error) {
           // A ws token that cannot be issued usually means the forwarded port
           // is dead — WS-level retries cannot fix that. Escalate to the full
-          // heal path (re-ensures the tunnel) and keep the failure visible.
-          void healSavedEnvironment(environmentId, "ws-token-issue-failed");
+          // heal path (re-ensures the tunnel) and keep the failure visible —
+          // unless the failure is permanent (auth endpoint gone, address
+          // gone): then automatic retries stop until a manual reconnect.
+          if (!noteSavedEnvironmentFailure(environmentId, error)) {
+            void healSavedEnvironment(environmentId, "ws-token-issue-failed");
+          }
           throw error;
         }
       },
@@ -1378,7 +1405,10 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
-  lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  // The applied version is kept: the store still holds this environment's
+  // data, so the replacement connection resumes from it instead of
+  // re-downloading every chat. It is dropped with the data
+  // (removeSavedEnvironment).
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
@@ -1625,7 +1655,10 @@ async function syncSavedEnvironmentConnections(
     staleEnvironmentIds.map((environmentId) => disconnectSavedEnvironment(environmentId)),
   );
   await Promise.all(
-    records.map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
+    records
+      // Stopped for a permanent failure: only a manual reconnect retries.
+      .filter((record) => getSelfHealNeedsAttention(record.environmentId) === null)
+      .map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
   );
 }
 
@@ -1634,43 +1667,99 @@ function stopActiveService() {
   activeService = null;
 }
 
+export type BrowserResumeAction = "skip" | "probe" | "reconnect" | "heal";
+
+/**
+ * What a browser resume (visibilitychange / pageshow) does to one connection.
+ * A socket with recent inbound traffic is never touched: on a slow link a
+ * forced reconnect costs a full resync and was itself a reconnect trigger.
+ * After a long background stretch a quiet socket is probed, and reconnected
+ * only if the probe gets no answer.
+ */
+export function decideBrowserResumeAction(input: {
+  readonly kind: "primary" | "saved";
+  readonly savedRuntimeState: string | null | undefined;
+  readonly transportHealthy: boolean;
+  readonly hasRecentInbound: boolean;
+  readonly longBackground: boolean;
+}): BrowserResumeAction {
+  // Saved environments that are not connected need the full heal path (it
+  // re-ensures a possibly dead ssh tunnel); a bare WS reconnect against a
+  // dead forwarded port would spin forever.
+  if (input.kind === "saved" && input.savedRuntimeState !== "connected") {
+    return "heal";
+  }
+  if (!input.transportHealthy) {
+    return "reconnect";
+  }
+  if (input.hasRecentInbound) {
+    return "skip";
+  }
+  return input.longBackground ? "probe" : "skip";
+}
+
+function recoverConnectionAfterBrowserResume(
+  connection: EnvironmentConnection,
+  reason: string,
+): void {
+  if (connection.kind === "saved") {
+    void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
+      immediate: true,
+    });
+    return;
+  }
+  void connection.reconnect().catch((error) => {
+    console.warn("Environment reconnect after browser resume failed", {
+      environmentId: connection.environmentId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 function reconnectEnvironmentConnectionsAfterBrowserResume(
   reason: string,
-  options: { readonly force: boolean; readonly forceSavedOnly?: boolean },
+  options: { readonly longBackground: boolean; readonly savedOnly?: boolean },
 ): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
   lastBrowserResumeReconnectAt = now;
-  resetSelfHealBackoffs();
 
   for (const connection of environmentConnections.values()) {
-    // Saved environments that are not connected need the full heal path (it
-    // re-ensures a possibly dead ssh tunnel); a bare WS reconnect against a
-    // dead forwarded port would spin forever.
-    const runtimeState =
-      connection.kind === "saved"
-        ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
-        : null;
-    const runtimeReportsHealthy = runtimeState === null || runtimeState === "connected";
-    const force = options.force && (!options.forceSavedOnly || connection.kind === "saved");
-    if (!force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
+    if (options.savedOnly && connection.kind !== "saved") {
       continue;
     }
-    if (connection.kind === "saved" && runtimeState !== "connected") {
-      void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
-        immediate: true,
-      });
-      continue;
-    }
-    void connection.reconnect().catch((error) => {
-      console.warn("Environment reconnect after browser resume failed", {
-        environmentId: connection.environmentId,
-        reason,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const action = decideBrowserResumeAction({
+      kind: connection.kind,
+      savedRuntimeState:
+        connection.kind === "saved"
+          ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]
+              ?.connectionState
+          : null,
+      transportHealthy: connection.isConnectionHealthy(),
+      hasRecentInbound: connection.hasRecentInbound(),
+      longBackground: options.longBackground,
     });
+    switch (action) {
+      case "skip":
+        break;
+      case "heal":
+      case "reconnect":
+        // Only this (down) connection retries now; the self-heal backoff
+        // ladders of every other environment are left alone.
+        recoverConnectionAfterBrowserResume(connection, reason);
+        break;
+      case "probe":
+        void connection.probeLiveness().then((alive) => {
+          if (alive || environmentConnections.get(connection.environmentId) !== connection) {
+            return;
+          }
+          recoverConnectionAfterBrowserResume(connection, `${reason}:probe-failed`);
+        });
+        break;
+    }
   }
 }
 
@@ -1741,7 +1830,7 @@ function subscribeBrowserResumeReconnects(): () => void {
       const hiddenDurationMs = Date.now() - lastBrowserHiddenAt;
       lastBrowserHiddenAt = null;
       reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange", {
-        force: hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+        longBackground: hiddenDurationMs >= BROWSER_RESUME_PROBE_AFTER_MS,
       });
     }
   };
@@ -1752,23 +1841,25 @@ function subscribeBrowserResumeReconnects(): () => void {
         lastBrowserHiddenAt === null ? 0 : Math.max(0, Date.now() - lastBrowserHiddenAt);
       lastBrowserHiddenAt = null;
       reconnectEnvironmentConnectionsAfterBrowserResume("pageshow", {
-        force: event.persisted || hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+        longBackground: event.persisted || hiddenDurationMs >= BROWSER_RESUME_PROBE_AFTER_MS,
       });
     }
   };
 
   // The network came back (Wi-Fi switch, VPN, laptop off a dead hotspot):
   // sockets opened on the old network may look alive but are dead, and saved
-  // environments may be sitting in a long self-heal backoff. Reconnect them
-  // now instead of waiting it out. Upstream t3code 990bb0b689 (idea: no dead
-  // time on the path back to reachability).
+  // environments may be sitting in a long self-heal backoff. Upstream t3code
+  // 990bb0b689 (idea: no dead time on the path back to reachability).
+  // Goes through the same decision as a long background stretch (0.0.163):
+  // a down saved computer heals now (immediate, skips its backoff), a quiet
+  // one is probed and reconnected only if the probe gets no answer, and one
+  // with recent traffic is left alone - no forced reconnect storm on a slow
+  // link. A local (primary) socket is untouched: the network change does not
+  // affect 127.0.0.1, and WebSocketConnectionSurface handles it when down.
   const handleOnline = () => {
-    // A local (primary) socket that still looks healthy is left alone: the
-    // network change does not touch 127.0.0.1, and WebSocketConnectionSurface
-    // already reconnects the primary one when it is down.
     reconnectEnvironmentConnectionsAfterBrowserResume("online", {
-      force: true,
-      forceSavedOnly: true,
+      longBackground: true,
+      savedOnly: true,
     });
   };
 
@@ -1906,6 +1997,25 @@ configureSelfHeal({
       lastErrorAt: isoNow(),
     });
   },
+  onNeedsAttention: (environmentId, failure) => {
+    console.warn("Saved environment needs attention; automatic reconnects stopped", {
+      environmentId,
+      kind: failure.kind,
+    });
+    // Dispose the live transport too: its own socket retries would otherwise
+    // keep failing in the background. Reconnect builds a fresh connection.
+    void removeConnection(environmentId)
+      .catch(() => false)
+      .finally(() => {
+        useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+          connectionState: "error",
+          connectedAt: null,
+          lastError: failure.message,
+          lastErrorAt: isoNow(),
+        });
+      });
+  },
+  isDeviceOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
 });
 
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
@@ -1914,6 +2024,7 @@ export async function removeSavedEnvironment(environmentId: EnvironmentId): Prom
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
+  lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
 }
 

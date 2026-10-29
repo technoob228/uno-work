@@ -1,6 +1,9 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   EnvironmentId,
+  EventId,
+  MessageId,
+  type OrchestrationEvent,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -21,6 +24,9 @@ const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockGetPrimaryKnownEnvironment = vi.hoisted(() => vi.fn());
 const mockFetchRemoteSessionState = vi.fn();
 const mockConnectionReconnects: Array<ReturnType<typeof vi.fn>> = [];
+const mockConnectionProbes: Array<ReturnType<typeof vi.fn>> = [];
+let mockHasRecentInbound = true;
+let mockProbeAlive = true;
 let savedEnvironmentRegistryListener: (() => void) | null = null;
 
 function MockWsTransport() {
@@ -184,6 +190,8 @@ describe("retainThreadDetailSubscription", () => {
     mockCreateEnvironmentConnection.mockImplementation((input) => {
       const reconnect = vi.fn(async () => undefined);
       mockConnectionReconnects.push(reconnect);
+      const probeLiveness = vi.fn(async () => mockProbeAlive);
+      mockConnectionProbes.push(probeLiveness);
       return {
         kind: input.kind,
         environmentId: input.knownEnvironment.environmentId,
@@ -191,6 +199,8 @@ describe("retainThreadDetailSubscription", () => {
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
         isConnectionHealthy: vi.fn(() => true),
+        hasRecentInbound: vi.fn(() => mockHasRecentInbound),
+        probeLiveness,
         reconnect,
         dispose: vi.fn(async () => undefined),
       };
@@ -213,6 +223,9 @@ describe("retainThreadDetailSubscription", () => {
       role: "client",
     });
     mockConnectionReconnects.length = 0;
+    mockConnectionProbes.length = 0;
+    mockHasRecentInbound = true;
+    mockProbeAlive = true;
   });
 
   afterEach(async () => {
@@ -384,7 +397,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps a healthy connection on a brief background transition", async () => {
+  it("never tears down a socket with recent traffic on resume; probes a quiet one first", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -414,12 +427,30 @@ describe("retainThreadDetailSubscription", () => {
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
-    visibilityState = "hidden";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(15_000);
+    const hideFor = async (ms: number) => {
+      visibilityState = "hidden";
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(ms);
+      visibilityState = "visible";
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    };
 
-    visibilityState = "visible";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    // Long background, but frames kept arriving: the socket is left alone.
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    // Quiet socket: probe first; a live answer means no reconnect.
+    mockHasRecentInbound = false;
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    // Quiet socket and an unanswered probe: only then reconnect.
+    mockProbeAlive = false;
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).toHaveBeenCalledTimes(2);
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     stop();
@@ -467,6 +498,93 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
 
+    stop();
+  });
+  it("resumes a chat from its last applied sequence and drops duplicate events", async () => {
+    const { retainThreadDetailSubscription, startEnvironmentConnectionService } =
+      await import("./service");
+    const { useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-resume");
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    const [input, listener, options] = mockSubscribeThread.mock.calls[0]!;
+    expect(input).toEqual({ threadId });
+    // Nothing applied yet: the first subscribe asks for a snapshot.
+    expect(options.resumeFrom()).toBeNull();
+
+    const applySpy = vi.spyOn(useStore.getState(), "applyOrchestrationEvents");
+    const messageEvent = (sequence: number) =>
+      ({
+        sequence,
+        eventId: EventId.make(`evt-${sequence}`),
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-10-29T00:00:00.000Z",
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make(`msg-${sequence}`),
+          role: "assistant",
+          text: "hi",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-10-29T00:00:00.000Z",
+          updatedAt: "2026-10-29T00:00:00.000Z",
+        },
+      }) as OrchestrationEvent;
+
+    listener({ kind: "resumed", sequence: 10 });
+    expect(options.resumeFrom()).toBe(10);
+
+    listener({ kind: "event", event: messageEvent(9) });
+    listener({ kind: "event", event: messageEvent(10) });
+    expect(applySpy).not.toHaveBeenCalled();
+
+    listener({ kind: "event", event: messageEvent(11) });
+    expect(applySpy).toHaveBeenCalledTimes(1);
+    expect(options.resumeFrom()).toBe(11);
+
+    // Overlap after a reconnect: the same event again is ignored.
+    listener({ kind: "event", event: messageEvent(11) });
+    expect(applySpy).toHaveBeenCalledTimes(1);
+
+    release();
+    stop();
+  });
+
+  it("parks idle cached chats on reconnect and resumes them when opened again", async () => {
+    const { retainThreadDetailSubscription, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-park");
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const [, listener, options] = mockSubscribeThread.mock.calls[0]!;
+    listener({ kind: "resumed", sequence: 42 });
+    // Open on screen: re-subscribe after a reconnect.
+    expect(options.shouldResubscribe()).toBe(true);
+
+    release();
+    // Idle and cached: stay parked instead of re-subscribing.
+    expect(options.shouldResubscribe()).toBe(false);
+    options.onSuspended();
+
+    const releaseAgain = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+    const [, , resumedOptions] = mockSubscribeThread.mock.calls[1]!;
+    expect(resumedOptions.resumeFrom()).toBe(42);
+
+    releaseAgain();
     stop();
   });
 });

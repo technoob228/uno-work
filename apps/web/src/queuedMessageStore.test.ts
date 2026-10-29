@@ -64,6 +64,17 @@ describe("shouldQueueSend", () => {
       false,
     );
   });
+
+  it("leaves an offline message to the outbox, never both", () => {
+    expect(
+      shouldQueueSend({
+        agentWorking: true,
+        hasAttachments: false,
+        sendNow: false,
+        linkDown: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("nextQueuedMessageToSend", () => {

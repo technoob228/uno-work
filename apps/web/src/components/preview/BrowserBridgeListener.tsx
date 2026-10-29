@@ -16,6 +16,7 @@ import {
   runBrowserAutomationCommand,
 } from "./BrowserAutomationRegistry";
 import { resolveBridgeEventProjectKey } from "./browserBridgeRouting";
+import { noteBridgeEventSeen, postBridgeResult, readBridgeResumeCursor } from "./bridgeDelivery";
 import { readCloudComputer } from "./portPreview";
 import { detectFileKind, makeAppFile, usePreviewPane } from "./PreviewPaneContext";
 import { openInNewTab } from "../../navigation/useOpenApp";
@@ -49,17 +50,16 @@ async function postCommandResult(
   event: BrowserBridgeCommandEvent,
   result: { ok: boolean; data?: unknown; error?: string },
 ): Promise<void> {
-  await fetch(resolveResultUrl(event.resultUrl), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  await postBridgeResult(
+    resolveResultUrl(event.resultUrl),
+    JSON.stringify({
       commandId: event.commandId,
       responseToken: event.responseToken,
       ok: result.ok,
       ...(result.data !== undefined ? { data: result.data } : {}),
       ...(result.error !== undefined ? { error: result.error } : {}),
     }),
-  }).catch(() => undefined);
+  );
 }
 
 /**
@@ -148,242 +148,254 @@ export function BrowserBridgeListener() {
     const unsubscribers = listEnvironmentConnections().map((connection) => {
       const api = readEnvironmentApi(connection.environmentId);
       if (!api) return undefined;
-      return api.browser.subscribeBridge((event) => {
-        // Секретные события не привязаны к вкладке предпросмотра — им не нужен
-        // projectKey, а у secretSettled и вовсе нет контекста.
-        if (event.type === "secretRequest") {
-          addSecretRequest({ event, environmentId: connection.environmentId });
-          return;
-        }
-        if (event.type === "secretSettled") {
-          removeSecretRequest(event.requestId);
-          return;
-        }
-        if (event.type === "toolApprovalRequest") {
-          addToolApproval({ event, environmentId: connection.environmentId });
-          return;
-        }
-        if (event.type === "toolApprovalSettled") {
-          removeToolApproval(event.requestId);
-          return;
-        }
-        if (event.type === "openInApp" && event.view === "app") {
-          // An app (open_in_panel with appId): framed as the app in the panel —
-          // its public address, or its local one, which the panel shows from
-          // the port's address on a cloud computer (ComputerAppFrame, P16).
-          // Another http address can't be framed inside https Uno Work, so it
-          // is offered in a new tab (a click: popup blockers).
-          const url = event.path;
-          const name = event.name ?? url;
-          const frameable =
-            isComputerLocalUrl(url) ||
-            !(window.location.protocol === "https:" && /^http:/i.test(url));
-          const here =
-            !event.context?.threadId || event.context.threadId === currentThreadIdRef.current;
-          if (frameable && here) {
-            openAppTabRef.current(makeAppFile({ url, name }));
+      const environmentId = connection.environmentId;
+      return api.browser.subscribeBridge(
+        (event) => {
+          noteBridgeEventSeen(environmentId, event);
+          // Секретные события не привязаны к вкладке предпросмотра — им не нужен
+          // projectKey, а у secretSettled и вовсе нет контекста.
+          if (event.type === "secretRequest") {
+            addSecretRequest({ event, environmentId: connection.environmentId });
             return;
           }
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: `${name} is ready to open`,
-              description: url,
-              actionProps: {
-                children: "Open",
-                onClick: () =>
-                  frameable ? openAppTabRef.current(makeAppFile({ url, name })) : openInNewTab(url),
-              },
-            }),
-          );
-          return;
-        }
-        if (event.type === "openInApp" && event.view === "connect-telegram") {
-          const open = () => setConnectTelegramIn(connection.environmentId);
-          if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
-            open();
+          if (event.type === "secretSettled") {
+            removeSecretRequest(event.requestId);
             return;
           }
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: "Your assistant's bot is ready",
-              description: "Open it in Telegram and press Start: your assistant says hi there.",
-              actionProps: { children: "Open", onClick: open },
-            }),
-          );
-          return;
-        }
-        if (event.type === "openInApp") {
-          const store = useStore.getState();
-          const go = () => {
-            if (store.activeEnvironmentId !== connection.environmentId) {
-              store.setActiveEnvironmentId(connection.environmentId);
+          if (event.type === "toolApprovalRequest") {
+            addToolApproval({ event, environmentId: connection.environmentId });
+            return;
+          }
+          if (event.type === "toolApprovalSettled") {
+            removeToolApproval(event.requestId);
+            return;
+          }
+          if (event.type === "openInApp" && event.view === "app") {
+            // An app (open_in_panel with appId): framed as the app in the panel —
+            // its public address, or its local one, which the panel shows from
+            // the port's address on a cloud computer (ComputerAppFrame, P16).
+            // Another http address can't be framed inside https Uno Work, so it
+            // is offered in a new tab (a click: popup blockers).
+            const url = event.path;
+            const name = event.name ?? url;
+            const frameable =
+              isComputerLocalUrl(url) ||
+              !(window.location.protocol === "https:" && /^http:/i.test(url));
+            const here =
+              !event.context?.threadId || event.context.threadId === currentThreadIdRef.current;
+            if (frameable && here) {
+              openAppTabRef.current(makeAppFile({ url, name }));
+              return;
             }
-            if (event.view === "office") {
-              void navigateRef.current({ to: "/office", search: { path: event.path } });
-            } else {
-              void navigateRef.current({
-                to: "/files",
-                search: { path: dirname(event.path), file: event.path },
-              });
+            toastManager.add(
+              stackedThreadToast({
+                type: "info",
+                title: `${name} is ready to open`,
+                description: url,
+                actionProps: {
+                  children: "Open",
+                  onClick: () =>
+                    frameable
+                      ? openAppTabRef.current(makeAppFile({ url, name }))
+                      : openInNewTab(url),
+                },
+              }),
+            );
+            return;
+          }
+          if (event.type === "openInApp" && event.view === "connect-telegram") {
+            const open = () => setConnectTelegramIn(connection.environmentId);
+            if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
+              open();
+              return;
             }
+            toastManager.add(
+              stackedThreadToast({
+                type: "info",
+                title: "Your assistant's bot is ready",
+                description: "Open it in Telegram and press Start: your assistant says hi there.",
+                actionProps: { children: "Open", onClick: open },
+              }),
+            );
+            return;
+          }
+          if (event.type === "openInApp") {
+            const store = useStore.getState();
+            const go = () => {
+              if (store.activeEnvironmentId !== connection.environmentId) {
+                store.setActiveEnvironmentId(connection.environmentId);
+              }
+              if (event.view === "office") {
+                void navigateRef.current({ to: "/office", search: { path: event.path } });
+              } else {
+                void navigateRef.current({
+                  to: "/files",
+                  search: { path: dirname(event.path), file: event.path },
+                });
+              }
+            };
+            // Switch views only for the chat the person is looking at; an
+            // agent in a background chat offers it instead of yanking the screen.
+            if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
+              go();
+              return;
+            }
+            const name = event.path.split("/").pop() ?? event.path;
+            toastManager.add(
+              stackedThreadToast({
+                type: "info",
+                title: `An agent wants to show you ${name}`,
+                actionProps: { children: "Open", onClick: go },
+              }),
+            );
+            return;
+          }
+          const projectKey =
+            resolveBridgeEventProjectKey({
+              context: event.context,
+              environmentId: connection.environmentId,
+              state: useStore.getState(),
+              groupingSettings: groupingSettingsRef.current,
+            }) ?? currentProjectKeyRef.current;
+          // Вкладка принадлежит треду-источнику, а не тому чату, что на экране:
+          // так вкладки, открытые агентом в одном чате, не засоряют другие, а
+          // панель, которую человек в этом чате закрыл, агент не распахивает
+          // (вкладка добавится, на кнопке панели загорится бейдж).
+          // Тред неизвестен (легаси-токен) — деградируем до текущего.
+          const target = {
+            projectKey,
+            threadId: event.context?.threadId ?? currentThreadIdRef.current,
           };
-          // Switch views only for the chat the person is looking at; an
-          // agent in a background chat offers it instead of yanking the screen.
-          if (!event.context?.threadId || event.context.threadId === currentThreadIdRef.current) {
-            go();
-            return;
-          }
-          const name = event.path.split("/").pop() ?? event.path;
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: `An agent wants to show you ${name}`,
-              actionProps: { children: "Open", onClick: go },
-            }),
-          );
-          return;
-        }
-        const projectKey =
-          resolveBridgeEventProjectKey({
-            context: event.context,
-            environmentId: connection.environmentId,
-            state: useStore.getState(),
-            groupingSettings: groupingSettingsRef.current,
-          }) ?? currentProjectKeyRef.current;
-        // Вкладка принадлежит треду-источнику, а не тому чату, что на экране:
-        // так вкладки, открытые агентом в одном чате, не засоряют другие, а
-        // панель, которую человек в этом чате закрыл, агент не распахивает
-        // (вкладка добавится, на кнопке панели загорится бейдж).
-        // Тред неизвестен (легаси-токен) — деградируем до текущего.
-        const target = {
-          projectKey,
-          threadId: event.context?.threadId ?? currentThreadIdRef.current,
-        };
-        const scope: PreviewTabScope =
-          event.type === "openUrl" || event.type === "openFile" ? (event.scope ?? "chat") : "chat";
+          const scope: PreviewTabScope =
+            event.type === "openUrl" || event.type === "openFile"
+              ? (event.scope ?? "chat")
+              : "chat";
 
-        if (event.type === "openUrl") {
-          const url = normalizeAgentBrowserUrl(event.url);
-          if (!url) return;
-          // "Your site" (18.10): the agent's own site on its cloud computer
-          // opens as a panel tab, shown from the port's address (or, without
-          // one, in the computer's browser) — never this device's localhost,
-          // so there is nothing to confirm.
-          if (isComputerLocalUrl(url) && readCloudComputer(connection.environmentId) !== null) {
+          if (event.type === "openUrl") {
+            const url = normalizeAgentBrowserUrl(event.url);
+            if (!url) return;
+            // "Your site" (18.10): the agent's own site on its cloud computer
+            // opens as a panel tab, shown from the port's address (or, without
+            // one, in the computer's browser) — never this device's localhost,
+            // so there is nothing to confirm.
+            if (isComputerLocalUrl(url) && readCloudComputer(connection.environmentId) !== null) {
+              openUrlForTargetRef.current(target, scope, url, "agent");
+              return;
+            }
+            if (isPrivateNetworkUrl(url)) {
+              askBeforeOpeningPrivateUrl(url, () => {
+                if (isWebApp) {
+                  void runExtensionBrowserCommand({ command: "openUrl", url }).catch(
+                    () => undefined,
+                  );
+                } else {
+                  openUrlForTargetRef.current(target, scope, url, "person");
+                }
+              });
+              return;
+            }
+            if (isWebApp) {
+              void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
+              return;
+            }
             openUrlForTargetRef.current(target, scope, url, "agent");
             return;
           }
-          if (isPrivateNetworkUrl(url)) {
-            askBeforeOpeningPrivateUrl(url, () => {
-              if (isWebApp) {
-                void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
-              } else {
-                openUrlForTargetRef.current(target, scope, url, "person");
-              }
-            });
-            return;
-          }
-          if (isWebApp) {
-            void runExtensionBrowserCommand({ command: "openUrl", url }).catch(() => undefined);
-            return;
-          }
-          openUrlForTargetRef.current(target, scope, url, "agent");
-          return;
-        }
-        if (event.type === "openFile") {
-          // Файлы рендерятся в самой панели (не в webview), поэтому путь один
-          // для Electron и браузерного режима: контент подтянется лениво через
-          // filesystem.readFile окружения-источника.
-          const name = event.path.split(/[\\/]/).findLast(Boolean) ?? event.path;
-          openFileForTargetRef.current(
-            target,
-            scope,
-            {
-              id: event.path,
-              name,
-              kind: detectFileKind(name),
-              content: "",
-              path: event.path,
-              environmentId: connection.environmentId,
-              projectKey,
-            },
-            "agent",
-          );
-          return;
-        }
-        void (async () => {
-          try {
-            const automationLevel = automationLevelRef.current;
-            if (automationLevel === "off") {
-              throw new Error("Browser automation is disabled in settings.");
-            }
-            if (automationLevel === "safe" && event.input.command === "evaluate") {
-              throw new Error("Browser automation safe mode blocks evaluate.");
-            }
-            // Автозаполнение логина адресовано конкретной вкладке (её id знает
-            // только клиент, открывший вкладку). Если такой вкладки здесь нет —
-            // команда не для нас: в вебе её исполнит companion в своей вкладке.
-            if (event.input.command === "fillCredential" && event.input.tabId && !isWebApp) {
-              const handler = findBrowserTabAutomationHandler(event.input.tabId);
-              if (!handler) {
-                throw new Error("The tab to fill in is no longer open.");
-              }
-              const data = await handler(event.input);
-              await postCommandResult(event, { ok: true, data });
-              return;
-            }
-            // The hosted build has no Electron webview: commands run in the
-            // user's own tabs through the companion extension.
-            // Agents may not steer the browser at this computer or its LAN
-            // (the local daemon, router pages, other machines) on their own.
-            const agentUrl =
-              event.input.command === "openUrl" || event.input.command === "navigate"
-                ? normalizeAgentBrowserUrl(event.input.url)
-                : null;
-            if (
-              (event.input.command === "openUrl" || event.input.command === "navigate") &&
-              !agentUrl
-            ) {
-              throw new Error("Only http(s) addresses can be opened.");
-            }
-            if (agentUrl && isPrivateNetworkUrl(agentUrl)) {
-              askBeforeOpeningPrivateUrl(agentUrl, () =>
-                isWebApp
-                  ? void runExtensionBrowserCommand({ command: "openUrl", url: agentUrl }).catch(
-                      () => undefined,
-                    )
-                  : openUrlForTargetRef.current(target, scope, agentUrl, "person"),
-              );
-              throw new Error(AGENT_PRIVATE_URL_MESSAGE);
-            }
-            if (isWebApp) {
-              if (!isBrowserExtensionConnected() && (await detectBrowserExtension()) === null) {
-                throw new Error(EXTENSION_MISSING_MESSAGE);
-              }
-              const data = await runExtensionBrowserCommand(event.input);
-              await postCommandResult(event, { ok: true, data });
-              return;
-            }
-            if (event.input.command === "openUrl" && agentUrl) {
-              openUrlForTargetRef.current(target, scope, agentUrl, "agent");
-              await postCommandResult(event, { ok: true, data: { url: agentUrl } });
-              return;
-            }
-            const data = await runBrowserAutomationCommand(
-              automationScopeKeys(target),
-              event.input,
+          if (event.type === "openFile") {
+            // Файлы рендерятся в самой панели (не в webview), поэтому путь один
+            // для Electron и браузерного режима: контент подтянется лениво через
+            // filesystem.readFile окружения-источника.
+            const name = event.path.split(/[\\/]/).findLast(Boolean) ?? event.path;
+            openFileForTargetRef.current(
+              target,
+              scope,
+              {
+                id: event.path,
+                name,
+                kind: detectFileKind(name),
+                content: "",
+                path: event.path,
+                environmentId: connection.environmentId,
+                projectKey,
+              },
+              "agent",
             );
-            await postCommandResult(event, { ok: true, data });
-          } catch (error) {
-            await postCommandResult(event, {
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            });
+            return;
           }
-        })();
-      });
+          void (async () => {
+            try {
+              const automationLevel = automationLevelRef.current;
+              if (automationLevel === "off") {
+                throw new Error("Browser automation is disabled in settings.");
+              }
+              if (automationLevel === "safe" && event.input.command === "evaluate") {
+                throw new Error("Browser automation safe mode blocks evaluate.");
+              }
+              // Автозаполнение логина адресовано конкретной вкладке (её id знает
+              // только клиент, открывший вкладку). Если такой вкладки здесь нет —
+              // команда не для нас: в вебе её исполнит companion в своей вкладке.
+              if (event.input.command === "fillCredential" && event.input.tabId && !isWebApp) {
+                const handler = findBrowserTabAutomationHandler(event.input.tabId);
+                if (!handler) {
+                  throw new Error("The tab to fill in is no longer open.");
+                }
+                const data = await handler(event.input);
+                await postCommandResult(event, { ok: true, data });
+                return;
+              }
+              // The hosted build has no Electron webview: commands run in the
+              // user's own tabs through the companion extension.
+              // Agents may not steer the browser at this computer or its LAN
+              // (the local daemon, router pages, other machines) on their own.
+              const agentUrl =
+                event.input.command === "openUrl" || event.input.command === "navigate"
+                  ? normalizeAgentBrowserUrl(event.input.url)
+                  : null;
+              if (
+                (event.input.command === "openUrl" || event.input.command === "navigate") &&
+                !agentUrl
+              ) {
+                throw new Error("Only http(s) addresses can be opened.");
+              }
+              if (agentUrl && isPrivateNetworkUrl(agentUrl)) {
+                askBeforeOpeningPrivateUrl(agentUrl, () =>
+                  isWebApp
+                    ? void runExtensionBrowserCommand({ command: "openUrl", url: agentUrl }).catch(
+                        () => undefined,
+                      )
+                    : openUrlForTargetRef.current(target, scope, agentUrl, "person"),
+                );
+                throw new Error(AGENT_PRIVATE_URL_MESSAGE);
+              }
+              if (isWebApp) {
+                if (!isBrowserExtensionConnected() && (await detectBrowserExtension()) === null) {
+                  throw new Error(EXTENSION_MISSING_MESSAGE);
+                }
+                const data = await runExtensionBrowserCommand(event.input);
+                await postCommandResult(event, { ok: true, data });
+                return;
+              }
+              if (event.input.command === "openUrl" && agentUrl) {
+                openUrlForTargetRef.current(target, scope, agentUrl, "agent");
+                await postCommandResult(event, { ok: true, data: { url: agentUrl } });
+                return;
+              }
+              const data = await runBrowserAutomationCommand(
+                automationScopeKeys(target),
+                event.input,
+              );
+              await postCommandResult(event, { ok: true, data });
+            } catch (error) {
+              await postCommandResult(event, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
+        },
+        // Reconnects get the events published while the socket was down.
+        { resumeFrom: () => readBridgeResumeCursor(environmentId) },
+      );
     });
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe?.();

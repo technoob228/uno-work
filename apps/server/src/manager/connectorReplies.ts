@@ -276,7 +276,12 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
     // a while: a pre-tool chunk is always followed by the tool's activity.
     if (final !== null && session.lastError !== ORPHANED_PROVIDER_SESSION_ERROR) {
       const finalMs = toMs(final.updatedAt);
-      if (finalMs >= lastWorkMs && toMs(session.updatedAt) - finalMs >= 10_000) {
+      // The harness itself marked the turn completed (Uno's harness stops
+      // its session a moment after the last message — live on stage 28.10):
+      // the last text after the last tool is the answer, however soon the
+      // session went away.
+      const completed = turnRow?.state === "completed";
+      if (finalMs >= lastWorkMs && (completed || toMs(session.updatedAt) - finalMs >= 10_000)) {
         const { text, files } = cleanAnswer(final.text);
         return { kind: "answer", turnId, text, files };
       }
