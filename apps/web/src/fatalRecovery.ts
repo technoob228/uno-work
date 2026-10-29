@@ -8,6 +8,7 @@
  * the same tab fails again within a minute, show a plain branded screen with
  * a Reload button rather than a white page.
  */
+import { hideBootShell } from "./lib/bootShell";
 
 export const FATAL_RELOAD_STORAGE_KEY = "uno-work:fatal-reload-at";
 export const FATAL_RELOAD_WINDOW_MS = 60_000;
@@ -53,6 +54,7 @@ function writeLastReloadAt(at: number): void {
 
 /** Rendered outside the dead React root, so nothing can clear it. */
 export function showFatalScreen(doc: Document = document): void {
+  hideBootShell(doc);
   if (doc.getElementById(FATAL_SCREEN_ID)) return;
   const screen = doc.createElement("div");
   screen.id = FATAL_SCREEN_ID;

@@ -93,6 +93,9 @@ export function useHomeComputer({
 
   const local = localMetricsQuery.data;
   const name = box?.name ?? local?.hostname ?? "This computer";
+  // The header chip waits for the name too: "This computer" for a moment and
+  // then the hostname read as the chip changing twice on every start (S6 29.10).
+  const nameLoading = box === null && thisMachine && localMetricsQuery.isLoading;
   const subtitle = box
     ? [sizeLine(box), awakeLine(box)].filter(Boolean).join(" · ") ||
       "Your computer in the Uno cloud"
@@ -186,6 +189,7 @@ export function useHomeComputer({
     loadLive: cloudMetricsQuery.isSuccess,
     lowResource,
     name,
+    nameLoading,
     subtitle,
     boostControls,
     boosting,

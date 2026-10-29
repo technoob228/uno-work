@@ -14,10 +14,11 @@ import { selectProjectsAcrossEnvironments, useStore } from "../../../store";
 import { filesListQueryOptions } from "../../files/filesApi";
 import { accountReachable, sitesQuery } from "../../myuno/myUnoQueries";
 import { useInboxEntries } from "../../../inbox/inboxStore";
+import { useFirstSnapshotPending } from "../../../lib/firstSnapshot";
+import { useHeldUntilSettled } from "../../../lib/heldValue";
 import {
   inboxSnoozedThreadIds,
   isContinueCandidate,
-  pickContinueItems,
   recentHomeEntries,
   threadActivityAt,
   type HomeThread,
@@ -35,11 +36,13 @@ export function useHomeStarters(input: {
 }): HomeStarter[] {
   const { environmentId, threads, now } = input;
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const homeListing = useQuery(filesListQueryOptions(environmentId, null, false)).data;
+  const homeListingQuery = useQuery(filesListQueryOptions(environmentId, null, false));
+  const homeListing = homeListingQuery.data;
   const files = homeListing?.entries;
   const homePath = homeListing?.rootPath ?? null;
   const inbox = useInboxEntries();
-  const sites = useQuery({ ...sitesQuery(), enabled: accountReachable() }).data?.sites;
+  const sitesResult = useQuery({ ...sitesQuery(), enabled: accountReachable() });
+  const sites = sitesResult.data?.sites;
 
   // The chats the model reads: the latest ones that were really talked in, by
   // the same bar as Continue (never settled or snoozed ones).
@@ -59,9 +62,18 @@ export function useHomeStarters(input: {
     () => hintChats.map((thread) => ({ id: thread.id, version: threadActivityAt(thread) })),
     [hintChats],
   );
-  const suggestions = useQuery(homeSuggestionsQueryOptions(environmentId, suggestionChats)).data;
+  const suggestionsQuery = useQuery(homeSuggestionsQueryOptions(environmentId, suggestionChats));
+  const suggestions = suggestionsQuery.data;
+  // The chips come from four answers that land at different moments; until
+  // they all did, keep the previous row (S6 29.10: it redrew 2–3 times).
+  const snapshotPending = useFirstSnapshotPending();
+  const settled =
+    !snapshotPending &&
+    !homeListingQuery.isLoading &&
+    !sitesResult.isLoading &&
+    !suggestionsQuery.isLoading;
 
-  return useMemo(() => {
+  const live = useMemo(() => {
     const chatHints: StarterChatHint[] = (suggestions?.suggestions ?? []).flatMap((suggestion) => {
       const thread = hintChats.find((candidate) => candidate.id === suggestion.threadId);
       if (!thread) return [];
@@ -115,4 +127,10 @@ export function useHomeStarters(input: {
       sites: (sites ?? []).map((site) => ({ name: site.customDomain ?? site.slug })),
     });
   }, [environmentId, files, hintChats, homePath, inbox, now, projects, sites, suggestions]);
+
+  return useHeldUntilSettled({
+    cacheKey: environmentId ? `home-starters:${environmentId}` : null,
+    live,
+    settled,
+  });
 }

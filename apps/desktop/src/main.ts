@@ -1382,6 +1382,10 @@ function revealWindow(window: BrowserWindow): void {
     window.restore();
   }
 
+  // The window booted unthrottled (createWindow); once shown, a hidden or
+  // minimized window goes back to being cheap. Idempotent on later reveals.
+  window.webContents.setBackgroundThrottling(true);
+
   if (!window.isVisible()) {
     window.show();
   }
@@ -2717,6 +2721,11 @@ function createWindow(): BrowserWindow {
     ...getWindowTitleBarOptions(),
     webPreferences: {
       preload: Path.join(__dirname, "preload.cjs"),
+      // The window boots hidden (show: false until the renderer has content),
+      // and Chromium throttles hidden renderers: timers coalesce and rAF
+      // stops, which stalls the first paint. Boot unthrottled; revealWindow
+      // turns throttling back on (upstream efcf7d1ac0).
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -2911,6 +2920,8 @@ function createWindow(): BrowserWindow {
       void window.webContents
         .executeJavaScript(
           `(() => {
+            // The splash lies over #root now (index.html), not inside it.
+            if (document.getElementById("boot-shell")) return true;
             const root = document.querySelector("#root");
             return Boolean(root && (root.children.length > 0 || (root.textContent ?? "").trim().length > 0));
           })()`,

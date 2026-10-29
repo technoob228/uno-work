@@ -63,12 +63,21 @@
         color: #f5f5f5;
       }
 
+      /* Over the app, not inside #root: React used to replace it with its own
+         splash a frame later — logo, blank frame, logo (S6 29.10). It stays
+         until the app's first real screen is committed (lib/bootShell.ts). */
       #boot-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483646;
         display: flex;
-        min-height: 100%;
         align-items: center;
         justify-content: center;
-        background: inherit;
+        background: #ffffff;
+      }
+
+      html.dark #boot-shell {
+        background: #161616;
       }
 
       #boot-shell-card {
@@ -94,13 +103,12 @@
     <title>Uno Work</title>
   </head>
   <body>
-    <div id="root">
-      <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="Uno Work splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Uno Work" />
-        </div>
+    <div id="boot-shell">
+      <div id="boot-shell-card" aria-label="Uno Work splash screen">
+        <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Uno Work" />
       </div>
     </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -117,6 +117,7 @@ import {
 } from "../keybindings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useGitStatus } from "../lib/gitStatusState";
+import { useFirstSnapshotPending } from "../lib/firstSnapshot";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn, isMacPlatform, newCommandId } from "../lib/utils";
 import { getProjectOrderKey } from "../logicalProject";
@@ -129,7 +130,6 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import {
-  selectBootstrapCompleteForActiveEnvironment,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectProjectsForEnvironment,
@@ -1688,9 +1688,6 @@ function useErrorToast() {
   }, []);
 }
 
-/** How long the sidebar waits for the computer's first snapshot before "No chats yet". */
-const CHATS_LOADING_MAX_MS = 8_000;
-
 function SidebarChatsLoading() {
   return (
     <div
@@ -1738,16 +1735,11 @@ export default function Sidebar() {
   // arrives the list is unknown, not empty — grey rows instead of a flash of
   // "No chats yet". Capped, so a computer that never answers still ends on
   // the empty state with its "New chat" button.
-  const activeBootstrapComplete = useStore(selectBootstrapCompleteForActiveEnvironment);
-  const [chatsLoadGraceOver, setChatsLoadGraceOver] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setChatsLoadGraceOver(true), CHATS_LOADING_MAX_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
+  // S6 29.10: one rule with "/" (lib/firstSnapshot) — also while the active
+  // computer isn't picked yet, which drew "Add a project" before the grey rows.
+  const chatsLoading = useFirstSnapshotPending();
   // The setup's project being made shows in the empty list (SidebarEmptyProjects).
   const setupPreviewName = useSetupProjectPreview((state) => state.name);
-  const chatsLoading =
-    activeEnvironmentId !== null && !activeBootstrapComplete && !chatsLoadGraceOver;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const allMachinesSidebar = useFeatureFlag("allMachinesSidebar");
   // Labs "Sidebar view menu" (w0138 p5): the title menu, One list / Inbox
