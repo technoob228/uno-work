@@ -62,7 +62,9 @@ const SNAPSHOT_IDENTITY = {
 
 /** Thread ids become ref names and folder names: only plain ones. */
 export function savedRefFor(threadId: string): string | null {
-  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(threadId) ? `${SAVED_REF_PREFIX}${threadId}` : null;
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(threadId)
+    ? `${SAVED_REF_PREFIX}${threadId}`
+    : null;
 }
 
 const fsTry = <A>(detail: string, run: () => Promise<A>) =>
@@ -76,10 +78,12 @@ const fsTry = <A>(detail: string, run: () => Promise<A>) =>
   });
 
 export const pathExists = (target: string) =>
-  Effect.promise(() => lstat(target).then(
-    () => true,
-    () => false,
-  ));
+  Effect.promise(() =>
+    lstat(target).then(
+      () => true,
+      () => false,
+    ),
+  );
 
 export const realPathOrNull = (target: string) =>
   Effect.promise(() => realpath(target).catch(() => null));
@@ -114,7 +118,8 @@ const run = (git: GitExec, cwd: string, args: ReadonlyArray<string>, options: Ru
     ...(options.truncate ? { truncateOutputAtMaxBytes: true } : {}),
   }).pipe(
     Effect.mapError(
-      (error) => new WorktreeCleanupError({ detail: error.detail.split(/\r?\n/)[0] ?? "git failed" }),
+      (error) =>
+        new WorktreeCleanupError({ detail: error.detail.split(/\r?\n/)[0] ?? "git failed" }),
     ),
   );
 
@@ -271,7 +276,12 @@ export const writeWorkingTree = Effect.fn("WorktreeCleanup.writeWorkingTree")(fu
 export const saveSnapshot = Effect.fn("WorktreeCleanup.saveSnapshot")(function* (
   git: GitExec,
   cwd: string,
-  input: { readonly ref: string; readonly tree: string; readonly headSha: string; readonly message: string },
+  input: {
+    readonly ref: string;
+    readonly tree: string;
+    readonly headSha: string;
+    readonly message: string;
+  },
 ) {
   const commit = (yield* runOk(
     git,
@@ -280,7 +290,12 @@ export const saveSnapshot = Effect.fn("WorktreeCleanup.saveSnapshot")(function* 
     { env: SNAPSHOT_IDENTITY },
   )).trim();
   yield* runOk(git, cwd, ["update-ref", input.ref, commit]);
-  const saved = yield* runOptional(git, cwd, ["rev-parse", "--verify", "--quiet", `${input.ref}^{tree}`]);
+  const saved = yield* runOptional(git, cwd, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${input.ref}^{tree}`,
+  ]);
   if (saved !== input.tree) {
     return yield* new WorktreeCleanupError({ detail: "The saved snapshot doesn't match the copy" });
   }
@@ -323,7 +338,11 @@ export const listIgnoredEnvFiles = Effect.fn("WorktreeCleanup.listIgnoredEnvFile
 interface SavedFilesManifest {
   readonly version: 1;
   readonly worktreePath: string;
-  readonly files: ReadonlyArray<{ readonly path: string; readonly mode?: number; readonly link?: string }>;
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly mode?: number;
+    readonly link?: string;
+  }>;
 }
 
 const MANIFEST = "manifest.json";
@@ -332,11 +351,7 @@ const MANIFEST = "manifest.json";
  * Copy `files` (relative to `cwd`) into `destination`: folder 0700, files
  * 0600, the manifest written last so a half-done save never restores.
  */
-export const saveEnvFiles = (
-  cwd: string,
-  files: ReadonlyArray<string>,
-  destination: string,
-) =>
+export const saveEnvFiles = (cwd: string, files: ReadonlyArray<string>, destination: string) =>
   fsTry("Couldn't save the copy's .env files", async () => {
     if (files.length > ENV_FILES_MAX) throw new Error(`more than ${ENV_FILES_MAX} files`);
     await rm(destination, { recursive: true, force: true });
@@ -378,7 +393,13 @@ export const restoreEnvFiles = (source: string, cwd: string) =>
     for (const entry of manifest.files) {
       const target = nodePath.join(cwd, entry.path);
       if (!isInside(cwd, target)) continue;
-      if (await lstat(target).then(() => true, () => false)) continue;
+      if (
+        await lstat(target).then(
+          () => true,
+          () => false,
+        )
+      )
+        continue;
       await mkdir(nodePath.dirname(target), { recursive: true });
       if (entry.link !== undefined) {
         await symlink(entry.link, target);
@@ -399,7 +420,12 @@ export const removeSavedFiles = (destination: string) =>
  * a copy with changes or untracked files — the last safety net. `force` is
  * only passed after the snapshot was saved and re-checked against the copy.
  */
-export const removeWorktree = (git: GitExec, repoCwd: string, worktreePath: string, force: boolean) =>
+export const removeWorktree = (
+  git: GitExec,
+  repoCwd: string,
+  worktreePath: string,
+  force: boolean,
+) =>
   runOk(
     git,
     repoCwd,
@@ -463,7 +489,12 @@ export const restoreSnapshot = Effect.fn("WorktreeCleanup.restoreSnapshot")(func
   cwd: string,
   ref: string,
 ) {
-  const commit = yield* runOptional(git, cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const commit = yield* runOptional(git, cwd, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${ref}^{commit}`,
+  ]);
   if (commit === null) return "none" as const;
   const base = yield* snapshotBase(git, cwd, ref);
   const head = yield* runOptional(git, cwd, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);

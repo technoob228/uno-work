@@ -157,7 +157,11 @@ export type Verdict =
   | { readonly remove: false; readonly reason: string };
 
 /** Whether a live (not deleted) idle chat's copy may go. */
-export function liveThreadVerdict(thread: CleanupThread, rules: CleanupRules, now: number): Verdict {
+export function liveThreadVerdict(
+  thread: CleanupThread,
+  rules: CleanupRules,
+  now: number,
+): Verdict {
   const activity = threadActivityMs(thread);
   const prefix = rules.lowDisk ? "Disk nearly full: " : "";
   const settledLimit = rules.settledAfterDays === null ? null : rules.settledAfterDays * DAY_MS;

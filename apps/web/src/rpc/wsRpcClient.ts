@@ -324,7 +324,9 @@ export interface WsRpcClient {
     readonly worktreeCleanupStatus: RpcUnaryNoArgMethod<
       typeof WS_METHODS.unoComputerWorktreeCleanupStatus
     >;
-    readonly worktreeCleanupRun: RpcUnaryNoArgMethod<typeof WS_METHODS.unoComputerWorktreeCleanupRun>;
+    readonly worktreeCleanupRun: RpcUnaryNoArgMethod<
+      typeof WS_METHODS.unoComputerWorktreeCleanupRun
+    >;
     readonly resourceAction: RpcUnaryMethod<typeof WS_METHODS.unoComputerResourceAction>;
   };
   readonly files: {

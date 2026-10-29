@@ -67,7 +67,8 @@ export function decodeDayChoice(value: string): number | null {
 
 export function reportEntryLine(entry: StorageCleanupReportEntry): string {
   const title = entry.threadTitle ?? entry.path ?? "A chat copy";
-  const size = entry.bytes !== null && entry.outcome === "removed" ? ` · ${formatBytes(entry.bytes)}` : "";
+  const size =
+    entry.bytes !== null && entry.outcome === "removed" ? ` · ${formatBytes(entry.bytes)}` : "";
   const saved = entry.saved ? " · changes saved" : "";
   return `${title}: ${entry.reason}${size}${saved}`;
 }

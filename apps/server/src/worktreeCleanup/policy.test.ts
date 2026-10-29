@@ -135,7 +135,10 @@ describe("threadBusyReason", () => {
     ).toBe("The agent is working in this chat");
     const running = thread({}, 2 * 60 * 60_000);
     expect(
-      threadBusyReason({ ...running, latestTurn: { ...running.latestTurn!, state: "running" } }, NOW),
+      threadBusyReason(
+        { ...running, latestTurn: { ...running.latestTurn!, state: "running" } },
+        NOW,
+      ),
     ).toBe("The agent is working in this chat");
   });
 
@@ -215,10 +218,18 @@ describe("liveThreadVerdict", () => {
 
   it("removes an archived chat 3 days after the archive", () => {
     expect(
-      liveThreadVerdict(thread({ archivedAt: ago(3 * DAY_MS), pinnedAt: ago(9 * DAY_MS) }, 10 * DAY_MS), rules(), NOW),
+      liveThreadVerdict(
+        thread({ archivedAt: ago(3 * DAY_MS), pinnedAt: ago(9 * DAY_MS) }, 10 * DAY_MS),
+        rules(),
+        NOW,
+      ),
     ).toEqual({ remove: true, reason: "archived chat, quiet for 3 days" });
     expect(
-      liveThreadVerdict(thread({ archivedAt: ago(DAY_MS), latestTurn: null }, 10 * DAY_MS), rules(), NOW),
+      liveThreadVerdict(
+        thread({ archivedAt: ago(DAY_MS), latestTurn: null }, 10 * DAY_MS),
+        rules(),
+        NOW,
+      ),
     ).toEqual({ remove: false, reason: "Archived 1 day ago" });
     // A finished chat idle that long is Done anyway, archived or not.
     expect(
@@ -230,9 +241,9 @@ describe("liveThreadVerdict", () => {
     expect(
       liveThreadVerdict(thread({ pinnedAt: ago(20 * DAY_MS) }, 14 * DAY_MS), rules(), NOW),
     ).toEqual({ remove: true, reason: "not used for 14 days" });
-    expect(
-      liveThreadVerdict(thread({ latestTurn: null }, 13 * DAY_MS), rules(), NOW).remove,
-    ).toBe(false);
+    expect(liveThreadVerdict(thread({ latestTurn: null }, 13 * DAY_MS), rules(), NOW).remove).toBe(
+      false,
+    );
   });
 
   it("under disk pressure: Done right away, any chat after 3 days", () => {
@@ -243,7 +254,9 @@ describe("liveThreadVerdict", () => {
         NOW,
       ),
     ).toEqual({ remove: true, reason: "Disk nearly full: Done chat, quiet for 1 day" });
-    expect(liveThreadVerdict(thread({ pinnedAt: ago(DAY_MS) }, 3 * DAY_MS), rules(true), NOW)).toEqual({
+    expect(
+      liveThreadVerdict(thread({ pinnedAt: ago(DAY_MS) }, 3 * DAY_MS), rules(true), NOW),
+    ).toEqual({
       remove: true,
       reason: "Disk nearly full: not used for 3 days",
     });

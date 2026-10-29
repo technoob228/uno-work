@@ -31,7 +31,9 @@ export function useEnvironmentSupportsWorktreeCleanup(
 ): boolean {
   const primary = usePrimaryEnvironmentDescriptor();
   const saved = useSavedEnvironmentRuntimeStore((state) =>
-    environmentId ? descriptorSupportsWorktreeCleanup(state.byId[environmentId]?.descriptor) : false,
+    environmentId
+      ? descriptorSupportsWorktreeCleanup(state.byId[environmentId]?.descriptor)
+      : false,
   );
   if (!environmentId) return false;
   if (primary?.environmentId === environmentId) return descriptorSupportsWorktreeCleanup(primary);

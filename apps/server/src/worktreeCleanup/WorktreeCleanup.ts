@@ -313,7 +313,9 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
     if (yield* containsProjectRoot(real, [input.project, ...input.projects])) {
       return new Keep("a project's main folder is inside it");
     }
-    const dotGit = yield* Effect.promise(() => lstat(nodePath.join(real, ".git")).catch(() => null));
+    const dotGit = yield* Effect.promise(() =>
+      lstat(nodePath.join(real, ".git")).catch(() => null),
+    );
     if (dotGit === null || !dotGit.isFile()) return new Keep("it isn't a linked git worktree");
     const repoCwd = yield* realPathOrNull(input.project.workspaceRoot);
     if (repoCwd === null) return new Keep("the project's folder is missing");
@@ -389,7 +391,8 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
           ? deletedThreadVerdict(currentRules)
           : { remove: false as const, reason: "the chat is back" };
       }
-      if (thread === null) return { remove: false as const, reason: "the chat changed during the check" };
+      if (thread === null)
+        return { remove: false as const, reason: "the chat changed during the check" };
       const busy = threadBusyReason(thread, at);
       return busy !== null
         ? { remove: false as const, reason: busy }
@@ -512,9 +515,7 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
           }
           return null;
         });
-        const saved = yield* saveAndVerify.pipe(
-          Effect.tapError(() => rollback),
-        );
+        const saved = yield* saveAndVerify.pipe(Effect.tapError(() => rollback));
         if (saved instanceof Keep) {
           yield* rollback;
           return keep(saved.reason);
@@ -586,63 +587,64 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
     }
   });
 
-  const pass = Effect.fn("WorktreeCleanup.pass")(function* (
-    trigger: StorageCleanupReport["trigger"],
-  ) {
-    yield* Ref.set(runningRef, true);
-    const startedAt = now();
-    const space = yield* deps.diskSpace(deps.worktreesDir);
-    const rules = effectiveRules(yield* deps.settings, isLowDisk(space));
-    const entries: StorageCleanupReportEntry[] = [];
-    if (cleanupEnabled(rules)) {
-      yield* sweep(rules, startedAt, entries).pipe(
-        Effect.catch((error) =>
-          Effect.gen(function* () {
-            entries.push({
-              kind: "worktree",
-              outcome: "failed",
-              reason: error.message,
-              path: null,
-              projectPath: null,
-              threadId: null,
-              threadTitle: null,
-              bytes: null,
-              saved: false,
-            });
-            yield* Effect.logWarning("worktree cleanup pass failed", { error: error.message });
-          }),
-        ),
-      );
-    }
-    const counts = { removed: 0, kept: 0, failed: 0 };
-    let bytesFreed = 0;
-    for (const item of entries) {
-      counts[item.outcome]++;
-      if (item.outcome === "removed") bytesFreed += item.bytes ?? 0;
-    }
-    const rank = (item: StorageCleanupReportEntry) =>
-      item.outcome === "failed" ? 0 : item.outcome === "removed" ? 1 : 2;
-    const report: StorageCleanupReport = {
-      trigger,
-      startedAt: new Date(startedAt).toISOString(),
-      finishedAt: new Date(now()).toISOString(),
-      lowDisk: rules.lowDisk,
-      entries: [...entries].sort((a, b) => rank(a) - rank(b)).slice(0, REPORT_ENTRY_LIMIT),
-      counts,
-      omittedCount: Math.max(0, entries.length - REPORT_ENTRY_LIMIT),
-      bytesFreed,
-    };
-    yield* Ref.set(reportRef, report);
-    if (counts.removed > 0 || counts.failed > 0 || trigger === "manual") {
-      yield* Effect.logInfo("worktree cleanup pass", {
+  const pass = Effect.fn("WorktreeCleanup.pass")(
+    function* (trigger: StorageCleanupReport["trigger"]) {
+      yield* Ref.set(runningRef, true);
+      const startedAt = now();
+      const space = yield* deps.diskSpace(deps.worktreesDir);
+      const rules = effectiveRules(yield* deps.settings, isLowDisk(space));
+      const entries: StorageCleanupReportEntry[] = [];
+      if (cleanupEnabled(rules)) {
+        yield* sweep(rules, startedAt, entries).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              entries.push({
+                kind: "worktree",
+                outcome: "failed",
+                reason: error.message,
+                path: null,
+                projectPath: null,
+                threadId: null,
+                threadTitle: null,
+                bytes: null,
+                saved: false,
+              });
+              yield* Effect.logWarning("worktree cleanup pass failed", { error: error.message });
+            }),
+          ),
+        );
+      }
+      const counts = { removed: 0, kept: 0, failed: 0 };
+      let bytesFreed = 0;
+      for (const item of entries) {
+        counts[item.outcome]++;
+        if (item.outcome === "removed") bytesFreed += item.bytes ?? 0;
+      }
+      const rank = (item: StorageCleanupReportEntry) =>
+        item.outcome === "failed" ? 0 : item.outcome === "removed" ? 1 : 2;
+      const report: StorageCleanupReport = {
         trigger,
+        startedAt: new Date(startedAt).toISOString(),
+        finishedAt: new Date(now()).toISOString(),
         lowDisk: rules.lowDisk,
-        ...counts,
+        entries: [...entries].sort((a, b) => rank(a) - rank(b)).slice(0, REPORT_ENTRY_LIMIT),
+        counts,
+        omittedCount: Math.max(0, entries.length - REPORT_ENTRY_LIMIT),
         bytesFreed,
-      });
-    }
-    return report;
-  }, Effect.ensuring(Effect.suspend(() => Ref.set(runningRef, false))));
+      };
+      yield* Ref.set(reportRef, report);
+      if (counts.removed > 0 || counts.failed > 0 || trigger === "manual") {
+        yield* Effect.logInfo("worktree cleanup pass", {
+          trigger,
+          lowDisk: rules.lowDisk,
+          ...counts,
+          bytesFreed,
+        });
+      }
+      return report;
+    },
+    Effect.ensuring(Effect.suspend(() => Ref.set(runningRef, false))),
+  );
 
   const automaticQueued = yield* Ref.make(false);
   const worker = yield* makeDrainableWorker(
@@ -686,12 +688,14 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
         const repoCwd = project === null ? null : yield* realPathOrNull(project.workspaceRoot);
         if (repoCwd === null) {
           return yield* new WorktreeCleanupError({
-            detail: "This chat's copy was cleaned up and its project folder is gone, so it can't come back",
+            detail:
+              "This chat's copy was cleaned up and its project folder is gone, so it can't come back",
           });
         }
         const ref = savedRefFor(thread.id);
         const hasSnapshot = ref !== null && (yield* refExists(deps.git, repoCwd, ref));
-        const base = hasSnapshot && ref !== null ? yield* snapshotBase(deps.git, repoCwd, ref) : null;
+        const base =
+          hasSnapshot && ref !== null ? yield* snapshotBase(deps.git, repoCwd, ref) : null;
         const created = yield* recreateWorktree(deps.git, {
           repoCwd,
           worktreePath,
@@ -708,9 +712,10 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
         );
         const filesDir = savedFilesDir(thread.id);
         const restore = Effect.gen(function* () {
-          const restored = hasSnapshot && ref !== null
-            ? yield* restoreSnapshot(deps.git, worktreePath, ref)
-            : ("none" as const);
+          const restored =
+            hasSnapshot && ref !== null
+              ? yield* restoreSnapshot(deps.git, worktreePath, ref)
+              : ("none" as const);
           const envFiles = filesDir === null ? 0 : yield* restoreEnvFiles(filesDir, worktreePath);
           return { restored, envFiles };
         });
@@ -806,7 +811,10 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
       };
       yield* Effect.sleep(FIRST_PASS_DELAY).pipe(
         Effect.andThen(
-          requestPass.pipe(Effect.andThen(worker.drain), Effect.repeat(Schedule.spaced(PASS_INTERVAL))),
+          requestPass.pipe(
+            Effect.andThen(worker.drain),
+            Effect.repeat(Schedule.spaced(PASS_INTERVAL)),
+          ),
         ),
         Effect.forkScoped,
       );

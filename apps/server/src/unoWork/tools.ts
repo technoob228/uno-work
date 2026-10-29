@@ -1297,7 +1297,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                     id: CHAT_COPIES_ID,
                     folder: displayPath(copies.worktreesDir, deps.home),
                     copies: copies.copies,
-                    size: copies.bytes === null ? "too big to measure quickly" : formatBytes(copies.bytes),
+                    size:
+                      copies.bytes === null
+                        ? "too big to measure quickly"
+                        : formatBytes(copies.bytes),
                     cleanedAutomatically:
                       "Uno Work removes copies of deleted chats, of Done or archived chats quiet for 3 days and of any chat unused for 14 days (sooner when the disk is nearly full). Changes are saved first and the copy comes back on the chat's next message, without node_modules or build output.",
                     ...(last
