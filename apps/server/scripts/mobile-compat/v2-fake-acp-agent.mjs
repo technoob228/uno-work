@@ -38,10 +38,12 @@ const chunk = (sessionId, text) =>
 
 async function prompt(id, params) {
   const sessionId = params.sessionId;
-  const text = (params.prompt ?? [])
+  const raw = (params.prompt ?? [])
     .map((block) => (block && block.type === "text" ? block.text : ""))
-    .join(" ")
-    .trim();
+    .join(" ");
+  // Work prepends its instructions to the first prompt: answer the person's
+  // words only (the instructions mention «approve» and friends).
+  const text = raw.split("</uno-work-instructions>").pop().trim();
   cancelled.delete(sessionId);
 
   if (/approve/i.test(text)) {
