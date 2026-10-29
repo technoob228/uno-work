@@ -13,8 +13,15 @@ import {
   buildRemoteStopScript,
   buildRemoteT3RunnerScript,
   describeReadinessCause,
+  fetchLoopbackSshJson,
+  type HealthProbeAction,
+  type HealthProbeOutcome,
+  INITIAL_HEALTH_PROBE_STATE,
   issueRemotePairingToken,
+  nextHealthProbeAction,
+  probeHttpHealth,
   REMOTE_PICK_PORT_SCRIPT,
+  SSH_HTTP_BRIDGE_TIMEOUT_MS,
   SshEnvironmentManager,
   waitForHttpReady,
 } from "./tunnel.ts";
@@ -67,6 +74,17 @@ const testHttpClient = HttpClient.make((request) =>
 );
 
 const hangingHttpClient = HttpClient.make(() => Effect.never);
+
+/** Answers 200 everywhere except `/api/health`, which hangs or answers `health`. */
+const makeHealthHttpClient = (health: "hang" | number) =>
+  HttpClient.make((request) => {
+    if (new URL(request.url).pathname !== "/api/health") {
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })));
+    }
+    return health === "hang"
+      ? Effect.never
+      : Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: health })));
+  });
 
 const testNetService = NetService.of({
   canListenOnHost: () => Effect.succeed(true),
@@ -382,10 +400,14 @@ describe("ssh tunnel supervision", () => {
     port: 2222,
   } as const;
 
-  function makeSupervisionHarness(options?: { readonly failLaunchAfterFirst?: string }) {
+  function makeSupervisionHarness(options?: {
+    readonly failLaunchAfterFirst?: string;
+    readonly httpClient?: HttpClient.HttpClient;
+  }) {
     const tunnelProcesses: ControllableProcess[] = [];
     const states: Array<{ state: string; localPort: number | null }> = [];
     let launchCount = 0;
+    let stopCount = 0;
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.sync(() => {
         const args = commandArgs(command);
@@ -401,13 +423,16 @@ describe("ssh tunnel supervision", () => {
           }
           return makeSuccessfulProcess('{"remotePort":3773}\n');
         }
+        if (args.includes("sh")) {
+          stopCount += 1;
+        }
         return makeSuccessfulProcess("\n");
       }),
     );
     const layer = Layer.mergeAll(
       NodeServices.layer,
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(HttpClient.HttpClient, options?.httpClient ?? testHttpClient),
       Layer.succeed(NetService, testNetService),
       SshPasswordPrompt.disabledLayer,
       SshEnvironmentManager.layer({
@@ -419,6 +444,7 @@ describe("ssh tunnel supervision", () => {
     return {
       tunnelProcesses,
       spawnedTunnelCount: () => tunnelProcesses.length,
+      remoteStopCount: () => stopCount,
       states,
       layer,
     };
@@ -467,6 +493,45 @@ describe("ssh tunnel supervision", () => {
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 
+  it.effect("respawns only the local tunnel when health probes go unanswered", () => {
+    const harness = makeSupervisionHarness({ httpClient: makeHealthHttpClient("hang") });
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(target);
+      assert.equal(harness.spawnedTunnelCount(), 1);
+
+      // Four 30 s intervals + 15 s probe timeouts = 180 s; the 30 s
+      // confirmation probe is still pending at 200 s.
+      yield* TestClock.adjust(Duration.seconds(200));
+      assert.equal(harness.spawnedTunnelCount(), 1);
+      assert.isFalse(harness.states.some((entry) => entry.state === "reconnecting"));
+
+      yield* TestClock.adjust(Duration.seconds(15));
+      assert.equal(harness.spawnedTunnelCount(), 2);
+      assert.equal(harness.states.at(-1)?.state, "up");
+      assert.equal(harness.states.at(-1)?.localPort, 41_773);
+
+      yield* TestClock.adjust(Duration.minutes(10));
+      assert.equal(harness.remoteStopCount(), 0);
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.effect("restarts the remote daemon when it answers /api/health with an error", () => {
+    const harness = makeSupervisionHarness({ httpClient: makeHealthHttpClient(500) });
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(target);
+
+      yield* TestClock.adjust(Duration.seconds(31));
+      assert.equal(harness.remoteStopCount(), 0);
+
+      yield* TestClock.adjust(Duration.seconds(30));
+      assert.equal(harness.remoteStopCount(), 1);
+      assert.equal(harness.spawnedTunnelCount(), 2);
+      assert.equal(harness.states.at(-1)?.state, "up");
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
   it.effect("does not resurrect a tunnel the user disconnected", () => {
     const harness = makeSupervisionHarness();
     return Effect.gen(function* () {
@@ -481,4 +546,109 @@ describe("ssh tunnel supervision", () => {
       assert.equal(harness.states.filter((entry) => entry.state === "down").length, 1);
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
+});
+
+describe("ssh tunnel health policy", () => {
+  function runOutcomes(outcomes: ReadonlyArray<HealthProbeOutcome>): HealthProbeAction[] {
+    let state = INITIAL_HEALTH_PROBE_STATE;
+    return outcomes.map((outcome) => {
+      const decision = nextHealthProbeAction(state, outcome);
+      state = decision.state;
+      return decision.action;
+    });
+  }
+
+  it("restarts the remote daemon after two consecutive non-2xx answers", () => {
+    assert.deepStrictEqual(runOutcomes(["unhealthy", "unhealthy"]), ["none", "restart-remote"]);
+  });
+
+  it("asks for a confirmed tunnel respawn only after four unanswered probes", () => {
+    assert.deepStrictEqual(
+      runOutcomes(["unreachable", "unreachable", "unreachable", "unreachable"]),
+      ["none", "none", "none", "confirm-then-respawn-tunnel"],
+    );
+  });
+
+  it("never restarts the remote daemon because probes went unanswered", () => {
+    const actions = runOutcomes(Array.from({ length: 50 }, () => "unreachable" as const));
+    assert.notInclude(actions, "restart-remote");
+  });
+
+  it("resets the streak when a probe in between succeeds or changes kind", () => {
+    assert.deepStrictEqual(
+      runOutcomes([
+        "unreachable",
+        "unreachable",
+        "unreachable",
+        "ok",
+        "unreachable",
+        "unreachable",
+        "unreachable",
+        "unhealthy",
+        "unreachable",
+        "unhealthy",
+        "ok",
+        "unhealthy",
+      ]),
+      Array.from({ length: 12 }, () => "none"),
+    );
+  });
+
+  it.effect("classifies probe answers: 2xx ok, non-2xx unhealthy, no answer unreachable", () =>
+    Effect.gen(function* () {
+      const baseUrl = "http://127.0.0.1:41773/";
+      const ok = yield* probeHttpHealth({ baseUrl, timeoutMs: 15_000 }).pipe(
+        Effect.provideService(HttpClient.HttpClient, makeHealthHttpClient(200)),
+      );
+      assert.equal(ok.outcome, "ok");
+      const unhealthy = yield* probeHttpHealth({ baseUrl, timeoutMs: 15_000 }).pipe(
+        Effect.provideService(HttpClient.HttpClient, makeHealthHttpClient(503)),
+      );
+      assert.equal(unhealthy.outcome, "unhealthy");
+      assert.equal(unhealthy.status, 503);
+
+      const fiber = yield* Effect.forkChild(
+        probeHttpHealth({ baseUrl, timeoutMs: 15_000 }).pipe(
+          Effect.provideService(HttpClient.HttpClient, hangingHttpClient),
+        ),
+      );
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.seconds(15));
+      const unreachable = yield* Fiber.join(fiber);
+      assert.equal(unreachable.outcome, "unreachable");
+      assert.isNull(unreachable.status);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("fails a hung desktop-bridge request without an ssh_http status", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(
+        Effect.result(
+          fetchLoopbackSshJson<unknown>({
+            httpBaseUrl: "http://127.0.0.1:41773/",
+            pathname: "/api/auth/ws-token",
+            method: "POST",
+          }),
+        ),
+      );
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.millis(SSH_HTTP_BRIDGE_TIMEOUT_MS));
+
+      const result = yield* Fiber.join(fiber);
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.equal(result.failure._tag, "SshHttpBridgeError");
+        assert.equal(
+          result.failure.message,
+          "No answer from http://127.0.0.1:41773/api/auth/ws-token within 20 s.",
+        );
+        assert.isUndefined(result.failure.status);
+        assert.notInclude(result.failure.message, "[ssh_http:");
+      }
+    }).pipe(
+      Effect.provide(
+        Layer.merge(TestClock.layer(), Layer.succeed(HttpClient.HttpClient, hangingHttpClient)),
+      ),
+    ),
+  );
 });

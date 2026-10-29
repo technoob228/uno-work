@@ -17,6 +17,7 @@ import {
   type WsConnectionMetadata,
   WS_RECONNECT_MAX_RETRIES,
 } from "./wsConnectionState";
+import { DEFAULT_WS_HEARTBEAT, WS_OPEN_TIMEOUT_MS, type WsHeartbeatConfig } from "./wsHeartbeat";
 
 export interface WsProtocolCloseContext {
   readonly intentional: boolean;
@@ -41,6 +42,8 @@ export interface WsProtocolLifecycleHandlers {
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
   readonly onOpen?: () => void;
+  /** Any inbound frame on the socket: the cheapest proof the connection is alive. */
+  readonly onInbound?: () => void;
   readonly onHeartbeatPing?: () => void;
   readonly onHeartbeatPong?: () => void;
   readonly onHeartbeatTimeout?: () => void;
@@ -172,9 +175,15 @@ function composeLifecycleHandlers(
   };
 }
 
+export interface WsRpcProtocolOptions {
+  /** Overrides the app-wide heartbeat (tests use a fast one). */
+  readonly heartbeat?: WsHeartbeatConfig;
+}
+
 export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
   handlers?: WsProtocolLifecycleHandlers,
+  options?: WsRpcProtocolOptions,
 ) {
   const lifecycle = composeLifecycleHandlers(handlers);
   const resolvedUrl =
@@ -203,6 +212,14 @@ export function createWsRpcProtocolLayer(
         },
         { once: true },
       );
+      if (handlers?.onInbound) {
+        const onInbound = handlers.onInbound;
+        socket.addEventListener("message", () => {
+          if (lifecycle.isActive()) {
+            onInbound();
+          }
+        });
+      }
       socket.addEventListener(
         "error",
         () => {
@@ -229,7 +246,7 @@ export function createWsRpcProtocolLayer(
       return socket;
     },
   );
-  const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(
+  const socketLayer = Socket.layerWebSocket(resolvedUrl, { openTimeout: WS_OPEN_TIMEOUT_MS }).pipe(
     Layer.provide(trackingWebSocketConstructorLayer),
   );
   const retryPolicy = Schedule.addDelay(Schedule.recurs(WS_RECONNECT_MAX_RETRIES), (retryCount) =>
@@ -241,6 +258,7 @@ export function createWsRpcProtocolLayer(
       RpcClient.makeProtocolSocket({
         retryPolicy,
         retryTransientErrors: true,
+        heartbeat: options?.heartbeat ?? DEFAULT_WS_HEARTBEAT,
       }),
       (protocol) => ({
         ...protocol,

@@ -56,6 +56,10 @@ export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
   readonly isConnectionHealthy: () => boolean;
+  /** Any frame arrived on the socket recently (see WsTransport.hasRecentInbound). */
+  readonly hasRecentInbound: () => boolean;
+  /** Waits for any inbound frame without touching the socket (see WsTransport.probeLiveness). */
+  readonly probeLiveness: (timeoutMs?: number) => Promise<boolean>;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -372,6 +376,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       await transport.reconnect();
     },
     isConnectionHealthy: () => transport.isConnectionHealthy(),
+    hasRecentInbound: () => transport.hasRecentInbound(),
+    probeLiveness: (timeoutMs) => transport.probeLiveness(timeoutMs),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),

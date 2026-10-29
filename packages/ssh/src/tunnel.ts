@@ -16,6 +16,7 @@ import {
   Option,
   Path,
   Ref,
+  Result,
   Schema,
   Scope,
   Schedule,
@@ -52,21 +53,93 @@ import {
 
 export const DEFAULT_REMOTE_PORT = 3773;
 const REMOTE_PORT_SCAN_WINDOW = 200;
+// Timeouts below are tuned for slow links (RTT up to ~550 ms, jitter, short
+// loss bursts): one HTTP request through a fresh ssh channel costs ~2 RTT, so
+// anything that crosses the tunnel needs seconds, not hundreds of ms.
 const SSH_READY_TIMEOUT_MS = 20_000;
-const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
+/** Per-attempt budget for HTTP probes that cross the ssh tunnel. */
+const SSH_READY_PROBE_TIMEOUT_MS = 5_000;
+/** Per-attempt budget for the probe the launch script runs on the remote loopback. */
+const REMOTE_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 60_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+/** Liveness check before reusing an existing tunnel; failing it closes the tunnel. */
+const EXISTING_TUNNEL_REUSE_TIMEOUT_MS = 10_000;
+const EXISTING_TUNNEL_REUSE_PROBE_TIMEOUT_MS = 8_000;
 const SUPERVISOR_BACKOFF_BASE_MS = 1_000;
 const SUPERVISOR_BACKOFF_MAX_MS = 60_000;
 const HEALTH_PROBE_INTERVAL_MS = 30_000;
-const HEALTH_PROBE_TIMEOUT_MS = 5_000;
+const HEALTH_PROBE_TIMEOUT_MS = 15_000;
+/** Last-chance probe before respawning a tunnel whose probes went unanswered. */
+const HEALTH_CONFIRM_PROBE_TIMEOUT_MS = 30_000;
+/** Consecutive non-2xx answers before the remote daemon is restarted. */
+const HEALTH_UNHEALTHY_RESTART_THRESHOLD = 2;
+/** Consecutive unanswered probes before the local tunnel is respawned. */
+const HEALTH_UNREACHABLE_RESPAWN_THRESHOLD = 4;
+/** Upper bound for one desktop-bridge request through the tunnel. */
+export const SSH_HTTP_BRIDGE_TIMEOUT_MS = 20_000;
 
 /** Exponential 1s→60s with ±25% jitter, driven by attempt count (not wall clock). */
 function supervisorBackoffDelayMs(attempt: number): number {
   const exponent = Math.min(Math.max(attempt, 1) - 1, 6);
   const base = Math.min(SUPERVISOR_BACKOFF_BASE_MS * 2 ** exponent, SUPERVISOR_BACKOFF_MAX_MS);
   return Math.round(base * (0.75 + Math.random() * 0.5));
+}
+
+/**
+ * - `ok`: the daemon answered 2xx.
+ * - `unhealthy`: the daemon answered, but with a non-2xx status (HTTP up,
+ *   persistence broken) — the half-dead case worth a remote restart.
+ * - `unreachable`: no HTTP answer (timeout, connection error). Usually a slow
+ *   or lossy link, so it must never restart the remote daemon.
+ */
+export type HealthProbeOutcome = "ok" | "unhealthy" | "unreachable";
+
+export type HealthProbeAction = "none" | "confirm-then-respawn-tunnel" | "restart-remote";
+
+export interface HealthProbeState {
+  readonly unhealthyStreak: number;
+  readonly unreachableStreak: number;
+}
+
+export const INITIAL_HEALTH_PROBE_STATE: HealthProbeState = {
+  unhealthyStreak: 0,
+  unreachableStreak: 0,
+};
+
+/**
+ * Pure health-monitor policy. Any outcome other than the current streak's kind
+ * resets that streak, so only uninterrupted runs of the same failure act.
+ * Thresholds keep firing on every further failure (the caller resets the state
+ * after a successful action), so a failed recovery is retried on the next probe.
+ */
+export function nextHealthProbeAction(
+  state: HealthProbeState,
+  outcome: HealthProbeOutcome,
+): { readonly state: HealthProbeState; readonly action: HealthProbeAction } {
+  switch (outcome) {
+    case "ok":
+      return { state: INITIAL_HEALTH_PROBE_STATE, action: "none" };
+    case "unhealthy": {
+      const next = { unhealthyStreak: state.unhealthyStreak + 1, unreachableStreak: 0 };
+      return {
+        state: next,
+        action:
+          next.unhealthyStreak >= HEALTH_UNHEALTHY_RESTART_THRESHOLD ? "restart-remote" : "none",
+      };
+    }
+    case "unreachable": {
+      const next = { unhealthyStreak: 0, unreachableStreak: state.unreachableStreak + 1 };
+      return {
+        state: next,
+        action:
+          next.unreachableStreak >= HEALTH_UNREACHABLE_RESPAWN_THRESHOLD
+            ? "confirm-then-respawn-tunnel"
+            : "none",
+      };
+    }
+  }
 }
 
 export interface RemoteT3RunnerOptions {
@@ -610,7 +683,7 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_REMOTE_PORT_SCAN_WINDOW: String(REMOTE_PORT_SCAN_WINDOW),
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
-    T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
+    T3_READY_PROBE_TIMEOUT_MS: String(REMOTE_READY_PROBE_TIMEOUT_MS),
   });
 }
 
@@ -905,6 +978,55 @@ export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(functio
   });
 });
 
+/**
+ * One bounded GET, classified for the health monitor: any HTTP answer is
+ * `ok`/`unhealthy` by status, while timeouts and transport errors are
+ * `unreachable`. Never fails.
+ */
+export const probeHttpHealth = Effect.fn("ssh/tunnel.probeHttpHealth")(function* (input: {
+  readonly baseUrl: string;
+  readonly path?: string;
+  readonly timeoutMs: number;
+}): Effect.fn.Return<
+  {
+    readonly outcome: HealthProbeOutcome;
+    readonly status: number | null;
+    readonly detail: unknown;
+  },
+  never,
+  HttpClient.HttpClient
+> {
+  const requestUrl = new URL(input.path ?? "/api/health", input.baseUrl).toString();
+  const client = yield* HttpClient.HttpClient;
+  const result = yield* client.execute(HttpClientRequest.get(requestUrl)).pipe(
+    Effect.tap((response) => response.text.pipe(Effect.ignore)),
+    Effect.map((response) => response.status),
+    Effect.timeoutOption(Duration.millis(input.timeoutMs)),
+    Effect.result,
+  );
+  if (Result.isFailure(result)) {
+    return {
+      outcome: "unreachable",
+      status: null,
+      detail: describeReadinessCause(result.failure),
+    } as const;
+  }
+  return Option.match(result.success, {
+    onNone: () =>
+      ({
+        outcome: "unreachable",
+        status: null,
+        detail: { kind: "probe-timeout", probeTimeoutMs: input.timeoutMs, requestUrl },
+      }) as const,
+    onSome: (status) =>
+      ({
+        outcome: status >= 200 && status < 300 ? "ok" : "unhealthy",
+        status,
+        detail: null,
+      }) as const,
+  });
+});
+
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname
     .trim()
@@ -940,16 +1062,14 @@ function resolveLoopbackSshHttpUrl(
   });
 }
 
-export const fetchLoopbackSshJson = Effect.fn("ssh/tunnel.fetchLoopbackSshJson")(function* <
-  T,
->(input: {
-  readonly httpBaseUrl: unknown;
-  readonly pathname: string;
-  readonly method?: "GET" | "POST";
-  readonly bearerToken?: unknown;
-  readonly body?: unknown;
-}): Effect.fn.Return<T, SshHttpBridgeError, HttpClient.HttpClient> {
-  const requestUrl = yield* resolveLoopbackSshHttpUrl(input.httpBaseUrl, input.pathname);
+const fetchLoopbackSshJsonUnbounded = Effect.fnUntraced(function* <T>(
+  input: {
+    readonly method?: "GET" | "POST";
+    readonly bearerToken?: unknown;
+    readonly body?: unknown;
+  },
+  requestUrl: URL,
+): Effect.fn.Return<T, SshHttpBridgeError, HttpClient.HttpClient> {
   const bearerToken =
     typeof input.bearerToken === "string" && input.bearerToken.trim().length > 0
       ? input.bearerToken
@@ -998,6 +1118,37 @@ export const fetchLoopbackSshJson = Effect.fn("ssh/tunnel.fetchLoopbackSshJson")
         }),
     ),
   )) as T;
+});
+
+export const fetchLoopbackSshJson = Effect.fn("ssh/tunnel.fetchLoopbackSshJson")(function* <
+  T,
+>(input: {
+  readonly httpBaseUrl: unknown;
+  readonly pathname: string;
+  readonly method?: "GET" | "POST";
+  readonly bearerToken?: unknown;
+  readonly body?: unknown;
+  /** Defaults to {@link SSH_HTTP_BRIDGE_TIMEOUT_MS}. */
+  readonly timeoutMs?: number;
+}): Effect.fn.Return<T, SshHttpBridgeError, HttpClient.HttpClient> {
+  const requestUrl = yield* resolveLoopbackSshHttpUrl(input.httpBaseUrl, input.pathname);
+  const timeoutMs = input.timeoutMs ?? SSH_HTTP_BRIDGE_TIMEOUT_MS;
+  // Covers connect, status and body. Deliberately no `[ssh_http:NNN]` prefix
+  // and no status: callers treat that prefix as an HTTP (auth) answer, while a
+  // timeout only means the link is slow or down.
+  const timeoutError = new SshHttpBridgeError({
+    message: `No answer from ${requestUrl.toString()} within ${Math.round(timeoutMs / 1_000)} s.`,
+    cause: { kind: "bridge-timeout", timeoutMs },
+  });
+  return yield* fetchLoopbackSshJsonUnbounded<T>(input, requestUrl).pipe(
+    Effect.timeoutOption(Duration.millis(timeoutMs)),
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail(timeoutError),
+        onSome: Effect.succeed,
+      }),
+    ),
+  );
 });
 
 const reserveLocalTunnelPort = Effect.fn("ssh/tunnel.reserveLocalTunnelPort")(function* () {
@@ -1608,43 +1759,48 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
    * exercises a real database write on the remote, so this catches half-dead
    * daemons (HTTP up, persistence broken) that a plain liveness check would
    * miss — the failure mode that silenced the Telegram assistant for two
-   * days. Two consecutive failures with a live ssh process trigger a
-   * non-interactive remote daemon restart; a dead ssh process is the tunnel
-   * supervisor's job, not ours.
+   * days. The policy lives in `nextHealthProbeAction`:
+   * - the daemon answering non-2xx twice in a row restarts the remote daemon;
+   * - unanswered probes (slow or lossy link) never touch the remote daemon:
+   *   after a streak and a failed long confirmation probe only the local ssh
+   *   process is replaced, which reuses the running daemon and its sessions.
+   * Actions need a live ssh process; a dead one is the supervisor's job.
    */
   const monitorTunnelEntryHealth = Effect.fn("ssh/tunnel.monitorTunnelEntryHealth")(function* (
     entry: SshTunnelEntry,
     runner?: RemoteT3RunnerOptions,
   ): Effect.fn.Return<void, never, SshEnvironmentEffectContext> {
-    let consecutiveFailures = 0;
+    let probeState = INITIAL_HEALTH_PROBE_STATE;
     for (;;) {
       yield* supervisedSleep(HEALTH_PROBE_INTERVAL_MS);
       if (tunnels.get(entry.key) !== entry) {
         return;
       }
-      const probeExit = yield* Effect.exit(
-        waitForHttpReady({
-          baseUrl: entry.httpBaseUrl,
-          path: "/api/health",
-          timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
-        }),
-      );
+      const probe = yield* probeHttpHealth({
+        baseUrl: entry.httpBaseUrl,
+        path: "/api/health",
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+      });
       if (tunnels.get(entry.key) !== entry) {
         return;
       }
-      if (Exit.isSuccess(probeExit)) {
-        consecutiveFailures = 0;
+      const decision = nextHealthProbeAction(probeState, probe.outcome);
+      probeState = decision.state;
+      if (probe.outcome === "ok") {
         continue;
       }
-      consecutiveFailures += 1;
       yield* Effect.logWarning("ssh.tunnel.health.probe.failed", {
         ...sshTargetLogFields(entry.target),
         key: entry.key,
         localPort: entry.localPort,
-        consecutiveFailures,
-        cause: probeExit.cause,
+        outcome: probe.outcome,
+        status: probe.status,
+        unhealthyStreak: probeState.unhealthyStreak,
+        unreachableStreak: probeState.unreachableStreak,
+        action: decision.action,
+        detail: probe.detail,
       });
-      if (consecutiveFailures < 2) {
+      if (decision.action === "none") {
         continue;
       }
       const processRunning = yield* entry.process.isRunning.pipe(Effect.orElseSucceed(() => false));
@@ -1652,7 +1808,52 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         // Dead tunnel process: the supervisor is already respawning it.
         continue;
       }
-      yield* emitTunnelState(entry, "reconnecting", { attempt: consecutiveFailures });
+
+      if (decision.action === "confirm-then-respawn-tunnel") {
+        const confirmation = yield* probeHttpHealth({
+          baseUrl: entry.httpBaseUrl,
+          path: "/api/health",
+          timeoutMs: HEALTH_CONFIRM_PROBE_TIMEOUT_MS,
+        });
+        if (tunnels.get(entry.key) !== entry) {
+          return;
+        }
+        if (confirmation.outcome !== "unreachable") {
+          // The daemon answered after all: slow link, not a dead tunnel. A
+          // non-2xx answer starts an `unhealthy` streak instead.
+          probeState = nextHealthProbeAction(probeState, confirmation.outcome).state;
+          yield* Effect.logInfo("ssh.tunnel.health.confirm.answered", {
+            ...sshTargetLogFields(entry.target),
+            key: entry.key,
+            outcome: confirmation.outcome,
+            status: confirmation.status,
+          });
+          continue;
+        }
+        const watchedChild = entry.process;
+        if (!(yield* watchedChild.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
+          continue;
+        }
+        // Kill only the local ssh process. The supervisor sees the exit and
+        // respawns it through `respawnTunnelProcess` (reusing the running
+        // remote daemon) on the same local port — emitting `reconnecting`
+        // and then `up` — exactly like after a network drop.
+        yield* Effect.logWarning("ssh.tunnel.health.tunnelRespawn", {
+          ...sshTargetLogFields(entry.target),
+          key: entry.key,
+          localPort: entry.localPort,
+          unreachableStreak: probeState.unreachableStreak,
+          detail: confirmation.detail,
+        });
+        yield* watchedChild
+          .kill({ killSignal: "SIGTERM", forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS })
+          .pipe(Effect.ignore);
+        probeState = INITIAL_HEALTH_PROBE_STATE;
+        continue;
+      }
+
+      // `restart-remote`: the daemon itself answered that it is broken.
+      yield* emitTunnelState(entry, "reconnecting", { attempt: probeState.unhealthyStreak });
       const authSecret = authSecrets.get(entry.key) ?? null;
       const authOptions: SshAuthOptions =
         authSecret === null
@@ -1675,7 +1876,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           remotePort: entry.remotePort,
         });
         yield* emitTunnelState(entry, "up");
-        consecutiveFailures = 0;
+        probeState = INITIAL_HEALTH_PROBE_STATE;
         continue;
       }
       yield* Effect.logWarning("ssh.tunnel.health.remoteRestart.failed", {
@@ -1832,7 +2033,12 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       // servers without the route answer 200 from the static catch-all, which
       // degrades this to the previous plain liveness check.
       const readinessExit = yield* Effect.exit(
-        waitForHttpReady({ baseUrl: entry.httpBaseUrl, path: "/api/health", timeoutMs: 2_000 }),
+        waitForHttpReady({
+          baseUrl: entry.httpBaseUrl,
+          path: "/api/health",
+          timeoutMs: EXISTING_TUNNEL_REUSE_TIMEOUT_MS,
+          probeTimeoutMs: EXISTING_TUNNEL_REUSE_PROBE_TIMEOUT_MS,
+        }),
       );
       if (Exit.isSuccess(readinessExit)) {
         yield* Effect.logDebug("ssh.environment.tunnel.reused", {

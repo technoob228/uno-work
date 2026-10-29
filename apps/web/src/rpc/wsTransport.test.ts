@@ -109,6 +109,16 @@ async function waitFor(assertion: () => void, timeoutMs = 1_000): Promise<void> 
   }
 }
 
+function sentRequests(socket: MockWebSocket): Array<{ id: string; tag: string }> {
+  return socket.sent
+    .map((raw) => JSON.parse(raw) as { _tag: string; id: string; tag: string })
+    .filter((message) => message._tag === "Request");
+}
+
+function sentPings(socket: MockWebSocket): number {
+  return socket.sent.filter((raw) => (JSON.parse(raw) as { _tag: string })._tag === "Ping").length;
+}
+
 function createTransport(...args: ConstructorParameters<typeof WsTransport>): WsTransport {
   const transport = new WsTransport(...args);
   transports.push(transport);
@@ -1453,6 +1463,7 @@ describe("WsTransport", () => {
         clientScope: {} as never,
         runtime,
       },
+      settleInboundWaiters: () => undefined,
       closeSession: (
         WsTransport.prototype as unknown as {
           closeSession: (session: {
@@ -1574,6 +1585,162 @@ describe("WsTransport", () => {
 
     await transport.dispose();
   }, 10_000);
+
+  describe("heartbeat on a slow link", () => {
+    const FAST_HEARTBEAT = { intervalMs: 40, maxSilentIntervals: 3 } as const;
+    const lifecycleWelcome = {
+      version: 1,
+      sequence: 1,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-local",
+          label: "Local environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/workspace",
+        projectName: "workspace",
+      },
+    };
+
+    it("keeps the socket while frames arrive, even when pongs never do", async () => {
+      const transport = createTransport("ws://localhost:3020", undefined, {
+        heartbeat: FAST_HEARTBEAT,
+      });
+      const listener = vi.fn();
+      const unsubscribe = transport.subscribe(
+        (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+        listener,
+      );
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      const socket = getSocket();
+      socket.open();
+      await waitFor(() => {
+        expect(sentRequests(socket)).toHaveLength(1);
+      });
+      const requestId = sentRequests(socket)[0]!.id;
+
+      // ~10 heartbeat intervals of steady traffic and not a single Pong: the
+      // old pinger declared the socket dead after the first missed pong.
+      for (let index = 0; index < 20; index += 1) {
+        socket.serverMessage(
+          JSON.stringify({ _tag: "Chunk", requestId, values: [lifecycleWelcome] }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(sentPings(socket)).toBeGreaterThanOrEqual(3);
+      expect(sockets).toHaveLength(1);
+      expect(socket.readyState).toBe(MockWebSocket.OPEN);
+      expect(transport.hasRecentInbound()).toBe(true);
+
+      unsubscribe();
+      await transport.dispose();
+    });
+
+    it("declares a silent socket dead and re-subscribes its streams on the next socket", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const transport = createTransport("ws://localhost:3020", undefined, {
+        heartbeat: FAST_HEARTBEAT,
+      });
+      const listener = vi.fn();
+      const unsubscribe = transport.subscribe(
+        (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+        listener,
+      );
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      const firstSocket = getSocket();
+      firstSocket.open();
+      await waitFor(() => {
+        expect(sentRequests(firstSocket)).toHaveLength(1);
+      });
+      firstSocket.serverMessage(
+        JSON.stringify({
+          _tag: "Chunk",
+          requestId: sentRequests(firstSocket)[0]!.id,
+          values: [lifecycleWelcome],
+        }),
+      );
+      await waitFor(() => {
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      // Total silence from now on: dead after 3 silent intervals.
+      await waitFor(() => {
+        expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
+      }, 2_000);
+
+      // Whichever socket comes next (protocol retry or a fresh session), a
+      // healthy server answers its pings, and the live subscription must be
+      // issued on it again. Before the fix the stream waited forever for
+      // chunks that the dead socket would never deliver.
+      const pongsSent = new Map<MockWebSocket, number>();
+      await waitFor(() => {
+        for (const socket of sockets) {
+          if (socket === firstSocket) continue;
+          if (socket.readyState === MockWebSocket.CONNECTING) {
+            socket.open();
+          }
+          if (socket.readyState === MockWebSocket.OPEN) {
+            const pings = sentPings(socket);
+            for (let index = pongsSent.get(socket) ?? 0; index < pings; index += 1) {
+              socket.serverMessage(JSON.stringify({ _tag: "Pong" }));
+            }
+            pongsSent.set(socket, pings);
+          }
+        }
+        const resubscribed = sockets.some(
+          (socket) =>
+            socket !== firstSocket &&
+            socket.readyState === MockWebSocket.OPEN &&
+            sentRequests(socket).some(
+              (request) => request.tag === WS_METHODS.subscribeServerLifecycle,
+            ),
+        );
+        expect(resubscribed).toBe(true);
+      }, 3_000);
+
+      unsubscribe();
+      await transport.dispose();
+    });
+
+    it("probes liveness without touching the socket", async () => {
+      const transport = createTransport("ws://localhost:3020", undefined, {
+        heartbeat: { intervalMs: 10_000, maxSilentIntervals: 3 },
+      });
+      const unsubscribe = transport.subscribe(
+        (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+        vi.fn(),
+      );
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      const socket = getSocket();
+      socket.open();
+      await waitFor(() => {
+        expect(sentRequests(socket)).toHaveLength(1);
+      });
+      expect(transport.hasRecentInbound()).toBe(false);
+
+      await expect(transport.probeLiveness(30)).resolves.toBe(false);
+      expect(socket.readyState).toBe(MockWebSocket.OPEN);
+
+      const probe = transport.probeLiveness(1_000);
+      socket.serverMessage(JSON.stringify({ _tag: "Pong" }));
+      await expect(probe).resolves.toBe(true);
+      expect(transport.hasRecentInbound()).toBe(true);
+      expect(sockets).toHaveLength(1);
+
+      unsubscribe();
+      await transport.dispose();
+    });
+  });
 
   it("backs off subscription retries only while the connection is unhealthy", () => {
     // Healthy: flat base cadence regardless of streak.
