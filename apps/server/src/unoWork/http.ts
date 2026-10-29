@@ -53,6 +53,7 @@ import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
@@ -254,6 +255,7 @@ const makeDeps = (input: {
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
+    const providerRegistry = Option.getOrNull(yield* Effect.serviceOption(ProviderRegistry));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
     const secretStore = Option.getOrNull(yield* Effect.serviceOption(ServerSecretStore));
     // What the assistant's bot-token card needs (Inbox, messenger, the late answer).
@@ -544,6 +546,7 @@ const makeDeps = (input: {
         createBoxStatus: (args) => unoCloud.createBoxStatus(args),
       },
       settings: serverSettings.getSettings,
+      ...(providerRegistry === null ? {} : { providers: providerRegistry.getProviders }),
       // The built-in assistant (assistant_connect): its pinned chat, its
       // Telegram, the connected tools — read-only; the window is the person's.
       assistant: {

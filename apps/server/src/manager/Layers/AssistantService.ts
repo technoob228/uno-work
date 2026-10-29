@@ -23,7 +23,7 @@ import {
   listAssistantConversations,
   pickAssistantChatToMigrate,
 } from "@t3tools/shared/assistantChat";
-import { rebaseEdit, ROUTING_PERSON_RULE } from "@t3tools/shared/assistantMemory";
+import { rebaseEdit } from "@t3tools/shared/assistantMemory";
 import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import {
   mergeInstructions,
@@ -37,6 +37,7 @@ import {
   RELEASED_0070_0105,
   SHIPPED_ASSISTANT_INSTRUCTIONS,
 } from "../assistantInstructionsHistory.ts";
+import { ROUTING_TEMPLATE, upgradeRoutingNotes } from "../routingTemplate.ts";
 import {
   coerceAssistantModelSelection,
   DEFAULT_ASSISTANT_MODEL_SELECTION,
@@ -441,43 +442,6 @@ effort), and evolve it:
   never work around it.
 `;
 
-const ROUTING_TEMPLATE = `# Routing table — which harness/model for which task
-
-Starting point by Uno; the person edits it on your page, you tune it from
-real outcomes. Cheapest thing that reliably does the job wins.
-
-${ROUTING_PERSON_RULE}
-
-| Task type | Harness | Model | Effort | Source | Why |
-|---|---|---|---|---|---|
-| Quick questions, status | self | — | — | default | answer yourself, no chat |
-| Simple tasks, small fixes | claudeAgent | claude-sonnet-5-5 | medium | default | reliable and cheap |
-| Anything with UI | claudeAgent | claude-opus-5-5 | high | default | taste and detail |
-| Hard bugs, architecture | claudeAgent | claude-opus-5-5 | max | default | strongest reasoning |
-| Reading code, summaries | claudeAgent | claude-haiku-4-5 | low | default | grunt work |
-
-Notes:
-- Harness \`self\` = answer in this chat, do not start a thread.
-- No Claude on this computer (no subscription)? Use Uno AI instead: harness
-  \`uno\`, model \`uno/uno/smart\` where the table says Sonnet or Haiku, the
-  newest Premium Opus-class model of the Uno model list where it says Opus.
-- A model this computer doesn't offer: take the newest one of the same
-  family (opus / sonnet / haiku).
-- Effort → harness option: claude → options.effort (low, medium, high, max),
-  codex → options.reasoningEffort (low, medium, high, xhigh for max).
-
-## Outcomes log
-
-<!-- date | task type | harness/model/effort | ok/failed/escalated | evidence/note -->
-
-## Proposals
-
-<!-- - task type → harness model effort | why | YYYY-MM-DD — waits for the person's yes -->
-
-## Declined
-
-<!-- - YYYY-MM-DD task type → harness model effort — not again for 14 days -->
-`;
 
 function slugifyAssistantName(name: string): string {
   const slug = name
@@ -711,6 +675,21 @@ const makeManagerAssistantService = Effect.gen(function* () {
       yield* writeFileIfMissing(path.join(workspaceRoot, "SOUL.md"), "# Who I am\n");
       yield* writeFileIfMissing(path.join(workspaceRoot, "USER.md"), "# About the person\n");
       yield* writeFileIfMissing(path.join(workspaceRoot, "ROUTING.md"), ROUTING_TEMPLATE);
+      // The old "no Claude → Smart" note, untouched, becomes "the person's
+      // word wins" (routingTemplate.ts); an edited file is left alone.
+      yield* fs.readFileString(path.join(workspaceRoot, "ROUTING.md")).pipe(
+        Effect.flatMap((content) => {
+          const upgraded = upgradeRoutingNotes(content);
+          return upgraded === null
+            ? Effect.void
+            : fs.writeFileString(path.join(workspaceRoot, "ROUTING.md"), upgraded);
+        }),
+        Effect.catch((cause) =>
+          Effect.logWarning("assistant routing notes upgrade failed").pipe(
+            Effect.annotateLogs({ projectId, cause: String(cause) }),
+          ),
+        ),
+      );
 
       const label = assistantTokenLabel(projectId);
       const existingToken = yield* tokenRepository.getActiveByLabel(label);
