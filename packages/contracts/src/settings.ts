@@ -198,6 +198,10 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   onboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Legacy plan mode (upstream 48aa875c0e / 31891a1a0c, Work 29.10). The
+  // composer's Build/Plan toggle is gone by default; this brings it back
+  // together with /plan, /default and Shift+Tab. Off — every chat builds.
+  planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   unoLastModelRoute: UnoModelRoute.pipe(
     Schema.withDecodingDefault(Effect.succeed("default" as const)),
   ),
@@ -981,6 +985,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffWordWrap: Schema.optionalKey(Schema.Boolean),
   featureFlags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   newChatModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  planModeEnabled: Schema.optionalKey(Schema.Boolean),
   unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(

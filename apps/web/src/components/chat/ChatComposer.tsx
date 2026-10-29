@@ -109,6 +109,7 @@ import {
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
+import { useSettings } from "../../hooks/useSettings";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
@@ -1036,14 +1037,16 @@ export const ChatComposer = memo(
         : imageAttachmentSupport === "unknown"
           ? "Attach files. Image support is unknown for this model."
           : "Attach files, images or video";
+    // Plan mode is legacy (Settings → Legacy, upstream 48aa875c0e): off, no
+    // Build/Plan switch, no /plan or /default, no Shift+Tab — and ChatView
+    // forces the effective mode to "default", so nobody is stuck in plan.
+    const planModeUiEnabled = useSettings((settings) => settings.planModeEnabled);
     const composerProviderControls = useMemo(
       () => ({
-        showInteractionModeToggle: getProviderInteractionModeToggle(
-          providerStatuses,
-          selectedProvider,
-        ),
+        showInteractionModeToggle:
+          planModeUiEnabled && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
       }),
-      [providerStatuses, selectedProvider],
+      [planModeUiEnabled, providerStatuses, selectedProvider],
     );
     // The Uno chat always runs on Hermes (0.0.84): its engine picker writes
     // the chat's own selection on the daemon; turns carry exactly that.
@@ -1209,20 +1212,24 @@ export const ChatComposer = memo(
             label: "/model",
             description: "Switch the model for this chat",
           },
-          {
-            id: "slash:plan",
-            type: "slash-command",
-            command: "plan",
-            label: "/plan",
-            description: "Switch this chat into plan mode",
-          },
-          {
-            id: "slash:default",
-            type: "slash-command",
-            command: "default",
-            label: "/default",
-            description: "Switch this chat back to normal build mode",
-          },
+          ...(planModeUiEnabled
+            ? ([
+                {
+                  id: "slash:plan",
+                  type: "slash-command",
+                  command: "plan",
+                  label: "/plan",
+                  description: "Switch this chat into plan mode",
+                },
+                {
+                  id: "slash:default",
+                  type: "slash-command",
+                  command: "default",
+                  label: "/default",
+                  description: "Switch this chat back to normal build mode",
+                },
+              ] as const)
+            : []),
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
         const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
           (command) => ({
@@ -1258,7 +1265,13 @@ export const ChatComposer = memo(
         }));
       }
       return [];
-    }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries]);
+    }, [
+      composerTrigger,
+      planModeUiEnabled,
+      selectedProvider,
+      selectedProviderStatus,
+      workspaceEntries,
+    ]);
 
     const composerMenuOpen = Boolean(composerTrigger);
     const composerMenuSearchKey = composerTrigger
@@ -2173,6 +2186,7 @@ export const ChatComposer = memo(
       event: KeyboardEvent,
     ) => {
       if (key === "Tab" && event.shiftKey) {
+        if (!planModeUiEnabled) return false;
         toggleInteractionMode();
         return true;
       }

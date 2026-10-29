@@ -16,6 +16,7 @@ export const DEVICE_RESTORE_SETTINGS = [
   { key: "diffWordWrap", label: "Diff line wrapping" },
   { key: "diffIgnoreWhitespace", label: "Diff whitespace changes" },
   { key: "autoOpenPlanSidebar", label: "Auto-open task panel" },
+  { key: "planModeEnabled", label: "Plan mode (legacy)" },
   { key: "confirmThreadArchive", label: "Archive confirmation" },
   { key: "confirmThreadDelete", label: "Delete confirmation" },
 ] as const satisfies ReadonlyArray<{ key: keyof ClientSettings; label: string }>;

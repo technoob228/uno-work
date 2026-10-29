@@ -710,6 +710,7 @@ describe("wsApi", () => {
   it("reads and writes persistence through the desktop bridge when available", async () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      planModeEnabled: false,
       browserAutomationLevel: "full" as const,
       browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,
@@ -788,6 +789,7 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      planModeEnabled: false,
       browserAutomationLevel: "full" as const,
       browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,

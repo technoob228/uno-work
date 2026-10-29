@@ -945,6 +945,32 @@ export function GeneralSettingsPanel({
 
       <NotificationsSection />
 
+      {simple ? null : (
+        <SettingsSection title="Legacy">
+          <SettingsRow
+            title="Plan mode (legacy)"
+            description="Brings back the Build/Plan switch in the message box, the /plan and /default commands and Shift+Tab. Off — every chat just does the work."
+            resetAction={
+              settings.planModeEnabled !== DEFAULT_UNIFIED_SETTINGS.planModeEnabled ? (
+                <SettingResetButton
+                  label="plan mode"
+                  onClick={() =>
+                    updateSettings({ planModeEnabled: DEFAULT_UNIFIED_SETTINGS.planModeEnabled })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.planModeEnabled}
+                onCheckedChange={(checked) => updateSettings({ planModeEnabled: Boolean(checked) })}
+                aria-label="Plan mode (legacy)"
+              />
+            }
+          />
+        </SettingsSection>
+      )}
+
       <SettingsSection title="About">
         {isElectron ? (
           <AboutVersionSection simple={simple} />
