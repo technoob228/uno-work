@@ -29,7 +29,11 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeClaudeAdapter,
+  toSessionPermissionUpdates,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
@@ -3662,3 +3666,31 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 });
+
+// Upstream t3code e9e46972fb.
+describe("toSessionPermissionUpdates", () => {
+  it("rescopes Claude Code suggestions to the session", () => {
+    const updates = toSessionPermissionUpdates("Bash", [
+      {
+        type: "addRules",
+        rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+        behavior: "allow",
+        destination: "localSettings",
+      },
+    ]);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0]?.destination, "session");
+  });
+
+  it("falls back to a whole-tool session rule when there is no suggestion (MCP tools)", () => {
+    assert.deepEqual(toSessionPermissionUpdates("mcp__uno-work__site_publish", undefined), [
+      {
+        type: "addRules",
+        rules: [{ toolName: "mcp__uno-work__site_publish" }],
+        behavior: "allow",
+        destination: "session",
+      },
+    ]);
+  });
+});
+
