@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import { useEnvironmentSupportsThreadSettlement } from "../../environments/threadSettlementSupport";
 import { markChatDone } from "../../inbox/inboxDone";
+import { offerThreadUndo, snapshotThreadForUndo } from "../../hooks/threadUndoActions";
 import { selectSidebarThreadSummaryByRef, useStore } from "../../store";
 import { isYourTurn } from "../Sidebar.yourTurn";
 import { Button } from "../ui/button";
@@ -38,7 +39,9 @@ export function ChatDoneButton(props: {
 
   const onClick = () => {
     setPending(true);
+    const before = snapshotThreadForUndo(ref);
     markChatDone(props.environmentId, props.threadId)
+      .then(() => offerThreadUndo("settle", ref, before))
       .catch((error: unknown) =>
         toastManager.add({
           type: "error",

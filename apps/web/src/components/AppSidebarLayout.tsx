@@ -12,6 +12,7 @@ import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
 import { NavRail, RAIL_WIDTH } from "./sidebar/NavRail";
 import { SidebarShortcutListener } from "./sidebar/SidebarShowButton";
+import { AppShortcuts } from "./AppShortcuts";
 import { SidebarDRail } from "./sidebar/SidebarDParts";
 import { useSidebarDOpenState } from "./sidebar/sidebarDState";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -154,6 +155,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         )}
         <PreviewPane suppressed={inSettings} />
         <SidebarShortcutListener />
+        <AppShortcuts />
         {/* Inside the provider: opening an item may close the phone sidebar. */}
         <InboxListener />
         <DockBadgeListener />

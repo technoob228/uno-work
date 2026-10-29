@@ -22,6 +22,7 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
+import { offerThreadUndo, snapshotThreadForUndo, withdrawThreadUndo } from "./threadUndoActions";
 
 export function useThreadActions() {
   const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
@@ -68,11 +69,14 @@ export function useThreadActions() {
         throw new Error("Cannot archive a running thread.");
       }
 
+      const before = snapshotThreadForUndo(threadRef);
       await api.orchestration.dispatchCommand({
         type: "thread.archive",
         commandId: newCommandId(),
         threadId: threadRef.threadId,
       });
+      // "Archived · ⌘Z to undo" at the bottom of the sidebar (29.10).
+      offerThreadUndo("archive", threadRef, before);
       // The dispatch is server-acknowledged; reflect it locally instead of
       // relying solely on the push stream, which can be down while the RPC
       // still works, or produce no event at all when the archive was an
@@ -100,6 +104,7 @@ export function useThreadActions() {
       threadId: target.threadId,
     });
     useStore.getState().setThreadArchivedAt(target, null);
+    withdrawThreadUndo("archive", target);
   }, []);
 
   const deleteThread = useCallback(
