@@ -108,7 +108,7 @@ set -e
 
 echo "== work $WORK_SHA · upstream $UPSTREAM_SHA · rc=$RC"
 echo "== methods the client asked for that Work does not serve:"
-grep -o '"method":"[^"]*"' "$ROOT/daemon.log" | sort -u || true
+grep -A2 "phone asked for a method" "$ROOT/daemon.log" | grep -o "method: [^ ]*" | sort -u || true
 if [ $RC -ne 0 ] && [ -n "${ALERT_CMD:-}" ]; then
   { echo "T3 v2 smoke RED on $(hostname): work $WORK_SHA, upstream $UPSTREAM_SHA"; grep -m1 '^FAIL' "$LOG"; } \
     | bash -c "$ALERT_CMD" || true
