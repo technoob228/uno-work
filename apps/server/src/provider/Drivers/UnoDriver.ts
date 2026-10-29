@@ -31,8 +31,10 @@ import {
   OpenCodeSettings,
   ProviderDriverKind,
   UNO_CODE_MINIMUM_VERSION,
+  UNO_FAST_GATEWAY_MODEL,
   UNO_GATEWAY_BASE_URL,
   UNO_PERSONAL_AI_BASE_URL,
+  UNO_SMART_GATEWAY_MODEL,
   type ModelCapabilitiesMetadata,
   type PersonalAiModel,
   type ServerProvider,
@@ -615,18 +617,44 @@ export const UNO_GATEWAY_STREAM_TIMEOUTS = {
   chunkTimeout: 120_000,
 } as const;
 
+/** Smart first, then Fast: OpenCode's Uno AI when the gateway's list didn't come. */
+const UNO_INCLUDED_OPENCODE_FALLBACK: ReadonlyArray<readonly [string, string]> = [
+  [UNO_SMART_GATEWAY_MODEL, "Smart"],
+  [UNO_FAST_GATEWAY_MODEL, "Fast"],
+];
+/**
+ * Their window when the gateway didn't say: smaller than either real one
+ * (MiMo / DeepSeek / GLM behind them are 200k+), so a long chat compacts a
+ * little early instead of overflowing.
+ */
+const UNO_INCLUDED_FALLBACK_CONTEXT_TOKENS = 128_000;
+
 /**
  * The Uno AI gateway as a provider of plain OpenCode (Misha 13.10: OpenCode
  * works on Uno AI as soon as it is installed, no key of its own). The same
  * provider id and key variable as Uno Code's, so a chat's calls are labelled
  * and billed the same way; the person's own providers stay next to it.
  * Null when the gateway listed no models: an empty provider only confuses.
+ *
+ * `includedWhenEmpty`: nothing came at all (the list is asked for once, when
+ * OpenCode starts — a key minted a second earlier or a slow gateway answers
+ * nothing) → Smart and Fast anyway, every Uno AI plan has them. Without them
+ * OpenCode came up with no Uno AI: its own free models on top of the picker,
+ * the Smart of an earlier start left at the bottom (walk 29.10).
  */
-export function unoGatewayProviderForOpenCode(catalog: UnoCatalog): Record<string, unknown> | null {
+export function unoGatewayProviderForOpenCode(
+  catalog: UnoCatalog,
+  options: { readonly includedWhenEmpty?: boolean } = {},
+): Record<string, unknown> | null {
   const models: Record<string, UnoOpenCodeModelConfig> = {};
   for (const model of Object.values(catalog)) {
     if (model.route === "russia") continue;
     models[model.modelId] = withLimit(model.name, gatewayModelLimit(model.contextLength));
+  }
+  if (options.includedWhenEmpty === true && Object.keys(catalog).length === 0) {
+    for (const [modelId, name] of UNO_INCLUDED_OPENCODE_FALLBACK) {
+      models[modelId] = withLimit(name, gatewayModelLimit(UNO_INCLUDED_FALLBACK_CONTEXT_TOKENS));
+    }
   }
   if (Object.keys(models).length === 0) return null;
   return {

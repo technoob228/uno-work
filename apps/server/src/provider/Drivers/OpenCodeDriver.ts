@@ -123,14 +123,22 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       // installed. Its own providers (a key, `opencode auth login`) stay as
       // they are. `UNO_WORK_OPENCODE_UNO_AI=0` in the instance's environment
       // turns it off. One quick look at the gateway's list: a slow gateway
-      // must not hold OpenCode back, it just comes up without Uno AI.
+      // must not hold OpenCode back. When nothing comes (a key minted a
+      // second ago, a slow gateway) it still gets Smart and Fast, never no
+      // Uno AI at all (walk 29.10: free models above a leftover Smart).
       const gatewayKey = yield* Effect.serviceOption(UnoGatewayKey);
       const unoApiKey = Option.isSome(gatewayKey) ? yield* gatewayKey.value.harnessKey() : "";
       if (unoApiKey.length > 0 && processEnv.UNO_WORK_OPENCODE_UNO_AI !== "0") {
         const catalog = yield* Effect.promise(() =>
           fetchUnoModelsCatalogWithRetry(unoApiKey, { delaysMs: [0] }).catch(() => ({})),
         );
-        const unoProvider = unoGatewayProviderForOpenCode(catalog);
+        if (Object.keys(catalog).length === 0) {
+          yield* Effect.logWarning("opencode.unoGateway.listUnavailable", {
+            instanceId,
+            using: "smart+fast",
+          });
+        }
+        const unoProvider = unoGatewayProviderForOpenCode(catalog, { includedWhenEmpty: true });
         if (unoProvider !== null) {
           processEnv.OPENCODE_CONFIG_CONTENT = withOpenCodeProvider(
             processEnv.OPENCODE_CONFIG_CONTENT,

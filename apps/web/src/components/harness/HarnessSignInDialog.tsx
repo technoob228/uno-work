@@ -30,7 +30,7 @@ import {
 import { Input } from "../ui/input";
 import { SetupLogDetails } from "./SetupLogDetails";
 import type { AuthJobView } from "./useHarnessSetup";
-import { isJobActive } from "./harnessSetupState";
+import { describeSignInFailure, isJobActive } from "./harnessSetupState";
 
 export interface HarnessSignInPanelProps {
   readonly driver: ProviderAuthDriver;
@@ -114,6 +114,13 @@ export function HarnessSignInPanel({
   const rejected = active && job?.codeCheck === "rejected" && job.needsCodeInput;
   // A Submit the computer refused (the sign-in isn't waiting any more…).
   const submitError = active && !checking ? (job?.error ?? null) : null;
+  // The CLI's own words ("exited with code 1… status code 400") go to the
+  // console and under Details; the person reads what happened and what next.
+  const failure = failed && job ? describeSignInFailure(job) : null;
+  const failedError = failed ? job?.error : undefined;
+  useEffect(() => {
+    if (failedError) console.warn(`[sign-in] ${driver} did not finish:`, failedError);
+  }, [driver, failedError]);
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     setSlow(false);
@@ -158,9 +165,11 @@ export function HarnessSignInPanel({
         </div>
       ) : job?.method === "oauth" && (active || failed) ? (
         <div className="flex flex-col gap-3">
-          {job.verificationUrl ? (
+          {job.verificationUrl && active ? (
             // The link itself is six lines of OAuth parameters: a button to
             // open it and one to copy it, the address stays folded away.
+            // Only while the sign-in waits: after it ended the link leads to a
+            // code nothing here can take any more.
             <div className="flex flex-col gap-1.5" data-testid="harness-sign-in-link">
               {inApp ? (
                 // Telegram's own browser (sign-in through Telegram opens Work
@@ -194,7 +203,7 @@ export function HarnessSignInPanel({
             </div>
           ) : null}
 
-          {job.userCode ? (
+          {job.userCode && active ? (
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">
                 Enter this one-time code on that page
@@ -359,18 +368,30 @@ export function HarnessSignInPanel({
         </div>
       )}
 
-      {failed ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
+      {failure ? (
+        <div
+          className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5"
+          data-testid="harness-sign-in-failed"
+        >
           <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-            <span className="min-w-0 break-words">
-              {job?.error ?? "The sign-in did not complete."}
-            </span>
+            <span className="min-w-0 break-words">{failure.message}</span>
           </div>
-          <SetupLogDetails log={job?.log ?? ""} />
-          <Button size="sm" variant="outline" className="self-start" onClick={onReset}>
-            Try again
-          </Button>
+          <SetupLogDetails log={failure.details} label="Details" />
+          {failure.codeRejected ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start"
+              onClick={() => onStart({ method: "oauth", restart: true })}
+            >
+              Get a new link
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="self-start" onClick={onReset}>
+              Try again
+            </Button>
+          )}
         </div>
       ) : null}
     </div>

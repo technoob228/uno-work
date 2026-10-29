@@ -28,16 +28,26 @@ import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 
 import { useAccountDefaultAi } from "../../../assistant/useAccountDefaultAi";
+import { useUpdateSettings } from "../../../hooks/useSettings";
 import { trackFunnel } from "../../../lib/funnel";
 import { isWebLite } from "../../../lite/webLite";
-import { useServerConfigReady, useServerProviders } from "../../../rpc/serverState";
+import {
+  useServerConfigReady,
+  useServerProviders,
+  whenServerConfigReady,
+} from "../../../rpc/serverState";
 import { arrivedAgent } from "../../../unoai/arrivedAgent";
 import { HarnessSignInDialog } from "../../harness/HarnessSignInDialog";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
 import { goalState, withAnswer } from "../../setup/goals";
 import { nextStepQuery } from "../../myuno/myUnoQueries";
 import { parseNextStepPlan } from "./nextStep";
-import { useSetupProgress, useUpdateSetupProgress } from "../../setup/useSetupProgress";
+import { persistWithRetry } from "../../setup/persistWithRetry";
+import {
+  currentSetupProgress,
+  useSetupProgress,
+  useUpdateSetupProgress,
+} from "../../setup/useSetupProgress";
 import {
   AGENT_LABEL,
   AGENT_PICK_KEY,
@@ -142,7 +152,13 @@ export function HomeAgentSignIn() {
     void update((current) => withAnswer(current, AGENT_PICK_KEY, arrived));
   }, [answers, arrived, settingsReady, update]);
 
-  // The first visit after picking an agent: its sign-in opens by itself, once.
+  // The first visit after picking an agent: its sign-in opens by itself, once
+  // per computer — the mark lives in the machine's settings, so neither a
+  // reload nor the move from app.uno4.work to the account's own address
+  // opens it again. That write lands in a fresh computer's first seconds,
+  // when one can get lost (walk 29.10: the dialog came back after the move):
+  // always sent, and repeated.
+  const updateSettings = useUpdateSettings().updateSettings;
   const autoOpened = useRef(false);
   const autoOpen =
     settingsReady &&
@@ -158,10 +174,19 @@ export function HomeAgentSignIn() {
     if (!autoOpen || autoOpened.current) return;
     autoOpened.current = true;
     useAgentSignInStore.getState().open(agent.driver);
-    void update((current) =>
-      withAnswer(current, AGENT_SIGN_IN_PROMPTED_KEY, new Date().toISOString()),
-    );
-  }, [agent.driver, autoOpen, update]);
+    const promptedAt = new Date().toISOString();
+    void persistWithRetry(async () => {
+      await whenServerConfigReady();
+      const current = currentSetupProgress();
+      await updateSettings({
+        setup: withAnswer(
+          current,
+          AGENT_SIGN_IN_PROMPTED_KEY,
+          current.answers[AGENT_SIGN_IN_PROMPTED_KEY] ?? promptedAt,
+        ),
+      });
+    }, "[agent-sign-in]");
+  }, [agent.driver, autoOpen, updateSettings]);
 
   // Signed in (here, in Settings or a terminal): the account hears it once —
   // it closes "Sign in to your agent" for the console too.
