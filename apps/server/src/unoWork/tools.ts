@@ -324,6 +324,8 @@ export interface UnoWorkToolDeps {
   readonly personWindowOpen?: Effect.Effect<boolean>;
   /** Tests: how long open_in_panel waits for a just-registered app to start. */
   readonly appStartWaitMs?: number;
+  /** Tests: how long an app tool waits for a just-registered app to appear in the list. */
+  readonly appListSettleMs?: number;
   readonly account: {
     readonly cloudState: Effect.Effect<UnoCloudState>;
     readonly resizeOptions: Effect.Effect<UnoComputerResizeOptions>;
@@ -635,23 +637,52 @@ function compactApp(app: UnoMachineApp) {
   };
 }
 
-const findApp = (deps: UnoWorkToolDeps, rawId: string) =>
-  deps.machineApps.list.pipe(
-    Effect.flatMap((apps) => {
-      const wanted = rawId.trim();
-      const app =
-        apps.apps.find((entry) => entry.id === wanted) ??
-        apps.apps.find((entry) => entry.id === `manifest:${wanted}`) ??
-        apps.apps.find((entry) => entry.name.toLowerCase() === wanted.toLowerCase());
-      return app
-        ? Effect.succeed(app)
-        : Effect.fail(
-            toolError(
-              `No app "${wanted}" on this computer. Call apps_list for the ids (e.g. "manifest:notes", "docker:web", "port:3000").`,
-            ),
-          );
-    }),
+/**
+ * How long an app tool waits for an app registered a moment ago to show up:
+ * the list is a scan cached for a few seconds (MachineAppsService SCAN_TTL_MS).
+ */
+const APP_LIST_SETTLE_MS = 6_000;
+
+/** `manifest:<id>` or `<id>` with a manifest file in ~/.uno/apps: registered, maybe not scanned yet. */
+const manifestFileExists = (deps: UnoWorkToolDeps, wanted: string) => {
+  const id = wanted.replace(/^manifest:/, "");
+  if (!new RegExp(MANIFEST_ID_PATTERN).test(id)) return Effect.succeed(false);
+  return Effect.promise(() =>
+    fsp.access(manifestPath(deps, id)).then(
+      () => true,
+      () => false,
+    ),
   );
+};
+
+const findApp = (
+  deps: UnoWorkToolDeps,
+  rawId: string,
+  /** One more sentence for the agent when there is no such app (open_in_panel: the url way). */
+  notFoundHint?: string,
+) =>
+  Effect.gen(function* () {
+    const wanted = rawId.trim();
+    const pick = (apps: ReadonlyArray<UnoMachineApp>) =>
+      apps.find((entry) => entry.id === wanted) ??
+      apps.find((entry) => entry.id === `manifest:${wanted}`) ??
+      apps.find((entry) => entry.name.toLowerCase() === wanted.toLowerCase());
+    let app = pick((yield* deps.machineApps.list).apps);
+    if (!app && wanted.length > 0 && (yield* manifestFileExists(deps, wanted))) {
+      // Registered a moment ago: give the scan a few seconds.
+      const settle = deps.appListSettleMs ?? APP_LIST_SETTLE_MS;
+      const poll = Math.min(500, Math.max(10, Math.floor(settle / 10)));
+      const deadline = Date.now() + settle;
+      while (!app && Date.now() < deadline) {
+        yield* Effect.sleep(Duration.millis(poll));
+        app = pick((yield* deps.machineApps.list).apps);
+      }
+    }
+    if (app) return app;
+    return yield* toolError(
+      `No app "${wanted}" on this computer. Ids are the ones apps_list shows: "manifest:<the id you gave app_register>" (e.g. "manifest:notes"; plain "notes" works too), "docker:web", "port:3000".${notFoundHint ? ` ${notFoundHint}` : ""}`,
+    );
+  });
 
 /** How long open_in_panel waits for an app Uno is about to start (it starts within ~20 s). */
 export const APP_START_WAIT_MS = 30_000;
@@ -893,6 +924,21 @@ export function appLocalAddress(
   if (!wanted) return app.localUrl ?? `${root}/`;
   return `${root}${wanted.startsWith("/") ? wanted : `/${wanted}`}`;
 }
+
+/**
+ * The page a registered app opens at (its manifest `path`) when the scan
+ * hasn't given it a `localUrl` yet (not running, or GET / didn't answer);
+ * undefined — the port's root.
+ */
+const manifestOpenPath = (deps: UnoWorkToolDeps, app: UnoMachineApp) =>
+  app.source !== "manifest" || app.localUrl !== null
+    ? Effect.succeed(undefined)
+    : readManifestRecord(deps, app.id.replace(/^manifest:/, "")).pipe(
+        Effect.map((record) =>
+          typeof record.path === "string" && record.path.startsWith("/") ? record.path : undefined,
+        ),
+        Effect.orElseSucceed(() => undefined),
+      );
 
 /** The link that opens an app inside the person's Uno Work (cloud computers); null — not known yet. */
 function appLinkFor(deps: UnoWorkToolDeps, app: Pick<UnoMachineApp, "id">): string | null {
@@ -2541,9 +2587,18 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           return yield* toolError("Give exactly one of appId, url or file.");
         }
         let localOnly = false;
-        let shownApp: { readonly name: string; readonly link: string | null } | null = null;
+        let shownApp: {
+          readonly name: string;
+          readonly link: string | null;
+          /** Not running after the wait: the panel shows "Nothing is running" for now. */
+          readonly notRunning: string | null;
+        } | null = null;
         if (appId !== undefined) {
-          let app = yield* findApp(deps, appId);
+          let app = yield* findApp(
+            deps,
+            appId,
+            'To show a page of a program that isn\'t registered, use url instead, e.g. "http://localhost:8080/".',
+          );
           // A bot is opened in Telegram, never in the panel.
           if (app.telegramBot) {
             return app.telegramBot.link
@@ -2559,14 +2614,23 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
                   note: `${app.name} is a Telegram bot without a username in its manifest yet. Add telegram (the username from BotFather) with app_register, then give the person https://t.me/<username>.`,
                 };
           }
+          // A registered app's port is its page even before Uno has started
+          // it, or while its first page fails: the scan's `http` only says
+          // that GET / answered just now (walk 29.10: four "Couldn't open it
+          // in the panel" for a just-registered app, the url way worked).
+          const registeredPage = app.source === "manifest" && app.port !== null;
           const local =
-            app.http && app.port !== null ? appLocalAddress(app, str(args, "path")) : null;
+            (app.http || registeredPage) && app.port !== null
+              ? appLocalAddress(app, str(args, "path"))
+              : null;
           if (local === null) {
             // An app hosted somewhere else: its own address, as the app.
             const elsewhere = app.url ?? app.publication?.url ?? null;
             if (!elsewhere) {
               return yield* toolError(
-                `${app.name} has no web address (status: ${app.status}). Start it or give it a port first.`,
+                app.port !== null
+                  ? `${app.name} ("${app.id}") doesn't answer as a web page on port ${app.port} (status: ${app.status}). If it is one, open it with url "http://localhost:${app.port}/".`
+                  : `${app.name} ("${app.id}") has no port or address to show (status: ${app.status}). If it serves a page, register its port with app_register, or open it with url "http://localhost:<port>/".`,
               );
             }
             const target = joinUrlPath(elsewhere, str(args, "path"));
@@ -2597,8 +2661,17 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             if (app.status !== "running" && app.canStart && app.source === "manifest") {
               app = yield* waitForAppRunning(deps, app);
             }
-            shownApp = { name: app.name, link };
-            url = local;
+            shownApp = {
+              name: app.name,
+              link,
+              notRunning:
+                app.status === "running"
+                  ? null
+                  : `${app.name} isn't running yet (status: ${app.status}), so the panel says nothing is running on port ${app.port} for now. Look at app_logs for "${app.id}", fix it or app_start it, then open_in_panel again.`,
+            };
+            url =
+              appLocalAddress(app, str(args, "path") ?? (yield* manifestOpenPath(deps, app))) ??
+              local;
           }
         }
         if (url !== undefined && !isCompleteHttpUrl(url)) {
@@ -2633,7 +2706,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             opened: shownApp.name,
             where: "the person's panel, inside Uno Work",
             ...(shownApp.link ? { link: shownApp.link } : {}),
-            note: `Done: the person sees ${shownApp.name} in their panel, live from this computer (they can comment on it). It is also in their Apps on Home${shownApp.link ? `, and this link opens it in their Uno Work: ${shownApp.link}` : ""}. Nothing to publish and no address to ask for. To look at the page yourself: browser_command openUrl ${url}.`,
+            note:
+              shownApp.notRunning ??
+              `Done: the person sees ${shownApp.name} in their panel, live from this computer (they can comment on it). It is also in their Apps on Home${shownApp.link ? `, and this link opens it in their Uno Work: ${shownApp.link}` : ""}. Nothing to publish and no address to ask for. To look at the page yourself: browser_command openUrl ${url}.`,
           };
         }
         if (inPanel) {
@@ -2658,6 +2733,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             opened: url,
             note: "Uno Work isn't open on the person's screen, so this opened in this computer's own browser (for you: browser_command). To show the person something you built, register it as an app (app_register) and open it with open_in_panel appId: it opens inside their Uno Work.",
           };
+        }
+        if (url !== undefined && shownApp?.notRunning) {
+          return { ok: true, opened: url, note: shownApp.notRunning };
         }
         return url !== undefined ? { ok: true, opened: url } : opened;
       }),

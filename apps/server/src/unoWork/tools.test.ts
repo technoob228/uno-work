@@ -75,6 +75,17 @@ function app(overrides: Partial<UnoMachineApp> = {}): UnoMachineApp {
   } as UnoMachineApp;
 }
 
+/** A machineApps.list answer with these apps. */
+function appsOf(list: UnoMachineApp[]) {
+  return {
+    apps: list,
+    manifestDir: "~/.uno/apps",
+    scannedAt: "",
+    publishBlockedReason: null,
+    warnings: [],
+  };
+}
+
 interface Recorded {
   approvals: Array<{
     tool: string;
@@ -1180,6 +1191,162 @@ describe("telling and showing", () => {
     expect(result._tag).toBe("Success");
     expect(calls).toBeGreaterThanOrEqual(3);
     expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:3000/" } });
+  });
+
+  // Walk on 0.0.162 (29.10): app_register "date-counter" on port 8733, then
+  // open_in_panel appId failed four times; the url way worked.
+  const justRegistered = (overrides: Partial<UnoMachineApp> = {}) =>
+    app({
+      id: "manifest:date-counter",
+      name: "Date Counter",
+      port: 8733,
+      status: "stopped",
+      http: false,
+      localUrl: null,
+      canStart: true,
+      canStop: false,
+      ...overrides,
+    });
+
+  it("opens a just-registered app by its id once Uno has started it (not 'no web address')", async () => {
+    let calls = 0;
+    const { deps, recorded } = makeDeps({ hostedMachine: true });
+    const panelDeps: UnoWorkToolDeps = {
+      ...deps,
+      appStartWaitMs: 500,
+      workAddress: () => "https://3csvnrcm77.uno4.work",
+      personWindowOpen: Effect.succeed(true),
+      bridge: (input) =>
+        Effect.sync(() => {
+          recorded.bridge.push(input);
+          return { status: 200, body: { ok: true, where: "panel" } };
+        }),
+      machineApps: {
+        ...deps.machineApps,
+        list: Effect.sync(() => {
+          calls += 1;
+          return appsOf([
+            calls >= 3
+              ? justRegistered({
+                  status: "running",
+                  http: true,
+                  localUrl: "http://localhost:8733/",
+                  canStart: false,
+                  canStop: true,
+                })
+              : justRegistered(),
+          ]);
+        }),
+      },
+    };
+    for (const appId of ["date-counter", "manifest:date-counter"]) {
+      calls = 0;
+      const result = await run("open_in_panel", panelDeps, { appId });
+      if (result._tag !== "Success") throw new Error(`open_in_panel failed for ${appId}`);
+      expect(result.success).toMatchObject({
+        opened: "Date Counter",
+        where: "the person's panel, inside Uno Work",
+      });
+      expect((result.success as { note: string }).note).toContain("Done");
+    }
+    expect(recorded.bridge.map((call) => (call.body as { url: string }).url)).toEqual([
+      "http://localhost:8733/",
+      "http://localhost:8733/",
+    ]);
+  });
+
+  it("opens a registered app whose first page doesn't answer yet, on its manifest path", async () => {
+    const { deps, recorded, home } = makeDeps({
+      apps: [justRegistered({ status: "running", canStart: false, canStop: true })],
+    });
+    mkdirSync(path.join(home, ".uno", "apps"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".uno", "apps", "date-counter.json"),
+      JSON.stringify({ name: "Date Counter", port: 8733, path: "/app" }),
+    );
+    const result = await run("open_in_panel", deps, { appId: "date-counter" });
+    expect(result._tag).toBe("Success");
+    expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:8733/app" } });
+    await run("open_in_panel", deps, { appId: "date-counter", path: "/widget" });
+    expect(recorded.bridge[1]).toMatchObject({ body: { url: "http://localhost:8733/widget" } });
+  });
+
+  it("says so when the app still isn't running after the wait, instead of 'Done'", async () => {
+    const { deps } = makeDeps({ hostedMachine: true });
+    const panelDeps: UnoWorkToolDeps = {
+      ...deps,
+      appStartWaitMs: 50,
+      personWindowOpen: Effect.succeed(true),
+      bridge: () => Effect.succeed({ status: 200, body: { ok: true, where: "panel" } }),
+      machineApps: {
+        ...deps.machineApps,
+        list: Effect.succeed(appsOf([justRegistered()])),
+      },
+    };
+    const result = await run("open_in_panel", panelDeps, { appId: "date-counter" });
+    if (result._tag !== "Success") throw new Error("open_in_panel failed");
+    const note = (result.success as { note: string }).note;
+    expect(note).toContain("isn't running yet");
+    expect(note).toContain('app_logs for "manifest:date-counter"');
+    expect(note).not.toContain("Done");
+  });
+
+  it("finds an app registered a moment ago that the cached list doesn't have yet", async () => {
+    let calls = 0;
+    const { deps, recorded, home } = makeDeps();
+    mkdirSync(path.join(home, ".uno", "apps"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".uno", "apps", "date-counter.json"),
+      JSON.stringify({ name: "Date Counter", port: 8733 }),
+    );
+    const stale: UnoWorkToolDeps = {
+      ...deps,
+      appListSettleMs: 500,
+      machineApps: {
+        ...deps.machineApps,
+        list: Effect.sync(() => {
+          calls += 1;
+          return appsOf(
+            calls >= 3
+              ? [app(), justRegistered({ status: "running", http: true, canStart: false })]
+              : [app()],
+          );
+        }),
+      },
+    };
+    const result = await run("open_in_panel", stale, { appId: "date-counter" });
+    expect(result._tag).toBe("Success");
+    expect(recorded.bridge[0]).toMatchObject({ body: { url: "http://localhost:8733/" } });
+  });
+
+  it("an unknown app id: one clear error with the id format and the url way, no waiting", async () => {
+    const { deps, recorded } = makeDeps();
+    const started = Date.now();
+    const result = await run("open_in_panel", deps, { appId: "date-counter" });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    if (result._tag !== "Failure") throw new Error("expected a failure");
+    expect(result.failure.message).toContain('"manifest:<the id you gave app_register>"');
+    expect(result.failure.message).toContain("use url instead");
+    expect(recorded.bridge).toEqual([]);
+  });
+
+  it("a program that isn't a web page names its port and the url way", async () => {
+    const { deps } = makeDeps({
+      apps: [
+        app({
+          id: "port:5432",
+          source: "port",
+          name: "postgres",
+          port: 5432,
+          http: false,
+          localUrl: null,
+        }),
+      ],
+    });
+    const result = await run("open_in_panel", deps, { appId: "port:5432" });
+    if (result._tag !== "Failure") throw new Error("expected a failure");
+    expect(result.failure.message).toContain("doesn't answer as a web page on port 5432");
+    expect(result.failure.message).toContain('url "http://localhost:5432/"');
   });
 
   it("tells the agent when its localhost went to the person's panel as their site", async () => {
