@@ -62,7 +62,7 @@ import { useUiStateStore } from "../uiStateStore";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { type ClientSettings, DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 vi.mock("../lib/gitStatusState", () => ({
   useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
@@ -1584,6 +1584,7 @@ async function mountChatView(options: {
   configureFixture?: (fixture: TestFixture) => void;
   resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
   initialPath?: string;
+  clientSettings?: Partial<ClientSettings>;
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
@@ -1603,7 +1604,11 @@ async function mountChatView(options: {
 
   // These tests drive the chat screen of someone who already set Uno Work up:
   // without this a fresh browser goes to the setup wizard, then Home.
-  writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, onboardingCompleted: true });
+  writeBrowserClientSettings({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompleted: true,
+    ...options.clientSettings,
+  });
   // ...and drive the full developer chat (branches, run actions, Open in
   // editor, command palette): Uno Work shows those only in Dev mode.
   setDevMode(true);
@@ -6181,6 +6186,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("keeps plan follow-up footer actions fused and aligned after a real resize", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
+      // Build/Plan is opt-in (Settings → Legacy «Plan mode (legacy)»).
+      clientSettings: { planModeEnabled: true },
       snapshot: createSnapshotWithPlanFollowUpPrompt(),
     });
 
@@ -6244,6 +6251,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("keeps the wide desktop follow-up layout expanded when the footer still fits", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
+      // Build/Plan is opt-in (Settings → Legacy «Plan mode (legacy)»).
+      clientSettings: { planModeEnabled: true },
       snapshot: createSnapshotWithPlanFollowUpPrompt({
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
@@ -6277,6 +6286,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("compacts the footer when a wide desktop follow-up layout starts overflowing", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
+      // Build/Plan is opt-in (Settings → Legacy «Plan mode (legacy)»).
+      clientSettings: { planModeEnabled: true },
       snapshot: createSnapshotWithPlanFollowUpPrompt({
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
