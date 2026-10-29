@@ -26,7 +26,7 @@ export function ComputerChip() {
     <>
       <ComputerPill
         computer={home.homeComputer}
-        loading={home.stateQuery.isLoading}
+        loading={home.stateQuery.isLoading || home.nameLoading}
         fit="chat"
         environmentId={environmentId}
       />

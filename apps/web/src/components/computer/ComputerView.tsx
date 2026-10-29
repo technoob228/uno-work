@@ -360,7 +360,7 @@ export function ComputerView() {
   const pill = (
     <ComputerPill
       computer={homeComputer}
-      loading={stateQuery.isPending}
+      loading={stateQuery.isPending || home.nameLoading}
       environmentId={environmentId}
     />
   );
