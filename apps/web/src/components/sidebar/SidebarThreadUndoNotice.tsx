@@ -9,6 +9,7 @@ import {
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { useServerKeybindings } from "../../rpc/serverState";
+import { withAppShortcutDefaults } from "../appShortcuts.logic";
 
 /**
  * "Done · ⌘Z to undo" at the bottom of the sidebar for 5 s after Done,
@@ -30,7 +31,8 @@ export function SidebarThreadUndoNotice() {
   const text = summary ?? shownSummary;
   if (!text) return null;
 
-  const shortcut = shortcutLabelForCommand(keybindings, "thread.undo");
+  // Older computers don't send the rule; ⌘Z works anyway (AppShortcuts adds it).
+  const shortcut = shortcutLabelForCommand(withAppShortcutDefaults(keybindings), "thread.undo");
   return (
     <div
       role="status"
