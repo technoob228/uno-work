@@ -118,6 +118,9 @@ describe("summarizeToolGroup", () => {
     const thought = entry({ tone: "thinking", label: "Thinking it through" });
     expect(summarizeToolGroup([thought, read("a.ts")]).summary).toBe("Read 1 file");
     expect(summarizeToolGroup([thought])).toEqual({ summary: "Thought", hasFailure: false });
+    // Notes about the run (an approval asked, context compacted) are not steps either.
+    const note = entry({ tone: "info", label: "Waiting for your OK", requestKind: "command" });
+    expect(summarizeToolGroup([read("a.ts"), note]).summary).toBe("Read 1 file");
   });
 
   it("marks a failed step", () => {

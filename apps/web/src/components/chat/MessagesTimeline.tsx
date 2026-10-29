@@ -2,7 +2,14 @@ import { RecordingMessageCard } from "../../screenRecording/RecordingCards";
 import { KEY_FRAME_PREFIX } from "../../screenRecording/agentView";
 import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
 import { localRecordingUrl } from "../../screenRecording/recordingStore";
-import { type EnvironmentId, type MessageId, type ThreadId, type TurnId } from "@t3tools/contracts";
+import {
+  type ApprovalRequestId,
+  type EnvironmentId,
+  type MessageId,
+  type ProviderApprovalDecision,
+  type ThreadId,
+  type TurnId,
+} from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
 import {
@@ -17,7 +24,8 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import { deriveTimelineEntries, formatElapsed, type PendingApproval } from "../../session-logic";
+import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
 import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
@@ -72,7 +80,7 @@ import {
   type MessagesTimelineRow,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
-import { summarizeToolGroup, toolGroupAction, workEntryIsThought } from "./workLogSummary";
+import { summarizeToolGroup, toolGroupAction, workEntryIsStep } from "./workLogSummary";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -120,7 +128,14 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
+  respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
+  onRespondToApproval:
+    | ((requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => Promise<void>)
+    | undefined;
 }
+
+const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
+const EMPTY_REQUEST_IDS: ReadonlyArray<ApprovalRequestId> = [];
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
@@ -154,6 +169,13 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /** The chat's latest turn: a finished one folds into "Worked for …". */
   latestTurn?: TimelineLatestTurn | null;
+  /** The agent's open questions before a step: the first shows on the feed's last row. */
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
+  respondingRequestIds?: ReadonlyArray<ApprovalRequestId>;
+  onRespondToApproval?: (
+    requestId: ApprovalRequestId,
+    decision: ProviderApprovalDecision,
+  ) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +205,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   onIsAtEndChange,
   latestTurn = null,
+  pendingApprovals = EMPTY_PENDING_APPROVALS,
+  respondingRequestIds = EMPTY_REQUEST_IDS,
+  onRespondToApproval,
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
@@ -217,6 +242,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               }
             : null,
         expandedTurnIds,
+        pendingApprovals,
       }),
     [
       timelineEntries,
@@ -230,6 +256,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurnStartedAt,
       latestTurnCompletedAt,
       expandedTurnIds,
+      pendingApprovals,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -278,6 +305,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      respondingRequestIds,
+      onRespondToApproval,
     }),
     [
       activeTurnInProgress,
@@ -295,6 +324,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      respondingRequestIds,
+      onRespondToApproval,
     ],
   );
 
@@ -408,6 +439,15 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
     >
       {row.kind === "work" && (
         <WorkGroupSection groupedEntries={row.groupedEntries} live={row.live} />
+      )}
+
+      {row.kind === "pending-approval" && (
+        <TimelinePendingApprovalRow
+          approval={row.approval}
+          pendingCount={row.pendingCount}
+          isResponding={ctx.respondingRequestIds.includes(row.approval.requestId)}
+          onRespondToApproval={ctx.onRespondToApproval}
+        />
       )}
 
       {row.kind === "turn-fold" && (
@@ -781,7 +821,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
     );
   };
 
-  if (groupedEntries.length === 1) {
+  // One step (with or without notes around it) stays its own row: a phrase
+  // would say less than the row itself.
+  if (groupedEntries.filter(workEntryIsStep).length < 2) {
     return <div className="space-y-0.5">{groupedEntries.map(renderEntry)}</div>;
   }
 
@@ -789,8 +831,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
   // tool's (a runtime error — a failed tool only marks the phrase).
   const pinned = groupedEntries.filter(
     (entry) =>
-      entry.toolName === "automation_create" ||
-      (entry.tone === "error" && !entry.itemType && !workEntryIsThought(entry)),
+      entry.toolName === "automation_create" || (entry.tone === "error" && !entry.itemType),
   );
   const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES * 2;
   const visibleEntries =

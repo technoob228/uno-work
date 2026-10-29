@@ -10,7 +10,7 @@ const at = (base: number, seconds: number) => new Date(base + seconds * 1000).to
 
 type Activity = {
   id: string;
-  tone: "tool" | "info" | "error";
+  tone: "tool" | "info" | "error" | "approval";
   kind: string;
   summary: string;
   payload: Record<string, unknown>;
@@ -278,5 +278,47 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     updatedAt: at(t1, 58),
   });
 
-  return [running, finished];
+  // ── A turn waiting for an OK on a step ──
+  const t2 = now - 40_000;
+  const ask = "showcase-ask";
+  const askTurn = "turn-showcase-ask-1";
+  const asking = thread({
+    id: ask,
+    projectId,
+    title: "Send emails with a real mailer",
+    messages: [
+      message(
+        `${ask}-u1`,
+        "user",
+        "Use a real mail service for the welcome email instead of the console log.",
+        at(t2, 0),
+        null,
+      ),
+    ],
+    activities: [
+      tool(`${ask}-r1`, askTurn, at(t2, 6), "read", "dynamic_tool_call", {
+        filePath: file("lib/mail.ts"),
+      }),
+      tool(`${ask}-r2`, askTurn, at(t2, 9), "read", "dynamic_tool_call", {
+        filePath: file("package.json"),
+      }),
+      {
+        id: `${ask}-approval`,
+        tone: "approval",
+        kind: "approval.requested",
+        summary: "Waiting for your OK",
+        payload: {
+          requestId: `${ask}-request`,
+          requestKind: "command",
+          detail: "npm install nodemailer",
+        },
+        turnId: askTurn,
+        createdAt: at(t2, 14),
+      },
+    ],
+    turn: { turnId: askTurn, startedAt: at(t2, 0), completedAt: null, answerId: null },
+    updatedAt: at(t2, 14),
+  });
+
+  return [running, finished, asking];
 }

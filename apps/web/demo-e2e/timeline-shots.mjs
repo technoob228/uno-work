@@ -23,6 +23,7 @@ page.on("pageerror", (error) => console.log("pageerror:", error.message));
 const TITLES = {
   "showcase-done": "Signup form doesn",
   "showcase-live": "Thank-you page after",
+  "showcase-ask": "Send emails with a real",
 };
 let booted = false;
 async function open(threadId) {
@@ -72,6 +73,10 @@ const steps = {
     await page.waitForTimeout(600);
     await shot("done-expanded");
   },
+  async approval() {
+    await open("showcase-ask");
+    await shot("approval");
+  },
   async live() {
     await open("showcase-live");
     await shot("live");
@@ -89,7 +94,7 @@ const steps = {
   },
 };
 
-for (const name of (process.env.STEPS ?? "done,doneExpanded,live,queue").split(",")) {
+for (const name of (process.env.STEPS ?? "done,doneExpanded,live,approval,queue").split(",")) {
   try {
     await steps[name]();
   } catch (error) {

@@ -1,4 +1,9 @@
-import { formatDuration, type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import {
+  formatDuration,
+  type PendingApproval,
+  type TimelineEntry,
+  type WorkLogEntry,
+} from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 import { liveThoughtFromReasoningTail, workEntryIsThought } from "./workLogSummary";
@@ -51,6 +56,14 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: ProposedPlan;
+    }
+  | {
+      /** The agent waits for an OK: the question on its own row (upstream 1f8530ec3c). */
+      kind: "pending-approval";
+      id: string;
+      createdAt: string;
+      approval: PendingApproval;
+      pendingCount: number;
     }
   | {
       kind: "working";
@@ -293,6 +306,7 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
   latestTurn?: TimelineLatestTurn | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -404,7 +418,19 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  if (input.isWorking) {
+  const pendingApproval = input.pendingApprovals?.[0];
+  if (pendingApproval) {
+    nextRows.push({
+      kind: "pending-approval",
+      id: `pending-approval:${pendingApproval.requestId}`,
+      createdAt: pendingApproval.createdAt,
+      approval: pendingApproval,
+      pendingCount: input.pendingApprovals?.length ?? 1,
+    });
+  }
+
+  // Waiting for the person's OK is not "Thinking": the question row says it.
+  if (input.isWorking && !pendingApproval) {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -444,6 +470,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "working": {
       const bw = b as typeof a;
       return a.createdAt === bw.createdAt && a.thought === bw.thought;
+    }
+
+    case "pending-approval": {
+      const ba = b as typeof a;
+      return a.approval === ba.approval && a.pendingCount === ba.pendingCount;
     }
 
     case "turn-fold": {

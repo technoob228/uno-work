@@ -4248,6 +4248,9 @@ export default function ChatView(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 onIsAtEndChange={onIsAtEndChange}
                 latestTurn={activeLatestTurn}
+                pendingApprovals={pendingApprovals}
+                respondingRequestIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
               />
             ) : null}
 

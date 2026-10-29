@@ -46,6 +46,15 @@ export function workEntryIsThought(entry: Pick<WorkLogEntry, "tone">): boolean {
   return entry.tone === "thinking";
 }
 
+/**
+ * A step the agent took (a tool call, a failed one too) — not a thought and
+ * not a note about the run ("Context compacted", an approval asked/answered),
+ * which are `info` rows.
+ */
+export function workEntryIsStep(entry: Pick<WorkLogEntry, "tone">): boolean {
+  return entry.tone === "tool" || entry.tone === "error";
+}
+
 /** The harness's name of the tool, lowercase: `toolName`, else `Read: {…}` of a Claude detail. */
 function harnessToolName(entry: SummaryEntry): string {
   if (entry.toolName) return entry.toolName.toLowerCase();
@@ -144,9 +153,12 @@ export function summarizeToolGroup(entries: ReadonlyArray<SummaryEntry>): {
   summary: string;
   hasFailure: boolean;
 } {
-  const toolEntries = entries.filter((entry) => !workEntryIsThought(entry));
+  const toolEntries = entries.filter(workEntryIsStep);
   if (entries.length > 0 && toolEntries.length === 0) {
-    return { summary: "Thought", hasFailure: false };
+    return {
+      summary: entries.some(workEntryIsThought) ? "Thought" : "Updates",
+      hasFailure: false,
+    };
   }
   const groups = new Map<ToolGroupAction, SummaryEntry[]>();
   for (const entry of toolEntries) {
