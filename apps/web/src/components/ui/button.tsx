@@ -72,3 +72,42 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
 }
 
 export { Button, buttonVariants };
+
+/**
+ * A word-sized button that sits inside a sentence — the draft screen's
+ * "What should we do in [Home folder] on [This Mac]?" (upstream T3 Code
+ * `InlineButton`, carried over as is).
+ */
+const inlineButtonVariants = cva(
+  "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 [text-align:var(--inline-button-text-align,center)] [white-space:var(--inline-button-white-space,nowrap)] hover:underline focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-64",
+  {
+    defaultVariants: { tone: "default" },
+    variants: {
+      tone: {
+        default: "text-foreground",
+        muted: "text-muted-foreground hover:text-foreground",
+        destructive: "text-destructive/80 hover:text-destructive",
+        picker:
+          "gap-1 text-foreground decoration-from-font underline-offset-4 data-popup-open:underline",
+      },
+    },
+  },
+);
+
+export function InlineButton({
+  className,
+  tone,
+  render,
+  ...props
+}: useRender.ComponentProps<"button"> & VariantProps<typeof inlineButtonVariants>) {
+  const defaultProps = {
+    className: cn(inlineButtonVariants({ tone }), className),
+    "data-slot": "inline-button",
+    type: render ? undefined : ("button" as const),
+  };
+  return useRender({
+    defaultTagName: "button",
+    props: mergeProps<"button">(defaultProps, props),
+    render,
+  });
+}
