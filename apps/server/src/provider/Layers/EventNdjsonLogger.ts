@@ -23,6 +23,79 @@ const LOG_SCOPE = "provider-observability";
 
 export type EventNdjsonStream = "native" | "canonical" | "orchestration";
 
+// Streaming fragments: thousands per turn, each already folded into a later
+// complete event (item.completed, the full assistant message, ...). Logging
+// them made provider logs mostly deltas and cost a deep secret-redaction walk,
+// a JSON.stringify and three spans per fragment. Upstream t3code 0bfb6df34b.
+const transientCanonicalEventTypes = new Set([
+  "content.delta",
+  "hook.progress",
+  "item.updated",
+  "task.progress",
+  "thread.realtime.audio.delta",
+  "tool.progress",
+  "turn.proposed.delta",
+]);
+const transientNativeMethods = new Set([
+  "item/agentMessage/delta",
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "thread/realtime/outputAudio/delta",
+  "thread/realtime/transcript/delta",
+  "claude/system/task_progress",
+]);
+const transientAcpUpdates = new Set(["agent_message_chunk", "agent_thought_chunk"]);
+
+/** False for streaming fragments that are not worth a log line. */
+export function shouldPersistProviderLogRecord(stream: EventNdjsonStream, event: unknown): boolean {
+  if (stream === "orchestration" || typeof event !== "object" || event === null) {
+    return true;
+  }
+  const type = Reflect.get(event, "type");
+  if (typeof type === "string" && transientCanonicalEventTypes.has(type)) {
+    return false;
+  }
+  if (stream !== "native") return true;
+
+  const nested = Reflect.get(event, "event");
+  const nativeEvent = typeof nested === "object" && nested !== null ? nested : event;
+  const method = Reflect.get(nativeEvent, "method");
+  if (
+    typeof method === "string" &&
+    (transientNativeMethods.has(method) ||
+      method.startsWith("claude/stream_event/content_block_delta/"))
+  ) {
+    return false;
+  }
+
+  const nativeType = Reflect.get(nativeEvent, "type");
+  if (nativeType === "message.part.delta") return false;
+
+  const payload = Reflect.get(nativeEvent, "payload");
+  if (typeof payload !== "object" || payload === null) return true;
+
+  if (method === "session/update") {
+    const update = Reflect.get(payload, "update");
+    if (typeof update !== "object" || update === null) return true;
+    const updateType = Reflect.get(update, "sessionUpdate");
+    return typeof updateType !== "string" || !transientAcpUpdates.has(updateType);
+  }
+
+  if (nativeType === "message.part.updated") {
+    const properties = Reflect.get(payload, "properties");
+    if (typeof properties !== "object" || properties === null) return true;
+    const part = Reflect.get(properties, "part");
+    if (typeof part !== "object" || part === null) return true;
+    const partType = Reflect.get(part, "type");
+    return partType !== "text" && partType !== "reasoning";
+  }
+
+  return true;
+}
+
 export interface EventNdjsonLogger {
   readonly filePath: string;
   write: (event: unknown, threadId: ThreadId | null) => Effect.Effect<void>;
@@ -80,7 +153,7 @@ function resolveStreamLabel(stream: EventNdjsonStream): string {
   }
 }
 
-const toLogMessage = Effect.fn("toLogMessage")(function* (
+const toLogMessage = Effect.fnUntraced(function* (
   event: unknown,
 ): Effect.fn.Return<string | undefined> {
   const serialized = yield* Effect.sync(() => {
@@ -141,7 +214,7 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
   const lineLogger = makeLineLogger(input.streamLabel);
   const batchedLogger = yield* Logger.batched(lineLogger, {
     window: input.batchWindowMs,
-    flush: Effect.fn("makeThreadWriter.flush")(function* (messages) {
+    flush: Effect.fnUntraced(function* (messages) {
       const flushResult = yield* Effect.sync(() => {
         try {
           for (const message of messages) {
@@ -204,7 +277,7 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
     failedSegments: new Set(),
   });
 
-  const resolveThreadWriter = Effect.fn("resolveThreadWriter")(function* (
+  const resolveThreadWriter = Effect.fnUntraced(function* (
     threadSegment: string,
   ): Effect.fn.Return<ThreadWriter | undefined> {
     return yield* SynchronizedRef.modifyEffect(stateRef, (state) => {
@@ -251,7 +324,12 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
     });
   });
 
-  const write = Effect.fn("write")(function* (event: unknown, threadId: ThreadId | null) {
+  // Log writes are untraced: they ran three to four spans per provider event
+  // (write, resolveThreadWriter, toLogMessage, flush) into the trace file.
+  const writeUntraced = Effect.fnUntraced(function* (event: unknown, threadId: ThreadId | null) {
+    if (!shouldPersistProviderLogRecord(options.stream, event)) {
+      return;
+    }
     const threadSegment = resolveThreadSegment(threadId);
     // Сырые события харнесса — те же выводы инструментов: секреты в лог не пишем.
     const message = yield* toLogMessage(redactSecretsDeep(event));
@@ -266,6 +344,8 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
 
     yield* writer.writeMessage(message);
   });
+  const write = (event: unknown, threadId: ThreadId | null) =>
+    writeUntraced(event, threadId).pipe(Effect.withTracerEnabled(false));
 
   const close = Effect.fn("close")(function* () {
     yield* SynchronizedRef.modifyEffect(stateRef, (state) =>

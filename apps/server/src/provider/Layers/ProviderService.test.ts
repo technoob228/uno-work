@@ -260,7 +260,11 @@ const hasMetricSnapshot = (
       Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
   );
 
-function makeProviderServiceLayer() {
+function makeProviderServiceLayer(
+  input: {
+    readonly directory?: ProviderSessionDirectory["Service"];
+  } = {},
+) {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
   const cursor = makeFakeCodexAdapter(CURSOR_DRIVER);
@@ -274,7 +278,10 @@ function makeProviderServiceLayer() {
   const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
     Layer.provide(SqlitePersistenceMemory),
   );
-  const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+  const directoryLayer =
+    input.directory === undefined
+      ? ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
+      : Layer.succeed(ProviderSessionDirectory, input.directory);
 
   const layer = it.layer(
     Layer.mergeAll(
@@ -1825,6 +1832,55 @@ validation.layer("ProviderServiceLive validation", (it) => {
       if (Option.isSome(runtime)) {
         assert.equal(runtime.value.threadId, session.threadId);
       }
+    }),
+  );
+});
+
+// Upstream t3code 9a7b1e21e5: listSessions resolves bindings only for live
+// adapter sessions, never the whole (historical) thread directory.
+const activeSessionThreadId = asThreadId("thread-active-session");
+const historicalSessionThreadId = asThreadId("thread-historical-session");
+const listThreadIds = vi.fn(() =>
+  Effect.succeed([activeSessionThreadId, historicalSessionThreadId]),
+);
+const getBinding = vi.fn((threadId: ThreadId) =>
+  Effect.succeed(
+    Option.some({
+      threadId,
+      provider: CODEX_DRIVER,
+      providerInstanceId: codexInstanceId,
+    }),
+  ),
+);
+const boundedListing = makeProviderServiceLayer({
+  directory: {
+    upsert: () => Effect.void,
+    getProvider: () => Effect.die("ProviderService.listSessions does not use getProvider"),
+    getBinding,
+    listThreadIds,
+    listBindings: () => Effect.die("ProviderService.listSessions does not use listBindings"),
+  },
+});
+
+boundedListing.layer("ProviderServiceLive session listing", (it) => {
+  it.effect("looks up bindings for active sessions without scanning historical threads", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      yield* boundedListing.codex.startSession({
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId: activeSessionThreadId,
+        cwd: "/tmp/project-active-session",
+        runtimeMode: "full-access",
+      });
+      listThreadIds.mockClear();
+      getBinding.mockClear();
+
+      const sessions = yield* provider.listSessions();
+
+      assert.equal(sessions.length, 1);
+      assert.equal(listThreadIds.mock.calls.length, 0);
+      assert.deepEqual(getBinding.mock.calls, [[activeSessionThreadId]]);
     }),
   );
 });

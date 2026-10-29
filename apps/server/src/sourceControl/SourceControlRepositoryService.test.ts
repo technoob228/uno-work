@@ -316,3 +316,25 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
     ),
   );
 });
+
+// Upstream t3code 1cc9d413a5.
+it.each([
+  [
+    "userinfo",
+    "fatal: unable to access 'https://x-access-token:ghp_s3cret@github.com/o/r.git/': 403",
+    "fatal: unable to access 'https://github.com/o/r.git/': 403",
+  ],
+  [
+    "a quoted query token",
+    "fatal: unable to access 'https://github.com/o/r.git?access_token=s3'cret/': 403",
+    "fatal: unable to access 'https://github.com/o/r.git': 403",
+  ],
+  [
+    "an unquoted query token",
+    "fatal: https://github.com/o/r.git?access_token=s3cret/info/refs not valid",
+    "fatal: https://github.com/o/r.git not valid",
+  ],
+  ["no credentials", "fatal: repository not found", "fatal: repository not found"],
+] as const)("redacts %s from clone error text", (_label, input, expected) => {
+  assert.strictEqual(SourceControlRepositoryService.redactUrlCredentials(input), expected);
+});

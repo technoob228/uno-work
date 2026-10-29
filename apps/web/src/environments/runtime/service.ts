@@ -147,8 +147,12 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 // - Threads with active work or pending user action are sticky and are never
 //   evicted while they remain non-idle.
 // - Capacity eviction only targets idle cached subscriptions.
-const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
-const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+// An unused (refCount 0, idle) thread keeps its live detail subscription -
+// server-side stream + full thread state in the renderer - this long. Upstream
+// keeps idle thread state 5 minutes (THREAD_SNAPSHOT_IDLE_TTL_MS, d7cf8aaa8d);
+// was 15 min / 32 threads here. Running threads are never evicted.
+const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
+const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 12;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
@@ -1632,7 +1636,7 @@ function stopActiveService() {
 
 function reconnectEnvironmentConnectionsAfterBrowserResume(
   reason: string,
-  options: { readonly force: boolean },
+  options: { readonly force: boolean; readonly forceSavedOnly?: boolean },
 ): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
@@ -1650,7 +1654,8 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(
         ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
         : null;
     const runtimeReportsHealthy = runtimeState === null || runtimeState === "connected";
-    if (!options.force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
+    const force = options.force && (!options.forceSavedOnly || connection.kind === "saved");
+    if (!force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
       continue;
     }
     if (connection.kind === "saved" && runtimeState !== "connected") {
@@ -1752,11 +1757,28 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
   };
 
+  // The network came back (Wi-Fi switch, VPN, laptop off a dead hotspot):
+  // sockets opened on the old network may look alive but are dead, and saved
+  // environments may be sitting in a long self-heal backoff. Reconnect them
+  // now instead of waiting it out. Upstream t3code 990bb0b689 (idea: no dead
+  // time on the path back to reachability).
+  const handleOnline = () => {
+    // A local (primary) socket that still looks healthy is left alone: the
+    // network change does not touch 127.0.0.1, and WebSocketConnectionSurface
+    // already reconnects the primary one when it is down.
+    reconnectEnvironmentConnectionsAfterBrowserResume("online", {
+      force: true,
+      forceSavedOnly: true,
+    });
+  };
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handlePageShow);
+  window.addEventListener("online", handleOnline);
   return () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pageshow", handlePageShow);
+    window.removeEventListener("online", handleOnline);
   };
 }
 

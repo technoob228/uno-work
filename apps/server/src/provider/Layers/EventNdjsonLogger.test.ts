@@ -6,7 +6,7 @@ import { ThreadId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeEventNdjsonLogger, shouldPersistProviderLogRecord } from "./EventNdjsonLogger.ts";
 
 function parseLogLine(line: string) {
   const match = /^\[([^\]]+)\] ([A-Z]+): (.+)$/.exec(line);
@@ -201,6 +201,74 @@ describe("EventNdjsonLogger", () => {
           matchingFiles.some((entry) => entry === `${fileStem}.3`),
           false,
         );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  // Upstream t3code 0bfb6df34b.
+  it("drops streaming fragments and keeps complete events", () => {
+    const drop = (stream: "native" | "canonical", event: unknown) =>
+      assert.equal(shouldPersistProviderLogRecord(stream, event), false);
+    const keep = (stream: "native" | "canonical" | "orchestration", event: unknown) =>
+      assert.equal(shouldPersistProviderLogRecord(stream, event), true);
+
+    drop("canonical", { type: "content.delta" });
+    drop("canonical", { type: "item.updated" });
+    keep("canonical", { type: "item.completed" });
+    keep("orchestration", { type: "content.delta" });
+
+    drop("native", { event: { method: "claude/stream_event/content_block_delta/text_delta" } });
+    drop("native", { event: { method: "claude/system/task_progress" } });
+    keep("native", { event: { method: "claude/assistant" } });
+    drop("native", { method: "item/agentMessage/delta" });
+    keep("native", { method: "item/completed" });
+    drop("native", { event: { type: "message.part.delta" } });
+    drop("native", {
+      event: {
+        type: "message.part.updated",
+        payload: { properties: { part: { type: "text" } } },
+      },
+    });
+    keep("native", {
+      event: {
+        type: "message.part.updated",
+        payload: { properties: { part: { type: "tool" } } },
+      },
+    });
+    drop("native", {
+      event: {
+        method: "session/update",
+        payload: { update: { sessionUpdate: "agent_message_chunk" } },
+      },
+    });
+    keep("native", {
+      event: { method: "session/update", payload: { update: { sessionUpdate: "tool_call" } } },
+    });
+  });
+
+  it.effect("does not write dropped fragments to the thread file", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-log-"));
+      const basePath = path.join(tempDir, "provider-canonical.ndjson");
+      try {
+        const logger = yield* makeEventNdjsonLogger(basePath, { stream: "canonical" });
+        if (!logger) {
+          assert.fail("logger was not created");
+          return;
+        }
+        const threadId = ThreadId.make("thread-fragments");
+        yield* logger.write({ type: "content.delta", id: "evt-delta" }, threadId);
+        yield* logger.write({ type: "item.completed", id: "evt-done" }, threadId);
+        yield* logger.close();
+
+        const lines = fs
+          .readFileSync(path.join(tempDir, "thread-fragments.log"), "utf8")
+          .trim()
+          .split("\n");
+        assert.equal(lines.length, 1);
+        assert.include(lines[0] ?? "", "evt-done");
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

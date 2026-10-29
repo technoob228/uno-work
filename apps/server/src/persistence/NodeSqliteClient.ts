@@ -5,6 +5,7 @@
  * @module SqliteClient
  */
 import { DatabaseSync, type StatementSync } from "node:sqlite";
+import * as NodeUtil from "node:util";
 
 import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
@@ -13,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
@@ -72,6 +74,71 @@ const checkNodeSqliteCompat = () => {
   return Effect.void;
 };
 
+/**
+ * `node:sqlite` reports the SQLite result code as `errcode`, while
+ * `classifySqliteError` reads `errno`. Copy it across so busy, locked and
+ * constraint failures get their own reasons instead of `UnknownError`.
+ * Upstream t3code 0fe4fa40fe.
+ */
+const classifyError = (cause: unknown, message: string, operation: string) => {
+  if (
+    Predicate.hasProperty(cause, "errcode") &&
+    typeof cause.errcode === "number" &&
+    !Predicate.hasProperty(cause, "errno")
+  ) {
+    Object.assign(cause, { errno: cause.errcode });
+  }
+  return classifySqliteError(cause, { message, operation });
+};
+
+/**
+ * SQLite keeps its copy of a statement's text and blob parameters until the
+ * statement is bound again or finalized, and `node:sqlite` cannot clear them.
+ * A cached statement would hold its last payload (a multi-MB tool output, an
+ * attachment) for as long as it stays cached, so executions binding more than
+ * this many string code units and blob bytes, or a named parameter behind a
+ * getter, get a throwaway statement instead. Upstream t3code 4cd0076ec6.
+ */
+export const LARGE_BINDING_SIZE = 64 * 1024;
+
+// `node:sqlite` binds both buffer views and raw buffers as blobs.
+const isBlob = (value: unknown): value is ArrayBufferView | ArrayBufferLike =>
+  ArrayBuffer.isView(value) || NodeUtil.types.isAnyArrayBuffer(value);
+
+const bindingSize = (value: unknown): number => {
+  if (typeof value === "string") {
+    return value.length;
+  }
+  return isBlob(value) ? value.byteLength : 0;
+};
+
+export const hasLargeBinding = (params: ReadonlyArray<unknown>): boolean => {
+  try {
+    let size = 0;
+    for (const param of params) {
+      if (
+        (typeof param === "object" || typeof param === "function") &&
+        param !== null &&
+        !isBlob(param)
+      ) {
+        // `node:sqlite` takes named parameters as one object, callable or not.
+        // Read data properties only: calling a getter here would run it twice.
+        for (const property of Object.values(Object.getOwnPropertyDescriptors(param))) {
+          if (!property.enumerable) continue;
+          if (!("value" in property)) return true;
+          size += bindingSize(property.value);
+        }
+      } else {
+        size += bindingSize(param);
+      }
+    }
+    return size > LARGE_BINDING_SIZE;
+  } catch {
+    // A parameter that cannot be measured is left for the statement to report.
+    return true;
+  }
+};
+
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
@@ -110,10 +177,7 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
           try: () => db.prepare(sql),
           catch: (cause) =>
             new SqlError({
-              reason: classifySqliteError(cause, {
-                message: "Failed to prepare statement",
-                operation: "prepare",
-              }),
+              reason: classifyError(cause, "Failed to prepare statement", "prepare"),
             }),
         }),
     });
@@ -130,21 +194,30 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
         } catch (cause) {
           return Effect.fail(
             new SqlError({
-              reason: classifySqliteError(cause, {
-                message: "Failed to execute statement",
-                operation: "execute",
-              }),
+              reason: classifyError(cause, "Failed to execute statement", "execute"),
             }),
           );
         }
       });
 
+    const prepareUncached = (sql: string) =>
+      Effect.try({
+        try: () => db.prepare(sql),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifyError(cause, "Failed to prepare statement", "prepare"),
+          }),
+      });
+
+    const statementFor = (sql: string, params: ReadonlyArray<unknown>) =>
+      hasLargeBinding(params) ? prepareUncached(sql) : Cache.get(prepareCache, sql);
+
     const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
-      Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw));
+      Effect.flatMap(statementFor(sql, params), (s) => runStatement(s, params, raw));
 
     const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
       Effect.acquireUseRelease(
-        Cache.get(prepareCache, sql),
+        statementFor(sql, params),
         (statement) =>
           Effect.try({
             try: () => {
@@ -160,10 +233,7 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
             },
             catch: (cause) =>
               new SqlError({
-                reason: classifySqliteError(cause, {
-                  message: "Failed to execute statement",
-                  operation: "execute",
-                }),
+                reason: classifyError(cause, "Failed to execute statement", "execute"),
               }),
           }),
         (statement) =>
@@ -211,6 +281,12 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     acquirer,
     compiler,
     transactionAcquirer,
+    // A deferred BEGIN only takes the write lock at the first write. If another
+    // process commits after this transaction's first read, that write fails at
+    // once with SQLITE_BUSY_SNAPSHOT, which busy_timeout cannot wait out. Taking
+    // the lock up front makes it wait instead. Read-only connections cannot
+    // write, so they keep the deferred BEGIN. Upstream t3code 0fe4fa40fe.
+    beginTransaction: options.readonly === true ? "BEGIN" : "BEGIN IMMEDIATE",
     spanAttributes: [
       ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
       [ATTR_DB_SYSTEM_NAME, "sqlite"],

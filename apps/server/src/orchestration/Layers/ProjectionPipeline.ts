@@ -101,6 +101,27 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
   );
 }
 
+// A refresh reads each persisted summary source (all messages, activities,
+// plans, approvals of the thread), so skip activities that cannot change the
+// result. Upstream t3code c034f51bb7 / c2283ce146.
+function shouldRefreshThreadShellSummary(event: OrchestrationEvent): boolean {
+  if (event.type !== "thread.activity-appended") {
+    return true;
+  }
+
+  switch (event.payload.activity.kind) {
+    case "approval.requested":
+    case "approval.resolved":
+    case "provider.approval.respond.failed":
+    case "user-input.requested":
+    case "user-input.resolved":
+    case "provider.user-input.respond.failed":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function derivePendingUserInputCountFromActivities(
   activities: ReadonlyArray<ProjectionThreadActivity>,
 ): number {
@@ -778,7 +799,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
-        case "thread.message-sent":
+        // A message cannot change any summary field except latestUserMessageAt,
+        // which is a monotonic maximum that folds in directly. The full refresh
+        // re-read every message, activity, plan and approval of the thread on
+        // each streamed assistant delta. Upstream t3code c2283ce146.
+        case "thread.message-sent": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const previousLatest = existingRow.value.latestUserMessageAt;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            updatedAt: event.occurredAt,
+            latestUserMessageAt:
+              event.payload.role === "user" &&
+              (previousLatest === null || event.payload.createdAt > previousLatest)
+                ? event.payload.createdAt
+                : previousLatest,
+          });
+          return;
+        }
+
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
         case "thread.approval-response-requested":
@@ -793,7 +837,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             updatedAt: event.occurredAt,
           });
-          yield* refreshThreadShellSummary(event.payload.threadId);
+          if (shouldRefreshThreadShellSummary(event)) {
+            yield* refreshThreadShellSummary(event.payload.threadId);
+          }
           return;
         }
 
@@ -1522,6 +1568,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         ),
       );
 
+      // Most events have no attachment cleanup; skip the call and its span
+      // (one per projector per event). Upstream t3code 99efaeab58.
+      if (
+        attachmentSideEffects.deletedThreadIds.size === 0 &&
+        attachmentSideEffects.prunedThreadRelativePaths.size === 0
+      ) {
+        return;
+      }
       yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to apply projected attachment side-effects", {
