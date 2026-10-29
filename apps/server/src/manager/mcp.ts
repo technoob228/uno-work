@@ -44,6 +44,16 @@ import type { AssistantScheduleError, AssistantSchedulesShape } from "../assista
 import type { AssistantTeamError, AssistantTeamShape } from "../assistants/assistantTeam.ts";
 import type { AutomationsServiceShape } from "../automations/AutomationsService.ts";
 import type { AutomationClientError } from "../automations/consoleClient.ts";
+import {
+  appendAssistantNotes,
+  ASSISTANT_NOTES_READABLE,
+  ASSISTANT_NOTES_WRITABLE,
+  editAssistantNotes,
+  NOTES_READ_MAX_LINES,
+  NOTES_TEXT_MAX_CHARS,
+  type NotesResult,
+  readAssistantNotes,
+} from "./assistantNotes.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
@@ -54,6 +64,13 @@ export interface ManagerMcpExtras {
   readonly team?: AssistantTeamShape;
   /** Automations (the console's): on a schedule or on an event. */
   readonly automations?: AutomationsServiceShape;
+  /**
+   * The folder of the caller's own assistant (its NOTES.md, ROUTING.md…), or
+   * null when the token is not an assistant's: the `notes_*` tools.
+   */
+  readonly assistantWorkspace?: (caller: ManagerCaller) => Effect.Effect<string | null>;
+  /** `send_file`: queue a file for the Telegram / Slack chat of the caller's turn. */
+  readonly sendFile?: (caller: ManagerCaller, path: string) => Effect.Effect<NotesResult>;
 }
 
 type ManagerMcpToolError =
@@ -106,6 +123,26 @@ const withAutomations = <A>(
   run: (automations: AutomationsServiceShape) => Effect.Effect<A, AutomationClientError>,
 ): Effect.Effect<A | { readonly error: string }, AutomationClientError> =>
   extras.automations ? run(extras.automations) : Effect.succeed({ error: AUTOMATIONS_UNAVAILABLE });
+
+const NOTES_UNAVAILABLE =
+  "Your notes are reachable only from your own conversation (an assistant's token).";
+
+/** One of the `notes_*` tools on the caller's own workspace. */
+const withNotes = (
+  extras: ManagerMcpExtras,
+  caller: ManagerCaller,
+  run: (workspaceRoot: string) => Promise<NotesResult>,
+): Effect.Effect<unknown> =>
+  Effect.gen(function* () {
+    const root = extras.assistantWorkspace ? yield* extras.assistantWorkspace(caller) : null;
+    if (root === null) return { error: NOTES_UNAVAILABLE };
+    const result = yield* Effect.tryPromise(() => run(root)).pipe(
+      Effect.orElseSucceed(
+        (): NotesResult => ({ ok: false, error: "Could not reach your notes; try once more." }),
+      ),
+    );
+    return result.ok ? result.value : { error: result.error };
+  });
 
 /** The trigger of `automation_create` / `automation_update`, as a JSON Schema. */
 const AUTOMATION_TRIGGER_JSON_SCHEMA = {
@@ -289,9 +326,20 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         prompt: { type: "string" },
         modelSelection: {
           type: "object",
-          description: "Optional {instanceId, model}; defaults to the project's model.",
+          description:
+            "Optional {instanceId, model}. The person's routing rows (Source `you` in ROUTING.md) win over it unless personAsked; without either it runs on the person's default AI, else the project's model. A harness their rows name that isn't ready here fails with a line to ask them — never start it on another model yourself.",
           properties: { instanceId: { type: "string" }, model: { type: "string" } },
           required: ["instanceId", "model"],
+        },
+        taskType: {
+          type: "string",
+          description:
+            "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        personAsked: {
+          type: "boolean",
+          description:
+            'true only when the person named this model/harness in this conversation ("through Claude", "on Smart"): then modelSelection wins over their table.',
         },
         runtimeMode: {
           type: "string",
@@ -591,6 +639,84 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     },
     run: (_tools, caller, args, extras) =>
       withAutomations(extras, (automations) => automations.toolDelete(caller, args)),
+  },
+  {
+    name: "notes_read",
+    description:
+      "Read one of your own files: NOTES.md (your shared memory; the newest lines by default), ROUTING.md (task type → AI), USER.md (about the person) or SOUL.md (who you are). The newest part of them is usually already in your context — read only for older notes or when the person says they changed them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_READABLE] },
+        lines: { type: "integer", minimum: 1, maximum: NOTES_READ_MAX_LINES },
+      },
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => readAssistantNotes(root, args)),
+  },
+  {
+    name: "notes_append",
+    description:
+      'Add to NOTES.md (default, at its end): a dated note ("- 2026-10-29 <fact>"; the person\'s own facts end in "(you)"). With file ROUTING.md: an Outcomes log line (it lands in that section). Short lines only; a table row or a proposal is notes_edit.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_WRITABLE] },
+        text: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => appendAssistantNotes(root, args)),
+  },
+  {
+    name: "notes_edit",
+    description:
+      "Replace one exact piece of NOTES.md or ROUTING.md (a routing table row, a stale note): `find` must occur exactly once. Lines ending in (you) and routing rows with Source `you` are the person's and can't be changed here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_WRITABLE] },
+        find: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+        replace: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+      },
+      required: ["file", "find", "replace"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => editAssistantNotes(root, args)),
+  },
+  {
+    name: "send_file",
+    description:
+      "Send a file of this computer to the Telegram or Slack chat the person writes from now (photos as photos, voice as voice, the rest as documents) — with your answer of this turn. Any file of the projects and the person's folders (projects, Documents, Uploads, Downloads, Desktop) you may reach; hidden files and keys never go. Telegram takes up to 50 MB. In the app (no Telegram/Slack): give the path instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          maxLength: 4096,
+          description: "Absolute or ~/ path, e.g. ~/projects/site/docs/report.pdf",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      Effect.gen(function* () {
+        const path =
+          typeof args === "object" &&
+          args !== null &&
+          typeof (args as { path?: unknown }).path === "string"
+            ? (args as { path: string }).path.trim()
+            : "";
+        if (path.length === 0) return { error: "path is required." };
+        if (extras.sendFile === undefined) return { error: "Sending files isn't available here." };
+        const result = yield* extras.sendFile(caller, path);
+        return result.ok ? result.value : { error: result.error };
+      }),
   },
   {
     name: "assistant_profile_get",

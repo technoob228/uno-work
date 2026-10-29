@@ -33,6 +33,7 @@ import type {
   FilesShare,
   InboxOpenTarget,
   RuntimeMode,
+  ServerProvider,
   ServerSettings,
   UnoBoxCreateJobStatus,
   UnoCloudCreateBoxResult,
@@ -339,6 +340,12 @@ export interface UnoWorkToolDeps {
     }) => Effect.Effect<UnoBoxCreateJobStatus, { readonly message: string }>;
   };
   readonly settings: Effect.Effect<ServerSettings, { readonly message: string }>;
+  /**
+   * The harnesses of this computer as the app sees them (installed, signed
+   * in): `settings_read` says which are ready, so an assistant asked for
+   * "Claude" knows whether it can start one. Absent (tests): not reported.
+   */
+  readonly providers?: Effect.Effect<ReadonlyArray<ServerProvider>>;
   readonly readLogTail: (input: {
     readonly app: UnoMachineApp;
     readonly lines: number;
@@ -2327,7 +2334,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in a folder that is a project; provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). Returns the threadId (and the computer).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder of this computer's home (a folder that isn't a project yet becomes one); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). For an assistant, the person's routing rows (Source `you`) win over provider unless personAsked; a harness of theirs that isn't ready here fails with harness_not_ready — ask the person in one line, never start it on another model yourself. Returns the threadId (and the computer).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2345,6 +2352,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         projectId: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        taskType: {
+          type: "string",
+          description:
+            "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        personAsked: {
+          type: "boolean",
+          description:
+            'true only when the person named this harness/model in the conversation ("through Claude", "on Smart"): then provider/model win over their table.',
+        },
         computerId: {
           type: "string",
           description:
@@ -2377,6 +2394,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
+            ...(str(args, "taskType") ? { taskType: str(args, "taskType") } : {}),
+            ...(args["personAsked"] === true ? { personAsked: true } : {}),
             ...(args["computerId"] !== undefined && args["computerId"] !== null
               ? { computerId: args["computerId"] }
               : {}),
@@ -3705,12 +3724,19 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "settings_read",
     group: "settings",
     description:
-      "The Uno Work settings that shape what you may do: agent access to the Uno account, whether chats may start chats in other projects, which AI harnesses are enabled, the default AI for apps. Never includes keys.",
+      "The Uno Work settings that shape what you may do: agent access to the Uno account, whether chats may start chats in other projects, which AI harnesses are enabled — and which are ready on this computer (installed and signed in, e.g. claudeAgent = Claude), the default AI for apps. Never includes keys.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
       asToolError(deps.settings).pipe(
-        Effect.map((settings) => {
+        Effect.flatMap((settings) =>
+          Effect.gen(function* () {
+            const providers: ReadonlyArray<ServerProvider> | null =
+              deps.providers === undefined ? null : yield* deps.providers;
+            return { settings, providers };
+          }),
+        ),
+        Effect.map(({ settings, providers }) => {
           const access = accountAccess(settings);
           return {
             signedInToUno: access.linked,
@@ -3720,6 +3746,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             harnesses: Object.entries(settings.providerInstances)
               .filter(([, instance]) => instance.enabled !== false)
               .map(([id, instance]) => ({ id, driver: instance.driver })),
+            ...(providers === null ? {} : { harnessReadiness: harnessReadiness(providers) }),
             thisChat: {
               mode: deps.caller.runtimeMode,
               meaning:
@@ -3900,6 +3927,40 @@ const BROWSER_READ_COMMANDS: ReadonlySet<string> = new Set([
   "back",
   "forward",
 ]);
+
+/**
+ * Each harness of this computer in one line for `settings_read`: whether a
+ * chat can start on it now and, if not, the one step that fixes it. The
+ * person's "use Claude" is never silently swapped for another model (Misha
+ * 29.10): the assistant reads this and asks instead.
+ */
+export function harnessReadiness(providers: ReadonlyArray<ServerProvider>): ReadonlyArray<{
+  readonly id: string;
+  readonly driver: string;
+  readonly ready: boolean;
+  readonly fix?: string;
+}> {
+  return providers.map((provider) => {
+    const base = { id: String(provider.instanceId), driver: String(provider.driver) };
+    if (provider.availability === "unavailable" || !provider.installed) {
+      return { ...base, ready: false, fix: "not installed: Settings → Agents → install it" };
+    }
+    if (!provider.enabled || provider.status === "disabled") {
+      return { ...base, ready: false, fix: "turned off: Settings → Agents → turn it on" };
+    }
+    if (provider.auth.status === "unauthenticated") {
+      return { ...base, ready: false, fix: "not signed in: Settings → Agents → Sign in" };
+    }
+    if (provider.status === "error") {
+      return {
+        ...base,
+        ready: false,
+        fix: provider.message ?? "it reports an error: Settings → Agents",
+      };
+    }
+    return { ...base, ready: true };
+  });
+}
 
 export function isWorkerTool(name: string, args: Record<string, unknown>): boolean {
   if (name === "browser_command") {

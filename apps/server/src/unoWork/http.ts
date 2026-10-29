@@ -43,6 +43,7 @@ import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
+import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
@@ -53,6 +54,7 @@ import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
@@ -254,6 +256,7 @@ const makeDeps = (input: {
     const serverConfig = yield* ServerConfig;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
+    const providerRegistry = Option.getOrNull(yield* Effect.serviceOption(ProviderRegistry));
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
     const secretStore = Option.getOrNull(yield* Effect.serviceOption(ServerSecretStore));
     // What the assistant's bot-token card needs (Inbox, messenger, the late answer).
@@ -544,6 +547,7 @@ const makeDeps = (input: {
         createBoxStatus: (args) => unoCloud.createBoxStatus(args),
       },
       settings: serverSettings.getSettings,
+      ...(providerRegistry === null ? {} : { providers: providerRegistry.getProviders }),
       // The built-in assistant (assistant_connect): its pinned chat, its
       // Telegram, the connected tools — read-only; the window is the person's.
       assistant: {
@@ -797,7 +801,15 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
-    return HttpServerResponse.jsonUnsafe(outcome.body, { status: 200 });
+    // The Uno dispatcher keeps every result in its context: long ones cut.
+    const shell = yield* (yield* ProjectionSnapshotQuery)
+      .getThreadShellById(ThreadId.make(thread.threadId))
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    const dispatcher = Option.isSome(shell) && shell.value.projectId === ASSISTANT_PROJECT_ID;
+    return HttpServerResponse.jsonUnsafe(
+      dispatcher ? capToolResultBody(outcome.body) : outcome.body,
+      { status: 200 },
+    );
   }),
 );
 

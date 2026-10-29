@@ -1,20 +1,61 @@
 /**
  * Which files an assistant reply may push into a chat with
- * `[[send-file: …]]`.
+ * `[[send-file: …]]` or `send_file`.
  *
- * The marker comes from model output, and model output can be steered by
+ * The request comes from model output, and model output can be steered by
  * anyone who writes into the chat or into a page the agent reads. Without a
  * boundary it would upload `~/.ssh/id_ed25519` or a project's `.env` to the
  * chat. So a file is sent only when, after resolving symlinks, it is a
- * regular file inside the thread's workspace, and no path segment is hidden
- * (`.env`, `.ssh/…`, `.git/…`) or looks like a private key.
+ * regular file inside one of the chat's roots ({@link sendableRoots}), and no
+ * path segment is hidden (`.env`, `.ssh/…`, `.git/…`) or looks like a key.
+ *
+ * Until 29.10 the roots were the chat's own workspace only, so Uno couldn't
+ * send ~/projects/luckyip/docs/… to Telegram. Now: the person's folders
+ * (projects, Documents, Uploads, Downloads, Desktop) for an assistant that
+ * reaches every project; with "only selected projects", only those.
  *
  * @module manager/connectorOutgoingFiles
  */
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
-const PRIVATE_KEY_NAME = /^(id_(rsa|dsa|ecdsa|ed25519)(_sk)?|.*\.(pem|key|p12|pfx|keystore|jks))$/i;
+const PRIVATE_KEY_NAME =
+  /^(id_[a-z0-9_]+|.*\.(pem|key|p12|pfx|keystore|jks|ppk|kdbx|env|der|crt))$|^(credentials|secrets?)(\.[a-z]+)?$/i;
+
+/** Home folders with the person's own files, sendable for an unrestricted assistant. */
+export const SENDABLE_HOME_FOLDERS = [
+  "projects",
+  "Documents",
+  "Uploads",
+  "Downloads",
+  "Desktop",
+] as const;
+
+/**
+ * The roots a chat may send files from: its own folder; then, for the
+ * person's own chats and assistants that reach every project, the home's
+ * {@link SENDABLE_HOME_FOLDERS} and every project; for "only selected
+ * projects", only the folders of those projects.
+ */
+export function sendableRoots(input: {
+  readonly threadRoot: string | null;
+  readonly home: string;
+  /** "all", or the project roots the chat's assistant may reach. */
+  readonly reach: "all" | ReadonlyArray<string>;
+  readonly allProjectRoots: ReadonlyArray<string>;
+}): ReadonlyArray<string> {
+  const roots = new Set<string>();
+  if (input.threadRoot !== null && input.threadRoot.trim().length > 0) roots.add(input.threadRoot);
+  if (input.reach === "all") {
+    for (const folder of SENDABLE_HOME_FOLDERS) roots.add(nodePath.join(input.home, folder));
+    for (const root of input.allProjectRoots) roots.add(root);
+  } else {
+    for (const root of input.reach) roots.add(root);
+  }
+  // The home itself is never a root (it holds .ssh, .credentials…).
+  roots.delete(input.home);
+  return [...roots];
+}
 
 /** Pure check on already-resolved absolute paths. */
 export function isSendableConnectorPath(
@@ -47,19 +88,29 @@ export type ConnectorOutgoingFile =
 export async function resolveConnectorOutgoingFile(
   rawPath: string,
   roots: ReadonlyArray<string>,
+  /** Expands a leading `~/`. */
+  home?: string,
 ): Promise<ConnectorOutgoingFile> {
   const refused = {
     ok: false,
-    reason: "only files inside this chat's workspace can be sent (hidden files and keys excluded)",
+    reason:
+      "only files of this chat's folder and the projects and folders it may reach (projects, Documents, Uploads, Downloads, Desktop) can be sent; hidden files and keys never",
   } as const;
   const usableRoots = roots.filter((root) => root.trim().length > 0);
   if (usableRoots.length === 0) return refused;
-  const candidate = nodePath.isAbsolute(rawPath)
-    ? rawPath
-    : nodePath.resolve(usableRoots[0]!, rawPath);
+  const expanded =
+    home !== undefined && (rawPath === "~" || rawPath.startsWith("~/"))
+      ? nodePath.join(home, rawPath.slice(1))
+      : rawPath;
+  const candidate = nodePath.isAbsolute(expanded)
+    ? expanded
+    : nodePath.resolve(usableRoots[0]!, expanded);
   let realFile: string;
   try {
     realFile = await fsPromises.realpath(candidate);
+    if (!(await fsPromises.stat(realFile)).isFile()) {
+      return { ok: false, reason: "not a file" };
+    }
   } catch {
     return { ok: false, reason: "file not found" };
   }

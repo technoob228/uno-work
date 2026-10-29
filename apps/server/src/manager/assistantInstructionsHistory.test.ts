@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   RELEASED_2026_10_14_1,
   RELEASED_2026_10_28_2,
+  RELEASED_2026_10_29_1,
   SHIPPED_ASSISTANT_INSTRUCTIONS,
 } from "./assistantInstructionsHistory.ts";
 import { ASSISTANT_INSTRUCTIONS_TEMPLATE } from "./Layers/AssistantService.ts";
@@ -95,7 +96,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-22.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-4)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-5)!;
     expect(instructionsVersion(branch)).toBe("2026-10-22.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -122,7 +123,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-5)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-6)!;
     expect(instructionsVersion(branch)).toBe("2026-10-21.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -143,7 +144,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
         known: SHIPPED_ASSISTANT_INSTRUCTIONS,
       });
       expect(plan.state).toBe("current");
-      expect(plan.write).toContain("2026-10-29.1");
+      expect(plan.write).toContain("2026-10-29.2");
       expect(plan.write).toContain("Your name is Ana.");
     }
   });
@@ -162,7 +163,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
       expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
     }
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("For now only this computer");
-    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-4)!;
     expect(instructionsVersion(previous)).toBe("2026-10-22.2");
     const plan = planInstructions({
       current: joinAgentsProfile(previous, profile),
@@ -193,7 +194,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("→ routine");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("## Schedules — recurring work");
     // The previous version (an untouched file) upgrades silently.
-    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
     expect(instructionsVersion(previous)).toBe("2026-10-28.1");
     const plan = planInstructions({
       current: joinAgentsProfile(previous, profile),
@@ -207,7 +208,6 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("2026-10-29.1: a dispatcher — project work is handed off at once, at most two calls itself", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-29.1");
     for (const words of [
       "anything that\ntouches a project's files or takes more than one quick step",
       "at most two\ntool calls in a turn",
@@ -225,7 +225,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("read a file, a light command");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("or a quick read yourself");
     // 0.0.159's file (untouched, with its base) upgrades silently.
-    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_10_28_2);
+    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)).toBe(RELEASED_2026_10_28_2);
     expect(instructionsVersion(RELEASED_2026_10_28_2)).toBe("2026-10-28.2");
     expect(RELEASED_2026_10_28_2).toContain("read a file, a light command");
     const plan = planInstructions({
@@ -237,6 +237,40 @@ describe("AGENTS.md of assistants made by older versions", () => {
     expect(plan.state).toBe("current");
     expect(plan.write).toContain("hand it off AT ONCE");
     expect(plan.write).toContain("Your name is Ana.");
+  });
+
+  it("2026-10-29.2: no tools of its own, notes by notes_*, one phone screen, the person's model wins", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-29.2");
+    for (const words of [
+      "has no terminal, file or browser tools",
+      "`notes_read`",
+      "`notes_append`",
+      "`notes_edit`",
+      "`send_file`",
+      "`harnessReadiness`",
+      "it becomes a project by itself",
+      "ONE phone screen",
+      "No paths, file names, code or logs",
+      "The person's word wins",
+      "`personAsked: true`",
+      "Never switch to another model in silence",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+    // 0.0.160's file (untouched, with or without its base) upgrades silently.
+    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_10_29_1);
+    expect(instructionsVersion(RELEASED_2026_10_29_1)).toBe("2026-10-29.1");
+    for (const base of [RELEASED_2026_10_29_1, null]) {
+      const plan = planInstructions({
+        current: joinAgentsProfile(RELEASED_2026_10_29_1, profile),
+        base,
+        next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+        known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+      });
+      expect(plan.state).toBe("current");
+      expect(plan.write).toContain("`notes_append`");
+      expect(plan.write).toContain("Your name is Ana.");
+    }
   });
 
   it("an edited 2026-10-14.1 file is offered the update, not overwritten", () => {

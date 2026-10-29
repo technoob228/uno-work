@@ -34,6 +34,8 @@ import {
   MANAGER_CALLER_THREAD_HEADER,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
+import { createHash } from "node:crypto";
+
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
@@ -422,6 +424,143 @@ export const HERMES_TITLE_GENERATION_TIMEOUT_SECONDS = 15;
  */
 export const HERMES_SUBSCRIPTION_STALE_TIMEOUT_SECONDS = 900;
 
+/**
+ * Hermes' own toolsets the Uno chat (the pinned assistant, `assistant-home`)
+ * does not get: it is a dispatcher, never a worker (Misha 29.10). With the
+ * terminal and files it read a backlog xlsx and grepped a Vue file for 15
+ * minutes while the person's messages queued behind the turn — and on
+ * GLM-5.3 Flash with the 2026-10-29.1 instructions it still ran the command
+ * itself. Without these tools the only way to do work is to start a chat
+ * (`chat_create`); its notes, reminders and status go through uno-manager.
+ *
+ * Names are Hermes' `toolsets.py` (0.21): `agent.disabled_toolsets` is
+ * subtracted last, so even a composite toolset cannot bring them back, and an
+ * ACP session's rebuild on `session/set_model` carries them over.
+ */
+export const HERMES_DISPATCHER_DISABLED_TOOLSETS: ReadonlyArray<string> = [
+  "terminal",
+  "file",
+  "code_execution",
+  "browser",
+  "web",
+  "delegation",
+  "computer_use",
+  "cronjob",
+  "image_gen",
+  // Context it never needs as a dispatcher: every one is tool schemas in
+  // each request (29.10: 100–115k input tokens a step on account 2709).
+  "skills",
+  "memory",
+  "todo",
+  "session_search",
+  "vision",
+  "video",
+  "tts",
+  "search",
+  "x_search",
+  "homeassistant",
+  "kanban",
+  "connections",
+];
+
+/**
+ * The MCP tools the Uno dispatcher gets (`mcp_servers.<name>.tools.include`)
+ * — of ~90 (≈ 75k characters of schemas, ~20k tokens in every request) the
+ * dozen a dispatcher uses: hand off, status, steer, notes, reminders,
+ * automations, its setup, send a file. Everything else is a chat's job.
+ */
+export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "uno-manager": [
+    // chat_create (uno-work) is its one way to start work: create_thread
+    // repeats it, get_thread_status repeats work_status.
+    "work_status",
+    "read_thread_detail",
+    "send_turn",
+    "interrupt_turn",
+    "respond_to_request",
+    "create_reminder",
+    "list_reminders",
+    "cancel_reminder",
+    "automation_create",
+    "automation_list",
+    "automation_update",
+    "automation_delete",
+    "notes_read",
+    "notes_append",
+    "notes_edit",
+    "send_file",
+    "assistant_profile_get",
+    "assistant_profile_set",
+    "ask_user",
+  ],
+  "uno-work": [
+    "chat_create",
+    "chat_message",
+    "chat_status",
+    "account_overview",
+    "notify",
+    "settings_read",
+    "github_pr_comment",
+  ],
+};
+
+/**
+ * Hermes' own context compaction (`compression.*`) for the dispatcher: its
+ * Telegram conversation lives for days, and every step re-sent the whole of
+ * it. Compact at ~28k tokens of context (the tools and instructions alone are
+ * ~15k) down to a short summary plus the
+ * last few messages, by the same fast model; prune long tool results early;
+ * compact a session coming back after an hour idle.
+ */
+export const HERMES_DISPATCHER_COMPRESSION = {
+  thresholdTokens: 28_000,
+  targetRatio: 0.2,
+  protectLastN: 6,
+  proactivePruneTokens: 12_000,
+  proactivePruneMinResultChars: 3_000,
+  idleCompactAfterSeconds: 3_600,
+} as const;
+
+/**
+ * What the dispatcher's Hermes session was built with. Hermes freezes the
+ * system prompt of a session and resumes it across restarts: on the canary
+ * (29.10) Uno's session dated from 08.10 and still ran the 08.10
+ * instructions, whatever AGENTS.md said. A different stamp starts a fresh
+ * session; the thread's recent conversation is handed over as for any new one.
+ * Notes and the person's files are not in it — they change all the time.
+ */
+const HERMES_DISPATCHER_PROMPT_SHAPE = 1;
+
+export function dispatcherPromptStamp(agentsMd: string): string {
+  const version =
+    /<!-- uno-instructions: ([^>]+?) -->/.exec(agentsMd)?.[1] ??
+    `edited:${createHash("sha256").update(agentsMd).digest("hex").slice(0, 12)}`;
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        shape: HERMES_DISPATCHER_PROMPT_SHAPE,
+        version,
+        disabled: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+        include: HERMES_DISPATCHER_MCP_TOOLS,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Resume a dispatcher session only when it was built as now (see
+ * {@link dispatcherPromptStamp}); other sessions resume as before.
+ */
+export function resumableSessionId(
+  cursor: { readonly sessionId: string; readonly promptStamp?: string } | undefined,
+  promptStamp: string | undefined,
+): string | undefined {
+  if (cursor === undefined) return undefined;
+  if (promptStamp !== undefined && cursor.promptStamp !== promptStamp) return undefined;
+  return cursor.sessionId;
+}
+
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   /** Hermes' provider ({@link hermesProviderIdOf}); the gateway when absent. */
@@ -454,14 +593,27 @@ export function buildHermesConfigYaml(input: {
    * (`buildAssistantContextHint`). Older Hermes ignores the key.
    */
   readonly environmentHint?: string;
+  /**
+   * Hermes toolsets this session never gets (`agent.disabled_toolsets`):
+   * {@link HERMES_DISPATCHER_DISABLED_TOOLSETS} for the Uno chat.
+   */
+  readonly disabledToolsets?: ReadonlyArray<string>;
+  /** Per MCP server: only these tools (`mcp_servers.<name>.tools.include`). */
+  readonly mcpToolsInclude?: Readonly<Record<string, ReadonlyArray<string>>>;
+  /** Tight context compaction ({@link HERMES_DISPATCHER_COMPRESSION}), by the chat model. */
+  readonly compression?: typeof HERMES_DISPATCHER_COMPRESSION;
 }): string {
   const quote = JSON.stringify;
   const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
+  const disabledToolsets = (input.disabledToolsets ?? []).filter((name) => name.trim().length > 0);
   const lines: Array<string> = [
     "agent:",
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
     `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
     `  verify_on_stop: ${HERMES_AGENT_VERIFY_ON_STOP}`,
+    ...(disabledToolsets.length > 0
+      ? [`  disabled_toolsets: [${disabledToolsets.map((name) => quote(name)).join(", ")}]`]
+      : []),
     ...(input.environmentHint !== undefined && input.environmentHint.trim().length > 0
       ? [`  environment_hint: ${quote(input.environmentHint)}`]
       : []),
@@ -492,13 +644,39 @@ export function buildHermesConfigYaml(input: {
           `    model: ${quote(HERMES_STT_MODEL)}`,
         ]),
   ];
-  if (input.sideTaskModel !== undefined && input.sideTaskModel.trim().length > 0) {
+  if (input.compression !== undefined) {
+    const c = input.compression;
     lines.push(
-      "auxiliary:",
-      "  title_generation:",
-      `    model: ${quote(input.sideTaskModel.trim())}`,
-      `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+      "compression:",
+      "  enabled: true",
+      `  threshold_tokens: ${c.thresholdTokens}`,
+      `  target_ratio: ${c.targetRatio}`,
+      `  protect_last_n: ${c.protectLastN}`,
+      `  tail_mode: "lean"`,
+      `  proactive_prune_tokens: ${c.proactivePruneTokens}`,
+      `  proactive_prune_min_result_chars: ${c.proactivePruneMinResultChars}`,
+      `  idle_compact_after_seconds: ${c.idleCompactAfterSeconds}`,
     );
+  }
+  const sideTaskModel = input.sideTaskModel?.trim() ?? "";
+  if (sideTaskModel.length > 0 || input.compression !== undefined) {
+    lines.push("auxiliary:");
+    if (sideTaskModel.length > 0) {
+      lines.push(
+        "  title_generation:",
+        `    model: ${quote(sideTaskModel)}`,
+        `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+      );
+    }
+    if (input.compression !== undefined) {
+      // The summary by the same fast model, on the same provider.
+      lines.push(
+        "  compression:",
+        // "main": the session's own provider (named custom ones too).
+        `    provider: "main"`,
+        `    model: ${quote(input.model)}`,
+      );
+    }
   }
   if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {
     lines.push("skills:", "  external_dirs:");
@@ -511,6 +689,13 @@ export function buildHermesConfigYaml(input: {
       const toolTimeoutSec = input.mcpToolTimeoutSec?.[server.name];
       if (toolTimeoutSec !== undefined && Number.isFinite(toolTimeoutSec) && toolTimeoutSec > 0) {
         lines.push(`    timeout: ${Math.round(toolTimeoutSec)}`);
+      }
+      const include = input.mcpToolsInclude?.[server.name];
+      if (include !== undefined) {
+        lines.push(
+          "    tools:",
+          `      include: [${include.map((name) => quote(name)).join(", ")}]`,
+        );
       }
       if ("url" in server) {
         lines.push(`    url: ${quote(server.url)}`);
