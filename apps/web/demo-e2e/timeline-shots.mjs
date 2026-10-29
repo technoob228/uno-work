@@ -24,6 +24,7 @@ const TITLES = {
   "showcase-done": "Signup form doesn",
   "showcase-live": "Thank-you page after",
   "showcase-ask": "Send emails with a real",
+  failed: "go test for the exit IP",
 };
 let booted = false;
 async function open(threadId) {
@@ -41,7 +42,15 @@ async function open(threadId) {
       .catch(() => {});
   }
   // The demo opens its own chat at start: pick ours from the sidebar.
-  await page.getByText(TITLES[threadId]).first().click();
+  const title = page.getByText(TITLES[threadId]).first();
+  if (!(await title.isVisible().catch(() => false))) {
+    await page
+      .getByText(/^Show \d+ more$/)
+      .first()
+      .click({ timeout: 3000 })
+      .catch(() => {});
+  }
+  await title.click();
   await page.waitForTimeout(1500);
   await page.evaluate(() => {
     for (const el of document.querySelectorAll("div")) {
@@ -77,6 +86,10 @@ const steps = {
     await open("showcase-ask");
     await shot("approval");
   },
+  async failed() {
+    await open("failed");
+    await shot("failed");
+  },
   async live() {
     await open("showcase-live");
     await shot("live");
@@ -94,7 +107,9 @@ const steps = {
   },
 };
 
-for (const name of (process.env.STEPS ?? "done,doneExpanded,live,approval,queue").split(",")) {
+for (const name of (process.env.STEPS ?? "done,doneExpanded,live,approval,failed,queue").split(
+  ",",
+)) {
   try {
     await steps[name]();
   } catch (error) {

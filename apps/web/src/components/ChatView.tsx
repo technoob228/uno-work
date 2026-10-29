@@ -4112,6 +4112,25 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  // A failed turn and its "Try again" (flows v2, I1): at the end of the feed (S4).
+  const threadErrorNotice = (placement: "banner" | "feed") => (
+    <ThreadErrorBanner
+      placement={placement}
+      error={
+        activeThread.session?.lastErrorClass === "billing_error" ||
+        harnessAuth?.suppressThreadError ||
+        // "Sign in or use Uno credits": the composer asks that itself.
+        isUnoCreditsChoiceRequiredText(activeThread.error)
+          ? null
+          : activeThread.error
+      }
+      onDismiss={() => setThreadError(activeThread.id, null)}
+      // "Try again" sends the person's last message again (flows v2, I1).
+      onRetry={isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined}
+      retryDisabled={isSendBusy || isConnecting}
+    />
+  );
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
@@ -4198,22 +4217,9 @@ export default function ChatView(props: ChatViewProps) {
             sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
             environmentId={activeThread.environmentId}
           />
-          <ThreadErrorBanner
-            error={
-              activeThread.session?.lastErrorClass === "billing_error" ||
-              harnessAuth?.suppressThreadError ||
-              // "Sign in or use Uno credits": the composer asks that itself.
-              isUnoCreditsChoiceRequiredText(activeThread.error)
-                ? null
-                : activeThread.error
-            }
-            onDismiss={() => setThreadError(activeThread.id, null)}
-            // "Try again" sends the person's last message again (flows v2, I1).
-            onRetry={
-              isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined
-            }
-            retryDisabled={isSendBusy || isConnecting}
-          />
+          {/* A failed turn: a quiet line at the end of the feed (S4, upstream
+              bd3287b640); a plate up here only when the feed is hidden. */}
+          {showsTimeline(embeddedVisibility) ? null : threadErrorNotice("banner")}
         </>
       ) : null}
       {/* Main content area with optional plan sidebar */}
@@ -4251,6 +4257,7 @@ export default function ChatView(props: ChatViewProps) {
                 pendingApprovals={pendingApprovals}
                 respondingRequestIds={respondingRequestIds}
                 onRespondToApproval={onRespondToApproval}
+                endOfFeed={threadErrorNotice("feed")}
               />
             ) : null}
 

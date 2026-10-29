@@ -232,7 +232,11 @@ export function deriveTurnFolds(input: {
   const foldsByAnchorEntryId = new Map<string, TurnFold>();
   for (const [turnId, group] of groupsByTurnId) {
     if (turnId === input.unsettledTurnId || group.hasStreamingMessage) continue;
-    if (group.terminalEntry === null && group.hasError) continue;
+    const isLatestInterruptedTurn =
+      input.latestTurn?.turnId === turnId && input.latestTurn.state === "interrupted";
+    // A stopped turn is the person's own doing, not a failure: it folds even
+    // when a step broke off (upstream f3b058cd6a).
+    if (group.terminalEntry === null && group.hasError && !isLatestInterruptedTurn) continue;
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {
       if (entry.id !== group.terminalEntry?.id) hiddenEntryIds.add(entry.id);
@@ -244,7 +248,6 @@ export function deriveTurnFolds(input: {
     if (!firstEntry || !lastEntry) continue;
 
     const isLatestTurn = input.latestTurn?.turnId === turnId;
-    const isLatestInterruptedTurn = isLatestTurn && input.latestTurn?.state === "interrupted";
     const elapsedMs =
       isLatestTurn && input.latestTurn?.startedAt && input.latestTurn.completedAt
         ? computeElapsedMs(input.latestTurn.startedAt, input.latestTurn.completedAt)

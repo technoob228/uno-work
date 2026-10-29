@@ -394,6 +394,22 @@ describe("deriveMessagesTimelineRows", () => {
       },
     });
     expect(failed.some((row) => row.kind === "turn-fold")).toBe(false);
+
+    // Stopped by the person while a step broke off: still folds, not a failure.
+    const stoppedMidStep = deriveMessagesTimelineRows({
+      ...base,
+      timelineEntries: [user, work("a", "2026-01-01T00:00:05Z", "error")],
+      isWorking: false,
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:10Z",
+      },
+    });
+    expect(stoppedMidStep.find((row) => row.kind === "turn-fold")).toMatchObject({
+      label: "You stopped after 10s",
+    });
   });
 
   it("puts the agent's latest thought on the live line", () => {

@@ -169,6 +169,11 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /** The chat's latest turn: a finished one folds into "Worked for …". */
   latestTurn?: TimelineLatestTurn | null;
+  /**
+   * The chat's state at the very end of the feed, as quiet lines (a failed
+   * turn and its "Try again"), instead of a plate above the chat.
+   */
+  endOfFeed?: ReactNode;
   /** The agent's open questions before a step: the first shows on the feed's last row. */
   pendingApprovals?: ReadonlyArray<PendingApproval>;
   respondingRequestIds?: ReadonlyArray<ApprovalRequestId>;
@@ -208,6 +213,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   pendingApprovals = EMPTY_PENDING_APPROVALS,
   respondingRequestIds = EMPTY_REQUEST_IDS,
   onRespondToApproval,
+  endOfFeed = null,
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
@@ -342,10 +348,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   if (rows.length === 0 && !isWorking) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3">
         <p className="text-sm text-muted-foreground/30">
           Send a message to start the conversation.
         </p>
+        {endOfFeed ? <div className="w-full max-w-3xl px-3 sm:px-5">{endOfFeed}</div> : null}
       </div>
     );
   }
@@ -365,7 +372,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onScroll={handleScroll}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
         ListHeaderComponent={TIMELINE_LIST_HEADER}
-        ListFooterComponent={TIMELINE_LIST_FOOTER}
+        ListFooterComponent={
+          endOfFeed ? (
+            <div className="mx-auto w-full min-w-0 max-w-3xl">
+              {endOfFeed}
+              {TIMELINE_LIST_FOOTER}
+            </div>
+          ) : (
+            TIMELINE_LIST_FOOTER
+          )
+        }
       />
     </TimelineRowCtx.Provider>
   );
