@@ -490,7 +490,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       config: ManagerTelegramConnectorConfig,
       lead: TelegramUpdate,
       rest: ReadonlyArray<TelegramIncomingMessage>,
-    ) => Effect.Effect<unknown, unknown>;
+    ) => Effect.Effect<void>;
   } = {};
 
   // Inline buttons and reply routes of messages chats sent to the person
@@ -1921,7 +1921,7 @@ const makeTelegramConnector = Effect.gen(function* () {
               .flatMap((part) => (part.message === undefined ? [] : [part.message]));
             return albumHandler.run === undefined
               ? Effect.void
-              : albumHandler.run(projectId, config, lead, rest).pipe(Effect.ignore);
+              : albumHandler.run(projectId, config, lead, rest);
           }),
           Effect.forkDetach,
         );
@@ -2292,7 +2292,8 @@ const makeTelegramConnector = Effect.gen(function* () {
       ),
     );
 
-  albumHandler.run = (projectId, config, lead, rest) => handleUpdate(projectId, config, lead, rest);
+  albumHandler.run = (projectId, config, lead, rest) =>
+    handleUpdate(projectId, config, lead, rest).pipe(Effect.ignore);
 
   // Return type inferred: `handleUpdate` carries its own error union, and
   // pinning it here would only duplicate it.
