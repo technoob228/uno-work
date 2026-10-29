@@ -186,7 +186,6 @@ import {
   addButtonGroup,
   addSentMessageRoute,
   answeredElsewhereLine,
-  APPROVAL_BUTTONS_TTL_MS,
   buildInlineKeyboard,
   CHOICE_BUTTONS_TTL_MS,
   decideButtonPress,

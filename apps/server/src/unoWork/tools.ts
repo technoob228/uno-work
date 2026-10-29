@@ -587,14 +587,15 @@ const num = (args: Record<string, unknown>, key: string): number | undefined =>
  * `messenger_send` buttons: a flat list; `row` on the buttons lays them out
  * in rows (then the explicit rows count, in row order).
  */
+const buttonRowOf = (entry: unknown): number | null =>
+  typeof entry === "object" &&
+  entry !== null &&
+  typeof (entry as { row?: unknown }).row === "number"
+    ? (entry as { row: number }).row
+    : null;
 const buttonRowsFromArgs = (raw: unknown): unknown => {
   if (!Array.isArray(raw)) return raw;
-  const rowOf = (entry: unknown) =>
-    typeof entry === "object" &&
-    entry !== null &&
-    typeof (entry as { row?: unknown }).row === "number"
-      ? (entry as { row: number }).row
-      : null;
+  const rowOf = buttonRowOf;
   if (!raw.some((entry) => rowOf(entry) !== null)) return raw;
   const rows = new Map<number, Array<unknown>>();
   for (const entry of raw) {
