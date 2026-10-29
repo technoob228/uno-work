@@ -251,6 +251,17 @@ export const managerMcpRouteLayer = HttpRouter.add(
       : true;
     const team = Option.getOrUndefined(yield* Effect.serviceOption(AssistantTeam));
     const automations = Option.getOrUndefined(yield* Effect.serviceOption(AutomationsService));
+    const projections = yield* ProjectionSnapshotQuery;
+    // The notes_* tools: the folder of the token's own assistant, never one
+    // the model names.
+    const assistantWorkspace = (who: ManagerCaller) => {
+      const projectId = assistantProjectOfCaller(who);
+      if (projectId === null) return Effect.succeed(null);
+      return projections.getProjectShellById(projectId).pipe(
+        Effect.map((shell) => (Option.isSome(shell) ? shell.value.workspaceRoot : null)),
+        Effect.orElseSucceed(() => null),
+      );
+    };
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       callerWithThread,
@@ -259,6 +270,7 @@ export const managerMcpRouteLayer = HttpRouter.add(
         ...(schedules ? { schedules } : {}),
         ...(team ? { team } : {}),
         ...(automations ? { automations } : {}),
+        assistantWorkspace,
       },
       { assistantsEnabled },
     );

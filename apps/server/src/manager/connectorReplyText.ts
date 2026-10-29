@@ -77,6 +77,39 @@ export const splitReplyText = (text: string, limit: number): ReadonlyArray<strin
 export type ReplyLanguage = "ru" | "en";
 
 /**
+ * One phone screen of a chat message, in characters. A Uno answer longer
+ * than {@link SCREEN_MAX_CHARS} is cut to about {@link SCREEN_CUT_CHARS}
+ * with a pointer to the whole answer (Misha 29.10: "два гигантских
+ * сообщения с путями к файлам — непонятно"). The cut is a safety net: the
+ * instructions already ask for one screen.
+ */
+export const SCREEN_MAX_CHARS = 1_100;
+export const SCREEN_CUT_CHARS = 900;
+
+/**
+ * `text` as it goes to a phone: unchanged when it fits one screen, else its
+ * head (cut at a paragraph / line / sentence) and one line saying where the
+ * rest is — the Uno chat in Uno Work (`moreUrl`, the person's own address
+ * when known).
+ */
+export const fitReplyToScreen = (
+  text: string,
+  input: { readonly language: ReplyLanguage; readonly moreUrl: string },
+): { readonly text: string; readonly cut: boolean } => {
+  const trimmed = text.trim();
+  if (trimmed.length <= SCREEN_MAX_CHARS) return { text: trimmed, cut: false };
+  let head = trimmed.slice(0, findCut(trimmed, SCREEN_CUT_CHARS)).trimEnd();
+  // A half table or list heading at the cut reads as noise: drop a dangling header line.
+  head = head.replace(/\n[^\n]{0,40}:\s*$/, "").trimEnd();
+  if (openFenceAtEnd(head) !== null) head = `${head}\n\`\`\``;
+  const more =
+    input.language === "ru"
+      ? `…дальше — в чате Uno в Uno Work: ${input.moreUrl}`
+      : `…the rest is in the Uno chat in Uno Work: ${input.moreUrl}`;
+  return { text: `${head}\n\n${more}`, cut: true };
+};
+
+/**
  * The language to talk to the person in: the script of what they wrote
  * wins (a Russian message gets a Russian note even from an English client),
  * then the client's language code, then English.

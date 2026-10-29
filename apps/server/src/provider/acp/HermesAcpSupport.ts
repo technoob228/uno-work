@@ -422,6 +422,31 @@ export const HERMES_TITLE_GENERATION_TIMEOUT_SECONDS = 15;
  */
 export const HERMES_SUBSCRIPTION_STALE_TIMEOUT_SECONDS = 900;
 
+/**
+ * Hermes' own toolsets the Uno chat (the pinned assistant, `assistant-home`)
+ * does not get: it is a dispatcher, never a worker (Misha 29.10). With the
+ * terminal and files it read a backlog xlsx and grepped a Vue file for 15
+ * minutes while the person's messages queued behind the turn — and on
+ * GLM-5.3 Flash with the 2026-10-29.1 instructions it still ran the command
+ * itself. Without these tools the only way to do work is to start a chat
+ * (`chat_create`); its notes, reminders and status go through uno-manager.
+ *
+ * Names are Hermes' `toolsets.py` (0.21): `agent.disabled_toolsets` is
+ * subtracted last, so even a composite toolset cannot bring them back, and an
+ * ACP session's rebuild on `session/set_model` carries them over.
+ */
+export const HERMES_DISPATCHER_DISABLED_TOOLSETS: ReadonlyArray<string> = [
+  "terminal",
+  "file",
+  "code_execution",
+  "browser",
+  "web",
+  "delegation",
+  "computer_use",
+  "cronjob",
+  "image_gen",
+];
+
 export function buildHermesConfigYaml(input: {
   readonly model: string;
   /** Hermes' provider ({@link hermesProviderIdOf}); the gateway when absent. */
@@ -454,14 +479,25 @@ export function buildHermesConfigYaml(input: {
    * (`buildAssistantContextHint`). Older Hermes ignores the key.
    */
   readonly environmentHint?: string;
+  /**
+   * Hermes toolsets this session never gets (`agent.disabled_toolsets`):
+   * {@link HERMES_DISPATCHER_DISABLED_TOOLSETS} for the Uno chat.
+   */
+  readonly disabledToolsets?: ReadonlyArray<string>;
 }): string {
   const quote = JSON.stringify;
   const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
+  const disabledToolsets = (input.disabledToolsets ?? []).filter(
+    (name) => name.trim().length > 0,
+  );
   const lines: Array<string> = [
     "agent:",
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
     `  intent_ack_continuation: ${HERMES_AGENT_INTENT_ACK_CONTINUATION}`,
     `  verify_on_stop: ${HERMES_AGENT_VERIFY_ON_STOP}`,
+    ...(disabledToolsets.length > 0
+      ? [`  disabled_toolsets: [${disabledToolsets.map((name) => quote(name)).join(", ")}]`]
+      : []),
     ...(input.environmentHint !== undefined && input.environmentHint.trim().length > 0
       ? [`  environment_hint: ${quote(input.environmentHint)}`]
       : []),

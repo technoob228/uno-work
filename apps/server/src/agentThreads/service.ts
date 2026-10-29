@@ -154,6 +154,14 @@ export interface AgentThreadsDeps {
    * only this computer (the old `checkTargetComputer` rule).
    */
   readonly remote?: AgentThreadsRemoteDeps;
+  /**
+   * A folder of this computer that is no project yet, made one now (an
+   * existing folder in the home folder, not hidden, not an assistant's) —
+   * so a task for ~/projects/<x> starts even when the person never added
+   * <x> to Uno Work (Misha 29.10, the luckyip case). Null: not such a folder.
+   * Only for a caller that reaches every project. Absent: no registration.
+   */
+  readonly registerFolder?: (cwd: string) => Effect.Effect<OrchestrationProjectShell | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -470,6 +478,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           normalizeWorkspacePath(input.cwd),
         );
         if (Option.isNone(found)) {
+          // A brand-new project is one the caller may use only when it
+          // reaches every project (the person's "all projects").
+          const reachesAll = (yield* callerAccess(caller)).allowed(crypto.randomUUID());
+          const registered =
+            reachesAll && deps.registerFolder ? yield* deps.registerFolder(input.cwd) : null;
+          if (registered !== null) return registered;
           return yield* fail(
             404,
             "project_not_found",

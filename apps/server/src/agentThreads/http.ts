@@ -32,6 +32,8 @@ import { readTeam } from "../assistants/teamStore.ts";
 import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
 import { remoteComputersOption } from "../remoteComputers/RemoteComputers.ts";
 import { assistantDisplayName } from "../remoteComputers/remoteChatHost.ts";
+import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
+import { makeRegisterFolder } from "./registerFolder.ts";
 import { type AgentThreadsReply, makeAgentThreadsHandlers } from "./service.ts";
 
 const makeRequestContext = Effect.gen(function* () {
@@ -67,6 +69,15 @@ const makeRequestContext = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       ),
     getProviders: providerRegistry.getProviders,
+    registerFolder: makeRegisterFolder({
+      engine,
+      projections,
+      defaultModelSelection: providerRegistry.getProviders.pipe(
+        Effect.map(selectAutoBootstrapModelSelection),
+        Effect.orElseSucceed(() => null),
+      ),
+      home: os.homedir(),
+    }),
     getOwnBoxId: serverSettings.getSettings.pipe(
       Effect.map((settings) => ownBoxIdFromSettings(settings.uno)),
       Effect.orElseSucceed(() => null),

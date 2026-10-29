@@ -44,6 +44,16 @@ import type { AssistantScheduleError, AssistantSchedulesShape } from "../assista
 import type { AssistantTeamError, AssistantTeamShape } from "../assistants/assistantTeam.ts";
 import type { AutomationsServiceShape } from "../automations/AutomationsService.ts";
 import type { AutomationClientError } from "../automations/consoleClient.ts";
+import {
+  appendAssistantNotes,
+  ASSISTANT_NOTES_READABLE,
+  ASSISTANT_NOTES_WRITABLE,
+  editAssistantNotes,
+  NOTES_READ_MAX_LINES,
+  NOTES_TEXT_MAX_CHARS,
+  type NotesResult,
+  readAssistantNotes,
+} from "./assistantNotes.ts";
 import type { ManagerToolError } from "./Errors.ts";
 import type { ManagerCaller, ManagerToolServiceShape } from "./Services/ManagerToolService.ts";
 
@@ -54,6 +64,11 @@ export interface ManagerMcpExtras {
   readonly team?: AssistantTeamShape;
   /** Automations (the console's): on a schedule or on an event. */
   readonly automations?: AutomationsServiceShape;
+  /**
+   * The folder of the caller's own assistant (its NOTES.md, ROUTING.md…), or
+   * null when the token is not an assistant's: the `notes_*` tools.
+   */
+  readonly assistantWorkspace?: (caller: ManagerCaller) => Effect.Effect<string | null>;
 }
 
 type ManagerMcpToolError =
@@ -106,6 +121,26 @@ const withAutomations = <A>(
   run: (automations: AutomationsServiceShape) => Effect.Effect<A, AutomationClientError>,
 ): Effect.Effect<A | { readonly error: string }, AutomationClientError> =>
   extras.automations ? run(extras.automations) : Effect.succeed({ error: AUTOMATIONS_UNAVAILABLE });
+
+const NOTES_UNAVAILABLE =
+  "Your notes are reachable only from your own conversation (an assistant's token).";
+
+/** One of the `notes_*` tools on the caller's own workspace. */
+const withNotes = (
+  extras: ManagerMcpExtras,
+  caller: ManagerCaller,
+  run: (workspaceRoot: string) => Promise<NotesResult>,
+): Effect.Effect<unknown> =>
+  Effect.gen(function* () {
+    const root = extras.assistantWorkspace ? yield* extras.assistantWorkspace(caller) : null;
+    if (root === null) return { error: NOTES_UNAVAILABLE };
+    const result = yield* Effect.tryPromise(() => run(root)).pipe(
+      Effect.orElseSucceed(
+        (): NotesResult => ({ ok: false, error: "Could not reach your notes; try once more." }),
+      ),
+    );
+    return result.ok ? result.value : { error: result.error };
+  });
 
 /** The trigger of `automation_create` / `automation_update`, as a JSON Schema. */
 const AUTOMATION_TRIGGER_JSON_SCHEMA = {
@@ -591,6 +626,54 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     },
     run: (_tools, caller, args, extras) =>
       withAutomations(extras, (automations) => automations.toolDelete(caller, args)),
+  },
+  {
+    name: "notes_read",
+    description:
+      "Read one of your own files: NOTES.md (your shared memory; the newest lines by default), ROUTING.md (task type → AI), USER.md (about the person) or SOUL.md (who you are). The newest part of them is usually already in your context — read only for older notes or when the person says they changed them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_READABLE] },
+        lines: { type: "integer", minimum: 1, maximum: NOTES_READ_MAX_LINES },
+      },
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => readAssistantNotes(root, args)),
+  },
+  {
+    name: "notes_append",
+    description:
+      'Add to the end of NOTES.md (default) or ROUTING.md: a dated note ("- 2026-10-29 <fact>"; the person\'s own facts end in "(you)") or an Outcomes log line. Short lines only.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_WRITABLE] },
+        text: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => appendAssistantNotes(root, args)),
+  },
+  {
+    name: "notes_edit",
+    description:
+      "Replace one exact piece of NOTES.md or ROUTING.md (a routing table row, a stale note): `find` must occur exactly once. Lines ending in (you) and routing rows with Source `you` are the person's and can't be changed here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", enum: [...ASSISTANT_NOTES_WRITABLE] },
+        find: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+        replace: { type: "string", maxLength: NOTES_TEXT_MAX_CHARS },
+      },
+      required: ["file", "find", "replace"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      withNotes(extras, caller, (root) => editAssistantNotes(root, args)),
   },
   {
     name: "assistant_profile_get",

@@ -32,6 +32,7 @@
  * @module manager/connectorReplies
  */
 import {
+  ASSISTANT_PROJECT_ID,
   ASSISTANT_TURN_NO_REPLY,
   CommandId,
   MessageId,
@@ -63,11 +64,14 @@ import {
 } from "../persistence/Services/ProjectionTurns.ts";
 import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
 import {
+  fitReplyToScreen,
   progressNoteDueAfterMs,
   progressNoteText,
   splitReplyText,
   type ReplyLanguage,
 } from "./connectorReplyText.ts";
+import { UNO_WORK_OPEN_URL } from "./taskDoneNotify.ts";
+import { currentWorkAddress } from "../workAddress.ts";
 import { extractOutgoingFiles } from "./telegramMedia.ts";
 
 // ── Timings ─────────────────────────────────────────────────────────────
@@ -102,6 +106,19 @@ export const replyPauseMs = (untilReadyMs: number): number =>
 export const MAX_RESUME_ATTEMPTS = 2;
 /** A message queued behind a turn running this long hears that it is queued. */
 export const QUEUED_NOTE_AFTER_MS = 20_000;
+/**
+ * The Uno chat (the pinned assistant, `assistant-home`) answers in seconds:
+ * it is a dispatcher with no tools of its own to dig with. A turn of it
+ * running this long is stopped ({@link watchdogPromptText}): the person's
+ * next message never waits behind a quarter-hour of work again (Misha 29.10:
+ * "Получил. Отвечу, как закончу с предыдущим" for 45 minutes).
+ */
+export const DISPATCHER_TURN_WATCHDOG_MS = 45_000;
+/** After the watchdog's stop, the session gets this long to settle before the retry goes in. */
+export const DISPATCHER_STOP_SETTLE_MS = 12_000;
+/** Watchdog stops of one message before it is answered with {@link watchdogGiveUpText}. */
+export const DISPATCHER_WATCHDOG_RETRIES = 1;
+
 /** A send that failed for a passing reason is retried after this long. */
 export const SEND_RETRY_MS = 30_000;
 /** ...and given up after this many failed ticks in a row. */
@@ -374,6 +391,25 @@ export const threadGoneText = (language: ReplyLanguage) =>
 export const fileRefusedText = (language: ReplyLanguage, name: string, reason: string) =>
   say(language, `Не могу отправить ${name}: ${reason}.`, `Could not send ${name}: ${reason}.`);
 
+/** The re-run of a Uno turn the watchdog stopped: hand it off now, one line. */
+export const watchdogPromptText = (original: string) =>
+  [
+    "[Uno Work: your turn on this message ran past 45 seconds and was stopped — the person " +
+      "waits. Do not do the work yourself. In THIS turn, with at most one tool call: either " +
+      "answer in one short line from what you already know, or hand the task off with ONE " +
+      "chat_create (the project's folder as cwd) and answer one line: what you started.]",
+    "",
+    original,
+  ].join("\n");
+
+/** The watchdog stopped Uno twice on one message. */
+export const watchdogGiveUpText = (language: ReplyLanguage) =>
+  say(
+    language,
+    "Не успел ответить быстро и остановился, чтобы не держать чат. Напиши, в какой папке это сделать, — запущу отдельным чатом.",
+    "I couldn't answer this quickly, so I stopped to keep the chat free. Tell me which folder it's for and I'll start it in a separate chat.",
+  );
+
 /** The re-run of a turn a restart cut off: the original message, framed. */
 export const resumePromptText = (original: string) =>
   [
@@ -400,6 +436,10 @@ export interface PendingReplyMeta {
   };
   /** The queued note went out. */
   readonly queuedNoteSent?: boolean;
+  /** The watchdog stopped the row's current Uno turn at this time (cleared on the retry). */
+  readonly watchdogStoppedAt?: string;
+  /** Uno turns of this row the watchdog stopped and ran again. */
+  readonly watchdogRetries?: number;
   /** When the row's turn was first dispatched (a queued row waited before). */
   readonly dispatchedAt?: string;
   /**
@@ -551,6 +591,22 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         return next;
       });
 
+    // Whether a thread is the Uno chat's (project `assistant-home`): its
+    // turns are short, so no "still working"/"queued" notes and a watchdog.
+    const dispatcherRef = yield* Ref.make<ReadonlyMap<string, boolean>>(new Map());
+    const isDispatcherThread = (
+      threadId: ThreadId,
+      detail: Pick<OrchestrationThread, "projectId"> | null,
+    ) =>
+      Effect.gen(function* () {
+        const known = (yield* Ref.get(dispatcherRef)).get(threadId);
+        if (known !== undefined) return known;
+        if (detail === null) return false;
+        const value = detail.projectId === ASSISTANT_PROJECT_ID;
+        yield* Ref.update(dispatcherRef, (map) => new Map(map).set(threadId, value));
+        return value;
+      });
+
     const loadThread = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const detail = yield* projections
@@ -602,7 +658,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
       Effect.gen(function* () {
         const rows = yield* repository.listByThread({ threadId: row.threadId, limit: 50 });
         const { detail, turns } = yield* loadThread(row.threadId);
-        return isThreadBusyForNewTurn({
+        const busy = isThreadBusyForNewTurn({
           rows,
           selfRowId: rowId(row),
           selfCreatedAt: row.createdAt,
@@ -610,6 +666,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           turns,
           nowMs: yield* Clock.currentTimeMillis,
         });
+        return { ...busy, dispatcher: yield* isDispatcherThread(row.threadId, detail) };
       });
 
     const tryDispatchQueued = (row: ConnectorPendingReply) =>
@@ -618,8 +675,10 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         const nowMs = yield* Clock.currentTimeMillis;
         if (busy.busy) {
           const meta = readMeta(row);
+          // The Uno chat's turn ends within the watchdog: "typing…" says enough.
           if (
             meta.systemTurn !== true &&
+            !busy.dispatcher &&
             meta.queuedNoteSent !== true &&
             nowMs - busy.sinceMs >= QUEUED_NOTE_AFTER_MS
           ) {
@@ -803,8 +862,20 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         return yield* transport.sendFile(row, resolved.path);
       });
 
-    const answerParts = (text: string, files: ReadonlyArray<string>, language: ReplyLanguage) => {
-      const textParts = splitReplyText(text, transport.limit);
+    const answerParts = (
+      text: string,
+      files: ReadonlyArray<string>,
+      language: ReplyLanguage,
+      /** The Uno chat: one phone screen at most ({@link fitReplyToScreen}). */
+      screen = false,
+    ) => {
+      const fitted = screen
+        ? fitReplyToScreen(text, {
+            language,
+            moreUrl: currentWorkAddress() ?? UNO_WORK_OPEN_URL,
+          }).text
+        : text;
+      const textParts = splitReplyText(fitted, transport.limit);
       const parts: Array<Part> = textParts.map((part) => ({ kind: "text", text: part }));
       if (parts.length === 0 && files.length === 0)
         parts.push({ kind: "text", text: doneText(language) });
@@ -858,6 +929,72 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         return yield* save({ ...row, progressNotes: row.progressNotes + 1 });
       });
 
+    // ── the Uno chat's watchdog ──
+
+    /** Stop the row's running Uno turn; the next ticks settle it ({@link afterWatchdogStop}). */
+    const watchdogStop = (row: ConnectorPendingReply, turnId: string | null) =>
+      Effect.gen(function* () {
+        const createdAt = yield* nowIso;
+        yield* Effect.logInfo(`${transport.logPrefix} Uno turn ran past the watchdog; stopping it`).pipe(
+          Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey, turnId }),
+        );
+        yield* engine
+          .dispatch(
+            {
+              type: "thread.turn.interrupt",
+              commandId: CommandId.make(`${transport.kind}:watchdog:${crypto.randomUUID()}`),
+              threadId: row.threadId,
+              ...(turnId !== null ? { turnId: TurnId.make(turnId) } : {}),
+              createdAt,
+            },
+            { origin: systemCommandOrigin(SYSTEM_TURN_ORIGIN_COMPONENT) },
+          )
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning(`${transport.logPrefix} watchdog interrupt failed`).pipe(
+                Effect.annotateLogs({ threadId: row.threadId, cause }),
+              ),
+            ),
+          );
+        return yield* save({ ...row, meta: { ...readMeta(row), watchdogStoppedAt: createdAt } });
+      });
+
+    /**
+     * The stopped turn has settled: run the message once more, told to hand
+     * it off in one line; stopped again → one line to the person. A work
+     * update (system turn) gets its facts instead.
+     */
+    const afterWatchdogStop = (row: ConnectorPendingReply) =>
+      Effect.gen(function* () {
+        const meta = readMeta(row);
+        if (meta.systemTurn === true) {
+          return yield* deliver(row, fallbackParts(row), "delivered", "watchdog");
+        }
+        const retries = meta.watchdogRetries ?? 0;
+        if (retries >= DISPATCHER_WATCHDOG_RETRIES) {
+          return yield* deliver(
+            row,
+            [{ kind: "text", text: watchdogGiveUpText(row.language) }],
+            "delivered",
+            "watchdog",
+          );
+        }
+        const messageId = MessageId.make(crypto.randomUUID());
+        const requestedAt = yield* dispatchTurn(
+          row,
+          watchdogPromptText(meta.dispatch.text),
+          messageId,
+        );
+        const { watchdogStoppedAt: _stopped, ...rest } = meta;
+        return yield* save({
+          ...row,
+          userMessageId: messageId,
+          requestedAt,
+          turnId: null,
+          meta: { ...rest, watchdogRetries: retries + 1 },
+        });
+      });
+
     const typingIfDue = (row: ConnectorPendingReply, nowMs: number) =>
       Effect.gen(function* () {
         const key = rowId(row);
@@ -878,6 +1015,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
       row: ConnectorPendingReply,
       verdict: ReplyVerdict,
       nowMs: number,
+      screen: boolean,
     ) =>
       Effect.gen(function* () {
         switch (verdict.kind) {
@@ -893,7 +1031,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
               row,
               verdict.text.trim().length === 0 && verdict.files.length === 0
                 ? fallbackParts(row)
-                : answerParts(verdict.text, verdict.files, row.language),
+                : answerParts(verdict.text, verdict.files, row.language, screen),
               "delivered",
               null,
             );
@@ -959,19 +1097,48 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         if (verdict.turnId !== null && verdict.turnId !== row.turnId) {
           current = yield* save({ ...current, turnId: TurnId.make(verdict.turnId) });
         }
+        const dispatcher = yield* isDispatcherThread(row.threadId, detail);
+        if (dispatcher) {
+          const stoppedAt = readMeta(current).watchdogStoppedAt;
+          if (stoppedAt !== undefined) {
+            // Stopped by the watchdog: wait for the session to let go (the
+            // adapter drops a stuck prompt after ~10 s), then go on.
+            const settling =
+              detail.session !== null &&
+              ACTIVE_SESSION_STATUSES.has(detail.session.status) &&
+              detail.session.activeTurnId === (verdict.turnId ?? detail.session.activeTurnId) &&
+              nowMs - toMs(stoppedAt) < DISPATCHER_STOP_SETTLE_MS;
+            if (settling) {
+              if (readMeta(current).systemTurn !== true) yield* typingIfDue(current, nowMs);
+              return;
+            }
+            return yield* afterWatchdogStop(current);
+          }
+          if (verdict.kind === "wait" && verdict.turnId !== null) {
+            const turn = turns.find((entry) => entry.turnId === verdict.turnId);
+            const startedMs = toMs(turn?.startedAt ?? current.requestedAt);
+            if (nowMs - startedMs >= DISPATCHER_TURN_WATCHDOG_MS) {
+              yield* watchdogStop(current, verdict.turnId);
+              return;
+            }
+          }
+        }
         if (readMeta(current).systemTurn === true) {
-          return yield* handleSystemVerdict(current, verdict, nowMs);
+          return yield* handleSystemVerdict(current, verdict, nowMs, dispatcher);
         }
         switch (verdict.kind) {
           case "wait": {
             yield* typingIfDue(current, nowMs);
-            yield* progressIfDue(current, nowMs);
+            // The Uno chat never says "still working": its watchdog ends the turn.
+            if (!dispatcher) {
+              yield* progressIfDue(current, nowMs);
+            }
             return;
           }
           case "answer":
             yield* deliver(
               current,
-              answerParts(verdict.text, verdict.files, current.language),
+              answerParts(verdict.text, verdict.files, current.language, dispatcher),
               "delivered",
               null,
             );
@@ -981,7 +1148,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
               current,
               verdict.partial === null
                 ? [{ kind: "text", text: stoppedText(current.language) }]
-                : answerParts(verdict.partial, [], current.language),
+                : answerParts(verdict.partial, [], current.language, dispatcher),
               "delivered",
               "stopped in the app",
             );

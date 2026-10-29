@@ -17,6 +17,7 @@ import * as nodePath from "node:path";
 
 import {
   ApprovalRequestId,
+  ASSISTANT_PROJECT_ID,
   type AssistantLlmProvider,
   type HermesSettings,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -77,6 +78,7 @@ import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
+  HERMES_DISPATCHER_DISABLED_TOOLSETS,
   type HermesLlmRoute,
   applyHermesLlmRoute,
   hermesProviderIdOf,
@@ -658,6 +660,11 @@ export function makeHermesAdapter(
           // SOUL.md / USER.md / the newest NOTES.md in the system prompt: a
           // status or dispatch turn needs no file reads (assistantContextHint).
           const assistantContext = inAssistantWorkspace ? yield* readAssistantContext(cwd) : null;
+          // The Uno chat is a dispatcher: no terminal, files, browser or web
+          // of its own (HERMES_DISPATCHER_DISABLED_TOOLSETS). Other
+          // assistants keep Hermes' tools.
+          const dispatcherOnly =
+            inAssistantWorkspace && (yield* readMarkerProjectId(cwd)) === ASSISTANT_PROJECT_ID;
           const hermesProvider = hermesProviderIdOf(llmRoute);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
@@ -681,6 +688,9 @@ export function makeHermesAdapter(
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
                   ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),
+                  ...(dispatcherOnly
+                    ? { disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS }
+                    : {}),
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see
                   // HERMES_TITLE_GENERATION_TIMEOUT_SECONDS). A brought key
@@ -1068,13 +1078,19 @@ export function makeHermesAdapter(
         }).pipe(Effect.scoped),
       );
 
+    /** The assistant a workspace belongs to, by its marker (written by the daemon); null if none. */
+    const readMarkerProjectId = (cwd: string) =>
+      fileSystem.readFileString(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER)).pipe(
+        Effect.map(assistantProjectIdOfMarker),
+        Effect.orElseSucceed(() => null),
+      );
+
     /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
     const readAssistantContext = (cwd: string) =>
       Effect.gen(function* () {
         const read = (name: string) =>
           fileSystem.readFileString(nodePath.join(cwd, name)).pipe(Effect.orElseSucceed(() => ""));
-        // The folder's marker names its assistant (written by the daemon).
-        const projectId = assistantProjectIdOfMarker(yield* read(ASSISTANT_WORKSPACE_MARKER));
+        const projectId = yield* readMarkerProjectId(cwd);
         const profile =
           projectId !== null && options?.assistantProfile
             ? yield* options.assistantProfile(projectId).pipe(Effect.orElseSucceed(() => null))
