@@ -115,8 +115,7 @@ function flush() {
 /** Wire the local store's visit / unread actions to the server. Idempotent. */
 export function installThreadReadStateSync() {
   setThreadReadStateSink({
-    visited: (threadKey, visitedAt) =>
-      queue(threadKey, { kind: "visit", visitedAt, attempts: 0 }),
+    visited: (threadKey, visitedAt) => queue(threadKey, { kind: "visit", visitedAt, attempts: 0 }),
     unread: (threadKey) => {
       unreadGuardUntil.set(threadKey, Date.now() + UNREAD_GUARD_MS);
       queue(threadKey, { kind: "unread", attempts: 0 });

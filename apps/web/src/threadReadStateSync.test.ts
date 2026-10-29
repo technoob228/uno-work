@@ -6,9 +6,8 @@ vi.mock("./environmentApi", () => ({
   readEnvironmentApi: () => ({ orchestration: { dispatchCommand } }),
 }));
 
-const { installThreadReadStateSync, mergeServerThreadReadState } = await import(
-  "./threadReadStateSync"
-);
+const { installThreadReadStateSync, mergeServerThreadReadState } =
+  await import("./threadReadStateSync");
 const { useUiStateStore } = await import("./uiStateStore");
 
 const ENV = EnvironmentId.make("env-1");
@@ -43,7 +42,12 @@ describe("thread read state ↔ server", () => {
     useUiStateStore.setState({ threadLastVisitedAtById: { [key("a")]: T3, [key("b")]: T1 } });
     let writes = 0;
     const unsubscribe = useUiStateStore.subscribe(() => (writes += 1));
-    mergeServerThreadReadState(ENV, [shell("a", T2), shell("b", T2), shell("c", T3), shell("d", null)]);
+    mergeServerThreadReadState(ENV, [
+      shell("a", T2),
+      shell("b", T2),
+      shell("c", T3),
+      shell("d", null),
+    ]);
     unsubscribe();
     expect(writes).toBe(1);
     expect(useUiStateStore.getState().threadLastVisitedAtById).toEqual({

@@ -728,8 +728,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           // Read state only: updatedAt stays, so reading never reorders.
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            lastVisitedAt:
-              event.type === "thread.visited" ? event.payload.lastVisitedAt : null,
+            lastVisitedAt: event.type === "thread.visited" ? event.payload.lastVisitedAt : null,
           });
           return;
         }

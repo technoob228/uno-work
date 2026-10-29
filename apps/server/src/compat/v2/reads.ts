@@ -2,11 +2,7 @@
  * T3 v2 compat: reads shared by the phone socket (handlers.ts) and the v2
  * HTTP snapshots (mobileCompatRoutes.ts with `x-t3-orchestration-protocol: 2`).
  */
-import type {
-  OrchestrationThread,
-  OrchestrationThreadShell,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { OrchestrationThread, OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";

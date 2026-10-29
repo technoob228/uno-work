@@ -130,7 +130,11 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
                     sequence: event.sequence,
                     project: toV2ProjectShell(project.value),
                   }
-                : { kind: "project.removed", sequence: event.sequence, projectId: event.aggregateId },
+                : {
+                    kind: "project.removed",
+                    sequence: event.sequence,
+                    projectId: event.aggregateId,
+                  },
             );
             continue;
           }
@@ -223,7 +227,11 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
                 }
                 lastThread = next.value.thread;
                 return [
-                  { kind: "snapshot", snapshotSequence: lastSequence, projection: next.value.projection },
+                  {
+                    kind: "snapshot",
+                    snapshotSequence: lastSequence,
+                    projection: next.value.projection,
+                  },
                 ];
               }),
             ),
@@ -306,17 +314,22 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
         });
         if ("kind" in plan) return yield* fail(plan.message);
         if (plan.create.kind !== "dispatch") {
-          return yield* fail(plan.create.kind === "reject" ? plan.create.message : V2_REFUSAL.badCommand);
+          return yield* fail(
+            plan.create.kind === "reject" ? plan.create.message : V2_REFUSAL.badCommand,
+          );
         }
         let sequence = 0;
         for (const command of [...plan.create.commands, ...(plan.message ? [plan.message] : [])]) {
           const result = yield* dispatchV1(command).pipe(
-            Effect.catch((cause) => fail(causeMessage(cause, "Uno Work could not start the chat."))),
+            Effect.catch((cause) =>
+              fail(causeMessage(cause, "Uno Work could not start the chat.")),
+            ),
           );
           sequence = result.sequence;
         }
         const projection = yield* readProjection(ThreadId.make(plan.threadId));
-        if (Option.isNone(projection)) return yield* fail("The new chat did not appear. Try again.");
+        if (Option.isNone(projection))
+          return yield* fail("The new chat did not appear. Try again.");
         return {
           threadId: plan.threadId,
           projection: projection.value.projection,
@@ -328,7 +341,8 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
     const getThreadProjection = (payload: unknown) =>
       Effect.gen(function* () {
         const threadIdRaw = asString(asRecord(payload)["threadId"]);
-        if (!threadIdRaw) return yield* Effect.fail(threadProjectionError("unknown", "threadId is required."));
+        if (!threadIdRaw)
+          return yield* Effect.fail(threadProjectionError("unknown", "threadId is required."));
         const projection = yield* readProjection(ThreadId.make(threadIdRaw));
         if (Option.isNone(projection)) {
           return yield* Effect.fail(
@@ -346,7 +360,9 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
           projects: snapshot["projects"],
           threads: snapshot["archivedThreads"],
         })),
-        Effect.mapError((cause) => shellError(causeMessage(cause, "Could not load archived chats."))),
+        Effect.mapError((cause) =>
+          shellError(causeMessage(cause, "Could not load archived chats.")),
+        ),
       );
 
     const loadConfig = withV1((v1) => v1["server.getConfig"]({})).pipe(

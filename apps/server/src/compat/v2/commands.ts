@@ -50,7 +50,8 @@ export interface V2CommandContext {
 
 export const V2_REFUSAL = {
   unsupported: "Uno Work can't do this from the phone yet. Open the chat in Uno Work.",
-  attachments: "Sending files from the phone is coming soon. Send text, or attach the file in Uno Work.",
+  attachments:
+    "Sending files from the phone is coming soon. Send text, or attach the file in Uno Work.",
   worktree:
     "New chats from the phone start in the project folder. Separate branches (worktrees) are coming soon.",
   busy: "The agent is still working on the previous message. Wait for the reply or press Stop, then send again.",
@@ -58,7 +59,8 @@ export const V2_REFUSAL = {
   autoSettle: "Auto-settle is set in Uno Work.",
   missingThread: "This chat is no longer on this computer.",
   missingRequest: "This question was already answered or has expired.",
-  badCommand: "The phone sent a command Uno Work could not read. Update the T3 Code app and try again.",
+  badCommand:
+    "The phone sent a command Uno Work could not read. Update the T3 Code app and try again.",
 } as const;
 
 const reject = (message: string): V2CommandPlan => ({ kind: "reject", message });
@@ -137,7 +139,9 @@ export function translateV2Command(raw: unknown, context: V2CommandContext): V2C
       return dispatch({ type: "thread.visit", ...base, visitedAt });
     }
     case "thread.mark-unread":
-      return base ? dispatch({ type: "thread.mark-unread", ...base }) : reject(V2_REFUSAL.badCommand);
+      return base
+        ? dispatch({ type: "thread.mark-unread", ...base })
+        : reject(V2_REFUSAL.badCommand);
     case "thread.snooze": {
       const snoozedUntil = str(command, "snoozedUntil");
       if (!base || !snoozedUntil) return reject(V2_REFUSAL.badCommand);
@@ -277,7 +281,9 @@ export function translateV2Command(raw: unknown, context: V2CommandContext): V2C
         command["modelSelection"] && typeof command["modelSelection"] === "object"
           ? (command["modelSelection"] as Raw)
           : null;
-      const instanceId = selection ? (str(selection, "instanceId") ?? str(selection, "provider")) : null;
+      const instanceId = selection
+        ? (str(selection, "instanceId") ?? str(selection, "provider"))
+        : null;
       const model = selection ? str(selection, "model") : null;
       if (!base || !projectId || !title || !instanceId || !model) {
         return reject(V2_REFUSAL.badCommand);
@@ -347,7 +353,9 @@ export function translateV2Launch(
   }
   const text = initial && typeof initial["text"] === "string" ? initial["text"] : null;
   const createCommand =
-    create.kind === "dispatch" ? (create.commands[0] as Extract<ClientOrchestrationCommand, { type: "thread.create" }>) : null;
+    create.kind === "dispatch"
+      ? (create.commands[0] as Extract<ClientOrchestrationCommand, { type: "thread.create" }>)
+      : null;
   const message: ClientOrchestrationCommand | null =
     text !== null && text.trim().length > 0 && createCommand
       ? {

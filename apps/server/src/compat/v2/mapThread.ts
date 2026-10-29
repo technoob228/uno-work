@@ -419,7 +419,9 @@ export function toV2ThreadProjection(input: V2ThreadProjectionInput): V2Json {
   }
 
   // Activities: tools, requests, errors, the latest todo list.
-  const latestPlanActivity = activities.findLast((activity) => activity.kind === "turn.plan.updated");
+  const latestPlanActivity = activities.findLast(
+    (activity) => activity.kind === "turn.plan.updated",
+  );
   activities.forEach((activity, index) => {
     const payload = payloadOf(activity);
     switch (activity.kind) {
@@ -509,7 +511,11 @@ export function toV2ThreadProjection(input: V2ThreadProjectionInput): V2Json {
         return;
       }
       case "runtime.error": {
-        const message = (stringField(payload, "message") ?? stringField(payload, "detail") ?? activity.summary)
+        const message = (
+          stringField(payload, "message") ??
+          stringField(payload, "detail") ??
+          activity.summary
+        )
           .trim()
           .slice(0, MAX_FAILURE_MESSAGE);
         pending.push({
@@ -686,7 +692,8 @@ function toV2Runs(input: {
       const runId = row.turnId as string;
       const userMessageId =
         row.pendingMessageId ??
-        thread.messages.find((message) => message.role === "user" && message.turnId === runId)?.id ??
+        thread.messages.find((message) => message.role === "user" && message.turnId === runId)
+          ?.id ??
         syntheticUserMessageId(runId);
       const isActive = runId === activeRunId;
       return {

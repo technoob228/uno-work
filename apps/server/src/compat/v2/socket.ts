@@ -26,7 +26,9 @@ export function isOrchestrationV2Upgrade(request: HttpServerRequest.HttpServerRe
   });
 }
 
-export function isOrchestrationV2HttpRequest(request: HttpServerRequest.HttpServerRequest): boolean {
+export function isOrchestrationV2HttpRequest(
+  request: HttpServerRequest.HttpServerRequest,
+): boolean {
   return request.headers[ORCHESTRATION_PROTOCOL_HEADER] === "2";
 }
 

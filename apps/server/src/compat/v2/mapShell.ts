@@ -193,7 +193,9 @@ export function toV2ThreadShell(
 }
 
 /** Which list the phone keeps the row in. */
-export function v2ShellLocation(thread: { readonly archivedAt?: string | null }): "active" | "archive" {
+export function v2ShellLocation(thread: {
+  readonly archivedAt?: string | null;
+}): "active" | "archive" {
   return thread.archivedAt ? "archive" : "active";
 }
 

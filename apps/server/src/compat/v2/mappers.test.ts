@@ -202,13 +202,22 @@ describe("v2 thread projection mapping", () => {
       "assistant_message",
     ]);
     expect(items.map((row) => row.position)).toEqual([0, 1, 2, 3]);
-    expect(items[2]!.item).toMatchObject({ requestId: "req-1", requestKind: "command", status: "waiting" });
+    expect(items[2]!.item).toMatchObject({
+      requestId: "req-1",
+      requestKind: "command",
+      status: "waiting",
+    });
     expect(items[3]!.item).toMatchObject({ text: "on it", streaming: true });
     expect(projection["runtimeRequests"]).toEqual([
       expect.objectContaining({ id: "req-1", kind: "command", status: "pending" }),
     ]);
     expect(projection["runs"]).toEqual([
-      expect.objectContaining({ id: TURN_ID, status: "waiting", userMessageId: "m-user", ordinal: 1 }),
+      expect.objectContaining({
+        id: TURN_ID,
+        status: "waiting",
+        userMessageId: "m-user",
+        ordinal: 1,
+      }),
     ]);
   });
 
@@ -244,10 +253,14 @@ describe("v2 commands", () => {
       kind: "dispatch",
       commands: [{ type: "thread.visit", ...base, visitedAt: T2 }],
     });
-    expect(translateV2Command({ ...base, type: "thread.pin.reorder", orderKey: "a" }, { now })).toEqual({
+    expect(
+      translateV2Command({ ...base, type: "thread.pin.reorder", orderKey: "a" }, { now }),
+    ).toEqual({
       kind: "noop",
     });
-    expect(translateV2Command({ ...base, type: "thread.auto-settle.set", enabled: false }, { now })).toEqual({
+    expect(
+      translateV2Command({ ...base, type: "thread.auto-settle.set", enabled: false }, { now }),
+    ).toEqual({
       kind: "reject",
       message: V2_REFUSAL.autoSettle,
     });
@@ -261,7 +274,14 @@ describe("v2 commands", () => {
         "user-input.requested",
         {
           requestId: "req-q",
-          questions: [{ id: "q", header: "Pick", question: "Which?", options: [{ label: "A", description: "a" }] }],
+          questions: [
+            {
+              id: "q",
+              header: "Pick",
+              question: "Which?",
+              options: [{ label: "A", description: "a" }],
+            },
+          ],
         },
         T3,
         3,
@@ -274,7 +294,9 @@ describe("v2 commands", () => {
       ),
     ).toMatchObject({
       kind: "dispatch",
-      commands: [{ type: "thread.approval.respond", requestId: "req-1", decision: "acceptForSession" }],
+      commands: [
+        { type: "thread.approval.respond", requestId: "req-1", decision: "acceptForSession" },
+      ],
     });
     expect(
       translateV2Command(
@@ -286,8 +308,14 @@ describe("v2 commands", () => {
       commands: [{ type: "thread.user-input.respond", requestId: "req-q", answers: { q: "A" } }],
     });
     expect(
-      translateV2Command({ ...base, type: "thread.user-input.dismiss", requestId: "req-q" }, { now, requests }),
-    ).toMatchObject({ kind: "dispatch", commands: [{ type: "thread.user-input.respond", answers: {} }] });
+      translateV2Command(
+        { ...base, type: "thread.user-input.dismiss", requestId: "req-q" },
+        { now, requests },
+      ),
+    ).toMatchObject({
+      kind: "dispatch",
+      commands: [{ type: "thread.user-input.respond", answers: {} }],
+    });
   });
 
   it("sends a message only when the agent is free, without attachments", () => {
@@ -307,12 +335,17 @@ describe("v2 commands", () => {
       translateV2Command(message, { now, thread: shell({ session: thread().session }) }),
     ).toEqual({ kind: "reject", message: V2_REFUSAL.busy });
     expect(
-      translateV2Command({ ...message, attachments: [{ type: "image" }] }, { now, thread: shell() }),
+      translateV2Command(
+        { ...message, attachments: [{ type: "image" }] },
+        { now, thread: shell() },
+      ),
     ).toEqual({ kind: "reject", message: V2_REFUSAL.attachments });
   });
 
   it("stops a run and the thread", () => {
-    expect(translateV2Command({ ...base, type: "run.interrupt", runId: TURN_ID }, { now })).toMatchObject({
+    expect(
+      translateV2Command({ ...base, type: "run.interrupt", runId: TURN_ID }, { now }),
+    ).toMatchObject({
       kind: "dispatch",
       commands: [{ type: "thread.turn.interrupt", turnId: TURN_ID }],
     });
@@ -336,7 +369,10 @@ describe("v2 commands", () => {
     const plan = translateV2Launch(launch, { now, newId: () => "new-id" });
     expect(plan).toMatchObject({
       threadId: "new-id",
-      create: { kind: "dispatch", commands: [{ type: "thread.create", runtimeMode: "full-access", worktreePath: null }] },
+      create: {
+        kind: "dispatch",
+        commands: [{ type: "thread.create", runtimeMode: "full-access", worktreePath: null }],
+      },
       message: { type: "thread.turn.start", message: { text: "hello" } },
     });
     expect(
