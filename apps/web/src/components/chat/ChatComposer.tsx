@@ -108,6 +108,14 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { useDevMode } from "../../devMode";
+import { useSettings } from "../../hooks/useSettings";
+import {
+  buildComposerPromptHistoryEntries,
+  isCaretOnPromptEdge,
+  stepComposerPromptHistory,
+  type ComposerPromptHistoryPosition,
+} from "./composerPromptHistory";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
@@ -469,9 +477,13 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
+  // 29.10: the context-window meter is a developer readout (Dev mode only).
+  const devMode = useDevMode();
   return (
     <>
-      {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
+      {devMode && props.activeContextWindow ? (
+        <ContextWindowMeter usage={props.activeContextWindow} />
+      ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">
           Preparing a separate copy of the project...
@@ -1032,14 +1044,16 @@ export const ChatComposer = memo(
         : imageAttachmentSupport === "unknown"
           ? "Attach files. Image support is unknown for this model."
           : "Attach files, images or video";
+    // Plan mode is legacy (Settings → Legacy, upstream 48aa875c0e): off, no
+    // Build/Plan switch, no /plan or /default, no Shift+Tab — and ChatView
+    // forces the effective mode to "default", so nobody is stuck in plan.
+    const planModeUiEnabled = useSettings((settings) => settings.planModeEnabled);
     const composerProviderControls = useMemo(
       () => ({
-        showInteractionModeToggle: getProviderInteractionModeToggle(
-          providerStatuses,
-          selectedProvider,
-        ),
+        showInteractionModeToggle:
+          planModeUiEnabled && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
       }),
-      [providerStatuses, selectedProvider],
+      [planModeUiEnabled, providerStatuses, selectedProvider],
     );
     // The Uno chat always runs on Hermes (0.0.84): its engine picker writes
     // the chat's own selection on the daemon; turns carry exactly that.
@@ -1205,20 +1219,24 @@ export const ChatComposer = memo(
             label: "/model",
             description: "Switch the model for this chat",
           },
-          {
-            id: "slash:plan",
-            type: "slash-command",
-            command: "plan",
-            label: "/plan",
-            description: "Switch this chat into plan mode",
-          },
-          {
-            id: "slash:default",
-            type: "slash-command",
-            command: "default",
-            label: "/default",
-            description: "Switch this chat back to normal build mode",
-          },
+          ...(planModeUiEnabled
+            ? ([
+                {
+                  id: "slash:plan",
+                  type: "slash-command",
+                  command: "plan",
+                  label: "/plan",
+                  description: "Switch this chat into plan mode",
+                },
+                {
+                  id: "slash:default",
+                  type: "slash-command",
+                  command: "default",
+                  label: "/default",
+                  description: "Switch this chat back to normal build mode",
+                },
+              ] as const)
+            : []),
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
         const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
           (command) => ({
@@ -1254,7 +1272,13 @@ export const ChatComposer = memo(
         }));
       }
       return [];
-    }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries]);
+    }, [
+      composerTrigger,
+      planModeUiEnabled,
+      selectedProvider,
+      selectedProviderStatus,
+      workspaceEntries,
+    ]);
 
     const composerMenuOpen = Boolean(composerTrigger);
     const composerMenuSearchKey = composerTrigger
@@ -1725,6 +1749,57 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Callbacks: prompt change
     // ------------------------------------------------------------------
+    // ↑ / ↓ recall of sent messages (upstream fd773172e7). Entries are built
+    // on the keypress, not per render: the chat changes on every streamed delta.
+    const promptHistoryPositionRef = useRef<ComposerPromptHistoryPosition | null>(null);
+    const promptHistoryMessagesRef = useRef(activeThread?.messages);
+    promptHistoryMessagesRef.current = activeThread?.messages;
+    // A recall from chat A is never active in chat B.
+    const promptHistoryTargetKey =
+      typeof composerDraftTarget === "string"
+        ? composerDraftTarget
+        : `${composerDraftTarget.environmentId}:${composerDraftTarget.threadId}`;
+    useEffect(() => {
+      promptHistoryPositionRef.current = null;
+    }, [promptHistoryTargetKey]);
+    const navigatePromptHistory = (
+      direction: "backward" | "forward",
+      event: KeyboardEvent,
+    ): boolean => {
+      if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || event.isComposing) {
+        return false;
+      }
+      if (isComposerApprovalState || pendingUserInputs.length > 0) return false;
+      // Something attached: recalling old text into it is never what ↑ meant.
+      if (
+        composerImagesRef.current.length > 0 ||
+        composerVideosRef.current.length > 0 ||
+        composerFilesRef.current.length > 0
+      ) {
+        return false;
+      }
+      const current = promptRef.current;
+      if (promptHistoryPositionRef.current === null && current.length > 0) return false;
+      const cursor = expandCollapsedComposerCursor(current, composerCursorRef.current);
+      if (!isCaretOnPromptEdge(current, cursor, direction === "backward" ? "start" : "end")) {
+        return false;
+      }
+      const step = stepComposerPromptHistory({
+        direction,
+        entries: buildComposerPromptHistoryEntries(promptHistoryMessagesRef.current ?? []),
+        position: promptHistoryPositionRef.current,
+        currentPrompt: current,
+      });
+      if (!step) return false;
+      promptHistoryPositionRef.current = step.position;
+      promptRef.current = step.prompt;
+      setComposerDraftPrompt(composerDraftTarget, step.prompt);
+      setComposerCursor(collapseExpandedComposerCursor(step.prompt, step.prompt.length));
+      setComposerTrigger(null);
+      setComposerHighlightedItemId(null);
+      return true;
+    };
+
     const onPromptChange = useCallback(
       (
         nextPrompt: string,
@@ -1749,6 +1824,10 @@ export const ChatComposer = memo(
         }
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
+        // Any edit ends ↑ browsing (fd773172e7).
+        if (promptHistoryPositionRef.current?.recalled !== nextPrompt) {
+          promptHistoryPositionRef.current = null;
+        }
         if (!terminalContextIdListsEqual(composerTerminalContexts, terminalContextIds)) {
           setComposerDraftTerminalContexts(
             composerDraftTarget,
@@ -2182,6 +2261,7 @@ export const ChatComposer = memo(
       event: KeyboardEvent,
     ) => {
       if (key === "Tab" && event.shiftKey) {
+        if (!planModeUiEnabled) return false;
         toggleInteractionMode();
         return true;
       }
@@ -2202,6 +2282,9 @@ export const ChatComposer = memo(
           onSelectComposerItem(selectedItem);
           return true;
         }
+      }
+      if (key === "ArrowUp" || key === "ArrowDown") {
+        return navigatePromptHistory(key === "ArrowUp" ? "backward" : "forward", event);
       }
       if (key === "Enter" && !event.shiftKey) {
         submitComposer();

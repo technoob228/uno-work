@@ -37,6 +37,11 @@ export type ModelPickerJumpKeybindingCommand =
 export const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  // The open chat: Done (settle), pin / unpin, and undo the last Done /
+  // snooze / unpin / archive (upstream 143341b0bc, 5781b5240b; Work 29.10).
+  "thread.settle",
+  "thread.pin",
+  "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
@@ -58,6 +63,9 @@ const STATIC_KEYBINDING_COMMANDS = [
   "rightPanel.toggle",
   "commandPalette.toggle",
   "sidebar.toggle",
+  // Back / forward through the app's screens, like a browser (upstream 829af7b73a).
+  "navigation.back",
+  "navigation.forward",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",

@@ -10,7 +10,6 @@ import { memo, type ReactNode, useRef, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import {
-  CodeIcon,
   DiffIcon,
   EllipsisIcon,
   MonitorSmartphoneIcon,
@@ -45,7 +44,7 @@ import { OpenInMenuItems, OpenInPicker } from "./OpenInPicker";
 import { useHeaderOverflow } from "./useHeaderOverflow";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { usePreviewPane } from "../preview/PreviewPaneContext";
-import { toggleDevMode, useDevMode } from "../../devMode";
+import { useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { isElectron } from "../../env";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
@@ -81,7 +80,6 @@ const HEADER_FOLD_ORDER = [
   "openIn",
   "scripts",
   "diff",
-  "devMode",
   "terminal",
 ] as const;
 type HeaderFoldId = (typeof HEADER_FOLD_ORDER)[number];
@@ -329,31 +327,6 @@ export const ChatHeader = memo(function ChatHeader({
             </button>
           </Foldable>
         ) : null}
-        {isMobile ? null : (
-          <Foldable id="devMode" folded={folded}>
-            <TooltipProvider delay={0} closeDelay={0}>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Toggle
-                      className="shrink-0 data-[pressed]:border-primary/40 data-[pressed]:bg-primary/15 data-[pressed]:text-primary"
-                      pressed={devMode}
-                      onPressedChange={() => toggleDevMode()}
-                      aria-label="Toggle dev mode"
-                      variant="outline"
-                      size="xs"
-                    >
-                      <CodeIcon className="size-3" />
-                    </Toggle>
-                  }
-                />
-                <TooltipPopup side="bottom">
-                  {devMode ? "Dev mode: on" : "Dev mode: off"}
-                </TooltipPopup>
-              </Tooltip>
-            </TooltipProvider>
-          </Foldable>
-        )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {isMobile ? (
@@ -429,9 +402,9 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
-        {/* Terminal is always one click away (it's not a developer-only tool);
-            a phone keeps the room for the chat's title instead. */}
-        {isMobile ? null : (
+        {/* Terminal is a developer tool (29.10: Dev mode only; the panel's
+            launcher and ctrl+` still open it); a phone keeps the room for the title. */}
+        {isMobile || !devMode ? null : (
           <Foldable id="terminal" folded={folded}>
             <Tooltip>
               <TooltipTrigger
@@ -536,7 +509,7 @@ export const ChatHeader = memo(function ChatHeader({
                   Started by Uno — open Uno's chat
                 </MenuItem>
               ) : null}
-              {isFolded("terminal") && !isMobile ? (
+              {isFolded("terminal") && !isMobile && devMode ? (
                 <MenuCheckboxItem
                   checked={terminalOpen}
                   onCheckedChange={onToggleTerminal}
@@ -553,11 +526,6 @@ export const ChatHeader = memo(function ChatHeader({
                   disabled={!isGitRepo && !diffOpen}
                 >
                   Diff panel{diffToggleShortcutLabel ? ` (${diffToggleShortcutLabel})` : ""}
-                </MenuCheckboxItem>
-              ) : null}
-              {isFolded("devMode") && !isMobile ? (
-                <MenuCheckboxItem checked={devMode} onCheckedChange={() => toggleDevMode()}>
-                  Dev mode
                 </MenuCheckboxItem>
               ) : null}
               {isFolded("scripts") && devMode && activeProjectScripts ? (

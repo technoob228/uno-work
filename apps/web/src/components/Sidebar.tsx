@@ -180,7 +180,7 @@ import {
   type SidebarSection,
 } from "./Sidebar.sections";
 import { isYourTurn } from "./Sidebar.yourTurn";
-import { toSortableTimestamp } from "../lib/threadSort";
+import { getThreadSortTimestamp, toSortableTimestamp } from "../lib/threadSort";
 import {
   canSnoozeThread,
   formatSnoozePickerValue,
@@ -229,6 +229,13 @@ import {
 } from "../assistant/assistantChat.logic";
 import { useAssistantChat } from "../assistant/useAssistantChat";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarThreadUndoNotice } from "./sidebar/SidebarThreadUndoNotice";
+import { renderRecentsByTime } from "./sidebar/SidebarRecentsByTime";
+import {
+  offerThreadUndo,
+  snapshotThreadForUndo,
+  withdrawThreadUndo,
+} from "../hooks/threadUndoActions";
 import {
   SIDEBAR_D_RAIL_WIDTH,
   SidebarDHeader,
@@ -2853,14 +2860,22 @@ export default function Sidebar() {
   );
   const setThreadPinned = useCallback(
     (threadRef: ScopedThreadRef, pinned: boolean) => {
+      const before = snapshotThreadForUndo(threadRef);
       dispatch(threadRef, {
         type: "thread.meta.update",
         commandId: newCommandId(),
         threadId: threadRef.threadId,
         pinnedAt: pinned ? new Date().toISOString() : null,
-      }).catch((error) =>
-        showErrorToast(pinned ? "Failed to pin chat" : "Failed to unpin chat", error),
-      );
+      })
+        // Unpinned · ⌘Z to undo (29.10); pinning by hand drops a stale Undo.
+        .then(() =>
+          pinned
+            ? withdrawThreadUndo("unpin", threadRef)
+            : offerThreadUndo("unpin", threadRef, before),
+        )
+        .catch((error) =>
+          showErrorToast(pinned ? "Failed to pin chat" : "Failed to unpin chat", error),
+        );
     },
     [dispatch, showErrorToast],
   );
@@ -2870,6 +2885,7 @@ export default function Sidebar() {
   );
   const attemptUnsnooze = useCallback(
     (threadRef: ScopedThreadRef) => {
+      withdrawThreadUndo("snooze", threadRef);
       dispatch(threadRef, {
         type: "thread.unsnooze",
         commandId: newCommandId(),
@@ -2905,6 +2921,7 @@ export default function Sidebar() {
     (threadRef: ScopedThreadRef, snoozedUntil: string, coParkingKeys?: ReadonlySet<string>) => {
       const threadKey = scopedThreadKey(threadRef);
       const navigateAfter = planForwardNavigation(threadKey, coParkingKeys);
+      const before = snapshotThreadForUndo(threadRef);
       dispatch(threadRef, {
         type: "thread.snooze",
         commandId: newCommandId(),
@@ -2913,23 +2930,13 @@ export default function Sidebar() {
       })
         .then(() => {
           if (routeThreadKeyRef.current === threadKey) navigateAfter?.();
-          // Snooze hides the row, so the toast is the confirmation and Undo
-          // is the escape hatch for a mis-click.
-          toastManager.add(
-            stackedThreadToast({
-              type: "success",
-              title: `Snoozed until ${snoozeWakeDescription(snoozedUntil, new Date())}`,
-              description: "It comes back on its own, or sooner if the agent needs you.",
-              actionProps: {
-                children: "Undo",
-                onClick: () => attemptUnsnooze(threadRef),
-              },
-            }),
-          );
+          // Snooze hides the row: "Snoozed · ⌘Z to undo" at the bottom of
+          // the sidebar is the confirmation and the escape hatch (29.10).
+          offerThreadUndo("snooze", threadRef, before);
         })
         .catch((error) => showErrorToast("Failed to snooze chat", error));
     },
-    [attemptUnsnooze, dispatch, planForwardNavigation, showErrorToast],
+    [dispatch, planForwardNavigation, showErrorToast],
   );
   const settlingThreadKeysRef = useRef(new Set<string>());
   const attemptSettle = useCallback(
@@ -2939,6 +2946,7 @@ export default function Sidebar() {
       if (settlingThreadKeysRef.current.has(threadKey)) return;
       settlingThreadKeysRef.current.add(threadKey);
       const navigateAfter = planForwardNavigation(threadKey, coParkingKeys);
+      const before = snapshotThreadForUndo(threadRef);
       dispatch(threadRef, {
         type: "thread.settle",
         commandId: newCommandId(),
@@ -2946,6 +2954,7 @@ export default function Sidebar() {
       })
         .then(() => {
           if (routeThreadKeyRef.current === threadKey) navigateAfter?.();
+          offerThreadUndo("settle", threadRef, before);
         })
         .catch((error) => showErrorToast("Failed to settle chat", error))
         .finally(() => settlingThreadKeysRef.current.delete(threadKey));
@@ -2954,6 +2963,7 @@ export default function Sidebar() {
   );
   const attemptUnsettle = useCallback(
     (threadRef: ScopedThreadRef) => {
+      withdrawThreadUndo("settle", threadRef);
       dispatch(threadRef, {
         type: "thread.unsettle",
         commandId: newCommandId(),
@@ -3983,6 +3993,10 @@ export default function Sidebar() {
         if (clicked) handlers.get(clicked)?.();
       });
     };
+  // Recents and the one list fall into Today / Yesterday / This week / Older
+  // by the time they are sorted by.
+  const dTimeOf = (thread: SidebarThreadSummary) =>
+    getThreadSortTimestamp(thread, sidebarThreadSortOrder);
   const dChatRows = (
     key: string,
     chats: ReadonlyArray<SidebarThreadSummary>,
@@ -3992,26 +4006,37 @@ export default function Sidebar() {
       readonly underComputer: boolean;
       readonly projectComputers: ReadonlyArray<string> | null;
     },
-  ) => (
-    <>
-      {(preview?.visible ?? chats).map((thread) =>
-        renderRow(thread, "active", {
-          d: true,
-          nested: place.nested,
-          showMachine: dChatChip(thread, place.underComputer, place.projectComputers),
-          placeLabel: dPlace.project ? dGroupOf(thread).name : null,
-        }),
-      )}
-      {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
-        <SidebarDShowMoreRow
-          nested={place.nested}
-          hiddenCount={preview.hiddenCount}
-          testId={`sidebar-d-show-more-${key}`}
-          onToggle={() => toggleDGroupExpanded(key)}
-        />
-      ) : null}
-    </>
-  );
+  ) => {
+    const row = (thread: SidebarThreadSummary) =>
+      renderRow(thread, "active", {
+        d: true,
+        nested: place.nested,
+        showMachine: dChatChip(thread, place.underComputer, place.projectComputers),
+        placeLabel: dPlace.project ? dGroupOf(thread).name : null,
+      });
+    const rows = preview?.visible ?? chats;
+    return (
+      <>
+        {/* One list: Today / Yesterday / This week / Older (29.10). */}
+        {key === "list"
+          ? renderRecentsByTime({
+              chats: rows,
+              timeOf: dTimeOf,
+              now: new Date(now),
+              renderRow: row,
+            })
+          : rows.map(row)}
+        {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
+          <SidebarDShowMoreRow
+            nested={place.nested}
+            hiddenCount={preview.hiddenCount}
+            testId={`sidebar-d-show-more-${key}`}
+            onToggle={() => toggleDGroupExpanded(key)}
+          />
+        ) : null}
+      </>
+    );
+  };
   const dRenderNodes = (nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>): ReactNode =>
     nodes.map((node, index) => {
       const underComputer = node.trail.computer !== undefined;
@@ -4208,9 +4233,12 @@ export default function Sidebar() {
         );
       })}
       {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-      {(dPreviews.legacy?.recents.visible ?? []).map((thread) =>
-        renderRow(thread, "active", { d: true }),
-      )}
+      {renderRecentsByTime({
+        chats: dPreviews.legacy?.recents.visible ?? [],
+        timeOf: dTimeOf,
+        now: new Date(now),
+        renderRow: (thread) => renderRow(thread, "active", { d: true }),
+      })}
       {dPreviews.legacy &&
       (dPreviews.legacy.recents.hiddenCount > 0 || dPreviews.legacy.recents.canCollapse) ? (
         <SidebarDShowMoreRow
@@ -4443,6 +4471,7 @@ export default function Sidebar() {
           {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
           {dChatList(false)}
           <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
+            <SidebarThreadUndoNotice />
             <SidebarUpdatePill />
           </SidebarFooter>
           {showPanel
@@ -4715,6 +4744,7 @@ export default function Sidebar() {
         </>
       )}
       <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1.5">
+        <SidebarThreadUndoNotice />
         <SidebarUpdatePill />
       </SidebarFooter>
 

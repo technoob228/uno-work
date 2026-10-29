@@ -468,6 +468,8 @@ const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
 
 function TimelineRowContent({ row }: { row: TimelineRow }) {
   const ctx = use(TimelineRowCtx);
+  // 29.10: "Revert to this message" is a developer tool (Dev mode only).
+  const devMode = useDevMode();
 
   return (
     <div
@@ -535,7 +537,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             ? { ...displayedWithRecording, visibleText: recordingPart.text }
             : displayedWithRecording;
           const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = typeof row.revertTurnCount === "number";
+          const canRevertAgentWork = devMode && typeof row.revertTurnCount === "number";
           const sentByThreadId = row.message.sentByThreadId ?? null;
           return (
             <div className="flex justify-end">

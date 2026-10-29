@@ -29,7 +29,12 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+o", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+n", "command": "chat.newLocal", "when": "!terminalFocus" },
-  { "key": "mod+o", "command": "editor.openFavorite" }
+  { "key": "mod+o", "command": "editor.openFavorite" },
+  { "key": "mod+[", "command": "navigation.back", "when": "!terminalFocus" },
+  { "key": "mod+]", "command": "navigation.forward", "when": "!terminalFocus" },
+  { "key": "mod+shift+s", "command": "thread.settle", "when": "!terminalFocus" },
+  { "key": "mod+shift+p", "command": "thread.pin", "when": "!terminalFocus" },
+  { "key": "mod+z", "command": "thread.undo", "when": "!terminalFocus && !editableFocus" }
 ]
 ```
 
@@ -63,6 +68,10 @@ Before 0.0.136 `mod+j` was `terminal.toggle`. On start the server moves that unt
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)
+- `navigation.back` / `navigation.forward`: back / forward through the app's screens, like a browser
+- `thread.settle`: Done for the open chat (it moves to the Done shelf)
+- `thread.pin`: pin or unpin the open chat
+- `thread.undo`: undo the last Done, snooze, unpin or archive (the note at the bottom of the sidebar). In a text field `mod+z` stays the field's own undo, except right after the action
 
 ### Key Syntax
 

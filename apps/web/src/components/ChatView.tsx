@@ -911,8 +911,12 @@ export default function ChatView(props: ChatViewProps) {
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const interactionMode =
-    composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  // Plan mode is legacy (Settings → Legacy, upstream 48aa875c0e). Off, the
+  // effective mode is "default" even for chats stored in plan mode, so nobody
+  // is stuck in it with the switch hidden; the next send stores "default".
+  const interactionMode = settings.planModeEnabled
+    ? (composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE)
+    : DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
@@ -3004,7 +3008,8 @@ export default function ChatView(props: ChatViewProps) {
       !queued && !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand) {
+    // /plan and /default act only with legacy plan mode on; else plain text.
+    if (standaloneSlashCommand && settings.planModeEnabled) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);

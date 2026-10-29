@@ -45,6 +45,13 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
+  { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
+  { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
+  { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
+  // In a text field ⌘Z stays the field's own undo, except right after a
+  // Done / snooze / unpin / archive (showThreadUndoNotice claims it).
+  { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,

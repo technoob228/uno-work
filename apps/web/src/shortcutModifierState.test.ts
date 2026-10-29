@@ -143,4 +143,27 @@ describe("shortcutModifierState", () => {
       shiftKey: false,
     });
   });
+
+  it("ignores poisoned modifier flags on non-modifier keys (dictation paste)", () => {
+    clearShortcutModifierState();
+    // A synthetic ⌘V can leave metaKey=true on later real keys: Enter must not mark ⌘ held.
+    syncShortcutModifierStateFromKeyboardEvent(
+      keyboardEventLike("keydown", { key: "Enter", metaKey: true }),
+    );
+    expect(readShortcutModifierState()).toEqual({
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    });
+  });
+
+  it("clears a held modifier when a non-modifier key reports it released", () => {
+    clearShortcutModifierState();
+    syncShortcutModifierStateFromKeyboardEvent(keyboardEventLike("keydown", { key: "Meta" }));
+    syncShortcutModifierStateFromKeyboardEvent(
+      keyboardEventLike("keydown", { key: "a", metaKey: false }),
+    );
+    expect(readShortcutModifierState().metaKey).toBe(false);
+  });
 });

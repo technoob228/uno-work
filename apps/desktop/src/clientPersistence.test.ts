@@ -50,6 +50,7 @@ function makeSecretStorage(available: boolean): DesktopSecretStorage {
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  planModeEnabled: false,
   browserAutomationLevel: "full",
   browserOpenIn: "auto",
   browserProfileScope: "account",
