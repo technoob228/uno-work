@@ -199,6 +199,11 @@ const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
 /** Gateway ids of the two models included in Uno AI hours. */
 export const UNO_SMART_GATEWAY_MODEL = "uno/smart";
 export const UNO_FAST_GATEWAY_MODEL = "uno/fast";
+/**
+ * GLM-5.3 Flash called by its own id: the gateway counts it in AI hours (one
+ * of the models behind Smart / Fast) though `/v1/models` lists only those two.
+ */
+export const UNO_GLM_FLASH_GATEWAY_MODEL = "z-ai/glm-5.3-flash";
 /** The same models as Uno harness slugs (`uno/` + gateway id). */
 export const UNO_SMART_MODEL_SLUG = `uno/${UNO_SMART_GATEWAY_MODEL}`;
 export const UNO_FAST_MODEL_SLUG = `uno/${UNO_FAST_GATEWAY_MODEL}`;

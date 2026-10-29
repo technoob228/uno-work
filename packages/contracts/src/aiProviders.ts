@@ -27,6 +27,7 @@
 import { Schema } from "effect";
 
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { UNO_GLM_FLASH_GATEWAY_MODEL } from "./model.ts";
 
 /** Providers a person can bring a key for. */
 export const ByokProviderId = Schema.Literals(["xai", "openrouter", "openai", "custom"]);
@@ -101,10 +102,15 @@ export const ASSISTANT_HARNESS_INSTANCE_ID = "hermes";
 /** Model-selection option carrying {@link AssistantLlmProvider}. */
 export const ASSISTANT_LLM_PROVIDER_OPTION_ID = "llmProvider";
 /**
- * Default model of the assistant on the Uno gateway: "Smart", the included
- * model of Uno AI hours (the gateway remaps the old default, Grok, to it).
+ * Default model of the assistant on the Uno gateway (29.10): GLM-5.3 Flash,
+ * included in Uno AI hours. The assistant only dispatches — it answers in
+ * about a second where Smart takes 5–10 (29.10, short prompt); the chats it
+ * starts do the heavy work on their own models. Before 0.0.160 it was "Smart"
+ * (`uno/smart`), which stays in the picker.
  */
-export const ASSISTANT_DEFAULT_GATEWAY_MODEL = "uno/smart";
+export const ASSISTANT_DEFAULT_GATEWAY_MODEL = UNO_GLM_FLASH_GATEWAY_MODEL;
+/** The assistant's default before 0.0.160 (and Grok before that). */
+export const ASSISTANT_PREVIOUS_DEFAULT_GATEWAY_MODEL = "uno/smart";
 /**
  * Gateway label of the assistant's calls — the app-label mechanism
  * (`/v1/apps/<label>`, X-Uno-App). Prefixed so a machine app that happens to

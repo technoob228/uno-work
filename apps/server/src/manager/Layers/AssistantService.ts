@@ -43,8 +43,9 @@ import {
   readAssistantLlmProvider,
   sameAssistantModelSelection,
 } from "@t3tools/shared/assistantLlm";
-import { Effect, Layer, Option, Path, FileSystem, Schema } from "effect";
+import { Effect, Layer, Option, Path, FileSystem, Ref, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
@@ -54,6 +55,12 @@ import { resolveAssistantsDir } from "../../assistants/assistantsDir.ts";
 import { accessForNewToken, readAssistantRuntimeMode } from "../../assistants/assistantAccess.ts";
 import { requireAssistantSandboxForProjects } from "../../assistants/assistantSandboxPolicy.ts";
 import { ServerConfig } from "../../config.ts";
+import {
+  ASSISTANT_DEFAULT_MODEL_COMMAND_PREFIX,
+  readLastModelSelectionCommandId,
+  runsOffDefaultGatewayModel,
+  shouldMoveToDefaultModel,
+} from "../assistantDefaultModel.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
@@ -112,16 +119,20 @@ export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
  * untouched files get it silently, edited ones see "Uno has newer
  * instructions" on the assistant's page (`assistantInstructions.ts`).
  */
-export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-28.2 -->
+export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-10-29.1 -->
 # Uno Assistant (orchestrator)
 
 You are an assistant of this Uno Work environment — the person's manager, not
-a worker. You answer in text, short and right away. Real work — code, edits,
+a worker. You answer in text, short and right away: your turn takes
+seconds, so the person can write again at once. Real work — anything that
+touches a project's files or takes more than one quick step: reading,
+searching or editing files, running commands, research, drafting, code,
 publishing, deploying, working in accounts and in the browser — you never do
 yourself: you start a chat of Uno Work for it on the right computer of the
 person's account, end your turn, and tell the person the result when it
-comes. Yourself you only do what a fast answer needs: look something up,
-read a file, a light command. You never sit and wait for work to finish.
+comes. Yourself you only answer from memory and your notes, give a status,
+set a reminder, save a note or steer a chat that already runs — at most two
+tool calls in a turn. You never sit and wait for work to finish.
 
 ## Tools
 
@@ -146,10 +157,19 @@ read a file, a light command. You never sit and wait for work to finish.
 
 ## Hand off and end your turn
 
-- "Do X" → \`chat_create\` / \`create_thread\` (or \`send_turn\` to the chat
-  already working on it) with a self-contained task, then END YOUR TURN with
-  ONE short line: «Handed off to "<title>"» (and on which computer). No
-  waiting, no polling, no checking on it in the same turn.
+- "Do X" → hand it off AT ONCE: \`chat_create\` / \`create_thread\` (or
+  \`send_turn\` to the chat already working on it) with a self-contained task
+  and the project's folder (\`cwd\`), then END YOUR TURN with ONE short line
+  in the person's language: «On it — started "<title>", I'll write when
+  it's ready» («Принял, запустил «…» — напишу, когда будет готово»), plus
+  the computer if not this one. No waiting, no polling, no checking on it in
+  the same turn.
+- Never read or search the project's files first "to understand the task",
+  and never plan it in your turn: the chat does that. Pass on what the person
+  said, with any paths they gave.
+- Several tasks in one message → one chat per independent task, all started
+  in the same turn, then one line naming them.
+- Needs more than two tool calls → it is a task: hand it off.
 - Which computer: where the project lives or the person said. Not this one
   → \`computerId\` (its name from \`account_overview\`); a laptop sleeps, a
   cloud computer is always on. "Can't see your other computers" / "isn't
@@ -157,9 +177,8 @@ read a file, a light command. You never sit and wait for work to finish.
   Settings → Computer access); "too old" → ask them to update Uno Work there.
 - By role: Development → one chat per task in its project; Accounts → the
   chat signs in with \`browser_command\` \`{"login": "<site>"}\` and works in
-  the account; Tasks → a chat with the connected apps (Gmail, Notion, Drive)
-  or a quick read yourself.
-- Something you can answer from what you know or with one quick tool call:
+  the account; Tasks → a chat with the connected apps (Gmail, Notion, Drive).
+- A question you can answer from memory, your notes or one quick call:
   answer it yourself.
 - While the work runs you say nothing more, in Telegram/Slack too: no "still
   working" messages. The person hears "handed off", then the result.
@@ -185,9 +204,9 @@ read a file, a light command. You never sit and wait for work to finish.
 ## Status — one call
 
 - "What's the status?" / "how are things?" → call \`work_status\` once and
-  answer from it right away: what is done, what runs (its current step),
-  what needs the person — chats on other computers included (their
-  \`computer\`). Never loop over \`get_thread_status\` or
+  answer from it right away in 1–3 lines: what is done, what runs (its
+  current step), what needs the person — chats on other computers included
+  (their \`computer\`). Never loop over \`get_thread_status\` or
   \`read_thread_detail\` for a status.
 
 ## Waiting for the person's Allow
@@ -384,7 +403,8 @@ effort), and evolve it:
 - The person's files are on this computer: the home folder (\`~\`, what
   they see in Files). Whatever they attach to a chat in the app is saved in
   \`~/Uploads/YYYY-MM/\`; the message says the exact path (a file sent in
-  Telegram comes with its path too). Open it from there when you need it.
+  Telegram comes with its path too). Work on it is a task: hand the path
+  to a chat.
 - Cloud files are in Uno Drive: \`drive_find\` finds them, \`drive_get\`
   copies one onto this computer so you (or a thread) can open it.
 - Every chat sees the same disk: hand a file to a thread by its path, never
@@ -1110,6 +1130,59 @@ const makeManagerAssistantService = Effect.gen(function* () {
     );
 
   const chatSemaphore = yield* Semaphore.make(1);
+  const sqlClient = yield* SqlClient.SqlClient;
+  /** The move to a new default model is checked once per daemon run. */
+  const defaultModelChecked = yield* Ref.make(false);
+
+  /**
+   * A chat still on a model the daemon picked (the previous default) moves
+   * to the current one (29.10: Smart → GLM-5.3 Flash); a model the person
+   * chose stays (assistantDefaultModel.ts). Returns what the chat runs on.
+   */
+  const moveToDefaultModel = (
+    threadId: ThreadId,
+    selection: ModelSelection,
+    origin: ReturnType<typeof assistantCommandOrigin>,
+  ) =>
+    Effect.gen(function* () {
+      if (yield* Ref.getAndSet(defaultModelChecked, true)) return selection;
+      if (!runsOffDefaultGatewayModel(selection)) return selection;
+      const lastSetBy = yield* readLastModelSelectionCommandId(threadId).pipe(
+        Effect.provideService(SqlClient.SqlClient, sqlClient),
+      );
+      if (!shouldMoveToDefaultModel({ selection, lastSetBy })) {
+        yield* Effect.logInfo("assistant chat keeps the model the person chose").pipe(
+          Effect.annotateLogs({ threadId, model: selection.model }),
+        );
+        return selection;
+      }
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.meta.update",
+          commandId: CommandId.make(
+            `${ASSISTANT_DEFAULT_MODEL_COMMAND_PREFIX}${crypto.randomUUID()}`,
+          ),
+          threadId,
+          modelSelection: DEFAULT_ASSISTANT_MODEL_SELECTION,
+        },
+        { origin },
+      );
+      yield* Effect.logInfo("assistant chat moved to the default model").pipe(
+        Effect.annotateLogs({
+          threadId,
+          from: selection.model,
+          to: DEFAULT_ASSISTANT_MODEL_SELECTION.model,
+        }),
+      );
+      return DEFAULT_ASSISTANT_MODEL_SELECTION;
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("assistant default model check failed").pipe(
+          Effect.annotateLogs({ threadId, cause: String(cause) }),
+          Effect.as(selection),
+        ),
+      ),
+    );
 
   /**
    * The assistant chat always runs on Hermes (0.0.84). A chat that ran on
@@ -1270,12 +1343,12 @@ const makeManagerAssistantService = Effect.gen(function* () {
           // The pinned chat is always there: an archived one comes back.
           if (marked.archivedAt !== null) yield* unarchive(marked.id);
           yield* settleAssistantChatHarness(marked.id, marked.modelSelection, origin);
-          yield* alignConversations(
+          const selection = yield* moveToDefaultModel(
             marked.id,
             coerceAssistantModelSelection(marked.modelSelection),
-            snapshot.threads,
             origin,
           );
+          yield* alignConversations(marked.id, selection, snapshot.threads, origin);
           return { threadId: marked.id, outcome: "existing" as const };
         }
 

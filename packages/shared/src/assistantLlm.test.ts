@@ -16,10 +16,10 @@ import {
 } from "./assistantLlm.ts";
 
 describe("assistant model selection", () => {
-  it("defaults to Hermes, Smart (Uno AI hours) and the Uno gateway", () => {
+  it("defaults to Hermes, GLM-5.3 Flash (Uno AI hours) and the Uno gateway", () => {
     expect(DEFAULT_ASSISTANT_MODEL_SELECTION).toEqual({
       instanceId: "hermes",
-      model: "uno/smart",
+      model: "z-ai/glm-5.3-flash",
       options: [{ id: "llmProvider", value: "uno" }],
     });
   });
@@ -84,7 +84,7 @@ describe("latest Grok", () => {
   });
 
   it("chooses a default per provider", () => {
-    expect(defaultAssistantModelFor("uno", [])).toBe("uno/smart");
+    expect(defaultAssistantModelFor("uno", [])).toBe("z-ai/glm-5.3-flash");
     expect(defaultAssistantModelFor("openrouter", ["~x-ai/grok-latest", "x-ai/grok-4.7"])).toBe(
       "~x-ai/grok-latest",
     );
@@ -99,6 +99,8 @@ describe("labels", () => {
     expect(assistantModelLabel("~x-ai/grok-latest")).toBe("Grok (latest)");
     expect(assistantModelLabel("uno/smart")).toBe("Smart");
     expect(assistantModelLabel("uno/fast")).toBe("Fast");
+    expect(assistantModelLabel("z-ai/glm-5.3-flash")).toBe("GLM-5.3 Flash");
+    expect(assistantModelLabel("z-ai/glm-5.3")).toBe("GLM-5.3");
     expect(assistantModelLabel("x-ai/grok-4.7")).toBe("Grok 4.7");
     expect(assistantModelLabel("openai/gpt-5")).toBe("gpt-5");
     expect(assistantProviderLabel("uno")).toBe("Uno AI");

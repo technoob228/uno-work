@@ -23,6 +23,7 @@
  */
 import {
   AI_PROVIDER_LABELS,
+  ASSISTANT_DEFAULT_GATEWAY_MODEL,
   type AssistantLlmProvider,
   type AssistantSignInStatus,
   BYOK_PROVIDER_IDS,
@@ -318,7 +319,7 @@ export function AssistantPowerPicker(props: {
         const model =
           card === "uno"
             ? ((await listAssistantLlmModels({ environmentId, provider: "uno" })).defaultModel ??
-              "uno/smart")
+              ASSISTANT_DEFAULT_GATEWAY_MODEL)
             : SUBSCRIPTION_DEFAULT_MODEL[card];
         await llm.setLlm({ provider: card, model });
         toastManager.add({

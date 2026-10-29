@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   RELEASED_2026_10_14_1,
+  RELEASED_2026_10_28_2,
   SHIPPED_ASSISTANT_INSTRUCTIONS,
 } from "./assistantInstructionsHistory.ts";
 import { ASSISTANT_INSTRUCTIONS_TEMPLATE } from "./Layers/AssistantService.ts";
@@ -94,7 +95,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-22.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-4)!;
     expect(instructionsVersion(branch)).toBe("2026-10-22.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -121,7 +122,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("an untouched 2026-10-21.1 file (branch stands) upgrades silently", () => {
-    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-4)!;
+    const branch = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-5)!;
     expect(instructionsVersion(branch)).toBe("2026-10-21.1");
     const plan = planInstructions({
       current: joinAgentsProfile(branch, profile),
@@ -142,7 +143,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
         known: SHIPPED_ASSISTANT_INSTRUCTIONS,
       });
       expect(plan.state).toBe("current");
-      expect(plan.write).toContain("2026-10-28.2");
+      expect(plan.write).toContain("2026-10-29.1");
       expect(plan.write).toContain("Your name is Ana.");
     }
   });
@@ -161,7 +162,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
       expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
     }
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("For now only this computer");
-    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-3)!;
     expect(instructionsVersion(previous)).toBe("2026-10-22.2");
     const plan = planInstructions({
       current: joinAgentsProfile(previous, profile),
@@ -174,7 +175,6 @@ describe("AGENTS.md of assistants made by older versions", () => {
   });
 
   it("2026-10-28.2: recurring and event work is an automation; no routine step in the setup", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-28.2");
     for (const words of [
       "## Automations — work on a schedule or on an event",
       "`automation_create`",
@@ -193,7 +193,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("→ routine");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("## Schedules — recurring work");
     // The previous version (an untouched file) upgrades silently.
-    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)!;
+    const previous = SHIPPED_ASSISTANT_INSTRUCTIONS.at(-2)!;
     expect(instructionsVersion(previous)).toBe("2026-10-28.1");
     const plan = planInstructions({
       current: joinAgentsProfile(previous, profile),
@@ -203,6 +203,39 @@ describe("AGENTS.md of assistants made by older versions", () => {
     });
     expect(plan.state).toBe("current");
     expect(plan.write).toContain("## Automations");
+    expect(plan.write).toContain("Your name is Ana.");
+  });
+
+  it("2026-10-29.1: a dispatcher — project work is handed off at once, at most two calls itself", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-29.1");
+    for (const words of [
+      "anything that\ntouches a project's files or takes more than one quick step",
+      "at most two\ntool calls in a turn",
+      "hand it off AT ONCE",
+      "Never read or search the project's files first",
+      "never plan it in your turn",
+      "one chat per independent task, all started\n  in the same turn",
+      "Needs more than two tool calls → it is a task",
+      "«Принял, запустил «…» — напишу, когда будет готово»",
+      "right away in 1–3 lines",
+    ]) {
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+    // The loophole that let it read a project's files itself is gone.
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("read a file, a light command");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("or a quick read yourself");
+    // 0.0.159's file (untouched, with its base) upgrades silently.
+    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_10_28_2);
+    expect(instructionsVersion(RELEASED_2026_10_28_2)).toBe("2026-10-28.2");
+    expect(RELEASED_2026_10_28_2).toContain("read a file, a light command");
+    const plan = planInstructions({
+      current: joinAgentsProfile(RELEASED_2026_10_28_2, profile),
+      base: RELEASED_2026_10_28_2,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).toContain("hand it off AT ONCE");
     expect(plan.write).toContain("Your name is Ana.");
   });
 

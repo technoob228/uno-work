@@ -57,7 +57,7 @@ export function isAssistantHarnessSelection(
  * What the assistant chat runs on, whatever was asked: a Hermes selection is
  * kept (normalised to carry its provider), anything else — another harness
  * the chat used before 0.0.84, or a composer's stale pick — becomes the
- * default (Hermes, latest Grok, Uno gateway).
+ * default (Hermes, the assistant's default model, Uno gateway).
  */
 export function coerceAssistantModelSelection(
   selection: ModelSelection | null | undefined,
@@ -150,8 +150,9 @@ export function defaultAssistantModelFor(
 const OPENROUTER_LATEST_GROK = "~x-ai/grok-latest";
 
 /**
- * "uno/smart" → "Smart", "~x-ai/grok-latest" → "Grok (latest)",
- * "x-ai/grok-4.7" → "Grok 4.7", "openai/gpt-5" → "gpt-5".
+ * "uno/smart" → "Smart", "z-ai/glm-5.3-flash" → "GLM-5.3 Flash",
+ * "~x-ai/grok-latest" → "Grok (latest)", "x-ai/grok-4.7" → "Grok 4.7",
+ * "openai/gpt-5" → "gpt-5".
  */
 export function assistantModelLabel(model: string): string {
   const subscriptionLabel = SUBSCRIPTION_MODEL_LABELS.get(model);
@@ -162,6 +163,11 @@ export function assistantModelLabel(model: string): string {
   if (/^grok-latest$/i.test(bare)) return "Grok (latest)";
   const grok = /^grok-(.+)$/i.exec(bare);
   if (grok?.[1]) return `Grok ${grok[1]}`;
+  const glm = /^glm-(\d[\d.]*)(?:-([a-z]+))?$/i.exec(bare);
+  if (glm?.[1]) {
+    const variant = glm[2] ? ` ${glm[2].charAt(0).toUpperCase()}${glm[2].slice(1)}` : "";
+    return `GLM-${glm[1]}${variant}`;
+  }
   return bare;
 }
 
