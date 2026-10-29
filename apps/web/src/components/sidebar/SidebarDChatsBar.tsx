@@ -428,7 +428,7 @@ export function SidebarDChatsBar(props: {
             >
               <span className="flex min-w-0 flex-col">
                 <span className="truncate">Only mine</span>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   Hide chats agents run on their own
                 </span>
               </span>
