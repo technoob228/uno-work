@@ -43,6 +43,7 @@ import { RpcServer } from "effect/unstable/rpc";
 
 import { layerJsonMobileCompat } from "./compat/rpcSerializationMobileCompat.ts";
 import { translateAuthDescriptorForUpstream } from "./compat/mobileScopes.ts";
+import { isOrchestrationV2Upgrade, serveOrchestrationV2Socket } from "./compat/v2/socket.ts";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig, resolveStaticDir } from "./config.ts";
@@ -2622,6 +2623,38 @@ const makeWsRpcLayer = (
     }),
   );
 
+/**
+ * Per-socket v1 handlers with their source-control deps. Shared by the web
+ * socket below and by the T3 v2 phone adapter (compat/v2/socket.ts), which
+ * reuses these handlers in-process for the phone's writes.
+ */
+export const makeWsRpcHandlersLayer = (
+  sessionId: AuthSessionId,
+  role: SessionRole,
+  mobileCompat: boolean,
+) =>
+  makeWsRpcLayer(sessionId, role, mobileCompat).pipe(
+    Layer.provide(
+      SourceControlDiscoveryLayer.layer.pipe(
+        Layer.provide(
+          SourceControlProviderRegistry.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                AzureDevOpsCli.layer,
+                BitbucketApi.layer,
+                GitHubCli.layer,
+                GitLabCli.layer,
+              ),
+            ),
+            Layer.provideMerge(GitVcsDriver.layer),
+            Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer))),
+          ),
+        ),
+        Layer.provide(VcsProcess.layer),
+      ),
+    ),
+  );
+
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.succeed(
     HttpRouter.add(
@@ -2639,42 +2672,28 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           onNone: () => false,
           onSome: (url) => url.searchParams.has("wsTicket"),
         });
-        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
-          spanPrefix: "ws.rpc",
-          spanAttributes: {
-            "rpc.transport": "websocket",
-            "rpc.system": "effect-rpc",
-          },
-        }).pipe(
-          Effect.provide(
-            makeWsRpcLayer(session.sessionId, session.role, mobileCompat).pipe(
-              // Mobile-compat: JSON-сериализация с коерсией числовых request id
-              // апстримного клиента (effect rc.115) к нашим строковым (beta.59).
-              Layer.provideMerge(layerJsonMobileCompat),
-              Layer.provide(
-                SourceControlDiscoveryLayer.layer.pipe(
-                  Layer.provide(
-                    SourceControlProviderRegistry.layer.pipe(
-                      Layer.provide(
-                        Layer.mergeAll(
-                          AzureDevOpsCli.layer,
-                          BitbucketApi.layer,
-                          GitHubCli.layer,
-                          GitLabCli.layer,
-                        ),
-                      ),
-                      Layer.provideMerge(GitVcsDriver.layer),
-                      Layer.provide(
-                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
-                      ),
-                    ),
-                  ),
-                  Layer.provide(VcsProcess.layer),
+        // T3 v2 compat: the store phone app asks for orchestration protocol 2.
+        // Its socket gets the v2 adapter (compat/v2); everything else below
+        // is the unchanged web path.
+        const rpcWebSocketHttpEffect = isOrchestrationV2Upgrade(request)
+          ? serveOrchestrationV2Socket(
+              makeWsRpcHandlersLayer(session.sessionId, session.role, true),
+            )
+          : yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
+              spanPrefix: "ws.rpc",
+              spanAttributes: {
+                "rpc.transport": "websocket",
+                "rpc.system": "effect-rpc",
+              },
+            }).pipe(
+              Effect.provide(
+                makeWsRpcHandlersLayer(session.sessionId, session.role, mobileCompat).pipe(
+                  // Mobile-compat: JSON-сериализация с коерсией числовых request id
+                  // апстримного клиента (effect rc.115) к нашим строковым (beta.59).
+                  Layer.provideMerge(layerJsonMobileCompat),
                 ),
               ),
-            ),
-          ),
-        );
+            );
         return yield* Effect.acquireUseRelease(
           sessions.markConnected(session.sessionId),
           () => rpcWebSocketHttpEffect,

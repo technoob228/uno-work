@@ -27,6 +27,13 @@ import { deriveAuthClientMetadata } from "../auth/utils.ts";
 import { respondToAuthError } from "../auth/http.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { KNOWN_SCOPES, scopesForSessionRole } from "./mobileScopes.ts";
+import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { makeV2Reads } from "./v2/reads.ts";
+import { isOrchestrationV2HttpRequest } from "./v2/socket.ts";
+
+const optionalTurnRepository = Effect.serviceOption(ProjectionTurnRepository).pipe(
+  Effect.map(Option.getOrUndefined),
+);
 
 /** Литералы RFC 8693, которые шлёт апстримный клиент. */
 const TOKEN_EXCHANGE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
@@ -178,6 +185,22 @@ export const orchestrationShellRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     yield* requireAuthenticatedSession;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    // T3 v2 compat: the phone (protocol 2) gets the v2 shell form.
+    if (isOrchestrationV2HttpRequest(request)) {
+      const reads = makeV2Reads(projectionSnapshotQuery, yield* optionalTurnRepository);
+      const v2Snapshot = yield* reads.buildShellSnapshot.pipe(
+        Effect.mapError(
+          (cause) =>
+            new AuthError({
+              message: "Failed to load orchestration shell snapshot.",
+              status: 500,
+              cause,
+            }),
+        ),
+      );
+      return HttpServerResponse.jsonUnsafe(v2Snapshot, { status: 200 });
+    }
     const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
       Effect.mapError(
         (cause) =>
@@ -210,6 +233,22 @@ export const orchestrationThreadDetailRouteLayer = HttpRouter.add(
       Effect.mapError(() => new AuthError({ message: "Invalid thread id.", status: 400 })),
     );
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    // T3 v2 compat: {snapshotSequence, projection} for the phone. A missing
+    // thread is a plain 404 here — never upstream's structured not-found,
+    // which would make the phone drop the chat as deleted.
+    if (isOrchestrationV2HttpRequest(request)) {
+      const reads = makeV2Reads(projectionSnapshotQuery, yield* optionalTurnRepository);
+      const sequenceV2 = yield* reads.currentSequence;
+      const projection = yield* reads.readProjection(threadId);
+      if (Option.isNone(projection)) {
+        return HttpServerResponse.text("Thread not found.", { status: 404 });
+      }
+      return HttpServerResponse.jsonUnsafe(
+        { snapshotSequence: sequenceV2, projection: projection.value.projection },
+        { status: 200 },
+      );
+    }
     const [threadDetail, sequence] = yield* Effect.all([
       projectionSnapshotQuery.getThreadDetailById(threadId),
       projectionSnapshotQuery.getSnapshotSequence(),
@@ -230,4 +269,27 @@ export const orchestrationThreadDetailRouteLayer = HttpRouter.add(
       { status: 200 },
     );
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+/**
+ * GET /api/orchestration/threads/:threadId/bounded (and /history) — upstream's
+ * paged thread snapshot. Not served in stage 1: a plain 501 makes the phone
+ * fall back to the socket snapshot ("unavailable"), unlike a structured
+ * not-found, which it would read as «the chat was deleted».
+ */
+const notImplementedForPhone = Effect.gen(function* () {
+  yield* requireAuthenticatedSession;
+  return HttpServerResponse.text("Not implemented by Uno Work yet.", { status: 501 });
+}).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error)));
+
+export const orchestrationThreadBoundedRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/orchestration/threads/:threadId/bounded",
+  notImplementedForPhone,
+);
+
+export const orchestrationThreadHistoryRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/orchestration/threads/:threadId/history",
+  notImplementedForPhone,
 );
