@@ -14,10 +14,10 @@ import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { useServerKeybindings } from "../../rpc/serverState";
 import { sidebarToggleLabel } from "./sidebarShortcut";
 import { cn } from "../../lib/utils";
-import { SidebarHeader, SidebarTrigger } from "../ui/sidebar";
+import { SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InboxBell } from "../inbox/InboxBell";
-import { useGoHome } from "../../navigation/useGoHome";
+import { useNavStore } from "../../navigation/navStore";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -97,19 +97,24 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 });
 
 /**
- * "New chat" — the start screen: one field "What should we do?", and the
- * chat starts when the person sends it. Same place as the logo, on purpose:
- * there is one way in.
+ * "New chat" — a new chat with its box in the middle: "What should we do in
+ * [Home folder ▾] on [This Mac ▾]?" (the draft hero). The same request as the
+ * sidebar's own New chat and the rail (`requestNewChat`): one way in.
  */
 function SidebarNewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
-  const goHome = useGoHome();
+  const requestNewChat = useNavStore((state) => state.requestNewChat);
+  const { isMobile, setOpenMobile } = useSidebar();
+  const startNewChat = () => {
+    if (isMobile) setOpenMobile(false);
+    requestNewChat();
+  };
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <button
             type="button"
-            onClick={goHome}
+            onClick={startNewChat}
             aria-label="New chat"
             data-testid="sidebar-header-new-chat"
             className={cn(
