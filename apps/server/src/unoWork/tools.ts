@@ -89,6 +89,8 @@ import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
 import { mailTools, type MailOwner } from "./mailTools.ts";
+import { automationChatTools } from "../automations/chatTools.ts";
+import type { AutomationChatTools } from "../automations/AutomationsService.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
@@ -397,6 +399,11 @@ export interface UnoWorkToolDeps {
      */
     readonly requestBotToken?: Effect.Effect<{ readonly opened: boolean }>;
   };
+  /**
+   * Automations of the calling chat (`automation_*`, `automations_list`),
+   * bound to it. Absent (tests, older wiring): the tools say they aren't here.
+   */
+  readonly automations?: AutomationChatTools;
   /**
    * The person's connected tools (Google Drive, Gmail & Calendar, Notion,
    * GitHub): calls go to the console with this computer's machine token.
@@ -3578,6 +3585,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
 
   // A comment on a GitHub pull request as the Uno GitHub app (Automations, 28.10)
   githubPrCommentTool({ fail: toolError }),
+  ...automationChatTools({ fail: toolError }),
 
   // Account
   {

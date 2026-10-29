@@ -99,6 +99,7 @@ import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts
 import { isAssistantConversationThread } from "../manager/assistantPush.ts";
 import { readIncomingRemoteChats, remoteStarterOf } from "../remoteComputers/remoteChatStore.ts";
 import { AssistantPushService, type AssistantPushChat } from "../manager/Services/AssistantPush.ts";
+import { AutomationsService } from "../automations/AutomationsService.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -360,6 +361,7 @@ const makeDeps = (input: {
       return remoteStarterOf(input.threadId, (id) => byId.get(id), incoming);
     }).pipe(Effect.orElseSucceed(() => null));
     const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
+    const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
@@ -494,6 +496,21 @@ const makeDeps = (input: {
             : Effect.succeed(null),
         ),
       ),
+      // Automations of this chat (29.10); in an assistant's own conversation, the assistant's.
+      ...(automations
+        ? {
+            automations: automations.chatTools({
+              threadId: input.threadId,
+              assistant: callerAssistant.pipe(
+                Effect.map((owner) =>
+                  owner !== null && thread !== null && isAssistantConversationThread(thread)
+                    ? (owner.projectId as string)
+                    : null,
+                ),
+              ),
+            }),
+          }
+        : {}),
       machineApps: { list: machineApps.list, action: machineApps.action },
       resources: computerResources.snapshot,
       disk: {
