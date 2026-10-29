@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
+import { ZoomableImage, type ZoomableImageHandle } from "./ZoomableImage";
 
 interface ExpandedImageDialogProps {
   preview: ExpandedImagePreview;
@@ -13,6 +14,8 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   onClose,
 }: ExpandedImageDialogProps) {
   const [preview, setPreview] = useState(initialPreview);
+  const zoomableImageRef = useRef<ZoomableImageHandle>(null);
+  const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
 
   // Sync when the parent hands us a new preview reference.
   useEffect(() => {
@@ -35,6 +38,12 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         event.preventDefault();
         event.stopPropagation();
         onClose();
+        return;
+      }
+      // A zoomed-in picture pans with the arrows first (upstream 8d8189e67d).
+      if (zoomableImageRef.current?.pan(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (preview.images.length <= 1) return;
@@ -92,12 +101,23 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         >
           <XIcon />
         </Button>
-        <img
-          src={item.src}
-          alt={item.name}
-          className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
-          draggable={false}
-        />
+        {failedImageSrc === item.src ? (
+          <img
+            src={item.src}
+            alt={item.name}
+            className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
+            draggable={false}
+          />
+        ) : (
+          // Click to zoom in, scroll to zoom, drag to pan.
+          <ZoomableImage
+            ref={zoomableImageRef}
+            key={`${preview.index}:${item.src}`}
+            src={item.src}
+            name={item.name}
+            onError={() => setFailedImageSrc(item.src)}
+          />
+        )}
         <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
           {item.name}
           {preview.images.length > 1 ? ` (${preview.index + 1}/${preview.images.length})` : ""}
