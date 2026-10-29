@@ -16,6 +16,7 @@ import { useActiveMachine } from "../hooks/useActiveMachine";
 import { useSettings } from "../hooks/useSettings";
 import { isWebApp } from "../webMode";
 import { useDefaultEnvironment } from "../hooks/useDefaultEnvironment";
+import { useFirstSnapshotPending } from "../lib/firstSnapshot";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { getProjectOrderKey } from "../logicalProject";
 import {
@@ -111,6 +112,7 @@ function ChatIndexRouteView() {
   // A cloud computer opens on its home screen (programs, files, apps); a
   // local one resumes the most recent chat.
   const machine = useActiveMachine();
+  const firstSnapshotPending = useFirstSnapshotPending();
   const openHome = !needsEnvironment && !rootSendsToSetup && machine.isCloud;
   useDefaultLandingRedirect(!needsEnvironment && !rootSendsToSetup && !openHome);
   // Once, not <Navigate>: this view stays mounted while the root's async
@@ -129,6 +131,12 @@ function ChatIndexRouteView() {
   }
   if (openHome) {
     return null;
+  }
+  // Until the computer's chats arrive, "/" doesn't know whether it resumes a
+  // chat: a blank main area (the sidebar shows grey rows), not "Start your
+  // first chat" for ~2 s before the redirect to the latest chat (S6 29.10).
+  if (firstSnapshotPending) {
+    return <SidebarInset className="h-dvh min-h-0 bg-background" aria-busy="true" />;
   }
 
   return <NoActiveThreadState />;
