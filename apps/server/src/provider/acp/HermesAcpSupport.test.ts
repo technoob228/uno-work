@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
+  dispatcherPromptStamp,
+  resumableSessionId,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   buildHermesConfigYaml,
@@ -473,5 +475,25 @@ describe("hermes on the person's own subscription (14.10)", () => {
       }),
     );
     expect(calls).toEqual(["openai-codex:gpt-5.5"]);
+  });
+});
+
+describe("dispatcher session stamp", () => {
+  const v1 = "<!-- uno-instructions: 2026-10-29.1 -->\n# Uno";
+  const v2 = "<!-- uno-instructions: 2026-10-29.2 -->\n# Uno";
+
+  it("changes with the instructions version, not with the text around it", () => {
+    expect(dispatcherPromptStamp(v1)).not.toBe(dispatcherPromptStamp(v2));
+    expect(dispatcherPromptStamp(v2)).toBe(dispatcherPromptStamp(`${v2}\n\nmore`));
+    expect(dispatcherPromptStamp("# hand-written")).not.toBe(dispatcherPromptStamp("# other"));
+  });
+
+  it("resumes only a session built as now; other chats resume as before", () => {
+    const stamp = dispatcherPromptStamp(v2);
+    expect(resumableSessionId({ sessionId: "s1" }, stamp)).toBeUndefined();
+    expect(resumableSessionId({ sessionId: "s1", promptStamp: "old" }, stamp)).toBeUndefined();
+    expect(resumableSessionId({ sessionId: "s1", promptStamp: stamp }, stamp)).toBe("s1");
+    expect(resumableSessionId({ sessionId: "s1" }, undefined)).toBe("s1");
+    expect(resumableSessionId(undefined, stamp)).toBeUndefined();
   });
 });

@@ -34,6 +34,8 @@ import {
   MANAGER_CALLER_THREAD_HEADER,
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
+import { createHash } from "node:crypto";
+
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
@@ -518,6 +520,46 @@ export const HERMES_DISPATCHER_COMPRESSION = {
   proactivePruneMinResultChars: 3_000,
   idleCompactAfterSeconds: 3_600,
 } as const;
+
+/**
+ * What the dispatcher's Hermes session was built with. Hermes freezes the
+ * system prompt of a session and resumes it across restarts: on the canary
+ * (29.10) Uno's session dated from 08.10 and still ran the 08.10
+ * instructions, whatever AGENTS.md said. A different stamp starts a fresh
+ * session; the thread's recent conversation is handed over as for any new one.
+ * Notes and the person's files are not in it — they change all the time.
+ */
+const HERMES_DISPATCHER_PROMPT_SHAPE = 1;
+
+export function dispatcherPromptStamp(agentsMd: string): string {
+  const version =
+    /<!-- uno-instructions: ([^>]+?) -->/.exec(agentsMd)?.[1] ??
+    `edited:${createHash("sha256").update(agentsMd).digest("hex").slice(0, 12)}`;
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        shape: HERMES_DISPATCHER_PROMPT_SHAPE,
+        version,
+        disabled: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+        include: HERMES_DISPATCHER_MCP_TOOLS,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Resume a dispatcher session only when it was built as now (see
+ * {@link dispatcherPromptStamp}); other sessions resume as before.
+ */
+export function resumableSessionId(
+  cursor: { readonly sessionId: string; readonly promptStamp?: string } | undefined,
+  promptStamp: string | undefined,
+): string | undefined {
+  if (cursor === undefined) return undefined;
+  if (promptStamp !== undefined && cursor.promptStamp !== promptStamp) return undefined;
+  return cursor.sessionId;
+}
 
 export function buildHermesConfigYaml(input: {
   readonly model: string;

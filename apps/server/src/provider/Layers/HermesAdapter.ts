@@ -79,6 +79,8 @@ import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
   HERMES_DISPATCHER_COMPRESSION,
+  dispatcherPromptStamp,
+  resumableSessionId,
   HERMES_DISPATCHER_DISABLED_TOOLSETS,
   HERMES_DISPATCHER_MCP_TOOLS,
   type HermesLlmRoute,
@@ -300,11 +302,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseHermesResume(raw: unknown): { sessionId: string } | undefined {
+function parseHermesResume(raw: unknown): { sessionId: string; promptStamp?: string } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== HERMES_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
-  return { sessionId: raw.sessionId.trim() };
+  return {
+    sessionId: raw.sessionId.trim(),
+    ...(typeof raw.promptStamp === "string" ? { promptStamp: raw.promptStamp } : {}),
+  };
 }
 
 function selectAutoApprovedPermissionOption(
@@ -602,7 +607,7 @@ export function makeHermesAdapter(
           );
           let ctx!: HermesSessionContext;
 
-          const resumeSessionId = parseHermesResume(input.resumeCursor)?.sessionId;
+          const resumeCursor = parseHermesResume(input.resumeCursor);
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
@@ -677,6 +682,20 @@ export function makeHermesAdapter(
           // assistants keep Hermes' tools.
           const dispatcherOnly =
             inAssistantWorkspace && (yield* readMarkerProjectId(cwd)) === ASSISTANT_PROJECT_ID;
+          const promptStamp = dispatcherOnly
+            ? dispatcherPromptStamp(
+                yield* fileSystem
+                  .readFileString(nodePath.join(cwd, "AGENTS.md"))
+                  .pipe(Effect.orElseSucceed(() => "")),
+              )
+            : undefined;
+          const resumeSessionId = resumableSessionId(resumeCursor, promptStamp);
+          if (resumeCursor !== undefined && resumeSessionId === undefined) {
+            yield* Effect.logInfo(
+              "hermes: the Uno chat's instructions or tools changed — a fresh session",
+              { threadId: input.threadId },
+            );
+          }
           const hermesProvider = hermesProviderIdOf(llmRoute);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
@@ -786,6 +805,11 @@ export function makeHermesAdapter(
             // on a subscription, takes the gateway key out).
             ...(llmRoute ? applyHermesLlmRoute(baseEnvironment, llmRoute) : baseEnvironment),
             HERMES_HOME: threadHermesHome,
+            // The dispatcher hands work off: the 14k-character Uno Work brief
+            // (apps, widgets, sites…) is for the chats that do it. Its own
+            // files go in instead — the env hint wins over config.yaml's
+            // `agent.environment_hint`, so that one never reached it.
+            ...(dispatcherOnly ? { HERMES_ENVIRONMENT_HINT: assistantContext?.hint ?? "" } : {}),
           };
           // A restricted assistant's chat: `hermes acp` in the sandbox with this
           // chat's home and the shared one it links into; on the person's
@@ -914,6 +938,7 @@ export function makeHermesAdapter(
             resumeCursor: {
               schemaVersion: HERMES_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(promptStamp !== undefined ? { promptStamp } : {}),
             },
             createdAt: now,
             updatedAt: now,
