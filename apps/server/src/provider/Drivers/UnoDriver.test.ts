@@ -606,6 +606,35 @@ describe("Uno AI as a provider of plain OpenCode", () => {
     expect(unoGatewayProviderForOpenCode({})).toBeNull();
   });
 
+  it("still has Smart then Fast when the gateway's list didn't come (walk 29.10)", () => {
+    const provider = unoGatewayProviderForOpenCode({}, { includedWhenEmpty: true });
+    expect(provider).not.toBeNull();
+    const models = provider?.models as Record<
+      string,
+      { name: string; limit?: { context: number } }
+    >;
+    expect(Object.keys(models)).toEqual(["uno/smart", "uno/fast"]);
+    expect(models["uno/smart"]?.name).toBe("Smart");
+    expect(models["uno/fast"]?.name).toBe("Fast");
+    // A window is set, so long chats compact instead of overflowing.
+    expect(models["uno/smart"]?.limit?.context).toBeGreaterThan(0);
+  });
+
+  it("keeps the gateway's own list when it came, and adds nothing to a Russia-only one", () => {
+    if (!smart || !russia) throw new Error("catalog entries did not normalize");
+    const listed = unoGatewayProviderForOpenCode(
+      { "uno/uno/smart": smart },
+      { includedWhenEmpty: true },
+    );
+    expect(Object.keys(listed?.models as object)).toEqual(["uno/smart"]);
+    expect(
+      unoGatewayProviderForOpenCode(
+        { "uno-russia/yandex/alice": russia },
+        { includedWhenEmpty: true },
+      ),
+    ).toBeNull();
+  });
+
   it("joins the instructions already in the config and keeps a provider the person set", () => {
     const added = JSON.parse(
       withOpenCodeProvider(JSON.stringify({ instructions: ["/brief.md"] }), "uno", {

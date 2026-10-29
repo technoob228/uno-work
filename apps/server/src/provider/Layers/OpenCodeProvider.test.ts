@@ -429,6 +429,26 @@ describe("orderOpenCodeModels", () => {
     ]);
   });
 
+  vitestIt("never lists OpenCode's free models above Smart (walk 29.10)", () => {
+    // As opencode 1.18.32 hands them over: its Zen free models first, then the
+    // Uno AI provider (here just Smart and Fast — the list of an hours account,
+    // or the fallback when the gateway's list didn't come).
+    const ordered = orderOpenCodeModels([
+      model("opencode/nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free"),
+      model("opencode/mimo-v2.6-flash-free", "MiMo-V2.6-Flash Free"),
+      model("opencode/big-pickle", "Big Pickle"),
+      model("opencode/beam-free", "Beam Free"),
+      model("opencode/glm-5.3-flash-free", "GLM-5.3-Flash Free"),
+      model("opencode/deepseek-v4.1-flash-free", "DeepSeek V4.1 Flash Free"),
+      model("opencode/flint-40b-free", "Flint 40B Free"),
+      model("opencode/ling-3.0-flash-fin-free", "Ling 3.0 Flash Fin Free"),
+      model("uno/uno/smart", "Smart"),
+      model("uno/uno/fast", "Fast"),
+    ]).map((entry) => (entry as { slug: string }).slug);
+    expect(ordered.slice(0, 3)).toEqual(["uno/uno/smart", "uno/uno/fast", "opencode/beam-free"]);
+    expect(ordered).toHaveLength(10);
+  });
+
   vitestIt("without Uno AI keeps the plain name order", () => {
     const ordered = orderOpenCodeModels([
       model("opencode/b", "Beta"),
