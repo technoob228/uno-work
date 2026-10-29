@@ -38,6 +38,7 @@
  */
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import {
+  ApprovalRequestId,
   ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerTelegramConnectorConfig,
@@ -53,6 +54,7 @@ import {
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
+import * as Semaphore from "effect/Semaphore";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
@@ -179,6 +181,31 @@ import {
   telegramFileUrl,
 } from "../channelRelay.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
+import { BrowserBridge } from "../../browserBridge.ts";
+import {
+  addButtonGroup,
+  addSentMessageRoute,
+  answeredElsewhereLine,
+  APPROVAL_BUTTONS_TTL_MS,
+  buildInlineKeyboard,
+  CHOICE_BUTTONS_TTL_MS,
+  decideButtonPress,
+  decodeButtonsState,
+  EMPTY_BUTTONS_STATE,
+  findReplyRoute,
+  groupsForRequest,
+  newButtonGroupId,
+  parseCallbackData,
+  pressedLine,
+  pressToastText,
+  pruneButtonsState,
+  removeButtonGroup,
+  requestGoneLine,
+  setGroupMessageId,
+  type ButtonGroup,
+  type ConnectorButton,
+  type ConnectorButtonsState,
+} from "../connectorButtons.ts";
 
 export interface ManagerTelegramRuntimeStatus {
   readonly botUsername: string | null;
@@ -200,6 +227,22 @@ export interface ManagerTelegramServiceShape {
     readonly chatId: string;
     readonly text: string;
   }) => Effect.Effect<boolean>;
+  /**
+   * A message from a chat to the person: text, optionally a file (sent
+   * natively, the text as its caption when it fits) and inline buttons.
+   * `routeReplies`: the person's reply to it goes to `threadId`
+   * (connectorButtons.ts). The file path must already be checked
+   * (connectorOutgoingFiles.ts). Never fails.
+   */
+  readonly sendRich: (input: TelegramRichMessage) => Effect.Effect<{
+    readonly ok: boolean;
+    readonly error: string | null;
+  }>;
+  /**
+   * An approval request was answered (in the app, with /approve, by a
+   * timeout): its buttons in Telegram go, the message says so.
+   */
+  readonly retireRequestButtons: (requestId: string) => Effect.Effect<void>;
   /**
    * Issue the one-time code the app shows as the bot's deep link
    * (telegramPairing.ts). A new code replaces the previous one. On a relay
@@ -250,6 +293,8 @@ const OK_PERSIST_INTERVAL = Duration.minutes(1);
 const INBOX_RETENTION = Duration.days(7);
 const INBOX_PRUNE_INTERVAL = Duration.hours(1);
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+// Telegram takes 1024 characters of caption; the HTML rendering adds a few.
+const TELEGRAM_CAPTION_LIMIT = 900;
 
 // The handoff preamble (carrying recent history of the old thread into the
 // replacement thread) is shared with "Continue on <machine>"; see
@@ -267,9 +312,39 @@ export const telegramSendOutcome = (errorCode: number | undefined): SendOutcome 
 /** How long the first part of an album waits for the rest (they arrive within ~1 s). */
 export const TELEGRAM_ALBUM_GATHER_MS = 1_500;
 
+export interface TelegramRichMessage {
+  /** The connector row (a routed row sends through its holder's bot). */
+  readonly projectId: ProjectId;
+  readonly chatId: string;
+  readonly text: string;
+  /** An absolute path already checked against the chat's sendable roots. */
+  readonly filePath?: string | null;
+  readonly buttons?: ReadonlyArray<ReadonlyArray<ConnectorButton>> | null;
+  /** The chat the message speaks for: buttons and replies go back there. */
+  readonly threadId: ThreadId;
+  /** The person's reply to this message goes to `threadId`. */
+  readonly routeReplies?: boolean;
+  /** Approval buttons live shorter than a choice. */
+  readonly buttonsTtlMs?: number;
+  readonly language?: "ru" | "en";
+}
+
+/** A press of an inline button (`allowed_updates` includes it). */
+export interface TelegramCallbackQuery {
+  readonly id: string;
+  readonly from?: TelegramIncomingMessage["from"];
+  /** The message with the buttons (absent for inline-mode messages: never ours). */
+  readonly message?: TelegramIncomingMessage;
+  readonly data?: string;
+}
+
+/** Updates the poller asks for: messages, and presses of our buttons. */
+export const TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query"] as const;
+
 export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: TelegramIncomingMessage;
+  readonly callback_query?: TelegramCallbackQuery;
   /**
    * Set by Uno's assistant bot relay (`tga_`) on a `/start <code>` the
    * console already answered ("Connected to …"): link locally, say nothing.
@@ -355,6 +430,19 @@ const fetchJson = (url: string, init?: RequestInit) =>
       }),
   });
 
+/** `message_id` of a `send*` result (a Message), or null. */
+const sentMessageId = (result: unknown): number | null => {
+  const id =
+    typeof result === "object" && result !== null
+      ? (result as { readonly message_id?: unknown }).message_id
+      : undefined;
+  return typeof id === "number" ? id : null;
+};
+
+/** Telegram refused our HTML: the same text goes again as plain text. */
+const isTelegramParseError = (description: string | undefined): boolean =>
+  description !== undefined && /parse entities|can't find end/i.test(description);
+
 /**
  * Identity of the update stream the persisted offset belongs to. A relay
  * token rotates (every "Connect with Uno's bot" mints a new one) while the
@@ -405,6 +493,42 @@ const makeTelegramConnector = Effect.gen(function* () {
       rest: ReadonlyArray<TelegramIncomingMessage>,
     ) => Effect.Effect<unknown, unknown>;
   } = {};
+
+  // Inline buttons and reply routes of messages chats sent to the person
+  // (connectorButtons.ts): in memory, mirrored to disk so a restart (an
+  // update) keeps them working.
+  const buttonsFile = nodePath.join(serverConfig.stateDir, "connector-buttons.json");
+  const buttonsRef = yield* Ref.make<ConnectorButtonsState>(
+    yield* Effect.promise(() =>
+      fsPromises
+        .readFile(buttonsFile, "utf8")
+        .then((raw) => pruneButtonsState(decodeButtonsState(JSON.parse(raw)), Date.now()))
+        .catch(() => EMPTY_BUTTONS_STATE),
+    ),
+  );
+  // Writes are serialized: two quick changes never race on the file.
+  const buttonsWriteLock = yield* Semaphore.make(1);
+  const updateButtons = (change: (state: ConnectorButtonsState) => ConnectorButtonsState) =>
+    buttonsWriteLock.withPermits(1)(
+      Effect.gen(function* () {
+        const next = yield* Ref.updateAndGet(buttonsRef, change);
+        yield* Effect.promise(async () => {
+          const temp = `${buttonsFile}.${process.pid}.tmp`;
+          await fsPromises.mkdir(nodePath.dirname(buttonsFile), { recursive: true });
+          await fsPromises.writeFile(temp, JSON.stringify(next), { mode: 0o600 });
+          await fsPromises.rename(temp, buttonsFile);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("telegram buttons state not saved").pipe(
+              Effect.annotateLogs({ cause }),
+            ),
+          ),
+        );
+        return next;
+      }),
+    );
+  // Uno Work tool approvals (the card) are answered through the bridge.
+  const browserBridge = Option.getOrNull(yield* Effect.serviceOption(BrowserBridge));
 
   const updateRuntime = (projectId: ProjectId, patch: Partial<BotRuntime>) =>
     Ref.update(runtimesRef, (runtimes) => {
@@ -797,11 +921,13 @@ const makeTelegramConnector = Effect.gen(function* () {
     botToken: string,
     chatId: string,
     text: string,
-    options: { readonly replyTo?: string | null } = {},
+    options: { readonly replyTo?: string | null; readonly replyMarkup?: unknown } = {},
   ): Effect.Effect<{
     readonly ok: boolean;
     readonly description?: string;
     readonly errorCode?: number | undefined;
+    /** The sent message's id (reply routing, buttons). */
+    readonly messageId?: number | null;
   }> => {
     const replyTo = options.replyTo ?? null;
     const attempt = (html: boolean) =>
@@ -820,6 +946,7 @@ const makeTelegramConnector = Effect.gen(function* () {
                   },
                 }
               : {}),
+            ...(options.replyMarkup !== undefined ? { reply_markup: options.replyMarkup } : {}),
           }),
         }).pipe(
           Effect.flatMap((response) =>
@@ -848,7 +975,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         () => attempt(false),
       ),
       Effect.tap(() => recordDelivery(projectId, true, null)),
-      Effect.map(() => ({ ok: true as const })),
+      Effect.map((response) => ({ ok: true as const, messageId: sentMessageId(response.result) })),
       Effect.catch((error) => {
         const description =
           error._tag === "TelegramApiRejection" ? error.description : error.message;
@@ -1113,9 +1240,10 @@ const makeTelegramConnector = Effect.gen(function* () {
     botToken: string,
     chatId: string,
     filePath: string,
+    options: { readonly caption?: string; readonly replyMarkup?: unknown } = {},
   ) =>
     Effect.gen(function* () {
-      const failure = yield* Effect.tryPromise({
+      const outcome = yield* Effect.tryPromise({
         try: async () => {
           const stat = await fsPromises.stat(filePath);
           if (!stat.isFile()) {
@@ -1128,41 +1256,69 @@ const makeTelegramConnector = Effect.gen(function* () {
           }
           const bytes = await fsPromises.readFile(filePath);
           const fileName = nodePath.basename(filePath);
-          const upload = async (method: string, field: string) => {
+          const caption = options.caption?.trim() ?? "";
+          interface UploadAnswer {
+            readonly ok?: boolean;
+            readonly description?: string;
+            readonly result?: unknown;
+          }
+          const upload = async (
+            method: string,
+            field: string,
+            html: boolean,
+          ): Promise<UploadAnswer> => {
             const form = new FormData();
             form.append("chat_id", chatId);
             form.append(field, new Blob([new Uint8Array(bytes)]), fileName);
+            if (caption.length > 0) {
+              form.append("caption", html ? renderTelegramHtml(caption) : caption);
+              if (html) form.append("parse_mode", "HTML");
+            }
+            if (options.replyMarkup !== undefined) {
+              form.append("reply_markup", JSON.stringify(options.replyMarkup));
+            }
             const response = await fetch(telegramApi(botToken, method), {
               method: "POST",
               body: form,
             });
-            return (await response.json()) as { ok?: boolean; description?: string };
+            const answer = (await response.json()) as UploadAnswer;
+            return answer.ok !== true && html && isTelegramParseError(answer.description)
+              ? upload(method, field, false)
+              : answer;
           };
           const preferred = pickTelegramUploadMethod(fileName, stat.size);
-          let result = await upload(preferred.method, preferred.field);
+          let result = await upload(preferred.method, preferred.field, true);
           if (result.ok !== true && preferred.method !== "sendDocument") {
-            result = await upload("sendDocument", "document");
+            result = await upload("sendDocument", "document", true);
           }
           if (result.ok !== true) {
             throw new Error(result.description ?? "upload rejected by Telegram");
           }
+          return sentMessageId(result.result);
         },
         catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
       }).pipe(
-        Effect.map(() => null),
-        Effect.catch((reason) => Effect.succeed(reason)),
+        Effect.map((messageId) => ({ ok: true as const, messageId, error: null })),
+        Effect.catch((reason) =>
+          Effect.succeed({
+            ok: false as const,
+            messageId: null,
+            error: redactConnectorSecrets(reason),
+          }),
+        ),
       );
-      if (failure !== null) {
+      if (!outcome.ok) {
         yield* Effect.logWarning("telegram file upload failed").pipe(
-          Effect.annotateLogs({ chatId, filePath, description: failure }),
+          Effect.annotateLogs({ chatId, filePath, description: outcome.error }),
         );
         yield* sendTelegramText(
           projectId,
           botToken,
           chatId,
-          `Could not send ${nodePath.basename(filePath)}: ${failure}`,
+          `Could not send ${nodePath.basename(filePath)}: ${outcome.error}`,
         );
       }
+      return outcome;
     });
 
   // The bot a pending reply answers through: the connector that received
@@ -1209,6 +1365,359 @@ const makeTelegramConnector = Effect.gen(function* () {
       return delivered && typeof hotKey === "string" ? markHotWindow(hotKey) : Effect.void;
     },
   });
+
+  // ── Inline buttons ────────────────────────────────────────────────────
+
+  const callBotJson = (botToken: string, method: string, body: Record<string, unknown>) =>
+    fetchJson(telegramApi(botToken, method), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).pipe(Effect.orElseSucceed((): TelegramApiResponse => ({ ok: false })));
+
+  const answerCallback = (botToken: string, callbackId: string, text?: string) =>
+    callBotJson(botToken, "answerCallbackQuery", {
+      callback_query_id: callbackId,
+      ...(text !== undefined ? { text } : {}),
+    }).pipe(Effect.asVoid);
+
+  /**
+   * The message of a spent group: its text with `line` under it, and no
+   * buttons. A message whose text we don't have (or Telegram won't take)
+   * at least loses its buttons.
+   */
+  const finishButtonMessage = (
+    botToken: string,
+    group: Pick<ButtonGroup, "chatId" | "messageId" | "text" | "caption">,
+    line: string,
+  ) =>
+    Effect.gen(function* () {
+      if (group.messageId === null) return;
+      const target = { chat_id: group.chatId, message_id: group.messageId };
+      const removeKeyboard = { reply_markup: { inline_keyboard: [] } };
+      if (group.text !== undefined) {
+        const method = group.caption === true ? "editMessageCaption" : "editMessageText";
+        const field = group.caption === true ? "caption" : "text";
+        const body = `${group.text}\n\n${line}`.trim();
+        let answer = yield* callBotJson(botToken, method, {
+          ...target,
+          [field]: renderTelegramHtml(body),
+          parse_mode: "HTML",
+          ...removeKeyboard,
+        });
+        if (answer.ok !== true && isTelegramParseError(answer.description)) {
+          answer = yield* callBotJson(botToken, method, {
+            ...target,
+            [field]: body,
+            ...removeKeyboard,
+          });
+        }
+        if (answer.ok === true) return;
+      }
+      yield* callBotJson(botToken, "editMessageReplyMarkup", { ...target, ...removeKeyboard });
+    });
+
+  /**
+   * A press of one of our buttons. Only the owner, in the chat the message
+   * went to, through this bot; the group is spent before anything runs, so
+   * a double tap does nothing twice.
+   */
+  const handleCallbackQuery = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    query: TelegramCallbackQuery,
+  ) =>
+    Effect.gen(function* () {
+      const language = detectReplyLanguage("", query.from?.language_code);
+      const message = query.message;
+      const chatIdNumber = message?.chat?.id;
+      if (parseCallbackData(query.data) === null) {
+        // Not ours (another tool's keyboard): close the spinner, nothing else.
+        yield* answerCallback(config.botToken, query.id);
+        return;
+      }
+      if (message === undefined || chatIdNumber === undefined) {
+        yield* answerCallback(config.botToken, query.id, pressToastText("unknown", language));
+        return;
+      }
+      const chatId = String(chatIdNumber);
+      const routedRows = yield* routedRowsOf(projectId);
+      const access = mergeRoutedAccess(
+        config,
+        routedRows.map((row) => row.config),
+      );
+      const senderRole = access.allowedChatIds.includes(chatId)
+        ? classifyTelegramSender({
+            chat: message.chat,
+            from: query.from,
+            allowedChatIds: access.allowedChatIds,
+            ownerUserIds: access.ownerUserIds,
+            groupMembers: config.groupMembers,
+          })
+        : "ignore";
+      const press = decideButtonPress({
+        state: yield* Ref.get(buttonsRef),
+        data: query.data,
+        connectorProjectId: projectId,
+        chatId,
+        messageId: message.message_id,
+        senderIsOwner: senderRole === "owner",
+        nowMs: Date.now(),
+      });
+      if (press.kind !== "ok") {
+        yield* answerCallback(config.botToken, query.id, pressToastText(press.kind, language));
+        if (press.kind === "expired" && message.message_id !== undefined) {
+          yield* callBotJson(config.botToken, "editMessageReplyMarkup", {
+            chat_id: chatId,
+            message_id: message.message_id,
+            reply_markup: { inline_keyboard: [] },
+          });
+        }
+        yield* Effect.logInfo("telegram button press refused").pipe(
+          Effect.annotateLogs({ projectId, chatId, reason: press.kind }),
+        );
+        return;
+      }
+      const { group, button } = press;
+      yield* updateButtons((state) => removeButtonGroup(state, group.id));
+      const finish = (line: string) =>
+        finishButtonMessage(
+          config.botToken,
+          { ...group, messageId: group.messageId ?? message.message_id ?? null },
+          line,
+        );
+      const action = button.action;
+      switch (action.kind) {
+        case "reply": {
+          yield* answerCallback(config.botToken, query.id);
+          yield* finish(pressedLine(button.label));
+          const { threadId, runtimeMode, interactionMode } = yield* ensureThreadForChat({
+            target: { kind: "thread", threadId: ThreadId.make(group.threadId) },
+            chatId,
+            chatLabel: message.chat?.title ?? message.chat?.username ?? chatId,
+            config,
+            senderRole: "owner",
+          });
+          yield* replies.enqueue({
+            connectorProjectId: projectId,
+            replyKey: `${chatId}:cb:${query.id}`,
+            chatId,
+            replyTo: message.message_id === undefined ? null : String(message.message_id),
+            replyThread: null,
+            threadId,
+            language: group.language ?? language,
+            dispatch: { text: action.value, attachments: [], runtimeMode, interactionMode },
+            extraMeta: { hotKey: hotWindowKey(projectId, chatId) },
+          });
+          yield* Effect.logInfo("telegram button answered a chat").pipe(
+            Effect.annotateLogs({ projectId, chatId, threadId }),
+          );
+          return;
+        }
+        case "approval": {
+          const threadId = ThreadId.make(group.threadId);
+          const pending = yield* pendingApprovalRepository
+            .listByThreadId({ threadId })
+            .pipe(Effect.orElseSucceed(() => []));
+          const open = pending.some(
+            (row) => row.status === "pending" && row.requestId === action.requestId,
+          );
+          if (!open) {
+            yield* answerCallback(config.botToken, query.id, requestGoneLine(language));
+            yield* finish(answeredElsewhereLine(group.language ?? language));
+            return;
+          }
+          yield* orchestrationEngine.dispatch(
+            {
+              type: "thread.approval.respond",
+              commandId: CommandId.make(`telegram:${crypto.randomUUID()}`),
+              threadId,
+              requestId: ApprovalRequestId.make(action.requestId),
+              decision: action.decision,
+              createdAt: new Date().toISOString(),
+            },
+            { origin: telegramCommandOrigin(chatId) },
+          );
+          yield* answerCallback(config.botToken, query.id);
+          yield* finish(pressedLine(button.label));
+          yield* Effect.logInfo("telegram button resolved an approval").pipe(
+            Effect.annotateLogs({ projectId, chatId, threadId, decision: action.decision }),
+          );
+          return;
+        }
+        case "tool-approval": {
+          const answered =
+            browserBridge === null
+              ? false
+              : yield* browserBridge.completeToolApprovalById({
+                  requestId: action.requestId,
+                  approved: action.approved,
+                });
+          if (!answered) {
+            yield* answerCallback(config.botToken, query.id, requestGoneLine(language));
+            yield* finish(answeredElsewhereLine(group.language ?? language));
+            return;
+          }
+          yield* answerCallback(config.botToken, query.id);
+          yield* finish(pressedLine(button.label));
+          yield* Effect.logInfo("telegram button answered a Uno Work approval").pipe(
+            Effect.annotateLogs({ projectId, chatId, approved: action.approved }),
+          );
+          return;
+        }
+      }
+    }).pipe(
+      // The chat it answers is gone: say so where the person pressed.
+      Effect.catchTag("TelegramRoutingError", (error) => {
+        const chatId = query.message?.chat?.id;
+        return chatId === undefined
+          ? Effect.void
+          : sendTelegramText(projectId, config.botToken, String(chatId), error.message).pipe(
+              Effect.asVoid,
+            );
+      }),
+    );
+
+  /** The chat a reply of the owner goes to: the one whose message they replied to. */
+  const replyRouteOf = (projectId: ProjectId, chatId: string, message: TelegramIncomingMessage) =>
+    Effect.gen(function* () {
+      const replied = message.reply_to_message;
+      if (replied?.message_id === undefined || replied.from?.is_bot !== true) return null;
+      const threadId = findReplyRoute(yield* Ref.get(buttonsRef), {
+        connectorProjectId: projectId,
+        chatId,
+        messageId: replied.message_id,
+        nowMs: Date.now(),
+      });
+      return threadId === null ? null : ThreadId.make(threadId);
+    });
+
+  const sendRich: ManagerTelegramServiceShape["sendRich"] = (input) =>
+    Effect.gen(function* () {
+      const config = yield* readRow(input.projectId);
+      if (config === null || !config.enabled) {
+        return { ok: false, error: "Telegram is not connected." };
+      }
+      const via = yield* resolveSendRow(input.projectId, config);
+      if (via === null) return { ok: false, error: "Telegram is not connected." };
+      const nowMs = Date.now();
+      const text = input.text.slice(0, TELEGRAM_MESSAGE_LIMIT);
+      const filePath = input.filePath ?? null;
+      const asCaption = filePath !== null && text.length <= TELEGRAM_CAPTION_LIMIT;
+      const buttons = input.buttons ?? [];
+      const group: ButtonGroup | null =
+        buttons.length === 0
+          ? null
+          : {
+              id: newButtonGroupId(),
+              connectorProjectId: via.projectId,
+              chatId: input.chatId,
+              messageId: null,
+              threadId: input.threadId,
+              rows: buttons,
+              text,
+              ...(asCaption ? { caption: true } : {}),
+              ...(input.language !== undefined ? { language: input.language } : {}),
+              createdAtMs: nowMs,
+              expiresAtMs: nowMs + (input.buttonsTtlMs ?? CHOICE_BUTTONS_TTL_MS),
+            };
+      if (group !== null) yield* updateButtons((state) => addButtonGroup(state, group, nowMs));
+      const replyMarkup = group === null ? undefined : buildInlineKeyboard(group);
+      const markup = replyMarkup === undefined ? {} : { replyMarkup };
+      let sent: {
+        readonly ok: boolean;
+        readonly messageId: number | null;
+        readonly error: string | null;
+      };
+      if (asCaption) {
+        sent = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, filePath, {
+          caption: text,
+          ...markup,
+        });
+        // The file did not go (the chat was told why): the words still do.
+        if (!sent.ok && (text.length > 0 || group !== null)) {
+          const fallback = yield* sendTelegramText(
+            via.projectId,
+            via.botToken,
+            input.chatId,
+            text,
+            markup,
+          );
+          if (fallback.ok) {
+            if (group !== null) {
+              yield* updateButtons((state) => ({
+                ...state,
+                groups: state.groups.map((entry) =>
+                  entry.id === group.id ? { ...entry, caption: false } : entry,
+                ),
+              }));
+            }
+            sent = { ok: true, messageId: fallback.messageId ?? null, error: sent.error };
+          }
+        }
+      } else {
+        const result = yield* sendTelegramText(
+          via.projectId,
+          via.botToken,
+          input.chatId,
+          text,
+          markup,
+        );
+        sent = {
+          ok: result.ok,
+          messageId: result.messageId ?? null,
+          error: result.ok ? null : (result.description ?? "Telegram refused the message."),
+        };
+        if (result.ok && filePath !== null) {
+          const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, filePath);
+          if (!file.ok) sent = { ...sent, error: file.error };
+        }
+      }
+      if (!sent.ok) {
+        if (group !== null) yield* updateButtons((state) => removeButtonGroup(state, group.id));
+        return { ok: false, error: sent.error ?? "Telegram refused the message." };
+      }
+      const messageId = sent.messageId;
+      if (messageId !== null) {
+        yield* updateButtons((state) => {
+          const withId = group === null ? state : setGroupMessageId(state, group.id, messageId);
+          return input.routeReplies === true
+            ? addSentMessageRoute(
+                withId,
+                {
+                  connectorProjectId: via.projectId,
+                  chatId: input.chatId,
+                  messageId,
+                  threadId: input.threadId,
+                  atMs: nowMs,
+                },
+                nowMs,
+              )
+            : withId;
+        });
+      }
+      return { ok: true, error: sent.error };
+    });
+
+  const retireRequestButtons: ManagerTelegramServiceShape["retireRequestButtons"] = (requestId) =>
+    Effect.gen(function* () {
+      const groups = groupsForRequest(yield* Ref.get(buttonsRef), requestId);
+      if (groups.length === 0) return;
+      yield* updateButtons((state) =>
+        groups.reduce((next, group) => removeButtonGroup(next, group.id), state),
+      );
+      for (const group of groups) {
+        const botToken = yield* botTokenOf(ProjectId.make(group.connectorProjectId));
+        if (botToken === null) continue;
+        yield* finishButtonMessage(botToken, group, answeredElsewhereLine(group.language ?? "en"));
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("telegram request buttons not retired").pipe(
+          Effect.annotateLogs({ requestId, cause }),
+        ),
+      ),
+    );
 
   /**
    * The chat that pressed Start on the app's link: allowlist it (re-reading
@@ -1373,6 +1882,10 @@ const makeTelegramConnector = Effect.gen(function* () {
     albumSiblings?: ReadonlyArray<TelegramIncomingMessage>,
   ) =>
     Effect.gen(function* () {
+      if (update.callback_query !== undefined) {
+        yield* handleCallbackQuery(projectId, config, update.callback_query);
+        return;
+      }
       const message = update.message;
       const chatIdNumber = message?.chat?.id;
       if (message === undefined || chatIdNumber === undefined) {
@@ -1671,12 +2184,19 @@ const makeTelegramConnector = Effect.gen(function* () {
       })
         ? yield* findLiveMainConversationId
         : null;
-      const target = resolveChatTarget({
-        connectorProjectId: projectId,
-        binding,
-        isPrivateChat,
-        mainThreadId,
-      });
+      // The owner's reply to a message a chat sent them ("💬 <chat>") goes
+      // back to that chat, whatever this chat is bound to.
+      const replyRoute =
+        senderRole === "owner" ? yield* replyRouteOf(projectId, chatId, message) : null;
+      const target: ManagerConnectorBindingTarget =
+        replyRoute !== null
+          ? { kind: "thread", threadId: replyRoute }
+          : resolveChatTarget({
+              connectorProjectId: projectId,
+              binding,
+              isPrivateChat,
+              mainThreadId,
+            });
       // An assistant routed through this bot that the person paused.
       const targetAssistant =
         target.kind === "assistant"
@@ -1861,7 +2381,7 @@ const makeTelegramConnector = Effect.gen(function* () {
 
       const response = yield* fetchJson(
         telegramApi(config.botToken, "getUpdates") +
-          `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${runtime.offset}&allowed_updates=%5B%22message%22%5D`,
+          `?timeout=${POLL_TIMEOUT_SECONDS}&offset=${runtime.offset}&allowed_updates=${encodeURIComponent(JSON.stringify(TELEGRAM_ALLOWED_UPDATES))}`,
         // Bounded, and dropped at once when the computer wakes from economy
         // sleep: the message that woke it is waiting in the relay queue.
         { signal: longPollSignal((POLL_TIMEOUT_SECONDS + 15) * 1000) },
@@ -2151,6 +2671,8 @@ const makeTelegramConnector = Effect.gen(function* () {
   return {
     getRuntimeStatus,
     sendText,
+    sendRich,
+    retireRequestButtons,
     startPairing,
     sendTestMessage,
     enqueueSystemTurn,

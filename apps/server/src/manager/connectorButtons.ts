@@ -82,6 +82,12 @@ export interface ButtonGroup {
   /** The chat the buttons answer. */
   readonly threadId: string;
   readonly rows: ReadonlyArray<ReadonlyArray<ConnectorButton>>;
+  /** The message as sent (markdown), to rewrite it with "✔ <label>" and no buttons. */
+  readonly text?: string;
+  /** The buttons sit under a file: the text is its caption. */
+  readonly caption?: boolean;
+  /** The person's language, for the lines added later. */
+  readonly language?: "ru" | "en";
   readonly createdAtMs: number;
   readonly expiresAtMs: number;
 }
