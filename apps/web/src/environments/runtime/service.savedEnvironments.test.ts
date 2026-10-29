@@ -142,11 +142,14 @@ vi.mock("~/terminalStateStore", () => ({
 }));
 
 vi.mock("~/uiStateStore", () => ({
+  setThreadReadStateSink: vi.fn(),
   useUiStateStore: {
     getState: () => ({
       clearThreadUi: vi.fn(),
       syncPromotedDraftThreadRefs: vi.fn(),
+      threadLastVisitedAtById: {},
     }),
+    setState: vi.fn(),
   },
 }));
 

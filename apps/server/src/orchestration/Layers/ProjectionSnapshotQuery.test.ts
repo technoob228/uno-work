@@ -430,6 +430,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           archivedAt: null,
           pinnedAt: null,
           snoozedUntil: null,
+          lastVisitedAt: null,
           snoozedAt: null,
           settledOverride: null,
           settledAt: null,
