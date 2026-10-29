@@ -69,9 +69,44 @@ function cachedChromium() {
   return existsSync(framework) ? join(app, "Contents/MacOS/Google Chrome for Testing") : null;
 }
 
-export async function launch() {
+// Loom Work: fake camera/microphone and an auto-picked screen for getDisplayMedia.
+export const MEDIA_ARGS = [
+  "--use-fake-ui-for-media-stream",
+  "--use-fake-device-for-media-stream",
+  "--auto-select-desktop-capture-source=Entire screen",
+  "--enable-features=GetDisplayMediaSetAutoSelectAllScreens",
+  "--autoplay-policy=no-user-gesture-required",
+];
+
+export async function launch({ extraArgs = [] } = {}) {
   const executablePath = cachedChromium();
-  return chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
+  const args = [...MEDIA_ARGS, ...extraArgs];
+  return chromium.launch(executablePath ? { executablePath, args } : { channel: "chrome", args });
+}
+
+/** Loom Work: the record popup → source, camera, microphone → Start. */
+export async function startRecording(
+  page,
+  { source = "screen", camera = true, microphone = true, trigger = "record-button" } = {},
+) {
+  await page.getByTestId(trigger).first().click();
+  const popup = page.getByTestId("record-popup");
+  await popup.waitFor();
+  await page.getByTestId(`record-source-${source}`).click();
+  for (const [id, want] of [
+    ["record-camera", camera],
+    ["record-microphone", microphone],
+  ]) {
+    const toggle = page.getByTestId(id);
+    const on =
+      (await toggle.getAttribute("aria-checked")) === "true" ||
+      (await toggle.getAttribute("data-checked")) !== null;
+    if (on !== want) await toggle.click();
+  }
+  await page.getByTestId("record-start").click();
+  await page
+    .locator('[data-testid="recording-bar"][data-phase="recording"]')
+    .waitFor({ timeout: 15_000 });
 }
 
 /**

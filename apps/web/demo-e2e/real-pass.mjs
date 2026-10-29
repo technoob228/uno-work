@@ -200,7 +200,15 @@ if (step === "pointing") {
   // says «Вот тут криво. Эта кнопка съехала, поправь.»; then the message goes
   // to a new chat and the agent answers. SHIM=http://127.0.0.1:18930 stands
   // in for the gateway's timeline mode (the branch's Go code, not deployed).
-  await page.getByText("Home", { exact: true }).first().click();
+  // Newer builds open on Home and have no "Home" item to click.
+  if (
+    !(await page
+      .getByTestId("home-show-agent")
+      .isVisible()
+      .catch(() => false))
+  ) {
+    await page.getByText("Home", { exact: true }).first().click();
+  }
   await page.getByTestId("home-show-agent").waitFor({ timeout: 60_000 });
   const target = page.getByTestId("home-upload-project");
   await page.addStyleTag({
