@@ -30,6 +30,13 @@ export interface PersonMessageInput {
   readonly buttons?: ReadonlyArray<ReadonlyArray<ConnectorButton>> | null;
   readonly buttonsTtlMs?: number;
   readonly language?: ReplyLanguage;
+  /**
+   * What Slack and Uno's service bot get instead of `text` + buttons when
+   * the buttons only work in Telegram (an Allow / Deny of a tool call).
+   */
+  readonly textWithoutButtons?: string;
+  /** An approval request: not counted against the chat's message limit. */
+  readonly approval?: boolean;
 }
 
 export interface PersonMessageResult {
@@ -63,6 +70,8 @@ export interface ConnectorNotifyServiceShape {
    * service bot (text only). Never fails.
    */
   readonly sendToPerson: (input: PersonMessageInput) => Effect.Effect<PersonMessageResult>;
+  /** An approval was answered somewhere: its Telegram buttons go. */
+  readonly retireButtons: (requestId: string) => Effect.Effect<void>;
   /** The HTTP endpoint's semantics: resolve (with assistant fallback) and send. */
   readonly notify: (input: ChannelNotifyInput) => Effect.Effect<ChannelNotifyResult>;
 }

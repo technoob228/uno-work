@@ -234,10 +234,12 @@ const makeConnectorNotifyService = Effect.gen(function* () {
 
   const sendToPerson: ConnectorNotifyServiceShape["sendToPerson"] = (input) =>
     Effect.gen(function* () {
-      const admitted = yield* Ref.modify(personSentAtRef, (sentAt) => {
-        const verdict = admitPersonMessage(sentAt, input.threadId, Date.now());
-        return [verdict.admit, verdict.sentAt] as const;
-      });
+      const admitted =
+        input.approval === true ||
+        (yield* Ref.modify(personSentAtRef, (sentAt) => {
+          const verdict = admitPersonMessage(sentAt, input.threadId, Date.now());
+          return [verdict.admit, verdict.sentAt] as const;
+        }));
       if (!admitted) {
         return {
           delivered: 0,
@@ -279,6 +281,12 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         }),
       );
       const buttons = input.buttons ?? [];
+      const plainText =
+        input.textWithoutButtons === undefined
+          ? text
+          : fromAssistant
+            ? input.textWithoutButtons
+            : `${chatHeaderLine(title)}\n${input.textWithoutButtons}`;
       let delivered = 0;
       let via: "telegram" | "slack" | "none" = "none";
       for (const chat of chats) {
@@ -304,8 +312,8 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         // Slack: text only from here — options as a line, the file by name.
         const target = parseSlackChatKey(chat.chatId);
         const slackText = [
-          text,
-          buttons.length > 0 ? buttonsAsText(buttons, language) : null,
+          plainText,
+          buttons.length > 0 && plainText === text ? buttonsAsText(buttons, language) : null,
           filePath === null ? null : `📎 ${filePath}`,
         ]
           .filter((part): part is string => part !== null)
@@ -329,7 +337,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       }
       if (chats.length > 0) return { delivered, via, note };
       // No Telegram / Slack linked to Uno Work: Uno's service bot, text only.
-      const service = yield* sendToUnoBot(text);
+      const service = yield* sendToUnoBot(plainText);
       return service.delivered > 0
         ? {
             delivered: service.delivered,
@@ -353,7 +361,16 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       ),
     );
 
-  return { resolveChats, sendToChats, sendToPerson, notify } satisfies ConnectorNotifyServiceShape;
+  const retireButtons: ConnectorNotifyServiceShape["retireButtons"] = (requestId) =>
+    telegram.retireRequestButtons(requestId);
+
+  return {
+    resolveChats,
+    sendToChats,
+    sendToPerson,
+    retireButtons,
+    notify,
+  } satisfies ConnectorNotifyServiceShape;
 });
 
 export const ConnectorNotifyServiceLive = Layer.effect(
