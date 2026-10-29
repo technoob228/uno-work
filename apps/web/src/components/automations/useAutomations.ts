@@ -155,6 +155,10 @@ export function useAutomationsGate(): "loading" | "on" | "off" {
     return "on";
   }
   if (!teamShown) return availability === "loading" ? "loading" : "off";
+  // The team arrives a moment after the account (Uno's computer included): with
+  // nobody to ask yet it is not "off" — /automations opened directly (a reload,
+  // a link) went to the start screen on the account that has it (0.0.159 smoke).
+  if (environmentIds.length === 0) return "loading";
   return computers.some((computer) => computer.loading) ? "loading" : "off";
 }
 
