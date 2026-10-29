@@ -69,7 +69,10 @@ export function joinCallsStage(
 ): JoinCallsStage {
   if (!view || !view.enabled || view.projectId !== projectId) return "off";
   if (view.google?.needsReconnect || view.google?.connected === false) return "reconnect";
-  if (view.notetaker.state === "installing") return "setting-up";
+  // The notetaker already reported (calls coming up / a status): it runs, whatever
+  // a store reinstall says.
+  const heard = view.upcomingAt !== null || view.recent.length > 0;
+  if (view.notetaker.state === "installing" && !heard) return "setting-up";
   return "on";
 }
 

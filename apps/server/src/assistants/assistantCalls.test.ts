@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyCallsEvent,
   botNameFor,
+  callsBusy,
+  callsWakeAt,
+  CALLS_RECHECK_MS,
   disableCalls,
   emptyCallsState,
   enableCalls,
@@ -138,6 +141,14 @@ describe("assistantCalls", () => {
       choice: "skip",
     });
     expect(nextCall(skipped, Date.parse("2026-10-28T12:00:00Z"))?.title).toBe("Later");
+    // the bot is done with a call it couldn't get into: the next one is next
+    const over = {
+      ...state,
+      upcoming: state.upcoming.map((c) =>
+        c.key === KEY ? { ...c, session: { status: "failed", detail: "x" } } : c,
+      ),
+    };
+    expect(nextCall(over, Date.parse("2026-10-28T14:10:00Z"))?.title).toBe("Later");
   });
 
   it("tells the person when the bot couldn't get in, once", () => {
@@ -238,5 +249,119 @@ describe("assistantCalls", () => {
     expect(
       parseCalendarFeed({ content: [{ type: "text", text: "[Truncated" }], isError: false }).ok,
     ).toBe(false);
+  });
+
+  describe("economy: wake for calls, hold during them", () => {
+    const at = (iso: string) => Date.parse(iso);
+    const withCalls = (
+      calls: Array<{ key: string; start: string; end: string; join: boolean }>,
+    ) => ({
+      ...on(),
+      upcoming: calls.map((c) => ({
+        ...c,
+        title: c.key,
+        platform: "meet",
+        platformName: "Google Meet",
+        why: "auto",
+        choice: "" as const,
+        session: null,
+      })),
+    });
+    const status = (session: string, s: string, atSec: number, meetingId = "") => ({
+      key: "k",
+      session,
+      title: "Sync",
+      start: "2026-10-28T17:00:00+00:00",
+      status: s,
+      reason: "",
+      text: "",
+      meetingId,
+      at: atSec,
+    });
+
+    it("wakes 3 minutes before the next call it joins, skipped calls don't count", () => {
+      const state = withCalls([
+        {
+          key: "skip",
+          start: "2026-10-28T16:30:00+00:00",
+          end: "2026-10-28T16:45:00+00:00",
+          join: false,
+        },
+        {
+          key: "go",
+          start: "2026-10-28T17:00:00+00:00",
+          end: "2026-10-28T17:30:00+00:00",
+          join: true,
+        },
+      ]);
+      expect(callsWakeAt(state, at("2026-10-28T16:10:00Z"))).toBe(at("2026-10-28T16:57:00Z"));
+    });
+
+    it("re-reads the calendar every couple of hours, on a clock boundary", () => {
+      const now = at("2026-10-28T16:10:00Z");
+      const wake = callsWakeAt(on(), now);
+      expect(wake).not.toBeNull();
+      expect(wake! % CALLS_RECHECK_MS).toBe(0);
+      expect(wake! - now).toBeLessThanOrEqual(CALLS_RECHECK_MS);
+      expect(callsWakeAt(on(), now + 60_000)).toBe(wake);
+    });
+
+    it("off — neither wakes nor holds", () => {
+      const state = disableCalls(
+        withCalls([
+          {
+            key: "go",
+            start: "2026-10-28T17:00:00+00:00",
+            end: "2026-10-28T17:30:00+00:00",
+            join: true,
+          },
+        ]),
+      );
+      expect(callsWakeAt(state, at("2026-10-28T16:59:00Z"))).toBeNull();
+      expect(callsBusy(state, at("2026-10-28T16:59:00Z"))).toBe(false);
+    });
+
+    it("holds from 3 minutes before the start until the bot could still knock", () => {
+      const state = withCalls([
+        {
+          key: "go",
+          start: "2026-10-28T17:00:00+00:00",
+          end: "2026-10-28T19:00:00+00:00",
+          join: true,
+        },
+      ]);
+      expect(callsBusy(state, at("2026-10-28T16:56:00Z"))).toBe(false);
+      expect(callsBusy(state, at("2026-10-28T16:58:00Z"))).toBe(true);
+      expect(callsBusy(state, at("2026-10-28T17:14:00Z"))).toBe(true);
+      // a long meeting the bot never got into doesn't keep the computer up to its end
+      expect(callsBusy(state, at("2026-10-28T17:30:00Z"))).toBe(false);
+    });
+
+    it("holds while the bot is in a call and until its notes are in", () => {
+      const t = at("2026-10-28T18:00:00Z") / 1000;
+      const inCall = {
+        ...on(),
+        statuses: [status("s1", "joining", t - 3000), status("s1", "recording", t - 2900)],
+      };
+      expect(callsBusy(inCall, t * 1000)).toBe(true);
+      const left = {
+        ...inCall,
+        statuses: [...inCall.statuses, status("s1", "done", t - 60, "m1")],
+      };
+      expect(callsBusy(left, t * 1000)).toBe(true);
+      const noted = {
+        ...left,
+        notes: [{ meetingId: "m1", title: "Sync", start: "", actionItems: 1, at: t }],
+      };
+      expect(callsBusy(noted, t * 1000)).toBe(false);
+      expect(callsBusy(left, (t + 3600) * 1000)).toBe(false); // notes never came: let it sleep
+      const failed = {
+        ...on(),
+        statuses: [status("s2", "joining", t - 100), status("s2", "failed", t - 50)],
+      };
+      expect(callsBusy(failed, t * 1000)).toBe(false);
+      const stale = { ...on(), statuses: [status("s3", "recording", t - 5 * 3600)] };
+      expect(callsBusy(stale, t * 1000)).toBe(false);
+    });
   });
 });
