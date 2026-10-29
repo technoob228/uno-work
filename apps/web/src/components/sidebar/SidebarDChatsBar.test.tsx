@@ -15,6 +15,8 @@ const base = {
   computers: [],
   pickedComputers: null,
   onComputersChange: () => {},
+  onlyMine: false,
+  onOnlyMineChange: () => {},
   onOpenSettings: () => {},
   onClearFilters: () => {},
   onNewChat: () => {},
@@ -75,6 +77,14 @@ describe("SidebarDChatsBar (Sidebar view menu on)", () => {
     );
     expect(html).toContain('data-testid="sidebar-d-clear-filter"');
     expect(html.split(">Chats · landing<").length - 1).toBe(1);
+  });
+
+  it("Only mine counts as a filter: × clears it", () => {
+    const html = renderToStaticMarkup(
+      <SidebarDChatsBar {...base} title="My chats" onlyMine={true} />,
+    );
+    expect(html).toContain('data-testid="sidebar-d-clear-filter"');
+    expect(html).toContain("My chats");
   });
 
   it("names the shortcut in the tooltip only when one is bound", () => {

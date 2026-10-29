@@ -31,6 +31,8 @@ const barProps = {
   computers: [],
   pickedComputers: null,
   onComputersChange: () => {},
+  onlyMine: false,
+  onOnlyMineChange: () => {},
   onOpenSettings: () => {},
   onClearFilters: () => {},
   onNewChat: () => {},

@@ -9,7 +9,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - This computer: `computer_status`, `computer_cleanup`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
 - Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`; frames of a screen recording: `recording_frames`; a project's keys: `project_keys`
-- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`; PR review: `github_pr_comment`
+- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`, `chat_call_person`, `chat_person_not_needed`; PR review: `github_pr_comment`
 - Repeating work ("every day at 9"): `automation_create` (never cron), `automations_list`, `automation_update`, `automation_delete`, `automation_run_now`
 - The person: `notify` (Inbox), `open_in_panel` (app, URL or file, right panel), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_forms_get`, `site_forms_set` (where form answers go)

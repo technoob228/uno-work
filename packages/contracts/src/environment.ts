@@ -35,6 +35,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       agents write here", 0.0.115) and no longer locks agents out of a chat
       the person wrote in. Clients hide the switch when absent. */
   agentsCloseChat: Schema.optionalKey(Schema.Boolean),
+  /** Server projects who a chat answers to (28.10): `startedBy`,
+      `latestPersonMessageAt` and the agents' person calls
+      (`thread.person.call` / `.release`, bridge `/call-person`,
+      `/person-not-needed`). Absent: clients tell agent chats only by
+      `spawnedByThreadId` / `assistantRole` and no agent can call the person. */
+  threadOwner: Schema.optionalKey(Schema.Boolean),
   /** Server speaks the "Continue on <machine>" protocol that sends files
       through the client (thread.continue.snapshot / land) instead of pushing
       them to origin. Clients refuse to continue to or from a machine without

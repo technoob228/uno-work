@@ -316,6 +316,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           controlChangedAt: null,
           agentsClosedAt: null,
           assistantRole: null,
+          startedBy: null,
+          latestPersonMessageAt: null,
+          personCalledAt: null,
+          personCalledByThreadId: null,
+          personCallReason: null,
           deletedAt: null,
           messages: [
             {
@@ -437,6 +442,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           controlChangedAt: null,
           agentsClosedAt: null,
           assistantRole: null,
+          startedBy: null,
+          latestPersonMessageAt: null,
+          personCalledAt: null,
+          personCalledByThreadId: null,
+          personCallReason: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",

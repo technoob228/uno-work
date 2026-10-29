@@ -482,6 +482,12 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
         : "Couldn't write to the other chat",
   ],
   chat_status: ["Checking another chat…", "Checked another chat", "Couldn't check the other chat"],
+  chat_call_person: ["Calling you into a chat…", "Called you into a chat", "Couldn't call you in"],
+  chat_person_not_needed: [
+    "Letting you off a chat…",
+    "You're not needed in that chat",
+    "Couldn't let you off the chat",
+  ],
   notify: [
     "Sending you a note…",
     (c) => named("Sent you a note:", text(c.args, "title"), "Sent you a note"),

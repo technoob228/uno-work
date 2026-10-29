@@ -39,8 +39,10 @@ describe("Uno Work environment brief", () => {
     // for `recording_frames` (Loom Work 28.10); +60 for the agent's own
     // mailbox (spec 20.10: one line, own mail vs Gmail); ~6 for `github_pr_comment` (Automations);
     // +40 for automations from any chat (29.10: "every day at 9" in a chat →
-    // automation_create, not cron — T3's schedule_task).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2025);
+    // automation_create, not cron — T3's schedule_task); ~15 for
+    // `chat_call_person` / `chat_person_not_needed` (Misha 28.10: chats
+    // agents start can be hidden, so an agent has to call the person into one).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2050);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
