@@ -15,7 +15,10 @@
  *     `X-Frame-Options` is dropped and so is an HTML page's CSP (the panel
  *     frames it and puts Comment's script in — the owner's dev preview);
  *   - an HTML page gets `<script src="/__uno/page-tools.js">` first in its
- *     <head> (asked for uncompressed; a compressed answer is unpacked);
+ *     <head> (asked for uncompressed; a compressed answer is unpacked) —
+ *     only a page: a fetch/XHR (`Sec-Fetch-Dest` not document/iframe/frame)
+ *     and data labelled text/html (`42`, JSON) go through untouched (29.10:
+ *     an app's `fetch("/count")` read `42<script…>`);
  *   - WebSocket upgrades (HMR) are piped through as they are;
  *   - nothing listening → 502 "Nothing is running on port N".
  *
@@ -99,12 +102,33 @@ function rewriteToLocal(value: string, publicHost: string | null, port: number):
   }
 }
 
+const NAVIGATION_DESTS = new Set(["document", "iframe", "frame"]);
+
+/** `Sec-Fetch-Dest`, lower case; "" — the browser didn't send it. */
+function fetchDest(headers: Http.IncomingHttpHeaders): string {
+  return (headerValue(headers["sec-fetch-dest"]) ?? "").trim().toLowerCase();
+}
+
 /** A navigation (a page, not a script or a fetch): asked for uncompressed, to put the script in. */
 export function isNavigationRequest(headers: Http.IncomingHttpHeaders): boolean {
-  const dest = headers["sec-fetch-dest"];
-  if (dest === "document" || dest === "iframe") return true;
-  if (dest !== undefined && dest !== "") return false;
+  const dest = fetchDest(headers);
+  if (NAVIGATION_DESTS.has(dest)) return true;
+  if (dest !== "") return false;
   return (headers.accept ?? "").includes("text/html");
+}
+
+/**
+ * Who asked, by `Sec-Fetch-Dest`: "page" — the browser opens it as a page
+ * (document/iframe/frame); "data" — a fetch/XHR, script, image… (never gets
+ * the script: `fetch("/count")` must read `42`, not `42<script…>`); "unknown"
+ * — no header, so the body decides ({@link looksLikeHtmlDocument}).
+ */
+export function pageToolsRequestKind(
+  headers: Http.IncomingHttpHeaders,
+): "page" | "data" | "unknown" {
+  const dest = fetchDest(headers);
+  if (dest === "") return "unknown";
+  return NAVIGATION_DESTS.has(dest) ? "page" : "data";
 }
 
 /** The headers the program gets. `upgrade`: keep the WebSocket handshake ones. */
@@ -207,21 +231,76 @@ export function pageToolsInsertIndex(prefix: Buffer, complete: boolean): number 
   return firstTag < 0 ? 0 : firstTag;
 }
 
-/** Puts {@link PAGE_TOOLS_SCRIPT_TAG} into an HTML stream, as early as it can. */
+const HTML_SPACE = /[\t\n\f\r ]/;
+const DOCTYPE_HTML = /^<!doctype\s+html\b/i;
+const DOCUMENT_TAG = /<(?:html|head|body)[\s/>]/i;
+const UTF8_BOM = "ï»¿"; // EF BB BF read as latin1
+
+/**
+ * Is this text/html answer a page, or data that only says it's HTML (a bare
+ * `42`, JSON, plain text, a markup fragment for `innerHTML`)? A page starts —
+ * after a BOM, whitespace and `<!-- comments -->` — with `<!doctype html`, or
+ * with markup that has `<html>`/`<head>`/`<body>` in it. null — can't tell yet.
+ */
+export function looksLikeHtmlDocument(prefix: Buffer, complete: boolean): boolean | null {
+  const text = prefix.toString("latin1");
+  const final = complete || prefix.length >= INJECT_SCAN_LIMIT;
+  let at = text.startsWith(UTF8_BOM) ? UTF8_BOM.length : 0;
+  for (;;) {
+    while (at < text.length && HTML_SPACE.test(text[at]!)) at++;
+    if (!text.startsWith("<!--", at)) break;
+    const end = text.indexOf("-->", at + 4);
+    if (end < 0) return final ? false : null;
+    at = end + 3;
+  }
+  const rest = text.slice(at);
+  if (rest === "") return final ? false : null;
+  if (!rest.startsWith("<")) return false;
+  if (DOCTYPE_HTML.test(rest) || DOCUMENT_TAG.test(rest)) return true;
+  return final ? false : null;
+}
+
+/**
+ * Puts {@link PAGE_TOOLS_SCRIPT_TAG} into an HTML stream, as early as it can.
+ * With `onlyIntoDocument` it first reads the start of the body: a page gets
+ * the script, anything else ({@link looksLikeHtmlDocument}) goes through as
+ * it came. The callback hears the verdict before the first byte leaves (the
+ * caller writes the response headers there).
+ */
 export class PageToolsInjector extends Transform {
   private held: Buffer[] = [];
   private heldLength = 0;
   private done = false;
+  private verdictListener: ((inject: boolean) => void) | null;
 
-  private flushWith(index: number | null): void {
-    const all = Buffer.concat(this.held, this.heldLength);
+  constructor(options: { readonly onlyIntoDocument?: (inject: boolean) => void } = {}) {
+    super();
+    this.verdictListener = options.onlyIntoDocument ?? null;
+  }
+
+  /** Pass what's held on: with the script at `index`, or untouched (null). */
+  private release(all: Buffer, index: number | null): void {
     this.held = [];
     this.heldLength = 0;
     this.done = true;
-    const at = index ?? 0;
-    this.push(all.subarray(0, at));
+    if (index === null) {
+      this.push(all);
+      return;
+    }
+    this.push(all.subarray(0, index));
     this.push(Buffer.from(PAGE_TOOLS_SCRIPT_TAG, "latin1"));
-    this.push(all.subarray(at));
+    this.push(all.subarray(index));
+  }
+
+  /** true — a page (or no check asked for); false — not a page; null — wait. */
+  private isPage(all: Buffer, complete: boolean): boolean | null {
+    const listener = this.verdictListener;
+    if (!listener) return true;
+    const verdict = looksLikeHtmlDocument(all, complete);
+    if (verdict === null) return null;
+    this.verdictListener = null;
+    listener(verdict);
+    return verdict;
   }
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
@@ -231,15 +310,22 @@ export class PageToolsInjector extends Transform {
     }
     this.held.push(chunk);
     this.heldLength += chunk.length;
-    const index = pageToolsInsertIndex(Buffer.concat(this.held, this.heldLength), false);
-    if (index !== null) this.flushWith(index);
+    const all = Buffer.concat(this.held, this.heldLength);
+    const page = this.isPage(all, false);
+    if (page === false) {
+      this.release(all, null);
+    } else if (page === true) {
+      const index = pageToolsInsertIndex(all, false);
+      if (index !== null) this.release(all, index);
+    }
     callback();
   }
 
   override _flush(callback: TransformCallback): void {
     if (!this.done) {
       const all = Buffer.concat(this.held, this.heldLength);
-      this.flushWith(pageToolsInsertIndex(all, true));
+      const page = this.isPage(all, true);
+      this.release(all, page ? (pageToolsInsertIndex(all, true) ?? 0) : null);
     }
     callback();
   }
@@ -389,11 +475,39 @@ export function relayPortPreviewRequest(
           const bodyless =
             req.method === "HEAD" || status === 204 || status === 304 || status < 200;
           const html = isHtml(headerValue(answer.headers["content-type"]));
-          const decoder =
-            html && !bodyless ? decoderFor(headerValue(answer.headers["content-encoding"])) : null;
+          // A fetch/XHR never gets the script, whatever its Content-Type says.
+          const asked = pageToolsRequestKind(req.headers);
+          const mayInject = html && !bodyless && asked !== "data";
+          const decoder = mayInject
+            ? decoderFor(headerValue(answer.headers["content-encoding"]))
+            : null;
           const encoded =
             (headerValue(answer.headers["content-encoding"]) ?? "identity") !== "identity";
-          const injecting = html && !bodyless && (!encoded || decoder !== null);
+          const injecting = mayInject && (!encoded || decoder !== null);
+          const onError = () => res.destroy();
+          if (injecting && asked === "unknown") {
+            // Nobody said it's a page: the body decides, the headers wait for it
+            // (untouched Content-Length when it's data and wasn't unpacked).
+            const injector = new PageToolsInjector({
+              onlyIntoDocument: (inject) => {
+                const rewritten = inject || decoder !== null;
+                const headers = portPreviewResponseHeaders(answer.headers, target, {
+                  injecting: rewritten,
+                });
+                res.writeHead(status, answer.statusMessage, headers);
+              },
+            });
+            if (decoder) {
+              pipeline(answer, decoder, injector, res, (error) => {
+                if (error) onError();
+              });
+            } else {
+              pipeline(answer, injector, res, (error) => {
+                if (error) onError();
+              });
+            }
+            return;
+          }
           const headers = portPreviewResponseHeaders(answer.headers, target, { injecting });
           res.writeHead(status, answer.statusMessage, headers);
           if (bodyless) {
@@ -401,7 +515,6 @@ export function relayPortPreviewRequest(
             res.end();
             return;
           }
-          const onError = () => res.destroy();
           if (injecting && decoder) {
             pipeline(answer, decoder, new PageToolsInjector(), res, (error) => {
               if (error) onError();
