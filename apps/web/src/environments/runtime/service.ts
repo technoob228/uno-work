@@ -58,10 +58,12 @@ import { createEnvironmentConnection, type EnvironmentConnection } from "./conne
 import { publishShellEvent } from "./shellEventBus";
 import {
   configureSelfHeal,
+  getSelfHealNeedsAttention,
   healSavedEnvironment,
   markSelfHealAuthRequired,
+  noteSavedEnvironmentFailure,
+  noteSavedEnvironmentHealthy,
   resetSelfHeal,
-  resetSelfHealBackoffs,
 } from "./selfHeal";
 import {
   useStore,
@@ -150,7 +152,8 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
-const BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS = 15_000;
+/** Hidden at least this long: a healthy-looking socket gets a liveness probe. */
+const BROWSER_RESUME_PROBE_AFTER_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -903,6 +906,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
     lastError: null,
     lastErrorAt: null,
   });
+  noteSavedEnvironmentHealthy(environmentId);
   useSavedEnvironmentRegistryStore.getState().markConnected(environmentId, connectedAt);
 }
 
@@ -1251,8 +1255,12 @@ function createSavedEnvironmentClient(
         } catch (error) {
           // A ws token that cannot be issued usually means the forwarded port
           // is dead — WS-level retries cannot fix that. Escalate to the full
-          // heal path (re-ensures the tunnel) and keep the failure visible.
-          void healSavedEnvironment(environmentId, "ws-token-issue-failed");
+          // heal path (re-ensures the tunnel) and keep the failure visible —
+          // unless the failure is permanent (auth endpoint gone, address
+          // gone): then automatic retries stop until a manual reconnect.
+          if (!noteSavedEnvironmentFailure(environmentId, error)) {
+            void healSavedEnvironment(environmentId, "ws-token-issue-failed");
+          }
           throw error;
         }
       },
@@ -1621,7 +1629,10 @@ async function syncSavedEnvironmentConnections(
     staleEnvironmentIds.map((environmentId) => disconnectSavedEnvironment(environmentId)),
   );
   await Promise.all(
-    records.map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
+    records
+      // Stopped for a permanent failure: only a manual reconnect retries.
+      .filter((record) => getSelfHealNeedsAttention(record.environmentId) === null)
+      .map((record) => ensureSavedEnvironmentConnection(record).catch(() => undefined)),
   );
 }
 
@@ -1630,42 +1641,96 @@ function stopActiveService() {
   activeService = null;
 }
 
+export type BrowserResumeAction = "skip" | "probe" | "reconnect" | "heal";
+
+/**
+ * What a browser resume (visibilitychange / pageshow) does to one connection.
+ * A socket with recent inbound traffic is never touched: on a slow link a
+ * forced reconnect costs a full resync and was itself a reconnect trigger.
+ * After a long background stretch a quiet socket is probed, and reconnected
+ * only if the probe gets no answer.
+ */
+export function decideBrowserResumeAction(input: {
+  readonly kind: "primary" | "saved";
+  readonly savedRuntimeState: string | null | undefined;
+  readonly transportHealthy: boolean;
+  readonly hasRecentInbound: boolean;
+  readonly longBackground: boolean;
+}): BrowserResumeAction {
+  // Saved environments that are not connected need the full heal path (it
+  // re-ensures a possibly dead ssh tunnel); a bare WS reconnect against a
+  // dead forwarded port would spin forever.
+  if (input.kind === "saved" && input.savedRuntimeState !== "connected") {
+    return "heal";
+  }
+  if (!input.transportHealthy) {
+    return "reconnect";
+  }
+  if (input.hasRecentInbound) {
+    return "skip";
+  }
+  return input.longBackground ? "probe" : "skip";
+}
+
+function recoverConnectionAfterBrowserResume(
+  connection: EnvironmentConnection,
+  reason: string,
+): void {
+  if (connection.kind === "saved") {
+    void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
+      immediate: true,
+    });
+    return;
+  }
+  void connection.reconnect().catch((error) => {
+    console.warn("Environment reconnect after browser resume failed", {
+      environmentId: connection.environmentId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 function reconnectEnvironmentConnectionsAfterBrowserResume(
   reason: string,
-  options: { readonly force: boolean },
+  options: { readonly longBackground: boolean },
 ): void {
   const now = Date.now();
   if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
     return;
   }
   lastBrowserResumeReconnectAt = now;
-  resetSelfHealBackoffs();
 
   for (const connection of environmentConnections.values()) {
-    // Saved environments that are not connected need the full heal path (it
-    // re-ensures a possibly dead ssh tunnel); a bare WS reconnect against a
-    // dead forwarded port would spin forever.
-    const runtimeState =
-      connection.kind === "saved"
-        ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]?.connectionState
-        : null;
-    const runtimeReportsHealthy = runtimeState === null || runtimeState === "connected";
-    if (!options.force && connection.isConnectionHealthy() && runtimeReportsHealthy) {
-      continue;
-    }
-    if (connection.kind === "saved" && runtimeState !== "connected") {
-      void healSavedEnvironment(connection.environmentId, `browser-resume:${reason}`, {
-        immediate: true,
-      });
-      continue;
-    }
-    void connection.reconnect().catch((error) => {
-      console.warn("Environment reconnect after browser resume failed", {
-        environmentId: connection.environmentId,
-        reason,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const action = decideBrowserResumeAction({
+      kind: connection.kind,
+      savedRuntimeState:
+        connection.kind === "saved"
+          ? useSavedEnvironmentRuntimeStore.getState().byId[connection.environmentId]
+              ?.connectionState
+          : null,
+      transportHealthy: connection.isConnectionHealthy(),
+      hasRecentInbound: connection.hasRecentInbound(),
+      longBackground: options.longBackground,
     });
+    switch (action) {
+      case "skip":
+        break;
+      case "heal":
+      case "reconnect":
+        // Only this (down) connection retries now; the self-heal backoff
+        // ladders of every other environment are left alone.
+        recoverConnectionAfterBrowserResume(connection, reason);
+        break;
+      case "probe":
+        void connection.probeLiveness().then((alive) => {
+          if (alive || environmentConnections.get(connection.environmentId) !== connection) {
+            return;
+          }
+          recoverConnectionAfterBrowserResume(connection, `${reason}:probe-failed`);
+        });
+        break;
+    }
   }
 }
 
@@ -1736,7 +1801,7 @@ function subscribeBrowserResumeReconnects(): () => void {
       const hiddenDurationMs = Date.now() - lastBrowserHiddenAt;
       lastBrowserHiddenAt = null;
       reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange", {
-        force: hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+        longBackground: hiddenDurationMs >= BROWSER_RESUME_PROBE_AFTER_MS,
       });
     }
   };
@@ -1747,7 +1812,7 @@ function subscribeBrowserResumeReconnects(): () => void {
         lastBrowserHiddenAt === null ? 0 : Math.max(0, Date.now() - lastBrowserHiddenAt);
       lastBrowserHiddenAt = null;
       reconnectEnvironmentConnectionsAfterBrowserResume("pageshow", {
-        force: event.persisted || hiddenDurationMs >= BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS,
+        longBackground: event.persisted || hiddenDurationMs >= BROWSER_RESUME_PROBE_AFTER_MS,
       });
     }
   };
@@ -1884,6 +1949,25 @@ configureSelfHeal({
       lastErrorAt: isoNow(),
     });
   },
+  onNeedsAttention: (environmentId, failure) => {
+    console.warn("Saved environment needs attention; automatic reconnects stopped", {
+      environmentId,
+      kind: failure.kind,
+    });
+    // Dispose the live transport too: its own socket retries would otherwise
+    // keep failing in the background. Reconnect builds a fresh connection.
+    void removeConnection(environmentId)
+      .catch(() => false)
+      .finally(() => {
+        useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+          connectionState: "error",
+          connectedAt: null,
+          lastError: failure.message,
+          lastErrorAt: isoNow(),
+        });
+      });
+  },
+  isDeviceOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
 });
 
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {

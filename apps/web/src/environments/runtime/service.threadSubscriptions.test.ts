@@ -21,6 +21,9 @@ const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockGetPrimaryKnownEnvironment = vi.hoisted(() => vi.fn());
 const mockFetchRemoteSessionState = vi.fn();
 const mockConnectionReconnects: Array<ReturnType<typeof vi.fn>> = [];
+const mockConnectionProbes: Array<ReturnType<typeof vi.fn>> = [];
+let mockHasRecentInbound = true;
+let mockProbeAlive = true;
 let savedEnvironmentRegistryListener: (() => void) | null = null;
 
 function MockWsTransport() {
@@ -184,6 +187,8 @@ describe("retainThreadDetailSubscription", () => {
     mockCreateEnvironmentConnection.mockImplementation((input) => {
       const reconnect = vi.fn(async () => undefined);
       mockConnectionReconnects.push(reconnect);
+      const probeLiveness = vi.fn(async () => mockProbeAlive);
+      mockConnectionProbes.push(probeLiveness);
       return {
         kind: input.kind,
         environmentId: input.knownEnvironment.environmentId,
@@ -191,6 +196,8 @@ describe("retainThreadDetailSubscription", () => {
         client: input.client,
         ensureBootstrapped: vi.fn(async () => undefined),
         isConnectionHealthy: vi.fn(() => true),
+        hasRecentInbound: vi.fn(() => mockHasRecentInbound),
+        probeLiveness,
         reconnect,
         dispose: vi.fn(async () => undefined),
       };
@@ -213,6 +220,9 @@ describe("retainThreadDetailSubscription", () => {
       role: "client",
     });
     mockConnectionReconnects.length = 0;
+    mockConnectionProbes.length = 0;
+    mockHasRecentInbound = true;
+    mockProbeAlive = true;
   });
 
   afterEach(async () => {
@@ -384,7 +394,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps a healthy connection on a brief background transition", async () => {
+  it("never tears down a socket with recent traffic on resume; probes a quiet one first", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -414,12 +424,30 @@ describe("retainThreadDetailSubscription", () => {
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
-    visibilityState = "hidden";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(15_000);
+    const hideFor = async (ms: number) => {
+      visibilityState = "hidden";
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(ms);
+      visibilityState = "visible";
+      documentTarget.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    };
 
-    visibilityState = "visible";
-    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    // Long background, but frames kept arriving: the socket is left alone.
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    // Quiet socket: probe first; a live answer means no reconnect.
+    mockHasRecentInbound = false;
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    // Quiet socket and an unanswered probe: only then reconnect.
+    mockProbeAlive = false;
+    await hideFor(15_000);
+    expect(mockConnectionProbes[0]).toHaveBeenCalledTimes(2);
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     stop();

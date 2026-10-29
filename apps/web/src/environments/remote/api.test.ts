@@ -283,6 +283,22 @@ describe("timeouts and retries (e2e 21.09: a fresh box left the request hanging 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("caps the ws token request at 20 s so a socket reconnect never hangs on it", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchMock);
+    const caught = await issueRemoteWebSocketToken({
+      httpBaseUrl: "https://box.example.com/",
+      bearerToken: "bearer",
+    }).catch((error: unknown) => error);
+    expect(timeoutSpy).toHaveBeenCalledWith(20_000);
+    expect(isRemoteEnvironmentUnreachableError(caught)).toBe(true);
+    expect((caught as Error).message).toContain("within 20 s");
+    timeoutSpy.mockRestore();
+  });
+
   it("turns an aborted (timed out) request into an unreachable error", async () => {
     const fetchMock = vi
       .fn()
