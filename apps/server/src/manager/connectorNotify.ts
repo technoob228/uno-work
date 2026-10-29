@@ -21,7 +21,9 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import type { ResolvedNotifyChat } from "./connectorBindings.ts";
+import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+
+import { isPrivateTelegramChatId, type ResolvedNotifyChat } from "./connectorBindings.ts";
 
 export type ConnectorNotificationKind = "turn.error" | "approval.requested" | "turn.completed";
 
@@ -270,3 +272,63 @@ export const resolveNotifyThreadId = (
   requestedThreadId === undefined || requestedThreadId === tokenThreadId
     ? { ok: true, threadId: tokenThreadId }
     : { ok: false };
+
+// ---------------------------------------------------------------------------
+// A chat writes to the person (`messenger_send`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which of the resolved chats a chat's own message goes to: the chats bound
+ * to it (or its project) when there are any — the person set that up;
+ * otherwise the person's own private chat, ONE per channel person: Telegram
+ * when linked (their bot or Uno's; the default assistant's link first when
+ * several bots know the same person), else the Slack DM. Never a group or a
+ * channel by fallback: a work chat must not speak to other people.
+ */
+export const pickPersonChats = (
+  chats: ReadonlyArray<ResolvedNotifyChat>,
+): ReadonlyArray<ResolvedNotifyChat> => {
+  const bound = chats.filter((chat) => chat.via !== "assistant");
+  if (bound.length > 0) return bound;
+  const own = chats
+    .filter(
+      (chat) =>
+        chat.via === "assistant" && (chat.kind === "slack" || isPrivateTelegramChatId(chat.chatId)),
+    )
+    .toSorted(
+      (a, b) =>
+        Number(b.connectorProjectId === ASSISTANT_PROJECT_ID) -
+        Number(a.connectorProjectId === ASSISTANT_PROJECT_ID),
+    );
+  const firstPerChat = (kind: ResolvedNotifyChat["kind"]) => {
+    const seen = new Set<string>();
+    return own.filter((chat) => {
+      if (chat.kind !== kind || seen.has(chat.chatId)) return false;
+      seen.add(chat.chatId);
+      return true;
+    });
+  };
+  const telegram = firstPerChat("telegram");
+  return telegram.length > 0 ? telegram : firstPerChat("slack");
+};
+
+/** Messages one chat may send the person in {@link PERSON_MESSAGE_WINDOW_MS}. */
+export const PERSON_MESSAGE_LIMIT = 8;
+export const PERSON_MESSAGE_WINDOW_MS = 10 * 60_000;
+
+/** Admit one more message of this chat, or not (the ledger keeps the window only). */
+export const admitPersonMessage = (
+  sentAt: ReadonlyMap<string, ReadonlyArray<number>>,
+  threadId: string,
+  nowMs: number,
+): { readonly admit: boolean; readonly sentAt: ReadonlyMap<string, ReadonlyArray<number>> } => {
+  const next = new Map<string, ReadonlyArray<number>>();
+  for (const [key, times] of sentAt) {
+    const recent = times.filter((at) => nowMs - at < PERSON_MESSAGE_WINDOW_MS);
+    if (recent.length > 0) next.set(key, recent);
+  }
+  const recent = next.get(threadId) ?? [];
+  if (recent.length >= PERSON_MESSAGE_LIMIT) return { admit: false, sentAt: next };
+  next.set(threadId, [...recent, nowMs]);
+  return { admit: true, sentAt: next };
+};

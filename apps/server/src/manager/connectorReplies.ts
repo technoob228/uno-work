@@ -1148,6 +1148,12 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
             return;
           }
           case "answer":
+            // It already wrote to the person itself (messenger_send with
+            // buttons) and says nothing more.
+            if (verdict.files.length === 0 && isNoReply(verdict.text)) {
+              yield* settle(current, "delivered", "no reply");
+              return;
+            }
             yield* deliver(
               current,
               answerParts(verdict.text, verdict.files, current.language, dispatcher),

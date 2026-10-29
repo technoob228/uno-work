@@ -16,7 +16,29 @@ import type {
 import { Context } from "effect";
 import type { Effect } from "effect";
 
+import type { ConnectorButton } from "../connectorButtons.ts";
 import type { ResolvedNotifyChat } from "../connectorBindings.ts";
+import type { ReplyLanguage } from "../connectorReplyText.ts";
+
+/** A chat's message to the person (`messenger_send`, approval requests). */
+export interface PersonMessageInput {
+  /** The chat that speaks: its title heads the message, replies go back to it. */
+  readonly threadId: ThreadId;
+  readonly text: string;
+  /** A file path as the agent gave it: checked like `send_file`. */
+  readonly file?: string | null;
+  readonly buttons?: ReadonlyArray<ReadonlyArray<ConnectorButton>> | null;
+  readonly buttonsTtlMs?: number;
+  readonly language?: ReplyLanguage;
+}
+
+export interface PersonMessageResult {
+  readonly delivered: number;
+  /** Where it went: the person's Telegram / Slack, Uno's service bot, or nowhere. */
+  readonly via: "telegram" | "slack" | "uno-bot" | "none";
+  /** Why something was not sent (the file, the buttons, the rate limit). */
+  readonly note: string | null;
+}
 
 export interface ConnectorNotifyServiceShape {
   readonly resolveChats: (input: {
@@ -35,6 +57,12 @@ export interface ConnectorNotifyServiceShape {
     /** Slack: write as this assistant when several share Uno's app. */
     options?: { readonly asAssistant?: ProjectId | null },
   ) => Effect.Effect<ChannelNotifyResult>;
+  /**
+   * A chat writes to the person through their messenger: the chats bound to
+   * it, else the person's own private chat (their bot or Uno's), else Uno's
+   * service bot (text only). Never fails.
+   */
+  readonly sendToPerson: (input: PersonMessageInput) => Effect.Effect<PersonMessageResult>;
   /** The HTTP endpoint's semantics: resolve (with assistant fallback) and send. */
   readonly notify: (input: ChannelNotifyInput) => Effect.Effect<ChannelNotifyResult>;
 }
