@@ -102,8 +102,8 @@ describe("new chat picker shortcuts", () => {
 
   it("takes no shortcut another default already uses", () => {
     const keys = (command: string) =>
-      DEFAULT_RESOLVED_KEYBINDINGS.filter((binding) => binding.command === command).map(
-        (binding) => JSON.stringify(binding.shortcut),
+      DEFAULT_RESOLVED_KEYBINDINGS.filter((binding) => binding.command === command).map((binding) =>
+        JSON.stringify(binding.shortcut),
       );
     const taken = new Set(
       DEFAULT_RESOLVED_KEYBINDINGS.filter(
