@@ -6,6 +6,9 @@ import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   buildHermesConfigYaml,
+  HERMES_DISPATCHER_COMPRESSION,
+  HERMES_DISPATCHER_DISABLED_TOOLSETS,
+  HERMES_DISPATCHER_MCP_TOOLS,
   applyHermesLlmRoute,
   applyHermesAcpModelSelection as applyModelSelectionForTest,
   hermesProviderIdOf,
@@ -259,6 +262,38 @@ describe("parseMcpJsonToAcpServers", () => {
   it("returns empty for invalid json", () => {
     expect(parseMcpJsonToAcpServers("{oops")).toEqual([]);
     expect(parseMcpJsonToAcpServers("null")).toEqual([]);
+  });
+});
+
+describe("buildHermesConfigYaml for the Uno dispatcher", () => {
+  const yaml = buildHermesConfigYaml({
+    model: "uno/glm-5.3-flash",
+    mcpServers: [
+      { type: "http", name: "uno-manager", url: "http://127.0.0.1:1/mcp", headers: [] },
+      { type: "http", name: "uno-work", url: "http://127.0.0.1:1/w", headers: [] },
+    ],
+    disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+    mcpToolsInclude: HERMES_DISPATCHER_MCP_TOOLS,
+    compression: HERMES_DISPATCHER_COMPRESSION,
+  });
+
+  it("no terminal, files, browser or web; only the dispatcher's MCP tools", () => {
+    expect(yaml).toContain('disabled_toolsets: ["terminal", "file", "code_execution", "browser", "web"');
+    expect(yaml).toMatch(/"uno-manager":\n[\s\S]*?include: \["work_status"[^\]]*"notes_append"[^\]]*"send_file"/);
+    expect(yaml).toMatch(/"uno-work":\n[\s\S]*?include: \["chat_create"/);
+    expect(yaml).not.toMatch(/include: \[[^\]]*"site_publish"/);
+  });
+
+  it("compacts its context early, by the same model", () => {
+    expect(yaml).toContain("compression:\n  enabled: true\n  threshold_tokens: 28000");
+    expect(yaml).toContain('auxiliary:\n  compression:\n    provider: "main"\n    model: "uno/glm-5.3-flash"');
+  });
+
+  it("other sessions get none of it", () => {
+    const plain = buildHermesConfigYaml({ model: "m", mcpServers: [] });
+    expect(plain).not.toContain("disabled_toolsets");
+    expect(plain).not.toContain("compression:");
+    expect(plain).not.toContain("include:");
   });
 });
 

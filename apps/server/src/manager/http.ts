@@ -73,6 +73,7 @@ import { bindingTargetLabel } from "./connectorBindings.ts";
 import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
 import { queueOutgoingFile } from "./outgoingFileQueue.ts";
 import { AssistantPushService } from "./Services/AssistantPush.ts";
+import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
 import { TELEGRAM_BOT_UPLOAD_LIMIT_BYTES } from "./telegramMedia.ts";
 import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
@@ -331,7 +332,12 @@ export const managerMcpRouteLayer = HttpRouter.add(
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
-    return HttpServerResponse.jsonUnsafe(outcome.body, { status: 200 });
+    // The Uno dispatcher keeps every result in its context: long ones cut.
+    const dispatcher = assistantProjectOfCaller(callerWithThread) === ASSISTANT_PROJECT_ID;
+    return HttpServerResponse.jsonUnsafe(
+      dispatcher ? capToolResultBody(outcome.body) : outcome.body,
+      { status: 200 },
+    );
   }),
 );
 

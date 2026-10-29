@@ -445,7 +445,79 @@ export const HERMES_DISPATCHER_DISABLED_TOOLSETS: ReadonlyArray<string> = [
   "computer_use",
   "cronjob",
   "image_gen",
+  // Context it never needs as a dispatcher: every one is tool schemas in
+  // each request (29.10: 100–115k input tokens a step on account 2709).
+  "skills",
+  "memory",
+  "todo",
+  "session_search",
+  "vision",
+  "video",
+  "tts",
+  "search",
+  "x_search",
+  "homeassistant",
+  "kanban",
+  "connections",
 ];
+
+/**
+ * The MCP tools the Uno dispatcher gets (`mcp_servers.<name>.tools.include`)
+ * — of ~90 (≈ 75k characters of schemas, ~20k tokens in every request) the
+ * dozen a dispatcher uses: hand off, status, steer, notes, reminders,
+ * automations, its setup, send a file. Everything else is a chat's job.
+ */
+export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "uno-manager": [
+    // chat_create (uno-work) is its one way to start work: create_thread
+    // repeats it, get_thread_status repeats work_status.
+    "work_status",
+    "read_thread_detail",
+    "send_turn",
+    "interrupt_turn",
+    "respond_to_request",
+    "create_reminder",
+    "list_reminders",
+    "cancel_reminder",
+    "automation_create",
+    "automation_list",
+    "automation_update",
+    "automation_delete",
+    "notes_read",
+    "notes_append",
+    "notes_edit",
+    "send_file",
+    "assistant_profile_get",
+    "assistant_profile_set",
+    "ask_user",
+  ],
+  "uno-work": [
+    "chat_create",
+    "chat_message",
+    "chat_status",
+    "account_overview",
+    "notify",
+    "settings_read",
+    "github_pr_comment",
+  ],
+};
+
+/**
+ * Hermes' own context compaction (`compression.*`) for the dispatcher: its
+ * Telegram conversation lives for days, and every step re-sent the whole of
+ * it. Compact at ~28k tokens of context (the tools and instructions alone are
+ * ~15k) down to a short summary plus the
+ * last few messages, by the same fast model; prune long tool results early;
+ * compact a session coming back after an hour idle.
+ */
+export const HERMES_DISPATCHER_COMPRESSION = {
+  thresholdTokens: 28_000,
+  targetRatio: 0.2,
+  protectLastN: 6,
+  proactivePruneTokens: 12_000,
+  proactivePruneMinResultChars: 3_000,
+  idleCompactAfterSeconds: 3_600,
+} as const;
 
 export function buildHermesConfigYaml(input: {
   readonly model: string;
@@ -484,6 +556,10 @@ export function buildHermesConfigYaml(input: {
    * {@link HERMES_DISPATCHER_DISABLED_TOOLSETS} for the Uno chat.
    */
   readonly disabledToolsets?: ReadonlyArray<string>;
+  /** Per MCP server: only these tools (`mcp_servers.<name>.tools.include`). */
+  readonly mcpToolsInclude?: Readonly<Record<string, ReadonlyArray<string>>>;
+  /** Tight context compaction ({@link HERMES_DISPATCHER_COMPRESSION}), by the chat model. */
+  readonly compression?: typeof HERMES_DISPATCHER_COMPRESSION;
 }): string {
   const quote = JSON.stringify;
   const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
@@ -528,13 +604,39 @@ export function buildHermesConfigYaml(input: {
           `    model: ${quote(HERMES_STT_MODEL)}`,
         ]),
   ];
-  if (input.sideTaskModel !== undefined && input.sideTaskModel.trim().length > 0) {
+  if (input.compression !== undefined) {
+    const c = input.compression;
     lines.push(
-      "auxiliary:",
-      "  title_generation:",
-      `    model: ${quote(input.sideTaskModel.trim())}`,
-      `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+      "compression:",
+      "  enabled: true",
+      `  threshold_tokens: ${c.thresholdTokens}`,
+      `  target_ratio: ${c.targetRatio}`,
+      `  protect_last_n: ${c.protectLastN}`,
+      `  tail_mode: "lean"`,
+      `  proactive_prune_tokens: ${c.proactivePruneTokens}`,
+      `  proactive_prune_min_result_chars: ${c.proactivePruneMinResultChars}`,
+      `  idle_compact_after_seconds: ${c.idleCompactAfterSeconds}`,
     );
+  }
+  const sideTaskModel = input.sideTaskModel?.trim() ?? "";
+  if (sideTaskModel.length > 0 || input.compression !== undefined) {
+    lines.push("auxiliary:");
+    if (sideTaskModel.length > 0) {
+      lines.push(
+        "  title_generation:",
+        `    model: ${quote(sideTaskModel)}`,
+        `    timeout: ${HERMES_TITLE_GENERATION_TIMEOUT_SECONDS}`,
+      );
+    }
+    if (input.compression !== undefined) {
+      // The summary by the same fast model, on the same provider.
+      lines.push(
+        "  compression:",
+        // "main": the session's own provider (named custom ones too).
+        `    provider: "main"`,
+        `    model: ${quote(input.model)}`,
+      );
+    }
   }
   if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {
     lines.push("skills:", "  external_dirs:");
@@ -547,6 +649,10 @@ export function buildHermesConfigYaml(input: {
       const toolTimeoutSec = input.mcpToolTimeoutSec?.[server.name];
       if (toolTimeoutSec !== undefined && Number.isFinite(toolTimeoutSec) && toolTimeoutSec > 0) {
         lines.push(`    timeout: ${Math.round(toolTimeoutSec)}`);
+      }
+      const include = input.mcpToolsInclude?.[server.name];
+      if (include !== undefined) {
+        lines.push("    tools:", `      include: [${include.map((name) => quote(name)).join(", ")}]`);
       }
       if ("url" in server) {
         lines.push(`    url: ${quote(server.url)}`);

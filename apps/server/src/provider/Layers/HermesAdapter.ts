@@ -78,7 +78,9 @@ import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
+  HERMES_DISPATCHER_COMPRESSION,
   HERMES_DISPATCHER_DISABLED_TOOLSETS,
+  HERMES_DISPATCHER_MCP_TOOLS,
   type HermesLlmRoute,
   applyHermesLlmRoute,
   hermesProviderIdOf,
@@ -699,7 +701,11 @@ export function makeHermesAdapter(
                   skillsExternalDirs: [sharedSkillsRoot()],
                   ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),
                   ...(dispatcherOnly
-                    ? { disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS }
+                    ? {
+                        disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+                        mcpToolsInclude: HERMES_DISPATCHER_MCP_TOOLS,
+                        compression: HERMES_DISPATCHER_COMPRESSION,
+                      }
                     : {}),
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see
