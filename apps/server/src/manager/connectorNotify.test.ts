@@ -176,6 +176,8 @@ describe("trackDomainEvent", () => {
         origin: telegramOrigin,
         summary: "Command approval requested",
         detail: "rm -rf build",
+        requestId: "req-1",
+        requestKind: null,
       },
     ]);
   });
@@ -247,6 +249,8 @@ describe("selectNotificationChats", () => {
         origin: telegramOrigin,
         summary: "Command approval requested",
         detail: null,
+        requestId: null,
+        requestKind: null,
       }).map((c) => c.chatId),
     ).toEqual(["100", "200"]);
     expect(isOwnOriginChat(telegramOrigin, { kind: "slack", chatId: "100" })).toBe(false);
@@ -296,6 +300,8 @@ describe("formatNotificationText", () => {
           origin: undefined,
           summary: "Command approval requested",
           detail: "rm -rf build",
+          requestId: null,
+          requestKind: null,
         },
         "Fix billing",
       ),

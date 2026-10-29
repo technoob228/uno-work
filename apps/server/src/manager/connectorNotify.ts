@@ -41,6 +41,9 @@ export type ConnectorNotification =
       readonly origin: OrchestrationCommandOrigin | undefined;
       readonly summary: string;
       readonly detail: string | null;
+      /** The request to answer (Allow / Deny buttons); null on an older payload. */
+      readonly requestId: string | null;
+      readonly requestKind: "command" | "file-read" | "file-change" | null;
     }
   | {
       readonly kind: "turn.completed";
@@ -110,7 +113,11 @@ export const trackDomainEvent = (
       }
       const payload =
         typeof activity.payload === "object" && activity.payload !== null
-          ? (activity.payload as { readonly detail?: unknown })
+          ? (activity.payload as {
+              readonly detail?: unknown;
+              readonly requestId?: unknown;
+              readonly requestKind?: unknown;
+            })
           : {};
       const detail =
         typeof payload.detail === "string" && payload.detail.trim().length > 0
@@ -124,6 +131,16 @@ export const trackDomainEvent = (
           origin: state.turnOrigins.get(threadId),
           summary: activity.summary,
           detail,
+          requestId:
+            typeof payload.requestId === "string" && payload.requestId.length > 0
+              ? payload.requestId
+              : null,
+          requestKind:
+            payload.requestKind === "command" ||
+            payload.requestKind === "file-read" ||
+            payload.requestKind === "file-change"
+              ? payload.requestKind
+              : null,
         },
       };
     }
@@ -233,7 +250,30 @@ export const notifyRateLimitKey = (
   chat: { readonly kind: string; readonly chatId: string },
   threadId: ThreadId,
   kind: ConnectorNotificationKind,
-): string => `${chat.kind}:${chat.chatId}|${threadId}|${kind}`;
+  /** An approval request: each one is its own message (its own buttons). */
+  requestId: string | null = null,
+): string =>
+  `${chat.kind}:${chat.chatId}|${threadId}|${kind}${requestId === null ? "" : `|${requestId}`}`;
+
+/** The request an approval-resolved event closes (its Telegram buttons go), or null. */
+export const resolvedApprovalRequestId = (event: OrchestrationEvent): string | null => {
+  if (event.type === "thread.approval-response-requested") return event.payload.requestId;
+  if (
+    event.type === "thread.activity-appended" &&
+    event.payload.activity.kind === "approval.resolved"
+  ) {
+    const payload = event.payload.activity.payload as { readonly requestId?: unknown } | null;
+    return typeof payload?.requestId === "string" ? payload.requestId : null;
+  }
+  return null;
+};
+
+/**
+ * How long an approval waits before it goes to the person's own Telegram
+ * (no chat bound to the thread): someone at the screen answers it in the
+ * app first, and nobody's phone buzzes for it.
+ */
+export const APPROVAL_FALLBACK_DELAY_MS = 30_000;
 
 /**
  * Admit at most one message per key per window. Returns the updated ledger
