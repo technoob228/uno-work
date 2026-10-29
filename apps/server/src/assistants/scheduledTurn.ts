@@ -36,7 +36,7 @@ import { ASSISTANT_THREAD_RUNTIME_MODE } from "../manager/connectorBindings.ts";
 import { decidePendingReply, isNoReply, stoppedText } from "../manager/connectorReplies.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import type { ManagerCaller } from "../manager/Services/ManagerToolService.ts";
-import { assistantCommandOrigin } from "../orchestration/commandOrigin.ts";
+import { assistantCommandOrigin, systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
@@ -94,6 +94,36 @@ export type AssistantEventTurnResult = ManagerAssistantTurnResult & {
   readonly reply: string | null;
 };
 
+/**
+ * A turn the daemon starts in a chat of the person (automations whose
+ * executor is a chat, 29.10): "this chat" — a new message in that chat, with
+ * its context, its own model and mode; "a new chat" — a new chat in the
+ * project, copying the model and mode of the chat it was set up from. The
+ * answer stays in the chat (no Telegram/Slack): the run's summary is it.
+ */
+export type ChatTurnTarget =
+  | { readonly kind: "chat"; readonly threadId: string }
+  | {
+      readonly kind: "new_chat";
+      readonly projectId: string;
+      readonly fromThreadId?: string | undefined;
+      readonly title: string;
+    };
+
+export interface ChatTurnInput {
+  readonly target: ChatTurnTarget;
+  readonly prompt: string;
+  readonly timeoutSec?: number;
+  /** Who started it, for the command origin ("automation 12"). */
+  readonly reason: string;
+}
+
+export interface ChatTurnResult {
+  readonly status: "answered" | "timeout";
+  readonly threadId: string;
+  readonly reply: string | null;
+}
+
 export interface AssistantScheduledTurnsShape {
   readonly run: (
     caller: ManagerCaller,
@@ -102,6 +132,8 @@ export interface AssistantScheduledTurnsShape {
   readonly runEvent: (
     input: AssistantEventTurnInput,
   ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
+  /** Optional: older wiring and tests without chats. */
+  readonly runInChat?: (input: ChatTurnInput) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
 }
 
 export class AssistantScheduledTurns extends Context.Service<
@@ -357,7 +389,114 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         ),
       );
 
-    return { run, runEvent } satisfies AssistantScheduledTurnsShape;
+    /** The chat a run of `target` goes into (a new one is created here). */
+    const chatOf = (target: ChatTurnTarget, reason: string) =>
+      Effect.gen(function* () {
+        const snapshot = yield* projections.getShellSnapshot();
+        if (target.kind === "chat") {
+          const thread = snapshot.threads.find((t) => t.id === target.threadId);
+          if (thread === undefined || thread.archivedAt !== null) {
+            return yield* turnError(
+              404,
+              "The chat this automation runs in was deleted or archived — pick another chat for it or delete it.",
+            );
+          }
+          return thread.id;
+        }
+        const project = snapshot.projects.find((p) => p.id === target.projectId);
+        if (project === undefined) {
+          return yield* turnError(
+            404,
+            "The project this automation opens chats in isn't on this computer any more.",
+          );
+        }
+        // Model and mode: the chat it was set up from, else the project's
+        // newest chat, else the project's default model.
+        const template =
+          snapshot.threads.find((t) => t.id === target.fromThreadId) ??
+          snapshot.threads
+            .filter((t) => t.projectId === project.id && t.archivedAt === null)
+            .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+        const modelSelection = template?.modelSelection ?? project.defaultModelSelection;
+        if (modelSelection === null || modelSelection === undefined) {
+          return yield* turnError(
+            409,
+            "The project has no chat to copy a model from: open one chat in it first.",
+          );
+        }
+        const threadId = ThreadId.make(crypto.randomUUID());
+        yield* engine.dispatch(
+          {
+            type: "thread.create",
+            commandId: CommandId.make(`automation:${crypto.randomUUID()}`),
+            threadId,
+            projectId: project.id,
+            title: target.title,
+            modelSelection,
+            runtimeMode: template?.runtimeMode ?? "approval-required",
+            interactionMode: template?.interactionMode ?? "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: new Date().toISOString(),
+          },
+          { origin: systemCommandOrigin("automations", reason) },
+        );
+        return threadId;
+      });
+
+    const runInChat = (input: ChatTurnInput) =>
+      Effect.gen(function* () {
+        const deadlineMs = Date.now() + (input.timeoutSec ?? 30 * 60) * 1_000;
+        const threadId = yield* chatOf(input.target, input.reason);
+        yield* waitUntilIdle(threadId);
+        const shell = yield* projections
+          .getThreadShellById(threadId)
+          .pipe(Effect.orElseSucceed(() => Option.none()));
+        if (Option.isNone(shell)) {
+          return yield* turnError(404, "The chat this automation runs in isn't there any more.");
+        }
+        const requestedAtIso = new Date().toISOString();
+        const messageId = MessageId.make(crypto.randomUUID());
+        yield* engine.dispatch(
+          {
+            type: "thread.turn.start",
+            commandId: CommandId.make(`automation:${crypto.randomUUID()}`),
+            threadId,
+            message: { messageId, role: "user", text: input.prompt, attachments: [] },
+            // The chat's own mode — what the person chose for it; never widened.
+            runtimeMode: shell.value.runtimeMode,
+            interactionMode: shell.value.interactionMode,
+            createdAt: requestedAtIso,
+          },
+          { origin: systemCommandOrigin("automations", input.reason) },
+        );
+        yield* Effect.logInfo("automation chat turn started").pipe(
+          Effect.annotateLogs({ threadId, target: input.target.kind, reason: input.reason }),
+        );
+        const reply = yield* awaitReply(
+          threadId,
+          messageId,
+          requestedAtIso,
+          deadlineMs,
+          "The chat could not finish",
+        );
+        return reply === null
+          ? { status: "timeout" as const, threadId, reply: null }
+          : { status: "answered" as const, threadId, reply: reply.text };
+      }).pipe(
+        Effect.mapError((error) =>
+          error instanceof AssistantTurnError
+            ? error
+            : turnError(
+                500,
+                `The automation could not start in the chat: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              ),
+        ),
+      );
+
+    return { run, runEvent, runInChat } satisfies AssistantScheduledTurnsShape;
   });
 
 export const AssistantScheduledTurnsLive = Layer.effect(

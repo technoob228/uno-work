@@ -24,6 +24,12 @@ export const WORK_UPDATE_NOTICE_PREFIX = "[Uno Work — work update";
 /** Starts the prompt of a scheduled assistant task (assistant_turn, no person in the chat). */
 export const SCHEDULED_TASK_PREFIX = "[Scheduled task ";
 
+/**
+ * Starts the message an automation puts into a chat or an assistant's thread
+ * (`automations/prompt.ts`). The person sees it folded: "Automation · <name>".
+ */
+export const AUTOMATION_PROMPT_PREFIX = "[Automation ";
+
 /** Starts the message that opens an assistant's setup chat (it then asks the person). */
 export const ASSISTANT_SETUP_PREFIX = "[Uno Work — setup";
 
@@ -150,6 +156,16 @@ export type UnoWorkNote =
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "work-update"; readonly text: string }
   | { readonly kind: "scheduled-task"; readonly text: string }
+  | {
+      readonly kind: "automation";
+      /** "Automation · Daily summary". */
+      readonly text: string;
+      readonly name: string;
+      /** What fired it ("Weekdays at 09:00", "the person pressed Run now"). */
+      readonly trigger: string;
+      /** The instruction and what follows the bracketed header. */
+      readonly body: string;
+    }
   | { readonly kind: "assistant-setup"; readonly text: string }
   | { readonly kind: "other"; readonly text: string };
 
@@ -182,6 +198,17 @@ function parseScheduledTask(text: string): UnoWorkNote {
   return { kind: "scheduled-task", text: prompt ? `${label}: ${prompt}` : `${label} ran.` };
 }
 
+/** `[Automation "Daily summary" — … Trigger: Weekdays at 09:00.]\n<instruction>` → its parts. */
+export function parseAutomationPrompt(text: string): UnoWorkNote | null {
+  if (!text.startsWith(AUTOMATION_PROMPT_PREFIX)) return null;
+  const name = /^\[Automation "([^"\n]*)"/.exec(text)?.[1]?.trim() || "Automation";
+  const end = text.indexOf("]\n");
+  const header = end === -1 ? text : text.slice(0, end);
+  const trigger = /Trigger: ([^\n]*?)\.?$/.exec(header)?.[1]?.trim() ?? "";
+  const body = end === -1 ? "" : text.slice(end + 2).trim();
+  return { kind: "automation", text: `Automation · ${name}`, name, trigger, body };
+}
+
 /**
  * A message the computer wrote for the agent, in the person's words; null for
  * anything the person (or another agent) wrote.
@@ -189,6 +216,7 @@ function parseScheduledTask(text: string): UnoWorkNote {
 export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   if (text.startsWith(WORK_UPDATE_NOTICE_PREFIX)) return parseWorkUpdate(text);
   if (text.startsWith(SCHEDULED_TASK_PREFIX)) return parseScheduledTask(text);
+  if (text.startsWith(AUTOMATION_PROMPT_PREFIX)) return parseAutomationPrompt(text);
   if (text.startsWith(ASSISTANT_SETUP_PREFIX)) {
     return {
       kind: "assistant-setup",

@@ -606,6 +606,36 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     },
     "The email wasn't sent",
   ],
+  automation_create: [
+    "Setting up an automation…",
+    (c) =>
+      named(
+        "Set up an automation",
+        typeof c.args.name === "string" ? `“${c.args.name}”` : undefined,
+        "Set up an automation",
+      ),
+    "The automation wasn't set up",
+  ],
+  automations_list: [
+    "Looking at automations…",
+    "Looked at automations",
+    "Couldn't read automations",
+  ],
+  automation_update: [
+    "Changing an automation…",
+    (c) => (c.args.enabled === false ? "Paused an automation" : "Changed an automation"),
+    "The automation wasn't changed",
+  ],
+  automation_delete: [
+    "Deleting an automation…",
+    "Deleted an automation",
+    "The automation wasn't deleted",
+  ],
+  automation_run_now: [
+    "Starting an automation…",
+    "Started an automation",
+    "The automation didn't start",
+  ],
   github_pr_comment: [
     "Commenting on the pull request…",
     (c) =>

@@ -32,6 +32,8 @@ import {
   type AssistantEventTurnInput,
   type AssistantEventTurnResult,
   type AssistantTurnError,
+  type ChatTurnInput,
+  type ChatTurnResult,
 } from "../assistants/scheduledTurn.ts";
 import { ServerConfig } from "../config.ts";
 import { readWorkMachineIdentity } from "../manager/workConsole.ts";
@@ -43,7 +45,13 @@ import type {
   AutomationResultBody,
   AutomationsClient,
 } from "./consoleClient.ts";
-import { automationEventPrompt, automationHeader, automationSummary, oneLine } from "./prompt.ts";
+import {
+  automationChatPrompt,
+  automationEventPrompt,
+  automationHeader,
+  automationSummary,
+  oneLine,
+} from "./prompt.ts";
 
 export const AUTOMATION_SOURCE = "automation";
 export const PROCESSED_FILE = "automations-processed.json";
@@ -139,7 +147,55 @@ export interface AutomationEventLoopDeps {
   readonly runTurn: (
     input: AssistantEventTurnInput,
   ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
+  /** A run in a chat (executor "chat" / "new_chat"); absent — such runs fail with a note. */
+  readonly runChatTurn?: (
+    input: ChatTurnInput,
+  ) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
   readonly now?: () => number;
+}
+
+/** "<name> · Oct 29" — the title of a new chat an automation opens. */
+export function newChatTitle(name: string, nowMs: number): string {
+  const day = new Date(nowMs).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${oneLine(name, 80) || "Automation"} · ${day}`;
+}
+
+/**
+ * Runs that must not overlap share a lane: one assistant's, one chat's
+ * (two runs never race in one thread); a new chat each time — per automation.
+ */
+export function laneOf(
+  event: Pick<AutomationEvent, "assistant" | "automationId" | "executor">,
+): string {
+  switch (event.executor.kind) {
+    case "assistant":
+      return `assistant:${event.assistant}`;
+    case "chat":
+      return `chat:${event.executor.threadId}`;
+    case "new_chat":
+      return `new_chat:${event.automationId}`;
+  }
+}
+
+/** The console's answer for a finished run in a chat. */
+export function resultOfChatTurn(
+  turn:
+    | { readonly ok: true; readonly result: ChatTurnResult }
+    | { readonly ok: false; readonly message: string },
+): AutomationResultBody {
+  if (!turn.ok) return { state: "failed", reason: turn.message };
+  const { result } = turn;
+  return result.status === "timeout"
+    ? {
+        state: "failed",
+        reason: automationSummary({ kind: "timeout", minutes: TURN_TIMEOUT_SEC / 60 }),
+        threadId: result.threadId,
+      }
+    : {
+        state: "done",
+        summary: automationSummary({ kind: "answered", text: result.reply ?? "" }),
+        threadId: result.threadId,
+      };
 }
 
 /** 5xx or no answer: worth another try. A 4xx is the console's final word. */
@@ -198,6 +254,7 @@ export function resultOfTurn(
 
 export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
   Effect.sync(() => {
+    const now = deps.now ?? Date.now;
     let after = 0;
     const inFlight = new Set<number>();
     const lanes = new Map<string, Semaphore.Semaphore>();
@@ -251,6 +308,40 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
         yield* deps.journal.add(event.id);
         if (claimed.outcome === "already_claimed") return "already_claimed" as const;
 
+        const executor = event.executor;
+        if (executor.kind !== "assistant") {
+          if (deps.runChatTurn === undefined) {
+            yield* report(event, {
+              state: "failed",
+              reason: "This Uno Work can't run automations in a chat yet — update it.",
+            });
+            return "no_assistant" as const;
+          }
+          const chatTurn = yield* deps
+            .runChatTurn({
+              target:
+                executor.kind === "chat"
+                  ? { kind: "chat", threadId: executor.threadId }
+                  : {
+                      kind: "new_chat",
+                      projectId: executor.projectId,
+                      fromThreadId: executor.fromThreadId,
+                      title: newChatTitle(event.name, now()),
+                    },
+              prompt: automationChatPrompt(event),
+              timeoutSec: TURN_TIMEOUT_SEC,
+              reason: `automation ${event.automationId}`,
+            })
+            .pipe(
+              Effect.map((result) => ({ ok: true as const, result })),
+              Effect.catch((error) =>
+                Effect.succeed({ ok: false as const, message: error.message }),
+              ),
+            );
+          yield* report(event, resultOfChatTurn(chatTurn));
+          return "ran" as const;
+        }
+
         const name = yield* deps.assistantName(event.assistant);
         if (name === null) {
           yield* report(event, {
@@ -293,7 +384,7 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
       Effect.gen(function* () {
         if (deps.journal.has(event.id) || inFlight.has(event.id)) return false;
         inFlight.add(event.id);
-        const sem = yield* lane(event.assistant);
+        const sem = yield* lane(laneOf(event));
         yield* Effect.forkDetach(
           sem
             .withPermits(1)(processEvent(event))
@@ -324,7 +415,6 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
         return { kind: "events", count: listed.events.length } as PollOutcome;
       });
 
-    const now = deps.now ?? Date.now;
     const run = Effect.gen(function* () {
       let failures = 0;
       let lastIdle: string | null = null;
@@ -376,6 +466,7 @@ export const AutomationEventLoopLive = Layer.effectDiscard(
       ),
       assistantName: automations.assistantName,
       runTurn: turns.value.runEvent,
+      ...(turns.value.runInChat ? { runChatTurn: turns.value.runInChat } : {}),
     });
     yield* Effect.forkScoped(
       loop.run.pipe(

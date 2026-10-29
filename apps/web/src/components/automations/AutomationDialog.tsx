@@ -2,14 +2,21 @@
  * New / Edit automation: When (a schedule in plain choices, or an event —
  * a GitHub pull request, after a call, Gmail soon) → What to do, in the
  * person's words. The mode is the assistant's own and is said in one line.
+ * Who (29.10): an assistant, or — opened from a chat — this chat / a new
+ * chat each time. Schedules: every day, weekdays, picked days, every N
+ * minutes or hours (15 minutes at least), every week.
  * No cron, no JSON: the dialog makes the trigger (`automations.logic.ts`).
  */
 import {
+  AUTOMATION_EVERY_MINUTES,
   AUTOMATION_INSTRUCTION_MAX_CHARS,
   AUTOMATION_NAME_MAX_CHARS,
   type Automation,
   type AutomationCadence,
+  type AutomationExecutor,
   type EnvironmentId,
+  automationExecutorOf,
+  everyLabel,
 } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -20,6 +27,7 @@ import {
   HandIcon,
   LoaderCircleIcon,
   MailIcon,
+  MessageSquareIcon,
   VideoIcon,
   ZapIcon,
 } from "lucide-react";
@@ -75,6 +83,22 @@ export interface AutomationAssistantChoice {
 const choiceKey = (choice: Pick<AutomationAssistantChoice, "environmentId" | "projectId">) =>
   `${choice.environmentId}:${choice.projectId}`;
 
+/**
+ * The chat the dialog was opened from (its clock panel, 29.10): then "Who"
+ * offers "This chat" (each run a new message here) and "A new chat each
+ * time" in its project, besides the assistants.
+ */
+export interface AutomationChatContext {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly title: string;
+  readonly projectId: string;
+  readonly projectTitle: string;
+}
+
+const THIS_CHAT = "chat:this";
+const NEW_CHAT = "chat:new";
+
 const WEEKDAY_NAMES = [
   "Sunday",
   "Monday",
@@ -87,8 +111,19 @@ const WEEKDAY_NAMES = [
 const CADENCES: ReadonlyArray<{ readonly id: AutomationCadence; readonly label: string }> = [
   { id: "daily", label: "Every day" },
   { id: "weekdays", label: "Weekdays" },
+  { id: "days", label: "Days…" },
+  { id: "every", label: "Every…" },
   { id: "weekly", label: "Every week" },
-  { id: "hourly", label: "Every hour" },
+];
+/** Monday first, the way a week reads. */
+const DAY_CHIPS: ReadonlyArray<{ readonly day: number; readonly label: string }> = [
+  { day: 1, label: "Mo" },
+  { day: 2, label: "Tu" },
+  { day: 3, label: "We" },
+  { day: 4, label: "Th" },
+  { day: 5, label: "Fr" },
+  { day: 6, label: "Sa" },
+  { day: 0, label: "Su" },
 ];
 const MINUTES = ["00", "15", "30", "45"];
 
@@ -318,6 +353,8 @@ export function AutomationDialog(props: {
   /** Edit this one (its assistant stays). */
   readonly automation?: Automation | null;
   readonly automationEnvironmentId?: string | null;
+  /** Opened from a chat: it can run it itself (the default then). */
+  readonly chat?: AutomationChatContext | null;
   readonly onSaved?: (automation: Automation, environmentId: string) => void;
 }) {
   // Mounted fresh each time it opens: the draft starts from the automation or empty.
@@ -330,60 +367,104 @@ export function AutomationDialog(props: {
 
 function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
   const editing = props.automation ?? null;
+  const chat = props.chat ?? null;
+  const editingExecutor = editing ? automationExecutorOf(editing) : null;
   const firstUsable = props.choices.find((choice) => choice.available);
   const [who, setWho] = useState<string>(() =>
     editing
-      ? `${props.automationEnvironmentId ?? ""}:${editing.assistant}`
-      : firstUsable
-        ? choiceKey(firstUsable)
-        : "",
+      ? editingExecutor?.kind === "assistant"
+        ? `${props.automationEnvironmentId ?? ""}:${editing.assistant}`
+        : editingExecutor?.kind === "new_chat"
+          ? NEW_CHAT
+          : THIS_CHAT
+      : chat
+        ? THIS_CHAT
+        : firstUsable
+          ? choiceKey(firstUsable)
+          : "",
   );
-  const choice =
-    props.choices.find((item) => choiceKey(item) === who) ??
-    (editing && props.automationEnvironmentId
-      ? {
-          environmentId: props.automationEnvironmentId,
-          projectId: editing.assistant,
-          name: editing.assistantName,
-          computer: "",
-          asksFirst: false,
-          available: true,
-        }
-      : null);
+  const inChat = who === THIS_CHAT || who === NEW_CHAT;
+  const choice: AutomationAssistantChoice | null = inChat
+    ? null
+    : (props.choices.find((item) => choiceKey(item) === who) ??
+      (editing && props.automationEnvironmentId
+        ? {
+            environmentId: props.automationEnvironmentId,
+            projectId: editing.assistant,
+            name: editing.assistantName,
+            computer: "",
+            asksFirst: false,
+            available: true,
+          }
+        : null));
+  // Where it is saved and what it is called in the lines below.
+  const environmentId = inChat
+    ? (chat?.environmentId ?? props.automationEnvironmentId ?? null)
+    : (choice?.environmentId ?? null);
+  const executor: AutomationExecutor | null = !inChat
+    ? null
+    : editing && editingExecutor && editingExecutor.kind !== "assistant" && !chat
+      ? editingExecutor
+      : chat
+        ? who === THIS_CHAT
+          ? { kind: "chat", threadId: chat.threadId, title: chat.title }
+          : {
+              kind: "new_chat",
+              projectId: chat.projectId,
+              fromThreadId: chat.threadId,
+              title: chat.projectTitle,
+            }
+        : null;
+  const doer = inChat ? (who === THIS_CHAT ? "This chat" : "A new chat") : (choice?.name ?? "It");
   const [draft, setDraft] = useState<AutomationDraft>(() =>
     editing ? draftOf(editing) : EMPTY_DRAFT,
   );
   const [nameTouched, setNameTouched] = useState(editing !== null);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<AutomationApiError | null>(null);
-  const actions = useAutomationActions(choice?.environmentId ?? "");
+  const actions = useAutomationActions(environmentId ?? "");
   const timezone = useMemo(() => browserTimeZone(), []);
   const set = (patch: Partial<AutomationDraft>) => {
     setFailure(null);
     setDraft((current) => ({ ...current, ...patch }));
   };
-  const problem = draftProblem(draft);
+  const problem =
+    inChat && draft.when === "event" && draft.source === "call"
+      ? "After a call is for an assistant."
+      : draftProblem(draft);
   const name = nameTouched && draft.name.trim() ? draft.name.trim() : autoName(draft);
   const kind = triggerOf(draft, timezone).kind;
-  const assistantName = choice?.name ?? "It";
+  const assistantName = doer;
   const navigate = useNavigate();
 
   const save = async () => {
-    if (!choice || problem) return;
+    if ((!choice && !executor) || environmentId === null || problem) return;
     setSaving(true);
     setFailure(null);
     const trigger = triggerOf(draft, timezone);
     const instruction = draft.instruction.trim();
     try {
+      const changedExecutor =
+        editing && executor && JSON.stringify(executor) !== JSON.stringify(editingExecutor)
+          ? { executor }
+          : {};
       const saved = editing
-        ? await actions.update(editing.id, { name, instruction, trigger })
-        : await actions.create({ assistant: choice.projectId, name, instruction, trigger });
+        ? await actions.update(editing.id, { name, instruction, trigger, ...changedExecutor })
+        : executor
+          ? await actions.create({ name, instruction, trigger, executor })
+          : await actions.create({ assistant: choice!.projectId, name, instruction, trigger });
       toastManager.add({
         type: "success",
-        title: editing ? "Saved" : `${choice.name} will do it`,
+        title: editing
+          ? "Saved"
+          : executor?.kind === "chat"
+            ? "This chat will do it"
+            : executor
+              ? "A new chat will do it"
+              : `${choice!.name} will do it`,
         description: `${name} · ${triggerLabel(saved, trigger)}`,
       });
-      props.onSaved?.(saved, choice.environmentId);
+      props.onSaved?.(saved, environmentId);
       props.onClose();
     } catch (cause) {
       setFailure(
@@ -409,7 +490,8 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
         </DialogDescription>
       </DialogHeader>
       <DialogPanel className="flex flex-col gap-5">
-        {!editing && props.choices.length > 1 ? (
+        {(!editing && (props.choices.length > 1 || chat !== null)) ||
+        (editing && inChat && chat !== null) ? (
           <div>
             <Label>Who</Label>
             <select
@@ -419,15 +501,27 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                 setFailure(null);
               }}
               className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-              aria-label="Assistant"
+              aria-label="Who does it"
               data-testid="automation-assistant"
             >
-              {props.choices.map((item) => (
-                <option key={choiceKey(item)} value={choiceKey(item)} disabled={!item.available}>
-                  {item.name} · {item.computer}
-                  {item.available ? "" : ` — ${item.note ?? "not here"}`}
-                </option>
-              ))}
+              {chat ? (
+                <>
+                  <option value={THIS_CHAT}>This chat — each run is a new message here</option>
+                  <option value={NEW_CHAT}>A new chat each time — in {chat.projectTitle}</option>
+                </>
+              ) : null}
+              {editing && inChat
+                ? null
+                : props.choices.map((item) => (
+                    <option
+                      key={choiceKey(item)}
+                      value={choiceKey(item)}
+                      disabled={!item.available}
+                    >
+                      {item.name} · {item.computer}
+                      {item.available ? "" : ` — ${item.note ?? "not here"}`}
+                    </option>
+                  ))}
             </select>
           </div>
         ) : null}
@@ -483,7 +577,46 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                     </select>
                   </>
                 ) : null}
-                {draft.cadence === "hourly" ? (
+                {draft.cadence === "days" ? (
+                  <div className="flex w-full flex-wrap gap-1" data-testid="automation-days">
+                    {DAY_CHIPS.map((item) => {
+                      const on = draft.weekdays.includes(item.day);
+                      return (
+                        <Chip
+                          key={item.day}
+                          on={on}
+                          onClick={() =>
+                            set({
+                              weekdays: on
+                                ? draft.weekdays.filter((d) => d !== item.day)
+                                : [...draft.weekdays, item.day],
+                            })
+                          }
+                          testId={`automation-day-${item.day}`}
+                        >
+                          {item.label}
+                        </Chip>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {draft.cadence === "every" ? (
+                  <select
+                    value={draft.everyMinutes}
+                    onChange={(event) => set({ everyMinutes: Number(event.target.value) })}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    aria-label="How often"
+                    data-testid="automation-every"
+                  >
+                    {AUTOMATION_EVERY_MINUTES.map((minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {everyLabel(minutes).replace(/^Every /, "every ")}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {draft.cadence === "every" && draft.everyMinutes < 60 ? null : draft.cadence ===
+                    "hourly" || draft.cadence === "every" ? (
                   <>
                     <span className="text-muted-foreground">at minute</span>
                     <select
@@ -530,23 +663,25 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                 onClick={() => set({ source: "github" as EventSource })}
                 testId="automation-source-github"
               />
-              {draft.source === "github" && choice ? (
+              {draft.source === "github" && environmentId !== null ? (
                 <div className="pl-1">
                   <RepoPicker
-                    environmentId={choice.environmentId}
+                    environmentId={environmentId}
                     value={draft.repo}
                     onChange={(repo) => set({ repo })}
                   />
                 </div>
               ) : null}
-              <SourceRow
-                on={draft.source === "call"}
-                icon={<VideoIcon className="size-4" />}
-                title="After a call"
-                hint="When the notes of a call it joined come in."
-                onClick={() => set({ source: "call" })}
-                testId="automation-source-call"
-              />
+              {inChat ? null : (
+                <SourceRow
+                  on={draft.source === "call"}
+                  icon={<VideoIcon className="size-4" />}
+                  title="After a call"
+                  hint="When the notes of a call it joined come in."
+                  onClick={() => set({ source: "call" })}
+                  testId="automation-source-call"
+                />
+              )}
               {draft.source === "call" && choice ? (
                 <CallsHint
                   environmentId={choice.environmentId}
@@ -610,7 +745,17 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
           />
         </div>
 
-        {choice ? (
+        {inChat ? (
+          <p
+            className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            data-testid="automation-mode-line"
+          >
+            <MessageSquareIcon className="size-3.5 text-amber-500" />
+            {who === THIS_CHAT
+              ? "Runs in this chat, with what it already knows, in the chat's own mode"
+              : "Opens a new chat in the project each time, set up like this one"}
+          </p>
+        ) : choice ? (
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"
             data-testid="automation-mode-line"
@@ -666,7 +811,7 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
         </Button>
         <Button
           size="sm"
-          disabled={saving || problem !== null || !choice}
+          disabled={saving || problem !== null || (!choice && !executor)}
           title={problem ?? undefined}
           onClick={() => void save()}
           data-testid="automation-save"

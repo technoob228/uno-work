@@ -127,3 +127,23 @@ describe("parseUnoWorkNote: turns the daemon starts for the assistant", () => {
     expect(parseUnoWorkNote("Scheduled task tomorrow?")).toBeNull();
   });
 });
+
+describe("parseUnoWorkNote: an automation's message (29.10)", () => {
+  it("folds to Automation · name with the trigger and the instruction", () => {
+    const note = parseUnoWorkNote(
+      '[Automation "Morning PRs" — it runs on its own: the person may not be watching this chat right now. Trigger: Weekdays at 09:00.]\nList open PRs\n\nDo the work here.',
+    );
+    expect(note).toEqual({
+      kind: "automation",
+      text: "Automation · Morning PRs",
+      name: "Morning PRs",
+      trigger: "Weekdays at 09:00",
+      body: "List open PRs\n\nDo the work here.",
+    });
+  });
+
+  it("the person's own text that merely mentions automations stays theirs", () => {
+    expect(parseUnoWorkNote("Automation: every day at 9")).toBeNull();
+    expect(parseUnoWorkNote("[Automations are cool]")).toBeNull();
+  });
+});

@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   AutomationClientError,
   consoleRefusal,
+  executorToConsole,
   makeAutomationsClient,
   parseAutomation,
   parseEvent,
+  parseExecutor,
   readConsoleError,
+  updateBodyToConsole,
 } from "./consoleClient.ts";
 
 const json = (status: number, body: unknown) =>
@@ -88,6 +91,7 @@ describe("console answers → Work's camelCase", () => {
         actions: ["opened"],
         drafts: false,
       },
+      executor: { kind: "assistant" },
       status: "needs_github_permission",
       statusDetail: "GitHub needs one more permission",
       manageUrl: "https://github.com/settings/installations/42",
@@ -142,6 +146,7 @@ describe("console answers → Work's camelCase", () => {
       assistantName: "Uno",
       name: "Morning plan",
       instruction: "Plan my day",
+      executor: { kind: "assistant" },
       kind: "schedule",
       title: "Weekdays at 09:00",
       url: null,
@@ -369,5 +374,36 @@ describe("automations client (console mocked)", () => {
   it("GitHub not connected without a link: a neutral line", () => {
     const refusal = consoleRefusal({ status: 409, body: { error: "GITHUB_NOT_CONNECTED" } });
     expect(refusal.message).toBe("GitHub isn't connected to this Uno account yet.");
+  });
+});
+
+describe("executor (29.10)", () => {
+  it("reads the console's executor; absent or unknown is the assistant", () => {
+    expect(parseExecutor(undefined)).toEqual({ kind: "assistant" });
+    expect(parseExecutor({ kind: "robot" })).toEqual({ kind: "assistant" });
+    expect(parseExecutor({ kind: "chat" })).toEqual({ kind: "assistant" });
+    expect(parseExecutor({ kind: "chat", thread_id: "t-1", title: "Notes" })).toEqual({
+      kind: "chat",
+      threadId: "t-1",
+      title: "Notes",
+    });
+    expect(parseExecutor({ kind: "new_chat", project_id: "p-1", from_thread_id: "t-1" })).toEqual({
+      kind: "new_chat",
+      projectId: "p-1",
+      fromThreadId: "t-1",
+    });
+  });
+
+  it("writes it snake_case, both ways round", () => {
+    const executor = { kind: "new_chat" as const, projectId: "p-1", fromThreadId: "t-1" };
+    expect(executorToConsole(executor)).toEqual({
+      kind: "new_chat",
+      project_id: "p-1",
+      from_thread_id: "t-1",
+    });
+    expect(parseExecutor(executorToConsole(executor))).toEqual(executor);
+    expect(updateBodyToConsole({ executor: { kind: "chat", threadId: "t" } })).toEqual({
+      executor: { kind: "chat", thread_id: "t" },
+    });
   });
 });

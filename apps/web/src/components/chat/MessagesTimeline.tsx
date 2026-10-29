@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
+import { AutomationMessageRow } from "../automations/AutomationMessageRow";
 import {
   createContext,
   memo,
@@ -507,6 +508,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           // A note the computer wrote for the agent (a late secret answer):
           // one quiet line, not the person's own bubble.
           const note = parseUnoWorkNote(row.message.text);
+          if (note?.kind === "automation") return <AutomationMessageRow note={note} />;
           if (note) return <UnoWorkNoteLine note={note} raw={row.message.text} />;
           const userAttachments = row.message.attachments ?? [];
           const allUserImages = userAttachments.filter(

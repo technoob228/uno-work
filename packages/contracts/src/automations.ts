@@ -41,7 +41,7 @@ export const AUTOMATION_DEFAULT_PR_ACTIONS: ReadonlyArray<AutomationPullRequestA
 
 export const AutomationScheduleTrigger = Schema.Struct({
   kind: Schema.Literal("schedule"),
-  /** Five fields (`min hour day month weekday`); at most once an hour. */
+  /** Five fields (`min hour day month weekday`); at most every 15 minutes. */
   cron: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
   /** IANA zone, e.g. `Europe/Berlin`. */
   timezone: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
@@ -81,6 +81,52 @@ export const AutomationTrigger = Schema.Union([
 ]);
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 export type AutomationTriggerKind = AutomationTrigger["kind"];
+
+/**
+ * Who runs it (29.10): an assistant (its turn, its answer to Telegram/Slack),
+ * a chat of Uno Work ("this chat": each run is a new message in it, with its
+ * context) or a new chat in a project for each run.
+ */
+export const AutomationAssistantExecutor = Schema.Struct({ kind: Schema.Literal("assistant") });
+export const AutomationChatExecutor = Schema.Struct({
+  kind: Schema.Literal("chat"),
+  threadId: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /** The chat's name when it was set up (the list shows the current one). */
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(120))),
+});
+export const AutomationNewChatExecutor = Schema.Struct({
+  kind: Schema.Literal("new_chat"),
+  projectId: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /** The chat it was set up from: a new chat copies its model and mode. */
+  fromThreadId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(120))),
+});
+export const AutomationExecutor = Schema.Union([
+  AutomationAssistantExecutor,
+  AutomationChatExecutor,
+  AutomationNewChatExecutor,
+]);
+export type AutomationExecutor = typeof AutomationExecutor.Type;
+export type AutomationExecutorKind = AutomationExecutor["kind"];
+
+/** Its executor (absent on an older daemon's answer: the assistant). */
+export function automationExecutorOf(automation: {
+  readonly executor?: AutomationExecutor | undefined;
+}): AutomationExecutor {
+  return automation.executor ?? { kind: "assistant" };
+}
+
+/** The automations a chat runs (its own, not the new chats a project opens). */
+export function automationRunsInChat(
+  automation: { readonly executor?: AutomationExecutor | undefined },
+  threadId: string,
+): boolean {
+  const executor = automationExecutorOf(automation);
+  return (
+    (executor.kind === "chat" && executor.threadId === threadId) ||
+    (executor.kind === "new_chat" && executor.fromThreadId === threadId)
+  );
+}
 
 export const AutomationStatus = Schema.Literals([
   "ok",
@@ -139,6 +185,8 @@ export const Automation = Schema.Struct({
   instruction: Schema.String,
   enabled: Schema.Boolean,
   trigger: AutomationTrigger,
+  /** Who runs it; absent from an older daemon — the assistant. */
+  executor: Schema.optional(AutomationExecutor),
   status: AutomationStatus,
   statusDetail: Schema.NullOr(Schema.String),
   /** Where on GitHub the person fixes the status (add the repo, accept a permission). */
@@ -181,6 +229,8 @@ export const AutomationCreateInput = Schema.Struct({
   name: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_NAME_MAX_CHARS))),
   instruction: TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_INSTRUCTION_MAX_CHARS)),
   trigger: AutomationTrigger,
+  /** Who runs it (default: the assistant). A chat or project must be on this computer. */
+  executor: Schema.optional(AutomationExecutor),
   enabled: Schema.optional(Schema.Boolean),
 });
 export type AutomationCreateInput = typeof AutomationCreateInput.Type;
@@ -193,12 +243,14 @@ export const AutomationUpdateInput = Schema.Struct({
     TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_INSTRUCTION_MAX_CHARS)),
   ),
   trigger: Schema.optional(AutomationTrigger),
+  executor: Schema.optional(AutomationExecutor),
 });
 export type AutomationUpdateInput = typeof AutomationUpdateInput.Type;
 
 /** Codes the daemon answers with (the console's, passed through). */
 export const AutomationErrorCode = Schema.Literals([
   "INVALID_TRIGGER",
+  "INVALID_EXECUTOR",
   "GITHUB_NOT_CONNECTED",
   "GITHUB_REPO_NOT_ALLOWED",
   "GITHUB_NOT_ALLOWED_FOR_ASSISTANT",
@@ -250,8 +302,17 @@ export const GithubPrCommentInput = Schema.Struct({
 });
 export type GithubPrCommentInput = typeof GithubPrCommentInput.Type;
 
-/** Simple schedule choices of the dialog → cron. */
-export type AutomationCadence = "daily" | "weekdays" | "weekly" | "hourly";
+/**
+ * Simple schedule choices of the dialog → cron. `days`: the weekdays picked
+ * (Mon, Wed, Fri); `every`: every N minutes (15, 20, 30) or hours (1–12).
+ */
+export type AutomationCadence = "daily" | "weekdays" | "weekly" | "days" | "every" | "hourly";
+
+/** Minutes between runs the dialog offers for "Every …" (15 minutes is the least). */
+export const AUTOMATION_EVERY_MINUTES: ReadonlyArray<number> = [
+  15, 30, 60, 120, 180, 240, 360, 720,
+];
+export const AUTOMATION_MIN_EVERY_MINUTES = 15;
 
 const WEEKDAY_NAMES = [
   "Sunday",
@@ -262,12 +323,32 @@ const WEEKDAY_NAMES = [
   "Friday",
   "Saturday",
 ];
+export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-/** "09:00" + cadence (+ weekday 0–6 for weekly) → cron and its label. */
+/** "Every 30 minutes", "Every hour", "Every 2 hours". */
+export function everyLabel(minutes: number): string {
+  if (minutes < 60) return `Every ${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? "Every hour" : `Every ${hours} hours`;
+}
+
+/** Mon, Wed, Fri (in week order, Monday first); weekdays / every day by name. */
+export function weekdaysLabel(days: ReadonlyArray<number>): string {
+  const set = [...new Set(days.filter((d) => d >= 0 && d <= 6))];
+  const mondayFirst = set.toSorted((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  if (mondayFirst.length === 7) return "Every day";
+  if (mondayFirst.length === 5 && [1, 2, 3, 4, 5].every((d) => set.includes(d))) return "Weekdays";
+  if (mondayFirst.length === 2 && set.includes(0) && set.includes(6)) return "Weekends";
+  return mondayFirst.map((d) => WEEKDAY_SHORT[d]).join(", ");
+}
+
+/** "09:00" + cadence (+ weekday 0–6 for weekly, weekdays for days, minutes for every) → cron and its label. */
 export function automationCronFor(input: {
   readonly cadence: AutomationCadence;
   readonly time: string;
   readonly weekday?: number;
+  readonly weekdays?: ReadonlyArray<number>;
+  readonly everyMinutes?: number;
 }): { readonly cron: string; readonly label: string } {
   const [hRaw, mRaw] = input.time.split(":");
   const hour = Math.min(23, Math.max(0, Number.parseInt(hRaw ?? "9", 10) || 0));
@@ -279,6 +360,32 @@ export function automationCronFor(input: {
         cron: `${minute} * * * *`,
         label: `Every hour at :${String(minute).padStart(2, "0")}`,
       };
+    case "every": {
+      const every = Math.max(AUTOMATION_MIN_EVERY_MINUTES, input.everyMinutes ?? 60);
+      if (every < 60) {
+        // 15/20/30 divide the hour evenly; anything else rounds to 30.
+        const step = [15, 20, 30].includes(every) ? every : 30;
+        return { cron: `*/${step} * * * *`, label: everyLabel(step) };
+      }
+      const hours = Math.min(12, Math.max(1, Math.round(every / 60)));
+      const step = [1, 2, 3, 4, 6, 8, 12].includes(hours) ? hours : 1;
+      return {
+        cron: step === 1 ? `${minute} * * * *` : `${minute} */${step} * * *`,
+        label: everyLabel(step * 60),
+      };
+    }
+    case "days": {
+      const days = [...new Set((input.weekdays ?? [1]).filter((d) => d >= 0 && d <= 6))].toSorted(
+        (a, b) => a - b,
+      );
+      const list = days.length === 0 ? [1] : days;
+      if (list.length === 7)
+        return { cron: `${minute} ${hour} * * *`, label: `Every day at ${hhmm}` };
+      return {
+        cron: `${minute} ${hour} * * ${list.join(",")}`,
+        label: `${weekdaysLabel(list)} at ${hhmm}`,
+      };
+    }
     case "weekdays":
       return { cron: `${minute} ${hour} * * 1-5`, label: `Weekdays at ${hhmm}` };
     case "weekly": {

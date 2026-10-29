@@ -61,6 +61,12 @@ const PROJECTS: Record<string, string> = {
   "assistant-ada": "Ada",
   "assistant-home": "Uno home",
   "assistant-bob": "Bob",
+  "proj-site": "site",
+};
+
+const THREADS: Record<string, { title: string; projectId: string }> = {
+  "thread-7": { title: "Release notes", projectId: "proj-site" },
+  "thread-8": { title: "Other chat", projectId: "proj-site" },
 };
 
 function setup(answer: (method: string, path: string, body: unknown) => Response) {
@@ -85,6 +91,17 @@ function setup(answer: (method: string, path: string, body: unknown) => Response
               ? Option.some({ id: projectId, title: PROJECTS[projectId] } as never)
               : Option.none(),
           ),
+        getThreadShellById: (threadId) =>
+          Effect.succeed(
+            THREADS[threadId] !== undefined
+              ? Option.some({ id: threadId, ...THREADS[threadId], archivedAt: null } as never)
+              : Option.none(),
+          ),
+        getShellSnapshot: () =>
+          Effect.succeed({
+            projects: Object.entries(PROJECTS).map(([id, title]) => ({ id, title })),
+            threads: Object.entries(THREADS).map(([id, t]) => ({ id, ...t, archivedAt: null })),
+          } as never),
       }),
     ),
     Layer.provide(Layer.succeed(ServerConfig, { stateDir: dir } as ServerConfigShape)),
@@ -378,5 +395,115 @@ describe("uno-manager MCP automation tools", () => {
     );
     expect(seen[0]?.label).toBe("assistant:assistant-ada");
     expect(JSON.stringify(routed)).toContain("created");
+  });
+});
+
+describe("uno-work automation_* from a chat (29.10)", () => {
+  const chat = (assistant: string | null = null) => ({
+    threadId: "thread-7",
+    assistant: Effect.succeed(assistant),
+  });
+
+  it("this chat runs it by default: executor chat with its name, no assistant", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    const result = await run((service) =>
+      service.chatTools(chat()).create({
+        instruction: "Sum up what changed today",
+        trigger: {
+          kind: "schedule",
+          cron: "0 18 * * 1-5",
+          timezone: "UTC",
+          label: "Weekdays at 18:00",
+        },
+      }),
+    );
+    expect(result._tag).toBe("Success");
+    expect(calls[0]!.body).toMatchObject({
+      assistant: "",
+      assistant_name: "",
+      executor: { kind: "chat", thread_id: "thread-7", title: "Release notes" },
+    });
+    expect(JSON.stringify(result)).toContain("It runs in this chat");
+  });
+
+  it("runIn new_chat: a new chat in this chat's project, set up from it", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    await run((service) =>
+      service.chatTools(chat()).create({
+        instruction: "Check CI",
+        trigger: {
+          kind: "schedule",
+          cron: "*/30 * * * *",
+          timezone: "UTC",
+          label: "Every 30 minutes",
+        },
+        runIn: "new_chat",
+      }),
+    );
+    expect(calls[0]!.body).toMatchObject({
+      executor: { kind: "new_chat", project_id: "proj-site", from_thread_id: "thread-7" },
+    });
+  });
+
+  it("in an assistant's own conversation the assistant runs it", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    await run((service) =>
+      service.chatTools(chat("assistant-ada")).create({
+        instruction: "Plan my day",
+        trigger: {
+          kind: "schedule",
+          cron: "0 8 * * *",
+          timezone: "UTC",
+          label: "Every day at 08:00",
+        },
+      }),
+    );
+    expect(calls[0]!.body).toMatchObject({ assistant: "assistant-ada", assistant_name: "Ada" });
+    expect((calls[0]!.body as Record<string, unknown>)["executor"]).toBeUndefined();
+  });
+
+  it("a chat lists and changes only its own", async () => {
+    const list = {
+      automations: [
+        automation({ id: 1, executor: { kind: "chat", thread_id: "thread-7" } }),
+        automation({ id: 2, executor: { kind: "chat", thread_id: "thread-8" } }),
+        automation({ id: 3 }),
+      ],
+    };
+    const { calls, run } = setup((method) =>
+      method === "GET" ? json(200, list) : json(200, { deleted: true }),
+    );
+    const own = await run((service) => service.chatTools(chat()).list({}));
+    expect(
+      own._tag === "Success" && (own.success as { automations: unknown[] }).automations,
+    ).toHaveLength(1);
+    const all = await run((service) => service.chatTools(chat()).list({ scope: "all" }));
+    expect(
+      all._tag === "Success" && (all.success as { automations: unknown[] }).automations,
+    ).toHaveLength(3);
+    const foreign = await run((service) => service.chatTools(chat()).remove({ id: 2 }));
+    expect(foreign._tag).toBe("Failure");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    const mine = await run((service) => service.chatTools(chat()).remove({ id: 1 }));
+    expect(mine._tag).toBe("Success");
+  });
+
+  it("refuses a chat that isn't on this computer (web create)", async () => {
+    const { calls, run } = setup(() => json(201, automation()));
+    const result = await run((service) =>
+      service.create({
+        instruction: "x",
+        trigger: {
+          kind: "schedule",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          label: "Every day at 09:00",
+        },
+        executor: { kind: "chat", threadId: "nope" },
+      }),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(JSON.stringify(result)).toContain("INVALID_EXECUTOR");
+    expect(calls).toHaveLength(0);
   });
 });

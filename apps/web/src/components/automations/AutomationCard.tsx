@@ -9,6 +9,7 @@ import {
   type AutomationRun,
   type EnvironmentId,
   type ThreadId,
+  automationExecutorOf,
   describeAutomationTrigger,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -38,7 +39,7 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
-import { type RunTone, runLine, statusProblem } from "./automations.logic";
+import { type RunTone, executorLabel, runLine, statusProblem } from "./automations.logic";
 import { useAutomationActions, useAutomationRuns } from "./useAutomations";
 
 const TRIGGER_ICON = {
@@ -245,10 +246,10 @@ export function AutomationCard(props: {
             data-testid="automation-name"
           >
             {automation.name}
-            {props.showAssistant ? (
-              <span className="font-normal text-muted-foreground">
+            {props.showAssistant || automationExecutorOf(automation).kind !== "assistant" ? (
+              <span className="font-normal text-muted-foreground" data-testid="automation-who">
                 {" "}
-                · {automation.assistantName}
+                · {executorLabel(automation)}
               </span>
             ) : null}
           </span>

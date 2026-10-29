@@ -185,6 +185,12 @@ function liveChats(world: AssistWorld): ChatSpec[] {
           "assistant",
           "Done for today: 212 orders → Drive / Orders / 2026-10-27. Next run tomorrow at 07:00.",
         ],
+        // An automation's run (29.10): the chat folds it to "Automation · …".
+        [
+          "user",
+          "[Automation \"Export today's orders\" — it runs on its own: the person may not be watching this chat right now. Trigger: Mon, Wed, Fri at 19:00.]\nExport today's orders to Drive as orders-<date>.csv and tell me the total.\n\nDo the work here, then end with a short result (2–4 lines, links when there are some).",
+        ],
+        ["assistant", "orders-2026-10-28.csv saved to Drive · 41 orders, $3,180."],
       ],
     },
   ];

@@ -17,6 +17,7 @@
  */
 import type {
   Automation,
+  AutomationExecutor,
   AutomationGithubReposResult,
   AutomationListResult,
   AutomationRun,
@@ -269,6 +270,54 @@ export function parseTrigger(raw: unknown): AutomationTrigger | null {
   }
 }
 
+/** The console's executor (snake_case) → Work's; absent or unknown → the assistant. */
+export function parseExecutor(raw: unknown): AutomationExecutor {
+  const r = record(raw);
+  const title = text(r?.["title"]);
+  switch (r?.["kind"]) {
+    case "chat": {
+      const threadId = text(r["thread_id"]);
+      if (threadId !== null) return { kind: "chat", threadId, ...(title ? { title } : {}) };
+      break;
+    }
+    case "new_chat": {
+      const projectId = text(r["project_id"]);
+      const fromThreadId = text(r["from_thread_id"]);
+      if (projectId !== null) {
+        return {
+          kind: "new_chat",
+          projectId,
+          ...(fromThreadId ? { fromThreadId } : {}),
+          ...(title ? { title } : {}),
+        };
+      }
+      break;
+    }
+  }
+  return { kind: "assistant" };
+}
+
+/** Work's executor → the console's body. */
+export function executorToConsole(executor: AutomationExecutor): Record<string, unknown> {
+  switch (executor.kind) {
+    case "assistant":
+      return { kind: "assistant" };
+    case "chat":
+      return {
+        kind: "chat",
+        thread_id: executor.threadId,
+        ...(executor.title ? { title: executor.title } : {}),
+      };
+    case "new_chat":
+      return {
+        kind: "new_chat",
+        project_id: executor.projectId,
+        ...(executor.fromThreadId ? { from_thread_id: executor.fromThreadId } : {}),
+        ...(executor.title ? { title: executor.title } : {}),
+      };
+  }
+}
+
 export function parseRun(raw: unknown): AutomationRun | null {
   const r = record(raw);
   const id = positiveInt(r?.["id"]);
@@ -307,6 +356,7 @@ export function parseAutomation(raw: unknown): Automation | null {
     instruction: nullableText(r["instruction"]) ?? "",
     enabled: r["enabled"] !== false,
     trigger,
+    executor: parseExecutor(r["executor"]),
     status: status as AutomationStatus,
     statusDetail: text(r["status_detail"]),
     manageUrl: githubUrl(r["manage_url"]) ?? null,
@@ -331,6 +381,8 @@ export interface AutomationEvent {
   readonly assistantName: string;
   readonly name: string;
   readonly instruction: string;
+  /** Who runs it (an older console: the assistant). */
+  readonly executor: AutomationExecutor;
   readonly kind: AutomationRunKind;
   readonly title: string;
   readonly url: string | null;
@@ -351,6 +403,7 @@ export function parseEvent(raw: unknown): AutomationEvent | null {
     assistantName: nullableText(r["assistant_name"]) ?? "",
     name: nullableText(r["name"]) ?? "",
     instruction: nullableText(r["instruction"]) ?? "",
+    executor: parseExecutor(r["executor"]),
     kind: kind as AutomationRunKind,
     title: nullableText(r["title"]) ?? "",
     url: text(r["url"]),
@@ -419,6 +472,7 @@ export interface AutomationCreateBody {
   readonly name: string;
   readonly instruction: string;
   readonly trigger: AutomationTrigger;
+  readonly executor?: AutomationExecutor | undefined;
   readonly enabled?: boolean | undefined;
 }
 
@@ -429,6 +483,7 @@ export function createBodyToConsole(input: AutomationCreateBody): Record<string,
     name: input.name,
     instruction: input.instruction,
     trigger: input.trigger,
+    ...(input.executor !== undefined ? { executor: executorToConsole(input.executor) } : {}),
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
   };
 }
@@ -442,6 +497,7 @@ export function updateBodyToConsole(
     ...(input.name !== undefined ? { name: input.name } : {}),
     ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
     ...(input.trigger !== undefined ? { trigger: input.trigger } : {}),
+    ...(input.executor !== undefined ? { executor: executorToConsole(input.executor) } : {}),
   };
 }
 

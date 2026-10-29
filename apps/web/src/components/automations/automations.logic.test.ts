@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   EMPTY_DRAFT,
+  automationDot,
+  executorLabel,
+  nextInLabel,
   autoName,
   automationFromToolResult,
   draftOf,
@@ -260,5 +263,83 @@ describe("automationsShown (gating 28.10)", () => {
     expect(automationsShown({ teamShown: false, computers: [on] })).toBe(false);
     expect(automationsShown({ teamShown: true, computers: [undefined] })).toBe(false);
     expect(automationsShown({ teamShown: true, computers: [on] })).toBe(true);
+  });
+});
+
+describe("the dialog's draft: days and every N (29.10)", () => {
+  const schedule = (cron: string) =>
+    automation({ trigger: { kind: "schedule", cron, timezone: "UTC", label: "x" } });
+
+  it("Mon, Wed, Fri and every N come back for Edit", () => {
+    expect(draftOf(schedule("0 9 * * 1,3,5"))).toMatchObject({
+      cadence: "days",
+      weekdays: [1, 3, 5],
+      time: "09:00",
+    });
+    expect(draftOf(schedule("*/30 * * * *"))).toMatchObject({ cadence: "every", everyMinutes: 30 });
+    expect(draftOf(schedule("10 */2 * * *"))).toMatchObject({
+      cadence: "every",
+      everyMinutes: 120,
+      time: "09:10",
+    });
+  });
+
+  it("makes the cron and the words", () => {
+    const tz = "Europe/Berlin";
+    expect(
+      triggerOf({ ...EMPTY_DRAFT, cadence: "days", weekdays: [1, 3, 5], time: "08:30" }, tz),
+    ).toMatchObject({ cron: "30 8 * * 1,3,5", label: "Mon, Wed, Fri at 08:30" });
+    expect(triggerOf({ ...EMPTY_DRAFT, cadence: "every", everyMinutes: 15 }, tz)).toMatchObject({
+      cron: "*/15 * * * *",
+      label: "Every 15 minutes",
+    });
+    expect(draftProblem({ ...EMPTY_DRAFT, cadence: "days", weekdays: [], instruction: "x" })).toBe(
+      "Pick at least one day.",
+    );
+  });
+});
+
+describe("a chat's automations (29.10)", () => {
+  it("who runs it, in words", () => {
+    expect(executorLabel(automation())).toBe("Bolt");
+    expect(
+      executorLabel(
+        automation({ executor: { kind: "chat", threadId: "t", title: "Release notes" } }),
+      ),
+    ).toBe("in “Release notes”");
+    expect(
+      executorLabel(automation({ executor: { kind: "new_chat", projectId: "p", title: "site" } })),
+    ).toBe("a new chat in site");
+  });
+
+  it("how soon the next run is", () => {
+    const now = Date.parse("2026-10-29T10:00:00Z");
+    expect(nextInLabel(null, now)).toBeNull();
+    expect(nextInLabel("2026-10-29T10:00:30Z", now)).toBe("any moment");
+    expect(nextInLabel("2026-10-29T10:12:00Z", now)).toBe("in 12 min");
+    expect(nextInLabel("2026-10-29T13:00:00Z", now)).toBe("in 3h");
+    expect(nextInLabel("2026-11-02T10:00:00Z", now)).toBe("in 4 days");
+  });
+
+  it("the dot: off, a problem, running, fine", () => {
+    expect(automationDot(automation({ enabled: false }))).toBe("muted");
+    expect(automationDot(automation({ status: "needs_github_repo" }))).toBe("error");
+    expect(automationDot(automation({ lastRun: run({ state: "running" }) }))).toBe("running");
+    expect(automationDot(automation({ lastRun: run({ state: "failed" }) }))).toBe("error");
+    expect(automationDot(automation({ lastRun: run() }))).toBe("ok");
+  });
+
+  it("the Automations screen puts chats' automations under Chats, after the assistants", () => {
+    const groups = groupByAssistant(
+      [
+        {
+          environmentId: "e",
+          automation: automation({ id: 1, executor: { kind: "chat", threadId: "t" } }),
+        },
+        { environmentId: "e", automation: automation({ id: 2 }) },
+      ],
+      [{ environmentId: "e", projectId: "assistant-bolt" }],
+    );
+    expect(groups.map((g) => g.assistantName)).toEqual(["Bolt", "Chats"]);
   });
 });
