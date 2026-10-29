@@ -299,6 +299,20 @@ describe("decidePendingReply", () => {
     ).toEqual({ kind: "answer", turnId: "t1", text: "готово, вот итог", files: [] });
   });
 
+  it("delivers the answer of a completed turn whose session stopped right after it", () => {
+    expect(
+      decidePendingReply(
+        probe({
+          messages: [userMessage("m1", 0), assistant("a1", "t1", 20, "Right now: none")],
+          turns: [turn("t1", "m1", "completed", 0, 20)],
+          session: { status: "stopped", activeTurnId: null, updatedAt: at(22), lastError: null },
+          activities: [tool("t1", 6)],
+          nowMs: T0 + 30_000,
+        }),
+      ),
+    ).toEqual({ kind: "answer", turnId: "t1", text: "Right now: none", files: [] });
+  });
+
   it("reports a provider failure honestly instead of re-running it", () => {
     expect(
       decidePendingReply(
