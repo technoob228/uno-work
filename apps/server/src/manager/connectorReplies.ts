@@ -47,6 +47,7 @@ import {
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { Clock, Duration, Effect, Option, Ref, Semaphore } from "effect";
 import * as crypto from "node:crypto";
+import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import { connectorCommandOrigin, systemCommandOrigin } from "../orchestration/commandOrigin.ts";
@@ -63,6 +64,9 @@ import {
   type ProjectionTurn,
 } from "../persistence/Services/ProjectionTurns.ts";
 import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
+import { takeOutgoingFiles } from "./outgoingFileQueue.ts";
+import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
+import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
 import {
   fitReplyToScreen,
   progressNoteDueAfterMs,
@@ -568,6 +572,11 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
     const turnRepository = yield* ProjectionTurnRepository;
+    const sendableRootsOf = makeThreadSendableRoots({
+      projections,
+      home: os.homedir(),
+      access: yield* assistantAccessDepsOption,
+    });
 
     const typingAtRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
     const sendStateRef = yield* Ref.make<ReadonlyMap<string, SendState>>(new Map());
@@ -842,13 +851,10 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
 
     const sendOneFile = (row: ConnectorPendingReply, rawPath: string, newerInChat: boolean) =>
       Effect.gen(function* () {
-        const context = yield* projections
-          .getThreadCheckpointContext(row.threadId)
-          .pipe(Effect.orElseSucceed(() => Option.none()));
-        const roots = Option.isSome(context)
-          ? [context.value.worktreePath ?? context.value.workspaceRoot]
-          : [];
-        const resolved = yield* Effect.promise(() => resolveConnectorOutgoingFile(rawPath, roots));
+        const roots = yield* sendableRootsOf(row.threadId);
+        const resolved = yield* Effect.promise(() =>
+          resolveConnectorOutgoingFile(rawPath, roots, os.homedir()),
+        );
         if (!resolved.ok) {
           yield* Effect.logWarning(`${transport.logPrefix} send-file refused`).pipe(
             Effect.annotateLogs({ chatId: row.chatId, filePath: rawPath, reason: resolved.reason }),
@@ -1078,7 +1084,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
             .filter((other) => rowId(other) !== rowId(row) && other.turnId !== null)
             .map((other) => String(other.turnId)),
         );
-        const verdict = decidePendingReply({
+        const decided = decidePendingReply({
           userMessageId: row.userMessageId,
           requestedAt: row.requestedAt,
           knownTurnId: row.turnId,
@@ -1089,6 +1095,12 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           activities: detail.activities,
           nowMs,
         });
+        // Files `send_file` queued in this turn go with its answer.
+        const queuedFiles = decided.kind === "answer" ? takeOutgoingFiles(row.threadId) : [];
+        const verdict =
+          decided.kind === "answer" && queuedFiles.length > 0
+            ? { ...decided, files: [...new Set([...decided.files, ...queuedFiles])] }
+            : decided;
         if (verdict.kind === "wait" && verdict.readyInMs !== undefined) {
           const wakeAt = nowMs + verdict.readyInMs;
           yield* Ref.update(nextWakeAtRef, (at) => (at === null ? wakeAt : Math.min(at, wakeAt)));

@@ -734,7 +734,7 @@ const makeSlackConnector = Effect.gen(function* () {
         yield* postMessage(
           input.web,
           input.channel,
-          `Could not send ${input.filePath}: ${failure}`,
+          `Could not send ${nodePath.basename(input.filePath)}: ${failure}`,
           input.threadTs,
           input.identity ?? null,
         );

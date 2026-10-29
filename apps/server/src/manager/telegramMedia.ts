@@ -531,21 +531,57 @@ export function extractOutgoingFiles(text: string): OutgoingFilesExtraction {
   };
 }
 
-const PHOTO_UPLOAD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+/** Telegram shows a photo only up to 10 MB; bigger goes as a document. */
+export const TELEGRAM_PHOTO_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
+
+const NATIVE_UPLOAD_BY_EXTENSION: Readonly<Record<string, TelegramUploadMethod>> = {
+  ".jpg": { method: "sendPhoto", field: "photo" },
+  ".jpeg": { method: "sendPhoto", field: "photo" },
+  ".png": { method: "sendPhoto", field: "photo" },
+  ".webp": { method: "sendPhoto", field: "photo" },
+  ".gif": { method: "sendAnimation", field: "animation" },
+  // A voice message must be OGG/Opus; Telegram plays it as a voice note.
+  ".ogg": { method: "sendVoice", field: "voice" },
+  ".oga": { method: "sendVoice", field: "voice" },
+  ".opus": { method: "sendVoice", field: "voice" },
+  // The music player takes MP3 and M4A only.
+  ".mp3": { method: "sendAudio", field: "audio" },
+  ".m4a": { method: "sendAudio", field: "audio" },
+  // Streamable video: MP4 only (others go as documents).
+  ".mp4": { method: "sendVideo", field: "video" },
+};
 
 export interface TelegramUploadMethod {
-  readonly method: "sendPhoto" | "sendDocument";
-  readonly field: "photo" | "document";
+  readonly method:
+    | "sendPhoto"
+    | "sendDocument"
+    | "sendAudio"
+    | "sendVoice"
+    | "sendVideo"
+    | "sendAnimation";
+  readonly field: "photo" | "document" | "audio" | "voice" | "video" | "animation";
 }
 
 /**
- * Photos go through `sendPhoto` (inline preview in the chat); everything else
- * is a document so Telegram never re-encodes it.
+ * The Bot API method a file goes out by, from its extension: photos inline,
+ * voice notes, music, video and GIFs natively, everything else as a document
+ * (never re-encoded). A photo over 10 MB goes as a document. The caller falls
+ * back to `sendDocument` when Telegram refuses the native method.
  */
-export function pickTelegramUploadMethod(fileName: string): TelegramUploadMethod {
+export function pickTelegramUploadMethod(
+  fileName: string,
+  sizeBytes?: number,
+): TelegramUploadMethod {
   const extensionIndex = fileName.lastIndexOf(".");
   const extension = extensionIndex >= 0 ? fileName.slice(extensionIndex).toLowerCase() : "";
-  return PHOTO_UPLOAD_EXTENSIONS.has(extension)
-    ? { method: "sendPhoto", field: "photo" }
-    : { method: "sendDocument", field: "document" };
+  const native = NATIVE_UPLOAD_BY_EXTENSION[extension];
+  if (native === undefined) return { method: "sendDocument", field: "document" };
+  if (
+    native.method === "sendPhoto" &&
+    sizeBytes !== undefined &&
+    sizeBytes > TELEGRAM_PHOTO_UPLOAD_LIMIT_BYTES
+  ) {
+    return { method: "sendDocument", field: "document" };
+  }
+  return native;
 }

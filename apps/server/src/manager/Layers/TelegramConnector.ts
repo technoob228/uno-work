@@ -1057,9 +1057,11 @@ const makeTelegramConnector = Effect.gen(function* () {
       return { attachments, notes };
     });
 
-  // Upload a file the assistant marked with `[[send-file: …]]`. Photos go via
-  // sendPhoto (with a sendDocument fallback: Telegram rejects photos over its
-  // dimension limits), everything else via sendDocument. Failures are reported
+  // Upload a file the assistant marked with `[[send-file: …]]` or queued with
+  // send_file. Photos, voice, audio, video and GIFs go natively
+  // (pickTelegramUploadMethod), with a sendDocument fallback when Telegram
+  // refuses (a photo over its dimension limits, a voice note not in Opus);
+  // everything else via sendDocument. Failures are reported
   // into the chat so the user isn't left waiting for a file that never comes.
   const sendTelegramFile = (
     projectId: ProjectId,
@@ -1075,7 +1077,9 @@ const makeTelegramConnector = Effect.gen(function* () {
             throw new Error("not a regular file");
           }
           if (stat.size > TELEGRAM_BOT_UPLOAD_LIMIT_BYTES) {
-            throw new Error("file exceeds the 50 MB Telegram bot upload limit");
+            throw new Error(
+              `it is ${Math.round(stat.size / 1024 / 1024)} MB, over the 50 MB a Telegram bot may send — ask for a link instead`,
+            );
           }
           const bytes = await fsPromises.readFile(filePath);
           const fileName = nodePath.basename(filePath);
@@ -1089,9 +1093,9 @@ const makeTelegramConnector = Effect.gen(function* () {
             });
             return (await response.json()) as { ok?: boolean; description?: string };
           };
-          const preferred = pickTelegramUploadMethod(fileName);
+          const preferred = pickTelegramUploadMethod(fileName, stat.size);
           let result = await upload(preferred.method, preferred.field);
-          if (result.ok !== true && preferred.method === "sendPhoto") {
+          if (result.ok !== true && preferred.method !== "sendDocument") {
             result = await upload("sendDocument", "document");
           }
           if (result.ok !== true) {
@@ -1111,7 +1115,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           projectId,
           botToken,
           chatId,
-          `Could not send ${filePath}: ${failure}`,
+          `Could not send ${nodePath.basename(filePath)}: ${failure}`,
         );
       }
     });

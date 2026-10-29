@@ -194,6 +194,18 @@ describe("pickTelegramUploadMethod", () => {
     expect(pickTelegramUploadMethod("diagram.svg").method).toBe("sendDocument");
     expect(pickTelegramUploadMethod("noextension").method).toBe("sendDocument");
   });
+
+  it("voice, music, video and GIFs go natively; a big photo as a document", () => {
+    expect(pickTelegramUploadMethod("answer.ogg")).toEqual({ method: "sendVoice", field: "voice" });
+    expect(pickTelegramUploadMethod("note.opus").method).toBe("sendVoice");
+    expect(pickTelegramUploadMethod("song.mp3")).toEqual({ method: "sendAudio", field: "audio" });
+    expect(pickTelegramUploadMethod("talk.M4A").method).toBe("sendAudio");
+    expect(pickTelegramUploadMethod("demo.mp4")).toEqual({ method: "sendVideo", field: "video" });
+    expect(pickTelegramUploadMethod("demo.mov").method).toBe("sendDocument");
+    expect(pickTelegramUploadMethod("fun.gif").method).toBe("sendAnimation");
+    expect(pickTelegramUploadMethod("scan.png", 12 * 1024 * 1024).method).toBe("sendDocument");
+    expect(pickTelegramUploadMethod("scan.png", 2 * 1024 * 1024).method).toBe("sendPhoto");
+  });
 });
 
 describe("sanitizeFileName", () => {

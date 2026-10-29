@@ -69,6 +69,8 @@ export interface ManagerMcpExtras {
    * null when the token is not an assistant's: the `notes_*` tools.
    */
   readonly assistantWorkspace?: (caller: ManagerCaller) => Effect.Effect<string | null>;
+  /** `send_file`: queue a file for the Telegram / Slack chat of the caller's turn. */
+  readonly sendFile?: (caller: ManagerCaller, path: string) => Effect.Effect<NotesResult>;
 }
 
 type ManagerMcpToolError =
@@ -684,6 +686,34 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     },
     run: (_tools, caller, args, extras) =>
       withNotes(extras, caller, (root) => editAssistantNotes(root, args)),
+  },
+  {
+    name: "send_file",
+    description:
+      "Send a file of this computer to the Telegram or Slack chat the person writes from now (photos as photos, voice as voice, the rest as documents) — with your answer of this turn. Any file of the projects and the person's folders (projects, Documents, Uploads, Downloads, Desktop) you may reach; hidden files and keys never go. Telegram takes up to 50 MB. In the app (no Telegram/Slack): give the path instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          maxLength: 4096,
+          description: "Absolute or ~/ path, e.g. ~/projects/site/docs/report.pdf",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    run: (_tools, caller, args, extras) =>
+      Effect.gen(function* () {
+        const path =
+          typeof args === "object" && args !== null && typeof (args as { path?: unknown }).path === "string"
+            ? (args as { path: string }).path.trim()
+            : "";
+        if (path.length === 0) return { error: "path is required." };
+        if (extras.sendFile === undefined) return { error: "Sending files isn't available here." };
+        const result = yield* extras.sendFile(caller, path);
+        return result.ok ? result.value : { error: result.error };
+      }),
   },
   {
     name: "assistant_profile_get",
