@@ -703,7 +703,7 @@ export const ChatComposer = memo(
       activeThreadEnvironmentId: _activeThreadEnvironmentId,
       activeThread,
       isServerThread: _isServerThread,
-      isLocalDraftThread: _isLocalDraftThread,
+      isLocalDraftThread,
       forceCompact = false,
       inDock = false,
       hideRuntimeModeControl = false,
@@ -3640,9 +3640,12 @@ export const ChatComposer = memo(
                               ? `Message ${persona.profile.name}…`
                               : isAssistantChat
                                 ? "Ask Uno anything — it can start chats for you…"
-                                : phase === "disconnected"
-                                  ? "Ask for follow-up changes or attach files"
-                                  : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                                : isLocalDraftThread
+                                  ? // A new chat: no "follow-up" yet (the centred draft screen).
+                                    "Describe the task, or attach files"
+                                  : phase === "disconnected"
+                                    ? "Ask for follow-up changes or attach files"
+                                    : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||
