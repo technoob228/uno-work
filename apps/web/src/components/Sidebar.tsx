@@ -30,6 +30,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
+  CirclePauseIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   CloudOffIcon,
@@ -804,6 +805,15 @@ function SidebarDMark(props: { mark: DRowMark }) {
       );
     case "failed":
       return <span role="img" aria-label="Failed" className="size-2 rounded-full bg-red-500" />;
+    case "stopped":
+      return (
+        <span
+          role="img"
+          aria-label="Stopped"
+          data-testid="sidebar-row-stopped"
+          className="size-2 rounded-full bg-muted-foreground/50"
+        />
+      );
     case "your-turn":
       return (
         <span
@@ -983,13 +993,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 icon: "failed" as const,
                 className: "text-red-700 dark:text-red-300",
               }
-            : yourTurn
+            : status === "stopped"
               ? {
-                  label: "Ready",
-                  icon: "your-turn" as const,
-                  className: "text-emerald-700 dark:text-emerald-300",
+                  label: "Stopped",
+                  icon: "stopped" as const,
+                  className: "text-muted-foreground",
                 }
-              : null;
+              : yourTurn
+                ? {
+                    label: "Ready",
+                    icon: "your-turn" as const,
+                    className: "text-emerald-700 dark:text-emerald-300",
+                  }
+                : null;
 
   const driverKind = resolveProviderDriverKind(thread, props.providerDriverByInstanceId);
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
@@ -1527,6 +1543,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
                     ) : topStatus.icon === "failed" ? (
                       <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
+                    ) : topStatus.icon === "stopped" ? (
+                      <CirclePauseIcon aria-hidden className="size-4 shrink-0" />
                     ) : (
                       <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                     )}

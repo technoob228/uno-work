@@ -1,3 +1,4 @@
+import { isRestartCutOffError } from "@t3tools/shared/turnErrorRetry";
 import * as React from "react";
 import type {
   SidebarEnvironmentScope,
@@ -716,7 +717,9 @@ export function shouldCreateNewThreadInCurrentProject(
 // "in motion" (working) and "broken" (failed). Ready is the unlabeled resting
 // state. Upstream also has "monitoring" (background liveness), which this
 // fork's shells do not carry.
-export type SidebarThreadStatus = "approval" | "input" | "working" | "failed" | "ready";
+// "stopped": a restart of Uno Work cut the agent off (an update, a crash) —
+// nothing broke, so not the red "failed"; the person decides whether to go on.
+export type SidebarThreadStatus = "approval" | "input" | "working" | "failed" | "stopped" | "ready";
 
 export function shouldRecedeSidebarThread(input: {
   status: SidebarThreadStatus;
@@ -747,7 +750,9 @@ export function resolveSidebarThreadStatus(
   ) {
     return "working";
   }
-  if (session?.status === "error") return "failed";
+  if (session?.status === "error") {
+    return isRestartCutOffError(session.lastError) ? "stopped" : "failed";
+  }
   return "ready";
 }
 

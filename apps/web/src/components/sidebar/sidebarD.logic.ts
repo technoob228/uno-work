@@ -27,13 +27,14 @@ export const SIDEBAR_D_PANEL_OPEN_DELAY_MS = 150;
 export const SIDEBAR_D_PANEL_CLOSE_DELAY_MS = 300;
 
 /** The one mark a D row shows at its end. */
-export type DRowMark = "approval" | "input" | "your-turn" | "failed" | "working" | null;
+export type DRowMark = "approval" | "input" | "your-turn" | "failed" | "stopped" | "working" | null;
 
 export function dRowMark(status: SidebarThreadStatus, yourTurn: boolean): DRowMark {
   switch (status) {
     case "approval":
     case "input":
     case "failed":
+    case "stopped":
     case "working":
       return status;
     case "ready":
@@ -51,6 +52,7 @@ const MARK_RANK: Readonly<Record<Exclude<DRowMark, null>, number>> = {
   input: 0,
   "your-turn": 0,
   failed: 1,
+  stopped: 1,
   working: 2,
 };
 
@@ -139,7 +141,13 @@ export function groupChatsForSidebarD<T>(input: {
  * its chats, then Recents; inbox — the chats by status, whatever folder they
  * live in, so what waits for the person is on top.
  */
-export type DStatusSectionId = "needs-you" | "your-turn" | "failed" | "working" | "idle";
+export type DStatusSectionId =
+  | "needs-you"
+  | "your-turn"
+  | "failed"
+  | "stopped"
+  | "working"
+  | "idle";
 
 export interface DStatusSection<T> {
   readonly id: DStatusSectionId;
@@ -155,6 +163,7 @@ export const STATUS_SECTIONS: ReadonlyArray<{
   { id: "needs-you", label: "Needs you" },
   { id: "your-turn", label: "Ready" },
   { id: "failed", label: "Failed" },
+  { id: "stopped", label: "Stopped" },
   { id: "working", label: "Working" },
   { id: "idle", label: "Idle" },
 ];
@@ -166,6 +175,7 @@ export function statusSectionOf(mark: DRowMark): DStatusSectionId {
       return "needs-you";
     case "your-turn":
     case "failed":
+    case "stopped":
     case "working":
       return mark;
     case null:
