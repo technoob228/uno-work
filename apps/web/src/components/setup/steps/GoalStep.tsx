@@ -89,27 +89,11 @@ import { installSkill } from "../setupSkills";
 import { SetupFrame } from "../SetupShell";
 import { NoIndexHtmlError, droppedName, uploadAndPublishSite } from "../siteUpload";
 import { useSetupNavigation } from "../useSetupNavigation";
+import { persistWithRetry } from "../persistWithRetry";
 import { currentSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
 import { AssistantTelegramPanel } from "./ChannelsStep";
 
 // ── shared plumbing ────────────────────────────────────────────────────
-
-/**
- * A settings write right after load can get lost: a fresh clone rotates its
- * session key in the first seconds and a write sent then may never land (prod
- * 26.09: the goal from the console was lost). Writes here are idempotent, so
- * send once (waiting at most 6 s) and repeat a few times in the background.
- */
-async function persistWithRetry(write: () => Promise<void>): Promise<void> {
-  const once = () =>
-    Promise.race([write(), new Promise<void>((resolve) => setTimeout(resolve, 6000))]).catch(
-      (error: unknown) => console.warn("[goal-first] settings write failed", error),
-    );
-  await once();
-  for (const delay of [3000, 8000, 15000]) {
-    setTimeout(() => void once(), delay);
-  }
-}
 
 /**
  * A goal picked in Uno Work goes to the account too (`onboarding_path`), so
@@ -424,7 +408,7 @@ function GoalPicker() {
       void persistWithRetry(async () => {
         await whenServerConfigReady();
         await updateSettings({ onboardingCompleted: true, machineOnboarded: true });
-      });
+      }, "[goal-first]");
       goHome();
     };
     if (machineOnboarded || accountTransport() === "none") {
@@ -468,7 +452,7 @@ function GoalPicker() {
             machineOnboarded: true,
             setup: withAnswer(withGoal(currentSetupProgress(), picked.goal), GOAL_PATH_KEY, via),
           });
-        });
+        }, "[goal-first]");
         if (onThisComputer) {
           goHome();
           return;
@@ -989,7 +973,7 @@ export function GoalStep() {
         machineOnboarded: true,
         setup: current.answers["goal"] === goal ? current : withGoal(current, goal),
       });
-    });
+    }, "[goal-first]");
   }, [goal, rememberGoal, updateSettings]);
   if (!goal) return <GoalPicker />;
   if (goalAsksHow(goal) && !via) return <HowPicker goal={goal} />;
