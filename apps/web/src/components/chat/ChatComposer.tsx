@@ -108,6 +108,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { useDevMode } from "../../devMode";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
@@ -468,9 +469,13 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
+  // 29.10: the context-window meter is a developer readout (Dev mode only).
+  const devMode = useDevMode();
   return (
     <>
-      {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
+      {devMode && props.activeContextWindow ? (
+        <ContextWindowMeter usage={props.activeContextWindow} />
+      ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">
           Preparing a separate copy of the project...
