@@ -18,7 +18,12 @@ import { useCallback } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
-import { HOME_FOLDER_TITLE, resolveHomeFolder, useFolderChats } from "../../hooks/useFolderChats";
+import {
+  HOME_FOLDER_TITLE,
+  resolveHomeFolder,
+  useChatOnComputer,
+  useFolderChats,
+} from "../../hooks/useFolderChats";
 import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useSettings } from "../../hooks/useSettings";
 import { startNewLocalThreadFromContext } from "../../lib/chatThreadActions";
@@ -35,6 +40,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
   const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
   const openAddProject = useCommandPaletteStore((store) => store.openAddProject);
   const folderChats = useFolderChats(environmentId);
+  const chatOnComputer = useChatOnComputer();
   const setTerminalOpen = useTerminalStateStore((store) => store.setTerminalOpen);
 
   const context = useCallback(
@@ -103,11 +109,20 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
    * into its composer. Returns the draft it opened, when it opened one.
    */
   const openChatWithPrompt = useCallback(
-    async (prompt: string, folder?: string | null): Promise<DraftId | null> => {
+    async (
+      prompt: string,
+      folder?: string | null,
+      onEnvironmentId?: EnvironmentId | null,
+    ): Promise<DraftId | null> => {
       if (environmentId === null) return null;
-      const target = folder || (await resolveHomeFolder(environmentId));
-      if (target) await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
-      else await startNewLocalThreadFromContext(context());
+      if (onEnvironmentId && onEnvironmentId !== environmentId) {
+        // Home's "on [computer ▾]": another connected computer.
+        await chatOnComputer.chatIn(onEnvironmentId, folder ?? null);
+      } else {
+        const target = folder || (await resolveHomeFolder(environmentId));
+        if (target) await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
+        else await startNewLocalThreadFromContext(context());
+      }
       const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
       const route = resolveThreadRouteTarget(params);
       const store = useComposerDraftStore.getState();
@@ -118,7 +133,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       if (route?.kind === "server") store.setPrompt(route.threadRef, prompt);
       return null;
     },
-    [chatInFolder, context, environmentId, router],
+    [chatInFolder, chatOnComputer, context, environmentId, router],
   );
 
   /**
@@ -140,7 +155,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
    */
   const startTask = useCallback(
     async (prompt: string, options: HomeStartOptions) => {
-      const draftId = await openChatWithPrompt(prompt, options.folder);
+      const draftId = await openChatWithPrompt(prompt, options.folder, options.environmentId);
       if (!draftId) return;
       const store = useComposerDraftStore.getState();
       // Set on the draft itself: a reused draft doesn't pick up the sticky model.

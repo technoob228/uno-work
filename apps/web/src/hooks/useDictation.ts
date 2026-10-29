@@ -9,6 +9,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { readLocalApi } from "../localApi";
+import { type DictationDraft, dictationErrorMessage } from "./dictationDraft";
 
 export type DictationState = "idle" | "recording" | "transcribing";
 
@@ -36,8 +37,11 @@ export const isDictationSupported = (): boolean =>
   typeof MediaRecorder !== "undefined";
 
 export function useDictation(callbacks: {
-  readonly onTranscript: (text: string) => void;
+  /** `captured`: the box as it was when the recording stopped (see `resolveDictationInsert`). */
+  readonly onTranscript: (text: string, captured: DictationDraft | null) => void;
   readonly onError: (message: string) => void;
+  /** The box right now — read when the recording stops, before transcription. */
+  readonly captureDraft?: () => DictationDraft | null;
 }): {
   readonly state: DictationState;
   readonly start: () => Promise<void>;
@@ -88,6 +92,7 @@ export function useDictation(callbacks: {
         return;
       }
       setState("transcribing");
+      const captured = callbacksRef.current.captureDraft?.() ?? null;
       void (async () => {
         try {
           const type = recorder.mimeType || mimeType || "audio/webm";
@@ -115,9 +120,11 @@ export function useDictation(callbacks: {
           if (text.length === 0) {
             throw new Error("No speech was recognized.");
           }
-          callbacksRef.current.onTranscript(text);
+          callbacksRef.current.onTranscript(text, captured);
         } catch (error) {
-          callbacksRef.current.onError(error instanceof Error ? error.message : String(error));
+          callbacksRef.current.onError(
+            dictationErrorMessage(error instanceof Error ? error.message : String(error)),
+          );
         } finally {
           setState("idle");
         }

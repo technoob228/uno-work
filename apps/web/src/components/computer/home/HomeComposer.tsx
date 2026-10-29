@@ -34,6 +34,9 @@ import {
 import {
   ArrowUpIcon,
   FileIcon,
+  LoaderCircleIcon,
+  MicIcon,
+  SquareIcon,
   FolderIcon,
   FolderUpIcon,
   LockIcon,
@@ -72,12 +75,16 @@ import {
   homeSendCheck,
 } from "../../../screenRecording/homeRecording";
 import { useScreenRecordingStore } from "../../../screenRecording/recordingStore";
+import { type DictationDraft, resolveDictationInsert } from "../../../hooks/dictationDraft";
+import { isDictationSupported, useDictation } from "../../../hooks/useDictation";
+import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
+import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
 import { TraitsPicker } from "../../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
-import { FolderChipMenu, type PickedFolder } from "../FolderChipMenu";
+import type { PickedFolder } from "../FolderChipMenu";
 import { homeAttachmentsFromFiles } from "./homeAttachments";
 import { homeStartModelSelection } from "./homeStartModel";
 import { useOwnAgentStart } from "./useOwnAgentStart";
@@ -93,6 +100,8 @@ const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
 };
 
 export interface HomeStartOptions {
+  /** The computer to start on (the box's computer pick); absent = Home's computer. */
+  readonly environmentId?: EnvironmentId | null;
   /** The folder to work in; null = the home folder. */
   readonly folder: string | null;
   /** Null = nothing usable to pick; the chat falls back to its own default. */
@@ -218,7 +227,14 @@ export function HomeComposer({
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const picker = useHomeModelPicker(environmentId, { ownAgentStart: true });
+  // "on [computer ▾]": the task can start on another connected computer
+  // without leaving this Home. Null = Home's own computer.
+  const [pickedEnvironmentId, setPickedEnvironmentId] = useState<EnvironmentId | null>(null);
+  const targetEnvironmentId =
+    pickedEnvironmentId !== null && pickedEnvironmentId !== environmentId
+      ? pickedEnvironmentId
+      : environmentId;
+  const picker = useHomeModelPicker(targetEnvironmentId, { ownAgentStart: true });
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
   const [images, setImages] = useState<ComposerImageAttachment[]>([]);
@@ -239,6 +255,37 @@ export function HomeComposer({
     markRecordingPrefilled(recording.threadKey);
     if (prefill.text !== null) setText(prefill.text);
   }, [recording, markRecordingPrefilled]);
+  // Dictation, as in the chat's composer: the words go where the caret was,
+  // or at the end if the person kept typing meanwhile.
+  const [dictationSupported] = useState(isDictationSupported);
+  const captureDictationDraft = (): DictationDraft => ({
+    owner: "home",
+    text: textRef.current,
+    cursor: ref.current?.selectionStart ?? textRef.current.length,
+  });
+  const dictation = useDictation({
+    captureDraft: captureDictationDraft,
+    onTranscript: (words, captured) => {
+      const result = resolveDictationInsert(captured, captureDictationDraft(), words);
+      if (result.kind !== "insert") return;
+      const current = textRef.current;
+      const next = current.slice(0, result.at) + result.insertion + current.slice(result.at);
+      setText(next);
+      const caret = result.at + result.insertion.length;
+      requestAnimationFrame(() => {
+        ref.current?.focus();
+        ref.current?.setSelectionRange(caret, caret);
+      });
+    },
+    onError: (message) =>
+      toastManager.add({ type: "error", title: "Dictation failed.", description: message }),
+  });
+  const dictationLabel =
+    dictation.state === "recording"
+      ? "Stop and transcribe"
+      : dictation.state === "transcribing"
+        ? "Transcribing…"
+        : "Dictate";
   const selectedEntry = picker.selection
     ? picker.instanceEntries.find((entry) => entry.instanceId === picker.selection?.instanceId)
     : undefined;
@@ -291,6 +338,7 @@ export function HomeComposer({
     setStarting(true);
     try {
       await onStart(prompt, {
+        environmentId: targetEnvironmentId,
         folder: folder?.cwd ?? null,
         modelSelection: picker.selection,
         runtimeMode,
@@ -439,11 +487,25 @@ export function HomeComposer({
               data-testid="home-composer-chips"
             >
               {minimal ? null : (
-                <FolderChipMenu
-                  environmentId={environmentId}
+                <NewChatComputerPicker
+                  variant="chip"
+                  environmentId={targetEnvironmentId}
+                  onPick={(next) => {
+                    // Folders belong to a computer: a new one starts in its home folder.
+                    setPickedEnvironmentId(next);
+                    setFolder(null);
+                    ref.current?.focus();
+                  }}
+                  testId="home-computer-chip"
+                />
+              )}
+              {minimal ? null : (
+                <NewChatFolderPicker
+                  variant="chip"
+                  environmentId={targetEnvironmentId}
                   folder={folder}
                   onPick={(next) => {
-                    // A folder the chip just made is a project already; the
+                    // A folder the picker just made is a project already; the
                     // chat finds it by path when the task starts.
                     setFolder(next);
                     ref.current?.focus();
@@ -458,7 +520,7 @@ export function HomeComposer({
                   model={picker.selection.model}
                   lockedProvider={null}
                   instanceEntries={picker.instanceEntries}
-                  environmentId={environmentId}
+                  environmentId={targetEnvironmentId}
                   modelOptionsByInstance={picker.modelOptionsByInstance}
                   open={pickerOpen}
                   onOpenChange={setPickerOpen}
@@ -545,6 +607,36 @@ export function HomeComposer({
           >
             <PaperclipIcon className="size-4" />
           </button>
+          {dictationSupported ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (dictation.state === "recording") dictation.stop();
+                else if (dictation.state === "idle") void dictation.start();
+              }}
+              disabled={dictation.state === "transcribing"}
+              aria-label={dictationLabel}
+              title={dictationLabel}
+              data-testid="home-dictate"
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                dictation.state === "recording" && "animate-pulse text-red-500 hover:text-red-500",
+              )}
+            >
+              {dictation.state === "transcribing" ? (
+                <LoaderCircleIcon className="size-4 animate-spin" />
+              ) : dictation.state === "recording" ? (
+                <SquareIcon className="size-4 fill-current" />
+              ) : (
+                <MicIcon className="size-4" />
+              )}
+            </button>
+          ) : null}
+          {recordingSupported && recordingKey ? (
+            // The same recording as "Show the agent" below, in the box itself
+            // (as in the chat's composer).
+            <RecordButton threadKey={recordingKey} environmentId={environmentId} />
+          ) : null}
           <button
             type="button"
             onClick={() => void submit()}

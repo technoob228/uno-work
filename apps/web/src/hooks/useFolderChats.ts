@@ -15,7 +15,9 @@ import {
   isAssistantProjectId,
   type EnvironmentId,
   type ModelSelection,
+  type RuntimeMode,
   type ScopedProjectRef,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -23,7 +25,10 @@ import { useCallback } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { ensureEnvironmentApi } from "../environmentApi";
-import { useEnvironmentProviders } from "../environments/settings/serverSettings";
+import {
+  readEnvironmentServerConfig,
+  useEnvironmentProviders,
+} from "../environments/settings/serverSettings";
 import { HOME_FOLDER_TITLE } from "../lib/homeFolder";
 import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
 import { newCommandId, newProjectId } from "../lib/utils";
@@ -66,6 +71,100 @@ export function folderDisplayName(path: string): string {
   return path.replace(/\/+$/, "").split("/").pop() || path;
 }
 
+export interface EnsureFolderProjectOptions {
+  readonly createFolder?: boolean;
+  /** The new project's default model; the machine's usable default otherwise. */
+  readonly defaultModelSelection?: ModelSelection | null;
+}
+
+/**
+ * The project for `folder` on `environmentId`, created when it isn't one yet.
+ * `providers`: the machine's harnesses for the new project's default model
+ * (read from its config when not given — any connected computer, not only
+ * the one on screen).
+ */
+export async function ensureFolderProjectOn(
+  environmentId: EnvironmentId,
+  folder: string,
+  title?: string,
+  options?: EnsureFolderProjectOptions & { readonly providers?: ReadonlyArray<ServerProvider> },
+): Promise<ScopedProjectRef> {
+  const existing = findProjectByPath(
+    selectProjectsAcrossEnvironments(useStore.getState()).filter(
+      (project) => project.environmentId === environmentId && !isAssistantProjectId(project.id),
+    ),
+    folder,
+  );
+  if (existing) return scopeProjectRef(environmentId, existing.id);
+  const providers =
+    options?.providers ?? readEnvironmentServerConfig(environmentId)?.providers ?? [];
+  const selection = options?.defaultModelSelection ?? pickUsableDefaultModelSelection(providers);
+  const projectId = newProjectId();
+  await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
+    type: "project.create",
+    commandId: newCommandId(),
+    projectId,
+    title: title ?? inferProjectTitleFromPath(folder),
+    workspaceRoot: folder,
+    // "Empty project" makes the folder; every other path points at one
+    // that is already there.
+    createWorkspaceRootIfMissing: options?.createFolder === true,
+    defaultModelSelection: selection ?? {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: DEFAULT_MODEL,
+    },
+    createdAt: new Date().toISOString(),
+  });
+  return scopeProjectRef(environmentId, projectId);
+}
+
+/** What a new chat carries when it moves (folder or computer): the words, model, permissions. */
+interface DraftCarry {
+  readonly prompt: string;
+  readonly modelSelection: ModelSelection | undefined;
+  readonly runtimeMode: RuntimeMode | null;
+}
+
+function readDraftCarry(draftId: DraftId): DraftCarry {
+  const before = useComposerDraftStore.getState().getComposerDraft(draftId);
+  return {
+    prompt: before?.prompt ?? "",
+    modelSelection: before?.activeProvider
+      ? before.modelSelectionByProvider[before.activeProvider]
+      : undefined,
+    runtimeMode: before?.runtimeMode ?? null,
+  };
+}
+
+/**
+ * After the move: the draft the chat opened on — read from the route (a
+ * project can have drafts under two keys, scoped id / logical path; the route
+ * is the truth) — gets what was typed, and the old draft lets it go.
+ */
+function applyDraftCarry(
+  router: ReturnType<typeof useRouter>,
+  draftId: DraftId,
+  carry: DraftCarry,
+  options: { readonly keepModel: boolean },
+): void {
+  const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+  const route = resolveThreadRouteTarget(params);
+  if (route?.kind !== "draft" || route.draftId === draftId) return;
+  const moved = route.draftId;
+  const next = useComposerDraftStore.getState();
+  if (carry.prompt) {
+    next.setPrompt(moved, carry.prompt);
+    next.setPrompt(draftId, "");
+  }
+  if (options.keepModel && carry.modelSelection) {
+    next.setModelSelection(moved, carry.modelSelection);
+  }
+  if (carry.runtimeMode) {
+    next.setRuntimeMode(moved, carry.runtimeMode);
+    next.setDraftThreadContext(moved, { runtimeMode: carry.runtimeMode });
+  }
+}
+
 export function useFolderChats(environmentId: EnvironmentId | null) {
   const { handleNewThread } = useNewThreadHandler();
   const router = useRouter();
@@ -76,39 +175,10 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
     async (
       folder: string,
       title?: string,
-      options?: {
-        readonly createFolder?: boolean;
-        /** The new project's default model; the machine's usable default otherwise. */
-        readonly defaultModelSelection?: ModelSelection | null;
-      },
+      options?: EnsureFolderProjectOptions,
     ): Promise<ScopedProjectRef> => {
       if (environmentId === null) throw new Error("No connection to this computer.");
-      const existing = findProjectByPath(
-        selectProjectsAcrossEnvironments(useStore.getState()).filter(
-          (project) => project.environmentId === environmentId && !isAssistantProjectId(project.id),
-        ),
-        folder,
-      );
-      if (existing) return scopeProjectRef(environmentId, existing.id);
-      const selection =
-        options?.defaultModelSelection ?? pickUsableDefaultModelSelection(providers);
-      const projectId = newProjectId();
-      await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
-        type: "project.create",
-        commandId: newCommandId(),
-        projectId,
-        title: title ?? inferProjectTitleFromPath(folder),
-        workspaceRoot: folder,
-        // "Empty project" makes the folder; every other path points at one
-        // that is already there.
-        createWorkspaceRootIfMissing: options?.createFolder === true,
-        defaultModelSelection: selection ?? {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: DEFAULT_MODEL,
-        },
-        createdAt: new Date().toISOString(),
-      });
-      return scopeProjectRef(environmentId, projectId);
+      return ensureFolderProjectOn(environmentId, folder, title, { ...options, providers });
     },
     [environmentId, providers],
   );
@@ -154,34 +224,50 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
       if (environmentId === null) return;
       const target = folder ?? (await resolveHomeFolder(environmentId));
       if (!target) throw new Error("Couldn't find the home folder on this computer.");
-      const store = useComposerDraftStore.getState();
-      const before = store.getComposerDraft(draftId);
-      const prompt = before?.prompt ?? "";
-      const modelSelection = before?.activeProvider
-        ? before.modelSelectionByProvider[before.activeProvider]
-        : undefined;
-      const runtimeMode = before?.runtimeMode ?? null;
+      const carry = readDraftCarry(draftId);
       if (projectRef) await handleNewThread(projectRef, { envMode: "local" });
       else await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
-      // The draft the chat opened on — read from the route: a project can have
-      // drafts under two keys (scoped id / logical path), the route is the truth.
-      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
-      const route = resolveThreadRouteTarget(params);
-      if (route?.kind !== "draft" || route.draftId === draftId) return;
-      const moved = route.draftId;
-      const next = useComposerDraftStore.getState();
-      if (prompt) {
-        next.setPrompt(moved, prompt);
-        next.setPrompt(draftId, "");
-      }
-      if (modelSelection) next.setModelSelection(moved, modelSelection);
-      if (runtimeMode) {
-        next.setRuntimeMode(moved, runtimeMode);
-        next.setDraftThreadContext(moved, { runtimeMode });
-      }
+      applyDraftCarry(router, draftId, carry, { keepModel: true });
     },
     [chatInFolder, environmentId, handleNewThread, router],
   );
 
   return { ensureFolderProject, chatInFolder, chatInHomeFolder, moveDraftToFolder };
+}
+
+/**
+ * A new chat on any connected computer — the draft screen's and Home's
+ * "on [computer ▾]". The chat opens in `folder` there (the home folder when
+ * null); `moveDraft` brings what was typed along from a draft on another
+ * computer (not the model: the other computer may not have it).
+ */
+export function useChatOnComputer() {
+  const { handleNewThread } = useNewThreadHandler();
+  const router = useRouter();
+
+  const chatIn = useCallback(
+    async (environmentId: EnvironmentId, folder: string | null): Promise<ScopedProjectRef> => {
+      const target = folder ?? (await resolveHomeFolder(environmentId));
+      if (!target) throw new Error("Couldn't reach that computer.");
+      const projectRef = await ensureFolderProjectOn(
+        environmentId,
+        target,
+        folder ? undefined : HOME_FOLDER_TITLE,
+      );
+      await handleNewThread(projectRef, { envMode: "local" });
+      return projectRef;
+    },
+    [handleNewThread],
+  );
+
+  const moveDraft = useCallback(
+    async (draftId: DraftId, environmentId: EnvironmentId): Promise<void> => {
+      const carry = readDraftCarry(draftId);
+      await chatIn(environmentId, null);
+      applyDraftCarry(router, draftId, carry, { keepModel: false });
+    },
+    [chatIn, router],
+  );
+
+  return { chatIn, moveDraft };
 }

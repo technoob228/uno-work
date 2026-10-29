@@ -115,6 +115,8 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   /** The project's folder; a new chat shows it as the folder chip. */
   activeProjectCwd?: string | undefined;
+  /** The new chat's centred question already asks for the folder (draft hero). */
+  hideDraftFolderChip?: boolean;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -156,6 +158,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeProjectName,
   activeProjectCwd,
+  hideDraftFolderChip = false,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -293,7 +296,9 @@ export const ChatHeader = memo(function ChatHeader({
               Talks to you in Telegram or Slack, starts and watches other chats for you.
             </span>
           </>
-        ) : draftId && activeProjectName && activeProjectCwd ? (
+        ) : draftId && hideDraftFolderChip ? null : draftId &&
+          activeProjectName &&
+          activeProjectCwd ? (
           <DraftFolderChip
             environmentId={activeThreadEnvironmentId}
             draftId={draftId}

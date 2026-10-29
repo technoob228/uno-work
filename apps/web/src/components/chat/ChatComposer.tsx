@@ -160,6 +160,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { readLocalApi } from "../../localApi";
 import { isDictationSupported, useDictation } from "../../hooks/useDictation";
+import { type DictationDraft, resolveDictationInsert } from "../../hooks/dictationDraft";
 import { RecordButton, screenRecordingAvailable } from "../../screenRecording/RecordButton";
 import { RecordingComposerCard } from "../../screenRecording/RecordingCards";
 import { prefilledInstruction } from "../../screenRecording/recordingLogic";
@@ -702,7 +703,7 @@ export const ChatComposer = memo(
       activeThreadEnvironmentId: _activeThreadEnvironmentId,
       activeThread,
       isServerThread: _isServerThread,
-      isLocalDraftThread: _isLocalDraftThread,
+      isLocalDraftThread,
       forceCompact = false,
       inDock = false,
       hideRuntimeModeControl = false,
@@ -1841,22 +1842,34 @@ export const ChatComposer = memo(
       };
     }, [composerCursor, composerTerminalContexts, promptRef]);
 
+    // Whose box the words are for: a late transcript never lands in another chat.
+    const dictationOwner =
+      typeof composerDraftTarget === "string"
+        ? composerDraftTarget
+        : `${composerDraftTarget.environmentId}:${composerDraftTarget.threadId}`;
+    const captureDictationDraft = useCallback((): DictationDraft => {
+      const snapshot = readComposerSnapshot();
+      return { owner: dictationOwner, text: snapshot.value, cursor: snapshot.cursor };
+    }, [dictationOwner, readComposerSnapshot]);
     const insertDictationTranscript = useCallback(
-      (text: string) => {
-        const snapshot = readComposerSnapshot();
-        const needsSpaceBefore =
-          snapshot.cursor > 0 && !/\s/.test(snapshot.value.charAt(snapshot.cursor - 1));
-        applyPromptReplacement(
-          snapshot.cursor,
-          snapshot.cursor,
-          `${needsSpaceBefore ? " " : ""}${text}`,
-        );
+      (text: string, captured: DictationDraft | null) => {
+        const result = resolveDictationInsert(captured, captureDictationDraft(), text);
+        if (result.kind === "insert") {
+          applyPromptReplacement(result.at, result.at, result.insertion);
+        } else if (result.kind === "elsewhere") {
+          toastManager.add({
+            type: "warning",
+            title: "Your words weren't added — the chat changed while they were transcribed.",
+            description: text,
+          });
+        }
       },
-      [applyPromptReplacement, readComposerSnapshot],
+      [applyPromptReplacement, captureDictationDraft],
     );
 
     const dictation = useDictation({
       onTranscript: insertDictationTranscript,
+      captureDraft: captureDictationDraft,
       onError: (message) =>
         toastManager.add({
           type: "error",
@@ -3627,9 +3640,12 @@ export const ChatComposer = memo(
                               ? `Message ${persona.profile.name}…`
                               : isAssistantChat
                                 ? "Ask Uno anything — it can start chats for you…"
-                                : phase === "disconnected"
-                                  ? "Ask for follow-up changes or attach files"
-                                  : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
+                                : isLocalDraftThread
+                                  ? // A new chat: no "follow-up" yet (the centred draft screen).
+                                    "Describe the task, or attach files"
+                                  : phase === "disconnected"
+                                    ? "Ask for follow-up changes or attach files"
+                                    : "Ask anything, attach files, @tag files/folders, or use / to show available commands"
                   }
                   disabled={
                     isConnecting ||
