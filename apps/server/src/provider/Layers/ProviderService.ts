@@ -1106,19 +1106,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ),
       );
       const activeSessions = sessionsByProvider.flatMap((sessions) => sessions);
-      const persistedBindings = yield* directory.listThreadIds().pipe(
-        Effect.flatMap((threadIds) =>
-          Effect.forEach(
-            threadIds,
-            (threadId) =>
-              directory
-                .getBinding(threadId)
-                .pipe(Effect.orElseSucceed(() => Option.none<ProviderRuntimeBinding>())),
-            { concurrency: "unbounded" },
-          ),
-        ),
-        Effect.orElseSucceed(() => [] as Array<Option.Option<ProviderRuntimeBinding>>),
-      );
+      // Only live adapter sessions appear in this response. Resolving every
+      // historical binding here made each call scale with the full thread
+      // history (≈2k bindings → 2k SELECTs per poll) instead of the active
+      // session set. Upstream t3code 9a7b1e21e5.
+      const persistedBindings = yield* Effect.forEach(
+        [...new Set(activeSessions.map((session) => session.threadId))],
+        (threadId) =>
+          directory
+            .getBinding(threadId)
+            .pipe(Effect.orElseSucceed(() => Option.none<ProviderRuntimeBinding>())),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.orElseSucceed(() => [] as Array<Option.Option<ProviderRuntimeBinding>>));
       const bindingsByThreadId = new Map<ThreadId, ProviderRuntimeBinding>();
       for (const bindingOption of persistedBindings) {
         const binding = Option.getOrUndefined(bindingOption);
