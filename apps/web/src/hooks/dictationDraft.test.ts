@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { dictationErrorMessage, resolveDictationInsert } from "./dictationDraft";
 
-describe("resolveDictationInsert", () => {
-  const draft = (text: string, cursor = text.length, owner = "chat-a") => ({ owner, text, cursor });
+const draft = (text: string, cursor = text.length, owner = "chat-a") => ({ owner, text, cursor });
 
+describe("resolveDictationInsert", () => {
   it("puts the words at the caret they were recorded at", () => {
-    expect(resolveDictationInsert(draft("Fix  please", 4), draft("Fix  please", 4), "the bug")).toEqual(
-      { kind: "insert", at: 4, insertion: "the bug" },
-    );
+    expect(
+      resolveDictationInsert(draft("Fix  please", 4), draft("Fix  please", 4), "the bug"),
+    ).toEqual({ kind: "insert", at: 4, insertion: "the bug" });
     expect(resolveDictationInsert(draft("Hello"), draft("Hello"), " world ")).toEqual({
       kind: "insert",
       at: 5,
@@ -31,9 +31,9 @@ describe("resolveDictationInsert", () => {
   });
 
   it("keeps the words out of another chat", () => {
-    expect(
-      resolveDictationInsert(draft("", 0, "chat-a"), draft("", 0, "chat-b"), "hello"),
-    ).toEqual({ kind: "elsewhere" });
+    expect(resolveDictationInsert(draft("", 0, "chat-a"), draft("", 0, "chat-b"), "hello")).toEqual(
+      { kind: "elsewhere" },
+    );
     expect(resolveDictationInsert(draft(""), null, "hello")).toEqual({ kind: "elsewhere" });
   });
 
