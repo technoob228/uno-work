@@ -178,6 +178,9 @@ import {
   type EmbeddedChatVisibility,
 } from "./chat/embeddedChatVisibility";
 import { ChatHeader } from "./chat/ChatHeader";
+import { DraftHeroHeadline, DraftHeroStarters } from "./chat/DraftHeroHeadline";
+import { resolveDraftHeroState } from "./chat/draftHero.logic";
+import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransition";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
@@ -1443,6 +1446,18 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  // A new chat not sent yet: the composer in the middle under "What should we
+  // do in [folder] on [computer]?" (upstream draft hero, #4055).
+  const isDraftHeroState = resolveDraftHeroState({
+    isLocalDraftThread: routeKind === "draft" && draftId !== null && isLocalDraftThread,
+    hasTimelineEntries: visibleTimelineEntries.length > 0,
+    isWorking,
+    isEmbedded,
+    isPreviewFocusMode,
+    isAssistantConversation: activeThread ? isAssistantConversation(activeThread) : false,
+    showComposer,
+  });
+  const draftHeroTransitionGroupRef = useDraftHeroLayoutTransition(isDraftHeroState);
   // P5 (28.10): the browser's "Show notifications" window comes after a line
   // that says what for, at the moment it is useful — Uno works, the person may
   // switch tabs — not on the first click of the first screen.
@@ -4136,6 +4151,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             activeProjectName={activeProject?.name}
             activeProjectCwd={activeProject?.cwd}
+            hideDraftFolderChip={isDraftHeroState}
             isGitRepo={isGitRepo}
             openInCwd={gitCwd}
             activeProjectScripts={activeProject?.scripts}
@@ -4223,7 +4239,7 @@ export default function ChatView(props: ChatViewProps) {
           {/* Messages Wrapper */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally */}
-            {showsTimeline(embeddedVisibility) ? (
+            {showsTimeline(embeddedVisibility) && !isDraftHeroState ? (
               <MessagesTimeline
                 key={activeThread.id}
                 isWorking={isWorking}
@@ -4315,6 +4331,7 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div
+                ref={draftHeroTransitionGroupRef}
                 className={cn(
                   "relative isolate",
                   isPreviewFocusMode && "pointer-events-auto",
@@ -4326,7 +4343,19 @@ export default function ChatView(props: ChatViewProps) {
                     "rounded-2xl border border-border/70 bg-card/95 shadow-xl shadow-black/10 backdrop-blur-xl",
                 )}
                 data-chat-dock={isChatDockMode ? "true" : undefined}
+                data-draft-hero={isDraftHeroState ? "true" : undefined}
               >
+                {isDraftHeroState && draftId && activeProject ? (
+                  // Out of flow, above the box, so the composer itself is what's centred.
+                  <div className="absolute inset-x-0 bottom-full pb-6">
+                    <DraftHeroHeadline
+                      environmentId={activeThread.environmentId}
+                      draftId={draftId}
+                      projectName={activeProject.name}
+                      projectCwd={activeProject.cwd}
+                    />
+                  </div>
+                ) : null}
                 {isChatDockMode ? (
                   <FullscreenChatDockHeader
                     status={focusChatStatus}
@@ -4497,6 +4526,20 @@ export default function ChatView(props: ChatViewProps) {
                   availableEnvironments={logicalProjectEnvironments}
                 />
               )}
+            </div>
+          ) : null}
+
+          {isDraftHeroState && draftId ? (
+            // The lower half of the page: the composer sits between this and the
+            // empty timeline above, in the middle; a few hints right under it.
+            <div className="min-h-0 flex-1 overflow-hidden px-3 pt-1 sm:px-5">
+              <div className="mx-auto w-full max-w-208">
+                <DraftHeroStarters
+                  environmentId={activeThread.environmentId}
+                  draftId={draftId}
+                  onPicked={scheduleComposerFocus}
+                />
+              </div>
             </div>
           ) : null}
 
