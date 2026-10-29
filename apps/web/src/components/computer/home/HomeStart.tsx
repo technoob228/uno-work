@@ -32,6 +32,7 @@ import { toastManager } from "../../ui/toast";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
+import { useFirstSnapshotPending } from "../../../lib/firstSnapshot";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import { goalState } from "../../setup/goals";
@@ -269,6 +270,11 @@ export function HomeStart({
   const { threads, now } = useHomeThreads();
   const skippedQuestions = useSkippedQuestionThreads(now);
   const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
+  // The computer's chats haven't come yet: "Needs you" / "In progress" would
+  // appear above the widgets a moment later and push them down (S6 flicker
+  // recipe c). Until then the widgets wait, so everything below the box lands
+  // at once. Capped (FIRST_SNAPSHOT_MAX_WAIT_MS) for a computer that never answers.
+  const firstSnapshotPending = useFirstSnapshotPending();
   // 01.10: the simple start screen unless Dev mode is on.
   const devMode = useDevMode();
   // The same box takes a project (Misha 01.10): Upload a project or a dropped
@@ -765,7 +771,7 @@ export function HomeStart({
           </div>
         ) : null}
         {/* Above the widgets it changes (Misha 11.10), not under them. */}
-        {layout.editing ? null : (
+        {layout.editing || firstSnapshotPending ? null : (
           <button
             type="button"
             onClick={() => layout.setEditing(true)}
@@ -776,7 +782,7 @@ export function HomeStart({
             Customize widgets
           </button>
         )}
-        {widgetBlocks.length > 0 ? (
+        {widgetBlocks.length > 0 && (layout.editing || !firstSnapshotPending) ? (
           <HomeWidgetGrid
             blocks={widgetBlocks}
             editing={layout.editing}
