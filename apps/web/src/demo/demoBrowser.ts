@@ -63,6 +63,27 @@ const APPS_BY_MACHINE: Record<DemoMachine["key"], () => UnoMachineApp[]> = {
     app("pult", "Пульт", "🎛", "Agents, questions and reports", demoSiteUrl("apps/pult.html")),
   ],
   work: () => [
+    // Prototype 29.10: pinned apps with a Home widget (the peek on hover).
+    {
+      ...app(
+        "shop-sales",
+        "Продажи магазина",
+        "📈",
+        "Orders and revenue of shop-site",
+        demoSiteUrl("apps/sales/"),
+      ),
+      widget: { path: "/widget.html", size: "medium", title: "Продажи сегодня" },
+    },
+    {
+      ...app(
+        "support-bot",
+        "Бот поддержки",
+        "🤖",
+        "Telegram support bot of the shop",
+        demoSiteUrl("apps/support/"),
+      ),
+      widget: { path: "/widget.html", size: "medium", title: "Ждут ответа" },
+    },
     app(
       "ai-limits",
       "Лимиты нейронок",

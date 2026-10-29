@@ -17,6 +17,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   CircleHelpIcon,
+  CodeXmlIcon,
   CreditCardIcon,
   FolderIcon,
   HouseIcon,
@@ -33,7 +34,7 @@ import {
   SquarePenIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useState, type FocusEvent, type ReactNode } from "react";
 
 import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
@@ -44,6 +45,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
+import { toggleDevMode, useDevMode } from "../../devMode";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
 import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
@@ -62,6 +64,7 @@ import {
 } from "./SidebarDAccountButton";
 import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
+import { type PlacesVariant, useSidebarProto } from "./sidebarProto";
 import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
@@ -290,6 +293,10 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
  * A place as an icon in the one row on top (Misha 28.10: "Home / Files / Apps
  * & sites — icons in one line, the name on hover; they shouldn't get in the
  * way"). The active one is lit.
+ *
+ * Prototype 29.10 (`sidebarProto.ts`): with `named` set the name grows out of
+ * the icon instead of a tooltip, and the icons to its right move over; null
+ * keeps the tooltip of 0.0.161.
  */
 function PlaceIcon(props: {
   icon: ReactNode;
@@ -298,26 +305,98 @@ function PlaceIcon(props: {
   onClick: () => void;
   testId: string;
   tour?: string;
+  /** The name beside the icon now (true/false), or in a tooltip (null). */
+  named?: boolean | null;
+  onHoverChange?: (hovered: boolean) => void;
+  /** A switch (Dev mode): lit while on, `aria-pressed`. */
+  pressed?: boolean;
+  /** The tooltip, when it says more than the name ("Dev mode: on"). */
+  hint?: string;
+  className?: string;
 }) {
+  const named = props.named ?? null;
+  const lit = props.pressed
+    ? "bg-primary/12 text-primary hover:bg-primary/18"
+    : props.active
+      ? PLACE_ICON_ACTIVE
+      : PLACE_ICON_IDLE;
+  const buttonProps = {
+    type: "button" as const,
+    "aria-label": props.label,
+    "aria-pressed": props.pressed,
+    "aria-current": props.active ? ("page" as const) : undefined,
+    onClick: props.onClick,
+    onPointerEnter: () => props.onHoverChange?.(true),
+    onPointerLeave: () => props.onHoverChange?.(false),
+    onFocus: (event: FocusEvent<HTMLButtonElement>) => {
+      if (event.currentTarget.matches(":focus-visible")) props.onHoverChange?.(true);
+    },
+    onBlur: () => props.onHoverChange?.(false),
+    "data-testid": props.testId,
+    "data-tour": props.tour,
+    "data-named": named === null ? undefined : String(named),
+    className: cn(named === null ? PLACE_ICON_CLASS : PLACE_PILL_CLASS, lit, props.className),
+  };
+  if (named !== null) {
+    return (
+      <button {...buttonProps}>
+        {props.icon}
+        {/* A narrow sidebar: the name gives way (…) before the icons on its right would. */}
+        <span
+          aria-hidden
+          className={cn(
+            "grid min-w-0 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none",
+            named ? "grid-cols-[1fr]" : "grid-cols-[0fr]",
+          )}
+        >
+          <span className="overflow-hidden">
+            <span className="block truncate pr-0.5 pl-1 text-[13px] font-medium">
+              {props.label}
+            </span>
+          </span>
+        </span>
+      </button>
+    );
+  }
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={props.label}
-            onClick={props.onClick}
-            data-testid={props.testId}
-            data-tour={props.tour}
-            aria-current={props.active ? "page" : undefined}
-            className={cn(PLACE_ICON_CLASS, props.active ? PLACE_ICON_ACTIVE : PLACE_ICON_IDLE)}
-          />
-        }
-      >
-        {props.icon}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+      <TooltipTrigger render={<button {...buttonProps} />}>{props.icon}</TooltipTrigger>
+      <TooltipPopup side="bottom">{props.hint ?? props.label}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** Whose name shows in the row now: the hovered place's, or (variant `one`) the open place's. */
+function placeNamed(
+  variant: PlacesVariant,
+  hovered: string | null,
+  id: string,
+  active: boolean,
+): boolean | null {
+  if (variant === "tooltip") return null;
+  if (variant === "expand") return hovered === id;
+  return hovered !== null ? hovered === id : active;
+}
+
+/**
+ * Dev mode as a switch in the row (Misha 29.10, S3 takes it from here): the
+ * terminal, Revert and the context meter in chats. Lit while on.
+ */
+function DevModePlace(props: { named: boolean | null; onHoverChange: (hovered: boolean) => void }) {
+  const devMode = useDevMode();
+  return (
+    <PlaceIcon
+      icon={<CodeXmlIcon />}
+      label="Dev mode"
+      hint={`Dev mode: ${devMode ? "on" : "off"}`}
+      active={false}
+      pressed={devMode}
+      onClick={toggleDevMode}
+      named={props.named}
+      onHoverChange={props.onHoverChange}
+      testId="sidebar-nav-dev-mode"
+      className="ml-auto"
+    />
   );
 }
 
@@ -351,6 +430,9 @@ function PlaceRow(props: {
 
 const PLACE_ICON_CLASS =
   "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+/** Prototype 29.10: the icon that grows its name (`PlaceIcon` with `named`). */
+const PLACE_PILL_CLASS =
+  "relative inline-flex h-8 min-w-8 shrink cursor-pointer items-center justify-center rounded-lg px-2 outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
 const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
 const PLACE_ICON_IDLE =
   "text-sidebar-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground data-[popup-open]:bg-sidebar-row-hover";
@@ -412,36 +494,51 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
   const automations = useAutomationsShown();
+  const { places } = useSidebarProto();
+  const [hovered, setHovered] = useState<string | null>(null);
+  const hover = (id: string) => (on: boolean) =>
+    setHovered((current) => (on ? id : current === id ? null : current));
+  const home = isHomePath(pathname);
+  const files = pathname.startsWith("/files");
+  const apps = pathname.startsWith("/sites");
+  const autos = pathname.startsWith("/automations");
   return (
     <nav
       aria-label="Uno Work"
-      className="flex items-center gap-0.5 px-0.5"
+      className="flex min-w-0 items-center gap-0.5 px-0.5"
       data-testid="sidebar-places"
+      data-places={places}
     >
       <PlaceIcon
         icon={<HouseIcon />}
         label="Home"
-        active={isHomePath(pathname)}
+        active={home}
         onClick={() => {
           sidebarDPanel.closeNow();
           goHome();
         }}
+        named={placeNamed(places, hovered, "home", home)}
+        onHoverChange={hover("home")}
         testId="sidebar-nav-home"
         tour="home"
       />
       <PlaceIcon
         icon={<FolderIcon />}
         label="Files"
-        active={pathname.startsWith("/files")}
+        active={files}
         onClick={() => open("/files")}
+        named={placeNamed(places, hovered, "files", files)}
+        onHoverChange={hover("files")}
         testId="sidebar-nav-files"
         tour="files"
       />
       <PlaceIcon
         icon={<LayoutGridIcon />}
         label="Apps & sites"
-        active={pathname.startsWith("/sites")}
+        active={apps}
         onClick={() => open("/sites")}
+        named={placeNamed(places, hovered, "apps", apps)}
+        onHoverChange={hover("apps")}
         testId="sidebar-nav-apps"
         tour="apps"
       />
@@ -449,8 +546,10 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
         <PlaceIcon
           icon={<WorkflowIcon />}
           label="Automations"
-          active={pathname.startsWith("/automations")}
+          active={autos}
           onClick={() => open("/automations")}
+          named={placeNamed(places, hovered, "automations", autos)}
+          onHoverChange={hover("automations")}
           testId="sidebar-nav-automations"
         />
       ) : null}
@@ -480,6 +579,10 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           )}
         />
       ) : null}
+      <DevModePlace
+        named={placeNamed(places, hovered, "dev-mode", false)}
+        onHoverChange={hover("dev-mode")}
+      />
     </nav>
   );
 });

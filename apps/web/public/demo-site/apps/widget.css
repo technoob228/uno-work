@@ -1,0 +1,17 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; }
+body { font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; color: #1b1d22; display: flex; flex-direction: column; gap: 8px; padding: 2px 4px; }
+.row { display: flex; align-items: baseline; gap: 8px; }
+.big { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+.muted { color: #6b7080; font-size: 12px; }
+.up { color: #23774a; font-weight: 600; font-size: 12px; }
+.warn { color: #b45309; font-weight: 600; font-size: 12px; }
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+li { display: flex; gap: 8px; align-items: center; font-size: 12.5px; }
+li b { font-weight: 600; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #e5484d; flex-shrink: 0; }
+.dot.ok { background: #30a46c; }
+.ago { margin-left: auto; color: #8b8f9c; font-size: 11px; white-space: nowrap; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+svg { display: block; }
+@media (prefers-color-scheme: dark) { body { color: #ececee; } .muted { color: #a0a4ae; } }

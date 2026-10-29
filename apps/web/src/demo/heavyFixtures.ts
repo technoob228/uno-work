@@ -177,6 +177,36 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
   } as ExecutionEnvironmentDescriptor;
 }
 
+/** Same address as demoBrowser's `demoSiteUrl` (not imported: demoBrowser imports this file). */
+const pinSiteUrl = (path: string) =>
+  new URL(`demo-site/${path}`, `${location.origin}${import.meta.env.BASE_URL}`).href;
+
+function demoPins() {
+  return [
+    {
+      id: "pin-shop-sales",
+      kind: "app",
+      title: "Продажи магазина",
+      target: pinSiteUrl("apps/sales/"),
+      icon: "📈",
+    },
+    {
+      id: "pin-support-bot",
+      kind: "app",
+      title: "Бот поддержки",
+      target: pinSiteUrl("apps/support/"),
+      icon: "🤖",
+    },
+    {
+      id: "pin-ai-limits",
+      kind: "app",
+      title: "Лимиты нейронок",
+      target: pinSiteUrl("apps/ai-limits.html"),
+      icon: "📊",
+    },
+  ];
+}
+
 export function serverConfigFor(machine: DemoMachine): ServerConfig {
   return {
     environment: descriptorFor(machine),
@@ -222,6 +252,8 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
       ...DEFAULT_CLIENT_SETTINGS,
       // p9: a tool server of Misha's own in Settings → Connectors.
       mcpServers: [{ name: "context7", url: "https://mcp.context7.com/mcp", enabled: true }],
+      // Prototype 29.10: pinned apps — two with a widget, one without.
+      ...(machine.key === "work" ? { pins: demoPins() } : {}),
     },
   } as unknown as ServerConfig;
 }

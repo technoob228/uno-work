@@ -38,6 +38,8 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { useSidebar } from "../ui/sidebar";
+import { PinWidgetPeek, PinWindowPeek, usePeekHover, usePinnedApp } from "./PinPeek";
+import { useSidebarProto } from "./sidebarProto";
 
 export const SidebarPinned = memo(function SidebarPinned({
   pinnedChats,
@@ -186,7 +188,16 @@ function PinRow({
   const { openBeside } = useOpenApp();
   const active = usePinActive(item);
   const openPin = useOpenPin();
-  const open = () => openPin(item);
+  // Prototype 29.10: a glance at a pinned app on hover (PinPeek.tsx).
+  const { peek } = useSidebarProto();
+  const { app, environmentId } = usePinnedApp(item);
+  const peekable =
+    app !== null && (peek === "window" || (peek === "card" && (app.widget ?? null) !== null));
+  const hover = usePeekHover(peek, peekable);
+  const open = () => {
+    hover.close();
+    openPin(item);
+  };
 
   const showMenu = async (position: { x: number; y: number }) => {
     const api = readLocalApi();
@@ -216,7 +227,11 @@ function PinRow({
   };
 
   return (
-    <li className="group/pin relative list-none">
+    <li
+      className="group/pin relative list-none"
+      {...hover.triggerProps}
+      data-peek={peekable ? peek : undefined}
+    >
       <button
         type="button"
         onClick={open}
@@ -224,7 +239,7 @@ function PinRow({
           event.preventDefault();
           void showMenu({ x: event.clientX, y: event.clientY });
         }}
-        title={item.target}
+        title={peekable ? undefined : item.target}
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg pr-7 pl-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2",
@@ -250,6 +265,12 @@ function PinRow({
       >
         <XIcon className="size-3.5" />
       </button>
+      {peekable && app && peek === "card" ? (
+        <PinWidgetPeek hover={hover} app={app} environmentId={environmentId} onOpen={open} />
+      ) : null}
+      {peekable && app && peek === "window" ? (
+        <PinWindowPeek hover={hover} app={app} onOpen={open} />
+      ) : null}
     </li>
   );
 }

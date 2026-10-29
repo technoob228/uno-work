@@ -10,6 +10,12 @@ import { ChevronDownIcon, EyeIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import {
+  type PeekVariant,
+  type PlacesVariant,
+  setSidebarProto,
+  useSidebarProto,
+} from "../../components/sidebar/sidebarProto";
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
 import type { getRouter } from "../../router";
 import { useActiveFollowsOpenChat } from "../DemoPanel";
@@ -109,6 +115,60 @@ const CONNECTOR_LABEL: Record<ConnectorProvider, string> = {
   github: "GitHub",
 };
 const STATE_LABEL: Record<ConnectorState, string> = { on: "вкл", off: "нет", expired: "истёк" };
+
+/** Prototype 29.10: the sidebar's top — names on hover, a pinned app's widget on hover. */
+const PLACES_OPTIONS: ReadonlyArray<{ readonly id: PlacesVariant; readonly name: string }> = [
+  { id: "expand", name: "Выезжает под мышью" },
+  { id: "one", name: "Одна: открытая или под мышью" },
+  { id: "tooltip", name: "Тултип (как сейчас)" },
+];
+const PEEK_OPTIONS: ReadonlyArray<{ readonly id: PeekVariant; readonly name: string }> = [
+  { id: "card", name: "Виджет карточкой" },
+  { id: "window", name: "Окно приложения" },
+  { id: "off", name: "Нет (как сейчас)" },
+];
+
+function SidebarProtoRows() {
+  const proto = useSidebarProto();
+  return (
+    <div className="mb-2 rounded-xl border border-primary/30 bg-primary/5 px-2.5 py-2">
+      <div className="text-[11px] font-semibold tracking-wide text-primary uppercase">
+        Сайдбар · 29.10
+      </div>
+      <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+        Наведи на иконки над чатами (Home, Files, Apps & sites, Dev mode) и на закреплённые
+        приложения в Pinned: у «Продажи магазина» и «Бот поддержки» есть виджет, у «Лимиты нейронок»
+        нет.
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="w-16 shrink-0 text-[11px] text-muted-foreground">Подписи</span>
+        {PLACES_OPTIONS.map((option) => (
+          <Chip
+            key={option.id}
+            testId={`demo-proto-places-${option.id}`}
+            active={proto.places === option.id}
+            onClick={() => setSidebarProto({ places: option.id })}
+          >
+            {option.name}
+          </Chip>
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="w-16 shrink-0 text-[11px] text-muted-foreground">Виджет</span>
+        {PEEK_OPTIONS.map((option) => (
+          <Chip
+            key={option.id}
+            testId={`demo-proto-peek-${option.id}`}
+            active={proto.peek === option.id}
+            onClick={() => setSidebarProto({ peek: option.id })}
+          >
+            {option.name}
+          </Chip>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function Chip(props: {
   readonly active: boolean;
@@ -247,6 +307,7 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
         </button>
       </div>
       <div className="min-h-0 overflow-y-auto px-3.5 pb-3">
+        <SidebarProtoRows />
         <div className="mt-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
           Состояние
         </div>
