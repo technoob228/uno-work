@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.161 — 2026-10-29
+
+- Loom Work + Notetaker: a screen recording ("Show the agent") also lands in Notetaker, next to your calls, when Notetaker is installed on the computer — the video, what you said and what was on screen line by line, notes and action items with "Ask Uno to do it". The recording card says "Also in Notetaker". Needs Notetaker 0.6.0 (reinstall it from the App Store to update).
+
+---
+
 ## v0.0.160 — 2026-10-29
 
 - Uno (the pinned assistant chat) now runs on GLM-5.3 Flash by default: about a second to the first word instead of 5-10 s on Smart. Smart, Fast and the rest stay in the picker; a model you picked yourself is kept.
