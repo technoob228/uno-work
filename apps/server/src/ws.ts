@@ -15,6 +15,8 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
+  type OrchestrationShellStreamItem,
+  type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
@@ -71,6 +73,12 @@ import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  liveAfter,
+  planShellResume,
+  planThreadResume,
+  subscribeNow,
+} from "./orchestration/subscriptionResume.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
@@ -1120,97 +1128,189 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
-        [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
-            Effect.gen(function* () {
-              const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
-                Effect.tapError((cause) =>
-                  Effect.logError("orchestration shell snapshot load failed", { cause }),
-                ),
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to load orchestration shell snapshot",
-                      cause,
+            Effect.succeed(
+              Stream.unwrap(
+                Effect.gen(function* () {
+                  // Live first, then history: nothing committed in between is lost.
+                  const live = yield* subscribeNow(orchestrationEngine.streamDomainEvents);
+                  const toShellItems = (afterSequence: number) =>
+                    liveAfter(live, afterSequence).pipe(
+                      Stream.mapEffect(toShellStreamEvent),
+                      Stream.flatMap((event) =>
+                        Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+                      ),
+                    );
+
+                  const plan =
+                    input.fromSequenceExclusive === undefined
+                      ? ({ kind: "snapshot", reason: "no-cursor" } as const)
+                      : yield* projectionSnapshotQuery.getSnapshotSequence().pipe(
+                          Effect.flatMap(({ snapshotSequence }) =>
+                            planShellResume({
+                              cursor: input.fromSequenceExclusive,
+                              currentSequence: snapshotSequence,
+                              readEvents: (cursor, limit) =>
+                                Stream.runCollect(
+                                  orchestrationEngine.readEvents(cursor, { limit }),
+                                ).pipe(Effect.map((events) => Array.from(events))),
+                              toShellEvent: toShellStreamEvent,
+                            }),
+                          ),
+                          Effect.tapError((cause) =>
+                            Effect.logWarning("orchestration shell resume failed", { cause }),
+                          ),
+                          // A failed resume is never fatal: a snapshot always works.
+                          Effect.orElseSucceed(
+                            () => ({ kind: "snapshot", reason: "gap-too-large" }) as const,
+                          ),
+                        );
+
+                  if (plan.kind === "replay") {
+                    return Stream.concat(
+                      Stream.fromIterable<OrchestrationShellStreamItem>([
+                        ...plan.items,
+                        { kind: "resumed", sequence: plan.lastSequence },
+                      ]),
+                      toShellItems(plan.lastSequence),
+                    );
+                  }
+
+                  const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+                    Effect.tapError((cause) =>
+                      Effect.logError("orchestration shell snapshot load failed", { cause }),
+                    ),
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: "Failed to load orchestration shell snapshot",
+                          cause,
+                        }),
+                    ),
+                  );
+
+                  return Stream.concat(
+                    Stream.succeed<OrchestrationShellStreamItem>({
+                      kind: "snapshot" as const,
+                      snapshot,
                     }),
-                ),
-              );
-
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.mapEffect(toShellStreamEvent),
-                Stream.flatMap((event) =>
-                  Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
-                ),
-              );
-
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot,
+                    toShellItems(snapshot.snapshotSequence),
+                  );
                 }),
-                liveStream,
-              );
-            }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
-            Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load thread ${input.threadId}`,
-                        cause,
-                      }),
-                  ),
-                ),
-                projectionSnapshotQuery.getSnapshotSequence().pipe(
-                  Effect.map(({ snapshotSequence }) => snapshotSequence),
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: "Failed to load orchestration snapshot sequence",
-                        cause,
-                      }),
-                  ),
-                ),
-              ]);
+            Effect.succeed(
+              Stream.unwrap(
+                Effect.gen(function* () {
+                  const live = yield* subscribeNow(orchestrationEngine.streamDomainEvents);
+                  const toThreadItems = (afterSequence: number) =>
+                    liveAfter(live, afterSequence).pipe(
+                      Stream.filter(
+                        (event) =>
+                          event.aggregateKind === "thread" &&
+                          event.aggregateId === input.threadId &&
+                          isThreadDetailEvent(event),
+                      ),
+                      Stream.map(
+                        (event): OrchestrationThreadStreamItem => ({
+                          kind: "event" as const,
+                          event,
+                        }),
+                      ),
+                    );
 
-              if (Option.isNone(threadDetail)) {
-                return yield* new OrchestrationGetSnapshotError({
-                  message: `Thread ${input.threadId} was not found`,
-                  cause: input.threadId,
-                });
-              }
+                  const plan =
+                    input.fromSequenceExclusive === undefined
+                      ? ({ kind: "snapshot", reason: "no-cursor" } as const)
+                      : yield* projectionSnapshotQuery.getSnapshotSequence().pipe(
+                          Effect.flatMap(({ snapshotSequence }) =>
+                            planThreadResume({
+                              threadId: input.threadId,
+                              cursor: input.fromSequenceExclusive,
+                              currentSequence: snapshotSequence,
+                              threadExists: projectionSnapshotQuery
+                                .getThreadShellById(input.threadId)
+                                .pipe(Effect.map(Option.isSome)),
+                              readThreadEvents: (cursor, limit) =>
+                                Stream.runCollect(
+                                  orchestrationEngine.readEvents(cursor, {
+                                    limit,
+                                    aggregate: { kind: "thread", id: input.threadId },
+                                  }),
+                                ).pipe(Effect.map((events) => Array.from(events))),
+                              isDetailEvent: isThreadDetailEvent,
+                            }),
+                          ),
+                          Effect.tapError((cause) =>
+                            Effect.logWarning("orchestration thread resume failed", {
+                              cause,
+                              threadId: input.threadId,
+                            }),
+                          ),
+                          Effect.orElseSucceed(
+                            () => ({ kind: "snapshot", reason: "gap-too-large" }) as const,
+                          ),
+                        );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
-                ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
-              );
+                  if (plan.kind === "replay") {
+                    return Stream.concat(
+                      Stream.fromIterable<OrchestrationThreadStreamItem>([
+                        ...plan.items.map((event) => ({ kind: "event" as const, event })),
+                        { kind: "resumed", sequence: plan.lastSequence },
+                      ]),
+                      toThreadItems(plan.lastSequence),
+                    );
+                  }
 
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot: {
-                    snapshotSequence,
-                    thread: threadDetail.value,
-                  },
+                  const [threadDetail, snapshotSequence] = yield* Effect.all([
+                    projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: `Failed to load thread ${input.threadId}`,
+                            cause,
+                          }),
+                      ),
+                    ),
+                    projectionSnapshotQuery.getSnapshotSequence().pipe(
+                      Effect.map(({ snapshotSequence }) => snapshotSequence),
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: "Failed to load orchestration snapshot sequence",
+                            cause,
+                          }),
+                      ),
+                    ),
+                  ]);
+
+                  if (Option.isNone(threadDetail)) {
+                    return yield* new OrchestrationGetSnapshotError({
+                      message: `Thread ${input.threadId} was not found`,
+                      cause: input.threadId,
+                    });
+                  }
+
+                  return Stream.concat(
+                    Stream.succeed<OrchestrationThreadStreamItem>({
+                      kind: "snapshot" as const,
+                      snapshot: {
+                        snapshotSequence,
+                        thread: threadDetail.value,
+                      },
+                    }),
+                    toThreadItems(snapshotSequence),
+                  );
                 }),
-                liveStream,
-              );
-            }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverGetConfig]: (_input) =>
@@ -2526,10 +2626,10 @@ const makeWsRpcLayer = (
             customHarness.installStatus(input),
             { "rpc.aggregate": "custom-harness" },
           ),
-        [WS_METHODS.subscribeBrowserBridge]: (_input) =>
+        [WS_METHODS.subscribeBrowserBridge]: (input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeBrowserBridge,
-            Effect.succeed(browserBridge.stream),
+            Effect.succeed(browserBridge.streamFrom(input.fromSequenceExclusive)),
             { "rpc.aggregate": "browser" },
           ),
         [WS_METHODS.subscribeBrowserLive]: (_input) =>

@@ -117,7 +117,7 @@ import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { BellIcon, ChevronDownIcon, WifiOffIcon } from "lucide-react";
+import { BellIcon, ChevronDownIcon, ClockIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatElapsedAgoLabel } from "../timestampFormat";
@@ -224,6 +224,13 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { isConnectionShapedSendError, isEnvironmentLinkKnownDown } from "~/outbox/outboxFlusher";
+import {
+  isOutboxEligibleSend,
+  selectOutboxEntriesForThread,
+  useOutboxStore,
+  type OutboxTurnStartCommand,
+} from "~/outbox/outboxStore";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
 import { Button } from "./ui/button";
@@ -1021,6 +1028,24 @@ export default function ChatView(props: ChatViewProps) {
     activeSavedEnvironmentId,
     activeSavedEnvironmentRuntime?.lastSynchronizedAt,
   ]);
+  // Messages written while the computer was unreachable (outbox/): shown in
+  // the chat right away, delivered by the outbox flusher once it is back.
+  const outboxEntriesForThread = useOutboxStore(
+    useShallow((state) =>
+      selectOutboxEntriesForThread(state.entries, activeThread?.environmentId, activeThread?.id),
+    ),
+  );
+  const outboxChatMessages = useMemo<ChatMessage[]>(
+    () =>
+      outboxEntriesForThread.map((entry) => ({
+        id: entry.command.message.messageId,
+        role: "user",
+        text: entry.command.message.text,
+        createdAt: entry.command.createdAt,
+        streaming: false,
+      })),
+    [outboxEntriesForThread],
+  );
   const [reconnectingEnvironmentId, setReconnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
@@ -1279,8 +1304,8 @@ export default function ChatView(props: ChatViewProps) {
         description: activeEnvironmentUnavailableState.lastSynchronizedAt
           ? `Showing cached chats last synchronized ${formatElapsedAgoLabel(
               activeEnvironmentUnavailableState.lastSynchronizedAt,
-            )}. Sending is paused until a fresh server snapshot arrives.`
-          : "Waiting for the first fresh chat snapshot. Sending is paused until it arrives.",
+            )}. Text messages you send now will go out when it is back.`
+          : "Waiting for the first fresh chat snapshot. Text messages you send now will go out when it is back.",
         actions: (
           <>
             <Button
@@ -1314,11 +1339,68 @@ export default function ChatView(props: ChatViewProps) {
         ),
       });
     }
+    const failedOutboxEntry = outboxEntriesForThread.find((entry) => entry.status === "failed");
+    if (failedOutboxEntry) {
+      items.push({
+        id: `outbox-failed:${failedOutboxEntry.id}`,
+        variant: "error",
+        icon: <ClockIcon />,
+        title: "A message written offline was not sent",
+        description: failedOutboxEntry.error ?? undefined,
+        actions: (
+          <>
+            <Button size="xs" onClick={() => useOutboxStore.getState().retry(failedOutboxEntry.id)}>
+              Retry
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => useOutboxStore.getState().remove(failedOutboxEntry.id)}
+            >
+              Discard
+            </Button>
+          </>
+        ),
+      });
+    }
+    const queuedOutboxEntries = outboxEntriesForThread.filter((entry) => entry.status !== "failed");
+    if (queuedOutboxEntries.length > 0) {
+      const sending = queuedOutboxEntries.some((entry) => entry.status === "sending");
+      const count = queuedOutboxEntries.length;
+      items.push({
+        id: "outbox-queued",
+        variant: "info",
+        icon: <ClockIcon />,
+        title: sending
+          ? `Sending ${count === 1 ? "your message" : `${count} messages`}…`
+          : `${count === 1 ? "1 message" : `${count} messages`} waiting to send`,
+        description: sending
+          ? "Delivering what you wrote while offline."
+          : `${count === 1 ? "It goes" : "They go"} out automatically when ${
+              activeEnvironmentUnavailableState?.label ?? "the computer"
+            } is back online.`,
+        actions: (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={sending}
+            onClick={() => {
+              for (const entry of queuedOutboxEntries) {
+                if (entry.status === "waiting") useOutboxStore.getState().remove(entry.id);
+              }
+            }}
+          >
+            Discard
+          </Button>
+        ),
+      });
+    }
     return items;
   }, [
     activeEnvironmentUnavailableState,
     handleReconnectActiveEnvironment,
     navigate,
+    outboxEntriesForThread,
     reconnectingEnvironmentId,
   ]);
   // While Uno Work updates itself the daemon restarts: "can't reach the
@@ -1656,16 +1738,26 @@ export default function ChatView(props: ChatViewProps) {
             return changed ? { ...message, attachments } : message;
           });
 
-    if (optimisticUserMessages.length === 0) {
+    if (optimisticUserMessages.length === 0 && outboxChatMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
-    const serverIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
-    const pendingMessages = optimisticUserMessages.filter((message) => !serverIds.has(message.id));
+    const shownIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
+    const pendingMessages: ChatMessage[] = [];
+    for (const message of [...optimisticUserMessages, ...outboxChatMessages]) {
+      if (shownIds.has(message.id)) continue;
+      shownIds.add(message.id);
+      pendingMessages.push(message);
+    }
     if (pendingMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  }, [
+    serverMessages,
+    attachmentPreviewHandoffByMessageId,
+    optimisticUserMessages,
+    outboxChatMessages,
+  ]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -2885,15 +2977,17 @@ export default function ChatView(props: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
-    if (
-      !api ||
-      !activeThread ||
-      isSendBusy ||
-      isConnecting ||
-      activeEnvironmentUnavailable ||
-      sendInFlightRef.current
-    )
+    if (!activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    // Offline: a plain message to an existing chat goes to the outbox (below);
+    // everything else still needs the link.
+    const linkDown =
+      !api || activeEnvironmentUnavailable || isEnvironmentLinkKnownDown(environmentId);
+    if (linkDown && !isServerThread) return;
+    const offlineLabel = activeEnvironmentUnavailableLabel ?? "the computer";
+    if (linkDown && activePendingProgress) {
+      setThreadError(activeThread.id, `Answer once ${offlineLabel} is back online.`);
       return;
+    }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
@@ -2935,6 +3029,7 @@ export default function ChatView(props: ChatViewProps) {
       composerFiles.length > 0 ||
       composerRecording !== null;
     if (
+      !linkDown &&
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
       !hasComposerAttachments &&
@@ -3018,6 +3113,58 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
+
+    const outboxEligible = isOutboxEligibleSend({
+      isServerThread,
+      hasAttachments: hasComposerAttachments,
+      needsBootstrap: isLocalDraftThread || shouldCreateWorktree,
+    });
+    if (linkDown) {
+      if (!outboxEligible) {
+        setThreadError(
+          threadIdForSend,
+          `${offlineLabel} is offline. Messages with attachments can be sent once it is back.`,
+        );
+        return;
+      }
+      const queuedTitleSeed =
+        trimmed ||
+        (sendableComposerTerminalContexts[0]
+          ? formatTerminalContextLabel(sendableComposerTerminalContexts[0])
+          : "New chat");
+      useOutboxStore.getState().enqueue({
+        environmentId,
+        command: {
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: formatOutgoingPrompt({
+              provider: ctxSelectedProvider,
+              model: ctxSelectedModel,
+              models: ctxSelectedProviderModels,
+              effort: ctxSelectedPromptEffort,
+              text: appendTerminalContextsToPrompt(promptForSend, sendableComposerTerminalContexts),
+            }),
+            attachments: [],
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: truncate(queuedTitleSeed),
+          runtimeMode,
+          interactionMode,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      isAtEndRef.current = true;
+      setThreadError(threadIdForSend, null);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+    if (!api) return;
 
     sendInFlightRef.current = true;
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
@@ -3161,6 +3308,10 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.resetCursorState();
 
     let turnStartSucceeded = false;
+    const turnCommandId = newCommandId();
+    // Text-only send to an existing chat: if the link drops under it, it goes
+    // to the outbox with this same command (same commandId: no double send).
+    let outboxFallbackCommand: OutboxTurnStartCommand | null = null;
     await (async () => {
       let firstComposerImageName: string | null = null;
       if (composerImagesSnapshot.length > 0) {
@@ -3191,6 +3342,24 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
+      if (outboxEligible) {
+        outboxFallbackCommand = {
+          type: "thread.turn.start",
+          commandId: turnCommandId,
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: [],
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: title,
+          runtimeMode,
+          interactionMode,
+          createdAt: messageCreatedAt,
+        };
+      }
       const threadCreateModelSelection = createModelSelection(
         ctxSelectedModelSelection.instanceId,
         ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
@@ -3252,7 +3421,7 @@ export default function ChatView(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
-        commandId: newCommandId(),
+        commandId: turnCommandId,
         threadId: threadIdForSend,
         message: {
           messageId: messageIdForSend,
@@ -3269,6 +3438,15 @@ export default function ChatView(props: ChatViewProps) {
       });
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
+      if (!turnStartSucceeded && outboxFallbackCommand && isConnectionShapedSendError(err)) {
+        useOutboxStore.getState().enqueue({ environmentId, command: outboxFallbackCommand });
+        setOptimisticUserMessages((existing) => {
+          const next = existing.filter((message) => message.id !== messageIdForSend);
+          return next.length === existing.length ? existing : next;
+        });
+        setThreadError(threadIdForSend, null);
+        return;
+      }
       if (
         !turnStartSucceeded &&
         promptRef.current.length === 0 &&
@@ -4416,7 +4594,10 @@ export default function ChatView(props: ChatViewProps) {
                     isConnecting={isConnecting}
                     isSendBusy={isSendBusy}
                     isPreparingWorktree={isPreparingWorktree}
-                    environmentUnavailable={activeEnvironmentUnavailableState}
+                    environmentUnavailable={
+                      // Existing chats stay writable offline: sends go to the outbox.
+                      isServerThread ? null : activeEnvironmentUnavailableState
+                    }
                     activePendingApproval={activePendingApproval}
                     pendingApprovals={pendingApprovals}
                     pendingUserInputs={pendingUserInputs}

@@ -913,7 +913,11 @@ export interface EnvironmentApi {
   };
   browser: {
     /** Live "open this URL in the built-in browser pane" pushes from harnesses. */
-    subscribeBridge: (callback: (event: BrowserBridgeStreamEvent) => void) => () => void;
+    subscribeBridge: (
+      callback: (event: BrowserBridgeStreamEvent) => void,
+      /** Last event sequence seen, read on every (re)subscribe: reconnects get what they missed. */
+      options?: { readonly resumeFrom?: () => number | null },
+    ) => () => void;
   };
   /**
    * The machine's own browser, shown live (browserLive.ts). Logins fill from the

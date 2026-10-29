@@ -1225,6 +1225,73 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("parks a subscription instead of re-subscribing when its owner no longer needs it", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const listener = vi.fn();
+    const onSuspended = vi.fn();
+    const shouldResubscribe = vi.fn(() => false);
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { shouldResubscribe, onSuspended },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const firstSocket = getSocket();
+    firstSocket.open();
+    await waitFor(() => {
+      expect(firstSocket.sent).toHaveLength(1);
+    });
+    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string };
+    firstSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [
+          {
+            version: 1,
+            sequence: 1,
+            type: "welcome",
+            payload: {
+              environment: {
+                environmentId: "environment-local",
+                label: "Local environment",
+                platform: { os: "darwin", arch: "arm64" },
+                serverVersion: "0.0.0-test",
+                capabilities: { repositoryIdentity: true },
+              },
+              cwd: "/tmp/one",
+              projectName: "one",
+            },
+          },
+        ],
+      }),
+    );
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalledOnce();
+    });
+
+    await transport.reconnect();
+    await waitFor(() => {
+      expect(onSuspended).toHaveBeenCalledOnce();
+      expect(sockets).toHaveLength(2);
+    });
+    const secondSocket = getSocket();
+    expect(secondSocket).not.toBe(firstSocket);
+    secondSocket.open();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Nothing re-subscribed on the new socket.
+    expect(secondSocket.sent.filter((frame) => frame.includes("subscribeServerLifecycle"))).toEqual(
+      [],
+    );
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("does not fire onResubscribe when the first stream attempt exits before any value", async () => {
     const transport = createTransport("ws://localhost:3020");
     const listener = vi.fn();

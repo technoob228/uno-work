@@ -112,6 +112,10 @@
       "types": "./src/pluginPatterns.ts",
       "import": "./src/pluginPatterns.ts"
     },
+    "./orchestrationEvents": {
+      "types": "./src/orchestrationEvents.ts",
+      "import": "./src/orchestrationEvents.ts"
+    },
     "./handoff": {
       "types": "./src/handoff.ts",
       "import": "./src/handoff.ts"

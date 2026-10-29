@@ -80,7 +80,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
         rpcClient.orchestration.subscribeThread(input, callback, options),
     },
     browser: {
-      subscribeBridge: (callback) => rpcClient.browser.subscribeBridge(callback),
+      subscribeBridge: (callback, options) => rpcClient.browser.subscribeBridge(callback, options),
     },
     browserLive: {
       subscribe: (callback) => rpcClient.browserLive.subscribe(callback),

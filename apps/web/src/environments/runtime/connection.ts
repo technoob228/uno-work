@@ -33,6 +33,10 @@ interface OrchestrationHandlers {
     environmentId: EnvironmentId,
   ) => void;
   readonly applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => void;
+  /** Last shell sequence applied for this environment (resume cursor), if any. */
+  readonly readShellResumeCursor?: (environmentId: EnvironmentId) => number | null;
+  /** The server replayed the gap up to `sequence`; record it as applied. */
+  readonly markShellResumed?: (sequence: number, environmentId: EnvironmentId) => void;
 }
 
 interface EnvironmentConnectionInput extends OrchestrationHandlers {
@@ -137,9 +141,19 @@ export function createEnvironmentConnection(
         bootstrapGate.resolve();
         return;
       }
+      if (item.kind === "resumed") {
+        // Incremental resync finished: the changes since our cursor are in.
+        input.markShellResumed?.(item.sequence, environmentId);
+        input.onSynchronized?.();
+        bootstrapGate.resolve();
+        return;
+      }
       input.applyShellEvent(item, environmentId);
     },
     {
+      ...(input.readShellResumeCursor
+        ? { resumeFrom: () => input.readShellResumeCursor?.(environmentId) ?? null }
+        : {}),
       onResubscribe: () => {
         if (disposed) {
           return;

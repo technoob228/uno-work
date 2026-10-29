@@ -35,6 +35,15 @@ interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
   readonly onResubscribe?: () => void;
   readonly tag?: string;
+  /**
+   * Checked before re-running a subscription that already delivered values
+   * and then lost its connection. Returning false ends the subscription
+   * instead of re-subscribing (so a reconnect does not re-open every cached
+   * stream at once) and calls `onSuspended`; the owner subscribes again when
+   * it needs the data.
+   */
+  readonly shouldResubscribe?: () => boolean;
+  readonly onSuspended?: () => void;
 }
 
 interface RequestOptions {
@@ -213,12 +222,24 @@ export class WsTransport {
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
     let cancelCurrentStream: () => void = NOOP;
+    let lostConnection = false;
 
     void (async () => {
       for (;;) {
         if (!active || this.disposed) {
           return;
         }
+
+        if (lostConnection && hasReceivedValue && options?.shouldResubscribe?.() === false) {
+          active = false;
+          try {
+            options.onSuspended?.();
+          } catch {
+            // Swallow suspend hook errors; the subscription is over either way.
+          }
+          return;
+        }
+        lostConnection = false;
 
         const session = this.session;
         try {
@@ -258,6 +279,7 @@ export class WsTransport {
           }
 
           if (session !== this.session) {
+            lostConnection = true;
             continue;
           }
 
@@ -275,6 +297,7 @@ export class WsTransport {
             });
           }
           this.hasReportedTransportDisconnect = true;
+          lostConnection = true;
           transportFailureStreak += 1;
           if (!this.connectionHealthy) {
             // Keep the transport self-healing even after the protocol layer

@@ -488,6 +488,14 @@ export interface BrowserBridgeShape {
   ) => Effect.Effect<BrowserBridgeStreamEvent>;
   readonly stream: Stream.Stream<BrowserBridgeStreamEvent>;
   /**
+   * The stream for a client that reconnects: it also gets what it missed since
+   * `fromSequenceExclusive` (the last event it saw), from a short in-memory
+   * buffer. Commands that already got a result or timed out are not replayed.
+   */
+  readonly streamFrom: (
+    fromSequenceExclusive: number | undefined,
+  ) => Stream.Stream<BrowserBridgeStreamEvent>;
+  /**
    * Есть ли живые подписчики стрима (подключённые web-клиенты). Счётчик
    * глобальный, не per-context: «подписан хоть кто-то» достаточно для выбора
    * исполнителя auto-роутингом.
@@ -535,6 +543,34 @@ export function authorizeLocalBridgeRequest(
 }
 
 /** Экспорт для тестов: Live/Test-слои строятся из этой фабрики. */
+export const BRIDGE_REPLAY_MAX_EVENTS = 200;
+export const BRIDGE_REPLAY_MAX_AGE_MS = 2 * 60_000;
+
+/**
+ * What a client that saw up to `fromSequenceExclusive` missed. Nothing when it
+ * has no cursor (first subscribe) or a cursor from before a server restart
+ * (ahead of this server's sequence); only recent events; commands only while
+ * still waiting for a result.
+ */
+export function missedBridgeEvents(input: {
+  readonly recent: ReadonlyArray<{ readonly event: BrowserBridgeStreamEvent; readonly at: number }>;
+  readonly fromSequenceExclusive: number | undefined;
+  readonly currentSequence: number;
+  readonly now: number;
+  readonly isPendingCommand: (commandId: string) => boolean;
+}): ReadonlyArray<BrowserBridgeStreamEvent> {
+  const from = input.fromSequenceExclusive;
+  if (from === undefined || from > input.currentSequence) return [];
+  return input.recent
+    .filter(
+      ({ event, at }) =>
+        event.sequence > from &&
+        input.now - at <= BRIDGE_REPLAY_MAX_AGE_MS &&
+        (event.type !== "command" || input.isPendingCommand(event.commandId)),
+    )
+    .map(({ event }) => event);
+}
+
 export const makeBrowserBridge = (input: {
   readonly token: string;
   readonly baseUrl: string | undefined;
@@ -545,6 +581,17 @@ export const makeBrowserBridge = (input: {
     registerKnownSecret(sharedMcpToken);
     const pubsub = yield* PubSub.unbounded<BrowserBridgeStreamEvent>();
     const sequenceRef = yield* Ref.make(0);
+    // Recent events for clients that come back after a dropped link (bad
+    // internet): without it an "open this page" or a browser command sent
+    // while the socket was down is lost and the agent waits for its timeout.
+    const recentEvents: Array<{ readonly event: BrowserBridgeStreamEvent; readonly at: number }> =
+      [];
+    const publishEvent = (event: BrowserBridgeStreamEvent) =>
+      Effect.suspend(() => {
+        recentEvents.push({ event, at: Date.now() });
+        if (recentEvents.length > BRIDGE_REPLAY_MAX_EVENTS) recentEvents.shift();
+        return PubSub.publish(pubsub, event);
+      });
     const subscriberCountRef = yield* Ref.make(0);
     const pendingCommands = new Map<string, PendingCommandResult>();
     const pendingSecretRequests = new Map<string, PendingSecretRequest>();
@@ -626,7 +673,7 @@ export const makeBrowserBridge = (input: {
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),
-          Effect.tap((event) => PubSub.publish(pubsub, event)),
+          Effect.tap((event) => publishEvent(event)),
         ),
       publishOpenFile: (path, context?, scope?) =>
         Ref.updateAndGet(sequenceRef, (sequence) => sequence + 1).pipe(
@@ -641,7 +688,7 @@ export const makeBrowserBridge = (input: {
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),
-          Effect.tap((event) => PubSub.publish(pubsub, event)),
+          Effect.tap((event) => publishEvent(event)),
         ),
       publishCommand: (input, context?) =>
         Effect.gen(function* () {
@@ -651,7 +698,7 @@ export const makeBrowserBridge = (input: {
           pendingCommands.set(commandId, { responseToken, deferred });
 
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          yield* publishEvent({
             version: 1,
             type: "command",
             sequence,
@@ -708,7 +755,7 @@ export const makeBrowserBridge = (input: {
               error: "Superseded by a newer request for the same secret.",
             });
             const staleSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-            yield* PubSub.publish(pubsub, {
+            yield* publishEvent({
               version: 1,
               type: "secretSettled",
               sequence: staleSequence,
@@ -745,7 +792,7 @@ export const makeBrowserBridge = (input: {
             ...(context ? { context } : {}),
             event,
           });
-          yield* PubSub.publish(pubsub, event);
+          yield* publishEvent(event);
 
           const holdMs =
             input.holdMs !== undefined && input.holdMs > 0
@@ -784,7 +831,7 @@ export const makeBrowserBridge = (input: {
                     sequenceRef,
                     (value) => value + 1,
                   );
-                  yield* PubSub.publish(pubsub, {
+                  yield* publishEvent({
                     version: 1,
                     type: "secretSettled",
                     sequence: expiredSequence,
@@ -804,7 +851,7 @@ export const makeBrowserBridge = (input: {
             } satisfies SecretRequestOutcome;
           }
           const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          yield* publishEvent({
             version: 1,
             type: "secretSettled",
             sequence: settledSequence,
@@ -839,7 +886,7 @@ export const makeBrowserBridge = (input: {
           pendingSecretRequests.delete(input.requestId);
           yield* Deferred.succeed(pending.deferred, input.outcome);
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          yield* publishEvent({
             version: 1,
             type: "secretSettled",
             sequence,
@@ -878,12 +925,12 @@ export const makeBrowserBridge = (input: {
             ...(context ? { context } : {}),
           } satisfies BridgeToolApprovalRequestEvent;
           pendingToolApprovals.set(requestId, { responseToken, deferred, event });
-          yield* PubSub.publish(pubsub, event);
+          yield* publishEvent(event);
 
           const expire = Effect.gen(function* () {
             pendingToolApprovals.delete(requestId);
             const settledSequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-            yield* PubSub.publish(pubsub, {
+            yield* publishEvent({
               version: 1,
               type: "toolApprovalSettled",
               sequence: settledSequence,
@@ -942,7 +989,7 @@ export const makeBrowserBridge = (input: {
           pendingToolApprovals.delete(input.requestId);
           yield* Deferred.succeed(pending.deferred, input.approved ? "approved" : "denied");
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          yield* publishEvent({
             version: 1,
             type: "toolApprovalSettled",
             sequence,
@@ -959,7 +1006,7 @@ export const makeBrowserBridge = (input: {
           pendingToolApprovals.delete(input.requestId);
           yield* Deferred.succeed(pending.deferred, input.approved ? "approved" : "denied");
           const sequence = yield* Ref.updateAndGet(sequenceRef, (value) => value + 1);
-          yield* PubSub.publish(pubsub, {
+          yield* publishEvent({
             version: 1,
             type: "toolApprovalSettled",
             sequence,
@@ -981,12 +1028,23 @@ export const makeBrowserBridge = (input: {
                 ...(context ? { context } : {}),
               }) satisfies BrowserBridgeStreamEvent,
           ),
-          Effect.tap((event) => PubSub.publish(pubsub, event)),
+          Effect.tap((event) => publishEvent(event)),
         ),
       get stream() {
+        return this.streamFrom(undefined);
+      },
+      streamFrom(fromSequenceExclusive) {
         return Stream.unwrap(
           Effect.gen(function* () {
             const subscription = yield* PubSub.subscribe(pubsub);
+            const missed = missedBridgeEvents({
+              recent: recentEvents,
+              fromSequenceExclusive,
+              currentSequence: yield* Ref.get(sequenceRef),
+              now: Date.now(),
+              isPendingCommand: (commandId) => pendingCommands.has(commandId),
+            });
+            const lastReplayed = missed.at(-1)?.sequence ?? 0;
             yield* Ref.update(subscriberCountRef, (count) => count + 1);
             // Реплей висящих запросов секретов: клиент мог перезагрузиться или
             // переподключиться после публикации — без реплея плашка теряется,
@@ -1001,8 +1059,13 @@ export const makeBrowserBridge = (input: {
                 (pending) => pending.event as BrowserBridgeStreamEvent,
               ),
             ];
-            return Stream.fromIterable(pendingReplay).pipe(
-              Stream.concat(Stream.fromSubscription(subscription)),
+            return Stream.fromIterable([...pendingReplay, ...missed]).pipe(
+              // Published between the subscription and the buffer read: in both.
+              Stream.concat(
+                Stream.fromSubscription(subscription).pipe(
+                  Stream.filter((event) => event.sequence > lastReplayed),
+                ),
+              ),
               Stream.ensuring(Ref.update(subscriberCountRef, (count) => count - 1)),
             );
           }),

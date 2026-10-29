@@ -21,6 +21,14 @@ import type { Effect, Stream } from "effect";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 
+export interface OrchestrationReadEventsOptions {
+  readonly limit?: number;
+  readonly aggregate?: {
+    readonly kind: OrchestrationEvent["aggregateKind"];
+    readonly id: string;
+  };
+}
+
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
@@ -29,10 +37,13 @@ export interface OrchestrationEngineShape {
    * Replay persisted orchestration events from an exclusive sequence cursor.
    *
    * @param fromSequenceExclusive - Sequence cursor (exclusive).
+   * @param options - `limit` caps the number of events (store default when
+   *   omitted); `aggregate` restricts the read to one project/thread stream.
    * @returns Stream containing ordered events.
    */
   readonly readEvents: (
     fromSequenceExclusive: number,
+    options?: OrchestrationReadEventsOptions,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
 
   /**

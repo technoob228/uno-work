@@ -24,6 +24,7 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { RightPanelSheet } from "../components/RightPanelSheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { Spinner } from "~/components/ui/spinner";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
@@ -139,6 +140,20 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
+function ThreadRouteLoadingPlaceholder() {
+  return (
+    <SidebarInset className="h-svh min-h-0 overflow-hidden bg-background text-foreground md:h-dvh">
+      <div
+        className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+        data-testid="thread-route-loading"
+      >
+        <Spinner className="size-4" />
+        Loading chat…
+      </div>
+    </SidebarInset>
+  );
+}
+
 function ChatThreadRouteView() {
   const navigate = useNavigate();
   const threadRef = Route.useParams({
@@ -252,7 +267,9 @@ function ChatThreadRouteView() {
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
   if (!threadRef || !bootstrapComplete || !routeThreadExists) {
-    return null;
+    // First load of this computer's chats (app start, reload) on a slow link
+    // can take a while: say so instead of an empty pane.
+    return threadRef && !bootstrapComplete ? <ThreadRouteLoadingPlaceholder /> : null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;

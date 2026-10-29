@@ -22,6 +22,34 @@ type RpcInput<TTag extends RpcTag> = Parameters<RpcMethod<TTag>>[0];
 
 interface StreamSubscriptionOptions {
   readonly onResubscribe?: () => void;
+  /**
+   * Asked before re-subscribing after the connection dropped. Returning false
+   * parks the subscription instead (`onSuspended` fires); its owner re-opens
+   * it when it is needed again.
+   */
+  readonly shouldResubscribe?: () => boolean;
+  readonly onSuspended?: () => void;
+}
+
+interface ResumableStreamSubscriptionOptions extends StreamSubscriptionOptions {
+  /**
+   * Read before every (re)subscribe: the last sequence this subscriber applied.
+   * The server then replays only the gap (or sends a snapshot when it cannot).
+   */
+  readonly resumeFrom?: () => number | null;
+}
+
+type ResumableStreamEvent<TTag extends RpcTag> =
+  RpcMethod<TTag> extends (input: any, options?: any) => Stream.Stream<infer TEvent, any, any>
+    ? TEvent
+    : never;
+
+function withResumeCursor<TInput extends object>(
+  input: TInput,
+  resumeFrom: (() => number | null) | undefined,
+): TInput & { readonly fromSequenceExclusive?: number } {
+  const cursor = resumeFrom?.() ?? null;
+  return cursor !== null && cursor > 0 ? { ...input, fromSequenceExclusive: cursor } : input;
 }
 
 type RpcUnaryMethod<TTag extends RpcTag> =
@@ -190,11 +218,27 @@ export interface WsRpcClient {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
-    readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
-    readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+    readonly subscribeShell: (
+      listener: (
+        event: ResumableStreamEvent<typeof ORCHESTRATION_WS_METHODS.subscribeShell>,
+      ) => void,
+      options?: ResumableStreamSubscriptionOptions,
+    ) => () => void;
+    readonly subscribeThread: (
+      input: {
+        readonly threadId: RpcInput<typeof ORCHESTRATION_WS_METHODS.subscribeThread>["threadId"];
+      },
+      listener: (
+        event: ResumableStreamEvent<typeof ORCHESTRATION_WS_METHODS.subscribeThread>,
+      ) => void,
+      options?: ResumableStreamSubscriptionOptions,
+    ) => () => void;
   };
   readonly browser: {
-    readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
+    readonly subscribeBridge: (
+      listener: (event: ResumableStreamEvent<typeof WS_METHODS.subscribeBrowserBridge>) => void,
+      options?: ResumableStreamSubscriptionOptions,
+    ) => () => void;
   };
   readonly browserLive: {
     readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserLive>;
@@ -588,23 +632,31 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
       subscribeShell: (listener, options) =>
         transport.subscribe(
-          (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),
+          (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell](
+              withResumeCursor({}, options?.resumeFrom),
+            ),
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeShell },
         ),
       subscribeThread: (input, listener, options) =>
         transport.subscribe(
-          (client) => client[ORCHESTRATION_WS_METHODS.subscribeThread](input),
+          (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread](
+              withResumeCursor({ threadId: input.threadId }, options?.resumeFrom),
+            ),
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
         ),
     },
     browser: {
       subscribeBridge: (listener, options) =>
-        transport.subscribe((client) => client[WS_METHODS.subscribeBrowserBridge]({}), listener, {
-          ...options,
-          tag: WS_METHODS.subscribeBrowserBridge,
-        }),
+        transport.subscribe(
+          (client) =>
+            client[WS_METHODS.subscribeBrowserBridge](withResumeCursor({}, options?.resumeFrom)),
+          listener,
+          { ...options, tag: WS_METHODS.subscribeBrowserBridge },
+        ),
     },
     browserLive: {
       subscribe: (listener, options) =>

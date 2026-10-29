@@ -612,17 +612,44 @@ export const OrchestrationShellStreamEvent = Schema.Union([
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
 
+/**
+ * Ends the replay of a resumed subscription: every change after the client's
+ * cursor up to `sequence` has been sent; live events follow. Only sent to a
+ * client that asked to resume (`fromSequenceExclusive`), so clients that never
+ * resume never see this kind.
+ */
+export const OrchestrationStreamResumed = Schema.Struct({
+  kind: Schema.Literal("resumed"),
+  sequence: NonNegativeInt,
+});
+export type OrchestrationStreamResumed = typeof OrchestrationStreamResumed.Type;
+
 export const OrchestrationShellStreamItem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("snapshot"),
     snapshot: OrchestrationShellSnapshot,
   }),
   OrchestrationShellStreamEvent,
+  OrchestrationStreamResumed,
 ]);
 export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.Type;
 
+/**
+ * Resume cursor for shell/thread subscriptions: the last sequence the client
+ * applied. The server replays only what changed after it, or falls back to a
+ * full snapshot when the gap is unknown or too large. Servers that predate
+ * this field ignore it and always send a snapshot.
+ */
+const SubscriptionResumeCursor = Schema.optional(NonNegativeInt);
+
+export const OrchestrationSubscribeShellInput = Schema.Struct({
+  fromSequenceExclusive: SubscriptionResumeCursor,
+});
+export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
+
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
+  fromSequenceExclusive: SubscriptionResumeCursor,
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 
@@ -1571,6 +1598,7 @@ export const OrchestrationThreadStreamItem = Schema.Union([
     kind: Schema.Literal("event"),
     event: OrchestrationEvent,
   }),
+  OrchestrationStreamResumed,
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
 
@@ -1690,7 +1718,7 @@ export const OrchestrationRpcSchemas = {
     output: OrchestrationThreadStreamItem,
   },
   subscribeShell: {
-    input: Schema.Struct({}),
+    input: OrchestrationSubscribeShellInput,
     output: OrchestrationShellStreamItem,
   },
 } as const;

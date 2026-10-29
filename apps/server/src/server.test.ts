@@ -4183,6 +4183,88 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("resumes shell and thread subscriptions from a cursor without a snapshot", () =>
+    Effect.gen(function* () {
+      const now = new Date().toISOString();
+      const messageEvent = (sequence: number, text: string, streaming: boolean) =>
+        ({
+          sequence,
+          eventId: EventId.make(`evt-resume-${sequence}`),
+          type: "thread.message-sent",
+          aggregateKind: "thread",
+          aggregateId: defaultThreadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            threadId: defaultThreadId,
+            messageId: MessageId.make("msg-resume"),
+            role: "assistant",
+            text,
+            turnId: null,
+            streaming,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }) as OrchestrationEvent;
+      const gap = [messageEvent(6, "Hel", true), messageEvent(7, "lo", true)];
+      const snapshotFailure = new PersistenceSqlError({
+        operation: "test.snapshot",
+        detail: "a resumed subscription must not load a snapshot",
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 7 }),
+            getShellSnapshot: () => Effect.fail(snapshotFailure),
+            getThreadDetailById: () => Effect.fail(snapshotFailure),
+            getThreadShellById: () =>
+              Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell())),
+          },
+          orchestrationEngine: {
+            readEvents: (fromSequenceExclusive) =>
+              Stream.fromIterable(gap.filter((event) => event.sequence > fromSequenceExclusive)),
+            streamDomainEvents: Stream.empty,
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const shellItems = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ fromSequenceExclusive: 5 }).pipe(
+            Stream.runCollect,
+          ),
+        ),
+      );
+      assert.deepEqual(
+        Array.from(shellItems, (item) => [item.kind, "sequence" in item ? item.sequence : null]),
+        [
+          ["thread-upserted", 7],
+          ["resumed", 7],
+        ],
+      );
+
+      const threadItems = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            fromSequenceExclusive: 5,
+          }).pipe(Stream.runCollect),
+        ),
+      );
+      const threadSummary = Array.from(threadItems, (item) =>
+        item.kind === "event" && item.event.type === "thread.message-sent"
+          ? ["event", item.event.sequence, item.event.payload.text]
+          : [item.kind],
+      );
+      assert.deepEqual(threadSummary, [["event", 7, "Hello"], ["resumed"]]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("enriches replayed project events with repository identity metadata", () =>
     Effect.gen(function* () {
       const repositoryIdentity = {

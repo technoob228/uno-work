@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, NonNegativeInt } from "./baseSchemas.ts";
 import {
   SkillsAddInput,
   SkillsAddResult,
@@ -1320,7 +1320,9 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
 });
 
 export const WsSubscribeBrowserBridgeRpc = Rpc.make(WS_METHODS.subscribeBrowserBridge, {
-  payload: Schema.Struct({}),
+  // The last event sequence the client saw: a reconnecting client also gets
+  // the recent events it missed. Older servers ignore it.
+  payload: Schema.Struct({ fromSequenceExclusive: Schema.optional(NonNegativeInt) }),
   success: BrowserBridgeStreamEvent,
   stream: true,
 });
