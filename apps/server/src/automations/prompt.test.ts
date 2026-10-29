@@ -1,8 +1,10 @@
+import { parseUnoWorkNote } from "@t3tools/shared/secretRequestCopy";
 import { describe, expect, it } from "vitest";
 
 import type { AutomationEvent } from "./consoleClient.ts";
 import {
   afterCallAutomationsText,
+  automationChatPrompt,
   automationEventPrompt,
   automationHeader,
   automationSummary,
@@ -16,6 +18,7 @@ const prEvent = (overrides: Partial<AutomationEvent> = {}): AutomationEvent => (
   assistantName: "Ada",
   name: "Review PRs in getuno/x",
   instruction: "Review the PR and leave a comment",
+  executor: { kind: "assistant" },
   kind: "github.pull_request",
   title: "PR #12 · Fix login",
   url: "https://github.com/getuno/x/pull/12",
@@ -101,5 +104,19 @@ describe("automation event prompt", () => {
     expect(
       afterCallAutomationsText([{ name: "Follow-up", instruction: "Draft the follow-up email" }]),
     ).toContain("- Follow-up: Draft the follow-up email");
+  });
+});
+
+describe("the message a chat gets (29.10)", () => {
+  it("does the work itself, folds as Automation · name, PR text stays untrusted", () => {
+    const text = automationChatPrompt(prEvent({ executor: { kind: "chat", threadId: "t-1" } }));
+    expect(text.startsWith('[Automation "Review PRs in getuno/x" — it runs on its own')).toBe(true);
+    expect(text).toContain("Trigger: PR #12");
+    expect(text).toContain("<untrusted_pr_text>");
+    expect(text).toContain('github_pr_comment {repo: "getuno/x", number: 12, body}');
+    expect(text).not.toContain("chat_create");
+    expect(text).not.toContain("NO_REPLY");
+    const note = parseUnoWorkNote(text);
+    expect(note).toMatchObject({ kind: "automation", text: "Automation · Review PRs in getuno/x" });
   });
 });

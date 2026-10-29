@@ -71,7 +71,8 @@ function triggerWords(args: Record<string, unknown>): string {
   const trigger = args["trigger"];
   if (typeof trigger !== "object" || trigger === null) return "";
   const t = trigger as Record<string, unknown>;
-  if (t["kind"] === "schedule") return typeof t["label"] === "string" ? t["label"] : "on a schedule";
+  if (t["kind"] === "schedule")
+    return typeof t["label"] === "string" ? t["label"] : "on a schedule";
   if (t["kind"] === "github.pull_request" && typeof t["repo"] === "string") {
     return describeAutomationTrigger({ kind: "github.pull_request", repo: t["repo"] });
   }

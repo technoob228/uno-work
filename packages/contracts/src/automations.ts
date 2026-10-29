@@ -309,7 +309,9 @@ export type GithubPrCommentInput = typeof GithubPrCommentInput.Type;
 export type AutomationCadence = "daily" | "weekdays" | "weekly" | "days" | "every" | "hourly";
 
 /** Minutes between runs the dialog offers for "Every …" (15 minutes is the least). */
-export const AUTOMATION_EVERY_MINUTES: ReadonlyArray<number> = [15, 30, 60, 120, 180, 240, 360, 720];
+export const AUTOMATION_EVERY_MINUTES: ReadonlyArray<number> = [
+  15, 30, 60, 120, 180, 240, 360, 720,
+];
 export const AUTOMATION_MIN_EVERY_MINUTES = 15;
 
 const WEEKDAY_NAMES = [
@@ -377,7 +379,8 @@ export function automationCronFor(input: {
         (a, b) => a - b,
       );
       const list = days.length === 0 ? [1] : days;
-      if (list.length === 7) return { cron: `${minute} ${hour} * * *`, label: `Every day at ${hhmm}` };
+      if (list.length === 7)
+        return { cron: `${minute} ${hour} * * *`, label: `Every day at ${hhmm}` };
       return {
         cron: `${minute} ${hour} * * ${list.join(",")}`,
         label: `${weekdaysLabel(list)} at ${hhmm}`,

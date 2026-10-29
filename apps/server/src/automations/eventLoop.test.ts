@@ -10,6 +10,8 @@ import {
   AssistantTurnError,
   type AssistantEventTurnInput,
   type AssistantEventTurnResult,
+  type ChatTurnInput,
+  type ChatTurnResult,
 } from "../assistants/scheduledTurn.ts";
 import {
   AutomationClientError,
@@ -19,6 +21,7 @@ import {
 } from "./consoleClient.ts";
 import {
   IDLE_RECHECK_MS,
+  laneOf,
   makeAutomationEventLoop,
   makeFileJournal,
   makeMemoryJournal,
@@ -40,6 +43,7 @@ const event = (id: number, overrides: Partial<AutomationEvent> = {}): Automation
   assistantName: "Ada",
   name: "Review PRs in getuno/x",
   instruction: "Review the PR and leave a comment",
+  executor: { kind: "assistant" },
   kind: "github.pull_request",
   title: `PR #${id}`,
   url: null,
@@ -66,6 +70,7 @@ function stand(
     runTurn?: (
       input: AssistantEventTurnInput,
     ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
+    runChatTurn?: (input: ChatTurnInput) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
   } = {},
 ) {
   const world: World = {
@@ -102,6 +107,8 @@ function stand(
       journal,
       linked: Effect.sync(() => world.linked),
       assistantName: (assistant) => Effect.succeed(world.assistants[assistant] ?? null),
+      ...(options.runChatTurn ? { runChatTurn: options.runChatTurn } : {}),
+      now: () => Date.parse("2026-10-29T09:00:00Z"),
       runTurn:
         options.runTurn ??
         ((input) =>
@@ -293,6 +300,92 @@ describe("automation event loop", () => {
     expect(nextPollDelayMs({ kind: "events", count: 0 }, 0, 25_000)).toBe(0);
     expect(nextPollDelayMs({ kind: "events", count: 0 }, 0, 20)).toBe(5_000);
     expect(nextPollDelayMs({ kind: "events", count: 2 }, 0, 20)).toBe(0);
+  });
+});
+
+describe("an automation a chat runs (29.10)", () => {
+  it("this chat: a new message in that chat, the answer is the summary, no assistant turn", async () => {
+    const chatTurns: ChatTurnInput[] = [];
+    const { world, loop } = stand({
+      runChatTurn: (input) =>
+        Effect.sync(() => {
+          chatTurns.push(input);
+          return {
+            status: "answered" as const,
+            threadId: "thread-7",
+            reply: "3 PRs open, 1 needs you.",
+          };
+        }),
+    });
+    world.queue = [
+      event(21, {
+        assistant: "",
+        assistantName: "",
+        name: "Morning PRs",
+        instruction: "List open PRs",
+        executor: { kind: "chat", threadId: "thread-7" },
+        kind: "schedule",
+        payload: { label: "Weekdays at 09:00" },
+      }),
+    ];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(world.turns).toHaveLength(0);
+    expect(chatTurns[0]).toMatchObject({
+      target: { kind: "chat", threadId: "thread-7" },
+      reason: "automation 7",
+    });
+    expect(chatTurns[0]!.prompt).toMatch(
+      /^\[Automation "Morning PRs" — .*Trigger: Weekdays at 09:00\.\]\nList open PRs/,
+    );
+    expect(world.results[0]!.body).toEqual({
+      state: "done",
+      summary: "3 PRs open, 1 needs you.",
+      threadId: "thread-7",
+    });
+  });
+
+  it("a new chat each time: titled with the name and the day", async () => {
+    const chatTurns: ChatTurnInput[] = [];
+    const { world, loop } = stand({
+      runChatTurn: (input) =>
+        Effect.sync(() => {
+          chatTurns.push(input);
+          return { status: "timeout" as const, threadId: "thread-new", reply: null };
+        }),
+    });
+    world.queue = [
+      event(22, {
+        assistant: "",
+        name: "CI check",
+        executor: { kind: "new_chat", projectId: "proj-1", fromThreadId: "thread-7" },
+        kind: "manual",
+        payload: {},
+      }),
+    ];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(chatTurns[0]!.target).toEqual({
+      kind: "new_chat",
+      projectId: "proj-1",
+      fromThreadId: "thread-7",
+      title: "CI check · Oct 29",
+    });
+    expect(world.results[0]!.body).toMatchObject({ state: "failed", threadId: "thread-new" });
+  });
+
+  it("an older wiring without chat turns fails the run with a note", async () => {
+    const { world, loop } = stand();
+    world.queue = [event(23, { assistant: "", executor: { kind: "chat", threadId: "t" } })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(world.results[0]!.body.state).toBe("failed");
+  });
+
+  it("lanes: per assistant, per chat, per automation for new chats", () => {
+    expect(laneOf(event(1))).toBe("assistant:assistant-ada");
+    expect(laneOf(event(1, { executor: { kind: "chat", threadId: "t-1" } }))).toBe("chat:t-1");
+    expect(laneOf(event(1, { executor: { kind: "new_chat", projectId: "p" } }))).toBe("new_chat:7");
   });
 });
 

@@ -148,7 +148,9 @@ export interface AutomationEventLoopDeps {
     input: AssistantEventTurnInput,
   ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
   /** A run in a chat (executor "chat" / "new_chat"); absent — such runs fail with a note. */
-  readonly runChatTurn?: (input: ChatTurnInput) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
+  readonly runChatTurn?: (
+    input: ChatTurnInput,
+  ) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
   readonly now?: () => number;
 }
 
@@ -156,6 +158,23 @@ export interface AutomationEventLoopDeps {
 export function newChatTitle(name: string, nowMs: number): string {
   const day = new Date(nowMs).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return `${oneLine(name, 80) || "Automation"} · ${day}`;
+}
+
+/**
+ * Runs that must not overlap share a lane: one assistant's, one chat's
+ * (two runs never race in one thread); a new chat each time — per automation.
+ */
+export function laneOf(
+  event: Pick<AutomationEvent, "assistant" | "automationId" | "executor">,
+): string {
+  switch (event.executor.kind) {
+    case "assistant":
+      return `assistant:${event.assistant}`;
+    case "chat":
+      return `chat:${event.executor.threadId}`;
+    case "new_chat":
+      return `new_chat:${event.automationId}`;
+  }
 }
 
 /** The console's answer for a finished run in a chat. */
@@ -365,7 +384,7 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
       Effect.gen(function* () {
         if (deps.journal.has(event.id) || inFlight.has(event.id)) return false;
         inFlight.add(event.id);
-        const sem = yield* lane(event.assistant);
+        const sem = yield* lane(laneOf(event));
         yield* Effect.forkDetach(
           sem
             .withPermits(1)(processEvent(event))

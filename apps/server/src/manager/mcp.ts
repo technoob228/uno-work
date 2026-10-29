@@ -110,7 +110,7 @@ const withAutomations = <A>(
 /** The trigger of `automation_create` / `automation_update`, as a JSON Schema. */
 const AUTOMATION_TRIGGER_JSON_SCHEMA = {
   description:
-    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (at most once an hour), the person\'s IANA time zone, and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. After each call your notetaker joins: {"kind":"call.ended"}.',
+    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (at most every 15 minutes; days of week 0 = Sunday, e.g. "0 9 * * 1,3,5"), the person\'s IANA time zone, and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. After each call your notetaker joins: {"kind":"call.ended"}.',
   anyOf: [
     {
       type: "object",
