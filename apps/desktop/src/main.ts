@@ -148,6 +148,9 @@ function installStdIoBrokenPipeGuards(): void {
 
 installStdIoBrokenPipeGuards();
 
+const RENDERER_RECOVERY_RELOAD_DELAY_MS = 500;
+const RENDERER_RECOVERY_MAX_ATTEMPTS = 3;
+const RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const READ_SKILLS_FOLDER_CHANNEL = "desktop:read-skills-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -2980,8 +2983,38 @@ function createWindow(): BrowserWindow {
       });
     },
   );
+  // Renderer crash (usually V8 OOM on long sessions) recovery: reload after a
+  // short delay, at most RENDERER_RECOVERY_MAX_ATTEMPTS times per rolling
+  // window so a renderer that dies on boot cannot reload-loop forever. Without
+  // a reload the person stares at a dead white window while agents keep
+  // running; the renderer rehydrates from the backend, which is unaffected.
+  // Upstream t3code 36caf34c68.
+  let rendererRecoveryTimestamps: number[] = [];
   window.webContents.on("render-process-gone", (_event, details) => {
-    console.error("[desktop] main window renderer process gone", details);
+    const recoverable =
+      details.reason === "crashed" || details.reason === "oom" || details.reason === "abnormal-exit";
+    const now = Date.now();
+    rendererRecoveryTimestamps = rendererRecoveryTimestamps.filter(
+      (timestamp) => now - timestamp < RENDERER_RECOVERY_WINDOW_MS,
+    );
+    const shouldRecover =
+      recoverable &&
+      !window.isDestroyed() &&
+      rendererRecoveryTimestamps.length < RENDERER_RECOVERY_MAX_ATTEMPTS;
+    console.error("[desktop] main window renderer process gone", {
+      ...details,
+      recovering: shouldRecover,
+    });
+    if (!shouldRecover) {
+      return;
+    }
+    rendererRecoveryTimestamps.push(now);
+    setTimeout(() => {
+      if (window.isDestroyed()) {
+        return;
+      }
+      void window.loadURL(isDevelopment ? resolveDesktopDevServerUrl() : backendHttpUrl);
+    }, RENDERER_RECOVERY_RELOAD_DELAY_MS);
   });
 
   if (isDevelopment) {

@@ -147,8 +147,12 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 // - Threads with active work or pending user action are sticky and are never
 //   evicted while they remain non-idle.
 // - Capacity eviction only targets idle cached subscriptions.
-const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
-const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+// An unused (refCount 0, idle) thread keeps its live detail subscription -
+// server-side stream + full thread state in the renderer - this long. Upstream
+// keeps idle thread state 5 minutes (THREAD_SNAPSHOT_IDLE_TTL_MS, d7cf8aaa8d);
+// was 15 min / 32 threads here. Running threads are never evicted.
+const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
+const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 12;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_FORCE_RECONNECT_AFTER_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;

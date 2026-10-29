@@ -19,8 +19,12 @@ import { isYourTurn, type YourTurnInput } from "./Sidebar.yourTurn";
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
-// nearby thread usually reuses an already-hot subscription.
-export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
+// nearby thread usually reuses an already-hot subscription. Each prewarmed
+// thread holds a live, fully hydrated detail subscription (all messages and
+// activities, growing as agents work) for as long as the row stays visible,
+// so this limit is a direct renderer-heap and server-load multiplier - keep it
+// small. Upstream t3code 36caf34c68 (10 -> 3).
+export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;
