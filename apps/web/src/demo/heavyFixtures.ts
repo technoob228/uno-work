@@ -23,6 +23,7 @@ import {
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 import { DEMO_ASSIST } from "./demoFlag";
+import { timelineShowcaseThreads } from "./timelineShowcase";
 
 // The computers run the same Work as the page (no "runs another version" banner).
 export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
@@ -1185,11 +1186,22 @@ function buildProject(project: ProjectSpec) {
   };
 }
 
+function showcaseThreads(key: MachineKey) {
+  const project = PROJECTS[key].find(
+    (spec) => spec.id !== ASSISTANT_PROJECT_ID && spec.title !== "Home folder",
+  );
+  return project ? timelineShowcaseThreads(project.id, project.root) : [];
+}
+
 export function readModelFor(machine: DemoMachine): OrchestrationReadModel {
   return {
     snapshotSequence: 5,
     projects: PROJECTS[machine.key].map(buildProject),
-    threads: CHATS.filter((chat) => chat.machine === machine.key).map(buildThread),
+    threads: [
+      ...CHATS.filter((chat) => chat.machine === machine.key).map(buildThread),
+      // The chat feed's own showcase (T3 port S4): on the page's computer only.
+      ...(machine.key === PRIMARY_MACHINE.key ? showcaseThreads(machine.key) : []),
+    ],
     updatedAt: new Date(NOW).toISOString(),
   } as unknown as OrchestrationReadModel;
 }

@@ -1287,7 +1287,8 @@ export const ChatComposer = memo(
     const isComposerApprovalState = activePendingApproval !== null;
     const activePendingUserInput = pendingUserInputs[0] ?? null;
     const hasComposerHeader =
-      isComposerApprovalState ||
+      // The approval itself is asked in the feed; only the folded phone composer shows it.
+      (isComposerApprovalState && isComposerCollapsedMobile) ||
       pendingUserInputs.length > 0 ||
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
     const showCollapsedMobilePromptRow =
@@ -3238,15 +3239,10 @@ export const ChatComposer = memo(
                 onCancelQueued={() => setPersonalAiQueued(false)}
               />
             ) : null}
+            {/* An approval is asked on its own row in the feed (TimelinePendingApprovalRow);
+                the composer stays a composer — what's typed now waits its turn. */}
             {!isComposerCollapsedMobile &&
-              (activePendingApproval ? (
-                <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                  <ComposerPendingApprovalPanel
-                    approval={activePendingApproval}
-                    pendingCount={pendingApprovals.length}
-                  />
-                </div>
-              ) : pendingUserInputs.length > 0 ? (
+              (activePendingApproval ? null : pendingUserInputs.length > 0 ? (
                 <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                   <ComposerPendingUserInputPanel
                     pendingUserInputs={pendingUserInputs}
@@ -3622,8 +3618,7 @@ export const ChatComposer = memo(
                   onPaste={onComposerPaste}
                   placeholder={
                     isComposerApprovalState
-                      ? (activePendingApproval?.detail ??
-                        "Resolve this approval request to continue")
+                      ? "Allow or deny the step above, or type what to do next"
                       : activePendingProgress
                         ? "Type your own answer, or leave this blank to use the selected option"
                         : showPlanFollowUpPrompt && activeProposedPlan
@@ -3680,15 +3675,7 @@ export const ChatComposer = memo(
             </div>
 
             {/* Bottom toolbar */}
-            {isComposerCollapsedMobile ? null : activePendingApproval ? (
-              <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
-                <ComposerPendingApprovalActions
-                  requestId={activePendingApproval.requestId}
-                  isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                  onRespondToApproval={onRespondToApproval}
-                />
-              </div>
-            ) : (
+            {isComposerCollapsedMobile ? null : (
               <div
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}

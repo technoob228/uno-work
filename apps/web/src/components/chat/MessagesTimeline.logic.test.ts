@@ -274,10 +274,177 @@ describe("deriveMessagesTimelineRows", () => {
         row.kind === "message" && row.message.role === "assistant",
     );
 
-    expect(assistantRows).toHaveLength(2);
-    expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
-    expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
-    expect(assistantRows[1]?.showCompletionDivider).toBe(true);
+    // The finished turn folds its in-between note: only the answer shows,
+    // under "Worked for 20s" (the fold row replaces the "Response" divider).
+    expect(assistantRows).toHaveLength(1);
+    expect(assistantRows[0]?.message.id).toBe("assistant-final");
+    expect(assistantRows[0]?.showAssistantCopyButton).toBe(true);
+    expect(assistantRows[0]?.showCompletionDivider).toBe(false);
+    expect(rows.find((row) => row.kind === "turn-fold")).toMatchObject({
+      label: "Worked for 20s",
+      expanded: false,
+    });
+  });
+
+  it("opens a folded turn and keeps copy on its last answer only", () => {
+    const message = (
+      id: string,
+      at: string,
+      turnId: string | null,
+      role: "user" | "assistant",
+    ) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt: at,
+      message: {
+        id: id as never,
+        role,
+        text: id,
+        turnId: turnId as never,
+        createdAt: at,
+        completedAt: at,
+        streaming: false,
+      },
+    });
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        message("user-1", "2026-01-01T00:00:00Z", null, "user"),
+        message("note", "2026-01-01T00:00:10Z", "turn-1", "assistant"),
+        message("final", "2026-01-01T00:00:20Z", "turn-1", "assistant"),
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+      expandedTurnIds: new Set(["turn-1" as never]),
+    });
+    expect(rows.map((row) => row.kind)).toEqual(["message", "turn-fold", "message", "message"]);
+    const assistant = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "assistant",
+    );
+    expect(assistant.map((row) => row.showAssistantCopyButton)).toEqual([false, true]);
+  });
+
+  it("does not fold the running turn, says who stopped it, keeps an unanswered error open", () => {
+    const work = (id: string, at: string, tone: "tool" | "error" = "tool") => ({
+      id: `${id}-entry`,
+      kind: "work" as const,
+      createdAt: at,
+      entry: { id, createdAt: at, label: id, tone, turnId: "turn-1" as never },
+    });
+    const user = {
+      id: "user-1-entry",
+      kind: "message" as const,
+      createdAt: "2026-01-01T00:00:00Z",
+      message: {
+        id: "user-1" as never,
+        role: "user" as const,
+        text: "go",
+        turnId: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        streaming: false,
+      },
+    };
+    const base = {
+      completionDividerBeforeEntryId: null,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+    const running = deriveMessagesTimelineRows({
+      ...base,
+      timelineEntries: [user, work("a", "2026-01-01T00:00:05Z"), work("b", "2026-01-01T00:00:06Z")],
+      isWorking: true,
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+    });
+    expect(running.some((row) => row.kind === "turn-fold")).toBe(false);
+    expect(running.find((row) => row.kind === "work")).toMatchObject({ live: true });
+
+    const stopped = deriveMessagesTimelineRows({
+      ...base,
+      timelineEntries: [user, work("a", "2026-01-01T00:00:05Z")],
+      isWorking: false,
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:01:30Z",
+      },
+    });
+    expect(stopped.find((row) => row.kind === "turn-fold")).toMatchObject({
+      label: "You stopped after 1m 30s",
+    });
+
+    const failed = deriveMessagesTimelineRows({
+      ...base,
+      timelineEntries: [user, work("a", "2026-01-01T00:00:05Z", "error")],
+      isWorking: false,
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "error",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:10Z",
+      },
+    });
+    expect(failed.some((row) => row.kind === "turn-fold")).toBe(false);
+
+    // Stopped by the person while a step broke off: still folds, not a failure.
+    const stoppedMidStep = deriveMessagesTimelineRows({
+      ...base,
+      timelineEntries: [user, work("a", "2026-01-01T00:00:05Z", "error")],
+      isWorking: false,
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:10Z",
+      },
+    });
+    expect(stoppedMidStep.find((row) => row.kind === "turn-fold")).toMatchObject({
+      label: "You stopped after 10s",
+    });
+  });
+
+  it("puts the agent's latest thought on the live line", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "thought-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "thought",
+            createdAt: "2026-01-01T00:00:05Z",
+            label: "Thinking it through",
+            detail: "…of the form. The route returns early. Now I check the mail settings.",
+            tone: "thinking",
+            turnId: "turn-1" as never,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+    });
+    expect(rows.at(-1)).toMatchObject({
+      kind: "working",
+      thought: "Now I check the mail settings.",
+    });
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {

@@ -239,6 +239,14 @@ import { useChatDockInset } from "./chat/useChatDockInset";
 import { useNotificationSoftAsk } from "../inbox/systemNotifications";
 import { useDemoSwitch } from "~/demo/demoFlag";
 import { useFeatureFlag } from "~/hooks/useFeatureFlags";
+import {
+  nextQueuedMessageToSend,
+  shouldQueueSend,
+  type QueuedChatMessage,
+  useQueuedMessages,
+  useQueuedMessageStore,
+} from "../queuedMessageStore";
+import { QueuedMessagesList } from "./chat/QueuedMessagesList";
 import { selfUpdateBannerItem, useSelfUpdate } from "../selfUpdate/SelfUpdateNotice";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
@@ -2900,8 +2908,16 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  /**
+   * `queued`: a message from "Up next" (queuedMessageStore.ts) goes instead of
+   * the composer's content — the composer, whatever is typed in it now, stays.
+   */
+  const onSend = async (e?: { preventDefault: () => void }, queued?: QueuedChatMessage) => {
     e?.preventDefault();
+    // A queued message that can't go now is not lost: back first, held.
+    const keepQueued = () => {
+      if (queued) useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued);
+    };
     const api = readEnvironmentApi(environmentId);
     if (
       !api ||
@@ -2910,19 +2926,24 @@ export default function ChatView(props: ChatViewProps) {
       isConnecting ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
-    )
+    ) {
+      keepQueued();
       return;
-    if (activePendingProgress) {
+    }
+    if (activePendingProgress && !queued) {
       onAdvanceActivePendingUserInput();
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx) return;
+    if (!sendCtx) {
+      keepQueued();
+      return;
+    }
     const {
-      images: composerImages,
-      videos: composerVideos,
-      files: composerFiles,
-      terminalContexts: composerTerminalContexts,
+      images: ctxComposerImages,
+      videos: ctxComposerVideos,
+      files: ctxComposerFiles,
+      terminalContexts: ctxComposerTerminalContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -2930,9 +2951,16 @@ export default function ChatView(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
       imageSupport: ctxImageSupport,
     } = sendCtx;
-    const promptForSend = promptRef.current;
+    // A queued message is text only: nothing of the composer goes with it.
+    const composerImages = queued ? [] : ctxComposerImages;
+    const composerVideos = queued ? [] : ctxComposerVideos;
+    const composerFiles = queued ? [] : ctxComposerFiles;
+    const composerTerminalContexts = queued ? [] : ctxComposerTerminalContexts;
+    const promptForSend = queued ? queued.text : promptRef.current;
     // Loom Work: the chat's screen recording goes with the message as a block.
-    const composerRecording = useScreenRecordingStore.getState().items[activeThread.id] ?? null;
+    const composerRecording = queued
+      ? null
+      : (useScreenRecordingStore.getState().items[activeThread.id] ?? null);
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -2953,6 +2981,7 @@ export default function ChatView(props: ChatViewProps) {
       composerFiles.length > 0 ||
       composerRecording !== null;
     if (
+      !queued &&
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
       !hasComposerAttachments &&
@@ -2972,7 +3001,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
+      !queued && !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -3017,7 +3046,28 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
-    if (!activeProject) return;
+    // Enter while the agent works: the message waits in "Up next" and goes
+    // by itself when the agent is done — it no longer cuts into the running
+    // turn (that is "Send now"). Pictures, files, a recording or terminal
+    // context still go at once: the queue keeps text only.
+    if (
+      !queued &&
+      shouldQueueSend({
+        agentWorking: phase === "running",
+        hasAttachments: hasComposerAttachments || sendableComposerTerminalContexts.length > 0,
+        sendNow: false,
+      })
+    ) {
+      useQueuedMessageStore.getState().enqueue(routeThreadKey, promptForSend.trim());
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+    if (!activeProject) {
+      keepQueued();
+      return;
+    }
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
@@ -3172,11 +3222,13 @@ export default function ChatView(props: ChatViewProps) {
         }),
       );
     }
-    promptRef.current = "";
-    clearComposerDraftContent(composerDraftTarget);
-    composerRef.current?.clearVideoAttachments();
-    composerRef.current?.setFileAttachments([]);
-    composerRef.current?.resetCursorState();
+    if (!queued) {
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.clearVideoAttachments();
+      composerRef.current?.setFileAttachments([]);
+      composerRef.current?.resetCursorState();
+    }
 
     let turnStartSucceeded = false;
     await (async () => {
@@ -3287,7 +3339,13 @@ export default function ChatView(props: ChatViewProps) {
       });
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
-      if (
+      if (queued && !turnStartSucceeded) {
+        // It goes back first in "Up next", waiting for Send now.
+        setOptimisticUserMessages((existing) =>
+          existing.filter((message) => message.id !== messageIdForSend),
+        );
+        useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued);
+      } else if (
         !turnStartSucceeded &&
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
@@ -3336,6 +3394,53 @@ export default function ChatView(props: ChatViewProps) {
   // it: do exactly what Enter would, once the chat is ready (see pendingSendStore).
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
+
+  // "Up next" (S4, upstream cc839c42b1): the first waiting message goes by
+  // itself once the agent is done and nothing else needs the person.
+  const queuedMessages = useQueuedMessages(routeThreadKey);
+  const nextQueued = nextQueuedMessageToSend({
+    queue: queuedMessages,
+    phase,
+    busy: isSendBusy || isConnecting || activeEnvironmentUnavailable,
+    waitingForPerson: activePendingApproval !== null || pendingUserInputs.length > 0,
+    hasError: Boolean(activeThread?.error),
+  });
+  useEffect(() => {
+    if (!nextQueued || sendInFlightRef.current) return;
+    const taken = useQueuedMessageStore.getState().take(routeThreadKey, nextQueued.id);
+    if (taken) void onSendRef.current(undefined, taken);
+  }, [nextQueued, routeThreadKey]);
+  const onSendQueuedNow = useCallback(
+    (id: string) => {
+      // "Send now": into the running turn, as Enter used to do.
+      if (sendInFlightRef.current) return;
+      const taken = useQueuedMessageStore.getState().take(routeThreadKey, id);
+      if (taken) void onSendRef.current(undefined, taken);
+    },
+    [routeThreadKey],
+  );
+  const onEditQueued = useCallback(
+    (id: string) => {
+      const taken = useQueuedMessageStore.getState().take(routeThreadKey, id);
+      if (!taken) return;
+      // Back into the composer, after whatever is typed there now.
+      const nextPrompt = [promptRef.current.trim(), taken.text].filter(Boolean).join("\n\n");
+      promptRef.current = nextPrompt;
+      setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(nextPrompt, nextPrompt.length),
+        prompt: nextPrompt,
+        detectTrigger: false,
+      });
+    },
+    [composerDraftTarget, routeThreadKey, setComposerDraftPrompt],
+  );
+  const onDeleteQueued = useCallback(
+    (id: string) => {
+      useQueuedMessageStore.getState().take(routeThreadKey, id);
+    },
+    [routeThreadKey],
+  );
   const pendingSend = usePendingSendStore((store) => store.pending);
   const [, setPendingSendTick] = useState(0);
   useEffect(() => {
@@ -3364,6 +3469,8 @@ export default function ChatView(props: ChatViewProps) {
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread) return;
+    // Stop means "I take over": what waits in Up next waits for Send now.
+    useQueuedMessageStore.getState().holdAll(routeThreadKey);
     const activeTurnId =
       activeThread.session?.activeTurnId ?? activeLatestTurn?.turnId ?? undefined;
     await api.orchestration.dispatchCommand({
@@ -4130,6 +4237,25 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  // A failed turn and its "Try again" (flows v2, I1): at the end of the feed (S4).
+  const threadErrorNotice = (placement: "banner" | "feed") => (
+    <ThreadErrorBanner
+      placement={placement}
+      error={
+        activeThread.session?.lastErrorClass === "billing_error" ||
+        harnessAuth?.suppressThreadError ||
+        // "Sign in or use Uno credits": the composer asks that itself.
+        isUnoCreditsChoiceRequiredText(activeThread.error)
+          ? null
+          : activeThread.error
+      }
+      onDismiss={() => setThreadError(activeThread.id, null)}
+      // "Try again" sends the person's last message again (flows v2, I1).
+      onRetry={isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined}
+      retryDisabled={isSendBusy || isConnecting}
+    />
+  );
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
@@ -4217,22 +4343,9 @@ export default function ChatView(props: ChatViewProps) {
             sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
             environmentId={activeThread.environmentId}
           />
-          <ThreadErrorBanner
-            error={
-              activeThread.session?.lastErrorClass === "billing_error" ||
-              harnessAuth?.suppressThreadError ||
-              // "Sign in or use Uno credits": the composer asks that itself.
-              isUnoCreditsChoiceRequiredText(activeThread.error)
-                ? null
-                : activeThread.error
-            }
-            onDismiss={() => setThreadError(activeThread.id, null)}
-            // "Try again" sends the person's last message again (flows v2, I1).
-            onRetry={
-              isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined
-            }
-            retryDisabled={isSendBusy || isConnecting}
-          />
+          {/* A failed turn: a quiet line at the end of the feed (S4, upstream
+              bd3287b640); a plate up here only when the feed is hidden. */}
+          {showsTimeline(embeddedVisibility) ? null : threadErrorNotice("banner")}
         </>
       ) : null}
       {/* Main content area with optional plan sidebar */}
@@ -4266,6 +4379,21 @@ export default function ChatView(props: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 onIsAtEndChange={onIsAtEndChange}
+                latestTurn={activeLatestTurn}
+                pendingApprovals={pendingApprovals}
+                respondingRequestIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
+                endOfFeed={
+                  <>
+                    <QueuedMessagesList
+                      messages={queuedMessages}
+                      onSendNow={onSendQueuedNow}
+                      onEdit={onEditQueued}
+                      onDelete={onDeleteQueued}
+                    />
+                    {threadErrorNotice("feed")}
+                  </>
+                }
               />
             ) : null}
 
