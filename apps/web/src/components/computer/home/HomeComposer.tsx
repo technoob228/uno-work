@@ -54,7 +54,10 @@ import {
   type ComposerImageAttachment,
   useComposerDraftStore,
 } from "../../../composerDraftStore";
-import { useEnvironmentProviders } from "../../../environments/settings/serverSettings";
+import {
+  useEnvironmentProviders,
+  useEnvironmentServerConfig,
+} from "../../../environments/settings/serverSettings";
 import { useSettings } from "../../../hooks/useSettings";
 import {
   getAppModelOptionsForInstance,
@@ -82,6 +85,8 @@ import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
 import { TraitsPicker } from "../../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
+import { Skeleton } from "../../ui/skeleton";
+import { FIRST_SNAPSHOT_MAX_WAIT_MS } from "../../../lib/firstSnapshot";
 import { Spinner } from "../../ui/spinner";
 import { toastManager } from "../../ui/toast";
 import type { PickedFolder } from "../FolderChipMenu";
@@ -235,6 +240,19 @@ export function HomeComposer({
       ? pickedEnvironmentId
       : environmentId;
   const picker = useHomeModelPicker(targetEnvironmentId, { ownAgentStart: true });
+  // The computer hasn't sent its config yet: the model chip is not known, so a
+  // placeholder of its size holds the row (else it appears late and pushes
+  // Permissions aside - S6 flicker recipe b).
+  // Capped like the first snapshot: a computer that never answers ends with no
+  // chip, not an endless shimmer.
+  const modelChipConfigMissing = useEnvironmentServerConfig(targetEnvironmentId) === null;
+  const [modelChipWaitOver, setModelChipWaitOver] = useState(false);
+  useEffect(() => {
+    if (!modelChipConfigMissing || modelChipWaitOver) return;
+    const timer = window.setTimeout(() => setModelChipWaitOver(true), FIRST_SNAPSHOT_MAX_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [modelChipConfigMissing, modelChipWaitOver]);
+  const modelChipPending = modelChipConfigMissing && !modelChipWaitOver;
   const ref = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
   const [images, setImages] = useState<ComposerImageAttachment[]>([]);
@@ -530,6 +548,11 @@ export function HomeComposer({
                   }}
                   triggerVariant="ghost"
                   triggerClassName="text-muted-foreground"
+                />
+              ) : modelChipPending && targetEnvironmentId !== null ? (
+                <Skeleton
+                  className="h-8 w-36 shrink-0 rounded-full sm:h-7"
+                  data-testid="home-model-chip-pending"
                 />
               ) : null}
               {picker.selection && selectedEntry ? (
