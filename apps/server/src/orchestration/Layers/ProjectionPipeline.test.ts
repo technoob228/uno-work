@@ -1650,6 +1650,269 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  // Upstream t3code c034f51bb7 + c2283ce146: streamed messages and routine
+  // tool activities must not re-read the whole thread history to refresh the
+  // shell summary; only approval / user-input lifecycle activities do.
+  it.effect("maintains shell summary fields without rescanning on routine events", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-shell-summary-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-shell-summary"),
+        occurredAt: "2026-03-01T08:00:00.000Z",
+        commandId: CommandId.make("cmd-shell-summary-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-shell-summary"),
+          title: "Project Shell Summary",
+          workspaceRoot: "/tmp/project-shell-summary",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-03-01T08:00:00.000Z",
+          updatedAt: "2026-03-01T08:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-shell-summary-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:01.000Z",
+        commandId: CommandId.make("cmd-shell-summary-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          projectId: ProjectId.make("project-shell-summary"),
+          title: "Thread Shell Summary",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-03-01T08:00:01.000Z",
+          updatedAt: "2026-03-01T08:00:01.000Z",
+        },
+      });
+
+      const readSummary = sql<{
+        readonly latestUserMessageAt: string | null;
+        readonly pendingUserInputCount: number;
+        readonly updatedAt: string;
+      }>`
+        SELECT
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_user_input_count AS "pendingUserInputCount",
+          updated_at AS "updatedAt"
+        FROM projection_threads
+        WHERE thread_id = 'thread-shell-summary'
+      `;
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-shell-summary-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:02.000Z",
+        commandId: CommandId.make("cmd-shell-summary-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          messageId: MessageId.make("message-shell-summary-user"),
+          role: "user",
+          text: "please do the thing",
+          turnId: TurnId.make("turn-shell-summary-1"),
+          streaming: false,
+          createdAt: "2026-03-01T08:00:02.000Z",
+          updatedAt: "2026-03-01T08:00:02.000Z",
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingUserInputCount: 0,
+          updatedAt: "2026-03-01T08:00:02.000Z",
+        },
+      ]);
+
+      // Plant an open user-input request straight in the activity table. A
+      // full summary refresh would count it; routine events must not.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+        ) VALUES (
+          'activity-shell-summary-planted',
+          'thread-shell-summary',
+          NULL,
+          'info',
+          'user-input.requested',
+          'User input requested',
+          json_object('requestId', 'user-input-planted'),
+          '2026-03-01T08:00:02.500Z'
+        )
+      `;
+
+      // Streaming assistant deltas bump updatedAt but must not disturb
+      // latestUserMessageAt or rescan the thread.
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-shell-summary-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:03.000Z",
+        commandId: CommandId.make("cmd-shell-summary-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          messageId: MessageId.make("message-shell-summary-assistant"),
+          role: "assistant",
+          text: "working on it",
+          turnId: TurnId.make("turn-shell-summary-1"),
+          streaming: true,
+          createdAt: "2026-03-01T08:00:03.000Z",
+          updatedAt: "2026-03-01T08:00:03.000Z",
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingUserInputCount: 0,
+          updatedAt: "2026-03-01T08:00:03.000Z",
+        },
+      ]);
+
+      // Ordinary tool activities bump updatedAt without a rescan.
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-shell-summary-5"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:04.000Z",
+        commandId: CommandId.make("cmd-shell-summary-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-5"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          activity: {
+            id: EventId.make("activity-shell-summary-command"),
+            tone: "tool",
+            kind: "tool.updated",
+            summary: "Ran a command",
+            payload: {},
+            turnId: TurnId.make("turn-shell-summary-1"),
+            createdAt: "2026-03-01T08:00:04.000Z",
+          },
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingUserInputCount: 0,
+          updatedAt: "2026-03-01T08:00:04.000Z",
+        },
+      ]);
+
+      // A user-input lifecycle activity refreshes from the persisted history
+      // (so the planted request is counted too).
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-shell-summary-6"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:05.000Z",
+        commandId: CommandId.make("cmd-shell-summary-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-6"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          activity: {
+            id: EventId.make("activity-shell-summary-user-input"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "user-input-request-shell-summary-1",
+              questions: [
+                {
+                  id: "confirm",
+                  header: "Confirm",
+                  question: "Proceed?",
+                  options: [{ label: "yes", description: "Proceed" }],
+                },
+              ],
+            },
+            turnId: TurnId.make("turn-shell-summary-1"),
+            createdAt: "2026-03-01T08:00:05.000Z",
+          },
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingUserInputCount: 2,
+          updatedAt: "2026-03-01T08:00:05.000Z",
+        },
+      ]);
+
+      // A later user message folds into latestUserMessageAt directly.
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-shell-summary-7"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-shell-summary"),
+        occurredAt: "2026-03-01T08:00:06.000Z",
+        commandId: CommandId.make("cmd-shell-summary-7"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-7"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-shell-summary"),
+          messageId: MessageId.make("message-shell-summary-user-2"),
+          role: "user",
+          text: "and one more",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-03-01T08:00:06.000Z",
+          updatedAt: "2026-03-01T08:00:06.000Z",
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:06.000Z",
+          pendingUserInputCount: 2,
+          updatedAt: "2026-03-01T08:00:06.000Z",
+        },
+      ]);
+    }),
+  );
+
   it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
