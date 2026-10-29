@@ -178,6 +178,15 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - `apps/server/src/ws.ts` — расширен для нового RPC.
 - Связь с компьютером — без тостов (05.10): апстримные тосты `WebSocketConnectionCoordinator` («Disconnected from… / Reconnected to… / Retries exhausted») и плавающая плашка «Economy · sleeping / waking» убраны; координатор только переподключает. Статус говорит чип компьютера в хедере (`components/computer/home/connectionStatus.ts` — правило и тексты, `useComputerConnection.ts` — откуда факты): разрыв < 5 с не виден, затем «Reconnecting…», через минуту «Offline — retrying», через 3 мин «No connection» + Retry (янтарная точка), «Asleep» / «Waking…» для экономного режима, «Sign in». При мердже апстрима не возвращать тосты в `WebSocketConnectionSurface.tsx`.
 
+### 11. Home: виджет «AI plan limits» (0.0.157)
+
+Сколько потрачено своей подписки Claude (через вход Claude Code) и ChatGPT (через вход Codex) на выбранном компьютере: 5 часов, неделя, неделя по модели («Weekly · Opus»), доплата сверх плана, когда сбросится. Встроенный виджет Home (`plan-limits`), не приложение: без iframe, процесса и порта. Порт `tools/ai-limits/collect.mjs` Миши без OpenRouter/Gemini и без сводки по нескольким машинам.
+
+- **Сервер:** `apps/server/src/planLimits/` — `planLimitsParse.ts` (чистый разбор `.credentials.json`/`.claude.json`/`auth.json` и ответов `api.anthropic.com/api/oauth/usage` и `chatgpt.com/backend-api/wham/usage`, оба эндпоинта недокументированные), `planLimitsReader.ts` (чтение, кэш 5 мин, последние цифры в `<stateDir>/plan-limits.json` 0600 без токенов), `PlanLimitsService.ts` (один на демон, в `server.ts`). RPC `uno.computer.planLimits {signInsOnly?}`, capability `planLimits`. Форма окна — апстримный `ServerProviderUsageWindow` (+ `scope`), чтобы потом взять их UI лимитов.
+- **Токены:** только читаются (не пишутся, не рефрешатся — рефреш выбил бы сам CLI), уходят только своему провайдеру, с таймаутом 10 с, не логируются и не попадают в ответы/ошибки. Истёкший токен не используется: остаются последние цифры с пометкой «Numbers from 3 h ago», до следующего запуска агента.
+- **Keychain (Mac):** сначала файл; если живого входа в файле нет — `security find-generic-password` без `-w` (только атрибуты, без запроса), секрет `-w` — только при чтении цифр, таймаут 4 с; после таймаута или «Deny» Keychain больше не спрашивается до рестарта демона (`problem: "locked"`). На Mac Миши 28.10 чтение без запроса (Claude Code пишет запись тем же `security`).
+- **Web:** виджет в `HomeWidgetBodies.tsx` (`PlanLimitsWidget`), тексты — `planLimitsModel.ts`. В списке виджетов только если у демона есть capability и на машине есть вход Claude Code или Codex (`usePlanLimitsAvailable`, запрос `signInsOnly` — без сети). Стоит в layout по умолчанию (`SEEDED_HOME_WIDGETS`) и один раз добавляется в уже сохранённые layout'ы (`newBuiltInWidgetBlocks`, ключ `uno-work:home:built-in-widgets-seen:v1`); убранный крестиком больше не возвращается. В спокойном режиме — под «Also here», как остальные.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

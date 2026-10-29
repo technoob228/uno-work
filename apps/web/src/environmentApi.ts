@@ -163,6 +163,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       appAiModels: rpcClient.unoComputer.appAiModels,
       appAiSpend: () => rpcClient.unoComputer.appAiSpend(),
       appAiStatus: () => rpcClient.unoComputer.appAiStatus(),
+      planLimits: (input) => rpcClient.unoComputer.planLimits(input),
       workSites: () => rpcClient.unoComputer.workSites(),
       workSiteUnpublish: (input) => rpcClient.unoComputer.workSiteUnpublish(input),
       localMetrics: () => rpcClient.unoComputer.localMetrics(),

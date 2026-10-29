@@ -71,6 +71,7 @@ import { UnoCloudServiceLive } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.ts";
 import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
 import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
+import { PlanLimitsServiceLive } from "./planLimits/PlanLimitsService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
@@ -447,6 +448,9 @@ const WorkspaceRegistryLayerLive = Layer.mergeAll(
   // Programs found on this machine: same key and box id, plus ServerConfig.
   // "What is using my computer" reads the same scan to name apps and containers.
   ComputerResourcesServiceLive.pipe(Layer.provideMerge(MachineAppsServiceLive)),
+  // Home's "AI plan limits": the Claude Code / Codex sign-ins on this machine
+  // (settings for their homes, the state dir for the last numbers).
+  PlanLimitsServiceLive,
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(

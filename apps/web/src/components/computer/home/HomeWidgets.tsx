@@ -32,6 +32,7 @@ import {
   SparklesIcon,
   SquarePenIcon,
   FolderIcon,
+  GaugeIcon,
   GlobeIcon,
   GripVerticalIcon,
   LayoutGridIcon,
@@ -157,6 +158,12 @@ export const HOME_WIDGETS: Record<HomeWidgetId, WidgetMeta> = {
     description: "AI time left and today's use, or spend and credits left",
     icon: <WalletIcon />,
     span: 1,
+  },
+  "plan-limits": {
+    title: "AI plan limits",
+    description: "How much of your Claude and ChatGPT plan is used, and when it resets",
+    icon: <GaugeIcon />,
+    span: 2,
   },
 };
 

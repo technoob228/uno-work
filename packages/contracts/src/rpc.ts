@@ -39,6 +39,7 @@ import {
   UnoAiStatus,
 } from "./appSdk.ts";
 import { InboxError, InboxSnapshot, InboxUpdateInput } from "./inbox.ts";
+import { PlanLimits, PlanLimitsInput } from "./planLimits.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import {
   UnoComputerActivity,
@@ -521,6 +522,7 @@ export const WS_METHODS = {
   appAiUpdate: "uno.appAi.update",
   appAiSpend: "uno.appAi.spend",
   appAiStatus: "uno.appAi.status",
+  unoComputerPlanLimits: "uno.computer.planLimits",
   workSites: "uno.sites.list",
   workSiteUnpublish: "uno.sites.unpublish",
   appAiModels: "uno.appAi.models",
@@ -2079,6 +2081,16 @@ export const WsAppAiSpendRpc = Rpc.make(WS_METHODS.appAiSpend, {
   error: UnoCloudRpcError,
 });
 
+/**
+ * Home's "AI plan limits": how much of this computer's Claude / ChatGPT plan
+ * sign-ins is used. Never fails: problems come back in the accounts.
+ */
+export const WsUnoComputerPlanLimitsRpc = Rpc.make(WS_METHODS.unoComputerPlanLimits, {
+  payload: PlanLimitsInput,
+  success: PlanLimits,
+  error: UnoCloudRpcError,
+});
+
 /** The person's sites on Uno Hosting, read by this computer (works on its direct address). */
 export const WsWorkSitesRpc = Rpc.make(WS_METHODS.workSites, {
   payload: Schema.Struct({}),
@@ -2283,6 +2295,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAppAiUpdateRpc,
   WsAppAiSpendRpc,
   WsAppAiStatusRpc,
+  WsUnoComputerPlanLimitsRpc,
   WsWorkSitesRpc,
   WsWorkSiteUnpublishRpc,
   WsAppAiModelsRpc,

@@ -1,13 +1,15 @@
 /**
  * What Home reads for its greeting and the "Uno AI spend" widget — all from
  * calls the app already makes (`/auth/me` through the account, the daemon's
- * account state, the home folder), plus the daemon's spend ledger.
+ * account state, the home folder), plus the daemon's spend ledger — and for
+ * "AI plan limits", the daemon's reading of the person's own plans.
  */
-import type { EnvironmentId, UnoAiSpend } from "@t3tools/contracts";
+import type { EnvironmentId, PlanLimits, UnoAiSpend } from "@t3tools/contracts";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import { isElectron } from "../../../env";
 import { ensureEnvironmentApi } from "../../../environmentApi";
+import { useEnvironmentSupportsPlanLimits } from "../../../environments/planLimitsSupport";
 import { unoCloudStateQueryOptions } from "../../../lib/workspaceReactQuery";
 import { aiHoursSummary, type AiHoursSummary } from "../../../account/aiHours";
 import { useAiStatus } from "../../../lib/aiStatusReactQuery";
@@ -55,6 +57,39 @@ export function aiSpendQueryOptions(environmentId: EnvironmentId | null) {
     enabled: environmentId !== null,
     refetchInterval: 60_000,
   });
+}
+
+/**
+ * "AI plan limits". `signInsOnly`: which Claude Code / Codex sign-ins the
+ * computer has (local files only — for "is the widget there"); otherwise the
+ * numbers, which the daemon reads from the providers at most every 5 minutes.
+ */
+export function planLimitsQueryOptions(
+  environmentId: EnvironmentId | null,
+  options: { readonly signInsOnly: boolean; readonly enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: ["home", "plan-limits", options.signInsOnly ? "sign-ins" : "usage", environmentId],
+    queryFn: (): Promise<PlanLimits> =>
+      ensureEnvironmentApi(environmentId!).unoComputer.planLimits(
+        options.signInsOnly ? { signInsOnly: true } : {},
+      ),
+    enabled: environmentId !== null && options.enabled !== false,
+    refetchInterval: options.signInsOnly ? 5 * 60_000 : 60_000,
+  });
+}
+
+/**
+ * Whether Home offers "AI plan limits" for this computer: its daemon reads
+ * them (0.0.157) and Claude Code or Codex is signed in there. False while
+ * that's unknown — never an empty widget.
+ */
+export function usePlanLimitsAvailable(environmentId: EnvironmentId | null): boolean {
+  const supported = useEnvironmentSupportsPlanLimits(environmentId);
+  const signIns = useQuery(
+    planLimitsQueryOptions(environmentId, { signInsOnly: true, enabled: supported }),
+  );
+  return supported && (signIns.data?.accounts.length ?? 0) > 0;
 }
 
 /** The daemon's reading, and the account's credits as a second source. */
