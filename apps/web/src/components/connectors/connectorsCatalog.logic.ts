@@ -42,6 +42,10 @@ export const APP_TECH: Readonly<Record<string, { readonly plain: string; readonl
       plain: "Reads, drafts and sends mail, can move it to Trash; reads your calendar.",
       tech: "OAuth · scopes gmail.modify, calendar.readonly · MCP uno-work › gmail_*, calendar_*",
     },
+    microsoft: {
+      plain: "Reads your Outlook calendar, Teams meetings too; never your mail.",
+      tech: "OAuth (Microsoft, personal and work accounts) · scopes User.Read, Calendars.Read",
+    },
   };
 
 /** "https://mcp.example.com/…" — the address may carry a token, so only the host shows. */

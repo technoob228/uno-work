@@ -369,8 +369,11 @@ Notetaker then asks this API (only the app with id `notetaker`; others get
 
 - `GET /v1/assistant/link` → `{enabled, assistant:{projectId,name}, owner:{name,email}, …}`
   with `botName:"Ada (Uno notes)"`, `rule:"mine"`, `choices:{<meetingKey>:{choice,at}}`;
-- `GET /v1/calendar/events?from=&to=` → the person's Google Calendar as JSON
-  (the console's `calendar_feed`; 424 `google_reconnect` / `google_not_connected`);
+- `GET /v1/calendar/events?from=&to=[&provider=gmail|microsoft]` → the person's
+  calendar as JSON (the console's `calendar_feed`; `provider` defaults to
+  `gmail`; 424 `google_reconnect` / `google_not_connected` /
+  `microsoft_reconnect` / `microsoft_not_connected`, 502 `calendar_unavailable`)
+  — see "Calendars" below, it needs no assistant;
 - `POST /v1/assistant/events` `{id, kind, at, …}` → 202 (a repeated `id` → 200
   `duplicate`). Kinds: `calls.upcoming`, `call.status` (a failure goes to the
   Inbox), `meeting.notes` (the assistant's turn — its answer goes to Telegram —
@@ -378,6 +381,26 @@ Notetaker then asks this API (only the app with id `notetaker`; others get
 
 Contract and fields: `reports/day_2026-10-28/assistants-d-impl/CONTRACTS.md`
 (W ↔ N) in the Uno workspace; code: `apps/server/src/assistants/assistantCalls*.ts`.
+
+### Calendars — `"calendar": true` (the Notetaker)
+
+The calendars the person connected to their Uno account — Google Calendar
+("Gmail & Calendar") and Outlook & Teams (`microsoft`, where the console
+offers it) — with or without an assistant's Join my calls. Only the app with
+id `notetaker` and `"calendar": true` or `"calls": true` in its manifest
+(others: 403 `calendar_not_allowed`):
+
+- `GET /v1/calendars` → `{"calendars": [{"provider": "gmail", "name": "Google Calendar",
+"available": true, "connected": true, "account": "misha@x.com", "needsReconnect": false},
+{"provider": "microsoft", "name": "Outlook & Teams", …}]}` — `available: false`:
+  the console doesn't offer that connector;
+- `GET /v1/calendar/events?from=&to=&provider=gmail|microsoft` (above).
+
+Not connected → the app's page asks Uno Work to connect it:
+`window.parent.postMessage({type: "uno-work:connect", provider: "gmail" | "microsoft"}, "*")`
+from the Notetaker's frame starts the usual Connect (in the browser; the
+desktop app's frames can't post — show "Settings → Connectors" there).
+Contract: `reports/day_2026-10-29/notetaker-ecosystem/CONTRACT.md`.
 
 ## 3. SDKs
 

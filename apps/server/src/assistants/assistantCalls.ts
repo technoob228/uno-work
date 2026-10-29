@@ -665,3 +665,101 @@ export function parseCalendarFeed(result: {
     return { ok: false, message: "The calendar answered something else." };
   }
 }
+
+// ---- the person's calendars (Notetaker, with or without an assistant) ----
+
+/** Calendar connectors of the Uno account, in the order Notetaker lists them. */
+export const CALENDAR_CONNECTORS = [
+  { provider: "gmail", name: "Google Calendar", label: "Google Calendar" },
+  { provider: "microsoft", name: "Outlook & Teams", label: "Outlook & Teams calendar" },
+] as const;
+
+export type CalendarConnectorProvider = (typeof CALENDAR_CONNECTORS)[number]["provider"];
+
+/** A connector as `ConnectorsService.list` reports it (the fields read here). */
+export interface CalendarConnectorRow {
+  readonly provider: string;
+  readonly available: boolean;
+  readonly connected: boolean;
+  readonly account: string | null;
+  readonly needsReconnect: boolean;
+}
+
+export interface CalendarView {
+  readonly provider: CalendarConnectorProvider;
+  readonly name: string;
+  /** False: the console doesn't offer this connector (no config, an older console). */
+  readonly available: boolean;
+  readonly connected: boolean;
+  readonly account: string;
+  readonly needsReconnect: boolean;
+}
+
+/** `GET /v1/calendars`: every calendar connector, listed or not (not listed = unavailable). */
+export function calendarsBody(rows: ReadonlyArray<CalendarConnectorRow> | null): {
+  readonly calendars: ReadonlyArray<CalendarView>;
+} {
+  return {
+    calendars: CALENDAR_CONNECTORS.map(({ provider, name }) => {
+      const row = rows?.find((r) => r.provider === provider);
+      return {
+        provider,
+        name,
+        available: row?.available === true || row?.connected === true,
+        connected: row?.connected === true,
+        account: row?.account ?? "",
+        needsReconnect: row?.needsReconnect === true,
+      };
+    }),
+  };
+}
+
+/** Some calendar is signed in (connected and not refused): Join my calls can start. */
+export function anyCalendarSignedIn(rows: ReadonlyArray<CalendarConnectorRow> | null): boolean {
+  return CALENDAR_CONNECTORS.some(({ provider }) => {
+    const row = rows?.find((r) => r.provider === provider);
+    return row?.connected === true && !row.needsReconnect;
+  });
+}
+
+const CALENDAR_ERROR_PREFIX: Readonly<Record<CalendarConnectorProvider, string>> = {
+  gmail: "google",
+  microsoft: "microsoft",
+};
+
+/**
+ * Why a calendar's feed didn't come, as the App API answers it:
+ * 424 `<google|microsoft>_not_connected` / `_reconnect`, else 502
+ * `calendar_unavailable`. `call` — the connector call failed with an HTTP
+ * status; `answer` — the connector answered an error text.
+ */
+export function calendarFeedFailure(
+  provider: CalendarConnectorProvider,
+  failure:
+    | { readonly kind: "call"; readonly status: number; readonly message: string }
+    | { readonly kind: "answer"; readonly message: string },
+): { readonly status: number; readonly code: string; readonly message: string } {
+  const prefix = CALENDAR_ERROR_PREFIX[provider];
+  const label = CALENDAR_CONNECTORS.find((c) => c.provider === provider)?.label ?? "The calendar";
+  const reconnect = {
+    status: 424,
+    code: `${prefix}_reconnect`,
+    message: `${label} needs signing in again in Uno Work.`,
+  };
+  const notConnected = {
+    status: 424,
+    code: `${prefix}_not_connected`,
+    message: `${label} isn't connected in Uno Work.`,
+  };
+  if (failure.kind === "call") {
+    // The console's 404 for a provider: never connected on this account.
+    if (failure.status === 404 && provider !== "gmail") return notConnected;
+    if (failure.status === 401 || failure.status === 403 || failure.status === 404) {
+      return reconnect;
+    }
+    return { status: 502, code: "calendar_unavailable", message: failure.message };
+  }
+  if (/not connected/i.test(failure.message)) return notConnected;
+  if (/expired|revoked|reconnect/i.test(failure.message)) return reconnect;
+  return { status: 502, code: "calendar_unavailable", message: failure.message };
+}

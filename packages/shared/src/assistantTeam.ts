@@ -47,6 +47,7 @@ export const TEAM_APP_NAME: Readonly<Record<string, string>> = {
   "google-drive": "Google Drive",
   notion: "Notion",
   github: "GitHub",
+  microsoft: "Outlook & Teams calendar",
 };
 
 const appName = (provider: string) => TEAM_APP_NAME[provider] ?? provider;

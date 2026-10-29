@@ -94,6 +94,7 @@ import {
 } from "./PluginPanelChat";
 import { AppFrame } from "../apps/AppFrame";
 import { ComputerAppFrame } from "../apps/ComputerAppFrame";
+import { useIsNotetakerAddress } from "../apps/appConnectBridge";
 import { isComputerLocalUrl } from "@t3tools/shared/portPreview";
 import { LiveBrowserView } from "./LiveBrowserView";
 import { TasksTabBody, TasksTabName } from "./TasksTabBody";
@@ -1455,6 +1456,36 @@ function PluginPanelBody({ file }: { file: PreviewFile }) {
   );
 }
 
+/** An app in the right panel; Uno Notetaker's Connect reaches Uno Work from here too. */
+function PanelAppFrame({
+  url,
+  name,
+  icon,
+  environmentId,
+}: {
+  url: string;
+  name: string;
+  icon: string | null;
+  environmentId: EnvironmentId | null;
+}) {
+  const notetaker = useIsNotetakerAddress(url);
+  // An app only the computer reaches (open_in_panel with appId, "Beside a
+  // chat"): from its port's address, never the computer's browser (P16).
+  if (isComputerLocalUrl(url)) {
+    return (
+      <ComputerAppFrame
+        environmentId={environmentId}
+        url={url}
+        name={name}
+        icon={icon}
+        compact
+        connectRequests={notetaker}
+      />
+    );
+  }
+  return <AppFrame url={url} name={name} icon={icon} compact connectRequests={notetaker} />;
+}
+
 function Body({ file }: { file: PreviewFile }) {
   const { currentChatEnvironmentId, editingFileId, sourceViewFileIds } = usePreviewPane();
   const effectiveEnvironmentId = file.environmentId ?? currentChatEnvironmentId ?? undefined;
@@ -1463,20 +1494,14 @@ function Body({ file }: { file: PreviewFile }) {
     return <PluginPanelBody file={file} />;
   }
   if (file.kind === "app" && file.url) {
-    // An app only the computer reaches (open_in_panel with appId, "Beside a
-    // chat"): from its port's address, never the computer's browser (P16).
-    if (isComputerLocalUrl(file.url)) {
-      return (
-        <ComputerAppFrame
-          environmentId={effectiveEnvironmentId ?? null}
-          url={file.url}
-          name={file.name}
-          icon={file.content || null}
-          compact
-        />
-      );
-    }
-    return <AppFrame url={file.url} name={file.name} icon={file.content || null} compact />;
+    return (
+      <PanelAppFrame
+        url={file.url}
+        name={file.name}
+        icon={file.content || null}
+        environmentId={effectiveEnvironmentId ?? null}
+      />
+    );
   }
   if (file.kind === "live-browser") {
     return <LiveBrowserView file={file} />;

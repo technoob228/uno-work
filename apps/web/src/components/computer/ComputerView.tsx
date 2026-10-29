@@ -86,6 +86,8 @@ import {
 } from "./programModel";
 import { appPrimaryAction } from "./appPrimaryAction";
 import { useAppInstalls } from "./useAppInstalls";
+import { NotetakerConfirmDialog, useNotetakerApp } from "./NotetakerBuiltIn";
+import { catalogTemplates } from "./useProgramTiles";
 import { useAppPrimaryAction } from "./useAppPrimaryAction";
 import { useHomeLaunchers } from "./useHomeLaunchers";
 import { useUnoAiArrivals } from "../../unoai/useUnoAiArrivals";
@@ -204,6 +206,23 @@ export function ComputerView() {
   const catalog = appsQuery.data?.catalog;
   const hasFilesApp = "/files" in (router.routesByPath as unknown as Record<string, unknown>);
   const hasDriveApp = "/drive" in (router.routesByPath as unknown as Record<string, unknown>);
+  // Uno Notetaker next to Uno Drive: added with one click, then an app like the others.
+  const notetaker = useNotetakerApp({
+    installs,
+    tiles,
+    computer: {
+      loading: stateQuery.isPending,
+      linked: computer?.linked === true,
+      hasBox,
+      computerOn,
+      templates: catalogTemplates(catalog),
+    },
+    onOpen: (tile) => openTile(tile),
+    onDetails: (tile) => {
+      resetTileMutations();
+      setDetailsKey(tile.key);
+    },
+  });
   const builtIns: BuiltInPrograms = {
     onNewChat: () => void launchers.newChat(),
     onChatInFolder: () => setFolderOpen(true),
@@ -213,6 +232,7 @@ export function ComputerView() {
         ? () => router.history.push("/drive")
         : null
       : undefined,
+    notetaker,
     onTerminal: () => void launchers.openTerminal(),
     onAppStore:
       hasBox && catalog?.availability === "ok" && catalog.templates.length > 0
@@ -576,6 +596,8 @@ export function ComputerView() {
       </div>
 
       {home.dialogs}
+
+      <NotetakerConfirmDialog notetaker={thisMachine ? notetaker : null} />
 
       <ProgramDialog
         tile={detailsTile}

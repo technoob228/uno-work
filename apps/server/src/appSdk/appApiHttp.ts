@@ -62,6 +62,8 @@ export interface AppApiCaller {
   readonly appIcon?: string | null;
   /** The manifest asks for an assistant's calls (`"calls": true`, Notetaker). */
   readonly calls?: boolean;
+  /** The manifest asks for the person's calendars (`"calendar": true`, Notetaker). */
+  readonly calendar?: boolean;
 }
 
 export interface AppApiTaskDetail {
@@ -125,11 +127,30 @@ export interface AppCallsReply {
   readonly body: unknown;
 }
 
+/** Calendars an app can read through Uno (the account's connectors). */
+export const CALENDAR_PROVIDERS = ["gmail", "microsoft"] as const;
+export type CalendarProvider = (typeof CALENDAR_PROVIDERS)[number];
+
+/** `?provider=` of `/v1/calendar/events`: absent = gmail (older notetakers); unknown = null. */
+export function parseCalendarProvider(raw: string | null): CalendarProvider | null {
+  if (raw === null || raw.trim() === "") return "gmail";
+  const value = raw.trim().toLowerCase();
+  return (CALENDAR_PROVIDERS as ReadonlyArray<string>).includes(value)
+    ? (value as CalendarProvider)
+    : null;
+}
+
 export interface AppCallsCore {
   readonly link: (caller: AppApiCaller) => Promise<AppCallsReply>;
+  /** `GET /v1/calendars`: each calendar connector of the account and its state. */
+  readonly calendars: (caller: AppApiCaller) => Promise<AppCallsReply>;
   readonly calendar: (
     caller: AppApiCaller,
-    range: { readonly from: string | null; readonly to: string | null },
+    range: {
+      readonly from: string | null;
+      readonly to: string | null;
+      readonly provider: CalendarProvider;
+    },
   ) => Promise<AppCallsReply>;
   readonly event: (caller: AppApiCaller, body: unknown) => Promise<AppCallsReply>;
 }
@@ -706,11 +727,51 @@ export function makeAppApiHandler(core: AppApiCore) {
         return await transcriptions(caller, req, res);
       }
       if (method === "POST" && route === "/v1/notify") return await notify(caller, req, res);
-      if (
-        route === "/v1/assistant/link" ||
-        route === "/v1/assistant/events" ||
-        route === "/v1/calendar/events"
-      ) {
+      if (route === "/v1/calendars" || route === "/v1/calendar/events") {
+        // The person's calendars: Notetaker reads them with or without an
+        // assistant's "Join my calls" (contract 29.10, notetaker-ecosystem).
+        if (!caller.calendar && !caller.calls) {
+          return send(
+            res,
+            err(
+              403,
+              "calendar_not_allowed",
+              'This app\'s manifest does not ask for calendars. Add "calendar": true to ~/.uno/apps/<id>.json.',
+            ),
+          );
+        }
+        if (!core.calls) {
+          return send(
+            res,
+            err(503, "calendar_unavailable", "Calendars aren't available on this computer."),
+          );
+        }
+        if (method === "GET" && route === "/v1/calendars") {
+          return send(res, await core.calls.calendars(caller));
+        }
+        if (method === "GET" && route === "/v1/calendar/events") {
+          const provider = parseCalendarProvider(url.searchParams.get("provider"));
+          if (provider === null) {
+            return send(
+              res,
+              err(
+                400,
+                "invalid_request",
+                `provider must be one of: ${CALENDAR_PROVIDERS.join(", ")}.`,
+              ),
+            );
+          }
+          return send(
+            res,
+            await core.calls.calendar(caller, {
+              from: url.searchParams.get("from"),
+              to: url.searchParams.get("to"),
+              provider,
+            }),
+          );
+        }
+      }
+      if (route === "/v1/assistant/link" || route === "/v1/assistant/events") {
         if (!caller.calls) {
           return send(
             res,
@@ -729,15 +790,6 @@ export function makeAppApiHandler(core: AppApiCore) {
         }
         if (method === "GET" && route === "/v1/assistant/link") {
           return send(res, await core.calls.link(caller));
-        }
-        if (method === "GET" && route === "/v1/calendar/events") {
-          return send(
-            res,
-            await core.calls.calendar(caller, {
-              from: url.searchParams.get("from"),
-              to: url.searchParams.get("to"),
-            }),
-          );
         }
         if (method === "POST" && route === "/v1/assistant/events") {
           const raw = await readBody(req, CALLS_EVENT_MAX_BYTES);
