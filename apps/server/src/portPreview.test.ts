@@ -6,8 +6,10 @@ import * as Zlib from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  looksLikeHtmlDocument,
   PAGE_TOOLS_SCRIPT_TAG,
   pageToolsInsertIndex,
+  pageToolsRequestKind,
   portPreviewRequestHeaders,
   type PortPreviewTarget,
   relayPortPreviewRequest,
@@ -47,6 +49,29 @@ async function closedPort(): Promise<number> {
   const port = (server.address() as AddressInfo).port;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return port;
+}
+
+/** A plain GET with exactly these headers (fetch() adds its own Sec-Fetch-* and decompresses). */
+function get(
+  port: number,
+  path: string,
+  headers: Http.OutgoingHttpHeaders = {},
+): Promise<{ status: number; headers: Http.IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const req = Http.get({ host: "127.0.0.1", port, path, headers, agent: false }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () =>
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
+      );
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+  });
+}
+
+function scriptTagsIn(body: string): number {
+  return body.split(PAGE_TOOLS_SCRIPT_TAG).length - 1;
 }
 
 /** The daemon's side: every request relayed to `port` (as portPreviewHttp does after auth). */
@@ -134,6 +159,38 @@ describe("port preview headers", () => {
     expect(at("<header>not head</header>")).toBe(0);
   });
 
+  it("tells a page from data labelled text/html", () => {
+    const doc = (body: string, complete = true) =>
+      looksLikeHtmlDocument(Buffer.from(body), complete);
+    expect(doc("<!doctype html><html><head></head></html>")).toBe(true);
+    expect(doc("﻿  <!-- built 29.10 -->\n<!DOCTYPE HTML><p>hi")).toBe(true);
+    expect(doc('<html lang="en"><body>x</body></html>')).toBe(true);
+    expect(doc('<meta charset="utf-8"><title>x</title><body>hi')).toBe(true);
+    expect(doc('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">')).toBe(true);
+    expect(doc("42")).toBe(false);
+    expect(doc("42", false)).toBe(false);
+    expect(doc('{"count":42}')).toBe(false);
+    expect(doc("[1,2,3]")).toBe(false);
+    expect(doc("Count: 42")).toBe(false);
+    expect(doc("<li>one</li><li>two</li>")).toBe(false);
+    expect(doc("<header>not head</header>")).toBe(false);
+    expect(doc("")).toBe(false);
+    // Not enough yet to tell.
+    expect(doc("  ", false)).toBeNull();
+    expect(doc("<!-- still a comm", false)).toBeNull();
+    expect(doc("<!doc", false)).toBeNull();
+    expect(doc("<div>", false)).toBeNull();
+  });
+
+  it("knows a page request from a fetch by Sec-Fetch-Dest", () => {
+    expect(pageToolsRequestKind({ "sec-fetch-dest": "document" })).toBe("page");
+    expect(pageToolsRequestKind({ "sec-fetch-dest": "iframe" })).toBe("page");
+    expect(pageToolsRequestKind({ "sec-fetch-dest": "frame" })).toBe("page");
+    expect(pageToolsRequestKind({ "sec-fetch-dest": "empty" })).toBe("data");
+    expect(pageToolsRequestKind({ "sec-fetch-dest": "script" })).toBe("data");
+    expect(pageToolsRequestKind({})).toBe("unknown");
+  });
+
   it("refuses ports outside 1024–65535 and Work's own", () => {
     const reserved = { daemonPort: 80, appApiPort: 3779 };
     expect(portPreviewPortProblem("5173", reserved)).toBeNull();
@@ -192,6 +249,111 @@ describe("port preview relay", () => {
     expect(await response.text()).toBe(
       `<html><head>${PAGE_TOOLS_SCRIPT_TAG}</head><body>z</body></html>`,
     );
+  });
+
+  describe("only real pages get the script (29.10: Date Counter read `42<script…>`)", () => {
+    /** An app whose endpoints label everything text/html, like the agent-built one did. */
+    async function startHtmlApp(): Promise<number> {
+      const page =
+        '<!doctype html><html><head><title>Date Counter</title></head><body><p id="c"></p></body></html>';
+      const app = Http.createServer((req, res) => {
+        if (req.url === "/count") {
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": 2 });
+          res.end("42");
+        } else if (req.url === "/stats") {
+          const json = JSON.stringify({ count: 42, since: "2026-10-29" });
+          res.writeHead(200, {
+            "content-type": "text/html",
+            "content-length": Buffer.byteLength(json),
+          });
+          res.end(json);
+        } else if (req.url === "/count.gz") {
+          res.writeHead(200, { "content-type": "text/html", "content-encoding": "gzip" });
+          res.end(Zlib.gzipSync("42"));
+        } else if (req.url === "/streamed") {
+          // The page arrives in pieces: the verdict waits for enough of it.
+          res.writeHead(200, { "content-type": "text/html" });
+          res.write("\n  <!-- app -->\n<!doc");
+          setTimeout(() => {
+            res.write("type html><html><he");
+            setTimeout(() => res.end("ad><title>x</title></head><body>hi</body></html>"), 10);
+          }, 10);
+        } else {
+          res.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": Buffer.byteLength(page),
+          });
+          res.end(page);
+        }
+      });
+      return startRelay(await listen(app));
+    }
+
+    it("a bare number labelled text/html goes through untouched, Content-Length kept", async () => {
+      const relay = await startHtmlApp();
+      const response = await get(relay, "/count");
+      expect(response.status).toBe(200);
+      expect(response.body.toString()).toBe("42");
+      expect(response.headers["content-length"]).toBe("2");
+    });
+
+    it("JSON labelled text/html goes through untouched", async () => {
+      const relay = await startHtmlApp();
+      const response = await get(relay, "/stats");
+      const body = response.body.toString();
+      expect(JSON.parse(body)).toEqual({ count: 42, since: "2026-10-29" });
+      expect(response.headers["content-length"]).toBe(String(Buffer.byteLength(body)));
+    });
+
+    it("a compressed number with no Sec-Fetch-Dest comes back unpacked, without the script", async () => {
+      const relay = await startHtmlApp();
+      const response = await get(relay, "/count.gz", { "accept-encoding": "gzip" });
+      expect(response.headers["content-encoding"]).toBeUndefined();
+      expect(response.headers["content-length"]).toBeUndefined();
+      expect(response.body.toString()).toBe("42");
+    });
+
+    it("a full HTML page gets the script once (no Sec-Fetch-Dest, page in pieces)", async () => {
+      const relay = await startHtmlApp();
+      const whole = await get(relay, "/", { accept: "text/html" });
+      const body = whole.body.toString();
+      expect(scriptTagsIn(body)).toBe(1);
+      expect(body).toBe(
+        `<!doctype html><html><head>${PAGE_TOOLS_SCRIPT_TAG}<title>Date Counter</title></head><body><p id="c"></p></body></html>`,
+      );
+      expect(whole.headers["content-length"]).toBeUndefined();
+
+      const streamed = (await get(relay, "/streamed")).body.toString();
+      expect(scriptTagsIn(streamed)).toBe(1);
+      expect(streamed).toBe(
+        `\n  <!-- app -->\n<!doctype html><html><head>${PAGE_TOOLS_SCRIPT_TAG}<title>x</title></head><body>hi</body></html>`,
+      );
+    });
+
+    it("a fetch (Sec-Fetch-Dest: empty) of an HTML page gets it untouched", async () => {
+      const relay = await startHtmlApp();
+      const page = await get(relay, "/", { "sec-fetch-dest": "empty", accept: "*/*" });
+      const body = page.body.toString();
+      expect(scriptTagsIn(body)).toBe(0);
+      expect(page.headers["content-length"]).toBe(String(Buffer.byteLength(body)));
+      const count = await get(relay, "/count", { "sec-fetch-dest": "empty" });
+      expect(count.body.toString()).toBe("42");
+      const gz = await get(relay, "/count.gz", {
+        "sec-fetch-dest": "empty",
+        "accept-encoding": "gzip",
+      });
+      expect(gz.headers["content-encoding"]).toBe("gzip");
+      expect(Zlib.gunzipSync(gz.body).toString()).toBe("42");
+    });
+
+    it("an iframe (or frame) navigation gets the script", async () => {
+      const relay = await startHtmlApp();
+      for (const dest of ["iframe", "frame", "document"]) {
+        const body = (await get(relay, "/", { "sec-fetch-dest": dest })).body.toString();
+        expect(scriptTagsIn(body)).toBe(1);
+        expect(body.startsWith(`<!doctype html><html><head>${PAGE_TOOLS_SCRIPT_TAG}`)).toBe(true);
+      }
+    });
   });
 
   it("passes other content untouched and rewrites the Location", async () => {
