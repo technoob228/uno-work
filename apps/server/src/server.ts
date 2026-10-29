@@ -114,6 +114,7 @@ import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdent
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorktreeCleanupLive } from "./worktreeCleanup/WorktreeCleanup.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -512,6 +513,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Automations: pulls this computer's queue of events from the console
       // (machine token, long-poll) and wakes the assistant for each one.
       AutomationEventLoopLive,
+      // Chat-copy (worktree) cleanup; sits below the reactors so the provider
+      // command reactor can bring a removed copy back on the next message.
+      WorktreeCleanupLive,
     ),
   ),
   // Manager tool layer (MCP surface for the manager brain). Sits above the

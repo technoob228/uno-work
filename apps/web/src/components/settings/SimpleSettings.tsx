@@ -71,6 +71,7 @@ import { toastManager } from "../ui/toast";
 import { AiProviderKeysSection } from "./AiProviderKeysSection";
 import { AppsAiDefaultRows } from "./AppsAiSettingsPanel";
 import { HarnessesSettingsPanel } from "./HarnessesSettingsPanel";
+import { ChatCopiesCleanupSection } from "./ChatCopiesCleanup";
 import { MachineAccessSections } from "./MachineAccessSettings";
 import { GeneralSettingsPanel, UnoGatewayBalance } from "./SettingsPanels";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
@@ -790,6 +791,8 @@ export function ComputerSettings() {
       </SettingsSection>
 
       <MachineAccessSections />
+
+      <ChatCopiesCleanupSection environmentId={environmentId} />
 
       <SettingsSection title="Safety and more">
         <LinkRow
