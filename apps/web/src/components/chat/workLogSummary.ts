@@ -60,7 +60,11 @@ const FETCH_TOOL = /(?:^|[^a-z])(?:webfetch|fetch|browse|open[ _-]?url)(?:$|[^a-
 
 export function toolGroupAction(entry: SummaryEntry): ToolGroupAction {
   const name = harnessToolName(entry);
-  if (entry.requestKind === "file-read" || entry.itemType === "image_view" || READ_TOOL.test(name)) {
+  if (
+    entry.requestKind === "file-read" ||
+    entry.itemType === "image_view" ||
+    READ_TOOL.test(name)
+  ) {
     return "read";
   }
   if (entry.itemType !== "mcp_tool_call" && CODE_SEARCH_TOOL.test(name)) return "code-search";
@@ -106,9 +110,9 @@ function toolGroupActionLabel(action: ToolGroupAction, count: number): string {
     case "command":
       return `Ran ${plural(count, "command", "commands")}`;
     case "code-search":
-      return `Searched files ${plural(count, "time", "times")}`;
+      return count === 1 ? "Searched files" : `Searched files ${count} times`;
     case "search":
-      return `Searched the web ${plural(count, "time", "times")}`;
+      return count === 1 ? "Searched the web" : `Searched the web ${count} times`;
     case "browse":
       return `Opened ${plural(count, "web page", "web pages")}`;
     case "delegate":

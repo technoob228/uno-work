@@ -4247,6 +4247,7 @@ export default function ChatView(props: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 onIsAtEndChange={onIsAtEndChange}
+                latestTurn={activeLatestTurn}
               />
             ) : null}
 

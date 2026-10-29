@@ -1,6 +1,7 @@
-import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import { formatDuration, type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import { liveThoughtFromReasoningTail, workEntryIsThought } from "./workLogSummary";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 
@@ -11,12 +12,28 @@ export interface TimelineDurationMessage {
   completedAt?: string | undefined;
 }
 
+export type TimelineLatestTurn = Pick<
+  OrchestrationLatestTurn,
+  "turnId" | "state" | "startedAt" | "completedAt"
+>;
+
 export type MessagesTimelineRow =
   | {
       kind: "work";
       id: string;
       createdAt: string;
       groupedEntries: WorkLogEntry[];
+      /** The steps the agent is taking right now (the running turn's last run of steps). */
+      live: boolean;
+    }
+  | {
+      /** A finished turn's steps and notes, folded: "Worked for 2m 10s" (upstream 1916ac6d55). */
+      kind: "turn-fold";
+      id: string;
+      createdAt: string;
+      turnId: TurnId;
+      label: string;
+      expanded: boolean;
     }
   | {
       kind: "message";
@@ -35,7 +52,13 @@ export type MessagesTimelineRow =
       createdAt: string;
       proposedPlan: ProposedPlan;
     }
-  | { kind: "working"; id: string; createdAt: string | null };
+  | {
+      kind: "working";
+      id: string;
+      createdAt: string | null;
+      /** The agent's latest thought, one line (upstream 95ccbf4066); null: plain "Thinking". */
+      thought: string | null;
+    };
 
 export interface StableMessagesTimelineRowsState {
   byId: Map<string, MessagesTimelineRow>;
@@ -119,6 +142,148 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   return new Set(lastAssistantMessageIdByResponseKey.values());
 }
 
+function computeElapsedMs(startIso: string, endIso: string): number | null {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}
+
+/**
+ * The latest turn counts as unsettled while it is still running (or has not
+ * recorded a completion). Keyed on the turn's own lifecycle, not on the
+ * transient working state, so folding does not flicker right after a send
+ * (upstream 1916ac6d55).
+ */
+function deriveUnsettledTurnId(latestTurn: TimelineLatestTurn | null): TurnId | null {
+  if (!latestTurn) return null;
+  const isSettled = latestTurn.completedAt !== null && latestTurn.state !== "running";
+  return isSettled ? null : latestTurn.turnId;
+}
+
+export interface TurnFold {
+  turnId: TurnId;
+  anchorEntryId: string;
+  createdAt: string;
+  hiddenEntryIds: ReadonlySet<string>;
+  label: string;
+}
+
+function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
+  if (entry.kind === "message") {
+    return entry.message.role === "assistant" ? (entry.message.turnId ?? null) : null;
+  }
+  return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
+}
+
+/**
+ * Finished turns fold their steps and in-between notes behind a "Worked for
+ * 2m 10s" row anchored at the turn's first foldable entry; the turn's last
+ * answer stays visible below the fold (upstream 1916ac6d55 `deriveTurnFolds`).
+ * A turn that ended on an error without an answer stays open: the person
+ * must see what went wrong.
+ */
+export function deriveTurnFolds(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  terminalAssistantMessageIds: ReadonlySet<string>;
+  latestTurn: TimelineLatestTurn | null;
+  unsettledTurnId: TurnId | null;
+}): ReadonlyMap<string, TurnFold> {
+  interface TurnGroup {
+    entries: Array<TimelineEntry>;
+    terminalEntry: Extract<TimelineEntry, { kind: "message" }> | null;
+    hasStreamingMessage: boolean;
+    hasError: boolean;
+  }
+  const groupsByTurnId = new Map<TurnId, TurnGroup>();
+
+  for (const entry of input.timelineEntries) {
+    const turnId = timelineEntryTurnId(entry);
+    if (!turnId) continue;
+    const group = groupsByTurnId.get(turnId) ?? {
+      entries: [],
+      terminalEntry: null,
+      hasStreamingMessage: false,
+      hasError: false,
+    };
+    group.entries.push(entry);
+    if (entry.kind === "message") {
+      if (input.terminalAssistantMessageIds.has(entry.message.id)) group.terminalEntry = entry;
+      if (entry.message.streaming) group.hasStreamingMessage = true;
+    } else if (entry.kind === "work" && entry.entry.tone === "error") {
+      group.hasError = true;
+    }
+    groupsByTurnId.set(turnId, group);
+  }
+
+  const foldsByAnchorEntryId = new Map<string, TurnFold>();
+  for (const [turnId, group] of groupsByTurnId) {
+    if (turnId === input.unsettledTurnId || group.hasStreamingMessage) continue;
+    if (group.terminalEntry === null && group.hasError) continue;
+    const hiddenEntryIds = new Set<string>();
+    for (const entry of group.entries) {
+      if (entry.id !== group.terminalEntry?.id) hiddenEntryIds.add(entry.id);
+    }
+    if (hiddenEntryIds.size === 0) continue;
+
+    const firstEntry = group.entries[0];
+    const lastEntry = group.entries.at(-1);
+    if (!firstEntry || !lastEntry) continue;
+
+    const isLatestTurn = input.latestTurn?.turnId === turnId;
+    const isLatestInterruptedTurn = isLatestTurn && input.latestTurn?.state === "interrupted";
+    const elapsedMs =
+      isLatestTurn && input.latestTurn?.startedAt && input.latestTurn.completedAt
+        ? computeElapsedMs(input.latestTurn.startedAt, input.latestTurn.completedAt)
+        : computeElapsedMs(
+            firstEntry.createdAt,
+            group.terminalEntry?.message.completedAt ??
+              (lastEntry.kind === "message"
+                ? (lastEntry.message.completedAt ?? lastEntry.createdAt)
+                : lastEntry.createdAt),
+          );
+    const duration = elapsedMs !== null && elapsedMs >= 1000 ? formatDuration(elapsedMs) : null;
+    const label = isLatestInterruptedTurn
+      ? duration
+        ? `You stopped after ${duration}`
+        : "You stopped this response"
+      : duration
+        ? `Worked for ${duration}`
+        : "Worked";
+
+    foldsByAnchorEntryId.set(firstEntry.id, {
+      turnId,
+      anchorEntryId: firstEntry.id,
+      createdAt: firstEntry.createdAt,
+      hiddenEntryIds,
+      label,
+    });
+  }
+  return foldsByAnchorEntryId;
+}
+
+/**
+ * The live line's thought: the latest reasoning row of the running turn
+ * (after the person's last message), as one sentence.
+ */
+function deriveLiveThought(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  unsettledTurnId: TurnId | null,
+): string | null {
+  for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+    const entry = timelineEntries[index];
+    if (!entry) continue;
+    if (entry.kind === "message" && entry.message.role === "user") return null;
+    if (entry.kind !== "work" || !workEntryIsThought(entry.entry)) continue;
+    if (unsettledTurnId !== null && entry.entry.turnId && entry.entry.turnId !== unsettledTurnId) {
+      return null;
+    }
+    const line = liveThoughtFromReasoningTail(entry.entry.detail ?? "");
+    return line.length > 0 ? line : null;
+  }
+  return null;
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;
@@ -126,16 +291,51 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  latestTurn?: TimelineLatestTurn | null;
+  expandedTurnIds?: ReadonlySet<TurnId>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const unsettledTurnId = deriveUnsettledTurnId(input.latestTurn ?? null);
+  const foldsByAnchorEntryId = deriveTurnFolds({
+    timelineEntries: input.timelineEntries,
+    terminalAssistantMessageIds,
+    latestTurn: input.latestTurn ?? null,
+    unsettledTurnId,
+  });
+  const foldedTurnIds = new Set<TurnId>();
+  const collapsedEntryIds = new Set<string>();
+  for (const fold of foldsByAnchorEntryId.values()) {
+    foldedTurnIds.add(fold.turnId);
+    if (input.expandedTurnIds?.has(fold.turnId)) continue;
+    for (const entryId of fold.hiddenEntryIds) collapsedEntryIds.add(entryId);
+  }
+  const lastUserIndex = input.timelineEntries.findLastIndex(
+    (entry) => entry.kind === "message" && entry.message.role === "user",
+  );
 
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
+      continue;
+    }
+
+    const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
+    if (turnFold) {
+      nextRows.push({
+        kind: "turn-fold",
+        id: `turn-fold:${turnFold.turnId}`,
+        createdAt: turnFold.createdAt,
+        turnId: turnFold.turnId,
+        label: turnFold.label,
+        expanded: input.expandedTurnIds?.has(turnFold.turnId) ?? false,
+      });
+    }
+
+    if (collapsedEntryIds.has(timelineEntry.id)) {
       continue;
     }
 
@@ -144,7 +344,14 @@ export function deriveMessagesTimelineRows(input: {
       let cursor = index + 1;
       while (cursor < input.timelineEntries.length) {
         const nextEntry = input.timelineEntries[cursor];
-        if (!nextEntry || nextEntry.kind !== "work") break;
+        if (
+          !nextEntry ||
+          nextEntry.kind !== "work" ||
+          collapsedEntryIds.has(nextEntry.id) ||
+          foldsByAnchorEntryId.has(nextEntry.id)
+        ) {
+          break;
+        }
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
       }
@@ -153,6 +360,9 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         groupedEntries,
+        // The running turn's steps after the person's last message, with
+        // nothing after them yet: what the agent is doing right now.
+        live: input.isWorking && index > lastUserIndex && cursor >= input.timelineEntries.length,
       });
       index = cursor - 1;
       continue;
@@ -175,9 +385,11 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
+      // A folded turn says "Worked for …" on its fold row already.
       showCompletionDivider:
         timelineEntry.message.role === "assistant" &&
-        input.completionDividerBeforeEntryId === timelineEntry.id,
+        input.completionDividerBeforeEntryId === timelineEntry.id &&
+        !(timelineEntry.message.turnId && foldedTurnIds.has(timelineEntry.message.turnId)),
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
@@ -197,6 +409,7 @@ export function deriveMessagesTimelineRows(input: {
       kind: "working",
       id: "working-indicator-row",
       createdAt: input.activeTurnStartedAt,
+      thought: deriveLiveThought(input.timelineEntries, unsettledTurnId),
     });
   }
 
@@ -228,14 +441,23 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
-    case "working":
-      return a.createdAt === (b as typeof a).createdAt;
+    case "working": {
+      const bw = b as typeof a;
+      return a.createdAt === bw.createdAt && a.thought === bw.thought;
+    }
+
+    case "turn-fold": {
+      const bf = b as typeof a;
+      return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
+    }
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
-    case "work":
-      return a.groupedEntries === (b as typeof a).groupedEntries;
+    case "work": {
+      const bw = b as typeof a;
+      return a.groupedEntries === bw.groupedEntries && a.live === bw.live;
+    }
 
     case "message": {
       const bm = b as typeof a;

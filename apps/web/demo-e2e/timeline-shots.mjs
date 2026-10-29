@@ -14,7 +14,10 @@ const only = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
+const page = await browser.newPage({
+  viewport: { width: 1280, height: 860 },
+  deviceScaleFactor: 2,
+});
 page.on("pageerror", (error) => console.log("pageerror:", error.message));
 
 const TITLES = {
@@ -31,7 +34,10 @@ async function open(threadId) {
     await page.waitForSelector("[data-timeline-root]", { timeout: 180_000 });
     booted = true;
     // The demo's "what to look at" card and the notifications ask cover the feed.
-    await page.getByRole("button", { name: "Not now" }).click({ timeout: 3000 }).catch(() => {});
+    await page
+      .getByRole("button", { name: "Not now" })
+      .click({ timeout: 3000 })
+      .catch(() => {});
   }
   // The demo opens its own chat at start: pick ours from the sidebar.
   await page.getByText(TITLES[threadId]).first().click();
@@ -58,7 +64,7 @@ const steps = {
   },
   async doneExpanded() {
     await open("showcase-done");
-    const fold = page.locator("[data-testid=turn-fold]").first();
+    const fold = page.locator("[data-testid=turn-fold] button").first();
     if (await fold.count()) await fold.click();
     await page.waitForTimeout(400);
     const group = page.locator("[data-testid=work-group-summary]").first();
@@ -72,7 +78,9 @@ const steps = {
   },
   async queue() {
     await open("showcase-live");
-    const editor = page.locator("[data-testid=composer-editor] [contenteditable=true], [contenteditable=true]").first();
+    const editor = page
+      .locator("[data-testid=composer-editor] [contenteditable=true], [contenteditable=true]")
+      .first();
     await editor.click();
     await page.keyboard.type("Also make the button say “Back to the blog”.");
     await page.keyboard.press("Enter");

@@ -160,13 +160,7 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     projectId,
     title: "Signup form doesn't send emails",
     messages: [
-      message(
-        `${done}-u1`,
-        "user",
-        "Hi! Can you look at my site's code?",
-        at(t0, -600),
-        null,
-      ),
+      message(`${done}-u1`, "user", "Hi! Can you look at my site's code?", at(t0, -600), null),
       message(
         `${done}-a1`,
         "assistant",

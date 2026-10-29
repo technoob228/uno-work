@@ -21,7 +21,11 @@ function entry(overrides: Partial<WorkLogEntry>): WorkLogEntry {
 }
 
 const read = (path: string) =>
-  entry({ itemType: "dynamic_tool_call", toolName: "Read", detail: `Read: {"file_path":"${path}"}` });
+  entry({
+    itemType: "dynamic_tool_call",
+    toolName: "Read",
+    detail: `Read: {"file_path":"${path}"}`,
+  });
 const command = (cmd: string) => entry({ itemType: "command_execution", command: cmd });
 const edit = (...files: string[]) => entry({ itemType: "file_change", changedFiles: files });
 
@@ -50,9 +54,7 @@ describe("toolGroupAction", () => {
     expect(toolGroupAction(entry({ itemType: "web_search", toolName: "websearch" }))).toBe(
       "search",
     );
-    expect(toolGroupAction(entry({ itemType: "web_search", toolName: "webfetch" }))).toBe(
-      "browse",
-    );
+    expect(toolGroupAction(entry({ itemType: "web_search", toolName: "webfetch" }))).toBe("browse");
     expect(toolGroupAction(entry({ itemType: "collab_agent_tool_call" }))).toBe("delegate");
     expect(toolGroupAction(entry({ itemType: "mcp_tool_call", label: "Published the site" }))).toBe(
       "other",
@@ -120,7 +122,10 @@ describe("summarizeToolGroup", () => {
 
   it("marks a failed step", () => {
     expect(
-      summarizeToolGroup([command("npm test"), entry({ itemType: "command_execution", command: "npm run build", tone: "error" })]),
+      summarizeToolGroup([
+        command("npm test"),
+        entry({ itemType: "command_execution", command: "npm run build", tone: "error" }),
+      ]),
     ).toEqual({ summary: "Ran 2 commands", hasFailure: true });
   });
 });
@@ -138,9 +143,9 @@ describe("liveThoughtLine", () => {
   });
 
   it("does not cut at dots inside file names or long dashes", () => {
-    expect(
-      liveThoughtLine("I read ThreadLaunchService.ts — it skips the fetch. Next step."),
-    ).toBe("I read ThreadLaunchService.ts — it skips the fetch.");
+    expect(liveThoughtLine("I read ThreadLaunchService.ts — it skips the fetch. Next step.")).toBe(
+      "I read ThreadLaunchService.ts — it skips the fetch.",
+    );
   });
 
   it("uses a bold-only opening line as the whole line", () => {

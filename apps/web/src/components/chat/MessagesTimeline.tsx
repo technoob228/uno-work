@@ -46,6 +46,7 @@ import {
   HammerIcon,
   type LucideIcon,
   MonitorSmartphoneIcon,
+  SearchIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -69,7 +70,9 @@ import {
   workingReassurance,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
+import { summarizeToolGroup, toolGroupAction, workEntryIsThought } from "./workLogSummary";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -116,6 +119,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onToggleTurnFold: (turnId: TurnId) => void;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -148,6 +152,8 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  /** The chat's latest turn: a finished one folds into "Worked for …". */
+  latestTurn?: TimelineLatestTurn | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +182,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   onIsAtEndChange,
+  latestTurn = null,
 }: MessagesTimelineProps) {
+  // Folded turns the person opened (the list is keyed per chat in ChatView).
+  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
+  const onToggleTurnFold = useCallback((turnId: TurnId) => {
+    setExpandedTurnIds((current) => {
+      const next = new Set(current);
+      if (next.has(turnId)) next.delete(turnId);
+      else next.add(turnId);
+      return next;
+    });
+  }, []);
+  const latestTurnId = latestTurn?.turnId ?? null;
+  const latestTurnState = latestTurn?.state ?? null;
+  const latestTurnStartedAt = latestTurn?.startedAt ?? null;
+  const latestTurnCompletedAt = latestTurn?.completedAt ?? null;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -186,6 +207,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
+        latestTurn:
+          latestTurnId && latestTurnState
+            ? {
+                turnId: latestTurnId,
+                state: latestTurnState,
+                startedAt: latestTurnStartedAt,
+                completedAt: latestTurnCompletedAt,
+              }
+            : null,
+        expandedTurnIds,
       }),
     [
       timelineEntries,
@@ -194,6 +225,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
+      latestTurnId,
+      latestTurnState,
+      latestTurnStartedAt,
+      latestTurnCompletedAt,
+      expandedTurnIds,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -241,6 +277,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onToggleTurnFold,
     }),
     [
       activeTurnInProgress,
@@ -257,6 +294,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onToggleTurnFold,
     ],
   );
 
@@ -368,7 +406,18 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
+      {row.kind === "work" && (
+        <WorkGroupSection groupedEntries={row.groupedEntries} live={row.live} />
+      )}
+
+      {row.kind === "turn-fold" && (
+        <TurnFoldRow
+          turnId={row.turnId}
+          label={row.label}
+          expanded={row.expanded}
+          createdAt={row.createdAt}
+        />
+      )}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -603,21 +652,37 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
+          <div className="flex min-w-0 items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
+            <span className="inline-flex shrink-0 items-center gap-[3px]">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
             </span>
-            <span>
-              {row.createdAt ? (
-                <>
-                  Thinking · <WorkingTimer createdAt={row.createdAt} />
-                </>
-              ) : (
-                "Thinking…"
-              )}
-            </span>
+            {row.thought ? (
+              // The agent's latest thought in its words, not a bare "Thinking"
+              // (upstream 95ccbf4066); the timer stays, the reassurance goes.
+              <span className="flex min-w-0 items-center" data-testid="live-thought">
+                <span className="truncate text-muted-foreground" title={row.thought}>
+                  {row.thought}
+                </span>
+                {row.createdAt ? (
+                  <span className="ml-1 shrink-0 tabular-nums">
+                    {"· "}
+                    <WorkingTimer createdAt={row.createdAt} reassure={false} />
+                  </span>
+                ) : null}
+              </span>
+            ) : (
+              <span>
+                {row.createdAt ? (
+                  <>
+                    Thinking · <WorkingTimer createdAt={row.createdAt} />
+                  </>
+                ) : (
+                  "Thinking…"
+                )}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -632,16 +697,17 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 // ---------------------------------------------------------------------------
 
 /** Live "28s" of the wait line, and past ~15 s the words that nothing is stuck. */
-function WorkingTimer({ createdAt }: { createdAt: string }) {
+function WorkingTimer({ createdAt, reassure = true }: { createdAt: string; reassure?: boolean }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [createdAt]);
   const startedAtMs = Date.parse(createdAt);
-  const reassurance = Number.isFinite(startedAtMs)
-    ? workingReassurance(Math.max(0, Math.floor((nowMs - startedAtMs) / 1000)))
-    : null;
+  const reassurance =
+    reassure && Number.isFinite(startedAtMs)
+      ? workingReassurance(Math.max(0, Math.floor((nowMs - startedAtMs) / 1000)))
+      : null;
   return (
     <>
       {formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}
@@ -676,61 +742,130 @@ function LiveMessageMeta({
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
-/** Owns its own expand/collapse state so toggling re-renders only this row.
- *  State resets on unmount which is fine — work groups start collapsed. */
+/**
+ * A run of the agent's steps. Two or more read as one phrase — "Read 3 files
+ * and ran 2 commands" (upstream 4a9edff4c1 #7152) — that opens to the
+ * steps; one step stays its own line. What the person must see is never
+ * folded away: a failure that isn't a tool's, an automation's card. Owns its
+ * open/closed state so toggling re-renders only this row.
+ */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
+  live,
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
+  live: boolean;
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  const [showAll, setShowAll] = useState(false);
+  const { summary, hasFailure } = useMemo(
+    () => summarizeToolGroup(groupedEntries),
+    [groupedEntries],
+  );
+
+  const renderEntry = (workEntry: TimelineWorkEntry) => {
+    // An assistant made an automation: its card, from the call's result (28.10).
+    const automation =
+      workEntry.toolName === "automation_create"
+        ? automationFromToolResult(workEntry.rawResult)
+        : null;
+    return automation ? (
+      <AutomationCreatedCard key={`work-row:${workEntry.id}`} automation={automation} />
+    ) : (
+      <SimpleWorkEntryRow
+        key={`work-row:${workEntry.id}`}
+        workEntry={workEntry}
+        workspaceRoot={workspaceRoot}
+      />
+    );
+  };
+
+  if (groupedEntries.length === 1) {
+    return <div className="space-y-0.5">{groupedEntries.map(renderEntry)}</div>;
+  }
+
+  // Shown even while folded: an automation's card and a failure that is not a
+  // tool's (a runtime error — a failed tool only marks the phrase).
+  const pinned = groupedEntries.filter(
+    (entry) =>
+      entry.toolName === "automation_create" ||
+      (entry.tone === "error" && !entry.itemType && !workEntryIsThought(entry)),
+  );
+  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES * 2;
   const visibleEntries =
-    hasOverflow && !isExpanded
-      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
+    hasOverflow && !showAll
+      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES * 2)
       : groupedEntries;
   const hiddenCount = groupedEntries.length - visibleEntries.length;
-  const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
-  const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
+  const ToggleIcon = isExpanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
-      {showHeader && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
-            {groupLabel} ({groupedEntries.length})
-          </p>
-          {hasOverflow && (
+    <div data-testid="work-group">
+      <button
+        type="button"
+        data-scroll-anchor-ignore
+        data-testid="work-group-summary"
+        aria-expanded={isExpanded}
+        className="group/summary flex max-w-full items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setIsExpanded((value) => !value)}
+      >
+        <span className="truncate">
+          {summary}
+          {live ? "…" : null}
+        </span>
+        {hasFailure ? (
+          <CircleAlertIcon
+            aria-label="A step failed"
+            className="size-3 shrink-0 text-amber-600/80 dark:text-amber-400/80"
+          />
+        ) : null}
+        <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/summary:opacity-100" />
+      </button>
+      {isExpanded ? (
+        <div className="mt-1 ml-2 space-y-0.5 border-l border-border/60 pl-2">
+          {hiddenCount > 0 ? (
             <button
               type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-              onClick={() => setIsExpanded((v) => !v)}
+              data-scroll-anchor-ignore
+              className="px-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+              onClick={() => setShowAll(true)}
             >
-              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
+              Show {hiddenCount} earlier {hiddenCount === 1 ? "step" : "steps"}
             </button>
-          )}
+          ) : null}
+          {visibleEntries.map(renderEntry)}
         </div>
-      )}
-      <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => {
-          // An assistant made an automation: its card, from the call's result (28.10).
-          const automation =
-            workEntry.toolName === "automation_create"
-              ? automationFromToolResult(workEntry.rawResult)
-              : null;
-          return automation ? (
-            <AutomationCreatedCard key={`work-row:${workEntry.id}`} automation={automation} />
-          ) : (
-            <SimpleWorkEntryRow
-              key={`work-row:${workEntry.id}`}
-              workEntry={workEntry}
-              workspaceRoot={workspaceRoot}
-            />
-          );
-        })}
-      </div>
+      ) : pinned.length > 0 ? (
+        <div className="mt-1 space-y-0.5">{pinned.map(renderEntry)}</div>
+      ) : null}
+    </div>
+  );
+});
+
+/** "Worked for 2m 10s" — a finished turn's steps and notes, folded (upstream 1916ac6d55). */
+const TurnFoldRow = memo(function TurnFoldRow(props: {
+  turnId: TurnId;
+  label: string;
+  expanded: boolean;
+  createdAt: string;
+}) {
+  const { onToggleTurnFold, timestampFormat } = use(TimelineRowCtx);
+  const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
+  return (
+    <div className="flex items-center gap-3" data-testid="turn-fold">
+      <button
+        type="button"
+        data-scroll-anchor-ignore
+        aria-expanded={props.expanded}
+        className="group/fold flex items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => onToggleTurnFold(props.turnId)}
+        title={formatTimestamp(props.createdAt, timestampFormat)}
+      >
+        <span>{props.label}</span>
+        <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/fold:opacity-100" />
+      </button>
+      <span className="h-px flex-1 bg-border/60" />
     </div>
   );
 });
@@ -1152,6 +1287,11 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;
+
+  // The harnesses report reads and searches as generic tool calls: name them by kind.
+  const action = toolGroupAction(workEntry);
+  if (action === "read") return EyeIcon;
+  if (action === "code-search") return SearchIcon;
 
   if (workEntry.itemType === "command_execution" || workEntry.command) {
     return TerminalIcon;
