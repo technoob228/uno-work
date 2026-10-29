@@ -92,7 +92,11 @@ describe("sidebar D places", () => {
     await expect
       .element(screen.getByTestId("sidebar-nav-apps"))
       .toHaveAttribute("aria-label", "Apps & sites");
-    await expect.element(screen.getByTestId("sidebar-nav-files")).not.toHaveTextContent("Files");
+    // Just icons until hovered: the names take no room.
+    const widths = ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(
+      (id) => screen.getByTestId(id).element().getBoundingClientRect().width,
+    );
+    expect(widths).toEqual([32, 32, 32]);
     const tops = ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(
       (id) => screen.getByTestId(id).element().getBoundingClientRect().top,
     );
@@ -119,10 +123,23 @@ describe("sidebar D places", () => {
     expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
   });
 
-  it("names a place on hover", async () => {
+  it("names a place on hover: the name grows out of the icon, the icons to its right move over", async () => {
     const screen = await mount(<SidebarDPlaces />);
-    await userEvent.hover(screen.getByTestId("sidebar-nav-apps"));
-    await expect.element(page.getByText("Apps & sites")).toBeVisible();
+    const apps = screen.getByTestId("sidebar-nav-apps");
+    const files = screen.getByTestId("sidebar-nav-files");
+    const rect = (locator: typeof files) => locator.element().getBoundingClientRect();
+    const gap = rect(apps).left - rect(files).right;
+    await userEvent.hover(files);
+    // "Files" in full; Apps & sites, to its right, moved over with it.
+    await expect.poll(() => rect(files).width).toBeGreaterThan(60);
+    expect(rect(apps).left - rect(files).right).toBeCloseTo(gap, 0);
+    await expect.element(files).toHaveTextContent("Files");
+    // The row has no room for "Apps & sites": its name on hover is "Apps".
+    await userEvent.hover(apps);
+    await expect.element(apps).toHaveTextContent("Apps");
+    await expect.element(apps).not.toHaveTextContent("Apps & sites");
+    await expect.element(apps).toHaveAttribute("aria-label", "Apps & sites");
+    await expect.poll(() => files.element().getBoundingClientRect().width).toBe(32);
   });
 
   it("turns Dev mode on and off from the end of the row", async () => {

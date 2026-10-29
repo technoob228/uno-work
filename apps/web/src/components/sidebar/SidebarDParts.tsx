@@ -291,19 +291,23 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
 /**
  * A place as an icon in the one row on top (Misha 28.10: "Home / Files / Apps
  * & sites — icons in one line, the name on hover; they shouldn't get in the
- * way"). The active one is lit.
+ * way"). The active one is lit. On hover (or keyboard focus) its name grows
+ * out of the icon and the icons to its right move over (Misha 29.10, the
+ * prototype's "expand"); a narrow sidebar cuts the name (…) before it would
+ * push an icon out of the row.
  */
 function PlaceIcon(props: {
   icon: ReactNode;
+  /** For the screen reader, and shown when `name` isn't given. */
   label: string;
+  /** The name on hover, when the row has no room for `label` ("Apps"). */
+  name?: string;
   active: boolean;
   onClick: () => void;
   testId: string;
   tour?: string;
   /** A switch (Dev mode): lit while on, `aria-pressed`. */
   pressed?: boolean;
-  /** The tooltip, when it says more than the name ("Dev mode: on"). */
-  hint?: string;
   className?: string;
 }) {
   const lit = props.pressed
@@ -312,25 +316,25 @@ function PlaceIcon(props: {
       ? PLACE_ICON_ACTIVE
       : PLACE_ICON_IDLE;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={props.label}
-            aria-pressed={props.pressed}
-            onClick={props.onClick}
-            data-testid={props.testId}
-            data-tour={props.tour}
-            aria-current={props.active ? "page" : undefined}
-            className={cn(PLACE_ICON_CLASS, lit, props.className)}
-          />
-        }
-      >
-        {props.icon}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{props.hint ?? props.label}</TooltipPopup>
-    </Tooltip>
+    <button
+      type="button"
+      aria-label={props.label}
+      aria-pressed={props.pressed}
+      onClick={props.onClick}
+      data-testid={props.testId}
+      data-tour={props.tour}
+      aria-current={props.active ? "page" : undefined}
+      className={cn(PLACE_PILL_CLASS, lit, props.className)}
+    >
+      {props.icon}
+      <span aria-hidden className={PLACE_NAME_CLASS}>
+        <span className="overflow-hidden">
+          <span className="block truncate pr-0.5 pl-1 text-[13px] font-medium">
+            {props.name ?? props.label}
+          </span>
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -345,7 +349,6 @@ function DevModePlace() {
     <PlaceIcon
       icon={<CodeXmlIcon />}
       label="Dev mode"
-      hint={`Dev mode: ${devMode ? "on" : "off"}`}
       active={false}
       pressed={devMode}
       onClick={toggleDevMode}
@@ -385,6 +388,12 @@ function PlaceRow(props: {
 
 const PLACE_ICON_CLASS =
   "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+/** `PlaceIcon`: an icon that grows its name — 32 px square until then. */
+const PLACE_PILL_CLASS =
+  "group/place relative inline-flex h-8 min-w-8 shrink cursor-pointer items-center justify-center rounded-lg px-2 outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+/** The name in it: no width until hover or focus, then its own (or what the row has left). */
+const PLACE_NAME_CLASS =
+  "grid min-w-0 grid-cols-[0fr] transition-[grid-template-columns] duration-200 ease-out group-hover/place:grid-cols-[1fr] group-focus-visible/place:grid-cols-[1fr] motion-reduce:transition-none";
 const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
 const PLACE_ICON_PRESSED = "bg-primary/12 text-primary hover:bg-primary/18";
 const PLACE_ICON_IDLE =
@@ -439,7 +448,7 @@ function NeedsYouPopover(props: {
 /**
  * Home, Files, Apps & sites, Automations (with the assistants, 28.10) — and
  * Needs you only when something waits for the person — as icons in one row,
- * the name on hover.
+ * the name on hover; Dev mode's switch at the end.
  */
 const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -450,7 +459,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   return (
     <nav
       aria-label="Uno Work"
-      className="flex items-center gap-0.5 px-0.5"
+      className="flex min-w-0 items-center gap-0.5 px-0.5"
       data-testid="sidebar-places"
     >
       <PlaceIcon
@@ -475,6 +484,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
       <PlaceIcon
         icon={<LayoutGridIcon />}
         label="Apps & sites"
+        name="Apps"
         active={pathname.startsWith("/sites")}
         onClick={() => open("/sites")}
         testId="sidebar-nav-apps"

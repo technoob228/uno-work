@@ -55,6 +55,8 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 
 Кнопка-тоггл (`<CodeIcon>`) живёт в `ChatHeader` слева, рядом с бейджем проекта. По клику переключает `ui_dev_mode` и через `window` event синхронизирует все потребители.
 
+С 29.10 тоггл есть и в конце ряда мест сайдбара D (`DevModePlace` в `sidebar/SidebarDParts.tsx`: горит, пока включён, `aria-pressed`). Иконки этого ряда при наведении выпускают название, соседи справа сдвигаются. Закреплённое приложение с Home-виджетом показывает виджет карточкой рядом с пином (`sidebar/PinPeek.tsx`).
+
 Под `{devMode && …}` спрятаны:
 
 - `ChatHeader`: ProjectScripts, OpenInPicker, GitActions (Commit & push), Terminal toggle, Diff toggle.
