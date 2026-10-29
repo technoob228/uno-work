@@ -38,6 +38,21 @@ export function isFirstSnapshotPending(input: {
   return input.waitedEnvironmentId !== null && !input.bootstrapComplete && !input.graceOver;
 }
 
+/**
+ * True once FIRST_SNAPSHOT_MAX_WAIT_MS have passed since page load — the same
+ * cap for anything else a screen holds back on its first frames (Home's
+ * "AI plan limits" sign-in check).
+ */
+export function useFirstSnapshotGraceOver(): boolean {
+  const [graceOver, setGraceOver] = useState(() => graceLeftMs() === 0);
+  useEffect(() => {
+    if (graceOver) return;
+    const timer = window.setTimeout(() => setGraceOver(true), graceLeftMs());
+    return () => window.clearTimeout(timer);
+  }, [graceOver]);
+  return graceOver;
+}
+
 export function useFirstSnapshotPending(): boolean {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -45,11 +60,6 @@ export function useFirstSnapshotPending(): boolean {
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, waitedEnvironmentId).bootstrapComplete,
   );
-  const [graceOver, setGraceOver] = useState(() => graceLeftMs() === 0);
-  useEffect(() => {
-    if (graceOver) return;
-    const timer = window.setTimeout(() => setGraceOver(true), graceLeftMs());
-    return () => window.clearTimeout(timer);
-  }, [graceOver]);
+  const graceOver = useFirstSnapshotGraceOver();
   return isFirstSnapshotPending({ waitedEnvironmentId, bootstrapComplete, graceOver });
 }

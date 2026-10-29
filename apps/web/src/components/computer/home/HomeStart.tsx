@@ -32,7 +32,7 @@ import { toastManager } from "../../ui/toast";
 import type { BuiltInPrograms } from "../ComputerPrograms";
 import { programRemoval, type ProgramTile } from "../programModel";
 import { ComputerDetails, type HomeComputer } from "./ComputerPill";
-import { useFirstSnapshotPending } from "../../../lib/firstSnapshot";
+import { useFirstSnapshotGraceOver, useFirstSnapshotPending } from "../../../lib/firstSnapshot";
 import { HomeAppWidget, HomeAppWidgetOpen } from "./HomeAppWidget";
 import { HomeComposer, type HomeStartOptions } from "./HomeComposer";
 import { goalState } from "../../setup/goals";
@@ -311,7 +311,12 @@ export function HomeStart({
   // "AI plan limits" comes with Home (also on layouts saved before it), and
   // shows only where Claude Code or Codex is signed in.
   useBuiltInWidgetsOnHome(layout);
-  const planLimitsAvailable = usePlanLimitsAvailable(environmentId);
+  const { available: planLimitsAvailable, pending: planLimitsPending } =
+    usePlanLimitsAvailable(environmentId);
+  // The same rule for "AI plan limits": until its sign-in check answers it
+  // would pop into the grid later and shift the widgets after it. Same cap.
+  const snapshotGraceOver = useFirstSnapshotGraceOver();
+  const widgetsWaiting = firstSnapshotPending || (planLimitsPending && !snapshotGraceOver);
   // "A new version of Uno Work is ready · Update" (cloud computers, 0.0.113+).
   const updateNotice = isWebLite ? null : <SelfUpdateCard environmentId={environmentId} />;
   const homeStarters = useHomeStarters({ environmentId, threads, now });
@@ -782,7 +787,7 @@ export function HomeStart({
           </div>
         ) : null}
         {/* Above the widgets it changes (Misha 11.10), not under them. */}
-        {layout.editing || firstSnapshotPending ? null : (
+        {layout.editing || widgetsWaiting ? null : (
           <button
             type="button"
             onClick={() => layout.setEditing(true)}
@@ -793,7 +798,7 @@ export function HomeStart({
             Customize widgets
           </button>
         )}
-        {widgetBlocks.length > 0 && (layout.editing || !firstSnapshotPending) ? (
+        {widgetBlocks.length > 0 && (layout.editing || !widgetsWaiting) ? (
           <HomeWidgetGrid
             blocks={widgetBlocks}
             editing={layout.editing}

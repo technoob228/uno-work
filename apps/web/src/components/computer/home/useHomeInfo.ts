@@ -84,12 +84,19 @@ export function planLimitsQueryOptions(
  * them (0.0.157) and Claude Code or Codex is signed in there. False while
  * that's unknown — never an empty widget.
  */
-export function usePlanLimitsAvailable(environmentId: EnvironmentId | null): boolean {
+export function usePlanLimitsAvailable(environmentId: EnvironmentId | null): {
+  readonly available: boolean;
+  /** The sign-ins aren't read yet: Home holds its widgets back (S6 rule, 29.10). */
+  readonly pending: boolean;
+} {
   const supported = useEnvironmentSupportsPlanLimits(environmentId);
   const signIns = useQuery(
     planLimitsQueryOptions(environmentId, { signInsOnly: true, enabled: supported }),
   );
-  return supported && (signIns.data?.accounts.length ?? 0) > 0;
+  return {
+    available: supported && (signIns.data?.accounts.length ?? 0) > 0,
+    pending: supported && signIns.isPending && !signIns.isError,
+  };
 }
 
 /** The daemon's reading, and the account's credits as a second source. */
