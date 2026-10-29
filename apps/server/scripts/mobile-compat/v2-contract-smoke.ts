@@ -59,11 +59,16 @@ const pass = (step: string, detail: unknown = "") => {
   console.log(`PASS ${step}${text ? `: ${text}` : ""}`);
 };
 class StepFailed extends Error {}
+let diagnose: () => unknown = () => null;
 const fail = (step: string, detail: unknown): never => {
   const text =
     detail instanceof Error ? (detail.stack ?? detail.message) : typeof detail === "string" ? detail : JSON.stringify(detail);
   results.push({ step, ok: false, detail: text });
   console.log(`FAIL ${step}: ${text}`);
+  try {
+    const extra = diagnose();
+    if (extra) console.log(`     state: ${JSON.stringify(extra).slice(0, 4000)}`);
+  } catch {}
   throw new StepFailed(step);
 };
 
@@ -261,6 +266,18 @@ const program = Effect.gen(function* () {
       : threadItems.some((item) => item.kind === "synchronized"),
   );
   pass("subscribeThread", { order: threadItems.slice(0, 2).map((item) => item.kind) });
+  diagnose = () => {
+    const p = threadItems.findLast((item) => item.kind === "snapshot")?.projection;
+    return {
+      frames: threadItems.map((item) => item.kind),
+      runs: p?.runs.map((run) => `${run.id}:${run.status}`),
+      requests: p?.runtimeRequests.map((request) => `${request.id}:${request.kind}:${request.status}`),
+      items: p?.visibleTurnItems.map(
+        (row) => `${row.item.type}:${row.item.status}:${String(row.item.text ?? row.item.title ?? row.item.failure?.message ?? "").slice(0, 120)}`,
+      ),
+      shell: shellThread(threadId),
+    };
+  };
   const projection = () => threadItems.findLast((item) => item.kind === "snapshot")?.projection;
   const assistantTexts = () =>
     (projection()?.visibleTurnItems ?? [])
