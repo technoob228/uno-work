@@ -20,7 +20,10 @@ export function isTransientReconnectState(state: ConnectionStateLike | null): bo
  * after it was connected) gets its own grace period.
  */
 export function reconnectEpisodeKey(
-  unavailable: { readonly environmentId: string; readonly connectionState: ConnectionStateLike } | null,
+  unavailable: {
+    readonly environmentId: string;
+    readonly connectionState: ConnectionStateLike;
+  } | null,
 ): string | null {
   return unavailable && isTransientReconnectState(unavailable.connectionState)
     ? unavailable.environmentId
@@ -33,7 +36,10 @@ export function reconnectEpisodeKey(
  * ones only after the grace period of their episode has passed.
  */
 export function useReconnectWarningVisible(
-  unavailable: { readonly environmentId: string; readonly connectionState: ConnectionStateLike } | null,
+  unavailable: {
+    readonly environmentId: string;
+    readonly connectionState: ConnectionStateLike;
+  } | null,
 ): boolean {
   const episodeKey = reconnectEpisodeKey(unavailable);
   const [elapsedEpisodeKey, setElapsedEpisodeKey] = useState<string | null>(null);

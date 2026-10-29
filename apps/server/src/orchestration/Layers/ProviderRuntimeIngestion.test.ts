@@ -3310,4 +3310,3 @@ describe("ProviderRuntimeIngestion", () => {
     expect(await harness.readModel()).toEqual(initial);
   });
 });
-

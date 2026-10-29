@@ -227,9 +227,8 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
     Effect.gen(function* () {
       const { stdio, input } = yield* makeInMemoryStdio();
       const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({ stdio });
-      const received = yield* Deferred.make<
-        ReadonlyArray<CodexProtocol.CodexAppServerIncomingNotification>
-      >();
+      const received =
+        yield* Deferred.make<ReadonlyArray<CodexProtocol.CodexAppServerIncomingNotification>>();
       yield* transport.incomingNotifications.pipe(
         Stream.take(2),
         Stream.runCollect,
@@ -258,4 +257,3 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
     }),
   );
 });
-

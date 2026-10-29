@@ -123,10 +123,7 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     );
 
   yield* Effect.addFinalizer(() =>
-    flush.pipe(
-      Effect.andThen(Effect.promise(() => sink.drain())),
-      Effect.ignore,
-    ),
+    flush.pipe(Effect.andThen(Effect.promise(() => sink.drain())), Effect.ignore),
   );
   yield* Effect.forkScoped(
     // Flush when push fills a batch or the batch window passes.

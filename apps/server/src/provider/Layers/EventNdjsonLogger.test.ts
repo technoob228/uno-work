@@ -238,7 +238,10 @@ describe("EventNdjsonLogger", () => {
       },
     });
     drop("native", {
-      event: { method: "session/update", payload: { update: { sessionUpdate: "agent_message_chunk" } } },
+      event: {
+        method: "session/update",
+        payload: { update: { sessionUpdate: "agent_message_chunk" } },
+      },
     });
     keep("native", {
       event: { method: "session/update", payload: { update: { sessionUpdate: "tool_call" } } },

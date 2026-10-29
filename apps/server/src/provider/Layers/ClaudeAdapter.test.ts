@@ -3693,4 +3693,3 @@ describe("toSessionPermissionUpdates", () => {
     ]);
   });
 });
-

@@ -96,7 +96,6 @@ export function shouldPersistProviderLogRecord(stream: EventNdjsonStream, event:
   return true;
 }
 
-
 export interface EventNdjsonLogger {
   readonly filePath: string;
   write: (event: unknown, threadId: ThreadId | null) => Effect.Effect<void>;

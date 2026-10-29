@@ -2992,7 +2992,9 @@ function createWindow(): BrowserWindow {
   let rendererRecoveryTimestamps: number[] = [];
   window.webContents.on("render-process-gone", (_event, details) => {
     const recoverable =
-      details.reason === "crashed" || details.reason === "oom" || details.reason === "abnormal-exit";
+      details.reason === "crashed" ||
+      details.reason === "oom" ||
+      details.reason === "abnormal-exit";
     const now = Date.now();
     rendererRecoveryTimestamps = rendererRecoveryTimestamps.filter(
       (timestamp) => now - timestamp < RENDERER_RECOVERY_WINDOW_MS,
