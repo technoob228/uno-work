@@ -56,14 +56,21 @@ git -C "$ROOT/upstream" fetch -q origin
 git -C "$ROOT/upstream" checkout -q --detach "$UPSTREAM_REF"
 UPSTREAM_SHA=$(git -C "$ROOT/upstream" rev-parse --short=10 HEAD)
 PNPM_VERSION=$(sed -n 's/.*"packageManager": "pnpm@\([^"]*\)".*/\1/p' "$ROOT/upstream/package.json")
-(cd "$ROOT/upstream" && nice -n 10 npx -y "pnpm@${PNPM_VERSION:-latest}" install \
-  --frozen-lockfile --ignore-scripts --filter "@t3tools/client-runtime..." >/dev/null)
+# Caches stay under ROOT: nothing lands in the machine owner's home.
+(cd "$ROOT/upstream" && npm_config_cache="$ROOT/.npm-cache" nice -n 10 \
+  npx -y "pnpm@${PNPM_VERSION:-latest}" install --frozen-lockfile --ignore-scripts \
+  --store-dir "$ROOT/.pnpm-store" --filter "@t3tools/client-runtime..." >/dev/null)
 cp "$ROOT/work/apps/server/scripts/mobile-compat/v2-contract-smoke.ts" \
   "$ROOT/upstream/packages/client-runtime/t3v2-contract-smoke.ts"
 
 # --- throwaway daemon ---------------------------------------------------------
-rm -rf "$ROOT/home" "$ROOT/harnesses" "$ROOT/project"
-mkdir -p "$ROOT/home" "$ROOT/harnesses" "$ROOT/project"
+rm -rf "$ROOT/home" "$ROOT/harnesses" "$ROOT/project" "$ROOT/userhome" "$ROOT/stubbin"
+mkdir -p "$ROOT/home" "$ROOT/harnesses" "$ROOT/project" "$ROOT/userhome" "$ROOT/stubbin"
+# The daemon gets its own HOME (assistants, harness installs, caches land in
+# ROOT and are wiped) and a stub `hermes`, so its first-start Hermes install
+# (~1.4 GB of uv caches) never runs on the machine.
+printf '#!/bin/sh\necho "Hermes Agent v0.0.0-smoke"\n' > "$ROOT/stubbin/hermes"
+chmod +x "$ROOT/stubbin/hermes"
 git -C "$ROOT/project" init -q && git -C "$ROOT/project" commit -q --allow-empty -m init \
   -c user.email=smoke@uno -c user.name=smoke 2>/dev/null || true
 cat > "$ROOT/harnesses/fake.json" <<EOF
@@ -72,11 +79,12 @@ EOF
 
 BIN="$ROOT/work/apps/server/src/bin.ts"
 cd "$ROOT/project"
-UNO_WORK_HARNESSES_DIR="$ROOT/harnesses" \
+HOME="$ROOT/userhome" PATH="$ROOT/stubbin:$PATH" UNO_WORK_HARNESSES_DIR="$ROOT/harnesses" \
+  UNO_WORK_ASSISTANT_PREWARM=0 UNO_WORK_ASSISTANTS_DIR="$ROOT/userhome/assistants" \
   nice -n 10 "$NODE" "$BIN" serve --mode web --host 127.0.0.1 --port "$PORT" \
   --base-dir "$ROOT/home" --no-browser "$ROOT/project" > "$ROOT/daemon.log" 2>&1 &
 DAEMON=$!
-trap 'kill $DAEMON 2>/dev/null || true; wait $DAEMON 2>/dev/null || true' EXIT
+trap 'kill $DAEMON 2>/dev/null || true; wait $DAEMON 2>/dev/null || true; rm -rf "$ROOT/userhome"' EXIT
 
 for _ in $(seq 1 120); do
   curl -sf "http://127.0.0.1:$PORT/.well-known/t3/environment" >/dev/null && break
@@ -86,7 +94,7 @@ done
 # The file harness is polled; give it a moment to appear.
 sleep 5
 
-PAIR=$("$NODE" "$BIN" auth pairing create --json --base-dir "$ROOT/home" --role owner \
+PAIR=$(HOME="$ROOT/userhome" "$NODE" "$BIN" auth pairing create --json --base-dir "$ROOT/home" --role owner \
   | "$NODE" -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>console.log(JSON.parse(s).credential))')
 
 set +e

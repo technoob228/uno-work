@@ -21,7 +21,7 @@ import {
   ThreadId,
   WsRpcGroup,
 } from "@t3tools/contracts";
-import { Duration, Effect, Option, Queue, Stream } from "effect";
+import { Duration, Effect, Option, Queue, type Scope, Stream } from "effect";
 import { RpcTest } from "effect/unstable/rpc";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -73,6 +73,10 @@ const causeMessage = (cause: unknown, fallback: string) => {
   return asString(record["message"]) ?? (cause instanceof Error ? cause.message : fallback);
 };
 
+const makeV1Client = () => RpcTest.makeClient(WsRpcGroup);
+type V1Client = Effect.Success<ReturnType<typeof makeV1Client>>;
+type V1Requirements = Exclude<Effect.Services<ReturnType<typeof makeV1Client>>, Scope.Scope>;
+
 export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
   Effect.gen(function* () {
     const projections = yield* ProjectionSnapshotQuery;
@@ -80,8 +84,12 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
     const turnRepository = Option.getOrUndefined(
       yield* Effect.serviceOption(ProjectionTurnRepository),
     );
-    // Same handlers, same session as a web socket of this person.
-    const v1 = yield* RpcTest.makeClient(WsRpcGroup);
+    // Same handlers, same session as a web socket of this person. The layer
+    // scope ends once the socket's RpcServer is built, so an in-process client
+    // is made per call, inside that call's own scope (cheap: no serialization).
+    const v1Handlers = yield* Effect.context<V1Requirements>();
+    const withV1 = <A, E>(use: (client: V1Client) => Effect.Effect<A, E>): Effect.Effect<A, E> =>
+      Effect.scoped(makeV1Client().pipe(Effect.flatMap(use))).pipe(Effect.provide(v1Handlers));
 
     const nowIso = () => new Date().toISOString();
 
@@ -231,8 +239,8 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
         }),
       );
 
-    const dispatchV1 = (command: Parameters<(typeof v1)["orchestration.dispatchCommand"]>[0]) =>
-      v1["orchestration.dispatchCommand"](command);
+    const dispatchV1 = (command: Parameters<V1Client["orchestration.dispatchCommand"]>[0]) =>
+      withV1((v1) => v1["orchestration.dispatchCommand"](command));
 
     const dispatchCommand = (payload: unknown) =>
       Effect.gen(function* () {
@@ -341,7 +349,9 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
         Effect.mapError((cause) => shellError(causeMessage(cause, "Could not load archived chats."))),
       );
 
-    const loadConfig = v1["server.getConfig"]({}).pipe(Effect.map(toV2ServerConfig));
+    const loadConfig = withV1((v1) => v1["server.getConfig"]({})).pipe(
+      Effect.map(toV2ServerConfig),
+    );
 
     return WsRpcGroupV2.of({
       [V2_METHODS.serverProbe]: () => Effect.succeed({}),
