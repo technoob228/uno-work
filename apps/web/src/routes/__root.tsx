@@ -9,10 +9,11 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import { hideBootShell } from "../lib/bootShell";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { SplashScreen } from "../components/SplashScreen";
 import { StaleBundleNotice } from "../components/StaleBundleNotice";
@@ -113,11 +114,22 @@ export const Route = createRootRouteWithContext<{
       };
     }
 
-    const [, , authGateState] = await Promise.all([
+    const [primaryDescriptor, , authGateState] = await Promise.all([
       ensurePrimaryEnvironmentReady(),
       ensureClientSettingsHydrated(),
       resolveInitialServerAuthGateState(),
     ]);
+    // The welcome / server config pick this same computer ~0.5 s later
+    // (EventRouter); until then every screen keyed on the active computer drew
+    // its "none yet" state first — the sidebar's "Add a project" that turned
+    // into grey rows, then into the list (S6 29.10). Pick it now; a computer
+    // the person already switched to is kept.
+    if (
+      authGateState.status === "authenticated" &&
+      useStore.getState().activeEnvironmentId === null
+    ) {
+      useStore.getState().setActiveEnvironmentId(primaryDescriptor.environmentId);
+    }
 
     // Not a `throw redirect(...)`: after pairing, the client navigates
     // /pair → / with the root match reused, and a redirect thrown from the
@@ -164,6 +176,12 @@ function RootRouteView() {
   const needsOnboarding =
     "needsOnboarding" in context && context.needsOnboarding === true && !onboardingCompleted;
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+
+  // The first real screen is in this commit: the index.html splash goes
+  // before the browser paints it (lib/bootShell.ts).
+  useLayoutEffect(() => {
+    hideBootShell();
+  }, []);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -279,6 +297,9 @@ function HostedStaticEnvironmentBootstrap() {
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
+  useLayoutEffect(() => {
+    hideBootShell();
+  }, []);
   const message = errorMessage(error);
   const details = errorDetails(error);
 
