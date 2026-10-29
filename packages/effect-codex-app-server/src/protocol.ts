@@ -11,6 +11,9 @@ import * as Stream from "effect/Stream";
 import * as CodexError from "./errors.ts";
 import { JsonRpcId, JsonRpcResponseEnvelope } from "./_internal/shared.ts";
 
+// How long a closed stdout waits for the process exit status.
+const EXIT_STATUS_GRACE = "250 millis";
+
 export interface CodexAppServerProtocolLogEvent {
   readonly direction: "incoming" | "outgoing";
   readonly stage: "raw" | "decoded" | "decode_failed";
@@ -126,7 +129,10 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       new Map<string, Deferred.Deferred<unknown, CodexError.CodexAppServerError>>(),
     );
     const nextRequestId = yield* Ref.make(1);
-    const remainder = yield* Ref.make("");
+    // Unfinished line kept as fragments so each chunk is scanned only once;
+    // `current + chunk` then split re-scanned the whole pending line on every
+    // chunk - quadratic for a multi-MB tool output. Upstream t3code 702a6ade3c.
+    const remainder: Array<string> = [];
     const terminationHandled = yield* Ref.make(false);
 
     const logProtocol = (event: CodexAppServerProtocolLogEvent) => {
@@ -318,11 +324,23 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     yield* options.stdio.stdin.pipe(
       Stream.decodeText(),
       Stream.runForEach((chunk) =>
-        Ref.modify(remainder, (current) => {
-          const combined = current + chunk;
-          const lines = combined.split("\n");
-          const nextRemainder = lines.pop() ?? "";
-          return [lines.map((line) => line.replace(/\r$/, "")), nextRemainder] as const;
+        Effect.sync(() => {
+          const lines: Array<string> = [];
+          let start = 0;
+          for (
+            let newline = chunk.indexOf("\n");
+            newline !== -1;
+            newline = chunk.indexOf("\n", start)
+          ) {
+            remainder.push(chunk.slice(start, newline));
+            lines.push(remainder.join("").replace(/\r$/, ""));
+            remainder.length = 0;
+            start = newline + 1;
+          }
+          if (start < chunk.length) {
+            remainder.push(chunk.slice(start));
+          }
+          return lines;
         }).pipe(Effect.flatMap((lines) => Effect.forEach(lines, handleLine, { discard: true }))),
       ),
       Effect.matchEffect({
@@ -331,21 +349,34 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.succeed(normalizeIncomingError(error, "Codex App Server input stream failed")),
           ),
         onSuccess: () =>
-          Ref.get(remainder).pipe(
+          Effect.sync(() => {
+            const line = remainder.join("");
+            remainder.length = 0;
+            return line;
+          }).pipe(
             Effect.flatMap((line) => (line.trim().length === 0 ? Effect.void : handleLine(line))),
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),
               onSuccess: () =>
-                handleTermination(
-                  () =>
-                    options.terminationError ??
-                    Effect.succeed(
-                      new CodexError.CodexAppServerTransportError({
-                        detail: "Codex App Server input stream ended",
-                        cause: new Error("Codex App Server input stream ended"),
-                      }),
-                    ),
-                ),
+                handleTermination(() => {
+                  const ended = new CodexError.CodexAppServerTransportError({
+                    detail: "Codex App Server input stream ended",
+                    cause: new Error("Codex App Server input stream ended"),
+                  });
+                  // Node ends stdout before it reports the exit of a crashed
+                  // process, so wait briefly for the exit status. stdout can
+                  // also close while the process keeps running; the wait must
+                  // not hang pending requests (a turn stuck "Working").
+                  // Upstream t3code 7769d709ce.
+                  return options.terminationError === undefined
+                    ? Effect.succeed(ended)
+                    : options.terminationError.pipe(
+                        Effect.timeoutOrElse({
+                          duration: EXIT_STATUS_GRACE,
+                          orElse: () => Effect.succeed(ended),
+                        }),
+                      );
+                }),
             }),
           ),
       }),

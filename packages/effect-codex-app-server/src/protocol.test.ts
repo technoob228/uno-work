@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -194,4 +195,67 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
       assert.equal(circularError.detail, "Failed to encode Codex App Server message");
     }),
   );
+
+  // Upstream t3code 7769d709ce.
+  it.effect("fails pending requests when input ends while the process is still running", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio,
+        terminationError: Effect.never,
+      });
+      const pending = yield* transport.request("thread/read", {}).pipe(Effect.forkScoped);
+      yield* Queue.take(output);
+
+      yield* Queue.end(input);
+      yield* TestClock.adjust("249 millis");
+      assert.isUndefined(pending.pollUnsafe());
+      yield* TestClock.adjust("1 millis");
+
+      const failure = yield* Fiber.join(pending).pipe(
+        Effect.match({
+          onFailure: (error) => error,
+          onSuccess: () => assert.fail("Expected the pending request to fail"),
+        }),
+      );
+      assert.instanceOf(failure, CodexError.CodexAppServerTransportError);
+    }),
+  );
+
+  // Upstream t3code 702a6ade3c: a line split across many chunks arrives whole.
+  it.effect("reassembles a message split across many input chunks", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({ stdio });
+      const received = yield* Deferred.make<
+        ReadonlyArray<CodexProtocol.CodexAppServerIncomingNotification>
+      >();
+      yield* transport.incomingNotifications.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.flatMap((items) => Deferred.succeed(received, items)),
+        Effect.forkScoped,
+      );
+
+      const big = "x".repeat(50_000);
+      const first = `${JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { delta: big, itemId: "item-1", threadId: "thread-1", turnId: "turn-1" },
+      })}\r\n`;
+      const second = `${JSON.stringify({
+        method: "item/agentMessage/delta",
+        params: { delta: "tail", itemId: "item-1", threadId: "thread-1", turnId: "turn-1" },
+      })}\n`;
+      const all = first + second;
+      for (let offset = 0; offset < all.length; offset += 997) {
+        yield* Queue.offer(input, encoder.encode(all.slice(offset, offset + 997)));
+      }
+
+      const items = yield* Deferred.await(received);
+      assert.equal(items.length, 2);
+      const params = (items[0] as { readonly params?: { readonly delta?: string } }).params;
+      assert.equal(params?.delta?.length, big.length);
+    }),
+  );
 });
+
