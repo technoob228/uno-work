@@ -1,6 +1,7 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import {
   ApprovalRequestId,
+  ASSISTANT_PROJECT_ID,
   CommandId,
   EventId,
   MessageId,
@@ -20,6 +21,10 @@ import {
   INITIAL_NOTIFY_TRACKER_STATE,
   isOwnOriginChat,
   NOTIFY_RATE_LIMIT_MS,
+  admitPersonMessage,
+  PERSON_MESSAGE_LIMIT,
+  PERSON_MESSAGE_WINDOW_MS,
+  pickPersonChats,
   selectNotificationChats,
   trackDomainEvent,
   type NotifyTrackerState,
@@ -351,5 +356,47 @@ describe("channel notify: thread ownership", () => {
 
   it("refuses to notify on behalf of another chat", () => {
     assert.deepEqual(resolveNotifyThreadId("thread-a", "thread-b"), { ok: false });
+  });
+});
+
+describe("messages from a chat to the person", () => {
+  const chat = (
+    overrides: Partial<ResolvedNotifyChat> & Pick<ResolvedNotifyChat, "chatId">,
+  ): ResolvedNotifyChat => ({
+    kind: "telegram",
+    connectorProjectId: ASSISTANT_PROJECT_ID,
+    notifyOnComplete: true,
+    via: "assistant",
+    ...overrides,
+  });
+
+  it("bound chats win; else the person's private Telegram once, never a group", () => {
+    const bound = chat({ chatId: "-100500", via: "thread" });
+    expect(pickPersonChats([bound, chat({ chatId: "42" })])).toEqual([bound]);
+    const other = ProjectId.make("assistant-ada");
+    expect(
+      pickPersonChats([
+        chat({ chatId: "42", connectorProjectId: other }),
+        chat({ chatId: "-100500" }),
+        chat({ chatId: "42" }),
+        chat({ chatId: "slack:D1", kind: "slack" }),
+      ]),
+    ).toEqual([chat({ chatId: "42" })]);
+    expect(pickPersonChats([chat({ chatId: "slack:D1", kind: "slack" })])).toEqual([
+      chat({ chatId: "slack:D1", kind: "slack" }),
+    ]);
+    expect(pickPersonChats([chat({ chatId: "-100500" })])).toEqual([]);
+  });
+
+  it("a chat may write a few times in ten minutes, then waits", () => {
+    let sentAt: ReadonlyMap<string, ReadonlyArray<number>> = new Map();
+    for (let index = 0; index < PERSON_MESSAGE_LIMIT; index += 1) {
+      const verdict = admitPersonMessage(sentAt, "t1", 1_000 + index);
+      expect(verdict.admit).toBe(true);
+      sentAt = verdict.sentAt;
+    }
+    expect(admitPersonMessage(sentAt, "t1", 2_000).admit).toBe(false);
+    expect(admitPersonMessage(sentAt, "t2", 2_000).admit).toBe(true);
+    expect(admitPersonMessage(sentAt, "t1", 1_000 + PERSON_MESSAGE_WINDOW_MS).admit).toBe(true);
   });
 });
