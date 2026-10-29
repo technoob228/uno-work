@@ -14,7 +14,12 @@ import {
 
 function offer(action: "Done" | "Snoozed" | "Unpinned" | "Archived", key: string) {
   const undo = vi.fn(async () => {});
-  const kind = { Done: "settle", Snoozed: "snooze", Unpinned: "unpin", Archived: "archive" } as const;
+  const kind = {
+    Done: "settle",
+    Snoozed: "snooze",
+    Unpinned: "unpin",
+    Archived: "archive",
+  } as const;
   showThreadUndoNotice({
     action,
     undo,

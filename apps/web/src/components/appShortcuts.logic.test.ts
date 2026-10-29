@@ -15,9 +15,7 @@ describe("default app shortcuts", () => {
   it("goes back and forward with ⌘[ / ⌘], not inside the terminal", () => {
     const back = event({ key: "[", code: "BracketLeft", metaKey: true });
     const forward = event({ key: "]", code: "BracketRight", ctrlKey: true });
-    expect(resolveShortcutCommand(back, DEFAULT_RESOLVED_KEYBINDINGS, MAC)).toBe(
-      "navigation.back",
-    );
+    expect(resolveShortcutCommand(back, DEFAULT_RESOLVED_KEYBINDINGS, MAC)).toBe("navigation.back");
     expect(
       resolveShortcutCommand(forward, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux" }),
     ).toBe("navigation.forward");
@@ -79,9 +77,9 @@ describe("withAppShortcutDefaults", () => {
       (binding) => !binding.command.startsWith("navigation.") && binding.command !== "thread.undo",
     );
     const merged = withAppShortcutDefaults(old);
-    expect(
-      resolveShortcutCommand(event({ key: "z", metaKey: true }), merged, MAC),
-    ).toBe("thread.undo");
+    expect(resolveShortcutCommand(event({ key: "z", metaKey: true }), merged, MAC)).toBe(
+      "thread.undo",
+    );
     expect(
       resolveShortcutCommand(event({ key: "[", code: "BracketLeft", metaKey: true }), merged, MAC),
     ).toBe("navigation.back");

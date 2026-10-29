@@ -151,4 +151,3 @@ export async function toggleOpenThreadPin(
   else withdrawThreadUndo("unpin", threadRef);
   return { ok: true };
 }
-

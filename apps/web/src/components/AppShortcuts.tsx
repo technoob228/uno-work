@@ -26,7 +26,10 @@ import { toastManager } from "./ui/toast";
  */
 export function AppShortcuts() {
   const serverKeybindings = useServerKeybindings();
-  const keybindings = useMemo(() => withAppShortcutDefaults(serverKeybindings), [serverKeybindings]);
+  const keybindings = useMemo(
+    () => withAppShortcutDefaults(serverKeybindings),
+    [serverKeybindings],
+  );
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -70,7 +73,8 @@ export function AppShortcuts() {
           .catch((error: unknown) =>
             toastManager.add({
               type: "error",
-              title: command === "thread.settle" ? "Couldn't mark it done" : "Couldn't pin the chat",
+              title:
+                command === "thread.settle" ? "Couldn't mark it done" : "Couldn't pin the chat",
               description: error instanceof Error ? error.message : String(error),
             }),
           );

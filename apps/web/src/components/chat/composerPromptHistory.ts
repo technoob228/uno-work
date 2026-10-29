@@ -41,7 +41,8 @@ export interface ComposerPromptHistoryStep {
 }
 
 // The bracketed text sent in place of an empty prompt with only attachments.
-const ATTACHMENT_ONLY_PROMPT_PATTERN = /^\[User attached one or more [^\]]*without additional text\./;
+const ATTACHMENT_ONLY_PROMPT_PATTERN =
+  /^\[User attached one or more [^\]]*without additional text\./;
 const PLAN_IMPLEMENTATION_PREFIX = buildPlanImplementationPrompt("").trim();
 
 /** The words the person typed, without what the app appended; "" when there are none. */

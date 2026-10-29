@@ -19,7 +19,11 @@ import { useServerKeybindings } from "../../rpc/serverState";
 export function SidebarThreadUndoNotice() {
   const notice = useThreadUndoNotice((state) => state.notice);
   const keybindings = useServerKeybindings();
-  const summary = notice ? (notice.count === 1 ? notice.action : `${notice.action} ${notice.count}`) : null;
+  const summary = notice
+    ? notice.count === 1
+      ? notice.action
+      : `${notice.action} ${notice.count}`
+    : null;
   // Keeps the last text on screen while it fades out, then unmounts on transitionend.
   const [shownSummary, setShownSummary] = useState(summary);
   if (summary && summary !== shownSummary) setShownSummary(summary);
