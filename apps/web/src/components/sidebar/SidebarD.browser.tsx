@@ -36,12 +36,19 @@ vi.mock("../../inbox/inboxStore", async (importOriginal) => ({
   useInboxNeedsYouCount: () => needsYou,
   useInboxEntries: () => [],
 }));
+// The icon row on top is the assistants update's (0.0.161); without it the
+// places are rows. These tests are about the icon row.
+vi.mock("../assistants/useAssistantTeam", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useTeamShown: () => true,
+}));
 
 const { SidebarProvider } = await import("../ui/sidebar");
 const { SidebarDAccountMenu, SidebarDPlaces, SidebarDRail, UnoFace } =
   await import("./SidebarDParts");
 const { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } =
   await import("./sidebarDState");
+const { readDevMode, setDevMode } = await import("../../devMode");
 
 /** What Sidebar.tsx does around the rail: Esc and a click into the page hide the panel. */
 function PanelDismiss() {
@@ -116,6 +123,20 @@ describe("sidebar D places", () => {
     const screen = await mount(<SidebarDPlaces />);
     await userEvent.hover(screen.getByTestId("sidebar-nav-apps"));
     await expect.element(page.getByText("Apps & sites")).toBeVisible();
+  });
+
+  it("turns Dev mode on and off from the end of the row", async () => {
+    setDevMode(false);
+    const screen = await mount(<SidebarDPlaces />);
+    const dev = screen.getByTestId("sidebar-nav-dev-mode");
+    await expect.element(dev).toHaveAttribute("aria-label", "Dev mode");
+    await expect.element(dev).toHaveAttribute("aria-pressed", "false");
+    await dev.click();
+    expect(readDevMode()).toBe(true);
+    await expect.element(dev).toHaveAttribute("aria-pressed", "true");
+    await dev.click();
+    expect(readDevMode()).toBe(false);
+    await expect.element(dev).toHaveAttribute("aria-pressed", "false");
   });
 
   it("counts what waits on Needs you", async () => {

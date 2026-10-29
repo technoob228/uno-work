@@ -17,6 +17,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   CircleHelpIcon,
+  CodeXmlIcon,
   CreditCardIcon,
   FolderIcon,
   HouseIcon,
@@ -44,6 +45,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
+import { toggleDevMode, useDevMode } from "../../devMode";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
 import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
@@ -298,7 +300,17 @@ function PlaceIcon(props: {
   onClick: () => void;
   testId: string;
   tour?: string;
+  /** A switch (Dev mode): lit while on, `aria-pressed`. */
+  pressed?: boolean;
+  /** The tooltip, when it says more than the name ("Dev mode: on"). */
+  hint?: string;
+  className?: string;
 }) {
+  const lit = props.pressed
+    ? PLACE_ICON_PRESSED
+    : props.active
+      ? PLACE_ICON_ACTIVE
+      : PLACE_ICON_IDLE;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -306,18 +318,40 @@ function PlaceIcon(props: {
           <button
             type="button"
             aria-label={props.label}
+            aria-pressed={props.pressed}
             onClick={props.onClick}
             data-testid={props.testId}
             data-tour={props.tour}
             aria-current={props.active ? "page" : undefined}
-            className={cn(PLACE_ICON_CLASS, props.active ? PLACE_ICON_ACTIVE : PLACE_ICON_IDLE)}
+            className={cn(PLACE_ICON_CLASS, lit, props.className)}
           />
         }
       >
         {props.icon}
       </TooltipTrigger>
-      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+      <TooltipPopup side="bottom">{props.hint ?? props.label}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/**
+ * Dev mode as a switch at the end of the row (Misha 29.10): the terminal,
+ * Revert and the context meter in chats. Lit while on; Settings keeps its
+ * own switch.
+ */
+function DevModePlace() {
+  const devMode = useDevMode();
+  return (
+    <PlaceIcon
+      icon={<CodeXmlIcon />}
+      label="Dev mode"
+      hint={`Dev mode: ${devMode ? "on" : "off"}`}
+      active={false}
+      pressed={devMode}
+      onClick={toggleDevMode}
+      testId="sidebar-nav-dev-mode"
+      className="ml-auto"
+    />
   );
 }
 
@@ -352,6 +386,7 @@ function PlaceRow(props: {
 const PLACE_ICON_CLASS =
   "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
 const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
+const PLACE_ICON_PRESSED = "bg-primary/12 text-primary hover:bg-primary/18";
 const PLACE_ICON_IDLE =
   "text-sidebar-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground data-[popup-open]:bg-sidebar-row-hover";
 
@@ -480,6 +515,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           )}
         />
       ) : null}
+      <DevModePlace />
     </nav>
   );
 });
