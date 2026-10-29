@@ -68,17 +68,21 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     const onWindowKeyUp = (event: KeyboardEvent) => {
       syncShortcutModifierStateFromKeyboardEvent(event);
     };
+    // Dictation tools paste with a synthetic ⌘V whose Meta keyup never reaches
+    // the page: a paste is never jump intent, so it resets like a blur (5d76653960).
     const onWindowBlur = () => {
       clearShortcutModifierState();
     };
 
     window.addEventListener("keydown", onWindowKeyDown, true);
     window.addEventListener("keyup", onWindowKeyUp, true);
+    window.addEventListener("paste", onWindowBlur, true);
     window.addEventListener("blur", onWindowBlur);
 
     return () => {
       window.removeEventListener("keydown", onWindowKeyDown, true);
       window.removeEventListener("keyup", onWindowKeyUp, true);
+      window.removeEventListener("paste", onWindowBlur, true);
       window.removeEventListener("blur", onWindowBlur);
     };
   }, []);

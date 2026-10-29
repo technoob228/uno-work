@@ -75,11 +75,17 @@ export function syncShortcutModifierStateFromKeyboardEvent(event: KeyboardEvent)
     return;
   }
 
+  // Flags on non-modifier keys may only clear a bit, never set one (upstream
+  // 5d76653960). After a dictation tool's synthetic ⌘V (Wispr Flow) the
+  // browser can keep reporting metaKey=true on real keys (Enter to send) until
+  // ⌘ is tapped; trusting it would mark ⌘ as held and stick the ⌘1–9 hints.
+  // Setting a bit needs a real modifier keydown, handled above.
+  const currentState = useShortcutModifierStateStore.getState().state;
   useShortcutModifierStateStore.getState().setState({
-    metaKey: event.metaKey,
-    ctrlKey: event.ctrlKey,
-    altKey: event.altKey,
-    shiftKey: event.shiftKey,
+    metaKey: currentState.metaKey && event.metaKey,
+    ctrlKey: currentState.ctrlKey && event.ctrlKey,
+    altKey: currentState.altKey && event.altKey,
+    shiftKey: currentState.shiftKey && event.shiftKey,
   });
 }
 
