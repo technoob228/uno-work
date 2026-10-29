@@ -7,7 +7,7 @@
 import { expect, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
-import { BrowserBridge } from "./browserBridge.ts";
+import { BrowserBridge, type BrowserBridgeShape } from "./browserBridge.ts";
 import type {
   ConnectorNotifyServiceShape,
   PersonMessageInput,
@@ -25,15 +25,15 @@ const harness = (windowOpen: boolean) => {
       }),
     retireButtons: (requestId: string) => Effect.sync(() => void retired.push(requestId)),
   } as unknown as ConnectorNotifyServiceShape;
-  const bridge = Layer.mock(BrowserBridge)({
+  const bridge = Layer.succeed(BrowserBridge, {
     hasSubscribers: Effect.succeed(windowOpen),
-    requestToolApproval: (input) =>
+    requestToolApproval: (input: Parameters<BrowserBridgeShape["requestToolApproval"]>[0]) =>
       Effect.gen(function* () {
         input.onRequestId?.("req-42");
         yield* Effect.sleep("20 millis");
         return "approved" as const;
       }),
-  });
+  } as unknown as BrowserBridgeShape);
   return { sent, retired, notify, bridge };
 };
 
