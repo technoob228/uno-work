@@ -41,6 +41,49 @@ describe("sessionActivity", () => {
     expect(getSessionActivity("t", 2_000).backgroundTaskCount).toBe(0);
   });
 
+  it("counts a task that is still running when its turn ends (moved to the background)", () => {
+    // Claude Code: a Bash past its 2-minute timeout keeps running in the
+    // background; only `task_updated` says so, the runtime events don't.
+    recordRuntimeEvent({ threadId: "t", type: "turn.started" }, 1_000);
+    recordRuntimeEvent(
+      { threadId: "t", type: "task.started", payload: { taskId: "done", isBackgrounded: false } },
+      1_100,
+    );
+    recordRuntimeEvent(
+      { threadId: "t", type: "task.completed", payload: { taskId: "done", status: "completed" } },
+      1_200,
+    );
+    recordRuntimeEvent(
+      { threadId: "t", type: "task.started", payload: { taskId: "slow", isBackgrounded: false } },
+      1_300,
+    );
+    expect(getSessionActivity("t", 1_400).backgroundTaskCount).toBe(0);
+
+    recordRuntimeEvent(
+      { threadId: "t", type: "turn.completed", payload: { state: "completed" } },
+      2_000,
+    );
+    expect(getSessionActivity("t", 3_000).backgroundTaskCount).toBe(1);
+
+    recordRuntimeEvent(
+      { threadId: "t", type: "task.completed", payload: { taskId: "slow", status: "completed" } },
+      4_000,
+    );
+    expect(getSessionActivity("t", 5_000).backgroundTaskCount).toBe(0);
+  });
+
+  it("does not keep the open tasks of an interrupted turn", () => {
+    recordRuntimeEvent(
+      { threadId: "t", type: "task.started", payload: { taskId: "fg", isBackgrounded: false } },
+      1_000,
+    );
+    recordRuntimeEvent(
+      { threadId: "t", type: "turn.completed", payload: { state: "interrupted" } },
+      2_000,
+    );
+    expect(getSessionActivity("t", 3_000).backgroundTaskCount).toBe(0);
+  });
+
   it("drops a background task that never reported completion after the age cap", () => {
     recordRuntimeEvent(
       { threadId: "t", type: "task.started", payload: { taskId: "a", isBackgrounded: true } },
