@@ -941,9 +941,9 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
     const watchdogStop = (row: ConnectorPendingReply, turnId: string | null) =>
       Effect.gen(function* () {
         const createdAt = yield* nowIso;
-        yield* Effect.logInfo(`${transport.logPrefix} Uno turn ran past the watchdog; stopping it`).pipe(
-          Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey, turnId }),
-        );
+        yield* Effect.logInfo(
+          `${transport.logPrefix} Uno turn ran past the watchdog; stopping it`,
+        ).pipe(Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey, turnId }));
         yield* engine
           .dispatch(
             {

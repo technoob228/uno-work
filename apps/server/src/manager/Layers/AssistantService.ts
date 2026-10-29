@@ -472,7 +472,6 @@ harness + model + effort), and evolve it:
   never work around it.
 `;
 
-
 function slugifyAssistantName(name: string): string {
   const slug = name
     .toLowerCase()

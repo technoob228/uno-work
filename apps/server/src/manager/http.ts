@@ -295,9 +295,13 @@ export const managerMcpRouteLayer = HttpRouter.add(
         );
         if (!resolved.ok) return { ok: false as const, error: `Not sent: ${resolved.reason}.` };
         const size = yield* Effect.promise(() =>
-          fsPromises.stat(resolved.path).then((stat) => stat.size, () => 0),
+          fsPromises.stat(resolved.path).then(
+            (stat) => stat.size,
+            () => 0,
+          ),
         );
-        const limit = chat.kind === "telegram" ? TELEGRAM_BOT_UPLOAD_LIMIT_BYTES : SLACK_UPLOAD_LIMIT_BYTES;
+        const limit =
+          chat.kind === "telegram" ? TELEGRAM_BOT_UPLOAD_LIMIT_BYTES : SLACK_UPLOAD_LIMIT_BYTES;
         if (size > limit) {
           return {
             ok: false as const,

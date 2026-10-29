@@ -278,15 +278,21 @@ describe("buildHermesConfigYaml for the Uno dispatcher", () => {
   });
 
   it("no terminal, files, browser or web; only the dispatcher's MCP tools", () => {
-    expect(yaml).toContain('disabled_toolsets: ["terminal", "file", "code_execution", "browser", "web"');
-    expect(yaml).toMatch(/"uno-manager":\n[\s\S]*?include: \["work_status"[^\]]*"notes_append"[^\]]*"send_file"/);
+    expect(yaml).toContain(
+      'disabled_toolsets: ["terminal", "file", "code_execution", "browser", "web"',
+    );
+    expect(yaml).toMatch(
+      /"uno-manager":\n[\s\S]*?include: \["work_status"[^\]]*"notes_append"[^\]]*"send_file"/,
+    );
     expect(yaml).toMatch(/"uno-work":\n[\s\S]*?include: \["chat_create"/);
     expect(yaml).not.toMatch(/include: \[[^\]]*"site_publish"/);
   });
 
   it("compacts its context early, by the same model", () => {
     expect(yaml).toContain("compression:\n  enabled: true\n  threshold_tokens: 28000");
-    expect(yaml).toContain('auxiliary:\n  compression:\n    provider: "main"\n    model: "uno/glm-5.3-flash"');
+    expect(yaml).toContain(
+      'auxiliary:\n  compression:\n    provider: "main"\n    model: "uno/glm-5.3-flash"',
+    );
   });
 
   it("other sessions get none of it", () => {

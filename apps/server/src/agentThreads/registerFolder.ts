@@ -43,7 +43,9 @@ export function isRegistrableFolder(folder: string, home: string): boolean {
   if (relative.length === 0 || relative.startsWith("..") || nodePath.isAbsolute(relative)) {
     return false;
   }
-  return relative.split(nodePath.sep).every((segment) => segment.length > 0 && !segment.startsWith("."));
+  return relative
+    .split(nodePath.sep)
+    .every((segment) => segment.length > 0 && !segment.startsWith("."));
 }
 
 /** The project's title: the folder's name ("Home folder" for the home folder). */
@@ -106,7 +108,9 @@ export const makeRegisterFolder =
           defaultModelSelection: selection,
           createdAt: new Date((deps.nowMs ?? Date.now)()).toISOString(),
         },
-        { origin: systemCommandOrigin(REGISTER_FOLDER_ORIGIN_COMPONENT, "chat started in a folder") },
+        {
+          origin: systemCommandOrigin(REGISTER_FOLDER_ORIGIN_COMPONENT, "chat started in a folder"),
+        },
       );
       for (let tries = 0; tries < 50; tries += 1) {
         const shell = yield* deps.projections.getProjectShellById(projectId);

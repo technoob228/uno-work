@@ -8,7 +8,9 @@ const table = (rows: string) =>
 describe("personRoute", () => {
   it("no rows of the person's: no rule", () => {
     expect(
-      personRoute(table("| Simple tasks | claudeAgent | claude-sonnet-5-5 | medium | default | x |")),
+      personRoute(
+        table("| Simple tasks | claudeAgent | claude-sonnet-5-5 | medium | default | x |"),
+      ),
     ).toBeNull();
   });
 

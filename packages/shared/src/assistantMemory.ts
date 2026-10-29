@@ -399,6 +399,12 @@ function isBlankCell(value: string): boolean {
   return /^[\s—–-]*$/.test(value);
 }
 
+const taskKey = (rule: RoutingRule) => rule.taskType.trim().toLowerCase();
+
+/** The one value all of them share, or null. */
+const shared = <T>(values: ReadonlyArray<T>): T | null =>
+  values.every((value) => value === values[0]) ? (values[0] ?? null) : null;
+
 export function personRoute(content: string, taskType?: string): PersonRoute | null {
   const rows = parseRouting(content).rules.filter(
     (rule) =>
@@ -409,10 +415,9 @@ export function personRoute(content: string, taskType?: string): PersonRoute | n
   if (rows.length === 0) return null;
   const wanted = taskType?.trim().toLowerCase() ?? "";
   if (wanted.length > 0) {
-    const key = (rule: RoutingRule) => rule.taskType.trim().toLowerCase();
     const row =
-      rows.find((rule) => key(rule) === wanted) ??
-      rows.find((rule) => key(rule).includes(wanted) || wanted.includes(key(rule)));
+      rows.find((rule) => taskKey(rule) === wanted) ??
+      rows.find((rule) => taskKey(rule).includes(wanted) || wanted.includes(taskKey(rule)));
     if (row !== undefined) {
       return {
         harness: row.harness.trim(),
@@ -422,12 +427,10 @@ export function personRoute(content: string, taskType?: string): PersonRoute | n
       };
     }
   }
-  const one = <T>(values: ReadonlyArray<T>): T | null =>
-    values.every((value) => value === values[0]) ? (values[0] ?? null) : null;
-  const harness = one(rows.map((rule) => rule.harness.trim()));
+  const harness = shared(rows.map((rule) => rule.harness.trim()));
   if (harness === null) return null;
-  const model = one(rows.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())));
-  const thinking = one(rows.map((rule) => thinkingOf(rule.effort)));
+  const model = shared(rows.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())));
+  const thinking = shared(rows.map((rule) => thinkingOf(rule.effort)));
   return { harness, model, thinking, taskType: rows.length === 1 ? rows[0]!.taskType : null };
 }
 

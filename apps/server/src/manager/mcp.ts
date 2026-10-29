@@ -333,12 +333,13 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         },
         taskType: {
           type: "string",
-          description: "The routing table row this task is (its Task type), to pick the person's model for it.",
+          description:
+            "The routing table row this task is (its Task type), to pick the person's model for it.",
         },
         personAsked: {
           type: "boolean",
           description:
-            "true only when the person named this model/harness in this conversation (\"through Claude\", \"on Smart\"): then modelSelection wins over their table.",
+            'true only when the person named this model/harness in this conversation ("through Claude", "on Smart"): then modelSelection wins over their table.',
         },
         runtimeMode: {
           type: "string",
@@ -706,7 +707,9 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
     run: (_tools, caller, args, extras) =>
       Effect.gen(function* () {
         const path =
-          typeof args === "object" && args !== null && typeof (args as { path?: unknown }).path === "string"
+          typeof args === "object" &&
+          args !== null &&
+          typeof (args as { path?: unknown }).path === "string"
             ? (args as { path: string }).path.trim()
             : "";
         if (path.length === 0) return { error: "path is required." };

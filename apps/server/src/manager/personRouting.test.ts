@@ -67,7 +67,10 @@ describe("applyPersonRoute", () => {
       route: claudeEverywhere,
       requested: smart,
       personAsked: false,
-      providers: [provider("uno"), provider("claudeAgent", { auth: { status: "unauthenticated" } })],
+      providers: [
+        provider("uno"),
+        provider("claudeAgent", { auth: { status: "unauthenticated" } }),
+      ],
     });
     expect(routed.kind).toBe("not-ready");
     if (routed.kind === "not-ready") {

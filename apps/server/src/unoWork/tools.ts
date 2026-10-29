@@ -2354,7 +2354,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         model: { type: "string" },
         taskType: {
           type: "string",
-          description: "The routing table row this task is (its Task type), to pick the person's model for it.",
+          description:
+            "The routing table row this task is (its Task type), to pick the person's model for it.",
         },
         personAsked: {
           type: "boolean",
@@ -3951,7 +3952,11 @@ export function harnessReadiness(providers: ReadonlyArray<ServerProvider>): Read
       return { ...base, ready: false, fix: "not signed in: Settings → Agents → Sign in" };
     }
     if (provider.status === "error") {
-      return { ...base, ready: false, fix: provider.message ?? "it reports an error: Settings → Agents" };
+      return {
+        ...base,
+        ready: false,
+        fix: provider.message ?? "it reports an error: Settings → Agents",
+      };
     }
     return { ...base, ready: true };
   });

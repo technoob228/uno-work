@@ -58,7 +58,10 @@ async function ownFile(
   }
 }
 
-export async function readAssistantNotes(workspaceRoot: string, args: unknown): Promise<NotesResult> {
+export async function readAssistantNotes(
+  workspaceRoot: string,
+  args: unknown,
+): Promise<NotesResult> {
   const input = asRecord(args);
   const file = input["file"] ?? "NOTES.md";
   if (!isReadable(file)) {
@@ -159,7 +162,10 @@ export const personLines = (text: string): ReadonlyArray<string> =>
     .map((line) => line.trimEnd())
     .filter((line) => /\(you\)\.?$/.test(line) || /\|\s*`?you`?\s*\|/.test(line));
 
-export async function editAssistantNotes(workspaceRoot: string, args: unknown): Promise<NotesResult> {
+export async function editAssistantNotes(
+  workspaceRoot: string,
+  args: unknown,
+): Promise<NotesResult> {
   const input = asRecord(args);
   const file = input["file"];
   if (!isWritable(file)) {
@@ -172,7 +178,10 @@ export async function editAssistantNotes(workspaceRoot: string, args: unknown): 
   if (typeof find !== "string") return { ok: false, error: find.error };
   const replaceRaw = input["replace"];
   if (typeof replaceRaw !== "string" || replaceRaw.length > NOTES_TEXT_MAX_CHARS) {
-    return { ok: false, error: `replace is a string of at most ${NOTES_TEXT_MAX_CHARS} characters.` };
+    return {
+      ok: false,
+      error: `replace is a string of at most ${NOTES_TEXT_MAX_CHARS} characters.`,
+    };
   }
   const dropped = personLines(find).filter((line) => !replaceRaw.includes(line));
   if (dropped.length > 0) {

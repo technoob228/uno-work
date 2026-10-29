@@ -563,9 +563,7 @@ export function buildHermesConfigYaml(input: {
 }): string {
   const quote = JSON.stringify;
   const provider = input.provider ?? HERMES_GATEWAY_PROVIDER;
-  const disabledToolsets = (input.disabledToolsets ?? []).filter(
-    (name) => name.trim().length > 0,
-  );
+  const disabledToolsets = (input.disabledToolsets ?? []).filter((name) => name.trim().length > 0);
   const lines: Array<string> = [
     "agent:",
     `  api_max_retries: ${HERMES_AGENT_API_MAX_RETRIES}`,
@@ -652,7 +650,10 @@ export function buildHermesConfigYaml(input: {
       }
       const include = input.mcpToolsInclude?.[server.name];
       if (include !== undefined) {
-        lines.push("    tools:", `      include: [${include.map((name) => quote(name)).join(", ")}]`);
+        lines.push(
+          "    tools:",
+          `      include: [${include.map((name) => quote(name)).join(", ")}]`,
+        );
       }
       if ("url" in server) {
         lines.push(`    url: ${quote(server.url)}`);

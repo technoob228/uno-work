@@ -10,10 +10,7 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { Effect, Option } from "effect";
 
-import {
-  assistantOfThread,
-  type AssistantAccessView,
-} from "../assistants/assistantAccess.ts";
+import { assistantOfThread, type AssistantAccessView } from "../assistants/assistantAccess.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { sendableRoots } from "./connectorOutgoingFiles.ts";
 
