@@ -84,8 +84,14 @@ export interface WorkLogEntry {
    */
   rawInput?: string;
   rawResult?: string;
-  /** The MCP tool of the call (`automation_create`): a few get a card of their own. */
+  /**
+   * The tool of the call: an MCP tool (`automation_create` — a few get a card
+   * of their own) or the harness's own (`Read`, `grep`, `bash`); the timeline
+   * names a run of them in one phrase ("Read 3 files and ran 2 commands").
+   */
   toolName?: string;
+  /** The turn the row belongs to: a finished turn folds into "Worked for 2m". */
+  turnId?: TurnId;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -649,6 +655,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     const toolName = human.callKey.split(":").at(-1);
     if (toolName) humanEntry.toolName = toolName;
     if (toolCallId) humanEntry.toolCallId = toolCallId;
+    if (activity.turnId) humanEntry.turnId = activity.turnId;
     return humanEntry;
   }
   const entry: DerivedWorkLogEntry = {
@@ -688,6 +695,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
+  }
+  const harnessToolName = isTaskActivity ? null : extractHarnessToolName(payload);
+  if (harnessToolName) {
+    entry.toolName = harnessToolName;
+  }
+  if (activity.turnId) {
+    entry.turnId = activity.turnId;
   }
   const collapseKey = deriveToolLifecycleCollapseKey(
     entry,
@@ -1051,6 +1065,12 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
     command: null,
     rawCommand: null,
   };
+}
+
+/** The harness's own name of the tool: Claude `data.toolName`, OpenCode `data.tool`. */
+function extractHarnessToolName(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  return asTrimmedString(data?.toolName) ?? asTrimmedString(data?.tool);
 }
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
