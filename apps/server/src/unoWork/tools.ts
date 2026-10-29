@@ -99,6 +99,7 @@ import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./poli
 import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
+import { normalizeButtonRows, type ButtonSpec } from "../manager/connectorButtons.ts";
 import { workAppLink } from "../workAddress.ts";
 
 export {
@@ -301,6 +302,21 @@ export interface UnoWorkToolDeps {
     readonly text: string;
     readonly kind: "info" | "warning" | "error";
   }) => Effect.Effect<{ readonly delivered: number }>;
+  /**
+   * `messenger_send`: this chat writes to the person's Telegram / Slack
+   * (ConnectorNotifyService.sendToPerson). Absent: older wiring, tests.
+   */
+  readonly messengerSend?: (input: {
+    readonly text: string;
+    readonly file?: string;
+    readonly buttons?: ReadonlyArray<
+      ReadonlyArray<{ readonly label: string; readonly value: string }>
+    >;
+  }) => Effect.Effect<{
+    readonly delivered: number;
+    readonly via: "telegram" | "slack" | "uno-bot" | "none";
+    readonly note: string | null;
+  }>;
   readonly openInApp: (input: {
     readonly view: "office" | "files";
     readonly path: string;
@@ -567,6 +583,28 @@ const str = (args: Record<string, unknown>, key: string): string | undefined =>
   typeof args[key] === "string" ? (args[key] as string) : undefined;
 const num = (args: Record<string, unknown>, key: string): number | undefined =>
   typeof args[key] === "number" ? (args[key] as number) : undefined;
+/**
+ * `messenger_send` buttons: a flat list; `row` on the buttons lays them out
+ * in rows (then the explicit rows count, in row order).
+ */
+const buttonRowOf = (entry: unknown): number | null =>
+  typeof entry === "object" &&
+  entry !== null &&
+  typeof (entry as { row?: unknown }).row === "number"
+    ? (entry as { row: number }).row
+    : null;
+const buttonRowsFromArgs = (raw: unknown): unknown => {
+  if (!Array.isArray(raw)) return raw;
+  const rowOf = buttonRowOf;
+  if (!raw.some((entry) => rowOf(entry) !== null)) return raw;
+  const rows = new Map<number, Array<unknown>>();
+  for (const entry of raw) {
+    const row = rowOf(entry) ?? 0;
+    rows.set(row, [...(rows.get(row) ?? []), entry]);
+  }
+  return [...rows.entries()].toSorted(([a], [b]) => a - b).map(([, entries]) => entries);
+};
+
 const bool = (args: Record<string, unknown>, key: string): boolean | undefined =>
   typeof args[key] === "boolean" ? (args[key] as boolean) : undefined;
 const strArray = (args: Record<string, unknown>, key: string): string[] | undefined =>
@@ -2516,6 +2554,75 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ok: true,
           inboxItemId: item.id,
           ...(messenger ? { messengerDelivered: messenger.delivered } : {}),
+        };
+      }),
+  },
+  {
+    name: "messenger_send",
+    group: "person",
+    description:
+      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons: a question with 2–4 answers → buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 3500 },
+        file: {
+          type: "string",
+          maxLength: 4096,
+          description: "Absolute or ~/ path of a file to send with it.",
+        },
+        buttons: {
+          type: "array",
+          maxItems: 12,
+          description:
+            'Answers as buttons: [{"label":"Yes, deploy","value":"Deploy it"}, {"label":"Not now"}]; value defaults to the label. Up to 3 short labels go side by side, else one per line; `row` (0, 1, …) lays them out yourself.',
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", minLength: 1, maxLength: 40 },
+              value: { type: "string", maxLength: 500 },
+              row: { type: "integer", minimum: 0, maximum: 5 },
+            },
+            required: ["label"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (deps.messengerSend === undefined) {
+          return yield* toolError("Messages to Telegram aren't available here; use notify.");
+        }
+        const text = str(args, "text")?.trim() ?? "";
+        if (text.length === 0) return yield* toolError("text is required.");
+        let buttons: ReadonlyArray<ReadonlyArray<ButtonSpec>> | undefined;
+        if (args.buttons !== undefined) {
+          const normalized = normalizeButtonRows(buttonRowsFromArgs(args.buttons));
+          if (!normalized.ok) return yield* toolError(`buttons: ${normalized.error}.`);
+          buttons = normalized.rows;
+        }
+        const file = str(args, "file")?.trim();
+        const result = yield* deps.messengerSend({
+          text,
+          ...(file ? { file } : {}),
+          ...(buttons ? { buttons } : {}),
+        });
+        if (result.delivered === 0) {
+          return yield* toolError(result.note ?? "Not delivered.");
+        }
+        return {
+          ok: true,
+          via: result.via,
+          ...(result.note ? { note: result.note } : {}),
+          ...(buttons && result.via === "telegram"
+            ? {
+                next: "End your turn now. The person's press (or reply) comes to this chat as their next message.",
+              }
+            : {}),
         };
       }),
   },

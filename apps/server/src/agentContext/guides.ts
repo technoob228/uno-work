@@ -205,6 +205,8 @@ export function buildUnoWorkGuide(
       return [
         "## You (the agent) telling the person",
         'Call `notify` with a short title in plain words (who/what first: "Notes app is ready", "Backup failed"), an optional body and where Open leads (`open`: a file, an app of this computer, a URL; default this chat). It lands in the Inbox bell of Uno Work; `alsoMessenger: true` also sends it to the person\'s Telegram/Slack when one is connected. One notification per outcome, not per step.',
+        "## Writing to the person's Telegram / Slack",
+        "`messenger_send` {text, file, buttons} writes to the person where they are, through the bot they connected (theirs or Uno's), even if they never used the assistant. The message is headed with this chat's title; their reply to it, and their tap on a button, come back to this chat as their message. `buttons`: up to 12 short labels (`label`; optional `value`, sent back instead of the label; optional `row` to group them) — use them for yes/no and 2–4 choices, then end your turn and wait. `file`: a file of this computer (a photo, a document, a voice note), checked like `send_file`. One message per outcome, a phone screen at most. Approvals (Allow / Deny) reach Telegram with buttons by themselves: don't repeat them. Slack gets the text, the options as a list and the file by its path.",
         section(apps, "Apps that tell the person something"),
       ].join("\n\n");
     case "browser":

@@ -21,7 +21,9 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import type { ResolvedNotifyChat } from "./connectorBindings.ts";
+import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+
+import { isPrivateTelegramChatId, type ResolvedNotifyChat } from "./connectorBindings.ts";
 
 export type ConnectorNotificationKind = "turn.error" | "approval.requested" | "turn.completed";
 
@@ -39,6 +41,9 @@ export type ConnectorNotification =
       readonly origin: OrchestrationCommandOrigin | undefined;
       readonly summary: string;
       readonly detail: string | null;
+      /** The request to answer (Allow / Deny buttons); null on an older payload. */
+      readonly requestId: string | null;
+      readonly requestKind: "command" | "file-read" | "file-change" | null;
     }
   | {
       readonly kind: "turn.completed";
@@ -108,7 +113,11 @@ export const trackDomainEvent = (
       }
       const payload =
         typeof activity.payload === "object" && activity.payload !== null
-          ? (activity.payload as { readonly detail?: unknown })
+          ? (activity.payload as {
+              readonly detail?: unknown;
+              readonly requestId?: unknown;
+              readonly requestKind?: unknown;
+            })
           : {};
       const detail =
         typeof payload.detail === "string" && payload.detail.trim().length > 0
@@ -122,6 +131,16 @@ export const trackDomainEvent = (
           origin: state.turnOrigins.get(threadId),
           summary: activity.summary,
           detail,
+          requestId:
+            typeof payload.requestId === "string" && payload.requestId.length > 0
+              ? payload.requestId
+              : null,
+          requestKind:
+            payload.requestKind === "command" ||
+            payload.requestKind === "file-read" ||
+            payload.requestKind === "file-change"
+              ? payload.requestKind
+              : null,
         },
       };
     }
@@ -231,7 +250,30 @@ export const notifyRateLimitKey = (
   chat: { readonly kind: string; readonly chatId: string },
   threadId: ThreadId,
   kind: ConnectorNotificationKind,
-): string => `${chat.kind}:${chat.chatId}|${threadId}|${kind}`;
+  /** An approval request: each one is its own message (its own buttons). */
+  requestId: string | null = null,
+): string =>
+  `${chat.kind}:${chat.chatId}|${threadId}|${kind}${requestId === null ? "" : `|${requestId}`}`;
+
+/** The request an approval-resolved event closes (its Telegram buttons go), or null. */
+export const resolvedApprovalRequestId = (event: OrchestrationEvent): string | null => {
+  if (event.type === "thread.approval-response-requested") return event.payload.requestId;
+  if (
+    event.type === "thread.activity-appended" &&
+    event.payload.activity.kind === "approval.resolved"
+  ) {
+    const payload = event.payload.activity.payload as { readonly requestId?: unknown } | null;
+    return typeof payload?.requestId === "string" ? payload.requestId : null;
+  }
+  return null;
+};
+
+/**
+ * How long an approval waits before it goes to the person's own Telegram
+ * (no chat bound to the thread): someone at the screen answers it in the
+ * app first, and nobody's phone buzzes for it.
+ */
+export const APPROVAL_FALLBACK_DELAY_MS = 30_000;
 
 /**
  * Admit at most one message per key per window. Returns the updated ledger
@@ -270,3 +312,63 @@ export const resolveNotifyThreadId = (
   requestedThreadId === undefined || requestedThreadId === tokenThreadId
     ? { ok: true, threadId: tokenThreadId }
     : { ok: false };
+
+// ---------------------------------------------------------------------------
+// A chat writes to the person (`messenger_send`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which of the resolved chats a chat's own message goes to: the chats bound
+ * to it (or its project) when there are any — the person set that up;
+ * otherwise the person's own private chat, ONE per channel person: Telegram
+ * when linked (their bot or Uno's; the default assistant's link first when
+ * several bots know the same person), else the Slack DM. Never a group or a
+ * channel by fallback: a work chat must not speak to other people.
+ */
+export const pickPersonChats = (
+  chats: ReadonlyArray<ResolvedNotifyChat>,
+): ReadonlyArray<ResolvedNotifyChat> => {
+  const bound = chats.filter((chat) => chat.via !== "assistant");
+  if (bound.length > 0) return bound;
+  const own = chats
+    .filter(
+      (chat) =>
+        chat.via === "assistant" && (chat.kind === "slack" || isPrivateTelegramChatId(chat.chatId)),
+    )
+    .toSorted(
+      (a, b) =>
+        Number(b.connectorProjectId === ASSISTANT_PROJECT_ID) -
+        Number(a.connectorProjectId === ASSISTANT_PROJECT_ID),
+    );
+  const firstPerChat = (kind: ResolvedNotifyChat["kind"]) => {
+    const seen = new Set<string>();
+    return own.filter((chat) => {
+      if (chat.kind !== kind || seen.has(chat.chatId)) return false;
+      seen.add(chat.chatId);
+      return true;
+    });
+  };
+  const telegram = firstPerChat("telegram");
+  return telegram.length > 0 ? telegram : firstPerChat("slack");
+};
+
+/** Messages one chat may send the person in {@link PERSON_MESSAGE_WINDOW_MS}. */
+export const PERSON_MESSAGE_LIMIT = 8;
+export const PERSON_MESSAGE_WINDOW_MS = 10 * 60_000;
+
+/** Admit one more message of this chat, or not (the ledger keeps the window only). */
+export const admitPersonMessage = (
+  sentAt: ReadonlyMap<string, ReadonlyArray<number>>,
+  threadId: string,
+  nowMs: number,
+): { readonly admit: boolean; readonly sentAt: ReadonlyMap<string, ReadonlyArray<number>> } => {
+  const next = new Map<string, ReadonlyArray<number>>();
+  for (const [key, times] of sentAt) {
+    const recent = times.filter((at) => nowMs - at < PERSON_MESSAGE_WINDOW_MS);
+    if (recent.length > 0) next.set(key, recent);
+  }
+  const recent = next.get(threadId) ?? [];
+  if (recent.length >= PERSON_MESSAGE_LIMIT) return { admit: false, sentAt: next };
+  next.set(threadId, [...recent, nowMs]);
+  return { admit: true, sentAt: next };
+};

@@ -42,6 +42,7 @@ import { InboxService } from "../inbox/InboxService.ts";
 import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
+import { replyButtons } from "../manager/connectorButtons.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -523,6 +524,13 @@ const makeDeps = (input: {
         notify
           .notify({ text, threadId: ThreadId.make(input.threadId), kind })
           .pipe(Effect.map((result) => ({ delivered: result.delivered }))),
+      messengerSend: ({ text, file, buttons }) =>
+        notify.sendToPerson({
+          threadId: ThreadId.make(input.threadId),
+          text,
+          ...(file !== undefined ? { file } : {}),
+          ...(buttons !== undefined ? { buttons: replyButtons(buttons) } : {}),
+        }),
       openInApp: ({ view, path: filePath }) =>
         Effect.gen(function* () {
           if (!(yield* browserBridge.hasSubscribers)) {
