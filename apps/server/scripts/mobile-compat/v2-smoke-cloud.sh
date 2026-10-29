@@ -74,7 +74,8 @@ done
 # The file harness is polled; give it a moment to appear.
 sleep 5
 
-PAIR=$("$NODE" "$BIN" auth pairing create --json --base-dir "$ROOT/home" --role owner | jq -r .credential)
+PAIR=$("$NODE" "$BIN" auth pairing create --json --base-dir "$ROOT/home" --role owner \
+  | "$NODE" -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>console.log(JSON.parse(s).credential))')
 
 set +e
 (cd "$ROOT/upstream/packages/client-runtime" && \
