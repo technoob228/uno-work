@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ListPlusIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -123,7 +123,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (isRunning) {
-    return (
+    const stop = (
       <button
         type="button"
         className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
@@ -135,6 +135,26 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </button>
+    );
+    // Something typed while the agent works: Enter (or this button) puts it
+    // in "Up next" — it goes when the agent is done (queuedMessageStore.ts).
+    if (!hasSendableContent) return stop;
+    return (
+      <div className="flex items-center gap-1.5">
+        <button
+          type="submit"
+          className="flex h-9 enabled:cursor-pointer items-center gap-1 rounded-full border border-border bg-background px-3 text-xs text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 sm:h-8"
+          {...pointerFocusProps}
+          disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          aria-label="Send when the agent is done"
+          title="Send when the agent is done"
+          data-testid="composer-queue-send"
+        >
+          <ListPlusIcon className="size-3.5" />
+          Up next
+        </button>
+        {stop}
+      </div>
     );
   }
 

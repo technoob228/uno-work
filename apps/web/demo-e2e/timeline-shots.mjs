@@ -96,14 +96,24 @@ const steps = {
   },
   async queue() {
     await open("showcase-live");
-    const editor = page
-      .locator("[data-testid=composer-editor] [contenteditable=true], [contenteditable=true]")
-      .first();
+    const editor = page.locator("[contenteditable=true]").first();
     await editor.click();
     await page.keyboard.type("Also make the button say “Back to the blog”.");
+    await page.waitForTimeout(300);
+    await shot("queue-typing");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    await editor.click();
+    await page.keyboard.type("And add our logo on top of the page.");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(800);
     await shot("queue-after-enter");
+    await page.getByRole("button", { name: "Send now" }).first().click();
+    await page.waitForTimeout(1200);
+    await shot("queue-send-now");
+    // The demo agent answers in ~2 s; then the next one goes by itself.
+    await page.waitForTimeout(6000);
+    await shot("queue-drained");
   },
 };
 
