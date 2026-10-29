@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.162 — 2026-10-29
+
+- Apps you or your agent run on the cloud computer show their real data inside Uno Work: Work's page tools now go only into real pages, not into an app's data answers (a counter showed "Count: …" instead of the number).
+- Claude Code sign-in: a wrong code now says "That code didn't work. Open the sign-in page again and paste the new code." with "Get a new link"; technical details are under "Details". The sign-in window opens by itself once per computer, also after Work moves to the computer's own address.
+- Uno AI Smart and Fast stay first in the OpenCode model picker, even when OpenCode started before it got the Uno AI model list.
+
+---
+
 ## v0.0.161 — 2026-10-29
 
 - Loom Work + Notetaker: a screen recording ("Show the agent") also lands in Notetaker, next to your calls, when Notetaker is installed on the computer — the video, what you said and what was on screen line by line, notes and action items with "Ask Uno to do it". The recording card says "Also in Notetaker". Needs Notetaker 0.6.0 (reinstall it from the App Store to update).
