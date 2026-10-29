@@ -96,30 +96,17 @@ function localComputerName(os: string): string {
 }
 
 /**
- * `onDone` runs when a pick takes the person somewhere (switch, connect,
- * "All computers") — the owner closes its menu.
+ * The machines this app knows, as the switcher lists them: this one first,
+ * then the saved ones, with the names, kinds and connection states the
+ * switcher shows. Also feeds "on [computer ▾]" on a new chat and on Home.
  */
-export function useComputerSwitcher(onDone?: () => void) {
-  const [addEnvOpen, setAddEnvOpen] = useState(false);
-  const navigate = useNavigate();
-  const [connecting, setConnecting] = useState<{ boxId: number; label: string } | null>(null);
-  const { reconnect, reconnectingId } = useReconnectEnvironment();
+export function useSwitcherMachines(): SwitcherMachine[] {
   const primaryDescriptor = usePrimaryEnvironmentDescriptor();
-  const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
-  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
-  const switchEnvironment = useSwitchEnvironment();
   const machineRows = useMachineRows();
-  const { explicitDefaultId, setDefaultEnvironment } = useDefaultEnvironment();
-  // Browser build only: a Uno Work desktop on this very computer that is not
-  // yet one of the saved machines gets a one-click "Use this computer".
-  const { daemon: localDaemon } = useLocalDaemonDiscovery();
-  const useThisComputer = useUseThisComputer();
-  const unlinkedLocalDaemon =
-    localDaemon && !savedEnvironmentRegistry[localDaemon.environmentId] ? localDaemon : null;
-
-  const environments = useMemo<SwitcherMachine[]>(() => {
+  const { explicitDefaultId } = useDefaultEnvironment();
+  return useMemo<SwitcherMachine[]>(() => {
     // Kinds come from the shared fold (daemon descriptor, account boxes,
     // registry, platform) so the switcher agrees with My machines.
     const kindById = new Map<string, MachineKind>();
@@ -196,6 +183,33 @@ export function useComputerSwitcher(onDone?: () => void) {
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,
   ]);
+
+}
+
+/**
+ * `onDone` runs when a pick takes the person somewhere (switch, connect,
+ * "All computers") — the owner closes its menu.
+ */
+export function useComputerSwitcher(onDone?: () => void) {
+  const [addEnvOpen, setAddEnvOpen] = useState(false);
+  const navigate = useNavigate();
+  const [connecting, setConnecting] = useState<{ boxId: number; label: string } | null>(null);
+  const { reconnect, reconnectingId } = useReconnectEnvironment();
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
+  const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const switchEnvironment = useSwitchEnvironment();
+  const machineRows = useMachineRows();
+  const { explicitDefaultId, setDefaultEnvironment } = useDefaultEnvironment();
+  // Browser build only: a Uno Work desktop on this very computer that is not
+  // yet one of the saved machines gets a one-click "Use this computer".
+  const { daemon: localDaemon } = useLocalDaemonDiscovery();
+  const useThisComputer = useUseThisComputer();
+  const unlinkedLocalDaemon =
+    localDaemon && !savedEnvironmentRegistry[localDaemon.environmentId] ? localDaemon : null;
+
+  const environments = useSwitcherMachines();
 
   // Cloud computers on the account that this app hasn't connected to yet: one
   // click wakes, connects and opens them.

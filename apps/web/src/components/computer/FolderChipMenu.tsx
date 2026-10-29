@@ -49,7 +49,7 @@ import { ChatInFolderDialog } from "./ChatInFolderDialog";
 
 const MAX_FOLDERS = 8;
 
-const BRING_FOLDER: ReadonlyArray<{
+export const BRING_FOLDER: ReadonlyArray<{
   source: ChatFolderSource;
   label: string;
   Icon: React.ComponentType<{ className?: string }>;
@@ -62,6 +62,37 @@ const BRING_FOLDER: ReadonlyArray<{
 export interface PickedFolder {
   readonly cwd: string;
   readonly name: string;
+}
+
+/**
+ * This computer's folders (projects) for "Work in", newest chat first, as in
+ * the sidebar — the project's own updatedAt barely moves (it is the folder's
+ * settings), so a folder worked in every day could fall off the list behind
+ * ones untouched since spring (15.10). The home folder and assistants' folders
+ * are not in it. Shared by the chip and the new chat's searchable picker.
+ */
+export function useRecentFolders(
+  environmentId: EnvironmentId | null,
+  home: string | null,
+  limit?: number,
+) {
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  return useMemo(() => {
+    const homeKey = home ? normalizeProjectPathForComparison(home) : null;
+    const mine = projects.filter(
+      (project) =>
+        project.environmentId === environmentId &&
+        !isAssistantProjectId(project.id) &&
+        normalizeProjectPathForComparison(project.cwd) !== homeKey,
+    );
+    const sorted = sortProjectsForSidebar(
+      mine,
+      threads.filter((thread) => thread.environmentId === environmentId),
+      "updated_at",
+    );
+    return limit === undefined ? sorted : sorted.slice(0, limit);
+  }, [environmentId, home, limit, projects, threads]);
 }
 
 export function FolderChipMenu({
@@ -84,25 +115,7 @@ export function FolderChipMenu({
 }) {
   const [pickingFolder, setPickingFolder] = useState(false);
   const home = useHomeFolderPath(environmentId);
-  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
-  // Newest chat first, as in the sidebar. The project's own updatedAt barely
-  // moves (it is the folder's settings), so a folder worked in every day could
-  // fall off the list behind ones untouched since spring (15.10).
-  const folders = useMemo(() => {
-    const homeKey = home ? normalizeProjectPathForComparison(home) : null;
-    const mine = projects.filter(
-      (project) =>
-        project.environmentId === environmentId &&
-        !isAssistantProjectId(project.id) &&
-        normalizeProjectPathForComparison(project.cwd) !== homeKey,
-    );
-    return sortProjectsForSidebar(
-      mine,
-      threads.filter((thread) => thread.environmentId === environmentId),
-      "updated_at",
-    ).slice(0, MAX_FOLDERS);
-  }, [environmentId, home, projects, threads]);
+  const folders = useRecentFolders(environmentId, home, MAX_FOLDERS);
 
   return (
     <>
