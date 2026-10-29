@@ -54,6 +54,7 @@ import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
+import { ChatAutomationsButton } from "../automations/ChatAutomations";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { TeammateChatHeadline } from "../assistants/TeammateChatHeadline";
 import { AssistantModeChip, UnoModeChip } from "../assistants/PersonaMode";
@@ -375,6 +376,13 @@ export const ChatHeader = memo(function ChatHeader({
         ) : isAssistantChat ? (
           <UnoModeChip environmentId={activeThreadEnvironmentId} />
         ) : null}
+        {/* S5 29.10: the chat's automations (a clock; nothing where they aren't on). */}
+        {draftId ? null : (
+          <ChatAutomationsButton
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+          />
+        )}
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
         {isAssistantChat ? (

@@ -13,6 +13,7 @@ import {
   AUTOMATION_DEFAULT_PR_ACTIONS,
   AUTOMATION_NAME_MAX_CHARS,
   automationCronFor,
+  automationExecutorOf,
 } from "@t3tools/contracts";
 
 // ── The last run ─────────────────────────────────────────────────────────
@@ -159,6 +160,10 @@ export interface AutomationDraft {
   readonly time: string;
   /** 0 = Sunday. */
   readonly weekday: number;
+  /** "Days…": the weekdays picked, 0 = Sunday. */
+  readonly weekdays: ReadonlyArray<number>;
+  /** "Every…": minutes between runs (15 … 720). */
+  readonly everyMinutes: number;
   readonly source: EventSource;
   readonly repo: string;
   readonly instruction: string;
@@ -171,6 +176,8 @@ export const EMPTY_DRAFT: AutomationDraft = {
   cadence: "weekdays",
   time: "09:00",
   weekday: 1,
+  weekdays: [1, 3, 5],
+  everyMinutes: 60,
   source: "github",
   repo: "",
   instruction: "",
@@ -199,6 +206,8 @@ export function triggerOf(draft: AutomationDraft, timezone: string): AutomationT
       cadence: draft.cadence,
       time: draft.time,
       weekday: draft.weekday,
+      weekdays: draft.weekdays,
+      everyMinutes: draft.everyMinutes,
     });
     return { kind: "schedule", cron, timezone, label };
   }
@@ -214,6 +223,9 @@ export function triggerOf(draft: AutomationDraft, timezone: string): AutomationT
 
 /** What stops "Create" (null: good to go). */
 export function draftProblem(draft: AutomationDraft): string | null {
+  if (draft.when === "schedule" && draft.cadence === "days" && draft.weekdays.length === 0) {
+    return "Pick at least one day.";
+  }
   if (draft.when === "event") {
     if (draft.source === "gmail") return "Email triggers are coming soon.";
     if (draft.source === "github" && !isRepoName(draft.repo)) return "Pick a repository.";
@@ -244,6 +256,9 @@ const CRON_DAILY = /^(\d{1,2}) (\d{1,2}) \* \* \*$/;
 const CRON_WEEKDAYS = /^(\d{1,2}) (\d{1,2}) \* \* 1-5$/;
 const CRON_WEEKLY = /^(\d{1,2}) (\d{1,2}) \* \* ([0-6])$/;
 const CRON_HOURLY = /^(\d{1,2}) \* \* \* \*$/;
+const CRON_DAYS = /^(\d{1,2}) (\d{1,2}) \* \* ([0-6](?:,[0-6])+)$/;
+const CRON_EVERY_MINUTES = /^\*\/(\d{1,2}) \* \* \* \*$/;
+const CRON_EVERY_HOURS = /^(\d{1,2}) \*\/(\d{1,2}) \* \* \*$/;
 
 const hhmm = (hour: string, minute: string) =>
   `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
@@ -279,7 +294,29 @@ export function draftOf(automation: Automation): AutomationDraft {
         };
       }
       match = CRON_HOURLY.exec(cron);
-      if (match) return { ...base, cadence: "hourly", time: hhmm("9", match[1]!) };
+      if (match) return { ...base, cadence: "every", everyMinutes: 60, time: hhmm("9", match[1]!) };
+      match = CRON_DAYS.exec(cron);
+      if (match) {
+        return {
+          ...base,
+          cadence: "days",
+          time: hhmm(match[2]!, match[1]!),
+          weekdays: match[3]!.split(",").map(Number),
+        };
+      }
+      match = CRON_EVERY_MINUTES.exec(cron);
+      if (match && [15, 20, 30].includes(Number(match[1]))) {
+        return { ...base, cadence: "every", everyMinutes: Number(match[1]) };
+      }
+      match = CRON_EVERY_HOURS.exec(cron);
+      if (match) {
+        return {
+          ...base,
+          cadence: "every",
+          time: hhmm("9", match[1]!),
+          everyMinutes: Number(match[2]) * 60,
+        };
+      }
       return base;
     }
   }
@@ -295,6 +332,46 @@ export function browserTimeZone(): string {
 }
 
 // ── Grouping for the Automations screen ──────────────────────────────────
+
+/** The group key of automations chats run. */
+export const CHATS_GROUP = "chats";
+
+/** Who runs it, in words: "Ada", "in “Release notes”", "a new chat in site". */
+export function executorLabel(automation: Automation): string {
+  const executor = automationExecutorOf(automation);
+  switch (executor.kind) {
+    case "assistant":
+      return automation.assistantName || automation.assistant;
+    case "chat":
+      return `in “${executor.title || "a chat"}”`;
+    case "new_chat":
+      return `a new chat in ${executor.title || "its project"}`;
+  }
+}
+
+/** "in 3h", "in 12 min", "in 2 days" — how soon the next run is (null: none / past). */
+export function nextInLabel(iso: string | null, nowMs: number): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso) - nowMs;
+  if (!Number.isFinite(ms)) return null;
+  if (ms <= 60_000) return "any moment";
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `in ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `in ${hours}h`;
+  return `in ${Math.round(hours / 24)} days`;
+}
+
+/** The dot of an automation: on and fine, running, a problem, or off. */
+export function automationDot(automation: Automation): RunTone {
+  if (!automation.enabled) return "muted";
+  if (automation.status !== "ok") return "error";
+  if (automation.lastRun !== null) {
+    if (runIsActive(automation.lastRun)) return "running";
+    if (automation.lastRun.state === "failed") return "error";
+  }
+  return "ok";
+}
 
 export interface AutomationGroup<T> {
   readonly key: string;
@@ -319,17 +396,22 @@ export function groupByAssistant<
     { environmentId: string; assistant: string; name: string; items: T[] }
   >();
   for (const item of items) {
-    const key = `${item.environmentId}:${item.automation.assistant}`;
+    // Automations chats run (29.10) go together under "Chats", after the assistants.
+    const inChat = automationExecutorOf(item.automation).kind !== "assistant";
+    const key = inChat
+      ? `${item.environmentId}:${CHATS_GROUP}`
+      : `${item.environmentId}:${item.automation.assistant}`;
     const group = groups.get(key) ?? {
       environmentId: item.environmentId,
-      assistant: item.automation.assistant,
-      name: item.automation.assistantName,
+      assistant: inChat ? CHATS_GROUP : item.automation.assistant,
+      name: inChat ? "Chats" : item.automation.assistantName,
       items: [],
     };
     group.items.push(item);
     groups.set(key, group);
   }
   const rank = (key: string) => {
+    if (key.endsWith(`:${CHATS_GROUP}`)) return Number.MAX_SAFE_INTEGER - 1;
     const at = order.findIndex((member) => `${member.environmentId}:${member.projectId}` === key);
     return at < 0 ? Number.MAX_SAFE_INTEGER : at;
   };

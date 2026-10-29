@@ -12,6 +12,7 @@
 import {
   ASSISTANT_PROJECT_ID,
   type Automation,
+  type AutomationExecutor,
   type AutomationRun,
   type AutomationTrigger,
   AUTOMATION_DEFAULT_PR_ACTIONS,
@@ -126,6 +127,11 @@ function fresh(automation: Automation): Automation {
 /** The next slot of a simple schedule (weekdays/daily/weekly/hourly), in the browser's time. */
 function nextSlot(cron: string, from = Date.now()): string | null {
   const [minute, hour, , , days] = cron.split(" ");
+  const step = /^\*\/(\d+)$/.exec(minute ?? "");
+  if (step) {
+    const every = Number(step[1]) * 60_000;
+    return new Date(Math.ceil((from + 1) / every) * every).toISOString();
+  }
   const at = new Date(from);
   at.setSeconds(0, 0);
   for (let step = 0; step < 24 * 8; step += 1) {
@@ -134,6 +140,7 @@ function nextSlot(cron: string, from = Date.now()): string | null {
     if (at.getTime() <= from) continue;
     if (hour !== "*" && at.getHours() !== Number(hour)) continue;
     if (days === "1-5" && (at.getDay() === 0 || at.getDay() === 6)) continue;
+    if (days && days.includes(",") && !days.split(",").map(Number).includes(at.getDay())) continue;
     if (days && /^\d$/.test(days) && at.getDay() !== Number(days)) continue;
     return at.toISOString();
   }
@@ -148,6 +155,7 @@ function make(
     name: string;
     instruction: string;
     trigger: AutomationTrigger;
+    executor?: AutomationExecutor;
     enabled?: boolean;
     createdAgo?: number;
   },
@@ -162,6 +170,7 @@ function make(
     instruction: input.instruction,
     enabled: input.enabled ?? true,
     trigger: input.trigger,
+    executor: input.executor ?? { kind: "assistant" },
     status: "ok",
     statusDetail: null,
     manageUrl: null,
@@ -269,6 +278,40 @@ export function resetAutomations(input: { readonly world: AssistWorld }) {
     createdAt: ago(180),
     startedAt: ago(180),
     finishedAt: ago(176),
+  });
+  // A chat runs this one (29.10): the export chat, Mon/Wed/Fri at 19:00.
+  const days = automationCronFor({ cadence: "days", time: "19:00", weekdays: [1, 3, 5] });
+  const exportRun = make("work", {
+    assistant: "",
+    assistantName: "",
+    name: "Export today's orders",
+    instruction: "Export today's orders to Drive as orders-<date>.csv and tell me the total.",
+    trigger: { kind: "schedule", cron: days.cron, timezone, label: days.label },
+    executor: { kind: "chat", threadId: "w-export", title: "Daily orders export to Drive" },
+    createdAgo: 86_400_000 * 3,
+  });
+  addRun(exportRun, {
+    kind: "schedule",
+    title: days.label,
+    url: null,
+    state: "done",
+    reason: null,
+    threadId: "w-export",
+    summary: "orders-2026-10-28.csv saved to Drive · 41 orders, $3,180.",
+    createdAt: ago(60 * 22),
+    startedAt: ago(60 * 22),
+    finishedAt: ago(60 * 22 - 1),
+  });
+  const every = automationCronFor({ cadence: "every", time: "09:00", everyMinutes: 30 });
+  make("work", {
+    assistant: "",
+    assistantName: "",
+    name: "Watch the checkout error rate",
+    instruction: "Check the checkout error rate in the logs; tell me only if it is over 2%.",
+    trigger: { kind: "schedule", cron: every.cron, timezone, label: every.label },
+    executor: { kind: "chat", threadId: "w-export", title: "Daily orders export to Drive" },
+    enabled: false,
+    createdAgo: 86_400_000,
   });
   make("work", {
     assistant: "assistant-mia",
@@ -417,9 +460,12 @@ export function automationHandlers(deps: {
       if (refusal) return refuse(refusal);
       const assistant =
         typeof input.assistant === "string" ? input.assistant : ASSISTANT_PROJECT_ID;
+      const executor = (input.executor as AutomationExecutor | undefined) ?? { kind: "assistant" };
       const created = make(machine.key, {
-        assistant,
-        assistantName: deps.nameOf(machine.key, assistant) ?? "Assistant",
+        assistant: executor.kind === "assistant" ? assistant : "",
+        assistantName:
+          executor.kind === "assistant" ? (deps.nameOf(machine.key, assistant) ?? "Assistant") : "",
+        executor,
         name:
           typeof input.name === "string" && input.name.trim()
             ? input.name.trim()
@@ -452,6 +498,9 @@ export function automationHandlers(deps: {
       if (typeof input.name === "string" && input.name.trim()) patch.name = input.name.trim();
       if (typeof input.instruction === "string" && input.instruction.trim()) {
         patch.instruction = input.instruction.trim();
+      }
+      if (input.executor && typeof input.executor === "object") {
+        patch.executor = input.executor as AutomationExecutor;
       }
       if (input.trigger && typeof input.trigger === "object") {
         const trigger = input.trigger as AutomationTrigger;

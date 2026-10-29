@@ -1,9 +1,13 @@
 /**
- * "Automation created · When … · Open" in the chat: what an assistant's
- * `automation_create` call made, from the call's own result — not from what
+ * "Automation created · When … · Open" in the chat: what an assistant's (or,
+ * 29.10, any chat's `uno-work`) `automation_create` call made, from the call's own result — not from what
  * the assistant chose to say.
  */
-import { type Automation, describeAutomationTrigger } from "@t3tools/contracts";
+import {
+  type Automation,
+  automationExecutorOf,
+  describeAutomationTrigger,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
@@ -26,6 +30,11 @@ export function AutomationCreatedCard(props: { readonly automation: Automation }
         <span className="truncate text-sm font-medium">{automation.name}</span>
         <span className="truncate text-xs text-muted-foreground">
           {describeAutomationTrigger(automation.trigger)}
+          {automationExecutorOf(automation).kind === "chat"
+            ? " · runs in this chat"
+            : automationExecutorOf(automation).kind === "new_chat"
+              ? " · a new chat each time"
+              : ""}
         </span>
       </span>
       <Button
