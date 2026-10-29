@@ -272,6 +272,8 @@ const program = Effect.gen(function* () {
   const send = (text: string) =>
     dispatch({
       type: "message.dispatch",
+      createdBy: "user",
+      creationSource: "mobile",
       messageId: randomUUID(),
       text,
       attachments: [],
