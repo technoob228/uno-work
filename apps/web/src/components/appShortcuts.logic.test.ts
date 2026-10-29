@@ -71,6 +71,58 @@ describe("default app shortcuts", () => {
   });
 });
 
+describe("new chat picker shortcuts", () => {
+  const host = event({ key: "h", metaKey: true, shiftKey: true });
+  const folder = event({ key: "f", metaKey: true, shiftKey: true });
+
+  it("opens the computer picker with ⌘⇧H and the folder picker with ⌘⇧F, even from the box", () => {
+    expect(resolveShortcutCommand(host, DEFAULT_RESOLVED_KEYBINDINGS, MAC)).toBe("composer.host");
+    expect(resolveShortcutCommand(folder, DEFAULT_RESOLVED_KEYBINDINGS, MAC)).toBe(
+      "composer.folder",
+    );
+    expect(
+      resolveShortcutCommand(
+        event({ key: "F", ctrlKey: true, shiftKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "Win32", context: { editableFocus: true } },
+      ),
+    ).toBe("composer.folder");
+  });
+
+  it("leaves both keys to the terminal", () => {
+    for (const keys of [host, folder]) {
+      expect(
+        resolveShortcutCommand(keys, DEFAULT_RESOLVED_KEYBINDINGS, {
+          ...MAC,
+          context: { terminalFocus: true },
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("takes no shortcut another default already uses", () => {
+    const keys = (command: string) =>
+      DEFAULT_RESOLVED_KEYBINDINGS.filter((binding) => binding.command === command).map(
+        (binding) => JSON.stringify(binding.shortcut),
+      );
+    const taken = new Set(
+      DEFAULT_RESOLVED_KEYBINDINGS.filter(
+        (binding) => binding.command !== "composer.host" && binding.command !== "composer.folder",
+      ).map((binding) => JSON.stringify(binding.shortcut)),
+    );
+    for (const key of [...keys("composer.host"), ...keys("composer.folder")]) {
+      expect(taken.has(key)).toBe(false);
+    }
+  });
+
+  it("works with a computer whose Work doesn't send them yet", () => {
+    const old = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+      (binding) => !binding.command.startsWith("composer."),
+    );
+    expect(resolveShortcutCommand(host, withAppShortcutDefaults(old), MAC)).toBe("composer.host");
+  });
+});
+
 describe("withAppShortcutDefaults", () => {
   it("adds the defaults an older computer doesn't send", () => {
     const old = DEFAULT_RESOLVED_KEYBINDINGS.filter(

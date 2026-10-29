@@ -42,6 +42,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  // A new chat's pickers: which computer (⌘⇧H, upstream `composer.host`) and
+  // which folder (⌘⇧F); handled only where those pickers are on screen.
+  { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  { key: "mod+shift+f", command: "composer.folder", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },

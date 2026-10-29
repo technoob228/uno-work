@@ -11,7 +11,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, ChevronDownIcon, LayoutGridIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { groupSwitcherMachines } from "../SidebarEnvSwitcher.logic";
@@ -28,6 +28,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { DraftProjectName } from "./DraftProjectName";
+import { usePickerShortcut, withShortcutHint } from "./usePickerShortcut";
 
 const NOT_CONNECTED_LABEL = {
   connecting: "Connecting…",
@@ -47,11 +48,14 @@ export function NewChatComputerPicker({
   onPick,
   variant,
   testId = "new-chat-computer-picker",
+  shortcut = true,
 }: {
   environmentId: EnvironmentId | null;
   onPick: (environmentId: EnvironmentId) => void | Promise<void>;
   variant: "inline" | "chip";
   testId?: string;
+  /** ⌘⇧H opens it (on by default; one picker per screen). */
+  shortcut?: boolean;
 }) {
   const navigate = useNavigate();
   const machines = useSwitcherMachines();
@@ -59,14 +63,20 @@ export function NewChatComputerPicker({
   const current = machines.find((machine) => machine.id === environmentId) ?? null;
   const name = current?.name ?? "This computer";
   const CurrentIcon = current ? MACHINE_KIND_ICON[current.kind] : null;
+  const [open, setOpen] = useState(false);
+  const shortcutLabel = usePickerShortcut("composer.host", shortcut, () =>
+    setOpen((value) => !value),
+  );
+  const title = withShortcutHint("The computer this chat runs on", shortcutLabel);
 
   return (
-    <Menu>
+    <Menu open={open} onOpenChange={setOpen}>
       {variant === "inline" ? (
         <MenuTrigger
           render={<InlineButton tone="picker" />}
           className="pointer-events-auto min-w-0 max-w-full align-baseline"
           data-testid={testId}
+          title={title}
         >
           <DraftProjectName value={name} singleLine />
           <ChevronDownIcon className="size-4 shrink-0 self-center opacity-50" />
@@ -79,7 +89,7 @@ export function NewChatComputerPicker({
               variant="ghost"
               className="min-w-0 shrink text-muted-foreground"
               data-testid={testId}
-              title="The computer this chat runs on"
+              title={title}
             />
           }
         >

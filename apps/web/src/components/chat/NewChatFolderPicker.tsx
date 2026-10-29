@@ -31,6 +31,7 @@ import {
   useComboboxFilter,
 } from "../ui/combobox";
 import { DraftProjectName } from "./DraftProjectName";
+import { usePickerShortcut, withShortcutHint } from "./usePickerShortcut";
 
 const HOME_VALUE = "home";
 const ANOTHER_VALUE = "action:another";
@@ -47,6 +48,7 @@ export function NewChatFolderPicker({
   onPick,
   variant,
   testId = "new-chat-folder-picker",
+  shortcut = true,
 }: {
   environmentId: EnvironmentId | null;
   /** The current folder; null = the home folder. */
@@ -58,6 +60,8 @@ export function NewChatFolderPicker({
   onPick: (folder: PickedFolder | null, projectRef?: ScopedProjectRef) => void | Promise<void>;
   variant: "inline" | "chip";
   testId?: string;
+  /** ⌘⇧F opens it (on by default; one picker per screen). */
+  shortcut?: boolean;
 }) {
   const home = useHomeFolderPath(environmentId);
   const folders = useRecentFolders(environmentId, home);
@@ -97,6 +101,11 @@ export function NewChatFolderPicker({
       ? (items[0] ?? null)
       : (items.find((item) => folderByValue.get(item.value)?.cwd === folder.cwd) ?? null);
   const label = folder ? folder.name : "Home folder";
+  const shortcutLabel = usePickerShortcut("composer.folder", shortcut, () => {
+    setOpen((value) => !value);
+    setQuery("");
+  });
+  const title = withShortcutHint(folder ? folder.cwd : (home ?? "Home folder"), shortcutLabel);
 
   const pick = (item: PickerItem) => {
     if (item.value === HOME_VALUE) return onPick(null);
@@ -141,7 +150,7 @@ export function NewChatFolderPicker({
             render={<InlineButton tone="picker" />}
             className="pointer-events-auto min-w-0 max-w-full align-baseline"
             data-testid={testId}
-            title={folder ? folder.cwd : (home ?? "Home folder")}
+            title={title}
           >
             <DraftProjectName value={label} singleLine />
             <ChevronDownIcon className="size-4 shrink-0 self-center opacity-50" />
@@ -154,7 +163,7 @@ export function NewChatFolderPicker({
                 variant="ghost"
                 className="min-w-0 shrink text-muted-foreground"
                 data-testid={testId}
-                title={folder ? folder.cwd : (home ?? "Home folder")}
+                title={title}
               />
             }
           >

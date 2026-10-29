@@ -21,11 +21,27 @@ export function isAppShortcutCommand(command: string | null): command is AppShor
   return command !== null && (APP_SHORTCUT_COMMANDS as ReadonlyArray<string>).includes(command);
 }
 
+/**
+ * ⌘⇧H / ⌘⇧F open a new chat's computer / folder picker. Not handled here:
+ * each picker listens while it is on screen (`usePickerShortcut`).
+ */
+export const PICKER_SHORTCUT_COMMANDS = [
+  "composer.host",
+  "composer.folder",
+] as const satisfies ReadonlyArray<KeybindingCommand>;
+
+export type PickerShortcutCommand = (typeof PICKER_SHORTCUT_COMMANDS)[number];
+
+const DEFAULTED_COMMANDS: ReadonlyArray<KeybindingCommand> = [
+  ...APP_SHORTCUT_COMMANDS,
+  ...PICKER_SHORTCUT_COMMANDS,
+];
+
 export function withAppShortcutDefaults(
   keybindings: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingsConfig {
   const known = new Set<string>(keybindings.map((binding) => binding.command));
-  const missing = APP_SHORTCUT_COMMANDS.filter((command) => !known.has(command));
+  const missing = DEFAULTED_COMMANDS.filter((command) => !known.has(command));
   if (missing.length === 0) return keybindings;
   const fallback = DEFAULT_RESOLVED_KEYBINDINGS.filter((binding) =>
     (missing as ReadonlyArray<string>).includes(binding.command),

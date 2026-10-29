@@ -68,6 +68,10 @@ const STATIC_KEYBINDING_COMMANDS = [
   "navigation.forward",
   "chat.new",
   "chat.newLocal",
+  // A new chat's computer / folder pickers (draft hero and Home's box), as
+  // upstream T3 Code's `composer.host` (Work 29.10: ⌘⇧H / ⌘⇧F).
+  "composer.host",
+  "composer.folder",
   "editor.openFavorite",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
