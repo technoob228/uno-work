@@ -1251,6 +1251,17 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      // Command / file-change output deltas cannot change thread state: only
+      // assistant text (the reply) and reasoning text (the live thought line)
+      // are read below. Skip them before the thread lookup. Upstream t3code
+      // 0bfb6df34b (which also drops reasoning_text; we keep it).
+      if (
+        event.type === "content.delta" &&
+        event.payload.streamKind !== "assistant_text" &&
+        event.payload.streamKind !== "reasoning_text"
+      ) {
+        return;
+      }
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
