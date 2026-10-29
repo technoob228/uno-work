@@ -486,6 +486,24 @@ function sidebarThreadSummariesEqual(
   );
 }
 
+/** By value: every shell event decodes a fresh modelSelection object, so a
+ *  reference check made each thread-upserted rewrite threadShellById and
+ *  re-render the sidebar and the open chat even when nothing changed. */
+function modelSelectionsEqual(
+  left: ThreadShell["modelSelection"],
+  right: ThreadShell["modelSelection"],
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return false;
+  if (left.instanceId !== right.instanceId || left.model !== right.model) return false;
+  const leftOptions = (left as { options?: unknown }).options;
+  const rightOptions = (right as { options?: unknown }).options;
+  return (
+    leftOptions === rightOptions ||
+    JSON.stringify(leftOptions ?? null) === JSON.stringify(rightOptions ?? null)
+  );
+}
+
 function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): boolean {
   return (
     left !== undefined &&
@@ -494,7 +512,7 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.codexThreadId === right.codexThreadId &&
     left.projectId === right.projectId &&
     left.title === right.title &&
-    left.modelSelection === right.modelSelection &&
+    modelSelectionsEqual(left.modelSelection, right.modelSelection) &&
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
     left.error === right.error &&

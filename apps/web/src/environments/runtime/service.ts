@@ -1114,7 +1114,8 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   const threadRef = threadId ? scopeThreadRef(environmentId, threadId) : null;
   const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
 
-  useStore.getState().applyShellEvent(event, environmentId);
+  const stateBefore = useStore.getState();
+  stateBefore.applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
   // Fire-after-commit: наблюдатели (мост панельных плагинов) видят уже
   // применённое событие и ничего не блокируют.
@@ -1123,6 +1124,14 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
     environmentId,
     removedThreadProjectId: previousThread?.projectId ?? null,
   });
+  if (event.kind === "thread-upserted" && useStore.getState() === stateBefore) {
+    // Nothing the app renders changed — typically only the server read mark
+    // moved (often our own thread.visit coming back). Take the mark and stop:
+    // the UI syncs and subscription upkeep below re-rendered the sidebar and
+    // the open chat for nothing (bench 29.10, +2 commits per opened chat).
+    mergeServerThreadReadState(environmentId, [event.thread]);
+    return;
+  }
 
   switch (event.kind) {
     case "project-upserted":

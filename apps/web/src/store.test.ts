@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  applyShellEvent,
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
@@ -1316,5 +1317,50 @@ describe("agent-spawned threads", () => {
     expect(
       selectThreadByRef(opened, scopeThreadRef(localEnvironmentId, thread.id))?.agentsClosedAt,
     ).toBeNull();
+  });
+});
+
+describe("thread-upserted with nothing new", () => {
+  // Every shell event decodes a fresh modelSelection object; a no-op upsert
+  // (e.g. only the server read mark moved) must leave the state untouched so
+  // the sidebar and the open chat do not re-render.
+  const shellThread = (lastVisitedAt: string | null) =>
+    ({
+      id: ThreadId.make("thread-noop"),
+      projectId: ProjectId.make("project-1"),
+      title: "Chat",
+      modelSelection: { instanceId: ProviderInstanceId.make("harness-fake"), model: "fake-1" },
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-10-29T10:00:00.000Z",
+      updatedAt: "2026-10-29T10:00:00.000Z",
+      archivedAt: null,
+      pinnedAt: null,
+      session: null,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+      lastVisitedAt,
+    }) as unknown as Extract<
+      Parameters<typeof applyShellEvent>[1],
+      { kind: "thread-upserted" }
+    >["thread"];
+
+  it("keeps the same state object", () => {
+    const first = applyShellEvent(
+      makeEmptyState(),
+      { kind: "thread-upserted", sequence: 1, thread: shellThread(null) },
+      localEnvironmentId,
+    );
+    const second = applyShellEvent(
+      first,
+      { kind: "thread-upserted", sequence: 2, thread: shellThread("2026-10-29T10:00:05.000Z") },
+      localEnvironmentId,
+    );
+    expect(second).toBe(first);
   });
 });
