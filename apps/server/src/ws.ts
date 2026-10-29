@@ -2626,10 +2626,10 @@ const makeWsRpcLayer = (
             customHarness.installStatus(input),
             { "rpc.aggregate": "custom-harness" },
           ),
-        [WS_METHODS.subscribeBrowserBridge]: (_input) =>
+        [WS_METHODS.subscribeBrowserBridge]: (input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeBrowserBridge,
-            Effect.succeed(browserBridge.stream),
+            Effect.succeed(browserBridge.streamFrom(input.fromSequenceExclusive)),
             { "rpc.aggregate": "browser" },
           ),
         [WS_METHODS.subscribeBrowserLive]: (_input) =>

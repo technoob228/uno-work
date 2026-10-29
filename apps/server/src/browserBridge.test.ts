@@ -16,6 +16,8 @@ import {
   normalizeBridgeRequestContext,
   requireBridgeThread,
   BROWSER_BRIDGE_URL_ENV,
+  BRIDGE_REPLAY_MAX_AGE_MS,
+  missedBridgeEvents,
   tokensEqual,
 } from "./browserBridge.ts";
 import { unoCliBinDir } from "./appSdk/unoCliPath.ts";
@@ -648,3 +650,82 @@ it.effect("times out a tool approval nobody answers", () =>
     assert.equal(yield* Fiber.join(approvalFiber), "timeout");
   }).pipe(Effect.provide(BrowserBridgeTest)),
 );
+
+it.effect("a reconnecting client gets the events it missed, once, then live ones", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    const seen = yield* browserBridge.publishOpenUrl("https://seen.example/");
+    // The client's socket is down for these:
+    yield* browserBridge.publishOpenUrl("https://missed-1.example/");
+    yield* browserBridge.publishOpenUrl("https://missed-2.example/");
+
+    const received = yield* browserBridge.streamFrom(seen.sequence).pipe(
+      Stream.take(3),
+      Stream.runCollect,
+      Effect.map((chunk) =>
+        Array.from(chunk, (event) => (event.type === "openUrl" ? event.url : event.type)),
+      ),
+      Effect.forkScoped,
+    );
+    yield* Effect.yieldNow;
+    yield* browserBridge.publishOpenUrl("https://live.example/");
+    assert.deepEqual(yield* Fiber.join(received), [
+      "https://missed-1.example/",
+      "https://missed-2.example/",
+      "https://live.example/",
+    ]);
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+it.effect("first subscribe and plain stream get no replay", () =>
+  Effect.gen(function* () {
+    const browserBridge = yield* BrowserBridge;
+    yield* browserBridge.publishOpenUrl("https://old.example/");
+    const received = yield* browserBridge.streamFrom(undefined).pipe(
+      Stream.runHead,
+      Effect.map((option) => Option.getOrThrow(option)),
+      Effect.forkScoped,
+    );
+    yield* Effect.yieldNow;
+    yield* browserBridge.publishOpenUrl("https://new.example/");
+    const event = yield* Fiber.join(received);
+    assert.equal(event.type === "openUrl" ? event.url : null, "https://new.example/");
+  }).pipe(Effect.provide(BrowserBridgeTest)),
+);
+
+const open = (sequence: number) =>
+  ({ version: 1, type: "openUrl", sequence, url: `https://${sequence}.example/` }) as const;
+const command = (sequence: number, commandId: string) =>
+  ({
+    version: 1,
+    type: "command",
+    sequence,
+    commandId,
+    responseToken: "t",
+    resultUrl: "/r",
+    input: { command: "state" },
+  }) as const;
+
+it("missed events: skips stale ones, finished commands and cursors from before a restart", () => {
+  const now = 1_000_000;
+  const recent = [
+    { event: open(1), at: now - BRIDGE_REPLAY_MAX_AGE_MS - 1 },
+    { event: open(2), at: now - 1_000 },
+    { event: command(3, "done"), at: now - 1_000 },
+    { event: command(4, "waiting"), at: now - 1_000 },
+  ];
+  const base = {
+    recent,
+    currentSequence: 4,
+    now,
+    isPendingCommand: (id: string) => id === "waiting",
+  };
+  assert.deepEqual(
+    missedBridgeEvents({ ...base, fromSequenceExclusive: 0 }).map((event) => event.sequence),
+    [2, 4],
+  );
+  assert.deepEqual(missedBridgeEvents({ ...base, fromSequenceExclusive: 4 }), []);
+  assert.deepEqual(missedBridgeEvents({ ...base, fromSequenceExclusive: undefined }), []);
+  // Cursor from a previous server process (its sequence ran higher).
+  assert.deepEqual(missedBridgeEvents({ ...base, fromSequenceExclusive: 90 }), []);
+});

@@ -235,7 +235,10 @@ export interface WsRpcClient {
     ) => () => void;
   };
   readonly browser: {
-    readonly subscribeBridge: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserBridge>;
+    readonly subscribeBridge: (
+      listener: (event: ResumableStreamEvent<typeof WS_METHODS.subscribeBrowserBridge>) => void,
+      options?: ResumableStreamSubscriptionOptions,
+    ) => () => void;
   };
   readonly browserLive: {
     readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserLive>;
@@ -648,10 +651,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     },
     browser: {
       subscribeBridge: (listener, options) =>
-        transport.subscribe((client) => client[WS_METHODS.subscribeBrowserBridge]({}), listener, {
-          ...options,
-          tag: WS_METHODS.subscribeBrowserBridge,
-        }),
+        transport.subscribe(
+          (client) =>
+            client[WS_METHODS.subscribeBrowserBridge](withResumeCursor({}, options?.resumeFrom)),
+          listener,
+          { ...options, tag: WS_METHODS.subscribeBrowserBridge },
+        ),
     },
     browserLive: {
       subscribe: (listener, options) =>
