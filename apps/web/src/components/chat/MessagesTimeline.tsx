@@ -63,6 +63,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { userImagePanelTab } from "./userImageTab";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -150,6 +151,12 @@ const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 
 interface MessagesTimelineProps {
   isWorking: boolean;
+  /**
+   * False while a chat's messages are still on their way from the computer:
+   * the empty feed then waits (and after a moment says "Loading chat…")
+   * instead of inviting a first message.
+   */
+  messagesLoaded?: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
@@ -186,12 +193,37 @@ interface MessagesTimelineProps {
   ) => Promise<void>;
 }
 
+/** Shown only if loading takes a noticeable moment: a quick load stays blank. */
+const MESSAGES_LOADING_NOTE_DELAY_MS = 400;
+
+function MessagesLoadingNote() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(true), MESSAGES_LOADING_NOTE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-2 text-sm text-muted-foreground transition-opacity duration-200",
+        visible ? "opacity-100" : "opacity-0",
+      )}
+      data-testid="messages-loading"
+      aria-hidden={!visible}
+    >
+      <Spinner className="size-4" />
+      Loading chat…
+    </p>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // MessagesTimeline — list owner
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
+  messagesLoaded = true,
   activeTurnInProgress,
   activeTurnId,
   activeTurnStartedAt,
@@ -375,9 +407,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   if (rows.length === 0 && !isWorking) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
+        {messagesLoaded ? (
+          <p className="text-sm text-muted-foreground/30">
+            Send a message to start the conversation.
+          </p>
+        ) : (
+          <MessagesLoadingNote />
+        )}
         {endOfFeed ? <div className="w-full max-w-3xl px-3 sm:px-5">{endOfFeed}</div> : null}
       </div>
     );

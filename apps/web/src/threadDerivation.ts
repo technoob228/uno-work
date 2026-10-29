@@ -98,6 +98,15 @@ function selectThreadTurnDiffSummaries(
   );
 }
 
+/**
+ * The chat's messages have arrived from the computer (its detail snapshot was
+ * applied). The shell alone lists the chat but not its messages: until this is
+ * true an empty message list means "not loaded", not "no messages yet".
+ */
+export function selectThreadDetailLoaded(state: EnvironmentState, threadId: ThreadId): boolean {
+  return state.messageIdsByThreadId[threadId] !== undefined;
+}
+
 export function getThreadFromEnvironmentState(
   state: EnvironmentState,
   threadId: ThreadId,

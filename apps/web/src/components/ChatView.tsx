@@ -75,10 +75,12 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import {
+  selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
+import { selectThreadDetailLoaded } from "../threadDerivation";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -917,6 +919,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
+  // A server chat whose messages haven't come yet must not show "Send a
+  // message to start the conversation." for a moment (S6 flicker recipe a).
+  const serverThreadDetailLoaded = useStore((store) =>
+    routeKind === "server"
+      ? selectThreadDetailLoaded(selectEnvironmentState(store, environmentId), threadId)
+      : true,
+  );
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   // Plan mode is legacy (Settings → Legacy, upstream 48aa875c0e). Off, the
   // effective mode is "default" even for chats stored in plan mode, so nobody
@@ -4553,6 +4562,7 @@ export default function ChatView(props: ChatViewProps) {
               <MessagesTimeline
                 key={activeThread.id}
                 isWorking={isWorking}
+                messagesLoaded={!isServerThread || serverThreadDetailLoaded}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnId={activeLatestTurn?.turnId ?? null}
                 activeTurnStartedAt={activeWorkStartedAt}
