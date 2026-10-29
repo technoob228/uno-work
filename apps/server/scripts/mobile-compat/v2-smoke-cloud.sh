@@ -36,6 +36,17 @@ git -C "$ROOT/work" fetch -q origin
 git -C "$ROOT/work" checkout -q --detach "$WORK_REF"
 WORK_SHA=$(git -C "$ROOT/work" rev-parse --short=10 HEAD)
 (cd "$ROOT/work" && nice -n 10 bun install --frozen-lockfile --ignore-scripts >/dev/null)
+# node-pty ships no linux prebuild and install scripts are off: reuse the
+# machine's Work build when there is one (N-API, ABI-stable), else compile.
+for PTY_DIR in "$ROOT"/work/node_modules/.bun/node-pty@*/node_modules/node-pty; do
+  [ -f "$PTY_DIR/build/Release/pty.node" ] && continue
+  PTY_NODE=${PTY_NODE:-/opt/uno-work/app/node_modules/node-pty/build/Release/pty.node}
+  if [ -f "$PTY_NODE" ]; then
+    mkdir -p "$PTY_DIR/build/Release" && cp "$PTY_NODE" "$PTY_DIR/build/Release/pty.node"
+  else
+    (cd "$PTY_DIR" && nice -n 10 npx -y node-gyp rebuild >/dev/null)
+  fi
+done
 
 # --- upstream client from UPSTREAM_REF ---------------------------------------
 if [ ! -d "$ROOT/upstream/.git" ]; then
@@ -69,6 +80,7 @@ trap 'kill $DAEMON 2>/dev/null || true; wait $DAEMON 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 120); do
   curl -sf "http://127.0.0.1:$PORT/.well-known/t3/environment" >/dev/null && break
+  kill -0 $DAEMON 2>/dev/null || { echo "daemon exited:"; tail -30 "$ROOT/daemon.log"; exit 2; }
   sleep 1
 done
 # The file harness is polled; give it a moment to appear.
