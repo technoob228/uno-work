@@ -110,6 +110,12 @@ import {
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
 import { useSettings } from "../../hooks/useSettings";
+import {
+  buildComposerPromptHistoryEntries,
+  isCaretOnPromptEdge,
+  stepComposerPromptHistory,
+  type ComposerPromptHistoryPosition,
+} from "./composerPromptHistory";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
@@ -1741,6 +1747,57 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Callbacks: prompt change
     // ------------------------------------------------------------------
+    // ↑ / ↓ recall of sent messages (upstream fd773172e7). Entries are built
+    // on the keypress, not per render: the chat changes on every streamed delta.
+    const promptHistoryPositionRef = useRef<ComposerPromptHistoryPosition | null>(null);
+    const promptHistoryMessagesRef = useRef(activeThread?.messages);
+    promptHistoryMessagesRef.current = activeThread?.messages;
+    // A recall from chat A is never active in chat B.
+    const promptHistoryTargetKey =
+      typeof composerDraftTarget === "string"
+        ? composerDraftTarget
+        : `${composerDraftTarget.environmentId}:${composerDraftTarget.threadId}`;
+    useEffect(() => {
+      promptHistoryPositionRef.current = null;
+    }, [promptHistoryTargetKey]);
+    const navigatePromptHistory = (
+      direction: "backward" | "forward",
+      event: KeyboardEvent,
+    ): boolean => {
+      if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || event.isComposing) {
+        return false;
+      }
+      if (isComposerApprovalState || pendingUserInputs.length > 0) return false;
+      // Something attached: recalling old text into it is never what ↑ meant.
+      if (
+        composerImagesRef.current.length > 0 ||
+        composerVideosRef.current.length > 0 ||
+        composerFilesRef.current.length > 0
+      ) {
+        return false;
+      }
+      const current = promptRef.current;
+      if (promptHistoryPositionRef.current === null && current.length > 0) return false;
+      const cursor = expandCollapsedComposerCursor(current, composerCursorRef.current);
+      if (!isCaretOnPromptEdge(current, cursor, direction === "backward" ? "start" : "end")) {
+        return false;
+      }
+      const step = stepComposerPromptHistory({
+        direction,
+        entries: buildComposerPromptHistoryEntries(promptHistoryMessagesRef.current ?? []),
+        position: promptHistoryPositionRef.current,
+        currentPrompt: current,
+      });
+      if (!step) return false;
+      promptHistoryPositionRef.current = step.position;
+      promptRef.current = step.prompt;
+      setComposerDraftPrompt(composerDraftTarget, step.prompt);
+      setComposerCursor(collapseExpandedComposerCursor(step.prompt, step.prompt.length));
+      setComposerTrigger(null);
+      setComposerHighlightedItemId(null);
+      return true;
+    };
+
     const onPromptChange = useCallback(
       (
         nextPrompt: string,
@@ -1765,6 +1822,10 @@ export const ChatComposer = memo(
         }
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
+        // Any edit ends ↑ browsing (fd773172e7).
+        if (promptHistoryPositionRef.current?.recalled !== nextPrompt) {
+          promptHistoryPositionRef.current = null;
+        }
         if (!terminalContextIdListsEqual(composerTerminalContexts, terminalContextIds)) {
           setComposerDraftTerminalContexts(
             composerDraftTarget,
@@ -2207,6 +2268,9 @@ export const ChatComposer = memo(
           onSelectComposerItem(selectedItem);
           return true;
         }
+      }
+      if (key === "ArrowUp" || key === "ArrowDown") {
+        return navigatePromptHistory(key === "ArrowUp" ? "backward" : "forward", event);
       }
       if (key === "Enter" && !event.shiftKey) {
         submitComposer();
