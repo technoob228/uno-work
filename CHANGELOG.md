@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.160 — 2026-10-29
+
+- Uno (the pinned assistant chat) now runs on GLM-5.3 Flash by default: about a second to the first word instead of 5-10 s on Smart. Smart, Fast and the rest stay in the picker; a model you picked yourself is kept.
+- Uno's instructions 2026-10-29.1 (accounts with the assistants update): anything that touches a project goes straight to its own chat, with one short line back, so Uno stays free for the next message.
+- Home: "Write to Uno in Telegram" disappears once Uno's Telegram is on for this computer.
+
+---
+
 ## v0.0.159 — 2026-10-29
 
 - Assistants D + Automations — only for accounts with the assistants update (console ASSISTANTS_MVP / AUTOMATIONS): icons on top of the sidebar, a gallery of three roles, Permission level (Autonomous / Cautious), "What should it do?" as a multi-select, a computer of its own right in the wizard, Uno as the orchestrator, chats on other computers, Telegram for Uno, Join my calls, Automations.
