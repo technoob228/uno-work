@@ -2334,7 +2334,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in a folder that is a project; provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). Returns the threadId (and the computer).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder of this computer's home (a folder that isn't a project yet becomes one); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). For an assistant, the person's routing rows (Source `you`) win over provider unless personAsked; a harness of theirs that isn't ready here fails with harness_not_ready — ask the person in one line, never start it on another model yourself. Returns the threadId (and the computer).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2352,6 +2352,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         projectId: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        taskType: {
+          type: "string",
+          description: "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        personAsked: {
+          type: "boolean",
+          description:
+            'true only when the person named this harness/model in the conversation ("through Claude", "on Smart"): then provider/model win over their table.',
+        },
         computerId: {
           type: "string",
           description:
@@ -2384,6 +2393,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
+            ...(str(args, "taskType") ? { taskType: str(args, "taskType") } : {}),
+            ...(args["personAsked"] === true ? { personAsked: true } : {}),
             ...(args["computerId"] !== undefined && args["computerId"] !== null
               ? { computerId: args["computerId"] }
               : {}),
@@ -3718,9 +3729,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     run: (deps) =>
       asToolError(deps.settings).pipe(
         Effect.flatMap((settings) =>
-          (deps.providers ?? Effect.succeed(null)).pipe(
-            Effect.map((providers) => ({ settings, providers })),
-          ),
+          Effect.gen(function* () {
+            const providers: ReadonlyArray<ServerProvider> | null =
+              deps.providers === undefined ? null : yield* deps.providers;
+            return { settings, providers };
+          }),
         ),
         Effect.map(({ settings, providers }) => {
           const access = accountAccess(settings);

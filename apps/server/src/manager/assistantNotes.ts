@@ -121,9 +121,35 @@ export async function appendAssistantNotes(
       error: `${file} is too long to grow; tell the person to trim it on your page.`,
     };
   }
+  if (file === "ROUTING.md") {
+    const placed = appendToOutcomesLog(before, text);
+    if (placed !== null) {
+      await fsp.writeFile(target.path, placed, "utf8");
+      return { ok: true, value: { file, appended: true, section: "Outcomes log" } };
+    }
+  }
   const separator = before.length === 0 || before.endsWith("\n") ? "" : "\n";
   await fsp.appendFile(target.path, `${separator}${text.trimEnd()}\n`, "utf8");
   return { ok: true, value: { file, appended: true } };
+}
+
+/**
+ * ROUTING.md: an appended line belongs to its "## Outcomes log" (the end
+ * of the file is "## Declined"); a "- task → …" proposal line to
+ * "## Proposals" when the text names it. null: no such section.
+ */
+export function appendToOutcomesLog(content: string, text: string): string | null {
+  const lines = content.split("\n");
+  const heading = /^##\s+outcomes/i;
+  const at = lines.findIndex((line) => heading.test(line.trim()));
+  if (at === -1) return null;
+  let end = at + 1;
+  while (end < lines.length && !/^#{1,2}\s/.test(lines[end] ?? "")) end += 1;
+  // Before the blank lines that end the section.
+  let insertAt = end;
+  while (insertAt > at + 1 && (lines[insertAt - 1] ?? "").trim() === "") insertAt -= 1;
+  const added = text.trimEnd().split("\n");
+  return [...lines.slice(0, insertAt), ...added, ...lines.slice(insertAt)].join("\n");
 }
 
 /** The person's lines in `text`: a note ending in "(you)", a routing row with Source `you`. */

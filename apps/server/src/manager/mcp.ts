@@ -324,9 +324,19 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         prompt: { type: "string" },
         modelSelection: {
           type: "object",
-          description: "Optional {instanceId, model}; defaults to the project's model.",
+          description:
+            "Optional {instanceId, model}. The person's routing rows (Source `you` in ROUTING.md) win over it unless personAsked; without either it runs on the person's default AI, else the project's model. A harness their rows name that isn't ready here fails with a line to ask them — never start it on another model yourself.",
           properties: { instanceId: { type: "string" }, model: { type: "string" } },
           required: ["instanceId", "model"],
+        },
+        taskType: {
+          type: "string",
+          description: "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        personAsked: {
+          type: "boolean",
+          description:
+            "true only when the person named this model/harness in this conversation (\"through Claude\", \"on Smart\"): then modelSelection wins over their table.",
         },
         runtimeMode: {
           type: "string",
@@ -645,7 +655,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "notes_append",
     description:
-      'Add to the end of NOTES.md (default) or ROUTING.md: a dated note ("- 2026-10-29 <fact>"; the person\'s own facts end in "(you)") or an Outcomes log line. Short lines only.',
+      'Add to NOTES.md (default, at its end): a dated note ("- 2026-10-29 <fact>"; the person\'s own facts end in "(you)"). With file ROUTING.md: an Outcomes log line (it lands in that section). Short lines only; a table row or a proposal is notes_edit.',
     inputSchema: {
       type: "object",
       properties: {

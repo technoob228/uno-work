@@ -99,7 +99,7 @@ export const ASSISTANT_CONTEXT_NOTES_CHARS = 6_000;
 export const ASSISTANT_CONTEXT_ROUTING_CHARS = 3_000;
 
 /** ROUTING.md without its logs: the table and notes above "## Outcomes log". */
-function routingTable(routing: string): string | null {
+export function routingTable(routing: string): string | null {
   const cut = routing.search(/^## Outcomes log/m);
   const head = (cut >= 0 ? routing.slice(0, cut) : routing).trim();
   return head.includes("|") ? head : null;
@@ -175,4 +175,15 @@ export function buildAssistantContextHint(input: {
     );
   }
   return { hint: sections.join("\n\n"), withNotes: notes !== null };
+}
+
+/**
+ * The ROUTING.md table changed while the session ran (the person edited it
+ * on the Models page): the turn carries the new one, so a hand-off never
+ * follows the session-start snapshot. null: unchanged.
+ */
+export function routingChangedNote(previous: string | null, routing: string): string | null {
+  const table = routingTable(routing);
+  if (table === null || table === previous) return null;
+  return `[ROUTING.md changed since this session started — the current table, it wins over the copy in your system prompt:]\n<ROUTING.md table>\n${clip(table, ASSISTANT_CONTEXT_ROUTING_CHARS)}\n</ROUTING.md table>`;
 }

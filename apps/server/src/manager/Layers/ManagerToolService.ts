@@ -1,5 +1,6 @@
 import type {
   ManagerActionProposal,
+  ManagerCreateThreadInput,
   ManagerPendingApprovalSummary,
   ManagerProposedAction,
   ManagerScope,
@@ -47,6 +48,8 @@ import {
 } from "../Errors.ts";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { applyPersonRoute, readPersonRoute } from "../personRouting.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
@@ -221,6 +224,37 @@ const makeManagerToolService = Effect.gen(function* () {
   const connectorRepository = yield* ManagerConnectorRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  // Optional: test wirings without providers skip the person's routing rows.
+  const providerRegistry = Option.getOrNull(yield* Effect.serviceOption(ProviderRegistry));
+
+  /**
+   * The model a chat the assistant starts runs on, after the person's
+   * routing rows (personRouting.ts). Fails — no chat — when their harness
+   * isn't ready here.
+   */
+  const routedModelSelection = (caller: ManagerCaller, input: ManagerCreateThreadInput) =>
+    Effect.gen(function* () {
+      const requested = input.modelSelection ?? null;
+      const assistantProjectId = assistantProjectOfCaller(caller);
+      if (providerRegistry === null || assistantProjectId === null) return requested;
+      const assistantProject = yield* projectionSnapshotQuery
+        .getProjectShellById(assistantProjectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isNone(assistantProject)) return requested;
+      const route = yield* Effect.promise(() =>
+        readPersonRoute(assistantProject.value.workspaceRoot, input.taskType),
+      );
+      const routed = applyPersonRoute({
+        route,
+        requested,
+        personAsked: input.personAsked === true,
+        providers: yield* providerRegistry.getProviders,
+      });
+      if (routed.kind === "not-ready") {
+        return yield* new ManagerInvalidRequestError({ detail: routed.message });
+      }
+      return routed.kind === "selection" ? routed.selection : requested;
+    });
 
   const getAllowedThreadShell = (caller: ManagerCaller, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -729,6 +763,7 @@ const makeManagerToolService = Effect.gen(function* () {
       const runtimeMode = createRuntimeFor(caller, input.runtimeMode ?? "approval-required");
       // The id is chosen now, so the receipt names the new chat (no
       // list_threads round trip) and the push knows who asked for it.
+      const modelSelection = yield* routedModelSelection(caller, input);
       const threadId = ThreadId.make(crypto.randomUUID());
       yield* noteCaller(caller, threadId);
       const receipt = yield* fileProposal(caller, {
@@ -736,7 +771,7 @@ const makeManagerToolService = Effect.gen(function* () {
         projectId: input.projectId,
         title: input.title,
         prompt: input.prompt,
-        modelSelection: input.modelSelection ?? null,
+        modelSelection,
         runtimeMode,
         threadId,
       });

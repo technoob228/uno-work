@@ -33,6 +33,7 @@ import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
 import { remoteComputersOption } from "../remoteComputers/RemoteComputers.ts";
 import { assistantDisplayName } from "../remoteComputers/remoteChatHost.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
+import { ManagerAccountDefaultAi } from "../manager/Layers/AccountDefaultAi.ts";
 import { makeRegisterFolder } from "./registerFolder.ts";
 import { type AgentThreadsReply, makeAgentThreadsHandlers } from "./service.ts";
 
@@ -47,6 +48,7 @@ const makeRequestContext = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const remoteComputers = yield* remoteComputersOption;
   const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+  const accountDefaultAi = Option.getOrNull(yield* Effect.serviceOption(ManagerAccountDefaultAi));
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
@@ -69,6 +71,9 @@ const makeRequestContext = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       ),
     getProviders: providerRegistry.getProviders,
+    ...(accountDefaultAi === null
+      ? {}
+      : { personalDefault: accountDefaultAi.spawnModelSelection() }),
     registerFolder: makeRegisterFolder({
       engine,
       projections,

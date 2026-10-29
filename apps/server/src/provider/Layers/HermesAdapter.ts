@@ -90,7 +90,12 @@ import {
   resolveHermesModeId,
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
-import { buildAssistantContextHint, buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
+import {
+  buildAssistantContextHint,
+  buildHermesHandoffPrompt,
+  routingChangedNote,
+  routingTable,
+} from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
@@ -252,6 +257,11 @@ interface HermesSessionContext {
   handoffPending: boolean;
   /** NOTES.md went into this session's system prompt (assistantContextHint): no second copy. */
   readonly notesInSystemPrompt: boolean;
+  /**
+   * The ROUTING.md table the model last saw (system prompt or a turn); null
+   * outside an assistant folder. A changed file rides along the next turn.
+   */
+  routingSeen: string | null | undefined;
   /** The last turn that has streamed assistant text (the 402 check looks at a turn's first text only). */
   replyTextTurnId: TurnId | undefined;
   /** The last turn whose `turn.completed` has gone out. */
@@ -926,6 +936,13 @@ export function makeHermesAdapter(
             hermesProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
             notesInSystemPrompt: assistantContext?.withNotes ?? false,
+            routingSeen: inAssistantWorkspace
+              ? routingTable(
+                  yield* fileSystem
+                    .readFileString(nodePath.join(cwd, "ROUTING.md"))
+                    .pipe(Effect.orElseSucceed(() => "")),
+                )
+              : undefined,
             replyTextTurnId: undefined,
             completedTurnId: undefined,
             billingFailure: undefined,
@@ -1182,10 +1199,20 @@ export function makeHermesAdapter(
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
         const userText = input.input?.trim() ?? "";
-        const handoffText = ctx.handoffPending
+        let handoffText = ctx.handoffPending
           ? yield* readHandoffPrompt(ctx, userText, input.contextMessages ?? [])
           : userText;
         ctx.handoffPending = false;
+        if (ctx.routingSeen !== undefined && ctx.session.cwd !== undefined) {
+          const routing = yield* fileSystem
+            .readFileString(nodePath.join(ctx.session.cwd, "ROUTING.md"))
+            .pipe(Effect.orElseSucceed(() => ""));
+          const changed = routingChangedNote(ctx.routingSeen, routing);
+          if (changed !== null) {
+            ctx.routingSeen = routingTable(routing);
+            handoffText = `${changed}\n\n${handoffText}`;
+          }
+        }
         if (handoffText.length > 0) {
           promptParts.push({ type: "text", text: handoffText });
         }

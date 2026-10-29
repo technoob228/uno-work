@@ -24,6 +24,7 @@
 import {
   CommandId,
   MessageId,
+  type ModelSelection,
   type OrchestrationCommand,
   type OrchestrationCommandOrigin,
   type OrchestrationProjectShell,
@@ -46,6 +47,7 @@ import * as crypto from "node:crypto";
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
+import { applyPersonRoute, readPersonRoute } from "../manager/personRouting.ts";
 import type {
   RemoteChatStarted,
   RemoteChatStartInput,
@@ -162,6 +164,12 @@ export interface AgentThreadsDeps {
    * Only for a caller that reaches every project. Absent: no registration.
    */
   readonly registerFolder?: (cwd: string) => Effect.Effect<OrchestrationProjectShell | null>;
+  /**
+   * What a chat an assistant starts without naming a model runs on: the
+   * account's default AI when usable here (as create_thread). Absent / null:
+   * the project's default.
+   */
+  readonly personalDefault?: Effect.Effect<ModelSelection | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -617,11 +625,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const model = optionalString(body, "model", 500);
         const projectId = optionalString(body, "projectId", 500);
         const rawCwd = optionalString(body, "cwd", 4096);
-        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok) {
+        const taskType = optionalString(body, "taskType", 200);
+        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok || !taskType.ok) {
           return yield* fail(
             400,
             "invalid_payload",
-            `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd" — строки.`,
+            `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd", "taskType" — строки.`,
           );
         }
         if (deps.remote === undefined) {
@@ -668,7 +677,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         });
         const sameProject = project.id === caller.projectId;
 
+        // Order (personRouting.ts): the person's routing rows → what the
+        // model named (first when the person asked for it) → the account's
+        // default AI → the project's default.
         let modelSelection = sameProject ? caller.modelSelection : project.defaultModelSelection;
+        let requested: ModelSelection | null = null;
         if (provider.value !== undefined) {
           const providers = yield* deps.getProviders;
           const resolved = resolveProviderModelSelection({
@@ -677,10 +690,40 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             providers,
           });
           if (!resolved.ok) return yield* fail(400, "invalid_provider", resolved.message);
-          modelSelection = resolved.selection;
+          requested = resolved.selection;
         } else if (model.value !== undefined && modelSelection !== null) {
-          modelSelection = { instanceId: modelSelection.instanceId, model: model.value };
+          requested = { instanceId: modelSelection.instanceId, model: model.value };
         }
+        const assistantProjectId =
+          assistant?.projectId ?? (isAssistantConversation(caller) ? caller.projectId : null);
+        if (assistantProjectId !== null) {
+          const assistantProject = yield* deps.projections
+            .getProjectShellById(ProjectId.make(assistantProjectId))
+            .pipe(Effect.orElseSucceed(() => Option.none()));
+          const route = Option.isSome(assistantProject)
+            ? yield* Effect.promise(() =>
+                readPersonRoute(assistantProject.value.workspaceRoot, taskType.value),
+              )
+            : null;
+          const routed = applyPersonRoute({
+            route,
+            requested,
+            personAsked: body.personAsked === true,
+            providers: route === null ? [] : yield* deps.getProviders,
+          });
+          if (routed.kind === "not-ready") {
+            return yield* fail(409, "harness_not_ready", routed.message);
+          }
+          if (routed.kind === "selection") requested = routed.selection;
+          else if (
+            requested === null &&
+            deps.personalDefault !== undefined &&
+            caller.projectId === assistantProjectId
+          ) {
+            requested = yield* deps.personalDefault;
+          }
+        }
+        if (requested !== null) modelSelection = requested;
         if (modelSelection === null) {
           return yield* fail(
             400,
