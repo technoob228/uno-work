@@ -1568,6 +1568,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         ),
       );
 
+      // Most events have no attachment cleanup; skip the call and its span
+      // (one per projector per event). Upstream t3code 99efaeab58.
+      if (
+        attachmentSideEffects.deletedThreadIds.size === 0 &&
+        attachmentSideEffects.prunedThreadRelativePaths.size === 0
+      ) {
+        return;
+      }
       yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to apply projected attachment side-effects", {
