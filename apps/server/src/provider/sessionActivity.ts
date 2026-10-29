@@ -27,6 +27,16 @@ interface ThreadActivity {
   lastEventMs: number;
   /** task id → when it started (ms since epoch). */
   readonly backgroundTasks: Map<string, number>;
+  /**
+   * Tasks started in the current turn without `isBackgrounded` (task id →
+   * start time). Claude Code moves such a task to the background on its own —
+   * a Bash command past its 2-minute timeout, or Ctrl+B — and says so only in
+   * a `task_updated` the runtime events don't carry. A task still open when
+   * its turn ends has outlived the turn: it is a background task (29.10,
+   * box 2582: a Bash moved to the background this way was killed with its
+   * idle harness 23 minutes later and the agent never reported).
+   */
+  readonly turnTasks: Map<string, number>;
 }
 
 export interface SessionActivity {
@@ -59,17 +69,34 @@ export function recordRuntimeEvent(event: ActivityEvent, nowMs: number = Date.no
   }
   let entry = activityByThread.get(event.threadId);
   if (entry === undefined) {
-    entry = { lastEventMs: nowMs, backgroundTasks: new Map() };
+    entry = { lastEventMs: nowMs, backgroundTasks: new Map(), turnTasks: new Map() };
     activityByThread.set(event.threadId, entry);
   }
   entry.lastEventMs = nowMs;
 
+  if (event.type === "turn.completed") {
+    // An interrupted or failed turn takes its foreground tasks down with it;
+    // only a turn that ended normally leaves them running.
+    if (payloadField(event.payload, "state") === "completed") {
+      for (const [taskId, startedMs] of entry.turnTasks) {
+        entry.backgroundTasks.set(taskId, startedMs);
+      }
+    }
+    entry.turnTasks.clear();
+    return;
+  }
+
   const taskId = payloadField(event.payload, "taskId");
   if (typeof taskId !== "string") return;
-  if (event.type === "task.started" && payloadField(event.payload, "isBackgrounded") === true) {
-    entry.backgroundTasks.set(taskId, nowMs);
+  if (event.type === "task.started") {
+    if (payloadField(event.payload, "isBackgrounded") === true) {
+      entry.backgroundTasks.set(taskId, nowMs);
+    } else {
+      entry.turnTasks.set(taskId, nowMs);
+    }
   } else if (event.type === "task.completed") {
     entry.backgroundTasks.delete(taskId);
+    entry.turnTasks.delete(taskId);
   }
 }
 
