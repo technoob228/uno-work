@@ -78,6 +78,9 @@ cat > "$ROOT/harnesses/fake.json" <<EOF
 EOF
 
 BIN="$ROOT/work/apps/server/src/bin.ts"
+# A project for the phone to start chats in (before the daemon owns the DB).
+HOME="$ROOT/userhome" "$NODE" "$BIN" project add --base-dir "$ROOT/home" --title "T3 smoke" \
+  "$ROOT/project" >/dev/null 2>&1
 cd "$ROOT/project"
 HOME="$ROOT/userhome" PATH="$ROOT/stubbin:$PATH" UNO_WORK_HARNESSES_DIR="$ROOT/harnesses" \
   UNO_WORK_ASSISTANT_PREWARM=0 UNO_WORK_ASSISTANTS_DIR="$ROOT/userhome/assistants" \

@@ -213,7 +213,10 @@ const program = Effect.gen(function* () {
       : shellItems.some((item) => item.kind === "synchronized"),
   );
   const shellSnapshot = shellItems.find((item) => item.kind === "snapshot").snapshot;
-  const project = shellSnapshot.projects[0];
+  // The daemon also has its assistant project (Hermes only): use ours.
+  const project =
+    shellSnapshot.projects.find((entry) => entry.title === "T3 smoke") ??
+    shellSnapshot.projects.find((entry) => entry.id !== "assistant-home");
   if (!project) fail("subscribeShell", "no project in the shell (start the daemon with a project folder)");
   pass("subscribeShell", {
     projects: shellSnapshot.projects.length,
