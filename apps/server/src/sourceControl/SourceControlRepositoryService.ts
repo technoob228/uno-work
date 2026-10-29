@@ -62,17 +62,45 @@ function repositoryError(input: {
   });
 }
 
+// Userinfo can contain @; remove through the last one before the host boundary.
+const URL_WITH_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]+@/gi;
+// Git leaves quotes inside query tokens unescaped; consume through the closing quote.
+const QUOTED_URL_QUERY = /(['"])([a-z][a-z0-9+.-]*:\/\/[^\s?]*)\?.*\1(?=[\s:]|$)/gi;
+const URL_QUERY = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?]*)\?[^\s]*/gi;
+
+/**
+ * Strips credentials from URLs inside error text: `https://user:token@host`
+ * userinfo and `?access_token=...` queries. A failed clone of a private repo
+ * echoed the clone URL - token included - into the error the chat and the
+ * agent see. Upstream t3code 1cc9d413a5.
+ */
+export function redactUrlCredentials(text: string): string {
+  return text
+    .replace(QUOTED_URL_QUERY, "$1$2$1")
+    .replace(URL_QUERY, "$1")
+    .replace(URL_WITH_USERINFO, "$1");
+}
+
 function mapRepositoryError(operation: string, provider: SourceControlProviderKind) {
-  return Effect.mapError((cause: unknown) =>
-    Schema.is(SourceControlRepositoryError)(cause)
-      ? cause
-      : repositoryError({
-          operation,
-          provider,
-          detail: detailFromUnknown(cause),
-          cause,
-        }),
-  );
+  return Effect.mapError((cause: unknown) => {
+    if (Schema.is(SourceControlRepositoryError)(cause)) {
+      return cause;
+    }
+    const detail = detailFromUnknown(cause);
+    const redacted = redactUrlCredentials(detail);
+    // The raw cause is serialized to the client with its message (a git error
+    // message includes the full command line, clone URL and all); drop it
+    // when it carries a credential.
+    const causeText =
+      cause instanceof Error ? `${cause.message}\n${cause.stack ?? ""}` : String(cause);
+    const causeIsClean = redacted === detail && redactUrlCredentials(causeText) === causeText;
+    return repositoryError({
+      operation,
+      provider,
+      detail: redacted,
+      ...(causeIsClean ? { cause } : {}),
+    });
+  });
 }
 
 function toRepositoryInfo(
