@@ -271,6 +271,10 @@ describe("premium credit", () => {
       isUnoPremiumModelSelected({ driverKind: "hermes", slug: "anthropic/claude-sonnet-5" }),
     ).toBe(true);
     expect(isUnoPremiumModelSelected({ driverKind: "hermes", slug: "uno/smart" })).toBe(false);
+    // The assistant's default: in AI hours, though `/v1/models` doesn't list it.
+    expect(isUnoPremiumModelSelected({ driverKind: "hermes", slug: "z-ai/glm-5.3-flash" })).toBe(
+      false,
+    );
     expect(isUnoPremiumModelSelected({ driverKind: "uno", slug: "uno/uno/fast" })).toBe(false);
     expect(
       isUnoPremiumModelSelected({

@@ -133,7 +133,7 @@ describe("deriveAssistantHarnessStatus", () => {
 });
 
 describe("orderAssistantModels", () => {
-  it("puts Smart first, then Grok releases newest first, then the rest", () => {
+  it("puts the default (GLM-5.3 Flash) first, then Smart, Grok releases newest first, the rest", () => {
     const ordered = orderAssistantModels(
       [
         { id: "openai/gpt-5", name: "GPT-5" },
@@ -144,11 +144,35 @@ describe("orderAssistantModels", () => {
       { ensureGatewayAlias: true },
     ).map((model) => model.id);
     expect(ordered).toEqual([
+      "z-ai/glm-5.3-flash",
       "uno/smart",
       "x-ai/grok-4.7",
       "x-ai/grok-4.20",
       "anthropic/claude-haiku-4.5",
       "openai/gpt-5",
+    ]);
+  });
+
+  it("keeps the catalog's Smart and Fast and names the default it adds", () => {
+    const ordered = orderAssistantModels(
+      [
+        { id: "uno/fast", name: "Fast" },
+        { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
+        { id: "uno/smart", name: "Smart" },
+      ],
+      { ensureGatewayAlias: true },
+    );
+    expect(ordered).toEqual([
+      { id: "z-ai/glm-5.3-flash", name: "GLM-5.3 Flash" },
+      { id: "uno/fast", name: "Fast" },
+      { id: "uno/smart", name: "Smart" },
+      { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
+    ]);
+  });
+
+  it("adds nothing to a key's own list", () => {
+    expect(orderAssistantModels([{ id: "grok-4.7", name: "grok-4.7" }])).toEqual([
+      { id: "grok-4.7", name: "grok-4.7" },
     ]);
   });
 });

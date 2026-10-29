@@ -22,7 +22,11 @@ import type {
   UnoAiPremiumStatus,
   UnoAiStatus,
 } from "@t3tools/contracts";
-import { UNO_FAST_GATEWAY_MODEL, UNO_SMART_GATEWAY_MODEL } from "@t3tools/contracts";
+import {
+  UNO_FAST_GATEWAY_MODEL,
+  UNO_GLM_FLASH_GATEWAY_MODEL,
+  UNO_SMART_GATEWAY_MODEL,
+} from "@t3tools/contracts";
 import { SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
@@ -42,12 +46,14 @@ const OPENCODE_UNO_PROVIDER_PREFIX = "uno/";
 const INCLUDED_GATEWAY_IDS: ReadonlySet<string> = new Set([
   UNO_SMART_GATEWAY_MODEL,
   UNO_FAST_GATEWAY_MODEL,
+  // The assistant's default (29.10): in AI hours though `/v1/models` doesn't list it.
+  UNO_GLM_FLASH_GATEWAY_MODEL,
 ]);
 
 /**
  * A premium model of the Uno gateway is picked (Uno Code, Hermes, or OpenCode
  * on its `uno` provider): marked `premium` by the gateway, or — without a mark
- * — anything but Smart / Fast and the private GPU.
+ * — anything but Smart / Fast / GLM-5.3 Flash and the private GPU.
  */
 export function isUnoPremiumModelSelected(input: {
   readonly driverKind: ProviderDriverKind | string | null | undefined;

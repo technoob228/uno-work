@@ -7,6 +7,7 @@
 import {
   ASSISTANT_DEFAULT_GATEWAY_MODEL,
   type AssistantHarnessStatus,
+  UNO_SMART_GATEWAY_MODEL,
   type AssistantLlmModel,
   type ProviderInstallJobStatus,
   type ServerProvider,
@@ -105,7 +106,7 @@ export function deriveAssistantHarnessStatus(input: {
 const GROK_RELEASES_RANK = 3;
 
 function grokRank(id: string): number {
-  // Uno AI hours: Smart (the default), then Fast — the included models.
+  // The default (GLM-5.3 Flash), then Smart and Fast — Uno AI hours.
   if (id === ASSISTANT_DEFAULT_GATEWAY_MODEL) return 0;
   if (id.startsWith("uno/")) return 1;
   if (/(^|\/)grok-latest$/.test(id)) return 2;
@@ -113,23 +114,23 @@ function grokRank(id: string): number {
 }
 
 /**
- * Picker order: Smart and Fast (Uno AI hours), the latest-Grok alias, then
- * Grok releases newest first, then everything else by name. The default
- * (Smart) is always offered on the gateway even when the catalog hides it.
+ * Picker order: the default (GLM-5.3 Flash), Smart and Fast (Uno AI hours),
+ * the latest-Grok alias, then Grok releases newest first, then everything
+ * else by name. On the gateway the default and Smart are always offered,
+ * even when the catalog hides them (`/v1/models` of an account with hours
+ * lists Smart and Fast, not the models behind them).
  */
 export function orderAssistantModels(
   models: ReadonlyArray<AssistantLlmModel>,
   options?: { readonly ensureGatewayAlias?: boolean },
 ): ReadonlyArray<AssistantLlmModel> {
   const list = [...models];
-  if (
-    options?.ensureGatewayAlias &&
-    !list.some((model) => model.id === ASSISTANT_DEFAULT_GATEWAY_MODEL)
-  ) {
-    list.push({
-      id: ASSISTANT_DEFAULT_GATEWAY_MODEL,
-      name: assistantModelLabel(ASSISTANT_DEFAULT_GATEWAY_MODEL),
-    });
+  if (options?.ensureGatewayAlias) {
+    for (const id of [ASSISTANT_DEFAULT_GATEWAY_MODEL, UNO_SMART_GATEWAY_MODEL]) {
+      if (!list.some((model) => model.id === id)) {
+        list.push({ id, name: assistantModelLabel(id) });
+      }
+    }
   }
   return list.toSorted((a, b) => {
     const rank = grokRank(a.id) - grokRank(b.id);
