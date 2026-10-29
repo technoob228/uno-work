@@ -55,6 +55,7 @@ import {
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Ref, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
+import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -133,7 +134,13 @@ import { detectReplyLanguage } from "../connectorReplyText.ts";
 import {
   buildMediaFailureNote,
   buildMediaNote,
-  collectTelegramMedia,
+  checkIncomingFile,
+  collectMessageFiles,
+  describeForwardOrigin,
+  incomingFileNote,
+  telegramAlbumKey,
+  telegramUploadDir,
+  wrapForwardedText,
   describeNonFileContent,
   isImageLikeMedia,
   pickTelegramUploadMethod,
@@ -256,6 +263,9 @@ export { stripHandoffPreamble };
  */
 export const telegramSendOutcome = (errorCode: number | undefined): SendOutcome =>
   errorCode === 400 || errorCode === 403 ? "gone" : "retry";
+
+/** How long the first part of an album waits for the rest (they arrive within ~1 s). */
+export const TELEGRAM_ALBUM_GATHER_MS = 1_500;
 
 export interface TelegramUpdate {
   readonly update_id: number;
@@ -384,6 +394,17 @@ const makeTelegramConnector = Effect.gen(function* () {
   const pairingsRef = yield* Ref.make<ReadonlyMap<ProjectId, TelegramPairing>>(new Map());
   // When a not-linked private chat last heard the "how to link" hint.
   const strangerRepliesRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  // Albums being gathered: parts by `<connector>:<chat>:<media_group_id>`.
+  const albumsRef = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<TelegramUpdate>>>(new Map());
+  // handleUpdate for a gathered album (set right after it is defined).
+  const albumHandler: {
+    run?: (
+      projectId: ProjectId,
+      config: ManagerTelegramConnectorConfig,
+      lead: TelegramUpdate,
+      rest: ReadonlyArray<TelegramIncomingMessage>,
+    ) => Effect.Effect<unknown, unknown>;
+  } = {};
 
   const updateRuntime = (projectId: ProjectId, patch: Partial<BotRuntime>) =>
     Ref.update(runtimesRef, (runtimes) => {
@@ -929,9 +950,11 @@ const makeTelegramConnector = Effect.gen(function* () {
 
   // Download every media payload of an incoming message. Images become chat
   // attachments (the harness sees them as vision inputs); everything else is
-  // saved under `telegram-files/<chatId>/` and described to the harness as a
-  // bracketed note with the absolute path. Failures degrade to notes too — the
-  // turn still runs so the user gets an answer instead of silence.
+  // saved under `~/Uploads/YYYY-MM/telegram/` (read-only for the owner, never
+  // run) and described as one line: who sent what, its real type by content,
+  // its size and path, flagged when it is a program or not what its name
+  // says. Voice notes stay under `telegram-files/<chatId>/`. Failures degrade
+  // to notes too — the turn still runs so the user gets an answer.
   const ingestIncomingMedia = (input: {
     readonly botToken: string;
     readonly threadId: ThreadId;
@@ -942,6 +965,10 @@ const makeTelegramConnector = Effect.gen(function* () {
      * smart-wake group), keyed by file_id, so we never pay the STT twice.
      */
     readonly precomputedTranscripts?: ReadonlyMap<string, string>;
+    /** Who sent it, as the note names them ("Misha"). */
+    readonly sender?: string;
+    /** The files came from the message the person replied to. */
+    readonly fromReply?: boolean;
   }) =>
     Effect.gen(function* () {
       const attachments: Array<ChatImageAttachment> = [];
@@ -980,7 +1007,12 @@ const makeTelegramConnector = Effect.gen(function* () {
           }
         }
 
-        const directory = nodePath.join(telegramFilesDir, input.chatId);
+        // Voice notes stay in the server's own folder (they become text);
+        // files the person sends land where they can find them.
+        const directory =
+          descriptor.kind === "voice" || descriptor.kind === "video_note"
+            ? nodePath.join(telegramFilesDir, input.chatId)
+            : telegramUploadDir(os.homedir(), new Date());
         const savedPath = nodePath.join(
           directory,
           `${crypto.randomUUID().slice(0, 8)}-${descriptor.fileName}`,
@@ -988,7 +1020,9 @@ const makeTelegramConnector = Effect.gen(function* () {
         const saved = yield* Effect.tryPromise({
           try: async () => {
             await fsPromises.mkdir(directory, { recursive: true });
-            await fsPromises.writeFile(savedPath, bytes);
+            // Kept, never run: no exec bits, owner only.
+            await fsPromises.writeFile(savedPath, bytes, { mode: 0o600 });
+            await fsPromises.chmod(savedPath, 0o600);
           },
           catch: (cause) => new TelegramConnectorError({ message: String(cause) }),
         }).pipe(
@@ -1052,7 +1086,18 @@ const makeTelegramConnector = Effect.gen(function* () {
           continue;
         }
 
-        notes.push(buildMediaNote(descriptor, savedPath));
+        notes.push(
+          descriptor.kind === "voice" || descriptor.kind === "video_note"
+            ? buildMediaNote(descriptor, savedPath)
+            : incomingFileNote({
+                sender: input.sender ?? "the person",
+                descriptor,
+                savedPath,
+                sizeBytes: bytes.length,
+                check: checkIncomingFile(descriptor.fileName, bytes),
+                ...(input.fromReply === true ? { fromRepliedMessage: true } : {}),
+              }),
+        );
       }
       return { attachments, notes };
     });
@@ -1324,6 +1369,8 @@ const makeTelegramConnector = Effect.gen(function* () {
     projectId: ProjectId,
     config: ManagerTelegramConnectorConfig,
     update: TelegramUpdate,
+    /** The other parts of its album, gathered ({@link TELEGRAM_ALBUM_GATHER_MS}). */
+    albumSiblings?: ReadonlyArray<TelegramIncomingMessage>,
   ) =>
     Effect.gen(function* () {
       const message = update.message;
@@ -1331,9 +1378,57 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (message === undefined || chatIdNumber === undefined) {
         return;
       }
-      const text = (message.text ?? message.caption ?? "").trim();
-      const media = collectTelegramMedia(message);
-      const nonFileLines = describeNonFileContent(message);
+      // An album comes as one update per photo/file: the first part waits a
+      // moment for the rest, then they go as ONE message; later parts only
+      // join it.
+      const albumKey = telegramAlbumKey(message);
+      if (albumKey !== null && albumSiblings === undefined) {
+        const key = `${projectId}:${albumKey}`;
+        const albums = yield* Ref.get(albumsRef);
+        const gathering = albums.get(key);
+        if (gathering !== undefined) {
+          yield* Ref.update(albumsRef, (map) => new Map(map).set(key, [...gathering, update]));
+          return;
+        }
+        yield* Ref.update(albumsRef, (map) => new Map(map).set(key, [update]));
+        yield* Effect.sleep(TELEGRAM_ALBUM_GATHER_MS).pipe(
+          Effect.andThen(
+            Ref.modify(albumsRef, (map) => {
+              const parts = map.get(key) ?? [update];
+              const next = new Map(map);
+              next.delete(key);
+              return [parts, next] as const;
+            }),
+          ),
+          Effect.flatMap((parts) => {
+            // The part with the caption leads (it carries the text).
+            const lead =
+              parts.find((part) => (part.message?.caption ?? "").trim().length > 0) ?? parts[0]!;
+            const rest = parts
+              .filter((part) => part !== lead)
+              .flatMap((part) => (part.message === undefined ? [] : [part.message]));
+            return albumHandler.run === undefined
+              ? Effect.void
+              : albumHandler.run(projectId, config, lead, rest).pipe(Effect.ignore);
+          }),
+          Effect.forkDetach,
+        );
+        return;
+      }
+      const forwardedFrom = describeForwardOrigin(message.forward_origin);
+      const ownText = (message.text ?? message.caption ?? "").trim();
+      const text =
+        forwardedFrom !== null && ownText.length > 0
+          ? wrapForwardedText(forwardedFrom, ownText)
+          : ownText;
+      const files = collectMessageFiles(message, albumSiblings ?? []);
+      const media = files.media;
+      const nonFileLines = [
+        ...describeNonFileContent(message),
+        ...(forwardedFrom !== null && ownText.length === 0
+          ? [`[Forwarded from ${forwardedFrom}.]`]
+          : []),
+      ];
       if (text.length === 0 && media.length === 0 && nonFileLines.length === 0) {
         return;
       }
@@ -1633,6 +1728,8 @@ const makeTelegramConnector = Effect.gen(function* () {
               chatId,
               media: takenMedia,
               precomputedTranscripts,
+              sender: message.from?.first_name ?? message.from?.username ?? "the person",
+              fromReply: files.fromReply,
             })
           : { attachments: [], notes: [] };
       const bodyParts = [text, ...nonFileLines, ...ingested.notes, ...refusedNotes].filter(
@@ -1675,6 +1772,8 @@ const makeTelegramConnector = Effect.gen(function* () {
         }),
       ),
     );
+
+  albumHandler.run = (projectId, config, lead, rest) => handleUpdate(projectId, config, lead, rest);
 
   // Return type inferred: `handleUpdate` carries its own error union, and
   // pinning it here would only duplicate it.
