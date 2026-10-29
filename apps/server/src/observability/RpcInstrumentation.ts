@@ -1,4 +1,4 @@
-import { Duration, Effect, Exit, Metric, Stream } from "effect";
+import { Duration, Effect, Exit, Metric, type Scope, Stream } from "effect";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
@@ -70,7 +70,13 @@ export const observeRpcStreamEffect = <A, StreamError, StreamContext, EffectErro
   method: string,
   effect: Effect.Effect<Stream.Stream<A, StreamError, StreamContext>, EffectError, EffectContext>,
   traceAttributes?: Readonly<Record<string, unknown>>,
-): Stream.Stream<A, StreamError | EffectError, StreamContext | EffectContext> =>
+): Stream.Stream<
+  A,
+  StreamError | EffectError,
+  StreamContext | Exclude<EffectContext, Scope.Scope>
+> =>
+  // Stream.unwrap runs the effect in the stream's scope, so handlers may fork
+  // scoped fibers (live-event buffers) that end with the subscription.
   Stream.unwrap(
     Effect.gen(function* () {
       yield* annotateRpcSpan(method, traceAttributes);

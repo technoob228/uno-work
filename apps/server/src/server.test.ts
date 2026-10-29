@@ -37,6 +37,7 @@ import {
   ManagedRuntime,
   Option,
   Path,
+  PubSub,
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -4152,6 +4153,69 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.deepEqual(replayResult, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Upstream t3code c14a5ca492 + 9c9ae3dc0e: live delivery is attached before
+  // the snapshot is read, and events already in the snapshot are not replayed.
+  it.effect("buffers thread events published while the initial snapshot loads", () =>
+    Effect.gen(function* () {
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+      const makeMessageEvent = (sequence: number) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-message-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: defaultThreadId,
+          occurredAt: "2026-01-01T00:00:01.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.message-sent",
+          payload: {
+            threadId: defaultThreadId,
+            messageId: MessageId.make(`message-${sequence}`),
+            role: "assistant",
+            text: `delta ${sequence}`,
+            turnId: null,
+            streaming: true,
+            createdAt: "2026-01-01T00:00:01.000Z",
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        }) satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            streamDomainEvents: Stream.fromPubSub(liveEvents),
+          },
+          projectionSnapshotQuery: {
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
+            getThreadDetailById: () =>
+              Effect.gen(function* () {
+                // Sequence 1 is already in this snapshot; 2 is not.
+                yield* PubSub.publish(liveEvents, makeMessageEvent(1));
+                yield* PubSub.publish(liveEvents, makeMessageEvent(2));
+                return Option.some(thread);
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      ).pipe(Effect.timeout("5 seconds"));
+
+      assert.equal(items[0]?.kind, "snapshot");
+      assert.equal(items[1]?.kind, "event");
+      assert.equal(items[1]?.kind === "event" ? items[1].event.sequence : null, 2);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

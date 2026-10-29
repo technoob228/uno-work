@@ -1124,6 +1124,18 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
             Effect.gen(function* () {
+              // Attach live delivery before reading the snapshot. Otherwise an
+              // event published while the snapshot loads is lost (a reconnect
+              // during a busy turn left the sidebar stale until the next event).
+              // Upstream t3code c14a5ca492 + 9c9ae3dc0e.
+              const liveBuffer = yield* Queue.unbounded<OrchestrationEvent>();
+              yield* Effect.forkScoped(
+                orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.runForEach((event) => Queue.offer(liveBuffer, event)),
+                ),
+                { startImmediately: true },
+              );
+
               const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
                 Effect.tapError((cause) =>
                   Effect.logError("orchestration shell snapshot load failed", { cause }),
@@ -1137,7 +1149,11 @@ const makeWsRpcLayer = (
                 ),
               );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              // The snapshot is read in one transaction, and events are
+              // projected in the transaction that persists them, so anything at
+              // or below its sequence is already in it.
+              const liveStream = Stream.fromQueue(liveBuffer).pipe(
+                Stream.filter((event) => event.sequence > snapshot.snapshotSequence),
                 Stream.mapEffect(toShellStreamEvent),
                 Stream.flatMap((event) =>
                   Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
@@ -1158,8 +1174,29 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "thread" &&
+                event.aggregateId === input.threadId &&
+                isThreadDetailEvent(event);
+
+              // Attach live delivery before reading the snapshot. Otherwise an
+              // event published while the snapshot loads is lost — e.g. a
+              // streamed text delta after a reconnect, so the reply showed a
+              // gap until the chat was reopened. Upstream t3code c14a5ca492 +
+              // 9c9ae3dc0e (fork starts immediately so the PubSub subscription
+              // exists before the reads below).
+              const liveBuffer = yield* Queue.unbounded<OrchestrationEvent>();
+              yield* Effect.forkScoped(
+                orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.filter(isThisThreadDetailEvent),
+                  Stream.runForEach((event) => Queue.offer(liveBuffer, event)),
+                ),
+                { startImmediately: true },
+              );
+
+              const readThreadDetail = projectionSnapshotQuery
+                .getThreadDetailById(input.threadId)
+                .pipe(
                   Effect.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
@@ -1167,18 +1204,33 @@ const makeWsRpcLayer = (
                         cause,
                       }),
                   ),
+                );
+              const readSnapshotSequence = projectionSnapshotQuery.getSnapshotSequence().pipe(
+                Effect.map(({ snapshotSequence }) => snapshotSequence),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to load orchestration snapshot sequence",
+                      cause,
+                    }),
                 ),
-                projectionSnapshotQuery.getSnapshotSequence().pipe(
-                  Effect.map(({ snapshotSequence }) => snapshotSequence),
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: "Failed to load orchestration snapshot sequence",
-                        cause,
-                      }),
-                  ),
-                ),
-              ]);
+              );
+              // The buffered live events overlap the snapshot. Events are
+              // projected in the transaction that persists them, so when the
+              // sequence is unchanged across the detail read, the detail holds
+              // exactly the events up to it: drop those from the buffer (a
+              // replayed streaming delta would double its text on the client).
+              // A commit in between is rare; re-read, and if it keeps moving
+              // keep a sequence read before the detail (a duplicate beats a
+              // lost event).
+              let snapshotSequence = yield* readSnapshotSequence;
+              let threadDetail = yield* readThreadDetail;
+              for (let attempt = 0; attempt < 2; attempt += 1) {
+                const sequenceAfter = yield* readSnapshotSequence;
+                if (sequenceAfter === snapshotSequence) break;
+                snapshotSequence = sequenceAfter;
+                threadDetail = yield* readThreadDetail;
+              }
 
               if (Option.isNone(threadDetail)) {
                 return yield* new OrchestrationGetSnapshotError({
@@ -1187,13 +1239,8 @@ const makeWsRpcLayer = (
                 });
               }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
-                ),
+              const liveStream = Stream.fromQueue(liveBuffer).pipe(
+                Stream.filter((event) => event.sequence > snapshotSequence),
                 Stream.map((event) => ({
                   kind: "event" as const,
                   event,
