@@ -74,6 +74,12 @@ const AGENT_START_ON_THEIR_OWN: ReadonlySet<string> = new Set([
   AGENT_START_STEP.firstTask,
 ]);
 const NOTHING: ReadonlySet<string> = new Set();
+const CONNECT_TELEGRAM_STEP = "connect_telegram";
+const TELEGRAM_DONE: ReadonlySet<string> = new Set([CONNECT_TELEGRAM_STEP]);
+
+function hasStep(plan: NextStepPlan | null, id: string): boolean {
+  return plan?.next?.id === id || (plan?.steps.some((entry) => entry.id === id) ?? false);
+}
 
 /** The account's answer (null while loading or when the account can't be read). */
 export function useNextStep(): HomeNextStepState {
@@ -90,7 +96,10 @@ export function useNextStep(): HomeNextStepState {
   // agent signed in, a setup step finished, Telegram / Slack on).
   const agentPlan = isAgentOnServerPlan(plan);
   const agent = useAgentOnComputer(agentPlan);
-  const channels = useAssistantChannels(usePrimaryEnvironmentId(), agentPlan);
+  // "Write to Uno in Telegram": the account only sees @get_uno_bot links, not
+  // Uno's own bot or @uno_work_bot (29.10: connected, the card stayed).
+  const telegramPlan = hasStep(plan, CONNECT_TELEGRAM_STEP);
+  const channels = useAssistantChannels(usePrimaryEnvironmentId(), agentPlan || telegramPlan);
   const doneHere = agentPlan
     ? agentStartDoneHere({
         // OpenCode / Uno AI picked before Work: no sign-in to ask for.
@@ -98,7 +107,9 @@ export function useNextStep(): HomeNextStepState {
         progress,
         channelOn: channels.telegram === "on" || channels.slack === "on",
       })
-    : NOTHING;
+    : telegramPlan && channels.telegram === "on"
+      ? TELEGRAM_DONE
+      : NOTHING;
   const { step, developerStep } = withoutSshFirst(
     plan,
     settingsReady
