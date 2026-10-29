@@ -3,7 +3,8 @@
 # the Mac). One throwaway daemon on its own port and folders, one account with
 # CHATS chats (TURNS of them with a finished turn, unread):
 #
-#   A  BASE_REF  web + daemon (before)
+#   A0 / B0  before / after with the default short list (Show N more closed)
+#   A  BASE_REF  web + daemon (before), every Show N more opened
 #   B  WORK_REF  web + daemon, no phone connected
 #   C  WORK_REF  web + daemon, a v2 phone subscribed to the shell and a chat
 #   B2 WORK_REF  again without the phone (noise check)
@@ -91,6 +92,7 @@ HOME="$B/userhome" "$NODE" "$W/apps/server/src/bin.ts" project add --base-dir "$
 start_daemon
 bench seed "$BASEURL" "$(pair)" "$CHATS" "$TURNS" "$B/turn-ids.json"
 bench measure "$BASEURL" "$(pair)" "A before ($BASE_REF)" "$B/turn-ids.json" "$B/A.json"
+BENCH_EXPAND=0 bench measure "$BASEURL" "$(pair)" "A before, short list" "$B/turn-ids.json" "$B/A0.json"
 stop_daemon
 
 # --- B / C / B2: after -------------------------------------------------------
@@ -98,6 +100,8 @@ checkout_and_build "$WORK_REF"
 start_daemon
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 bench measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
+bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
+BENCH_EXPAND=0 bench measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
 
 bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
 NEWEST=$("$NODE" -e 'const a=require(process.argv[1]);console.log(a[a.length-1])' "$B/turn-ids.json")
@@ -115,7 +119,7 @@ bench measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.js
 stop_daemon
 
 "$NODE" -e '
-const rows = ["A","B","C","B2"].map((k) => require(`${process.argv[1]}/${k}.json`).summary);
+const rows = ["A0","B0","A","B","C","B2"].map((k) => require(`${process.argv[1]}/${k}.json`).summary);
 const f = (v) => (v === null || v === undefined ? "–" : Number(v).toFixed(1));
 console.log("| run | rows | clicks | click→DOM med / p95, ms | click→paint med / p95, ms | commits ≤300 ms | commits ≤2.5 s | sidebar mutations ≤300 ms / ≤2.5 s | idle commits 5 s |");
 console.log("|---|---|---|---|---|---|---|---|---|");

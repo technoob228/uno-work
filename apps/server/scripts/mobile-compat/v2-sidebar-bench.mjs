@@ -219,6 +219,21 @@ async function measure(label, idsFile, out) {
     ids[ids.length - 1],
     { timeout: 120_000 },
   );
+  // Worst case: every "Show N more" opened, so all chats are rows in the DOM
+  // (BENCH_EXPAND=0 keeps the default short list).
+  if (process.env.BENCH_EXPAND !== "0") {
+    for (let round = 0; round < 20; round += 1) {
+      const opened = await page.evaluate(() => {
+        const buttons = [...document.querySelectorAll('[data-testid^="sidebar-d-show-more"]')].filter(
+          (button) => /^Show \d+ more/.test(button.textContent ?? ""),
+        );
+        for (const button of buttons) button.click();
+        return buttons.length;
+      });
+      if (opened === 0) break;
+      await sleep(500);
+    }
+  }
   const rows = await page.evaluate(() => document.querySelectorAll("[data-thread-item]").length);
   await sleep(8_000); // first sync, backfill, late snapshots
   const idleCommits = await page.evaluate(async () => {
