@@ -63,6 +63,7 @@ import {
   startEnvironmentConnectionService,
   useSavedEnvironmentRegistryStore,
 } from "../environments/runtime";
+import { startOutboxFlusher } from "../outbox/outboxFlusher";
 import { configureClientTracing } from "../observability/clientTracing";
 import {
   ensurePrimaryEnvironmentReady,
@@ -375,6 +376,8 @@ function EnvironmentConnectionManagerBootstrap() {
   useEffect(() => {
     return startEnvironmentConnectionService(queryClient);
   }, [queryClient]);
+  // Messages written offline go out once their computer is back (outbox/).
+  useEffect(() => startOutboxFlusher(), []);
 
   return null;
 }
