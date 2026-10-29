@@ -28,3 +28,35 @@ layer("NodeSqliteClient", (it) => {
     }),
   );
 });
+
+layer("NodeSqliteClient large bindings", (it) => {
+  it("flags only executions binding more than LARGE_BINDING_SIZE", () => {
+    const big = "x".repeat(SqliteClient.LARGE_BINDING_SIZE + 1);
+    assert.equal(SqliteClient.hasLargeBinding(["small", 1, null]), false);
+    assert.equal(SqliteClient.hasLargeBinding([big]), true);
+    assert.equal(SqliteClient.hasLargeBinding([new Uint8Array(SqliteClient.LARGE_BINDING_SIZE + 1)]), true);
+    assert.equal(SqliteClient.hasLargeBinding([{ payload: big }]), true);
+    const withGetter = Object.defineProperty({}, "payload", {
+      enumerable: true,
+      get: () => "small",
+    });
+    assert.equal(SqliteClient.hasLargeBinding([withGetter]), true);
+  });
+
+  it.effect("round-trips a large payload through a throwaway statement", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const big = "y".repeat(SqliteClient.LARGE_BINDING_SIZE * 2);
+      yield* sql`CREATE TABLE blobs(id INTEGER PRIMARY KEY, body TEXT NOT NULL)`;
+      yield* sql`INSERT INTO blobs(body) VALUES (${big})`;
+      yield* sql`INSERT INTO blobs(body) VALUES (${"small"})`;
+      const rows = yield* sql<{ readonly len: number }>`
+        SELECT length(body) AS len FROM blobs ORDER BY id
+      `;
+      assert.deepEqual(
+        rows.map((row) => row.len),
+        [SqliteClient.LARGE_BINDING_SIZE * 2, 5],
+      );
+    }),
+  );
+});
