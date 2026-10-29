@@ -191,6 +191,7 @@ import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/h
 import { wasEverSignedIn } from "./harness/harnessSignInMemory";
 import { refreshEnvironmentProviders } from "~/environments/settings/serverSettings";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useReconnectWarningVisible } from "./chat/reconnectWarningGrace";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
 import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
@@ -1258,9 +1259,10 @@ export default function ChatView(props: ChatViewProps) {
   // "A new version of Uno Work is ready · Update" for the computer this chat runs on.
   const selfUpdate = useSelfUpdate(activeThread?.environmentId ?? primaryEnvironmentId);
   const selfUpdateBanner = selfUpdateBannerItem(selfUpdate);
+  const reconnectWarningVisible = useReconnectWarningVisible(activeEnvironmentUnavailableState);
   const environmentBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
-    if (activeEnvironmentUnavailableState) {
+    if (activeEnvironmentUnavailableState && reconnectWarningVisible) {
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant:
@@ -1320,6 +1322,7 @@ export default function ChatView(props: ChatViewProps) {
     handleReconnectActiveEnvironment,
     navigate,
     reconnectingEnvironmentId,
+    reconnectWarningVisible,
   ]);
   // While Uno Work updates itself the daemon restarts: "can't reach the
   // computer" and "versions differ" would only repeat what the update notice says.
