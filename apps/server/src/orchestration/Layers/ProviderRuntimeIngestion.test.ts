@@ -460,7 +460,8 @@ describe("ProviderRuntimeIngestion", () => {
         harness.readModel,
         (entry) => entry.session?.status === "error",
       );
-      expect(thread.session?.lastError).toBe(UPSTREAM_TIMEOUT);
+      // The person reads the sentence, not the gateway's JSON (walk on 0.0.162, 29.10).
+      expect(thread.session?.lastError).toBe("Uno AI didn't answer in time — try again.");
       await new Promise((resolve) => setTimeout(resolve, 100));
       const after = await waitForThread(harness.readModel, () => true);
       expect(after.messages.filter(isAutoRetryNote)).toHaveLength(2);

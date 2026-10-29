@@ -7,7 +7,10 @@ import {
 } from "@t3tools/shared/turnErrorRetry";
 import { Cause, Effect, Fiber, Layer, Option, Scope, Stream } from "effect";
 
-import { isUnoBillingErrorDetail } from "../../provider/unoBilling.ts";
+import {
+  isUnoBillingErrorDetail,
+  normalizeUnoBillingErrorMessage,
+} from "../../provider/unoBilling.ts";
 import { systemCommandOrigin } from "../commandOrigin.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -88,7 +91,7 @@ export const makeTurnAutoRetryLayer = (options: TurnAutoRetryLayerOptions = {}) 
       const giveUp = (threadId: ThreadId, error: string, detail: string) =>
         Effect.gen(function* () {
           yield* Effect.logWarning("turn auto-retry: could not continue the turn").pipe(
-            Effect.annotateLogs({ threadId, detail }),
+            Effect.annotateLogs({ threadId, detail, error }),
           );
           const shell = yield* projections
             .getThreadShellById(threadId)
@@ -105,7 +108,8 @@ export const makeTurnAutoRetryLayer = (options: TurnAutoRetryLayerOptions = {}) 
             session: {
               ...session,
               status: "error",
-              lastError: error,
+              // The person's sentence, not the harness's JSON (raw `error` is in the log).
+              lastError: normalizeUnoBillingErrorMessage(error),
               lastErrorClass: "provider_error",
               updatedAt: now,
             },

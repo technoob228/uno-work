@@ -6,6 +6,7 @@ import {
   isUnoBillingErrorDetail,
   isUnoBillingFailureReply,
   normalizeUnoBillingErrorMessage,
+  providerErrorBodyMessage,
   UNO_AI_CREDIT_EMPTY_MESSAGE,
   UNO_AI_NOT_INCLUDED_MESSAGE,
   UNO_LLM_CREDITS_EMPTY_MESSAGE,
@@ -233,5 +234,62 @@ describe("billing failure relayed as an assistant reply", () => {
     ]) {
       expect(isUnoBillingFailureReply(reply)).toBe(false);
     }
+  });
+});
+
+describe("a provider error that is only a JSON body (walk on 0.0.162, 29.10)", () => {
+  const STOPPED = "Uno AI stopped answering — try again.";
+  // What OpenCode reported: the inner object of the gateway's SSE error chunk.
+  const FROM_OPENCODE = JSON.stringify({
+    message: STOPPED,
+    type: "upstream_error",
+    code: "upstream_error",
+  });
+
+  it("shows the person only the sentence", () => {
+    expect(normalizeUnoBillingErrorMessage(FROM_OPENCODE)).toBe(STOPPED);
+    expect(providerErrorBodyMessage(FROM_OPENCODE)).toBe(STOPPED);
+  });
+
+  it("finds the sentence nested, after harness wrappers, or in a body inside the body", () => {
+    const nested = JSON.stringify({
+      error: { message: STOPPED, type: "upstream_error", code: "upstream_error" },
+    });
+    expect(normalizeUnoBillingErrorMessage(nested)).toBe(STOPPED);
+    expect(normalizeUnoBillingErrorMessage(`Error: ${FROM_OPENCODE}`)).toBe(STOPPED);
+    expect(normalizeUnoBillingErrorMessage(`HTTP 502: ${nested}`)).toBe(STOPPED);
+    expect(normalizeUnoBillingErrorMessage(`AI_APICallError: ${nested}`)).toBe(STOPPED);
+    expect(normalizeUnoBillingErrorMessage(JSON.stringify({ message: nested }))).toBe(STOPPED);
+    expect(normalizeUnoBillingErrorMessage(JSON.stringify({ error: "Bad gateway" }))).toBe(
+      "Bad gateway",
+    );
+  });
+
+  it("is idempotent and leaves plain sentences and other text alone", () => {
+    expect(normalizeUnoBillingErrorMessage(STOPPED)).toBe(STOPPED);
+    for (const text of [
+      "HTTP 502: Bad gateway",
+      "Error: tool failed",
+      "Expected {x} but got {y}",
+      "{not json}",
+      '{"type":"upstream_error","code":"upstream_error"}',
+      "[1,2]",
+    ]) {
+      expect(normalizeUnoBillingErrorMessage(text)).toBe(text);
+    }
+    expect(providerErrorBodyMessage('{"message":"   "}')).toBeNull();
+  });
+
+  it("keeps the raw text for classification: not billing, not a retryable timeout", () => {
+    expect(classifyProviderErrorDetail(FROM_OPENCODE)).toBe("provider_error");
+    expect(classifyOrchestrationErrorDetail(FROM_OPENCODE)).toBe("provider_error");
+  });
+
+  it("still turns a billing body into the way out, not the bare sentence", () => {
+    expect(
+      normalizeUnoBillingErrorMessage(
+        JSON.stringify({ error: { code: "insufficient_credits", message: "No money" } }),
+      ),
+    ).toBe(UNO_AI_CREDIT_EMPTY_MESSAGE);
   });
 });
