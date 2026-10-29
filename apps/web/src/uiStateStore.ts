@@ -718,14 +718,37 @@ export function rememberSettingsScope(
   return { ...state, settingsScopeMemory: { machineEnvironmentId, lastKind } };
 }
 
+/**
+ * Server mirror of read state (threadReadStateSync.ts). The store stays the
+ * instant source for rendering; the sink is told after a local change and
+ * writes to the daemon in the background.
+ */
+export interface ThreadReadStateSink {
+  readonly visited: (threadKey: string, visitedAt: string) => void;
+  readonly unread: (threadKey: string) => void;
+}
+let threadReadStateSink: ThreadReadStateSink | null = null;
+export function setThreadReadStateSink(sink: ThreadReadStateSink | null) {
+  threadReadStateSink = sink;
+}
+
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
   syncProjects: (projects) => set((state) => syncProjects(state, projects)),
   syncThreads: (threads) => set((state) => syncThreads(state, threads)),
   markThreadVisited: (threadId, visitedAt) =>
-    set((state) => markThreadVisited(state, threadId, visitedAt)),
+    set((state) => {
+      const next = markThreadVisited(state, threadId, visitedAt);
+      const at = next.threadLastVisitedAtById[threadId];
+      if (next !== state && at) threadReadStateSink?.visited(threadId, at);
+      return next;
+    }),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
-    set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
+    set((state) => {
+      const next = markThreadUnread(state, threadId, latestTurnCompletedAt);
+      if (next !== state) threadReadStateSink?.unread(threadId);
+      return next;
+    }),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
   setThreadChangedFilesExpanded: (threadId, turnId, expanded) =>
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),

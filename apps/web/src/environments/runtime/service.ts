@@ -84,6 +84,7 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import { installThreadReadStateSync, mergeServerThreadReadState } from "../../threadReadStateSync";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -1130,6 +1131,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       return;
     case "thread-upserted":
       syncThreadUiFromStore();
+      mergeServerThreadReadState(environmentId, [event.thread]);
       if (!previousThread && threadRef) {
         markPromotedDraftThreadByRef(threadRef);
       }
@@ -1152,6 +1154,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 }
 
 function createEnvironmentConnectionHandlers() {
+  installThreadReadStateSync();
   return {
     applyShellEvent,
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
@@ -1166,6 +1169,7 @@ function createEnvironmentConnectionHandlers() {
 
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
       markAppliedProjectionSnapshot(environmentId, snapshot);
+      mergeServerThreadReadState(environmentId, snapshot.threads, { backfill: true });
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),
