@@ -1164,9 +1164,9 @@ describe("a project shared with someone else", { timeout: 120_000 }, () => {
       const first = await syncProject({ dir, name: "notes" }, misha);
       expect(first.ok).toBe(true);
       expect(await claimSharedArrival(claim, anya)).toBe(true);
-      expect(
-        await claimSharedArrival({ ...claim, membership: "2026-11-02T08:00:00Z" }, anya),
-      ).toBe(true);
+      expect(await claimSharedArrival({ ...claim, membership: "2026-11-02T08:00:00Z" }, anya)).toBe(
+        true,
+      );
       // The project itself doesn't notice.
       fs.writeFileSync(path.join(dir, "plan.md"), "plan 2\n");
       expect((await syncProject({ dir, name: "notes" }, misha)).state).toBe("synced");
