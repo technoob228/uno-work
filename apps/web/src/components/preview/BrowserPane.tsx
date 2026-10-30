@@ -59,7 +59,7 @@ import {
   setBrowserAutomationHandler,
   setBrowserTabAutomationHandler,
 } from "./BrowserAutomationRegistry";
-import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
+import { CommentBar, CommentLayer, SelectionQuote } from "./annotate/CommentLayer";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { IframeWebview } from "./annotate/iframeWebview";
 import { PostMessageWebview } from "./annotate/postMessageWebview";
@@ -1491,6 +1491,13 @@ function BrowserView({
             </div>
             {pageToolsOn ? (
               <CommentLayer
+                tabId={tab.id}
+                pageRef={pageElementRef}
+                zoom={zoomFactor * deviceScale}
+              />
+            ) : null}
+            {pageToolsOn ? (
+              <SelectionQuote
                 tabId={tab.id}
                 pageRef={pageElementRef}
                 zoom={zoomFactor * deviceScale}

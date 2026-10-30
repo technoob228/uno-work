@@ -37,7 +37,7 @@ import {
 } from "@t3tools/shared/browserScreenshot";
 import { Context, Data, Duration, Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import type { BrowserContext, CDPSession, Page } from "playwright-core";
+import type { Browser, BrowserContext, CDPSession, Page } from "playwright-core";
 
 import {
   bridgeContextKey,
@@ -53,6 +53,11 @@ import {
   type BrowserSetupController,
 } from "./browserSetup.ts";
 import { ServerConfig } from "./config.ts";
+import {
+  capturePage as capturePageIn,
+  type PageCapture,
+  type PageCaptureInput,
+} from "./htmlRender/pageCapture.ts";
 
 /**
  * Серверный исполнитель bridge-команд: Chromium самой машины (playwright-core).
@@ -140,6 +145,14 @@ export interface ServerBrowserShape {
     input: BrowserAutomationCommandInput,
     context?: BrowserBridgeRequestContext,
   ) => Effect.Effect<BrowserAutomationCommandResult>;
+  /**
+   * Снимок страницы агента (`html_preview`): отдельный браузер на один кадр,
+   * без профиля человека (htmlRender/pageCapture.ts). Не фейлится: `error` —
+   * текст для агента.
+   */
+  readonly capturePage: (
+    input: PageCaptureInput,
+  ) => Effect.Effect<PageCapture | { readonly error: string }>;
   readonly live: ServerBrowserLiveShape;
   readonly shutdown: Effect.Effect<void>;
 }
@@ -1094,30 +1107,94 @@ export const makeServerBrowser = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Браузер ещё не поставлен: запускаем установку и ждём её (обычно ~30–45 с),
+   * чтобы первая же команда прошла. Затянулась — текст агенту, когда повторить,
+   * а не держим команду бесконечно. null — браузер готов.
+   */
+  const setupProblem = (context?: BrowserBridgeRequestContext) =>
+    Effect.gen(function* () {
+      if (!setup || setup.current().status === "ready") return null;
+      const started = yield* Effect.promise(() =>
+        setup.ensure({ ...(context ? { context } : {}) }).catch(
+          (cause: unknown): BrowserLiveSetup => ({
+            ...setup.current(),
+            status: "failed",
+            error: cause instanceof Error ? cause.message : String(cause),
+          }),
+        ),
+      );
+      const current =
+        started.status === "installing" || started.status === "missing"
+          ? yield* Effect.promise(() => waitForSetup(SERVER_BROWSER_SETUP_WAIT_MS))
+          : started;
+      return current.status === "ready" ? null : setupMessageForAgent(current);
+    });
+
+  // Один снимок за раз: на маленькой машине браузер ест заметно памяти.
+  const captureSemaphore = yield* Semaphore.make(1);
+
+  const launchForCapture = async (): Promise<Browser> => {
+    const { chromium } = await import("playwright-core");
+    const executablePath = process.env[SERVER_BROWSER_EXECUTABLE_ENV]?.trim() || undefined;
+    const launchWith = (channel: "chromium" | "chrome" | undefined) =>
+      chromium.launch({
+        headless: true,
+        ...(executablePath ? { executablePath } : {}),
+        ...(channel ? { channel } : {}),
+        args: [
+          "--dns-prefetch-disable",
+          "--disable-background-networking",
+          "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        ],
+      });
+    if (executablePath) return launchWith(undefined);
+    const missing = (cause: unknown) =>
+      /executable doesn't exist|is not found/i.test(String(cause));
+    // Как у основного браузера: полный Chromium, потом оболочка; на Mac и
+    // Windows браузера машины обычно нет, но есть Chrome человека (без профиля).
+    return launchWith("chromium").catch((cause: unknown) =>
+      missing(cause)
+        ? launchWith(undefined).catch((next: unknown) =>
+            missing(next) ? launchWith("chrome") : Promise.reject(next),
+          )
+        : Promise.reject(cause),
+    );
+  };
+
+  const capturePage: ServerBrowserShape["capturePage"] = (input) =>
+    Effect.gen(function* () {
+      const problem = yield* setupProblem();
+      if (problem !== null) return { error: problem };
+      return yield* captureSemaphore.withPermits(1)(
+        Effect.tryPromise({
+          try: async () => {
+            const browser = await launchForCapture();
+            try {
+              return await capturePageIn(browser, input);
+            } finally {
+              await browser.close().catch(() => undefined);
+            }
+          },
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("html_preview could not take a picture", { cause }).pipe(
+              Effect.as({
+                error:
+                  "No browser for a preview on this computer right now. html_render still works: publish the page.",
+              }),
+            ),
+          ),
+        ),
+      );
+    });
+
   const execute: ServerBrowserShape["execute"] = (input, context) =>
     Effect.gen(function* () {
       const commandId = `server-${randomBytes(12).toString("hex")}`;
-      // Браузер ещё не поставлен: запускаем установку и ждём её (обычно
-      // ~30–45 с), чтобы первая же команда прошла. Затянулась — отвечаем
-      // агенту, когда повторить, а не держим команду бесконечно.
-      if (setup && setup.current().status !== "ready") {
-        const started = yield* Effect.promise(() =>
-          setup.ensure({ context }).catch(
-            (cause: unknown): BrowserLiveSetup => ({
-              ...setup.current(),
-              status: "failed",
-              error: cause instanceof Error ? cause.message : String(cause),
-            }),
-          ),
-        );
-        const current =
-          started.status === "installing" || started.status === "missing"
-            ? yield* Effect.promise(() => waitForSetup(SERVER_BROWSER_SETUP_WAIT_MS))
-            : started;
-        if (current.status !== "ready") {
-          return { ok: false, commandId, error: setupMessageForAgent(current) };
-        }
-      }
+      const problem = yield* setupProblem(context);
+      if (problem !== null) return { ok: false, commandId, error: problem };
       // Браузер ещё не запущен (или только что поставлен): поднять его и
       // вкладку чата до отсчёта таймаута команды, с повторами.
       if (input.command !== "requestHelp") {
@@ -1536,7 +1613,7 @@ export const makeServerBrowser = Effect.gen(function* () {
 
   yield* Effect.addFinalizer(() => shutdown.pipe(Effect.timeout("5 seconds"), Effect.ignore));
 
-  return { execute, live, shutdown } satisfies ServerBrowserShape;
+  return { execute, capturePage, live, shutdown } satisfies ServerBrowserShape;
 });
 
 export const ServerBrowserLive = Layer.effect(ServerBrowser, makeServerBrowser);
@@ -1579,6 +1656,7 @@ export const ServerBrowserTest = Layer.succeed(ServerBrowser, {
       commandId: "test",
       error: "Server-side browser is unavailable in tests.",
     }),
+  capturePage: () => Effect.succeed({ error: "Server-side browser is unavailable in tests." }),
   live: unavailableServerBrowserLive,
   shutdown: Effect.void,
 });

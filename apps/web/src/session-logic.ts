@@ -12,6 +12,11 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import {
+  HTML_RENDER_ACTIVITY_KIND,
+  readHtmlRenderReference,
+  type HtmlRenderReference,
+} from "@t3tools/shared/htmlRender";
 import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "./unoHarnessLabels";
 import {
   describeToolActivity,
@@ -154,6 +159,13 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      /** A page the agent showed in the chat. */
+      id: string;
+      kind: "html-render";
+      createdAt: string;
+      htmlRender: HtmlRenderReference;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -565,6 +577,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "task.started")
     .filter((activity) => activity.kind !== "context-window.updated")
     .filter((activity) => !activity.kind.startsWith("plan-limit."))
+    .filter((activity) => activity.kind !== HTML_RENDER_ACTIVITY_KIND)
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .filter((activity) => !isClaudeBookkeepingWarning(activity))
@@ -572,6 +585,26 @@ export function deriveWorkLogEntries(
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+/** The pages of a chat, every turn's: unlike the work log, they stay. */
+export function deriveHtmlRenderEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Extract<TimelineEntry, { kind: "html-render" }>[] {
+  return activities.flatMap((activity) => {
+    if (activity.kind !== HTML_RENDER_ACTIVITY_KIND) return [];
+    const htmlRender = readHtmlRenderReference(activity.payload);
+    return htmlRender
+      ? [
+          {
+            id: `html-render:${activity.id}`,
+            kind: "html-render" as const,
+            createdAt: activity.createdAt,
+            htmlRender,
+          },
+        ]
+      : [];
+  });
 }
 
 /**
@@ -1345,6 +1378,7 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  htmlRenderEntries: ReadonlyArray<TimelineEntry> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1364,7 +1398,7 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...htmlRenderEntries].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

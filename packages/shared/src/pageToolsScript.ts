@@ -61,7 +61,55 @@ export type PageToolsMessage =
   | { readonly type: "network"; readonly data: unknown }
   | { readonly type: "pick"; readonly data: PagePick }
   | { readonly type: "pinClick"; readonly data: { readonly n: number } }
+  | { readonly type: "selection"; readonly data: PageSelection }
   | { readonly type: "key"; readonly data: { readonly key: string } };
+
+/** What the person selected on the page; empty text: nothing any more. */
+export interface PageSelection {
+  readonly text: string;
+  readonly url: string;
+  /** The selection's last line in the page's viewport (CSS pixels). */
+  readonly rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+}
+
+const SELECTION_MAX_TEXT = 8_000;
+
+/**
+ * Reads the selection in a page: plain ES2017, for the in-page script and for
+ * the computer's live browser, which asks once after the person's mouse up. A
+ * selection inside a field is the field's, and may be a password: not reported.
+ */
+const READ_SELECTION = `function () {
+    var s = window.getSelection ? window.getSelection() : null;
+    var a = document.activeElement;
+    var field = a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName || ""));
+    var text = s && !s.isCollapsed && s.rangeCount && !field ? String(s).trim() : "";
+    var box = { x: 0, y: 0, w: 0, h: 0 };
+    if (text) {
+      var range = s.getRangeAt(0), lines = range.getClientRects();
+      var last = lines.length ? lines[lines.length - 1] : range.getBoundingClientRect();
+      box = { x: last.left, y: last.top, w: last.width, h: last.height };
+    }
+    return { text: text.slice(0, ${SELECTION_MAX_TEXT}), url: location.href, rect: box };
+  }`;
+
+/** One evaluation in a page: its {@link PageSelection}. */
+export const PAGE_SELECTION_EXPRESSION = `(${READ_SELECTION})()`;
+
+/** A selection as the page reported it, checked (a page can say anything); null: none. */
+export function pageSelectionFrom(data: unknown): PageSelection | null {
+  const { text, url, rect } = (data ?? {}) as Partial<PageSelection>;
+  if (typeof text !== "string" || text.length === 0 || typeof url !== "string") return null;
+  const { x, y, w, h } = (rect ?? {}) as Partial<PageSelection["rect"]>;
+  if (![x, y, w, h].every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return null;
+  }
+  return {
+    text: text.slice(0, SELECTION_MAX_TEXT),
+    url: url.slice(0, 2_000),
+    rect: { x: x as number, y: y as number, w: w as number, h: h as number },
+  };
+}
 
 export interface PagePick {
   readonly kind: "element" | "area";
@@ -525,6 +573,23 @@ const SCRIPT = String.raw`
   // The queue channel: the pointer is the app's (a picture of the page), and
   // the page's own events — the agent's clicks — stay the page's.
   if (!QUEUE) {
+  // Text selected on the page: the app offers a quote over it.
+  var readSelection = __READ_SELECTION__;
+  var selTimer = 0, selDown = false, selLast = "";
+  function selReport() {
+    selTimer = 0;
+    if (selDown) return;
+    var sel = mode === "off" ? readSelection() : { text: "", url: location.href, rect: { x: 0, y: 0, w: 0, h: 0 } };
+    var key = sel.text ? sel.text + "|" + Math.round(sel.rect.x) + "|" + Math.round(sel.rect.y) : "";
+    if (key === selLast) return;
+    selLast = key;
+    emit("selection", sel);
+  }
+  function selSoon() { if (!selTimer) selTimer = setTimeout(selReport, 120); }
+  document.addEventListener("selectionchange", selSoon);
+  w.addEventListener("pointerdown", function () { selDown = true; }, true);
+  w.addEventListener("pointerup", function () { selDown = false; selSoon(); }, true);
+  w.addEventListener("scroll", function () { if (selLast) selSoon(); }, true);
   ["pointerdown", "mousedown"].forEach(function (t) { w.addEventListener(t, onDown, true); });
   ["pointerup", "mouseup"].forEach(function (t) { w.addEventListener(t, onUp, true); });
   ["click", "dblclick", "auxclick", "contextmenu"].forEach(function (t) { w.addEventListener(t, onClick, true); });
@@ -747,7 +812,8 @@ export function buildPageToolsScript(
   options: { readonly verifyPath?: string } = {},
 ): string {
   const verify = channel === "postMessage" && options.verifyPath ? options.verifyPath : "";
-  return `${SCRIPT.trim()}(${JSON.stringify(nonce)}, ${channel === "queue" ? "true" : "false"}, ${channel === "postMessage" ? "true" : "false"}, ${JSON.stringify(verify)});`;
+  const script = SCRIPT.trim().replace("__READ_SELECTION__", READ_SELECTION);
+  return `${script}(${JSON.stringify(nonce)}, ${channel === "queue" ? "true" : "false"}, ${channel === "postMessage" ? "true" : "false"}, ${JSON.stringify(verify)});`;
 }
 
 /** The script the console puts on the person's Uno Sites pages. */

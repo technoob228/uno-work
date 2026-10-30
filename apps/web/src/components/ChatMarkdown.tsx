@@ -1,8 +1,6 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
-  Children,
   Suspense,
-  isValidElement,
   use,
   useCallback,
   memo,
@@ -19,6 +17,8 @@ import remarkGfm from "remark-gfm";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { fileLinkParentSuffixes } from "./chat/fileLinkLabel";
 import { FileMention, FileMentionContext } from "./chat/MarkdownFileLink";
+import { extractCodeBlock } from "./chat/markdownCodeBlock";
+import { MarkdownMermaidCodeBlock } from "./chat/MarkdownMermaidCodeBlock";
 import { remarkFileMentions } from "./chat/remarkFileMentions";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
@@ -71,41 +71,6 @@ function extractFenceLanguage(className: string | undefined): string {
   const raw = match?.[1] ?? "text";
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
-}
-
-function nodeToPlainText(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map((child) => nodeToPlainText(child)).join("");
-  }
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return nodeToPlainText(node.props.children);
-  }
-  return "";
-}
-
-function extractCodeBlock(
-  children: ReactNode,
-): { className: string | undefined; code: string } | null {
-  const childNodes = Children.toArray(children);
-  if (childNodes.length !== 1) {
-    return null;
-  }
-
-  const onlyChild = childNodes[0];
-  if (
-    !isValidElement<{ className?: string; children?: ReactNode }>(onlyChild) ||
-    onlyChild.type !== "code"
-  ) {
-    return null;
-  }
-
-  return {
-    className: onlyChild.props.className,
-    code: nodeToPlainText(onlyChild.props.children),
-  };
 }
 
 function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
@@ -387,27 +352,40 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
           return <pre {...props}>{children}</pre>;
         }
 
-        return (
-          <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              {/* Reserve the block's height but stay hidden until Shiki has
+        const highlighted = (
+          <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+            {/* Reserve the block's height but stay hidden until Shiki has
                   coloured it, so plain text never flashes before the
                   highlighted version (upstream c07575f573). */}
-              <Suspense
-                fallback={
-                  <pre {...props} className="invisible" aria-hidden>
-                    {children}
-                  </pre>
-                }
+            <Suspense
+              fallback={
+                <pre {...props} className="invisible" aria-hidden>
+                  {children}
+                </pre>
+              }
+            >
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={codeBlock.code}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
+        );
+        return (
+          <MarkdownCodeBlock code={codeBlock.code}>
+            {extractFenceLanguage(codeBlock.className) === "mermaid" ? (
+              <MarkdownMermaidCodeBlock
+                code={codeBlock.code}
+                isStreaming={isStreaming}
+                className="right-9"
               >
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
+                {highlighted}
+              </MarkdownMermaidCodeBlock>
+            ) : (
+              highlighted
+            )}
           </MarkdownCodeBlock>
         );
       },

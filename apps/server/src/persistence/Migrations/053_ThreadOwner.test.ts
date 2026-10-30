@@ -156,7 +156,7 @@ layer("053_ThreadOwner", (it) => {
       });
       yield* sql`INSERT INTO projection_threads ${sql.insert(values)}`;
 
-      const ran = yield* runMigrations();
+      const ran = yield* runMigrations({ toMigrationInclusive: 53 });
       assert.deepStrictEqual(
         ran.map(([id]) => id),
         [52, 53],
@@ -177,7 +177,7 @@ layer("053_ThreadOwner", (it) => {
           last_visited_at: null,
         },
       ]);
-      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 53 }), []);
     }),
   );
 });

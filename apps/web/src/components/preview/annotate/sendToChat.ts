@@ -25,6 +25,31 @@ export function makePanelContextFile(payload: PanelContextPayload): ComposerFile
   };
 }
 
+/** A quote from the page waits by the chat's composer; false: no chat on screen (it says so). */
+export function useQuoteToChat(): (quote: {
+  text: string;
+  comment: string;
+  page: string;
+}) => boolean {
+  const composerRef = useComposerHandleContext();
+  return useCallback(
+    (quote) => {
+      const composer = composerRef?.current;
+      if (!composer?.addQuote) {
+        toastManager.add({
+          type: "info",
+          title: "Open a chat to send this",
+          description: "Quotes go to the chat next to the panel.",
+        });
+        return false;
+      }
+      composer.addQuote(quote);
+      return true;
+    },
+    [composerRef],
+  );
+}
+
 /** Put a card into the chat's composer; false — no chat composer on screen (it says so). */
 export function useSendToChat(): (payload: PanelContextPayload, text?: string) => boolean {
   const composerRef = useComposerHandleContext();

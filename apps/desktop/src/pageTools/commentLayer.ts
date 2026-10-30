@@ -25,6 +25,7 @@ type Emit = (message: PageToolsWireMessage) => void;
 const ACCENT = "#5b5bd6";
 const HOST_TAG = "uno-page-tools";
 const COMMENTING_CLASS = "__uno-commenting";
+const SELECTION_MAX_TEXT = 8_000;
 
 const SHADOW_CSS = `
 .hl{position:fixed;display:none;border:1.5px solid ${ACCENT};background:rgba(91,91,214,.08);border-radius:4px;pointer-events:none;box-sizing:border-box}
@@ -427,6 +428,64 @@ export function installCommentLayer(win: Window & typeof globalThis, emit: Emit)
   win.addEventListener("pointermove", onMove, true);
   win.addEventListener("keydown", onKey, true);
   win.addEventListener("scroll", redraw, true);
+
+  // Text selected on the page: the app offers a quote over it (the same as
+  // the in-page script's). A selection inside a field may be a password.
+  let selectionTimer: number | null = null;
+  let selecting = false;
+  let lastSelection = "";
+  const reportSelection = () => {
+    selectionTimer = null;
+    if (selecting) return;
+    const selection = win.getSelection();
+    const active = doc.activeElement as HTMLElement | null;
+    const inField =
+      !!active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+    const text =
+      mode === "off" && selection && !selection.isCollapsed && selection.rangeCount && !inField
+        ? selection.toString().trim()
+        : "";
+    const rect = { x: 0, y: 0, w: 0, h: 0 };
+    if (text && selection) {
+      const range = selection.getRangeAt(0);
+      const lines = range.getClientRects();
+      const last = lines.item(lines.length - 1) ?? range.getBoundingClientRect();
+      Object.assign(rect, { x: last.left, y: last.top, w: last.width, h: last.height });
+    }
+    const key = text ? `${text}|${Math.round(rect.x)}|${Math.round(rect.y)}` : "";
+    if (key === lastSelection) return;
+    lastSelection = key;
+    emit({
+      type: "selection",
+      data: { text: text.slice(0, SELECTION_MAX_TEXT), url: win.location.href, rect },
+    });
+  };
+  const reportSelectionSoon = () => {
+    selectionTimer ??= win.setTimeout(reportSelection, 120);
+  };
+  doc.addEventListener("selectionchange", reportSelectionSoon);
+  win.addEventListener(
+    "pointerdown",
+    () => {
+      selecting = true;
+    },
+    true,
+  );
+  win.addEventListener(
+    "pointerup",
+    () => {
+      selecting = false;
+      reportSelectionSoon();
+    },
+    true,
+  );
+  win.addEventListener(
+    "scroll",
+    () => {
+      if (lastSelection) reportSelectionSoon();
+    },
+    true,
+  );
   win.addEventListener("resize", redraw);
 
   return {

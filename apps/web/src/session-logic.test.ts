@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveHtmlRenderEntries,
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -1389,6 +1390,58 @@ describe("deriveWorkLogEntries", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.id).toBe("a-complete-same-timestamp");
+  });
+});
+
+describe("a page in the chat", () => {
+  const page = makeActivity({
+    id: "page-1",
+    createdAt: "2026-02-23T00:00:02.000Z",
+    kind: "html.render",
+    summary: "Page",
+    tone: "info",
+    payload: {
+      attachmentId: "page-abc",
+      path: "/home/uno/.uno-work/attachments/page-abc.html",
+      title: "Revenue",
+      height: 400,
+    },
+  });
+
+  it("is an entry of its own, not a line of work", () => {
+    expect(deriveHtmlRenderEntries([page])).toMatchObject([
+      { kind: "html-render", htmlRender: { attachmentId: "page-abc", title: "Revenue" } },
+    ]);
+    expect(deriveWorkLogEntries([page], undefined)).toEqual([]);
+  });
+
+  it("stays in the feed in time order, whichever turn it came from", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("message-1"),
+          role: "assistant",
+          text: "See above",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+      deriveHtmlRenderEntries([page]),
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["html-render", "message"]);
+  });
+
+  it("is skipped when the reference is broken, and never points outside its id", () => {
+    const broken = (payload: Record<string, unknown>) =>
+      makeActivity({ id: "page-2", kind: "html.render", summary: "Page", tone: "info", payload });
+    expect(deriveHtmlRenderEntries([broken({ title: "No id" })])).toEqual([]);
+    expect(
+      deriveHtmlRenderEntries([
+        broken({ attachmentId: "abc", path: "/etc/passwd", title: "Other file", height: 100 }),
+      ]),
+    ).toEqual([]);
   });
 });
 

@@ -11,6 +11,7 @@
  */
 import { buildPlanImplementationPrompt } from "../../proposedPlan";
 import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
+import { extractQuotes } from "../../lib/chatQuotes";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 
 export interface ComposerPromptHistoryMessage {
@@ -48,7 +49,9 @@ const PLAN_IMPLEMENTATION_PREFIX = buildPlanImplementationPrompt("").trim();
 /** The words the person typed, without what the app appended; "" when there are none. */
 export function recallableComposerPrompt(text: string): string {
   const withoutRecording = extractRecordingBlock(text).text;
-  const prompt = deriveDisplayedUserMessageState(withoutRecording).visibleText.trim();
+  const prompt = extractQuotes(
+    deriveDisplayedUserMessageState(withoutRecording).visibleText,
+  ).text.trim();
   if (ATTACHMENT_ONLY_PROMPT_PATTERN.test(prompt)) return "";
   if (prompt.startsWith(PLAN_IMPLEMENTATION_PREFIX)) return "";
   return prompt;

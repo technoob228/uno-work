@@ -34,6 +34,7 @@ import {
   pageToolsCall,
   type PageToolsPostCommand,
   type PageToolsMessage,
+  pageSelectionFrom,
   parsePageToolsMessage,
 } from "./pageToolsScript";
 import { usePageToolsStore } from "./pageToolsStore";
@@ -194,6 +195,9 @@ export function usePageTools(input: {
           if (comment) actions.patch(tabId, { draft: { kind: "edit", commentId: comment.id } });
           return;
         }
+        case "selection":
+          actions.patch(tabId, { selection: pageSelectionFrom(message.data) });
+          return;
         case "key": {
           if (message.data.key === "c") actions.toggleMode(tabId);
           else if (message.data.key === "Escape") actions.escape(tabId);

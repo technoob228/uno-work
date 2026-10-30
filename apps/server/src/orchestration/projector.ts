@@ -7,6 +7,8 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 
+import { capThreadActivities } from "@t3tools/shared/htmlRender";
+
 import { isPersonOrigin, startedByFromOrigin } from "./commandOrigin.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
@@ -863,12 +865,13 @@ export function projectEvent(
             return nextBase;
           }
 
-          const activities = [
-            ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
-            payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          const activities = capThreadActivities(
+            [
+              ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
+              payload.activity,
+            ].toSorted(compareThreadActivities),
+            500,
+          );
 
           return {
             ...nextBase,

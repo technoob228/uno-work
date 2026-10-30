@@ -217,6 +217,31 @@ describe("resolveAssistantMessageCopyState", () => {
 });
 
 describe("deriveMessagesTimelineRows", () => {
+  it("gives a page its own row", () => {
+    const htmlRender = {
+      attachmentId: "page-abc",
+      path: "/home/uno/.uno-work/attachments/page-abc.html",
+      title: "Revenue",
+      height: 400,
+    };
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "html-render:1",
+          kind: "html-render",
+          createdAt: "2026-01-01T00:00:05Z",
+          htmlRender,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    expect(rows).toMatchObject([{ kind: "html-render", htmlRender }]);
+  });
+
   it("only enables assistant copy for the terminal assistant message in a turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [

@@ -18,6 +18,31 @@ type WhenToken =
   | { type: "lparen" }
   | { type: "rparen" };
 
+/** Shortcut keys by physical key, for layouts where `event.key` is another character. */
+export const EVENT_CODE_SHORTCUT_KEYS: Readonly<Record<string, string>> = {
+  Backquote: "`",
+  Backslash: "\\",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Comma: ",",
+  Digit0: "0",
+  Digit1: "1",
+  Digit2: "2",
+  Digit3: "3",
+  Digit4: "4",
+  Digit5: "5",
+  Digit6: "6",
+  Digit7: "7",
+  Digit8: "8",
+  Digit9: "9",
+  Equal: "=",
+  Minus: "-",
+  Period: ".",
+  Quote: "'",
+  Semicolon: ";",
+  Slash: "/",
+};
+
 /** The terminal's default before 0.0.136 — what the daemon migrates to {@link TERMINAL_TOGGLE_DEFAULT_KEY}. */
 export const LEGACY_TERMINAL_TOGGLE_RULE: KeybindingRule = {
   key: "mod+j",
