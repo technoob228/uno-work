@@ -1,8 +1,11 @@
 /**
- * Puts a linked prompt in a chat's box, and nothing else: no send, no model,
- * no permissions (upstream `promptLinks/linkedPrompt`). A draft the person
- * typed is never replaced without asking.
+ * Puts a linked prompt in a chat's box: no send, no model (upstream
+ * `promptLinks/linkedPrompt`). A draft the person typed is never replaced
+ * without asking. The words come from whoever made the link, so this chat
+ * starts on confirmations even for someone on Full access (Misha 30.10); the
+ * picker in the box can change that, for this chat only.
  */
+import type { RuntimeMode } from "@t3tools/contracts";
 import type { LinkedPrompt } from "@t3tools/shared/promptLinks";
 
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
@@ -10,6 +13,7 @@ import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraf
 import { toastManager } from "../ui/toast";
 
 const READ_IT_MS = 12_000;
+const LINKED_PROMPT_RUNTIME_MODE: RuntimeMode = "approval-required";
 
 function warnAboutHiddenCharacters(prompt: LinkedPrompt): void {
   if (prompt.hiddenCharacters === 0) return;
@@ -24,7 +28,10 @@ function warnAboutHiddenCharacters(prompt: LinkedPrompt): void {
 export function placeLinkedPrompt(target: ComposerThreadTarget, prompt: LinkedPrompt): void {
   warnAboutHiddenCharacters(prompt);
   const place = () => {
-    useComposerDraftStore.getState().setPrompt(target, prompt.text);
+    const drafts = useComposerDraftStore.getState();
+    drafts.setPrompt(target, prompt.text);
+    drafts.setRuntimeMode(target, LINKED_PROMPT_RUNTIME_MODE);
+    drafts.setDraftThreadContext(target, { runtimeMode: LINKED_PROMPT_RUNTIME_MODE });
     toastManager.add({
       type: "info",
       title: "Prompt added from a link",
