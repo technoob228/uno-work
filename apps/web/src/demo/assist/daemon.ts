@@ -30,8 +30,8 @@ import {
   CONNECTOR_PROVIDERS,
   type ConnectorProvider,
   type ConnectorState,
-  macOnline,
 } from "./world";
+import { linkUp } from "./links";
 
 // ── Per assistant: what its daemon keeps ─────────────────────────────────
 
@@ -343,10 +343,9 @@ export function drawPortrait(persona: string, seed: number): string {
 
 /** Is that computer reachable from the page (asleep ones aren't). */
 export function machineAwake(key: MachineKey): boolean {
-  if (key === "work") return true;
-  if (key === "mac") return macOnline(world);
   if (key === "own") return ownComputerRunning();
-  return false;
+  // The link decides: asleep, offline, a flaky drop, woken.
+  return linkUp(key);
 }
 
 // ── Its memory files (NOTES.md, AGENTS.md…) ─────────────────────────────

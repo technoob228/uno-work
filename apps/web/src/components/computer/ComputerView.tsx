@@ -69,6 +69,7 @@ import {
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
 import { ComputerPill } from "./home/ComputerPill";
+import { useOverviewComputers } from "./home/ComputersOverview";
 import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
 import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
@@ -169,6 +170,7 @@ export function ComputerView() {
   });
   const launchers = useHomeLaunchers(environmentId);
   const terminalComputer = useNameAmongComputers(environmentId);
+  const overviewComputers = useOverviewComputers();
   // The console's first message / a Uno AI chat moving to this computer.
   useUnoAiArrivals(thisMachine ? environmentId : null, launchers.startTask);
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
@@ -384,6 +386,7 @@ export function ComputerView() {
       computer={homeComputer}
       loading={stateQuery.isPending || home.nameLoading}
       environmentId={environmentId}
+      computers={overviewComputers}
     />
   );
 

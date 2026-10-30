@@ -34,6 +34,8 @@ import {
 } from "./demoBrowser";
 import "./seedTabs";
 import { DEMO_ASSIST, useDemoStore } from "./demoFlag";
+import { isWoken, startLinks, trackClient } from "./assist/links";
+import { demoMetrics } from "./assist/metrics";
 import {
   type DemoInboxInput,
   type DemoQuestion,
@@ -131,6 +133,8 @@ function seedLocalStorage() {
       // p5: every computer in one sidebar, one list (no grouping).
       sidebarEnvironmentScope: "all",
       sidebarGroupLevels: [],
+      // Several computers: the spaces option as the world asks (Settings can change it live).
+      ...(DEMO_ASSIST ? { computerSpaces: WORLD.spaces === "on" } : {}),
     }),
   );
   const records = savedMachines().map((machine) => ({
@@ -345,6 +349,8 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     case WS_METHODS.unoComputerGetState:
       return computerStateFor(machine);
     case WS_METHODS.unoComputerLocalMetrics:
+      // Multi-computer variants: each computer's own live load (assist/metrics.ts).
+      if (DEMO_ASSIST) return demoMetrics(machine);
       return {
         hostname: machine.label,
         platform: machine.os,
@@ -553,7 +559,14 @@ function cloudState() {
       ? [
           box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
           ...(WORLD.account === "live"
-            ? [box(MACHINES.product.boxId!, MACHINES.product.label, "sleeping")]
+            ? [
+                box(
+                  MACHINES.product.boxId!,
+                  MACHINES.product.label,
+                  // Multi-computer variants: `__mcDemo.wake("product")` wakes it.
+                  isWoken("product") ? "running" : "sleeping",
+                ),
+              ]
             : []),
         ]
       : [
@@ -1605,6 +1618,7 @@ export const assistDemo = {
 };
 
 function startAssist() {
+  startLinks();
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });
@@ -1646,6 +1660,8 @@ export async function startDemo(): Promise<void> {
         client.close(4000, "asleep");
         return;
       }
+      // Multi-computer variants: a flaky link closes this socket on its next drop.
+      if (DEMO_ASSIST) trackClient(machine.key, client);
       void harnessFor(machine).then((harness) => {
         harness.connect(client);
         client.addEventListener("message", (event) => {

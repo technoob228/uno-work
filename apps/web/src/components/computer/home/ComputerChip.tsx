@@ -9,13 +9,13 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 
-import { useNameAmongComputers } from "../../computerSwitcher/useComputerSwitcher";
 import { ComputerPill } from "./ComputerPill";
+import { useOverviewComputers } from "./ComputersOverview";
 import { useHomeComputer } from "./useHomeComputer";
 
 export function ComputerChip({ environmentId }: { environmentId: EnvironmentId }) {
   const navigate = useNavigate();
-  const computerName = useNameAmongComputers(environmentId);
+  const computers = useOverviewComputers();
   const home = useHomeComputer({
     environmentId,
     boxId: null,
@@ -28,7 +28,7 @@ export function ComputerChip({ environmentId }: { environmentId: EnvironmentId }
         loading={home.stateQuery.isLoading || home.nameLoading}
         fit="chat"
         environmentId={environmentId}
-        namesChatComputer={computerName !== null}
+        computers={computers}
       />
       {home.dialogs}
     </>

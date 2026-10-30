@@ -23,6 +23,7 @@
  *   main list and reachable through the project scope and the footer,
  *   "Continue on another machine", the snooze "Pick time" dialog.
  */
+import { useSpaceScope } from "../spaces";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -2480,9 +2481,16 @@ export default function Sidebar() {
     () => livePicks(dStoredProjectPicks, dProjectKeys),
     [dProjectKeys, dStoredProjectPicks],
   );
+  // Spaces on (Misha 28.10): the sidebar shows the space's computer only, never a mix.
+  const dSpace = useSpaceScope();
   const dComputerPicks = useMemo(
-    () => (dMultiComputer ? livePicks(dStoredComputerPicks, dComputerIds) : null),
-    [dComputerIds, dMultiComputer, dStoredComputerPicks],
+    () =>
+      dSpace !== null
+        ? [dSpace]
+        : dMultiComputer
+          ? livePicks(dStoredComputerPicks, dComputerIds)
+          : null,
+    [dComputerIds, dMultiComputer, dSpace, dStoredComputerPicks],
   );
   const dComputersInView = dComputerPicks ?? dComputerIds;
   // Computer drops out of the grouping while one computer is in view.
@@ -4587,7 +4595,8 @@ export default function Sidebar() {
                 })}
                 groupInHeader={dGroupInHeader}
                 levels={dLevelsChosen}
-                multiComputer={dMultiComputer}
+                // Inside a space there is one computer: no computer filter or grouping.
+                multiComputer={dMultiComputer && dSpace === null}
                 onLevelsChange={(levels) =>
                   void updateSidebarSettings({ sidebarGroupLevels: [...levels] })
                 }

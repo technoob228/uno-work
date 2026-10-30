@@ -1,3 +1,4 @@
+import { SpacesRail, useSpacesRailShown } from "./sidebar/SpacesRail";
 import { useEffect, type ReactNode } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -41,6 +42,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Labs "Layout options": rail + panel, or tabs on top (desktop app).
   const layout = useNavLayout();
   const rail = layout === "rail";
+  const spacesRail = useSpacesRailShown();
   // Sidebar D (0.0.105): the standard sidebar folds to a rail of icons, a
   // choice remembered on this device; a narrow window shows the rail by itself.
   const sidebarD = !legacySidebar && !rail;
@@ -126,6 +128,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={{ ["--nav-rail-width" as string]: RAIL_WIDTH }}
       >
         {rail ? <NavRail isElectron={isElectron} /> : null}
+        {/* Spaces on (Settings, Misha 28.10): a space per computer, picked in this rail. */}
+        {spacesRail && !rail ? <SpacesRail /> : null}
         {sidebarD && sidebarDState.railShown ? <SidebarDRail isElectron={isElectron} /> : null}
         <Sidebar
           side="left"
@@ -134,6 +138,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             "border-r border-border bg-card text-foreground",
             // The panel sits right of the rail; folded, it is gone (the rail stays).
             rail && "left-(--nav-rail-width) group-data-[collapsible=offcanvas]:invisible",
+            spacesRail && !rail && "md:left-(--nav-rail-width)",
           )}
           resizable={{
             minWidth: THREAD_SIDEBAR_MIN_WIDTH,

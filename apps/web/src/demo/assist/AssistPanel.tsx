@@ -17,6 +17,8 @@ import type { MachineKey } from "../heavyFixtures";
 import { demoReady, listScenes, play } from "./engine";
 import { personaOf } from "./daemon";
 import { VARIANT } from "./variant";
+import { MC_VARIANT } from "./mcVariant";
+import { dropLink, wakeComputer } from "./links";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -55,6 +57,24 @@ const ROWS: ReadonlyArray<{
     options: [
       { id: "online", name: "Онлайн" },
       { id: "asleep", name: "Спит" },
+      { id: "flaky", name: "Отваливается" },
+      { id: "offline", name: "Нет связи" },
+    ],
+  },
+  {
+    key: "spaces",
+    label: "Простр.",
+    options: [
+      { id: "off", name: "Выкл (вариант C)" },
+      { id: "on", name: "Вкл — машина = своя вселенная" },
+    ],
+  },
+  {
+    key: "load",
+    label: "uno-work",
+    options: [
+      { id: "normal", name: "Обычная нагрузка" },
+      { id: "busy", name: "Загружен" },
     ],
   },
   {
@@ -230,9 +250,11 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
     >
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-1">
         <div className="min-w-0">
-          <div className="text-sm font-semibold">Ассистенты · {VARIANT.title}</div>
+          <div className="text-sm font-semibold">Несколько компьютеров · {MC_VARIANT.title}</div>
+          <div className="text-[11px] leading-snug text-muted-foreground">{MC_VARIANT.hint}</div>
           <div className="text-[11px] text-muted-foreground">
-            Настоящий Uno Work · данные выдуманные, ничего не уходит наружу
+            Настоящий Uno Work · данные выдуманные, ничего не уходит наружу · ассистенты:{" "}
+            {VARIANT.title}
           </div>
         </div>
         <button
@@ -282,6 +304,31 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
             ))}
           </div>
         ))}
+        <div className="mt-3 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Компьютеры
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <Chip
+            testId="demo-mc-drop-mac"
+            active={false}
+            onClick={() => {
+              setOpen(false);
+              dropLink("mac", 10);
+            }}
+          >
+            Уронить связь с MacBook на 10 с
+          </Chip>
+          <Chip
+            testId="demo-mc-wake-free"
+            active={false}
+            onClick={() => {
+              setOpen(false);
+              wakeComputer("product");
+            }}
+          >
+            Разбудить free-cloud
+          </Chip>
+        </div>
         <div className="mt-3 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
           Сцены
         </div>
