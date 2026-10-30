@@ -28,7 +28,7 @@ import {
   UploadIcon,
 } from "lucide-react";
 import * as Schema from "effect/Schema";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { cn } from "../../lib/utils";
@@ -42,7 +42,12 @@ import { filesListQueryOptions, filesQueryKeys } from "./filesApi";
 import { prefetchFileForView } from "./filesPrefetch";
 import { useProgressiveRows } from "./useProgressiveRows";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
-import { FilesSearchField, FilesSearchResults, useFilesSearch } from "./FilesSearch";
+import {
+  FilesSearchField,
+  FilesSearchResults,
+  focusFilesSearchOnFind,
+  useFilesSearch,
+} from "./FilesSearch";
 import { FilesNavButtons, type FilesHistory } from "./filesHistory";
 import { RecentFilesList } from "./RecentFilesList";
 import type { useFilesUploads } from "./FilesUploads";
@@ -222,6 +227,7 @@ export const FilesTree = memo(function FilesTree(props: {
   const root = useQuery(filesListQueryOptions(environmentId, null, showHidden));
   const rootPath = root.data?.rootPath ?? null;
   const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
   const search = useFilesSearch({
     environmentId,
     folderEntries: root.data?.entries,
@@ -277,7 +283,13 @@ export const FilesTree = memo(function FilesTree(props: {
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col" data-testid="files-tree">
+    <div
+      className="flex h-full min-h-0 w-full flex-col outline-none"
+      data-testid="files-tree"
+      // Clicking anywhere in the column puts the keyboard here, for ⌘F.
+      tabIndex={-1}
+      onKeyDown={(event) => focusFilesSearchOnFind(event, searchInput.current)}
+    >
       <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
           <SidebarShowButton />
@@ -369,7 +381,9 @@ export const FilesTree = memo(function FilesTree(props: {
             <RefreshCwIcon />
           </Button>
         </div>
-        {recentMode ? null : <FilesSearchField value={query} onChange={setQuery} />}
+        {recentMode ? null : (
+          <FilesSearchField value={query} onChange={setQuery} inputRef={searchInput} />
+        )}
       </div>
       {recentMode ? (
         <RecentFilesList
