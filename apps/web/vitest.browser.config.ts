@@ -32,6 +32,9 @@ export default defineConfig((env) =>
             strictPort: false,
           },
         },
+        // One file at a time: side by side, a click sometimes waited until the
+        // 30 s timeout, in a different test each run.
+        fileParallelism: false,
         testTimeout: 30_000,
         hookTimeout: 30_000,
       },

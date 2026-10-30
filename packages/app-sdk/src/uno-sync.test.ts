@@ -45,7 +45,8 @@ function computer(label: string) {
   const home = path.join(root, label);
   fs.mkdirSync(home, { recursive: true });
   const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH ?? "",
+    // The helper the engine writes: a test's own `git push uno` finds it there too.
+    PATH: `${path.join(home, ".uno", "sync", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
     HOME: home,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"),

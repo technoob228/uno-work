@@ -181,7 +181,7 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()(
 );
 
 // What another tab queued or sent shows here too: a stale copy would send it twice.
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("storage", (event) => {
     if (event.key === QUEUED_MESSAGES_STORAGE_KEY) void useQueuedMessageStore.persist.rehydrate();
   });
