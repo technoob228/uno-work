@@ -13,6 +13,7 @@ import {
   isAssistantProjectId,
   type InboxItem,
   type RuntimeMode,
+  type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { pendingPlanResume } from "@t3tools/shared/planLimitRules";
@@ -96,6 +97,7 @@ import {
   descriptorFor,
   machineByEnv,
   readModelFor,
+  applyDemoMachineSettings,
   serverConfigFor,
   toShellSnapshot,
   toShellThread,
@@ -389,8 +391,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     case WS_METHODS.unoComputerPlanLimits:
       return planLimitsFor(machine.key);
     case WS_METHODS.serverUpdateSettings: {
-      if (!DEMO_ACCOUNTS) return {};
-      applyDemoPlanSettings((body as { patch?: Record<string, unknown> }).patch ?? {});
+      const patch = (body as { patch?: Record<string, unknown> }).patch ?? {};
+      if (DEMO_ACCOUNTS) applyDemoPlanSettings(patch);
+      applyDemoMachineSettings(machine, patch as ServerSettingsPatch);
       emitDemoConfig(machine);
       return serverConfigFor(machine).settings;
     }

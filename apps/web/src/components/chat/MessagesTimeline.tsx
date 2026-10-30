@@ -54,6 +54,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  EllipsisIcon,
   FileIcon,
   FileVideoIcon,
   GlobeIcon,
@@ -67,6 +68,8 @@ import {
   WrenchIcon,
   ZapIcon,
 } from "lucide-react";
+import { readLocalApi } from "../../localApi";
+import { chatFileEntry, COPY_TO_CLOUD_LABEL, useCopyFileToCloud } from "./useCopyFileToCloud";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -1574,6 +1577,38 @@ const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {
   const { file } = props;
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const { openFile } = usePreviewPane();
+  const cloudCopy = useCopyFileToCloud(activeThreadEnvironmentId);
+  const openBeside = () =>
+    openFile({
+      id: file.path,
+      name: file.name,
+      kind: detectFileKind(file.name),
+      content: "",
+      path: file.path,
+      environmentId: activeThreadEnvironmentId,
+    });
+  const showMenu = async (position: { readonly x: number; readonly y: number }) => {
+    const api = readLocalApi();
+    if (!api?.contextMenu) return;
+    const clicked = await api.contextMenu.show(
+      [
+        { id: "open" as const, label: "Open beside the chat" },
+        { id: "cloud" as const, label: COPY_TO_CLOUD_LABEL },
+      ],
+      position,
+    );
+    if (clicked === "open") openBeside();
+    if (clicked === "cloud") {
+      cloudCopy.open(
+        chatFileEntry({
+          path: file.path,
+          kind: "file",
+          name: file.name,
+          sizeBytes: file.sizeBytes,
+        }),
+      );
+    }
+  };
   const body = (
     <>
       <FileIcon className="size-4 shrink-0 text-foreground/70" />
@@ -1592,23 +1627,34 @@ const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {
     return <div className={className}>{body}</div>;
   }
   return (
-    <button
-      type="button"
-      className={cn(className, "cursor-pointer hover:bg-background")}
-      title={file.path}
-      onClick={() =>
-        openFile({
-          id: file.path,
-          name: file.name,
-          kind: detectFileKind(file.name),
-          content: "",
-          path: file.path,
-          environmentId: activeThreadEnvironmentId,
-        })
-      }
-    >
-      {body}
-    </button>
+    <div className="group/attachment relative min-w-0">
+      <button
+        type="button"
+        className={cn(className, "w-full cursor-pointer pe-8 hover:bg-background")}
+        title={file.path}
+        data-testid="chat-attachment-chip"
+        onClick={openBeside}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void showMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
+        {body}
+      </button>
+      <button
+        type="button"
+        aria-label={`More for ${file.name}`}
+        className="absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/attachment:opacity-100 pointer-coarse:opacity-100"
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          void showMenu({ x: box.left, y: box.bottom });
+        }}
+      >
+        <EllipsisIcon className="size-3.5" />
+      </button>
+      {cloudCopy.dialog}
+    </div>
   );
 });
 

@@ -36,12 +36,13 @@ function signedOutHere(provider: ServerProvider): boolean {
  * its harness on and installed, its model still listed. Null otherwise — new
  * chats then start the way they did before the setting, without a word.
  */
-export function newChatModelSelection(input: {
-  readonly providers: ReadonlyArray<ServerProvider>;
-  readonly settings: UnifiedSettings;
-}): ModelSelection | null {
-  const chosen = input.settings.newChatModelSelection ?? null;
-  if (!chosen) return null;
+function usableNewChatChoice(
+  chosen: ModelSelection,
+  input: {
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly settings: UnifiedSettings;
+  },
+): ModelSelection | null {
   const provider = input.providers.find((candidate) => candidate.instanceId === chosen.instanceId);
   if (!provider?.enabled || !provider.installed || signedOutHere(provider)) return null;
   const entry = deriveProviderInstanceEntries(input.providers).find(
@@ -55,6 +56,28 @@ export function newChatModelSelection(input: {
     getAppModelOptionsForInstance(input.settings, entry),
   );
   return model ? { ...chosen, model } : null;
+}
+
+/**
+ * The most specific choice that can run here: the project's, then the
+ * computer's, then the app's "New chats start on". One that can't run steps
+ * aside for the next, not for nothing.
+ */
+export function newChatModelSelection(input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
+  readonly projectChoice?: ModelSelection | null;
+}): ModelSelection | null {
+  for (const chosen of [
+    input.projectChoice,
+    input.settings.defaultModelSelection,
+    input.settings.newChatModelSelection,
+  ]) {
+    if (!chosen) continue;
+    const usable = usableNewChatChoice(chosen, input);
+    if (usable) return usable;
+  }
+  return null;
 }
 
 /** OpenCode's Smart: the gateway's `uno/smart` under OpenCode's `uno` provider. */
@@ -197,6 +220,8 @@ export function newThreadStartSelection(input: {
   readonly projectDefault: ModelSelection | null;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UnifiedSettings;
+  /** Set for this project in Settings: beats everything else. */
+  readonly projectChoice?: ModelSelection | null;
   /**
    * The person came for their own agent: with no pick of theirs yet, a new
    * chat starts there, not on the project's default (the machine's own

@@ -6,12 +6,7 @@
  * next to "Add a widget"; the computer lives in the header pill.
  */
 import { UnoAiChatsCard } from "../../../unoai/UnoAiChatsList";
-import {
-  DEFAULT_RUNTIME_MODE,
-  isAssistantProjectId,
-  type EnvironmentId,
-  type UnoMachineApp,
-} from "@t3tools/contracts";
+import { isAssistantProjectId, type EnvironmentId, type UnoMachineApp } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -532,7 +527,7 @@ export function HomeStart({
                       void onStartTask(prompt, {
                         folder,
                         modelSelection: null,
-                        runtimeMode: DEFAULT_RUNTIME_MODE,
+                        runtimeMode: null,
                       })
                     }
                     onAskUno={(prompt) => void onAskUno(prompt)}
@@ -600,7 +595,7 @@ export function HomeStart({
             void onStartTask(prompt, {
               folder,
               modelSelection: null,
-              runtimeMode: DEFAULT_RUNTIME_MODE,
+              runtimeMode: null,
             })
           }
           onAskUno={(prompt) => void onAskUno(prompt)}
@@ -720,7 +715,7 @@ export function HomeStart({
               void onStartTask(prompt, {
                 folder,
                 modelSelection: null,
-                runtimeMode: DEFAULT_RUNTIME_MODE,
+                runtimeMode: null,
               })
             }
             onAskUno={(prompt) => void onAskUno(prompt)}

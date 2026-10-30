@@ -30,6 +30,7 @@ import {
   type MoveProjectToBoxStep,
 } from "../moveProjectToBox";
 import { useSettings } from "../hooks/useSettings";
+import { newChatEnvMode } from "../newChatDefaults";
 import type { Project } from "../types";
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import { CreateUnoBoxSection } from "./CreateUnoBoxSection";
@@ -181,9 +182,10 @@ export function MoveProjectToBoxDialog({
         });
         // Opening a thread in the new project also switches the active
         // environment, so the app lands on the box.
-        await handleNewThread(scopeProjectRef(targetId, projectId), {
-          envMode: settings.defaultThreadEnvMode,
-        }).catch(() => undefined);
+        const projectRef = scopeProjectRef(targetId, projectId);
+        await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) }).catch(
+          () => undefined,
+        );
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "Could not move the project.";
         setError(message);
@@ -195,17 +197,7 @@ export function MoveProjectToBoxDialog({
         setStep(null);
       }
     },
-    [
-      copyEnv,
-      handleNewThread,
-      handleOpenChange,
-      mode,
-      pending,
-      project,
-      remoteUrl,
-      savedRuntime,
-      settings.defaultThreadEnvMode,
-    ],
+    [copyEnv, handleNewThread, handleOpenChange, mode, pending, project, remoteUrl, savedRuntime],
   );
 
   return (

@@ -110,6 +110,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useSettings, useUpdateSettings } from "../hooks/useSettings";
+import { newChatEnvMode } from "../newChatDefaults";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useThreadTitle } from "../hooks/useThreadTitle";
 import {
@@ -169,7 +170,6 @@ import {
   orderItemsByPreferredIds,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
-  resolveSidebarNewThreadEnvMode,
   resolveSidebarProjectScope,
   resolveSidebarThreadEnvironmentAvailability,
   resolveSidebarThreadStatus,
@@ -1951,7 +1951,6 @@ export default function Sidebar() {
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const confirmThreadDelete = useSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useSettings((s) => s.confirmThreadArchive);
-  const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
   const projectGroupingSettings = useSettings(
     useShallow((settings) => ({
       sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
@@ -3701,14 +3700,11 @@ export default function Sidebar() {
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
       if (isMobile) setOpenMobile(false);
-      const envMode = resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode });
       // Scoped to a project: the new chat belongs there.
       const scopedMember = scopedProjectGroup?.memberProjects[0];
       if (scopedMember) {
-        void newThreadContext.handleNewThread(
-          scopeProjectRef(scopedMember.environmentId, scopedMember.id),
-          { envMode },
-        );
+        const projectRef = scopeProjectRef(scopedMember.environmentId, scopedMember.id);
+        void newThreadContext.handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) });
         return;
       }
       const startInCurrentProject = () =>
@@ -3716,7 +3712,7 @@ export default function Sidebar() {
           activeDraftThread: newThreadContext.activeDraftThread,
           activeThread: newThreadContext.activeThread ?? undefined,
           defaultProjectRef: newThreadContext.defaultProjectRef,
-          defaultThreadEnvMode: envMode,
+          defaultThreadEnvMode: newChatEnvMode,
           handleNewThread: newThreadContext.handleNewThread,
           activeEnvironmentId: newThreadContext.activeEnvironmentId,
           createStarterProject: newThreadContext.createStarterProject,
@@ -3740,7 +3736,6 @@ export default function Sidebar() {
       });
     },
     [
-      defaultThreadEnvMode,
       folderChats,
       isMobile,
       newThreadContext,
@@ -3798,14 +3793,11 @@ export default function Sidebar() {
           if (isMobile) setOpenMobile(false);
           void newThreadContext.handleNewThread(
             scopeProjectRef(project.environmentId, project.id),
-            {
-              envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
-            },
+            { envMode: newChatEnvMode(scopeProjectRef(project.environmentId, project.id)) },
           );
         },
       }));
   }, [
-    defaultThreadEnvMode,
     homeFolderPath,
     isMobile,
     lastChatMsByProjectKey,
@@ -4166,9 +4158,8 @@ export default function Sidebar() {
         ?.projectSync.opened({ projectId: project.id })
         .catch(() => undefined);
     }
-    void newThreadContext.handleNewThread(scopeProjectRef(project.environmentId, project.id), {
-      envMode: resolveSidebarNewThreadEnvMode({ defaultEnvMode: defaultThreadEnvMode }),
-    });
+    const projectRef = scopeProjectRef(project.environmentId, project.id);
+    void newThreadContext.handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) });
   };
   const toRenameTarget = (project: Project): ProjectRenameTarget => ({
     id: project.id,
@@ -4729,11 +4720,7 @@ export default function Sidebar() {
                 sidebarDPanel.closeNow();
                 void newThreadContext.handleNewThread(
                   scopeProjectRef(member.environmentId, member.id),
-                  {
-                    envMode: resolveSidebarNewThreadEnvMode({
-                      defaultEnvMode: defaultThreadEnvMode,
-                    }),
-                  },
+                  { envMode: newChatEnvMode(scopeProjectRef(member.environmentId, member.id)) },
                 );
               }}
             />
@@ -4985,11 +4972,7 @@ export default function Sidebar() {
                     if (isMobile) setOpenMobile(false);
                     void newThreadContext.handleNewThread(
                       scopeProjectRef(member.environmentId, member.id),
-                      {
-                        envMode: resolveSidebarNewThreadEnvMode({
-                          defaultEnvMode: defaultThreadEnvMode,
-                        }),
-                      },
+                      { envMode: newChatEnvMode(scopeProjectRef(member.environmentId, member.id)) },
                     );
                   }}
                 />

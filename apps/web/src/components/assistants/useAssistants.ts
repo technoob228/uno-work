@@ -236,7 +236,8 @@ export const computerSetupDeps: Pick<
       () => undefined,
     ),
   readSetup,
-  saveSetup: (environmentId, setup) => updateEnvironmentSettings(environmentId, { setup }),
+  saveSetup: (environmentId, setup) =>
+    updateEnvironmentSettings(environmentId, { setup }).then(() => undefined),
 };
 
 export function makeCreateAssistantDeps(

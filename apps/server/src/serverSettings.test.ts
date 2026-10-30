@@ -442,6 +442,33 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer()), Effect.scoped),
   );
 
+  it.effect("keeps a project's values on disk and drops them on reset", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        projectSettingsOverrides: {
+          p1: { defaultRuntimeMode: "approval-required", defaultThreadEnvMode: "worktree" },
+          p2: { branchNamePrefix: "" },
+        },
+      });
+      const saved = JSON.parse(yield* fileSystem.readFileString(serverConfig.settingsPath));
+      assert.deepEqual(saved.projectSettingsOverrides, {
+        p1: { defaultRuntimeMode: "approval-required", defaultThreadEnvMode: "worktree" },
+        p2: { branchNamePrefix: "" },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        projectSettingsOverrides: { p1: { defaultThreadEnvMode: "worktree" }, p2: null },
+      });
+      assert.deepEqual(next.projectSettingsOverrides, {
+        p1: { defaultThreadEnvMode: "worktree" },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("writes only non-default server settings to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

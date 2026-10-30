@@ -52,6 +52,7 @@ import {
 } from "../environments/runtime";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
+import { newChatEnvMode } from "../newChatDefaults";
 import { readLocalApi } from "../localApi";
 import {
   getSourceControlDiscoverySnapshot,
@@ -667,17 +668,10 @@ function OpenCommandPaletteDialog() {
         return;
       }
 
-      await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
-        envMode: settings.defaultThreadEnvMode,
-      });
+      const projectRef = scopeProjectRef(project.environmentId, project.id);
+      await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) });
     },
-    [
-      handleNewThread,
-      navigate,
-      settings.defaultThreadEnvMode,
-      settings.sidebarThreadSortOrder,
-      threads,
-    ],
+    [handleNewThread, navigate, settings.sidebarThreadSortOrder, threads],
   );
 
   const projectSearchItems = useMemo(
@@ -715,21 +709,14 @@ function OpenCommandPaletteDialog() {
               activeDraftThread,
               activeThread,
               defaultProjectRef,
-              defaultThreadEnvMode: settings.defaultThreadEnvMode,
+              defaultThreadEnvMode: newChatEnvMode,
               handleNewThread,
             },
             scopeProjectRef(project.environmentId, project.id),
           );
         },
       }),
-    [
-      activeDraftThread,
-      activeThread,
-      defaultProjectRef,
-      handleNewThread,
-      projects,
-      settings.defaultThreadEnvMode,
-    ],
+    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, projects],
   );
 
   const allThreadItems = useMemo(
@@ -872,7 +859,7 @@ function OpenCommandPaletteDialog() {
           filterIgnored: true,
         });
         await handleNewThread(scopeProjectRef(environmentId, projectId), {
-          envMode: settings.defaultThreadEnvMode,
+          envMode: newChatEnvMode({ environmentId, projectId }),
         }).catch(() => undefined);
       } catch (error) {
         toastManager.add(
@@ -884,7 +871,7 @@ function OpenCommandPaletteDialog() {
         );
       }
     },
-    [handleNewThread, settings.addProjectBaseDirectory, settings.defaultThreadEnvMode],
+    [handleNewThread, settings.addProjectBaseDirectory],
   );
 
   const buildAddProjectSourceGroups = useCallback(
@@ -1168,7 +1155,7 @@ function OpenCommandPaletteDialog() {
             activeDraftThread,
             activeThread,
             defaultProjectRef,
-            defaultThreadEnvMode: settings.defaultThreadEnvMode,
+            defaultThreadEnvMode: newChatEnvMode,
             handleNewThread,
             activeEnvironmentId,
             createStarterProject,
@@ -1322,9 +1309,10 @@ function OpenCommandPaletteDialog() {
             ),
           });
         } else {
-          await handleNewThread(scopeProjectRef(existing.environmentId, existing.id), {
-            envMode: settings.defaultThreadEnvMode,
-          }).catch(() => undefined);
+          const projectRef = scopeProjectRef(existing.environmentId, existing.id);
+          await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) }).catch(
+            () => undefined,
+          );
         }
         setOpen(false);
         return;
@@ -1345,9 +1333,10 @@ function OpenCommandPaletteDialog() {
           },
           createdAt: new Date().toISOString(),
         });
-        await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
-          envMode: settings.defaultThreadEnvMode,
-        }).catch(() => undefined);
+        const projectRef = scopeProjectRef(browseEnvironmentId, projectId);
+        await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) }).catch(
+          () => undefined,
+        );
         setOpen(false);
       } catch (error) {
         toastManager.add(
@@ -1367,7 +1356,6 @@ function OpenCommandPaletteDialog() {
       navigate,
       projects,
       setOpen,
-      settings.defaultThreadEnvMode,
       settings.sidebarThreadSortOrder,
       threads,
     ],

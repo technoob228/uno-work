@@ -180,7 +180,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       if (options.recordingKey && threadId) {
         useScreenRecordingStore.getState().moveTo(options.recordingKey, threadId);
       }
-      if (!options.assistant) {
+      if (!options.assistant && options.runtimeMode !== null) {
         store.setRuntimeMode(draftId, options.runtimeMode);
         store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
       }

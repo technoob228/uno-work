@@ -22,6 +22,7 @@ import {
 import * as os from "node:os";
 
 import { formatGeneratedBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { branchNamingPolicy } from "../../textGeneration/TextGenerationPresets.ts";
 import {
   Cache,
@@ -949,7 +950,11 @@ const make = Effect.gen(function* () {
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const settings = yield* serverSettingsService.getSettings;
+      const thread = yield* resolveThread(input.threadId);
+      const { settings } = resolveProjectSettings(
+        yield* serverSettingsService.getSettings,
+        thread?.projectId ?? null,
+      );
       const naming = {
         mode: settings.branchNamingMode,
         prefix: settings.branchNamePrefix,
