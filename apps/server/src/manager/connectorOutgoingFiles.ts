@@ -32,13 +32,16 @@ export const SENDABLE_HOME_FOLDERS = [
 ] as const;
 
 /**
- * The roots a chat may send files from: its own folder; then, for the
- * person's own chats and assistants that reach every project, the home's
- * {@link SENDABLE_HOME_FOLDERS} and every project; for "only selected
- * projects", only the folders of those projects.
+ * The roots a chat may send files from: its own folder; the folders of the
+ * chats its assistant started (a chat writes `docs/x.md`, Uno sends it by that
+ * very path); then, for the person's own chats and assistants that reach every
+ * project, the home's {@link SENDABLE_HOME_FOLDERS} and every project; for
+ * "only selected projects", only the folders of those projects.
  */
 export function sendableRoots(input: {
   readonly threadRoot: string | null;
+  /** The folders of the chats this one started, newest first. */
+  readonly childRoots?: ReadonlyArray<string>;
   readonly home: string;
   /** "all", or the project roots the chat's assistant may reach. */
   readonly reach: "all" | ReadonlyArray<string>;
@@ -46,6 +49,7 @@ export function sendableRoots(input: {
 }): ReadonlyArray<string> {
   const roots = new Set<string>();
   if (input.threadRoot !== null && input.threadRoot.trim().length > 0) roots.add(input.threadRoot);
+  for (const root of input.childRoots ?? []) roots.add(root);
   if (input.reach === "all") {
     for (const folder of SENDABLE_HOME_FOLDERS) roots.add(nodePath.join(input.home, folder));
     for (const root of input.allProjectRoots) roots.add(root);
@@ -82,8 +86,9 @@ export type ConnectorOutgoingFile =
   | { readonly ok: false; readonly reason: string };
 
 /**
- * Resolve a `[[send-file: …]]` path against the thread's workspace roots.
- * Relative paths are taken from the first root. Never throws.
+ * Resolve a `[[send-file: …]]` path against the thread's workspace roots. A
+ * relative path is tried from each root in turn: the first one holding a file
+ * this chat may send wins. Never throws.
  */
 export async function resolveConnectorOutgoingFile(
   rawPath: string,
@@ -102,18 +107,6 @@ export async function resolveConnectorOutgoingFile(
     home !== undefined && (rawPath === "~" || rawPath.startsWith("~/"))
       ? nodePath.join(home, rawPath.slice(1))
       : rawPath;
-  const candidate = nodePath.isAbsolute(expanded)
-    ? expanded
-    : nodePath.resolve(usableRoots[0]!, expanded);
-  let realFile: string;
-  try {
-    realFile = await fsPromises.realpath(candidate);
-    if (!(await fsPromises.stat(realFile)).isFile()) {
-      return { ok: false, reason: "not a file" };
-    }
-  } catch {
-    return { ok: false, reason: "file not found" };
-  }
   const realRoots: Array<string> = [];
   for (const root of usableRoots) {
     try {
@@ -122,5 +115,23 @@ export async function resolveConnectorOutgoingFile(
       // A missing root simply can't contain anything.
     }
   }
-  return isSendableConnectorPath(realFile, realRoots) ? { ok: true, path: realFile } : refused;
+  const candidates = nodePath.isAbsolute(expanded)
+    ? [expanded]
+    : usableRoots.map((root) => nodePath.resolve(root, expanded));
+  let failure: ConnectorOutgoingFile = { ok: false, reason: "file not found" };
+  for (const candidate of candidates) {
+    try {
+      const realFile = await fsPromises.realpath(candidate);
+      if (!(await fsPromises.stat(realFile)).isFile()) {
+        failure = { ok: false, reason: "not a file" };
+      } else if (isSendableConnectorPath(realFile, realRoots)) {
+        return { ok: true, path: realFile };
+      } else {
+        failure = refused;
+      }
+    } catch {
+      // Not in this root: the next one may have it.
+    }
+  }
+  return failure;
 }

@@ -47,6 +47,7 @@ import {
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { Clock, Duration, Effect, Option, Ref, Semaphore } from "effect";
 import * as crypto from "node:crypto";
+import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 
@@ -63,7 +64,9 @@ import {
   ProjectionTurnRepository,
   type ProjectionTurn,
 } from "../persistence/Services/ProjectionTurns.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
+import { driveLinkForFile, largeFileCloudDeps, largeFileText } from "./largeFileLink.ts";
 import { queueOutgoingFile, takeOutgoingFiles } from "./outgoingFileQueue.ts";
 import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
 import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
@@ -78,6 +81,13 @@ import { UNO_WORK_OPEN_URL } from "./taskDoneNotify.ts";
 import { currentWorkAddress } from "../workAddress.ts";
 import { extractOutgoingFiles } from "./telegramMedia.ts";
 import { decideLaunchTruth, launchCheckPromptText, notLaunchedText } from "./launchTruth.ts";
+import {
+  localDocumentsIn,
+  REPORT_CHECK_MAX,
+  reportCheckPromptText,
+  withReportLink,
+} from "./reportCheck.ts";
+import { isReportSource, readReports, reportOfSource } from "../sites/reports.ts";
 
 // ── Timings ─────────────────────────────────────────────────────────────
 
@@ -398,6 +408,9 @@ export const threadGoneText = (language: ReplyLanguage) =>
     "This chat was deleted in Uno Work, so there is no answer. Write again to start a new one.",
   );
 
+/** A big file over a slow line still ends in a line to the person. */
+const LARGE_FILE_LINK_TIMEOUT = Duration.minutes(15);
+
 export const fileRefusedText = (language: ReplyLanguage, name: string, reason: string) =>
   say(language, `Не могу отправить ${name}: ${reason}.`, `Could not send ${name}: ${reason}.`);
 
@@ -456,6 +469,8 @@ export interface PendingReplyMeta {
    * with no call reaches the person as {@link notLaunchedText}.
    */
   readonly launchChecks?: number;
+  /** Hidden report checks made for this row (`reportCheck.ts`). */
+  readonly reportChecks?: number;
   /** When the row's turn was first dispatched (a queued row waited before). */
   readonly dispatchedAt?: string;
   /**
@@ -480,6 +495,8 @@ export interface ReplyTransport {
   readonly kind: ManagerConnectorKind;
   /** Characters per message. */
   readonly limit: number;
+  /** Bytes per file; a bigger file goes as a link (`largeFileLink.ts`). */
+  readonly fileLimitBytes: number;
   /** Renew the "typing…" signal (best effort; called every few seconds per row). */
   readonly typing: (row: ConnectorPendingReply) => Effect.Effect<void>;
   /**
@@ -581,6 +598,7 @@ export const isThreadBusyForNewTurn = (input: {
 export const makeConnectorReplies = (transport: ReplyTransport) =>
   Effect.gen(function* () {
     const repository = yield* ManagerConnectorPendingReplyRepository;
+    const serverSettings = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
     const turnRepository = yield* ProjectionTurnRepository;
@@ -877,8 +895,52 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
             { asReply: false, newerInChat },
           );
         }
-        return yield* transport.sendFile(row, resolved.path);
+        const size = yield* Effect.promise(() =>
+          fsPromises.stat(resolved.path).then(
+            (stat) => stat.size,
+            () => 0,
+          ),
+        );
+        if (size <= transport.fileLimitBytes) return yield* transport.sendFile(row, resolved.path);
+        // Copying takes minutes: the reply loop goes on, the link comes after.
+        yield* sendAsLink(row, resolved.path, size).pipe(Effect.forkDetach);
+        return "ok" as const;
       });
+
+    /** The file through Uno Drive, one line for the person. Never fails. */
+    const sendAsLink = (row: ConnectorPendingReply, file: string, sizeBytes: number) =>
+      Effect.gen(function* () {
+        const current =
+          serverSettings === null
+            ? null
+            : yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+        const cloud = current === null ? null : largeFileCloudDeps(current);
+        const url =
+          cloud === null
+            ? null
+            : yield* Effect.tryPromise(() => driveLinkForFile(cloud, file)).pipe(
+                Effect.timeoutOption(LARGE_FILE_LINK_TIMEOUT),
+                Effect.map(Option.getOrNull),
+                Effect.tapError((cause) =>
+                  Effect.logWarning(`${transport.logPrefix} large file link failed`).pipe(
+                    Effect.annotateLogs({ chatId: row.chatId, cause: String(cause) }),
+                  ),
+                ),
+                Effect.orElseSucceed(() => null),
+              );
+        yield* transport.sendText(
+          row,
+          largeFileText({
+            language: row.language,
+            name: nodePath.basename(file),
+            sizeBytes,
+            chat: transport.kind === "telegram" ? "Telegram" : "Slack",
+            url,
+            moreUrl: currentWorkAddress() ?? UNO_WORK_OPEN_URL,
+          }),
+          { asReply: false, newerInChat: false },
+        );
+      }).pipe(Effect.ignore);
 
     const answerParts = (
       text: string,
@@ -1041,6 +1103,45 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         });
       });
 
+    /**
+     * Uno's answer names a local document and has no link: the report's link
+     * when there is one, else one hidden "(Uno Work)" question to publish it
+     * (`reportCheck.ts`). True: the answer waits for that turn.
+     */
+    const reportNet = (row: ConnectorPendingReply, text: string, nowMs: number) =>
+      Effect.gen(function* () {
+        const documents = localDocumentsIn(text);
+        if (documents.length === 0) return { checking: false, text };
+        const roots = yield* sendableRootsOf(row.threadId);
+        for (const document of documents) {
+          const resolved = yield* Effect.promise(() =>
+            resolveConnectorOutgoingFile(document, roots, os.homedir()),
+          );
+          if (!resolved.ok || !isReportSource(resolved.path)) continue;
+          const reports = yield* Effect.promise(() => readReports(os.homedir()));
+          const report = reportOfSource(reports, resolved.path, nowMs);
+          if (report !== null) {
+            return { checking: false, text: withReportLink(text, report.url, row.language) };
+          }
+          const meta = readMeta(row);
+          if ((meta.reportChecks ?? 0) >= REPORT_CHECK_MAX) continue;
+          yield* Effect.logInfo(
+            `${transport.logPrefix} Uno named a file with no link; asking it once to publish`,
+          ).pipe(Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey }));
+          const messageId = MessageId.make(crypto.randomUUID());
+          const requestedAt = yield* dispatchTurn(row, reportCheckPromptText(document), messageId);
+          yield* save({
+            ...row,
+            userMessageId: messageId,
+            requestedAt,
+            turnId: null,
+            meta: { ...meta, reportChecks: (meta.reportChecks ?? 0) + 1 },
+          });
+          return { checking: true, text };
+        }
+        return { checking: false, text };
+      });
+
     const typingIfDue = (row: ConnectorPendingReply, nowMs: number) =>
       Effect.gen(function* () {
         const key = rowId(row);
@@ -1194,6 +1295,11 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
               `${transport.logPrefix} Uno claimed a launch again without one; telling the person it did not start`,
             ).pipe(Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey }));
             verdict = { ...verdict, text: notLaunchedText(current.language) };
+          }
+          if (verdict.files.length === 0) {
+            const net = yield* reportNet(current, verdict.text, nowMs);
+            if (net.checking) return;
+            verdict = { ...verdict, text: net.text };
           }
         }
         if (readMeta(current).systemTurn === true) {

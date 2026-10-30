@@ -419,6 +419,61 @@ const asUnoChat = () => {
 };
 
 it.live(
+  "a file too big for Telegram: the answer goes, a line follows, no refusal and no upload",
+  () =>
+    Effect.gen(function* () {
+      const dbPath = nodePath.join(tmpDir, "state.sqlite");
+      const big = nodePath.join(workspaceRoot, "запись.mp4");
+      fs.closeSync(fs.openSync(big, "w"));
+      fs.truncateSync(big, 60 * 1024 * 1024);
+      world.script = () => ({
+        durationMs: MINUTE,
+        answer: `ответ: запись готова\n\n[[send-file: ${big}]]`,
+      });
+      yield* daemonRun(
+        dbPath,
+        Effect.gen(function* () {
+          yield* connect;
+          say("пришли запись");
+          expect(
+            yield* waitFor(
+              () => sent.some((entry) => entry.text.includes("«запись.mp4» (60 МБ)")),
+              real(10 * MINUTE),
+            ),
+          ).toBe(true);
+          expect(sent.some((entry) => entry.method === "sendDocument")).toBe(false);
+          expect(sent.some((entry) => /refus|not sent|не отправ/i.test(entry.text))).toBe(false);
+        }),
+      );
+    }),
+  120_000,
+);
+
+it.live(
+  "Uno names a document nobody can open: one hidden check, and the answer still goes",
+  () =>
+    Effect.gen(function* () {
+      const dbPath = nodePath.join(tmpDir, "state.sqlite");
+      asUnoChat();
+      const report = nodePath.join(workspaceRoot, "WEEKLY.md");
+      fs.writeFileSync(report, "# Итоги");
+      world.script = () => ({ durationMs: 20_000, answer: `ответ: отчёт лежит в ${report}` });
+      yield* daemonRun(
+        dbPath,
+        Effect.gen(function* () {
+          yield* connect;
+          say("что по отчёту?");
+          expect(yield* waitFor(() => answers().length > 0, real(10 * MINUTE))).toBe(true);
+          expect(world.turnCount).toBe(2);
+          expect(world.dispatchedTexts[1]).toContain("(Uno Work) Report check");
+          expect(answers()).toHaveLength(1);
+        }),
+      );
+    }),
+  120_000,
+);
+
+it.live(
   "a «запустил» with no launch never reaches Telegram: one hidden check, then the honest line",
   () =>
     Effect.gen(function* () {

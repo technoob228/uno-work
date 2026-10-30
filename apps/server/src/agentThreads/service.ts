@@ -97,6 +97,7 @@ import {
   isPinnedAssistantChat,
   threadController,
   threadRelation,
+  withAssistantChatRule,
 } from "./logic.ts";
 
 export type AgentThreadsScope = "own-project" | "any-project";
@@ -572,7 +573,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       const started = yield* remote
         .startChat({
           target,
-          text: input.text,
+          text: assistant === null ? input.text : withAssistantChatRule(input.text),
           title: input.title,
           cwd,
           projectId,

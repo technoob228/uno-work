@@ -75,6 +75,7 @@ import { queueOutgoingFile } from "./outgoingFileQueue.ts";
 import { AssistantPushService } from "./Services/AssistantPush.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
+import { SLACK_UPLOAD_LIMIT_BYTES } from "./largeFileLink.ts";
 import { TELEGRAM_BOT_UPLOAD_LIMIT_BYTES } from "./telegramMedia.ts";
 import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
 import { resolveNotifyThreadId } from "./connectorNotify.ts";
@@ -302,12 +303,6 @@ export const managerMcpRouteLayer = HttpRouter.add(
         );
         const limit =
           chat.kind === "telegram" ? TELEGRAM_BOT_UPLOAD_LIMIT_BYTES : SLACK_UPLOAD_LIMIT_BYTES;
-        if (size > limit) {
-          return {
-            ok: false as const,
-            error: `Not sent: ${Math.round(size / 1024 / 1024)} MB is over ${chat.kind === "telegram" ? "Telegram's 50 MB bot limit" : "the upload limit"} — give the person a link instead (file_share_link in a chat, or Uno Drive).`,
-          };
-        }
         if (!queueOutgoingFile(conversation, resolved.path)) {
           return { ok: false as const, error: "Not sent: too many files wait already." };
         }
@@ -316,7 +311,10 @@ export const managerMcpRouteLayer = HttpRouter.add(
           value: {
             queued: nodePath.basename(resolved.path),
             to: chat.kind,
-            note: "It goes with your answer of this turn. Say in one short line what it is.",
+            note:
+              size > limit
+                ? "It is too big for the chat: right after your answer the person gets a download link. Say in one short line what it is."
+                : "It goes with your answer of this turn. Say in one short line what it is.",
           },
         };
       });
@@ -347,8 +345,6 @@ export const managerMcpRouteLayer = HttpRouter.add(
 
 const SEND_FILE_NO_CHAT =
   "The person isn't writing from Telegram or Slack in this turn: give them the file's path (it opens in Uno Work) instead.";
-/** Slack's own cap is 1 GB; above this a link is kinder. */
-const SLACK_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 
 /**
  * `uno-work assistant-turn` (the CLI a console schedule runs after waking the

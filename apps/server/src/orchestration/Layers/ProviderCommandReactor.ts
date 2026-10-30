@@ -3,6 +3,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  isAssistantProjectId,
   MessageId,
   type ModelSelection,
   type OrchestrationEvent,
@@ -46,7 +47,7 @@ import {
   findAskCardQuestion,
   isAskCardRequest,
 } from "../../assistants/askCards.ts";
-import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
+import { agentMessageEnvelope, withAssistantChatRule } from "../../agentThreads/logic.ts";
 import { currentAssistantModelSelection } from "../../manager/assistantEngineSelection.ts";
 import {
   annotateDispatcherHistory,
@@ -471,6 +472,18 @@ const make = Effect.gen(function* () {
     return yield* projectionSnapshotQuery
       .getThreadDetailById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
+  });
+
+  /** This turn is the task an assistant gave a chat it started. */
+  const isFirstTaskOfAssistantChat = Effect.fnUntraced(function* (
+    thread: Pick<OrchestrationThread, "assistantRole" | "spawnedByThreadId" | "messages">,
+  ) {
+    if (thread.messages.filter((message) => message.role === "user").length > 1) return false;
+    if (thread.assistantRole === "spawned") return true;
+    const parentId = thread.spawnedByThreadId ?? null;
+    if (parentId === null) return false;
+    const parent = yield* resolveThread(parentId);
+    return parent !== undefined && isAssistantProjectId(parent.projectId);
   });
 
   /**
@@ -1103,14 +1116,17 @@ const make = Effect.gen(function* () {
     // saying who it is from and how to answer (plan 22); the stored message
     // and the UI keep the clean text.
     const senderThreadId = message.sentByThreadId ?? null;
+    const taskText = (yield* isFirstTaskOfAssistantChat(thread))
+      ? withAssistantChatRule(message.text)
+      : message.text;
     const promptText =
       senderThreadId === null
-        ? message.text
+        ? taskText
         : agentMessageEnvelope({
             sender: (yield* resolveThread(senderThreadId)) ?? null,
             senderThreadId,
             recipientSpawnedByThreadId: thread.spawnedByThreadId,
-            text: message.text,
+            text: taskText,
           });
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,

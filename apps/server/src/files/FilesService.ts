@@ -9,6 +9,7 @@
  * @module files/FilesService
  */
 import fsPromises from "node:fs/promises";
+import os from "node:os";
 import nodePath from "node:path";
 
 import {
@@ -109,7 +110,7 @@ import {
 } from "./cloudStorage.ts";
 import { CLOUD_OFFICE_STAGING_DIR, openCloudOffice, saveCloudOffice } from "./cloudOffice.ts";
 import { listCloudOfficeVersions } from "./officeVersions.ts";
-import { publishToUnoHosting } from "./sitePublish.ts";
+import { publishToUnoHosting, SiteHostingLimitError } from "./sitePublish.ts";
 import {
   generateShareToken,
   hashSharePassword,
@@ -137,6 +138,17 @@ export interface FilesServiceShape {
   readonly publishSite: (
     input: FilesPublishSiteInput,
   ) => Effect.Effect<FilesPublishSiteResult, FilesError>;
+  /**
+   * A page the server made itself (a report), not a folder of the person's:
+   * published with a password from its first second. `fallbackSlug`: taken
+   * when the account's limit refuses a new site.
+   */
+  readonly publishGeneratedSite: (input: {
+    readonly html: string;
+    readonly slug: string;
+    readonly password: string;
+    readonly fallbackSlug?: string;
+  }) => Effect.Effect<FilesPublishSiteResult, FilesError>;
   /** Owner download route: a file path resolved inside the root. */
   readonly resolveOwnerFile: (path: string) => Effect.Effect<string, FilesError>;
   /** Public route: the share behind a token (any status; the caller decides). */
@@ -450,6 +462,38 @@ export const makeFilesService = (
         return result;
       });
 
+    const publishGeneratedSite: FilesServiceShape["publishGeneratedSite"] = (input) =>
+      Effect.gen(function* () {
+        const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+        const apiKey = current?.uno.boxToken?.trim() || current?.uno.apiKey.trim() || "";
+        if (apiKey.length === 0) {
+          return yield* new FilesError({
+            message:
+              "Publishing needs this computer to be connected to your Uno account (Settings → Uno account).",
+          });
+        }
+        return yield* attempt(async () => {
+          const folder = await fsPromises.mkdtemp(nodePath.join(os.tmpdir(), "uno-site-"));
+          try {
+            const page = nodePath.join(folder, "index.html");
+            await fsPromises.writeFile(page, input.html, { mode: 0o600 });
+            const publish = (slug: string) =>
+              publishToUnoHosting({ path: page, slug, password: input.password, apiKey });
+            try {
+              return await publish(input.slug);
+            } catch (error) {
+              // The day's limit counts new sites only: an old slug still goes up.
+              if (error instanceof SiteHostingLimitError && input.fallbackSlug !== undefined) {
+                return await publish(input.fallbackSlug);
+              }
+              throw error;
+            }
+          } finally {
+            await fsPromises.rm(folder, { recursive: true, force: true });
+          }
+        }, "Publishing didn't work.");
+      });
+
     const resolveOwnerFile: FilesServiceShape["resolveOwnerFile"] = (path) =>
       withRoot("Couldn't open this file.", async (root) => {
         const resolved = await resolveInsideRoot(root, path);
@@ -679,6 +723,7 @@ export const makeFilesService = (
       listShares,
       revokeShare,
       publishSite,
+      publishGeneratedSite,
       resolveOwnerFile,
       findShareByToken,
       recordShareAccess,

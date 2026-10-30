@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentMessageEnvelope,
+  withAssistantChatRule,
   checkMessageText,
   clampInteger,
   defaultTitleFromText,
@@ -294,5 +295,14 @@ describe("threadRelation / parseListScope", () => {
     expect(parseListScope(" project ")).toBe("project");
     expect(parseListScope("all")).toBe("all");
     expect(parseListScope("everyone")).toBeNull();
+  });
+});
+
+describe("withAssistantChatRule", () => {
+  it("asks a chat Uno started for a report on a page, after the task", () => {
+    const text = withAssistantChatRule("Сделай отчёт");
+    expect(text.startsWith("Сделай отчёт")).toBe(true);
+    expect(text).toContain("report_publish");
+    expect(text).toContain("No file paths");
   });
 });

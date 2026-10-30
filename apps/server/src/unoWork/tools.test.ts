@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InboxPost } from "../inbox/inboxModel.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { validateArgs, type JsonSchema } from "./argsSchema.ts";
+import { isReportSlug, readReports, recordReport, REPORT_MAX_BYTES } from "../sites/reports.ts";
 import {
   MAIL_NOT_ENABLED_MESSAGE,
   attachmentRefusal,
@@ -1575,19 +1576,65 @@ describe("sites: password and forms", () => {
     });
     expect(result._tag).toBe("Success");
     expect(recorded.approvals).toEqual([]);
-    expect(recorded.console).toEqual([
-      {
-        method: "PUT",
-        path: "/api/v1/deploys/team-site/password",
-        body: { password: "correct-horse-battery" },
-      },
-    ]);
+    expect(recorded.console[0]).toEqual({
+      method: "PUT",
+      path: "/api/v1/deploys/team-site/password",
+      body: { password: "correct-horse-battery" },
+    });
     if (result._tag === "Success") {
+      // No open link from hosting: the password is the only way in.
       expect(result.success).toMatchObject({
         hasPassword: true,
         password: "correct-horse-battery",
       });
     }
+  });
+
+  it("gives a link instead of the password when hosting makes one", async () => {
+    const { deps } = makeDeps({
+      console: (request) =>
+        request.path.endsWith("/open-link")
+          ? { status: 200, body: { url: "https://team-site.uno4.me/?k=abc", expires_at: 2_000 } }
+          : { status: 200, body: {} },
+    });
+    const result = await run("site_set_password", deps, { slug: "team-site" });
+    if (result._tag !== "Success") throw new Error("site_set_password failed");
+    expect(result.success).toMatchObject({ openUrl: "https://team-site.uno4.me/?k=abc" });
+    expect(result.success).not.toHaveProperty("password");
+  });
+
+  it("site_open_link makes a fresh link, for a day by default", async () => {
+    const { deps, recorded } = makeDeps({
+      runtimeMode: "approval-required",
+      console: () => ({
+        status: 200,
+        body: { url: "https://team-site.uno4.me/?k=abc", expires_at: 2_000_000_000 },
+      }),
+    });
+    const result = await run("site_open_link", deps, { slug: "team-site" });
+    if (result._tag !== "Success") throw new Error("site_open_link failed");
+    expect(recorded.approvals).toEqual([]);
+    expect(recorded.console).toEqual([
+      {
+        method: "POST",
+        path: "/api/v1/deploys/team-site/open-link",
+        body: { ttl_seconds: 86_400 },
+      },
+    ]);
+    expect(result.success).toMatchObject({
+      url: "https://team-site.uno4.me/?k=abc",
+      expiresAt: new Date(2_000_000_000_000).toISOString(),
+    });
+  });
+
+  it("site_open_link says what's wrong with a site that needs no link", async () => {
+    const open = makeDeps({ console: () => ({ status: 409, body: { code: "NOT_PROTECTED" } }) });
+    expect(await run("site_open_link", open.deps, { slug: "team-site" })).toMatchObject({
+      _tag: "Failure",
+    });
+    const missing = makeDeps({ console: () => ({ status: 404, body: {} }) });
+    const result = await run("site_open_link", missing.deps, { slug: "team-site" });
+    expect(JSON.stringify(result)).toContain("no site “team-site”");
   });
 
   it("generates a readable password and can remove it", async () => {
@@ -1741,7 +1788,34 @@ describe("sites: password and forms", () => {
           updatedAt: null,
         },
       ],
+      reports: [],
     });
+  });
+
+  it("keeps reports out of the person's sites and lists them apart", async () => {
+    const { deps, home } = makeDeps({
+      console: () => ({
+        status: 200,
+        body: { deploys: [{ slug: "menu" }, { slug: "r-0123456789" }] },
+      }),
+    });
+    await recordReport(home, {
+      slug: "r-0123456789",
+      threadId: "t1",
+      title: "Отчёт",
+      source: "/a/report.md",
+      url: "https://r-0123456789.uno4.me/?k=abc",
+      expiresAtMs: Date.now() + 60_000,
+      createdAtMs: 1,
+    });
+    const result = await run("sites_list", deps);
+    if (result._tag !== "Success") throw new Error("sites_list failed");
+    const { sites, reports } = result.success as {
+      sites: { slug: string }[];
+      reports: { slug: string }[];
+    };
+    expect(sites.map((site) => site.slug)).toEqual(["menu"]);
+    expect(reports.map((report) => report.slug)).toEqual(["r-0123456789"]);
   });
 
   it("rejects slugs that could leave the site's path", async () => {
@@ -1942,6 +2016,110 @@ const harnessToolIds = (name: string) => [
   `mcp__uno_work__${name}`,
   `mcp_uno_work_${name}`,
 ];
+
+describe("report_publish", () => {
+  const withReports = (
+    options: Parameters<typeof makeDeps>[0] = {},
+    publishFails = false,
+  ): ReturnType<typeof makeDeps> & {
+    published: { html: string; slug: string; password: string }[];
+  } => {
+    const made = makeDeps({
+      console: () => ({
+        status: 200,
+        body: { url: "https://r-x.uno4.me/?k=abc", expires_at: 2_000_000_000 },
+      }),
+      ...options,
+    });
+    const published: { html: string; slug: string; password: string }[] = [];
+    const deps: UnoWorkToolDeps = {
+      ...made.deps,
+      reports: {
+        resolveFile: (file) =>
+          Effect.succeed(
+            file.includes(".ssh")
+              ? { ok: false as const, reason: "hidden files and keys never go" }
+              : { ok: true as const, path: path.resolve(made.home, file) },
+          ),
+        publish: (input) =>
+          publishFails
+            ? Effect.fail({ message: "No more sites today." })
+            : Effect.sync(() => {
+                published.push(input);
+                return { slug: input.slug } as never;
+              }),
+      },
+    };
+    return { ...made, deps, published };
+  };
+
+  it("publishes a private page, gives a link and never the password", async () => {
+    const { deps, home, published, recorded } = withReports({ runtimeMode: "approval-required" });
+    writeFileSync(path.join(home, "report.md"), "# Итоги\n\nТекст");
+    const result = await run("report_publish", deps, { path: "report.md" });
+    if (result._tag !== "Success")
+      throw new Error(`report_publish failed: ${JSON.stringify(result)}`);
+    expect(recorded.approvals).toEqual([]);
+    expect(published).toHaveLength(1);
+    const [page] = published;
+    expect(isReportSlug(page!.slug)).toBe(true);
+    expect(page!.html).toContain("<h1>Итоги</h1>");
+    expect(result.success).toEqual({
+      url: "https://r-x.uno4.me/?k=abc",
+      expiresAt: new Date(2_000_000_000_000).toISOString(),
+      slug: page!.slug,
+      title: "Итоги",
+    });
+    expect(JSON.stringify(result.success)).not.toContain(page!.password);
+    expect(recorded.console[0]).toMatchObject({ body: { ttl_seconds: 86_400 } });
+    const [entry] = await readReports(home);
+    expect(entry).toMatchObject({ slug: page!.slug, url: "https://r-x.uno4.me/?k=abc" });
+  });
+
+  it("updates the same report when the chat publishes the file again", async () => {
+    const { deps, home, published } = withReports();
+    writeFileSync(path.join(home, "report.md"), "# Итоги");
+    await run("report_publish", deps, { path: "report.md" });
+    await run("report_publish", deps, { path: "report.md" });
+    expect(published[1]?.slug).toBe(published[0]?.slug);
+    expect(await readReports(home)).toHaveLength(1);
+  });
+
+  it("refuses what send_file refuses, and files that aren't pages", async () => {
+    const { deps, home, published } = withReports();
+    writeFileSync(path.join(home, "photo.png"), "x");
+    expect(JSON.stringify(await run("report_publish", deps, { path: "~/.ssh/id.md" }))).toContain(
+      "hidden files and keys never go",
+    );
+    expect(JSON.stringify(await run("report_publish", deps, { path: "photo.png" }))).toContain(
+      "Markdown or HTML",
+    );
+    expect(published).toEqual([]);
+  });
+
+  it("refuses a report too long to read", async () => {
+    const { deps, home } = withReports();
+    writeFileSync(path.join(home, "big.md"), "x".repeat(REPORT_MAX_BYTES + 1));
+    expect(JSON.stringify(await run("report_publish", deps, { path: "big.md" }))).toContain("2 MB");
+  });
+
+  it("keeps a page nobody can open from holding a slug", async () => {
+    const { deps, home } = withReports({ console: () => ({ status: 500, body: {} }) });
+    writeFileSync(path.join(home, "report.md"), "# Итоги");
+    const result = await run("report_publish", deps, { path: "report.md" });
+    expect(JSON.stringify(result)).toContain("no link came back");
+    const [entry] = await readReports(home);
+    expect(entry?.expiresAtMs).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("passes on what hosting says at the account's limit", async () => {
+    const { deps, home } = withReports({}, true);
+    writeFileSync(path.join(home, "report.md"), "# Итоги");
+    expect(JSON.stringify(await run("report_publish", deps, { path: "report.md" }))).toContain(
+      "No more sites today",
+    );
+  });
+});
 
 describe("the chat feed tells every uno-work tool in plain words", () => {
   it("has a line for each tool while it runs, when it is done and when it failed", () => {

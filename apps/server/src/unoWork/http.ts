@@ -61,6 +61,8 @@ import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
 import { isRelayCredential, isRouteCredential } from "../manager/channelRelay.ts";
 import { connectorAccessDecision, readAppAccess } from "../assistants/localAssistantStore.ts";
 import { assistantOfThread } from "../assistants/assistantAccess.ts";
+import { resolveConnectorOutgoingFile } from "../manager/connectorOutgoingFiles.ts";
+import { makeThreadSendableRoots } from "../manager/threadSendableRoots.ts";
 import { isRestrictedAllowlist } from "../assistants/assistantSandboxRules.ts";
 import { readMailLedger, recordMailSent } from "../assistants/mailLedger.ts";
 import { readTeam } from "../assistants/teamStore.ts";
@@ -316,6 +318,14 @@ const makeDeps = (input: {
       return { roots: [...roots], name: owner.title };
     }).pipe(Effect.orElseSucceed(() => null));
     const home = os.homedir();
+    const sendableRootsOf = makeThreadSendableRoots({
+      projections,
+      home,
+      access:
+        tokenRepository === null
+          ? null
+          : { tokens: tokenRepository, stateDir: serverConfig.stateDir },
+    });
     const manifestDir = resolveManifestDir(home);
     const context = { threadId: input.threadId, ...(input.cwd ? { cwd: input.cwd } : {}) };
 
@@ -505,6 +515,15 @@ const makeDeps = (input: {
         clean: (input) => computerResources.clean(input),
       },
       computerState: unoComputer.getState(),
+      reports: {
+        resolveFile: (filePath) =>
+          sendableRootsOf(ThreadId.make(input.threadId)).pipe(
+            Effect.flatMap((roots) =>
+              Effect.promise(() => resolveConnectorOutgoingFile(filePath, roots, home)),
+            ),
+          ),
+        publish: (args) => files.publishGeneratedSite(args),
+      },
       files: {
         list: (args) => files.list(args),
         stat: (args) => files.stat(args),

@@ -39,8 +39,10 @@ describe("Uno Work environment brief", () => {
     // for `recording_frames` (Loom Work 28.10); +60 for the agent's own
     // mailbox (spec 20.10: one line, own mail vs Gmail); ~6 for `github_pr_comment` (Automations);
     // ~45 for `messenger_send` with answer buttons (Misha 29.10: any chat writes to
-    // the person's Telegram and asks with buttons; the details are uno_guide("notify")).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2030);
+    // the person's Telegram and asks with buttons; the details are uno_guide("notify"));
+    // ~25 for `report_publish` (Misha 30.10: a report came as two screens of text
+    // and paths he can't open; the details are uno_guide("sites")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2055);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

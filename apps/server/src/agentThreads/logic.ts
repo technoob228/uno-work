@@ -281,6 +281,14 @@ export function agentMessageEnvelope(input: {
   return `${header}\n\n${input.text}`;
 }
 
+/**
+ * What a chat an assistant started hears with its task (the stored message
+ * stays clean): the assistant answers on a phone, so a long result goes as a
+ * link and not as text it would have to retell.
+ */
+export const withAssistantChatRule = (text: string): string =>
+  `${text}\n\n[Uno Work: the person reads the result on a phone. If it is longer than one screen, write it to a Markdown file, call report_publish with that file and end your message with 3-5 lines and the link. No file paths in your final message.]`;
+
 export function normalizeWorkspacePath(path: string): string {
   const trimmed = path.trim();
   return trimmed.length <= 1 ? trimmed : trimmed.replace(/[/\\]+$/g, "");

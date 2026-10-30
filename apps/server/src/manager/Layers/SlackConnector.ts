@@ -44,6 +44,7 @@ import {
 import { Context, Data, Duration, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
+import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -67,14 +68,21 @@ import {
   type SendOutcome,
   type SystemTurnInput,
 } from "../connectorReplies.ts";
-import { detectReplyLanguage } from "../connectorReplyText.ts";
+import { detectReplyLanguage, type ReplyLanguage } from "../connectorReplyText.ts";
+import { UNO_WORK_OPEN_URL } from "../taskDoneNotify.ts";
+import { currentWorkAddress } from "../../workAddress.ts";
+import { SLACK_UPLOAD_LIMIT_BYTES } from "../largeFileLink.ts";
+import { hidesLinkPreview, markdownLinksForSlack } from "../telegramMarkdown.ts";
 import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "../addressing.ts";
 import type { AddressingReason } from "../addressing.ts";
 import {
   buildMediaFailureNote,
   buildMediaNote,
+  checkIncomingFile,
+  incomingFileNote,
   isImageLikeMedia,
   sanitizeFileName,
+  telegramUploadDir,
   type TelegramMediaDescriptor,
 } from "../telegramMedia.ts";
 import {
@@ -134,6 +142,14 @@ export interface ManagerSlackServiceShape {
     readonly text: string;
     readonly threadTs?: string;
     /** Write as this assistant (name + emoji) when several share Uno's app. */
+    readonly asAssistant?: ProjectId;
+  }) => Effect.Effect<boolean>;
+  /** Upload a file to a channel/DM; a failure is told in the chat. `false`: no live bot. */
+  readonly sendFile: (input: {
+    readonly projectId: ProjectId;
+    readonly channelId: string;
+    readonly filePath: string;
+    readonly threadTs?: string;
     readonly asAssistant?: ProjectId;
   }) => Effect.Effect<boolean>;
   /**
@@ -216,6 +232,18 @@ const SLACK_SEND_FILE_HINT =
  * note/transcription helpers apply. Audio becomes "voice" (transcribable),
  * video "video", images "photo"-like via mime, the rest "document".
  */
+/** One line when a file is over what Uno takes from Slack. */
+const slackFileLimitReply = (
+  language: ReplyLanguage,
+  sizeBytes: number,
+  moreUrl: string,
+): string => {
+  const megabytes = Math.ceil(sizeBytes / (1024 * 1024));
+  return language === "ru"
+    ? `Файл на ${megabytes} МБ: из Slack я беру до 100 МБ. Загрузи его в Uno Work или Uno Drive и напиши мне здесь: ${moreUrl}`
+    : `This file is ${megabytes} MB: I take up to 100 MB from Slack. Upload it to Uno Work or Uno Drive and tell me here: ${moreUrl}`;
+};
+
 function toMediaDescriptor(file: SlackRawFile): TelegramMediaDescriptor | null {
   if (file.url_private_download === undefined || file.id === undefined) {
     return null;
@@ -290,13 +318,17 @@ export function makeSlackWebClient(botToken: string): WebClient {
  * Uses the history scopes the app manifest already requests. Failures
  * degrade to "no context" — the mention is still answered.
  */
-const fetchThreadBacklog = (input: {
+export const fetchThreadBacklog = (input: {
   readonly web: WebClient;
   readonly channel: string;
   readonly threadTs: string;
   readonly excludeTs: string;
   readonly botUserId: string;
-}): Effect.Effect<ReadonlyArray<string>> =>
+}): Effect.Effect<{
+  readonly lines: ReadonlyArray<string>;
+  /** The files of the message the thread hangs under. */
+  readonly rootFiles: ReadonlyArray<SlackRawFile>;
+}> =>
   Effect.tryPromise({
     try: () =>
       input.web.conversations.replies({
@@ -312,6 +344,7 @@ const fetchThreadBacklog = (input: {
         readonly user?: string;
         readonly bot_id?: string;
         readonly text?: string;
+        readonly files?: ReadonlyArray<SlackRawFile>;
       }>;
       // conversations.replies returns oldest-first with the root message
       // first; keep the root and the most recent replies.
@@ -335,12 +368,13 @@ const fetchThreadBacklog = (input: {
         lines.push(line);
         used += line.length;
       }
-      return lines;
+      const first = all[0];
+      return { lines, rootFiles: first?.ts === input.excludeTs ? [] : (first?.files ?? []) };
     }),
     Effect.catch((cause) =>
       Effect.logWarning("slack thread backlog fetch failed").pipe(
         Effect.annotateLogs({ channel: input.channel, cause: String(cause) }),
-        Effect.andThen(Effect.succeed([] as ReadonlyArray<string>)),
+        Effect.andThen(Effect.succeed({ lines: [], rootFiles: [] })),
       ),
     ),
   );
@@ -444,7 +478,8 @@ const makeSlackConnector = Effect.gen(function* () {
       try: async () => {
         const base = {
           channel,
-          text: text.slice(0, SLACK_MESSAGE_LIMIT),
+          text: markdownLinksForSlack(text).slice(0, SLACK_MESSAGE_LIMIT),
+          ...(hidesLinkPreview(text) ? { unfurl_links: false, unfurl_media: false } : {}),
           ...(threadTs === undefined
             ? {}
             : broadcast
@@ -571,18 +606,37 @@ const makeSlackConnector = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly channel: string;
     readonly files: ReadonlyArray<SlackRawFile>;
+    /** They came from the message the thread hangs under. */
+    readonly fromThread: boolean;
+    readonly sender: string;
+    readonly language: ReplyLanguage;
+    /** Tells the person why a file wasn't taken. */
+    readonly tell: (text: string) => Effect.Effect<void>;
   }) =>
     Effect.gen(function* () {
       const attachments: Array<ChatImageAttachment> = [];
       const notes: Array<string> = [];
       for (const file of input.files) {
         const descriptor = toMediaDescriptor(file);
-        if (descriptor === null) continue;
+        if (descriptor === null) {
+          // A link to Google Drive and the like: Slack has no bytes to give.
+          notes.push(
+            `[Slack: ${input.sender} attached ${sanitizeFileName(file.name ?? "", "a file")}, but Slack has no copy of it to download. Ask them to upload the file itself.]`,
+          );
+          continue;
+        }
         if (
           descriptor.sizeBytes !== null &&
           descriptor.sizeBytes > SLACK_FILE_DOWNLOAD_LIMIT_BYTES
         ) {
           notes.push(buildMediaFailureNote(descriptor, "the file exceeds the 100 MB download cap"));
+          yield* input.tell(
+            slackFileLimitReply(
+              input.language,
+              descriptor.sizeBytes,
+              currentWorkAddress() ?? UNO_WORK_OPEN_URL,
+            ),
+          );
           continue;
         }
         const downloaded = yield* downloadSlackFile(
@@ -637,7 +691,12 @@ const makeSlackConnector = Effect.gen(function* () {
           }
         }
 
-        const directory = nodePath.join(slackFilesDir, input.channel);
+        // Voice stays in the server's own folder (it becomes text); files the
+        // person sends land where they can find them, as from Telegram.
+        const directory =
+          descriptor.kind === "voice"
+            ? nodePath.join(slackFilesDir, input.channel)
+            : telegramUploadDir(os.homedir(), new Date(), "slack");
         const savedPath = nodePath.join(
           directory,
           `${crypto.randomUUID().slice(0, 8)}-${descriptor.fileName}`,
@@ -645,7 +704,9 @@ const makeSlackConnector = Effect.gen(function* () {
         const saved = yield* Effect.tryPromise({
           try: async () => {
             await fsPromises.mkdir(directory, { recursive: true });
-            await fsPromises.writeFile(savedPath, bytes);
+            // Kept, never run: no exec bits, owner only.
+            await fsPromises.writeFile(savedPath, bytes, { mode: 0o600 });
+            await fsPromises.chmod(savedPath, 0o600);
           },
           catch: (cause) => new SlackConnectorError({ message: String(cause) }),
         }).pipe(
@@ -674,7 +735,19 @@ const makeSlackConnector = Effect.gen(function* () {
           }
         }
 
-        notes.push(buildMediaNote(descriptor, savedPath));
+        notes.push(
+          descriptor.kind === "voice"
+            ? buildMediaNote(descriptor, savedPath)
+            : incomingFileNote({
+                channel: "Slack",
+                sender: input.sender,
+                descriptor,
+                savedPath,
+                sizeBytes: bytes.length,
+                check: checkIncomingFile(descriptor.fileName, bytes),
+                ...(input.fromThread ? { fromRepliedMessage: true } : {}),
+              }),
+        );
       }
       return { attachments, notes };
     });
@@ -855,6 +928,7 @@ const makeSlackConnector = Effect.gen(function* () {
   const replies = yield* makeConnectorReplies({
     kind: "slack",
     limit: SLACK_MESSAGE_LIMIT,
+    fileLimitBytes: SLACK_UPLOAD_LIMIT_BYTES,
     logPrefix: "slack",
     typing: (row) =>
       Effect.gen(function* () {
@@ -1183,20 +1257,36 @@ const makeSlackConnector = Effect.gen(function* () {
       const backlog =
         Option.isNone(existing) && !isDM && threadTs !== null
           ? yield* fetchThreadBacklog({ web, channel, threadTs, excludeTs: ts, botUserId })
-          : [];
+          : { lines: [], rootFiles: [] };
+      // Called under a message with a file: the file is what they mean, as a
+      // reply to a file in Telegram.
+      const fromThread = files.length === 0 && backlog.rootFiles.length > 0;
+      const incoming = fromThread ? backlog.rootFiles : files;
       const ingested =
-        files.length > 0
-          ? yield* ingestSlackFiles({ botToken: config.botToken, threadId, channel, files })
+        incoming.length > 0
+          ? yield* ingestSlackFiles({
+              botToken: config.botToken,
+              threadId,
+              channel,
+              files: incoming,
+              fromThread,
+              sender: senderRole === "member" ? "a member" : "the person",
+              language: detectReplyLanguage(cleanedText, null),
+              tell: (text) =>
+                postMessage(web, channel, text, isDM ? undefined : (threadTs ?? ts)).pipe(
+                  Effect.ignore,
+                ),
+            })
           : { attachments: [], notes: [] };
       const bodyParts = [cleanedText, ...ingested.notes].filter((part) => part.length > 0);
       if (bodyParts.length === 0) {
         bodyParts.push("[The user sent the attached image(s) without a caption.]");
       }
       const contextBlock =
-        backlog.length > 0
+        backlog.lines.length > 0
           ? [
               "[Slack thread context — earlier messages in this thread, oldest first:]",
-              ...backlog,
+              ...backlog.lines,
             ].join("\n")
           : null;
       const body = [
@@ -1438,6 +1528,25 @@ const makeSlackConnector = Effect.gen(function* () {
     }),
   );
 
+  const sendFile: ManagerSlackServiceShape["sendFile"] = (input) =>
+    Effect.gen(function* () {
+      const holder = yield* holderOf(input.projectId);
+      const runtime = runtimes.get(holder);
+      if (runtime?.web == null) return false;
+      const as = input.asAssistant ?? (holder !== input.projectId ? input.projectId : undefined);
+      const shared =
+        as !== undefined && (as !== holder || (yield* routedSlackRowsOf(holder)).length > 0);
+      yield* sendSlackFile({
+        web: runtime.web,
+        botToken: runtime.botToken,
+        channel: input.channelId,
+        threadTs: input.threadTs,
+        filePath: input.filePath,
+        identity: shared ? yield* identityOf(as, runtime) : null,
+      }).pipe(Effect.ignore);
+      return true;
+    });
+
   const sendText: ManagerSlackServiceShape["sendText"] = (input) =>
     Effect.gen(function* () {
       // A routed assistant writes through its holder's connection, as itself.
@@ -1479,6 +1588,7 @@ const makeSlackConnector = Effect.gen(function* () {
         };
       }),
     sendText,
+    sendFile,
     listChannels: (projectId) =>
       Effect.gen(function* () {
         const runtime = runtimes.get(yield* holderOf(projectId));

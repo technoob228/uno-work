@@ -10,7 +10,9 @@ import {
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
 import { Effect, Layer, Option, Ref, Schema } from "effect";
+import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
+import * as nodePath from "node:path";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -27,6 +29,15 @@ import {
 } from "../connectorNotify.ts";
 import { buttonsAsText, chatHeaderLine } from "../connectorButtons.ts";
 import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
+import {
+  driveLinkForFile,
+  largeFileCloudDeps,
+  largeFileText,
+  SLACK_UPLOAD_LIMIT_BYTES,
+} from "../largeFileLink.ts";
+import { UNO_WORK_OPEN_URL } from "../taskDoneNotify.ts";
+import { TELEGRAM_BOT_UPLOAD_LIMIT_BYTES } from "../telegramMedia.ts";
+import { currentWorkAddress } from "../../workAddress.ts";
 import { detectReplyLanguage } from "../connectorReplyText.ts";
 import { makeThreadSendableRoots } from "../threadSendableRoots.ts";
 import { assistantAccessDepsOption } from "../../assistants/assistantAccess.ts";
@@ -272,6 +283,39 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         filePath = resolved.path;
       }
 
+      const sizeOfFile =
+        filePath === null
+          ? 0
+          : yield* Effect.promise(() =>
+              fsPromises.stat(filePath!).then(
+                (stat) => stat.size,
+                () => 0,
+              ),
+            );
+      /** The line that replaces a file too big for this chat. */
+      const largeFileLine = (chat: "Telegram" | "Slack") =>
+        Effect.gen(function* () {
+          const current =
+            serverSettings === null
+              ? null
+              : yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+          const cloud = current === null ? null : largeFileCloudDeps(current);
+          const url =
+            cloud === null
+              ? null
+              : yield* Effect.tryPromise(() => driveLinkForFile(cloud, filePath!)).pipe(
+                  Effect.orElseSucceed(() => null),
+                );
+          return largeFileText({
+            language,
+            name: nodePath.basename(filePath!),
+            sizeBytes: sizeOfFile,
+            chat,
+            url,
+            moreUrl: currentWorkAddress() ?? UNO_WORK_OPEN_URL,
+          });
+        });
+
       const chats = pickPersonChats(
         yield* resolveChats({
           threadId: input.threadId,
@@ -291,11 +335,12 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       let via: "telegram" | "slack" | "none" = "none";
       for (const chat of chats) {
         if (chat.kind === "telegram") {
+          const tooBig = sizeOfFile > TELEGRAM_BOT_UPLOAD_LIMIT_BYTES;
           const sent = yield* telegram.sendRich({
             projectId: chat.connectorProjectId,
             chatId: chat.chatId,
-            text,
-            filePath,
+            text: tooBig ? `${text}\n\n${yield* largeFileLine("Telegram")}`.trim() : text,
+            filePath: tooBig ? null : filePath,
             buttons,
             threadId: input.threadId,
             routeReplies: !fromAssistant,
@@ -309,29 +354,34 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           if (sent.error !== null) note = sent.error;
           continue;
         }
-        // Slack: text only from here — options as a line, the file by name.
+        // Slack: options as a line; the file goes after the text.
         const target = parseSlackChatKey(chat.chatId);
+        const tooBig = sizeOfFile > SLACK_UPLOAD_LIMIT_BYTES;
         const slackText = [
           plainText,
           buttons.length > 0 && plainText === text ? buttonsAsText(buttons, language) : null,
-          filePath === null ? null : `📎 ${filePath}`,
+          tooBig ? yield* largeFileLine("Slack") : null,
         ]
           .filter((part): part is string => part !== null)
           .join("\n\n");
-        const ok = yield* slack.sendText({
+        const place = {
           projectId: chat.connectorProjectId,
           channelId: target.channelId,
-          text: slackText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
           ...(projectId !== null && isAssistantProjectId(projectId)
             ? { asAssistant: projectId }
             : {}),
           ...(target.threadTs !== null ? { threadTs: target.threadTs } : {}),
+        };
+        const ok = yield* slack.sendText({
+          ...place,
+          text: slackText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
         });
         if (ok) {
           delivered += 1;
           if (via === "none") via = "slack";
-          if (buttons.length > 0 || filePath !== null) {
-            note = "Slack got the text only: buttons as a list of options, the file as its path.";
+          if (buttons.length > 0) note = "Slack got the buttons as a list of options.";
+          if (filePath !== null && !tooBig) {
+            yield* slack.sendFile({ ...place, filePath });
           }
         }
       }

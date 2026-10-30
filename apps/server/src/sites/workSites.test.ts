@@ -50,6 +50,18 @@ describe("work sites", () => {
   });
 });
 
+describe("reports among the sites", () => {
+  const body = { deploys: [{ slug: "menu" }, { slug: "r-0123456789" }] };
+
+  it("stay off the person's list and come when asked for", () => {
+    expect(parseWorkSites(body).sites.map((site) => site.slug)).toEqual(["menu"]);
+    expect(parseWorkSites(body, { withReports: true }).sites.map((site) => site.slug)).toEqual([
+      "menu",
+      "r-0123456789",
+    ]);
+  });
+});
+
 describe("unpublish a site", () => {
   const settings = { uno: { apiKey: "", boxToken: "uno_agt_box" } } as never;
   it("deletes it on the console with the machine token", async () => {

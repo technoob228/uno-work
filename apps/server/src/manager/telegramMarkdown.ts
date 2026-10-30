@@ -32,17 +32,24 @@ const renderEmphasis = (value: string): string =>
     .replace(/(?<!_)_([^_\n]+)_(?!_)/g, "<i>$1</i>");
 
 const renderNonCode = (value: string): string => {
-  const link = /\[([^\]\n]+)]\(([^\s)]+)\)/g;
+  // A bare address stays whole: `_` in it is no emphasis.
+  const link = /(\*\*)?\[([^\]\n]+)]\(([^\s)]+)\)(\*\*)?|https?:\/\/[^\s<>]+/g;
   let cursor = 0;
   let output = "";
   for (const match of value.matchAll(link)) {
     const index = match.index ?? 0;
     output += renderEmphasis(value.slice(cursor, index));
-    const label = match[1] ?? "";
-    const href = match[2] ?? "";
-    output += isSafeLink(href)
-      ? `<a href="${escapeHtml(href)}">${renderEmphasis(label)}</a>`
-      : renderEmphasis(match[0]);
+    const label = match[2];
+    const href = match[3] ?? "";
+    if (label === undefined) {
+      output += escapeHtml(match[0]);
+    } else if (isSafeLink(href)) {
+      const anchor = `<a href="${escapeHtml(href)}">${renderEmphasis(label)}</a>`;
+      const bold = match[1] !== undefined && match[4] !== undefined;
+      output += bold ? `<b>${anchor}</b>` : `${match[1] ?? ""}${anchor}${match[4] ?? ""}`;
+    } else {
+      output += renderEmphasis(match[0]);
+    }
     cursor = index + match[0].length;
   }
   return output + renderEmphasis(value.slice(cursor));
@@ -102,3 +109,42 @@ export const renderTelegramHtml = (markdown: string): string => {
   }
   return output.join("\n");
 };
+
+/** A Markdown link, `[label](url)`. */
+const MARKDOWN_LINK = /\[([^\]\n]+)]\((https?:\/\/[^\s)]+)\)/g;
+
+/**
+ * The text for a chat that shows no formatting: a link keeps its address, so
+ * the fallback for HTML Telegram couldn't parse still opens.
+ */
+export const markdownLinksAsText = (text: string): string => text.replace(MARKDOWN_LINK, "$1: $2");
+
+/** Slack's own link form, `<url|label>`: Slack shows `[label](url)` as typed. */
+export const markdownLinksForSlack = (text: string): string =>
+  text.replace(
+    MARKDOWN_LINK,
+    (_, label: string, url: string) =>
+      `<${url}|${label.replaceAll("|", "/").replaceAll(">", "›").replaceAll("<", "‹")}>`,
+  );
+
+/**
+ * A link behind a word, or a page of Uno Hosting: the messenger shows no
+ * preview, so a report's title and text stay inside the report.
+ */
+export const hidesLinkPreview = (text: string): boolean =>
+  /\]\(https?:\/\/|[./]uno4\.me\b/i.test(text);
+
+/** The text fields of a `sendMessage`; `html: false` is the plain retry after a parse error. */
+export const telegramTextFields = (
+  text: string,
+  html: boolean,
+): {
+  readonly text: string;
+  readonly parse_mode?: "HTML";
+  readonly link_preview_options?: { readonly is_disabled: true };
+} => ({
+  ...(html
+    ? { text: renderTelegramHtml(text), parse_mode: "HTML" as const }
+    : { text: markdownLinksAsText(text) }),
+  ...(hidesLinkPreview(text) ? { link_preview_options: { is_disabled: true as const } } : {}),
+});

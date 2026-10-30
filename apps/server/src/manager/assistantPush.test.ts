@@ -164,6 +164,21 @@ describe("noticeFromProbe", () => {
     expect(result?.notice.excerpt).toContain("<untrusted_thread_output>Done, tests pass");
   });
 
+  it("carries the chat's report link to the assistant", () => {
+    const result = noticeFromProbe({
+      watch,
+      probe: probe("completed"),
+      title: "Weekly",
+      project: "Shop",
+      sentKeys: new Set(),
+      nowMs,
+      report: { title: "Итоги [недели]", url: "https://r-1.uno4.me/?k=abc" },
+    });
+    expect(result?.notice.report?.url).toBe("https://r-1.uno4.me/?k=abc");
+    const text = formatPushNotice([result!.notice]);
+    expect(text).toContain("Its report: [Итоги  недели](https://r-1.uno4.me/?k=abc)");
+  });
+
   it("is deduped per (thread, turn, outcome)", () => {
     const first = noticeFromProbe({
       watch,

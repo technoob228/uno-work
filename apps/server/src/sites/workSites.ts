@@ -15,6 +15,7 @@ import type {
 
 import { liveSiteUrl } from "../files/sitePublish.ts";
 import { consoleRequest, consoleToken } from "../unoWork/consoleClient.ts";
+import { isReportSlug } from "./reports.ts";
 import { forgetSiteChat, readSiteChats, type SiteChats } from "./siteChats.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 
@@ -52,15 +53,22 @@ export function parseWorkSite(raw: unknown): UnoWorkSite | null {
   };
 }
 
-/** The console's `{deploys, storage_used_bytes, storage_limit_bytes}`. */
-export function parseWorkSites(body: unknown): UnoWorkSites {
+/**
+ * The console's `{deploys, storage_used_bytes, storage_limit_bytes}`. Reports
+ * (`reports.ts`) are pages of a chat's result, not the person's sites: they
+ * stay off Apps & sites and `sites_list` unless asked for.
+ */
+export function parseWorkSites(
+  body: unknown,
+  options: { readonly withReports?: boolean } = {},
+): UnoWorkSites {
   const r = record(body) ?? {};
   const deploys = Array.isArray(r["deploys"]) ? r["deploys"] : [];
   return {
     availability: "ok",
     sites: deploys.flatMap((raw) => {
       const site = parseWorkSite(raw);
-      return site ? [site] : [];
+      return site && (options.withReports === true || !isReportSlug(site.slug)) ? [site] : [];
     }),
     storageUsedBytes: numOrNull(r["storage_used_bytes"]),
     storageLimitBytes: numOrNull(r["storage_limit_bytes"]),
