@@ -6,7 +6,11 @@ import {
   settingsListOrder,
 } from "./assistantSettingsNav.logic";
 
-const member = (environmentId: string, projectId: string, extra: Partial<{ isUno: boolean; revoked: boolean }> = {}) => ({
+const member = (
+  environmentId: string,
+  projectId: string,
+  extra: Partial<{ isUno: boolean; revoked: boolean }> = {},
+) => ({
   environmentId,
   projectId,
   isUno: extra.isUno ?? false,
@@ -36,8 +40,12 @@ describe("one page for an assistant's settings", () => {
 
   it("an old helper link opens that helper, removed ones too", () => {
     const team = [unoCloud, mia, rexGone];
-    expect(memberOfLegacyView(team, { view: "local", project: "assistant-mia" }, "env-cloud")).toBe(mia);
-    expect(memberOfLegacyView(team, { view: "local", project: "assistant-rex" }, null)).toBe(rexGone);
+    expect(memberOfLegacyView(team, { view: "local", project: "assistant-mia" }, "env-cloud")).toBe(
+      mia,
+    );
+    expect(memberOfLegacyView(team, { view: "local", project: "assistant-rex" }, null)).toBe(
+      rexGone,
+    );
     expect(memberOfLegacyView(team, { view: "local", project: "assistant-none" }, null)).toBeNull();
   });
 

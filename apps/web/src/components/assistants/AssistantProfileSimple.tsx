@@ -61,12 +61,7 @@ import { AssistantModeSwitch } from "./PersonaMode";
 import { AutomationsSection } from "../automations/AutomationsSection";
 import { JoinCallsSection } from "./JoinCallsSection";
 import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
-import {
-  TeamConnectors,
-  TeamPresetEditor,
-  TeamRoutines,
-  TeamRunsOn,
-} from "./AssistantProfileReal";
+import { TeamConnectors, TeamPresetEditor, TeamRoutines, TeamRunsOn } from "./AssistantProfileReal";
 import { ACTIVITY_LABEL, buildAssistantTree, descendantKeys } from "./assistantTeam.logic";
 import { setupProgressLine } from "./teamFromDaemon.logic";
 import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
@@ -266,9 +261,7 @@ function Advanced(props: { readonly children: ReactNode }) {
       >
         <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
         Advanced
-        <span className="font-normal">
-          · projects by name, its email, role and routines, team
-        </span>
+        <span className="font-normal">· projects by name, its email, role and routines, team</span>
       </button>
       {open ? props.children : null}
     </section>

@@ -128,11 +128,11 @@ export function AssistantChatHeaderActions({
           search: { view: "profile", env: uno.environmentId, project: uno.projectId },
         })
       : devMode
-      ? navigate({
-          to: "/settings/environment/$environmentId/assistants",
-          params: { environmentId },
-        })
-      : navigate({ to: "/assistants", search: { view: "card" } }));
+        ? navigate({
+            to: "/settings/environment/$environmentId/assistants",
+            params: { environmentId },
+          })
+        : navigate({ to: "/assistants", search: { view: "card" } }));
   const anyOn = channels.telegram === "on" || channels.slack === "on";
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const conversations = useAssistantConversations();
@@ -182,52 +182,55 @@ export function AssistantChatHeaderActions({
         </Tooltip>
       ) : null}
       {compact && uno ? null : (
-      <Menu>
-        <MenuTrigger
-          data-testid="uno-connect"
-          title="Where you talk to Uno besides here: Telegram, Slack"
-          className={cn(
-            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium shadow-xs/5 hover:bg-accent sm:h-6",
-            anyOn ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {channels.telegram === "on" ? (
-            <>
-              <span className="grid size-3.5 place-items-center rounded-full bg-sky-500 text-white">
-                <SendIcon className="size-2" />
-              </span>
-              Telegram
-              <span className="size-1.5 rounded-full bg-success" aria-hidden />
-            </>
-          ) : (
-            <>
-              <PlugIcon className="size-3.5" />
-              Connect
-            </>
-          )}
-          <ChevronDownIcon className="size-3 opacity-60" />
-        </MenuTrigger>
-        <MenuPopup align="end" side="bottom" className="min-w-64">
-          <MenuGroup>
-            <MenuGroupLabel>Talk to Uno from</MenuGroupLabel>
-            <MenuItem onClick={() => setConnecting("telegram")} data-testid="uno-connect-telegram">
-              <span className="grid size-4 place-items-center rounded-full bg-sky-500 text-white">
-                <SendIcon className="size-2.5" />
-              </span>
-              <span className="flex-1">Telegram</span>
-              <ChannelBadge state={channels.telegram} />
-            </MenuItem>
-            <MenuItem onClick={() => setConnecting("slack")} data-testid="uno-connect-slack">
-              <SlackMark className="size-4" />
-              <span className="flex-1">Slack</span>
-              <ChannelBadge state={channels.slack} />
-            </MenuItem>
-          </MenuGroup>
-          <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
-            Your Telegram chat talks to Uno's main conversation: the same Uno, the same memory.
-          </p>
-        </MenuPopup>
-      </Menu>
+        <Menu>
+          <MenuTrigger
+            data-testid="uno-connect"
+            title="Where you talk to Uno besides here: Telegram, Slack"
+            className={cn(
+              "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium shadow-xs/5 hover:bg-accent sm:h-6",
+              anyOn ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {channels.telegram === "on" ? (
+              <>
+                <span className="grid size-3.5 place-items-center rounded-full bg-sky-500 text-white">
+                  <SendIcon className="size-2" />
+                </span>
+                Telegram
+                <span className="size-1.5 rounded-full bg-success" aria-hidden />
+              </>
+            ) : (
+              <>
+                <PlugIcon className="size-3.5" />
+                Connect
+              </>
+            )}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </MenuTrigger>
+          <MenuPopup align="end" side="bottom" className="min-w-64">
+            <MenuGroup>
+              <MenuGroupLabel>Talk to Uno from</MenuGroupLabel>
+              <MenuItem
+                onClick={() => setConnecting("telegram")}
+                data-testid="uno-connect-telegram"
+              >
+                <span className="grid size-4 place-items-center rounded-full bg-sky-500 text-white">
+                  <SendIcon className="size-2.5" />
+                </span>
+                <span className="flex-1">Telegram</span>
+                <ChannelBadge state={channels.telegram} />
+              </MenuItem>
+              <MenuItem onClick={() => setConnecting("slack")} data-testid="uno-connect-slack">
+                <SlackMark className="size-4" />
+                <span className="flex-1">Slack</span>
+                <ChannelBadge state={channels.slack} />
+              </MenuItem>
+            </MenuGroup>
+            <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
+              Your Telegram chat talks to Uno's main conversation: the same Uno, the same memory.
+            </p>
+          </MenuPopup>
+        </Menu>
       )}
       {devMode || (compact && uno) ? null : (
         <>

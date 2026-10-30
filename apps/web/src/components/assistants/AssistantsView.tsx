@@ -320,7 +320,9 @@ function LegacyAssistantLink(props: { view: "card" | "local"; project: string | 
   const { environmentId } = useActiveMachine();
   const member = memberOfLegacyView(team, props, environmentId);
   if (member) {
-    return <AssistantProfilePage environmentId={member.environmentId} projectId={member.projectId} />;
+    return (
+      <AssistantProfilePage environmentId={member.environmentId} projectId={member.projectId} />
+    );
   }
   return <AssistantsViewMvp />;
 }

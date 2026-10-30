@@ -17,7 +17,9 @@ export interface SettingsMember {
 }
 
 /** The search of an assistant's page. */
-export function assistantSettingsSearch(member: Pick<SettingsMember, "environmentId" | "projectId">) {
+export function assistantSettingsSearch(
+  member: Pick<SettingsMember, "environmentId" | "projectId">,
+) {
   return { view: "profile" as const, env: member.environmentId, project: member.projectId };
 }
 
@@ -43,7 +45,9 @@ export function memberOfLegacyView<M extends SettingsMember>(
 }
 
 /** Uno first, then the helpers in the sidebar's order, the removed ones last. */
-export function settingsListOrder<M extends SettingsMember>(team: ReadonlyArray<M>): {
+export function settingsListOrder<M extends SettingsMember>(
+  team: ReadonlyArray<M>,
+): {
   readonly live: ReadonlyArray<M>;
   readonly removed: ReadonlyArray<M>;
 } {
