@@ -84,9 +84,7 @@ export function HtmlRenderDocument(props: {
   const theme = useHtmlRenderTheme();
   const { openUrl } = usePreviewPane();
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const [srcDoc] = useState(() =>
-    htmlRenderFrameDocument(withHtmlRenderTheme(props.html, theme)),
-  );
+  const [srcDoc] = useState(() => htmlRenderFrameDocument(withHtmlRenderTheme(props.html, theme)));
   const [loaded, setLoaded] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
 
@@ -104,7 +102,10 @@ export function HtmlRenderDocument(props: {
     const allowed: HtmlRenderShortcut[] = [];
     const others: HtmlRenderShortcut[] = [];
     for (const { command, shortcut } of keybindings) {
-      if (PAGE_SHORTCUT_COMMANDS.has(command) && (shortcut.metaKey || shortcut.ctrlKey || shortcut.modKey)) {
+      if (
+        PAGE_SHORTCUT_COMMANDS.has(command) &&
+        (shortcut.metaKey || shortcut.ctrlKey || shortcut.modKey)
+      ) {
         allowed.push(pageShortcut(shortcut, mac));
       } else {
         others.push(pageShortcut(shortcut, mac));

@@ -166,6 +166,9 @@ import { recordingFrameAttachments } from "../screenRecording/frameAttachments";
 import { appendRecordingToPrompt } from "../screenRecording/recordingLogic";
 import { recordingReadiness } from "../screenRecording/pipeline";
 import { useScreenRecordingStore } from "../screenRecording/recordingStore";
+import { useComposerQuotesStore } from "../composerQuotesStore";
+import { appendQuotesToPrompt, extractQuotes, quoteSummary } from "../lib/chatQuotes";
+import { ReplySelectionToolbar } from "./chat/ReplySelectionToolbar";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -3090,6 +3093,10 @@ export default function ChatView(props: ChatViewProps) {
     const composerRecording = queued
       ? null
       : (useScreenRecordingStore.getState().items[activeThread.id] ?? null);
+    // Quotes with a remark: they go as a block of the message's text.
+    const composerQuotes = queued
+      ? []
+      : (useComposerQuotesStore.getState().items[activeThread.id] ?? []);
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -3101,6 +3108,7 @@ export default function ChatView(props: ChatViewProps) {
         composerImages.length +
         composerVideos.length +
         composerFiles.length +
+        composerQuotes.length +
         (composerRecording ? 1 : 0),
       terminalContexts: composerTerminalContexts,
     });
@@ -3115,6 +3123,7 @@ export default function ChatView(props: ChatViewProps) {
       showPlanFollowUpPrompt &&
       activeProposedPlan &&
       !hasComposerAttachments &&
+      composerQuotes.length === 0 &&
       sendableComposerTerminalContexts.length === 0
     ) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -3131,7 +3140,10 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      !queued && !hasComposerAttachments && sendableComposerTerminalContexts.length === 0
+      !queued &&
+      !hasComposerAttachments &&
+      composerQuotes.length === 0 &&
+      sendableComposerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     // /plan and /default act only with legacy plan mode on; else plain text.
@@ -3191,7 +3203,10 @@ export default function ChatView(props: ChatViewProps) {
         sendNow: false,
       })
     ) {
-      useQueuedMessageStore.getState().enqueue(routeThreadKey, promptForSend.trim());
+      useQueuedMessageStore
+        .getState()
+        .enqueue(routeThreadKey, appendQuotesToPrompt(promptForSend.trim(), composerQuotes));
+      useComposerQuotesStore.getState().take(activeThread.id);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -3235,6 +3250,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       const queuedTitleSeed =
         trimmed ||
+        (composerQuotes[0] ? quoteSummary(composerQuotes[0]) : "") ||
         (sendableComposerTerminalContexts[0]
           ? formatTerminalContextLabel(sendableComposerTerminalContexts[0])
           : "New chat");
@@ -3252,7 +3268,10 @@ export default function ChatView(props: ChatViewProps) {
               model: ctxSelectedModel,
               models: ctxSelectedProviderModels,
               effort: ctxSelectedPromptEffort,
-              text: appendTerminalContextsToPrompt(promptForSend, sendableComposerTerminalContexts),
+              text: appendTerminalContextsToPrompt(
+                appendQuotesToPrompt(promptForSend, composerQuotes),
+                sendableComposerTerminalContexts,
+              ),
             }),
             attachments: [],
           },
@@ -3265,6 +3284,7 @@ export default function ChatView(props: ChatViewProps) {
       });
       isAtEndRef.current = true;
       setThreadError(threadIdForSend, null);
+      useComposerQuotesStore.getState().take(activeThread.id);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -3292,8 +3312,9 @@ export default function ChatView(props: ChatViewProps) {
         ? takenRecording.forAgent
         : { ...takenRecording.forAgent, frames: [] }
       : null;
+    const takenQuotes = queued ? [] : useComposerQuotesStore.getState().take(activeThread.id);
     const messageTextForSend = appendTerminalContextsToPrompt(
-      appendRecordingToPrompt(promptForSend, recordingForAgent),
+      appendRecordingToPrompt(appendQuotesToPrompt(promptForSend, takenQuotes), recordingForAgent),
       composerTerminalContextsSnapshot,
     );
     const messageIdForSend = newMessageId();
@@ -3435,7 +3456,7 @@ export default function ChatView(props: ChatViewProps) {
           firstComposerVideoName = firstComposerVideo.name;
         }
       }
-      let titleSeed = trimmed;
+      let titleSeed = trimmed || (takenQuotes[0] ? quoteSummary(takenQuotes[0]) : "");
       if (!titleSeed) {
         if (firstComposerImageName) {
           titleSeed = `Image: ${firstComposerImageName}`;
@@ -3590,6 +3611,7 @@ export default function ChatView(props: ChatViewProps) {
         composerRef.current?.setVideoAttachments(retryComposerVideos);
         composerRef.current?.setFileAttachments(composerFilesSnapshot);
         if (takenRecording) useScreenRecordingStore.getState().restore(takenRecording.item);
+        useComposerQuotesStore.getState().restore(activeThread.id, takenQuotes);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
@@ -3616,6 +3638,7 @@ export default function ChatView(props: ChatViewProps) {
   // "Up next" (S4, upstream cc839c42b1): the first waiting message goes by
   // itself once the agent is done and nothing else needs the person.
   const queuedMessages = useQueuedMessages(routeThreadKey);
+  const [messagesViewport, setMessagesViewport] = useState<HTMLDivElement | null>(null);
   const nextQueued = nextQueuedMessageToSend({
     queue: queuedMessages,
     phase,
@@ -3642,7 +3665,11 @@ export default function ChatView(props: ChatViewProps) {
       const taken = useQueuedMessageStore.getState().take(routeThreadKey, id);
       if (!taken) return;
       // Back into the composer, after whatever is typed there now.
-      const nextPrompt = [promptRef.current.trim(), taken.text].filter(Boolean).join("\n\n");
+      const { text: takenText, quotes } = extractQuotes(taken.text);
+      if (activeThread && quotes.length > 0) {
+        useComposerQuotesStore.getState().restore(activeThread.id, quotes);
+      }
+      const nextPrompt = [promptRef.current.trim(), takenText].filter(Boolean).join("\n\n");
       promptRef.current = nextPrompt;
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
       composerRef.current?.resetCursorState({
@@ -3651,7 +3678,7 @@ export default function ChatView(props: ChatViewProps) {
         detectTrigger: false,
       });
     },
-    [composerDraftTarget, routeThreadKey, setComposerDraftPrompt],
+    [activeThread, composerDraftTarget, routeThreadKey, setComposerDraftPrompt],
   );
   const onDeleteQueued = useCallback(
     (id: string) => {
@@ -4651,7 +4678,19 @@ export default function ChatView(props: ChatViewProps) {
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={setMessagesViewport} className="relative flex min-h-0 flex-1 flex-col">
+            {activeThread ? (
+              <ReplySelectionToolbar
+                viewport={messagesViewport}
+                onQuote={(quote) =>
+                  useComposerQuotesStore.getState().add(activeThread.id, { ...quote, page: null })
+                }
+                onQuoteAndSend={(quote) => {
+                  useComposerQuotesStore.getState().add(activeThread.id, { ...quote, page: null });
+                  void onSendRef.current();
+                }}
+              />
+            ) : null}
             {/* Messages — LegendList handles virtualization and scrolling internally */}
             {showsTimeline(embeddedVisibility) && !isDraftHeroState ? (
               <MessagesTimeline

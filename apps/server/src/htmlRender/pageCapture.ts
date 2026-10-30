@@ -84,10 +84,7 @@ const blockedAddress = (text: string) =>
     ? /\b(?:https?|wss?):\/\/[^\s'"]+/.exec(text)?.[0]
     : undefined;
 
-export async function capturePage(
-  browser: Browser,
-  input: PageCaptureInput,
-): Promise<PageCapture> {
+export async function capturePage(browser: Browser, input: PageCaptureInput): Promise<PageCapture> {
   const consoleMessages: Array<{ level: string; text: string }> = [];
   const blocked = new Set<string>();
   const note = (level: string, text: string) => {

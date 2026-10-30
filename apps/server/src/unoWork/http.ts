@@ -428,13 +428,15 @@ const makeDeps = (input: {
             return reference;
           }),
         capture: (page) =>
-          serverBrowser.capturePage(page).pipe(
-            Effect.flatMap((shot) =>
-              "error" in shot
-                ? Effect.fail(new UnoWorkToolError({ message: shot.error }))
-                : Effect.succeed(shot),
+          serverBrowser
+            .capturePage(page)
+            .pipe(
+              Effect.flatMap((shot) =>
+                "error" in shot
+                  ? Effect.fail(new UnoWorkToolError({ message: shot.error }))
+                  : Effect.succeed(shot),
+              ),
             ),
-          ),
       },
       // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
       ...(projectSync

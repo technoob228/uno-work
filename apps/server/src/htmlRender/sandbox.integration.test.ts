@@ -243,20 +243,24 @@ addEventListener("message", (event) => received.push(event.data));
 });
 
 describe("the agent's preview", () => {
-  it("is a real picture of the page, with what was blocked", { timeout: 30_000 }, async (context) => {
-    if (browser === null) {
-      context.skip();
-      return;
-    }
-    const capture = await capturePage(browser, {
-      html: injectHtmlRenderBootstrap(
-        `<!doctype html><html><body><h1 style="height:320px">Revenue</h1><img src="https://example.com/x.png"></body></html>`,
-      ),
-      width: 640,
-      appearance: "dark",
-    });
-    expect(Buffer.from(capture.png, "base64").subarray(1, 4).toString()).toBe("PNG");
-    expect(capture.contentHeight).toBeGreaterThan(300);
-    expect(capture.blockedRequests.join()).toContain("example.com");
-  });
+  it(
+    "is a real picture of the page, with what was blocked",
+    { timeout: 30_000 },
+    async (context) => {
+      if (browser === null) {
+        context.skip();
+        return;
+      }
+      const capture = await capturePage(browser, {
+        html: injectHtmlRenderBootstrap(
+          `<!doctype html><html><body><h1 style="height:320px">Revenue</h1><img src="https://example.com/x.png"></body></html>`,
+        ),
+        width: 640,
+        appearance: "dark",
+      });
+      expect(Buffer.from(capture.png, "base64").subarray(1, 4).toString()).toBe("PNG");
+      expect(capture.contentHeight).toBeGreaterThan(300);
+      expect(capture.blockedRequests.join()).toContain("example.com");
+    },
+  );
 });

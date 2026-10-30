@@ -134,7 +134,7 @@ describe("htmlRenderFrameDocument", () => {
     );
     expect(doc).toContain(`sandbox="${HTML_RENDER_SANDBOX}"`);
     expect(doc).not.toContain("allow-same-origin");
-    expect(doc).toContain('title=&quot;a&amp;b&quot;');
+    expect(doc).toContain("title=&quot;a&amp;b&quot;");
   });
 
   it("can't be closed from inside the attribute", () => {
@@ -157,10 +157,7 @@ describe("htmlRenderFrameDocument", () => {
 describe("withHtmlRenderTheme", () => {
   it("swaps the default theme for the reader's", () => {
     const stored = injectHtmlRenderBootstrap("<p>x</p>");
-    const themed = withHtmlRenderTheme(
-      stored,
-      htmlRenderTheme(UNO_LIGHT_THEME_COLORS, "light"),
-    );
+    const themed = withHtmlRenderTheme(stored, htmlRenderTheme(UNO_LIGHT_THEME_COLORS, "light"));
     expect(themed).toContain(":root{color-scheme:light;");
     expect(themed).not.toContain("prefers-color-scheme");
     expect(themed.endsWith("<p>x</p>")).toBe(true);
@@ -174,7 +171,12 @@ describe("withHtmlRenderTheme", () => {
 });
 
 describe("readHtmlRenderReference", () => {
-  const reference = { attachmentId: "t-1", path: "/state/attachments/t-1.html", title: "C", height: 420 };
+  const reference = {
+    attachmentId: "t-1",
+    path: "/state/attachments/t-1.html",
+    title: "C",
+    height: 420,
+  };
 
   it("reads a reference and refuses a path that isn't the page's own file", () => {
     expect(readHtmlRenderReference(reference)).toEqual(reference);

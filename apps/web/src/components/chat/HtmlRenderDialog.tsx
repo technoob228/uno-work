@@ -71,7 +71,13 @@ export function HtmlRenderDialog(props: {
           >
             <PlusIcon />
           </Button>
-          <Button ref={closeRef} aria-label="Close" size="icon-xs" variant="ghost" onClick={onClose}>
+          <Button
+            ref={closeRef}
+            aria-label="Close"
+            size="icon-xs"
+            variant="ghost"
+            onClick={onClose}
+          >
             <XIcon />
           </Button>
         </div>

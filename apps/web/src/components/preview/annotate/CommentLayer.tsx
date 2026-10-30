@@ -4,16 +4,101 @@
  * "3 comments · Clear · Send to chat". The highlight and the numbered pins
  * are drawn inside the page (pageToolsScript.ts); this is the app's part.
  */
-import { MessageSquarePlusIcon } from "lucide-react";
+import { MessageSquarePlusIcon, QuoteIcon } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "../../../lib/utils";
+import { QuoteCommentEditor } from "../../chat/QuoteCommentEditor";
 import { Button } from "../../ui/button";
 import { commentsPayload } from "./pageTools.logic";
+import type { PageSelection } from "./pageToolsScript";
 import { usePageToolsStore, usePageToolsTab } from "./pageToolsStore";
-import { useSendToChat } from "./sendToChat";
+import { useQuoteToChat, useSendToChat } from "./sendToChat";
 
 const NOTE_WIDTH = 272;
+const QUOTE_BOX_HEIGHT = 190;
+
+/**
+ * Text selected on the page, with developer tools off too: a Quote button at
+ * the selection, then the comment box. The quote waits by the composer. Sites
+ * stay plain until the person selects something.
+ */
+export function SelectionQuote({
+  tabId,
+  pageRef,
+  zoom = 1,
+}: {
+  tabId: string;
+  pageRef: RefObject<HTMLElement | null>;
+  zoom?: number;
+}) {
+  const tab = usePageToolsTab(tabId);
+  const quoteToChat = useQuoteToChat();
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  // Held while writing: the page's selection may change under the box.
+  const [quoting, setQuoting] = useState<PageSelection | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const selection = tab.commenting || tab.draft ? null : tab.selection;
+  const target = quoting ?? selection;
+
+  useLayoutEffect(() => {
+    const layer = layerRef.current?.getBoundingClientRect();
+    const page = pageRef.current?.getBoundingClientRect();
+    if (!target || !layer || !page) {
+      setPosition(null);
+      return;
+    }
+    const width = quoting ? NOTE_WIDTH + 48 : 90;
+    const height = quoting ? QUOTE_BOX_HEIGHT : 28;
+    const { x, y, w, h } = target.rect;
+    setPosition({
+      left: Math.max(8, Math.min(page.left - layer.left + (x + w) * zoom, layer.width - width - 8)),
+      top: Math.max(
+        8,
+        Math.min(page.top - layer.top + (y + h) * zoom + 6, layer.height - height - 8),
+      ),
+    });
+  }, [target, quoting, pageRef, zoom]);
+
+  if (!target) return null;
+  const finish = () => {
+    setQuoting(null);
+    usePageToolsStore.getState().patch(tabId, { selection: null });
+  };
+  return (
+    <div ref={layerRef} className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      {position === null ? null : quoting ? (
+        <div
+          className="pointer-events-auto absolute rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-xl"
+          style={{ width: NOTE_WIDTH + 48, left: position.left, top: position.top }}
+          data-testid="browser-quote-box"
+        >
+          <blockquote className="line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
+            {quoting.text}
+          </blockquote>
+          <QuoteCommentEditor
+            onSave={(comment) => {
+              if (quoteToChat({ text: quoting.text, comment, page: quoting.url })) finish();
+            }}
+            onCancel={() => setQuoting(null)}
+          />
+        </div>
+      ) : (
+        <Button
+          size="xs"
+          variant="outline"
+          className="pointer-events-auto absolute shadow-md"
+          style={{ left: position.left, top: position.top }}
+          data-testid="browser-quote-button"
+          onClick={() => setQuoting(target)}
+        >
+          <QuoteIcon aria-hidden="true" className="size-3.5" />
+          Quote
+        </Button>
+      )}
+    </div>
+  );
+}
 
 /**
  * The browser's bottom strip while commenting: what to do, how many notes,

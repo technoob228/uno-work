@@ -354,29 +354,33 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
 
         const highlighted = (
           <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              {/* Reserve the block's height but stay hidden until Shiki has
+            {/* Reserve the block's height but stay hidden until Shiki has
                   coloured it, so plain text never flashes before the
                   highlighted version (upstream c07575f573). */}
-              <Suspense
-                fallback={
-                  <pre {...props} className="invisible" aria-hidden>
-                    {children}
-                  </pre>
-                }
-              >
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={diffThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
+            <Suspense
+              fallback={
+                <pre {...props} className="invisible" aria-hidden>
+                  {children}
+                </pre>
+              }
+            >
+              <SuspenseShikiCodeBlock
+                className={codeBlock.className}
+                code={codeBlock.code}
+                themeName={diffThemeName}
+                isStreaming={isStreaming}
+              />
+            </Suspense>
+          </CodeHighlightErrorBoundary>
         );
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
             {extractFenceLanguage(codeBlock.className) === "mermaid" ? (
-              <MarkdownMermaidCodeBlock code={codeBlock.code} isStreaming={isStreaming} className="right-9">
+              <MarkdownMermaidCodeBlock
+                code={codeBlock.code}
+                isStreaming={isStreaming}
+                className="right-9"
+              >
                 {highlighted}
               </MarkdownMermaidCodeBlock>
             ) : (

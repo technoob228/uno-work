@@ -17,8 +17,7 @@ import { useTheme } from "./useTheme";
 function readAppThemeColors(appearance: ThemeAppearance): ThemeColors {
   const base = appearance === "light" ? UNO_LIGHT_THEME_COLORS : UNO_DARK_THEME_COLORS;
   const style = getComputedStyle(document.documentElement);
-  const token = (name: string, fallback: string) =>
-    style.getPropertyValue(name).trim() || fallback;
+  const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
   const primary = token("--primary", base.accent);
   return {
     ...base,

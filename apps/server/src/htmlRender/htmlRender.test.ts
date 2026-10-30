@@ -118,9 +118,9 @@ describe("inlineLocalImages", () => {
       denied: (absolute) =>
         absolute.startsWith(`${inside}${path.sep}`) ? null : "Ada works only in its projects.",
     };
-    await expect(
-      inlineLocalImages(`<img src="${inside}/photo.png">`, fenced),
-    ).rejects.toThrow("Ada works only in its projects.");
+    await expect(inlineLocalImages(`<img src="${inside}/photo.png">`, fenced)).rejects.toThrow(
+      "Ada works only in its projects.",
+    );
   });
 
   it("refuses an image over the limit", async () => {
@@ -136,7 +136,10 @@ describe("preparePage", () => {
   it("adds the bootstrap and keeps data out of its head scan", async () => {
     const file = path.join(root, "a.png");
     await writeFile(file, PNG);
-    const page = await preparePage(`<!doctype html><html><head></head><body><img src="${file}"></body></html>`, files());
+    const page = await preparePage(
+      `<!doctype html><html><head></head><body><img src="${file}"></body></html>`,
+      files(),
+    );
     expect(page.html.indexOf('<style id="t3-theme">')).toBeLessThan(page.html.indexOf("<img"));
     expect(page.html).toContain("data:image/png;base64,");
   });
@@ -144,7 +147,11 @@ describe("preparePage", () => {
 
 describe("storePage", () => {
   it("keeps the page under an id tied to the thread, readable by its owner only", async () => {
-    const stored = await storePage({ attachmentsDir: root, threadId: "Thread 1", html: "<p>x</p>" });
+    const stored = await storePage({
+      attachmentsDir: root,
+      threadId: "Thread 1",
+      html: "<p>x</p>",
+    });
     expect(stored.attachmentId).toMatch(/^thread-1-[0-9a-f-]{36}$/);
     expect(stored.path).toBe(path.join(root, `${stored.attachmentId}.html`));
     expect(await readFile(stored.path, "utf8")).toBe("<p>x</p>");

@@ -1,6 +1,9 @@
 import { RecordingMessageCard } from "../../screenRecording/RecordingCards";
 import { KEY_FRAME_PREFIX } from "../../screenRecording/agentView";
 import { extractRecordingBlock } from "../../screenRecording/recordingLogic";
+import { extractQuotes, quotesAsText } from "../../lib/chatQuotes";
+import { SentQuotes } from "./ComposerQuoteChips";
+import { REPLY_QUOTE_SOURCE_ATTRIBUTE } from "./ReplySelectionToolbar";
 import { localRecordingUrl } from "../../screenRecording/recordingStore";
 import {
   type ApprovalRequestId,
@@ -572,9 +575,15 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const displayedWithRecording = deriveDisplayedUserMessageState(row.message.text);
           // Loom Work: a screen recording block shows as a player card.
           const recordingPart = extractRecordingBlock(displayedWithRecording.visibleText);
-          const displayedUserMessage = recordingPart.recording
-            ? { ...displayedWithRecording, visibleText: recordingPart.text }
-            : displayedWithRecording;
+          const quotesPart = extractQuotes(recordingPart.text);
+          const displayedUserMessage = {
+            ...displayedWithRecording,
+            visibleText: quotesPart.text,
+            copyText:
+              quotesPart.quotes.length > 0
+                ? quotesAsText(quotesPart.text, quotesPart.quotes)
+                : displayedWithRecording.copyText,
+          };
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = devMode && typeof row.revertTurnCount === "number";
           const sentByThreadId = row.message.sentByThreadId ?? null;
@@ -592,6 +601,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   data-sent-by-agent={sentByThreadId ? "true" : undefined}
                 >
                   {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
+                  {quotesPart.quotes.length > 0 && <SentQuotes quotes={quotesPart.quotes} />}
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                       {userImages.map((image) => (
@@ -730,12 +740,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={ctx.markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                  environmentId={ctx.activeThreadEnvironmentId}
-                />
+                <div {...{ [REPLY_QUOTE_SOURCE_ATTRIBUTE]: "" }}>
+                  <ChatMarkdown
+                    text={messageText}
+                    cwd={ctx.markdownCwd}
+                    isStreaming={Boolean(row.message.streaming)}
+                    environmentId={ctx.activeThreadEnvironmentId}
+                  />
+                </div>
                 <AssistantChangedFilesSection
                   turnSummary={row.assistantTurnDiffSummary}
                   routeThreadKey={ctx.routeThreadKey}

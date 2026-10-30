@@ -131,15 +131,14 @@ export function HtmlRenderFrame(props: {
             </Tooltip>
           </div>
           {expanded ? (
-            <HtmlRenderDialog
-              html={page.data}
-              title={title}
-              onClose={() => setExpanded(false)}
-            />
+            <HtmlRenderDialog html={page.data} title={title} onClose={() => setExpanded(false)} />
           ) : null}
         </>
       ) : (
-        <div className="size-full animate-pulse rounded-lg bg-muted/40" aria-label={`Loading ${title}`} />
+        <div
+          className="size-full animate-pulse rounded-lg bg-muted/40"
+          aria-label={`Loading ${title}`}
+        />
       )}
     </div>
   );

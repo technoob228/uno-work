@@ -74,10 +74,7 @@ const CSS_URL_ABSOLUTE = new RegExp(
 // `<img src="charts/q3.png">`, `url(./q3.png)`: next to the page or the chat's folder.
 const RELATIVE_NAME = String.raw`(?![a-z][a-z0-9+.-]*:|/|~|#)[^"'\x60()<>\r\n]{1,2048}?\.(?:${IMAGE_EXTENSIONS})`;
 const SRC_RELATIVE = new RegExp(String.raw`\ssrc\s*=\s*(["'])(${RELATIVE_NAME})\1`, "gid");
-const CSS_URL_RELATIVE = new RegExp(
-  String.raw`url\(\s*(["']?)(${RELATIVE_NAME})\1\s*\)`,
-  "gid",
-);
+const CSS_URL_RELATIVE = new RegExp(String.raw`url\(\s*(["']?)(${RELATIVE_NAME})\1\s*\)`, "gid");
 
 interface ImageReference {
   readonly start: number;

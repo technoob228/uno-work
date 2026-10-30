@@ -123,9 +123,7 @@ export function MermaidDiagram({
       sanitize: sanitizeDiagramSvg,
       onRender: () => setRenderError(null),
       onError: (error) =>
-        setRenderError(
-          error instanceof Error ? error.message : "it could not be drawn.",
-        ),
+        setRenderError(error instanceof Error ? error.message : "it could not be drawn."),
     });
     return () => mounted.destroy();
   };
@@ -145,10 +143,7 @@ export function MermaidDiagram({
   }
 
   return (
-    <div
-      className="chat-markdown-mermaid overflow-x-auto"
-      data-markdown-mermaid=""
-    >
+    <div className="chat-markdown-mermaid overflow-x-auto" data-markdown-mermaid="">
       {renderError ? <DiagramError message={renderError} source={source} /> : null}
       <button
         type="button"
@@ -185,9 +180,7 @@ function DiagramError({
           </Button>
         ) : null}
       </div>
-      <pre className="mt-2 mb-0 overflow-auto font-mono text-xs whitespace-pre-wrap">
-        {source}
-      </pre>
+      <pre className="mt-2 mb-0 overflow-auto font-mono text-xs whitespace-pre-wrap">{source}</pre>
     </div>
   );
 }

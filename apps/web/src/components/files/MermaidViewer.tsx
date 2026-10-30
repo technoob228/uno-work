@@ -27,10 +27,10 @@ export default function MermaidViewer(props: { readonly text: string }) {
       </Suspense>
       {expanded
         ? createPortal(
-          <ExpandedImageDialog
-            preview={{ images: [{ src: expanded, name: "Diagram" }], index: 0 }}
-            onClose={() => setExpanded(null)}
-          />,
+            <ExpandedImageDialog
+              preview={{ images: [{ src: expanded, name: "Diagram" }], index: 0 }}
+              onClose={() => setExpanded(null)}
+            />,
             document.body,
           )
         : null}

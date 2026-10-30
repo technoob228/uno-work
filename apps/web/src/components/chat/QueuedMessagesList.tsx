@@ -7,7 +7,16 @@
 import { ArrowUpIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { memo } from "react";
 
+import { extractQuotes } from "../../lib/chatQuotes";
 import { type QueuedChatMessage } from "../../queuedMessageStore";
+
+/** What the person wrote, with a word for the quotes that go with it. */
+function queuedMessageText(text: string): string {
+  const { text: own, quotes } = extractQuotes(text);
+  if (quotes.length === 0) return own;
+  const count = quotes.length === 1 ? "1 quote" : `${quotes.length} quotes`;
+  return own ? `${own}\n+ ${count}` : count;
+}
 
 export const QueuedMessagesList = memo(function QueuedMessagesList({
   messages,
@@ -31,7 +40,7 @@ export const QueuedMessagesList = memo(function QueuedMessagesList({
           data-testid="queued-message"
         >
           <p className="line-clamp-4 whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground/80">
-            {message.text}
+            {queuedMessageText(message.text)}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span className="mr-auto">

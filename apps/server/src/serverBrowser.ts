@@ -53,7 +53,11 @@ import {
   type BrowserSetupController,
 } from "./browserSetup.ts";
 import { ServerConfig } from "./config.ts";
-import { capturePage as capturePageIn, type PageCapture, type PageCaptureInput } from "./htmlRender/pageCapture.ts";
+import {
+  capturePage as capturePageIn,
+  type PageCapture,
+  type PageCaptureInput,
+} from "./htmlRender/pageCapture.ts";
 
 /**
  * Серверный исполнитель bridge-команд: Chromium самой машины (playwright-core).
@@ -1145,7 +1149,8 @@ export const makeServerBrowser = Effect.gen(function* () {
         ],
       });
     if (executablePath) return launchWith(undefined);
-    const missing = (cause: unknown) => /executable doesn't exist|is not found/i.test(String(cause));
+    const missing = (cause: unknown) =>
+      /executable doesn't exist|is not found/i.test(String(cause));
     // Как у основного браузера: полный Chromium, потом оболочка; на Mac и
     // Windows браузера машины обычно нет, но есть Chrome человека (без профиля).
     return launchWith("chromium").catch((cause: unknown) =>
