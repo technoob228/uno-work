@@ -73,6 +73,13 @@ export interface ThreadWaitProbe {
   } | null;
   readonly turns: ReadonlyArray<WaitTurnRow>;
   readonly nowMs: number;
+  /**
+   * The harness refused to start the newest turn (`provider.turn.start.failed`:
+   * not signed in, no such folder…). Its turn row stays `pending` with no
+   * session, which read as "still starting" for two minutes and then as a
+   * vague "session absent" (canary 2534, 30.10). Absent: not looked up.
+   */
+  readonly startFailure?: { readonly detail: string; readonly at: string } | null;
 }
 
 export type SettledWaitStatus = Exclude<ManagerWaitStatus, "timeout" | "running">;
@@ -85,6 +92,8 @@ export type ThreadWaitVerdict =
       /** The turn the verdict is about (latest concrete turn), if any. */
       readonly turn: WaitTurnRow | null;
       readonly error: string | null;
+      /** The turn never started (the harness refused it): `error` says why. */
+      readonly notStarted?: boolean;
     };
 
 const NOT_SETTLED: ThreadWaitVerdict = { settled: false };
@@ -111,6 +120,21 @@ export const evaluateThreadWait = (probe: ThreadWaitProbe): ThreadWaitVerdict =>
     .filter((turn) => turn.state === "pending" || turn.state === "running")
     .toSorted(byRequestedAtDesc)[0];
   if (inflight !== undefined) {
+    const startFailure = probe.startFailure ?? null;
+    if (
+      inflight.state === "pending" &&
+      inflight.turnId === null &&
+      startFailure !== null &&
+      startFailure.at >= inflight.requestedAt
+    ) {
+      return {
+        settled: true,
+        status: "error",
+        turn: latest,
+        error: startFailure.detail,
+        notStarted: true,
+      };
+    }
     // «stopped»/«error» stamped BEFORE the request is a stale status of an
     // earlier run: dispatch is exactly what (re)starts the session.
     const sessionDied =

@@ -2,7 +2,7 @@ import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import { LEGACY_NO_CLAUDE_NOTE, ROUTING_TEMPLATE, upgradeRoutingNotes } from "./routingTemplate.ts";
-import { applyPersonRoute } from "./personRouting.ts";
+import { applyPersonRoute, selectionNotReadyMessage } from "./personRouting.ts";
 
 const provider = (
   driver: string,
@@ -104,6 +104,27 @@ describe("applyPersonRoute", () => {
     expect(
       applyPersonRoute({ route: null, requested: smart, personAsked: false, providers: [] }),
     ).toEqual({ kind: "none" });
+  });
+});
+
+describe("selectionNotReadyMessage (any chat an assistant starts)", () => {
+  // Canary 30.10: the account default AI was Claude, not signed in; the chat
+  // died on start and Uno re-ran it on Smart by itself.
+  const claude = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-sonnet-5" };
+
+  it("Claude not signed in: not started, ask the person", () => {
+    const message = selectionNotReadyMessage(claude, [
+      provider("uno"),
+      provider("claudeAgent", { auth: { status: "unauthenticated" } }),
+    ]);
+    expect(message).toContain("Claude is not signed in");
+    expect(message).toContain("NOT started");
+    expect(message).toContain("Не стартовал");
+  });
+
+  it("ready, or a provider this computer doesn't list: start as before", () => {
+    expect(selectionNotReadyMessage(claude, [provider("claudeAgent")])).toBeNull();
+    expect(selectionNotReadyMessage(claude, [provider("uno")])).toBeNull();
   });
 });
 

@@ -90,7 +90,8 @@ const flatPayload = (payload: unknown): string => {
   return text.replace(/\\+"/g, '"');
 };
 
-const FAILED_RESULT = /"ok"\s*:\s*false|"isError"\s*:\s*true|"error"\s*:\s*["{]|"code"\s*:\s*"[a-z_]+"/;
+const FAILED_RESULT =
+  /"ok"\s*:\s*false|"isError"\s*:\s*true|"error"\s*:\s*["{]|"code"\s*:\s*"[a-z_]+"/;
 
 /**
  * The chats a turn started, from its tool activities. A call that failed
@@ -184,7 +185,10 @@ const hasUnnegated = (text: string, patterns: ReadonlyArray<RegExp>): boolean =>
  * "отдал в работу", "launched", "started a chat"). A denial («не запустил»)
  * is not a claim; "запущен" is not one in a status answer (`statusTurn`).
  */
-export function claimsLaunch(text: string, options: { readonly statusTurn?: boolean } = {}): boolean {
+export function claimsLaunch(
+  text: string,
+  options: { readonly statusTurn?: boolean } = {},
+): boolean {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length === 0) return false;
   if (hasUnnegated(flat, FIRST_PERSON_CLAIMS)) return true;
@@ -254,7 +258,8 @@ const shortId = (id: string) => (id.length > 8 ? `${id.slice(0, 8)}…` : id);
 
 /** «[запущен чат «…» (id …, папка …, модель …)]» — one launch as a fact. */
 export const launchFactLine = (fact: LaunchFact): string => {
-  const verb = fact.tool === "send_turn" || fact.tool === "chat_message" ? "отправлено в чат" : "запущен чат";
+  const verb =
+    fact.tool === "send_turn" || fact.tool === "chat_message" ? "отправлено в чат" : "запущен чат";
   const details = [
     fact.threadId === null ? null : `id ${shortId(fact.threadId)}`,
     fact.cwd === null ? null : `папка ${fact.cwd}`,

@@ -22,7 +22,10 @@ const chatCreate = (turnId: string, options: { failed?: boolean; errorResult?: b
       status: options.failed ? "failed" : "completed",
       detail: options.errorResult
         ? JSON.stringify({
-            result: JSON.stringify({ error: "harness_not_ready", message: "Claude is not signed in" }),
+            result: JSON.stringify({
+              error: "harness_not_ready",
+              message: "Claude is not signed in",
+            }),
           })
         : JSON.stringify({
             result: JSON.stringify({
@@ -131,17 +134,26 @@ describe("decideLaunchTruth", () => {
 
   it("a claim backed by a call is fine", () => {
     expect(
-      decideLaunchTruth({ text: claim, activities: [chatCreate("t1")], turnId: "t1", checksMade: 0 }),
+      decideLaunchTruth({
+        text: claim,
+        activities: [chatCreate("t1")],
+        turnId: "t1",
+        checksMade: 0,
+      }),
     ).toEqual({ kind: "ok" });
   });
 
   it("a claim with no call: one hidden check, then the honest line", () => {
-    expect(decideLaunchTruth({ text: claim, activities: [], turnId: "t1", checksMade: 0 })).toEqual({
-      kind: "check",
-    });
-    expect(decideLaunchTruth({ text: claim, activities: [], turnId: "t2", checksMade: 1 })).toEqual({
-      kind: "correct",
-    });
+    expect(decideLaunchTruth({ text: claim, activities: [], turnId: "t1", checksMade: 0 })).toEqual(
+      {
+        kind: "check",
+      },
+    );
+    expect(decideLaunchTruth({ text: claim, activities: [], turnId: "t2", checksMade: 1 })).toEqual(
+      {
+        kind: "correct",
+      },
+    );
   });
 
   it("no claim, nothing to check", () => {
@@ -182,10 +194,14 @@ describe("annotateDispatcherHistory", () => {
   ];
 
   it("a launch carries its facts; a claim without a call is not carried", () => {
-    const out = annotateDispatcherHistory(messages, [chatCreate("t2"), workStatus("t3")], (fact) => ({
-      ...fact,
-      model: "claudeAgent/claude-sonnet-5",
-    }));
+    const out = annotateDispatcherHistory(
+      messages,
+      [chatCreate("t2"), workStatus("t3")],
+      (fact) => ({
+        ...fact,
+        model: "claudeAgent/claude-sonnet-5",
+      }),
+    );
     expect(out[1]?.text).toBe(NOT_LAUNCHED_FACT);
     expect(out[3]?.text).toBe(
       "[запущен чат «Читать package.json в shop-demo» (id 876c0451…, папка ~/projects/shop-demo, модель claudeAgent/claude-sonnet-5)]\n" +
