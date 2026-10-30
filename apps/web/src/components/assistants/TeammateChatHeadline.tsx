@@ -24,7 +24,7 @@ export function TeammateChatHeadline(props: {
           search: { view: "profile", env: member.environmentId, project: member.projectId },
         })
       }
-      title={`${member.profile.name}'s page`}
+      title={`${member.profile.name}'s settings`}
       className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md text-left hover:opacity-80"
       data-testid="teammate-headline"
     >

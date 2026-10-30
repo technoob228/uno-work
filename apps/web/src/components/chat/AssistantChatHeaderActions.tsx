@@ -29,8 +29,9 @@ import { UnoFace } from "../sidebar/SidebarDParts";
 import { AssistantModelPicker } from "./AssistantEngine";
 import { AssistantMemoryChip } from "./AssistantMemoryChip";
 import { cn } from "../../lib/utils";
+import { AssistantSettingsButton } from "../assistants/AssistantSettingsButton";
 import { useCloudPlan } from "../assistants/PersonaMode";
-import { useTeamShown } from "../assistants/useAssistantTeam";
+import { useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -97,20 +98,41 @@ export function AssistantChatHeadline({
   );
 }
 
-export function AssistantChatHeaderActions({ environmentId }: { environmentId: EnvironmentId }) {
+export function AssistantChatHeaderActions({
+  environmentId,
+  compact = false,
+}: {
+  environmentId: EnvironmentId;
+  /** A phone: only Settings (Telegram, memory and the AI are on Uno's page). */
+  compact?: boolean;
+}) {
   const navigate = useNavigate();
   const channels = useAssistantChannels(environmentId);
+  // With the assistants update Uno has a page like every assistant (29.10): its
+  // settings — mode, computer, apps, AI, Telegram, instructions — are there.
+  const teamShown = useTeamShown();
+  const team = useAssistantTeam();
+  const uno = teamShown
+    ? (team.find((member) => member.isUno && member.environmentId === environmentId) ??
+      team.find((member) => member.isUno) ??
+      null)
+    : null;
   // 01.10: the model is picked in the composer below; the header's copy of the
   // picker and the engine note are for Dev mode.
   const devMode = useDevMode();
   // The gear: the assistant's card (Dev mode: all of its settings).
   const openSettings = () =>
-    void (devMode
+    void (uno && !devMode
       ? navigate({
-          to: "/settings/environment/$environmentId/assistants",
-          params: { environmentId },
+          to: "/assistants",
+          search: { view: "profile", env: uno.environmentId, project: uno.projectId },
         })
-      : navigate({ to: "/assistants", search: { view: "card" } }));
+      : devMode
+        ? navigate({
+            to: "/settings/environment/$environmentId/assistants",
+            params: { environmentId },
+          })
+        : navigate({ to: "/assistants", search: { view: "card" } }));
   const anyOn = channels.telegram === "on" || channels.slack === "on";
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const conversations = useAssistantConversations();
@@ -159,60 +181,70 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      <Menu>
-        <MenuTrigger
-          data-testid="uno-connect"
-          className={cn(
-            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium shadow-xs/5 hover:bg-accent sm:h-6",
-            anyOn ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {channels.telegram === "on" ? (
-            <>
-              <span className="grid size-3.5 place-items-center rounded-full bg-sky-500 text-white">
-                <SendIcon className="size-2" />
-              </span>
-              Telegram
-              <span className="size-1.5 rounded-full bg-success" aria-hidden />
-            </>
-          ) : (
-            <>
-              <PlugIcon className="size-3.5" />
-              Connect
-            </>
-          )}
-          <ChevronDownIcon className="size-3 opacity-60" />
-        </MenuTrigger>
-        <MenuPopup align="end" side="bottom" className="min-w-64">
-          <MenuGroup>
-            <MenuGroupLabel>Talk to Uno from</MenuGroupLabel>
-            <MenuItem onClick={() => setConnecting("telegram")} data-testid="uno-connect-telegram">
-              <span className="grid size-4 place-items-center rounded-full bg-sky-500 text-white">
-                <SendIcon className="size-2.5" />
-              </span>
-              <span className="flex-1">Telegram</span>
-              <ChannelBadge state={channels.telegram} />
-            </MenuItem>
-            <MenuItem onClick={() => setConnecting("slack")} data-testid="uno-connect-slack">
-              <SlackMark className="size-4" />
-              <span className="flex-1">Slack</span>
-              <ChannelBadge state={channels.slack} />
-            </MenuItem>
-          </MenuGroup>
-          <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
-            Your Telegram chat talks to Uno's main conversation: the same Uno, the same memory.
-          </p>
-        </MenuPopup>
-      </Menu>
-      {devMode ? null : (
+      {compact && uno ? null : (
+        <Menu>
+          <MenuTrigger
+            data-testid="uno-connect"
+            title="Where you talk to Uno besides here: Telegram, Slack"
+            className={cn(
+              "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-input px-2 text-xs font-medium shadow-xs/5 hover:bg-accent sm:h-6",
+              anyOn ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {channels.telegram === "on" ? (
+              <>
+                <span className="grid size-3.5 place-items-center rounded-full bg-sky-500 text-white">
+                  <SendIcon className="size-2" />
+                </span>
+                Telegram
+                <span className="size-1.5 rounded-full bg-success" aria-hidden />
+              </>
+            ) : (
+              <>
+                <PlugIcon className="size-3.5" />
+                Connect
+              </>
+            )}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </MenuTrigger>
+          <MenuPopup align="end" side="bottom" className="min-w-64">
+            <MenuGroup>
+              <MenuGroupLabel>Talk to Uno from</MenuGroupLabel>
+              <MenuItem
+                onClick={() => setConnecting("telegram")}
+                data-testid="uno-connect-telegram"
+              >
+                <span className="grid size-4 place-items-center rounded-full bg-sky-500 text-white">
+                  <SendIcon className="size-2.5" />
+                </span>
+                <span className="flex-1">Telegram</span>
+                <ChannelBadge state={channels.telegram} />
+              </MenuItem>
+              <MenuItem onClick={() => setConnecting("slack")} data-testid="uno-connect-slack">
+                <SlackMark className="size-4" />
+                <span className="flex-1">Slack</span>
+                <ChannelBadge state={channels.slack} />
+              </MenuItem>
+            </MenuGroup>
+            <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
+              Your Telegram chat talks to Uno's main conversation: the same Uno, the same memory.
+            </p>
+          </MenuPopup>
+        </Menu>
+      )}
+      {devMode || (compact && uno) ? null : (
         <>
           <AssistantMemoryChip environmentId={environmentId} onOpenSettings={openSettings} />
-          <AssistantModelPicker
-            environmentId={environmentId}
-            compact
-            settingsLink
-            testId="uno-header-engine"
-          />
+          {/* The AI is picked in the composer below and on Uno's page: with
+              the page there, the header's copy of the picker goes (29.10). */}
+          {uno ? null : (
+            <AssistantModelPicker
+              environmentId={environmentId}
+              compact
+              settingsLink
+              testId="uno-header-engine"
+            />
+          )}
           {conversations.supported ? (
             <Tooltip>
               <TooltipTrigger
@@ -237,6 +269,7 @@ export function AssistantChatHeaderActions({ environmentId }: { environmentId: E
           ) : null}
         </>
       )}
+      {!devMode && uno ? <AssistantSettingsButton member={uno} compact={compact} /> : null}
       {devMode ? (
         <Tooltip>
           <TooltipTrigger

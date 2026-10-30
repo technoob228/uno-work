@@ -652,6 +652,8 @@ export function AssistantsPhoneSettings() {
   const devMode = useDevMode();
   const { environmentId } = useActiveMachine();
   const channels = useAssistantChannels(environmentId);
+  const teamShown = useTeamShown();
+  const helpers = teamShown ? " Your helpers' own bots are on their pages." : "";
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
   const phoneUrl = isWebApp && !isElectron ? window.location.origin : PHONE_WORK_URL;
   return (
@@ -659,8 +661,12 @@ export function AssistantsPhoneSettings() {
       <SettingsSection title="Assistants">
         <LinkRow
           icon={<BotIcon />}
-          title="Assistants"
-          description="Bots that answer in Telegram or Slack 24/7. Create, pause or delete them."
+          title={teamShown ? "Your assistants" : "Assistants"}
+          description={
+            teamShown
+              ? "Uno and your helpers. Open one to change its name, permission level, computer, apps, AI, Telegram and instructions."
+              : "Bots that answer in Telegram or Slack 24/7. Create, pause or delete them."
+          }
           onClick={() => void navigate({ to: "/assistants" })}
         />
       </SettingsSection>
@@ -675,8 +681,8 @@ export function AssistantsPhoneSettings() {
           }
           description={
             channels.telegram === "on"
-              ? `Your assistant answers you in Telegram${channels.telegramBot ? ` as @${channels.telegramBot}` : ""}.`
-              : "Scan a QR code with your phone and write to your assistant from anywhere."
+              ? `Uno answers you in Telegram${channels.telegramBot ? ` as @${channels.telegramBot}` : ""}.${helpers}`
+              : `Scan a QR code with your phone and write to Uno from anywhere.${helpers}`
           }
           control={
             channels.telegram === "on" ? (

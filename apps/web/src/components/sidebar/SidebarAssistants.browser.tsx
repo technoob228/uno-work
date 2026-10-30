@@ -125,12 +125,12 @@ describe("the Assistants header", () => {
     expect(screen.getByTestId("sidebar-new-assistant-row").query()).toBeNull();
   });
 
-  it("the gear opens the assistants' settings", async () => {
+  it("the gear opens every assistant and the way into each one's settings", async () => {
     const screen = await mount();
     await userEvent.hover(screen.getByTestId("sidebar-assistants-settings"));
-    await expect.element(screen.getByText("Assistant settings")).toBeVisible();
+    await expect.element(screen.getByText("All assistants and their settings")).toBeVisible();
     await screen.getByTestId("sidebar-assistants-settings").click();
-    expect(navigate).toHaveBeenCalledWith({ to: "/settings/assistants-phone" });
+    expect(navigate).toHaveBeenCalledWith({ to: "/assistants" });
   });
 
   it("hides the whole block behind one small line, and brings it back", async () => {
@@ -143,6 +143,18 @@ describe("the Assistants header", () => {
     await screen.getByTestId("sidebar-show-assistants").click();
     await expect.element(screen.getByTestId("sidebar-assistants-header")).toBeVisible();
     expect(screen.getByTestId("sidebar-assistant").elements()).toHaveLength(2);
+  });
+});
+
+describe("an assistant's row", () => {
+  it("has its settings on hover: its gear opens its page", async () => {
+    const screen = await mount();
+    const mia = screen.getByTestId("sidebar-assistant").nth(1);
+    await mia.getByTestId("sidebar-assistant-settings").click();
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/assistants",
+      search: { view: "profile", env: "env-1", project: "assistant-mia" },
+    });
   });
 });
 

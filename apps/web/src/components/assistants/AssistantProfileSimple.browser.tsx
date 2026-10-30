@@ -21,9 +21,13 @@ const quickCreate = vi.fn(async () => true);
 let teamShown = true;
 let members: ReadonlyArray<unknown> = [];
 
+const historyBack = vi.fn();
+let canGoBack = false;
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useNavigate: () => navigate,
+  useCanGoBack: () => canGoBack,
+  useRouter: () => ({ history: { back: historyBack } }),
 }));
 vi.mock("./useAssistantTeam", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -138,6 +142,8 @@ function wrap(node: React.ReactNode) {
 
 beforeEach(() => {
   teamShown = true;
+  canGoBack = false;
+  historyBack.mockReset();
   navigate.mockReset();
   quickCreate.mockClear();
   members = [member("assistant-home", "Uno"), member("assistant-scout", "Scout")];
@@ -217,6 +223,49 @@ describe("its page", () => {
       .element(screen.getByTestId("assistant-talk-telegram"))
       .toHaveTextContent("@scout_bot");
     expect(screen.getByTestId("assistant-connect-telegram").query()).toBeNull();
+  });
+
+  it("its computer, apps and AI are in sight; Advanced keeps the rest", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await expect
+      .element(screen.getByTestId("assistant-profile-works-on-section"))
+      .toBeInTheDocument();
+    await expect.element(screen.getByTestId("assistant-profile-can-use")).toBeInTheDocument();
+    await expect.element(screen.getByText("The AI it runs on")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-profile-preset").query()).toBeNull();
+  });
+
+  it("memory and instructions are edited on the page, not on another one", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await screen.getByTestId("assistant-profile-memory-edit").click();
+    await expect.element(screen.getByTestId("assistant-profile-memory-editor")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("Back returns where the person came from", async () => {
+    canGoBack = true;
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await expect.element(screen.getByTestId("assistant-profile-back")).toHaveTextContent("Back");
+    await screen.getByTestId("assistant-profile-back").click();
+    expect(historyBack).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("opened by a link, Back goes to all assistants", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await expect
+      .element(screen.getByTestId("assistant-profile-back"))
+      .toHaveTextContent("All assistants");
+    await screen.getByTestId("assistant-profile-back").click();
+    expect(navigate).toHaveBeenCalledWith({ to: "/assistants" });
   });
 
   it("its face opens the picker with Upload, Emoji and Persona", async () => {

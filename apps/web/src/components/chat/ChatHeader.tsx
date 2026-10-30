@@ -55,6 +55,7 @@ import { ComputerChip } from "../computer/home/ComputerChip";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { ChatAutomationsButton } from "../automations/ChatAutomations";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
+import { AssistantSettingsButton } from "../assistants/AssistantSettingsButton";
 import { TeammateChatHeadline } from "../assistants/TeammateChatHeadline";
 import { AssistantModeChip, UnoModeChip } from "../assistants/PersonaMode";
 import { useTeammateOfThread } from "../assistants/useAssistantTeam";
@@ -350,9 +351,9 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {/* Variant D: its mode at the top of its chat — Uno's or the persona's own. */}
         {teammate ? (
-          <AssistantModeChip member={teammate} />
+          <AssistantModeChip member={teammate} compact={isMobile} />
         ) : isAssistantChat ? (
-          <UnoModeChip environmentId={activeThreadEnvironmentId} />
+          <UnoModeChip environmentId={activeThreadEnvironmentId} compact={isMobile} />
         ) : null}
         {/* S5 29.10: the chat's automations (a clock; nothing where they aren't on). */}
         {draftId ? null : (
@@ -364,7 +365,14 @@ export const ChatHeader = memo(function ChatHeader({
         {/* Which computer, and switching to another, from any chat (0.0.96). */}
         <ComputerChip />
         {isAssistantChat ? (
-          <AssistantChatHeaderActions environmentId={activeThreadEnvironmentId} />
+          <AssistantChatHeaderActions
+            environmentId={activeThreadEnvironmentId}
+            compact={isMobile}
+          />
+        ) : null}
+        {/* A helper's settings, labelled, where its chat starts (29.10). */}
+        {teammate && !teammate.revoked && !devMode ? (
+          <AssistantSettingsButton member={teammate} compact={isMobile} />
         ) : null}
         {devMode && activeProjectScripts && (
           <Foldable id="scripts" folded={folded}>

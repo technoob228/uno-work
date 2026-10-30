@@ -79,7 +79,9 @@ import { PersonaCreatorPage } from "./PersonaCreator";
 import { UnoSetupPage } from "./UnoSetupPage";
 import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
-import { useTeamShown } from "./useAssistantTeam";
+import { useAssistantTeam, useTeamShown } from "./useAssistantTeam";
+import { memberOfLegacyView } from "./assistantSettingsNav.logic";
+import { AssistantsTeamList } from "./AssistantsTeamList";
 import {
   ASSISTANT_COMPUTERS_KEY,
   LOCAL_ASSISTANTS_KEY,
@@ -188,6 +190,12 @@ export function AssistantsView() {
   // Variant D: a new assistant is a persona from the gallery (Grok-style), next to Uno.
   if (teamShown && search.view === "new") {
     return <PersonaCreatorPage />;
+  }
+  // One page per assistant (29.10): the list opens it, old links to Uno's
+  // 0.0.105 card and a helper's 0.0.106 page land on it too.
+  if (teamShown && search.view === undefined) return <AssistantsTeamList />;
+  if (teamShown && (search.view === "card" || search.view === "local")) {
+    return <LegacyAssistantLink view={search.view} project={search.project} />;
   }
   if (availability === "on") return <AssistantsViewMvp />;
   return <AssistantsViewClassic checking={availability === "loading"} />;
@@ -305,6 +313,18 @@ function ClassicEmptyAssistants({
       </Button>
     </section>
   );
+}
+
+function LegacyAssistantLink(props: { view: "card" | "local"; project: string | undefined }) {
+  const team = useAssistantTeam();
+  const { environmentId } = useActiveMachine();
+  const member = memberOfLegacyView(team, props, environmentId);
+  if (member) {
+    return (
+      <AssistantProfilePage environmentId={member.environmentId} projectId={member.projectId} />
+    );
+  }
+  return <AssistantsViewMvp />;
 }
 
 function AssistantsViewMvp() {
