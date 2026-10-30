@@ -54,7 +54,12 @@ const text = async (page, testId) =>
   (await page.getByTestId(testId).first().innerText()).replace(/\s+/g, " ").slice(0, 220);
 
 async function newChat(page) {
-  await page.getByTestId("sidebar-new-chat").first().click();
+  await page
+    .getByTestId("sidebar-new-chat")
+    .or(page.getByTestId("sidebar-d-new-chat"))
+    .or(page.getByTestId("sidebar-header-new-chat"))
+    .first()
+    .click();
   await page.getByTestId("draft-hero-heading").waitFor({ timeout: 20_000 });
   await page.waitForTimeout(2500);
 }
@@ -114,7 +119,12 @@ async function newChat(page) {
 {
   const { page, context } = await open({ newChatModelSelection: CLAUDE, planLimitSwitch: "auto" });
   await step("Switch by itself: a new chat starts on the MacBook and says so", async () => {
-    await page.getByTestId("sidebar-new-chat").first().click();
+    await page
+      .getByTestId("sidebar-new-chat")
+      .or(page.getByTestId("sidebar-d-new-chat"))
+      .or(page.getByTestId("sidebar-header-new-chat"))
+      .first()
+      .click();
     await page.getByTestId("plan-room-started-on").waitFor({ timeout: 25_000 });
     await page.waitForTimeout(1500);
     await shot(page, "07-auto-started-on-macbook");

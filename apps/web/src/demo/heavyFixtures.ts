@@ -15,6 +15,7 @@ import {
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
+  UNO_SMART_MODEL_SLUG,
   type ExecutionEnvironmentDescriptor,
   type InboxItem,
   type OrchestrationReadModel,
@@ -212,6 +213,17 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
         models: [
           { slug: "uno/smart", name: "Smart", isCustom: false, capabilities: null },
           { slug: "uno/fast", name: "Fast", isCustom: false, capabilities: null },
+          // plans=full: Smart under its real id, so "Use Uno AI · Smart" is offered.
+          ...(hasPlans(machine.key)
+            ? [
+                {
+                  slug: UNO_SMART_MODEL_SLUG,
+                  name: "Uno AI · Smart",
+                  isCustom: false,
+                  capabilities: null,
+                },
+              ]
+            : []),
         ],
         slashCommands: [],
         skills: [],
