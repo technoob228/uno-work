@@ -7,6 +7,9 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  SHARED_PROJECT_HERE,
+  arrivalWords,
+  arrivalsToBring,
   conflictLine,
   entriesByProject,
   fileCount,
@@ -16,6 +19,7 @@ import {
   nameList,
   projectKeyCount,
   refreshEveryMs,
+  sharedWaitingLine,
   syncLabel,
   syncMarkOf,
   toggleMenuLabel,
@@ -257,3 +261,59 @@ describe("hostLine", () => {
     expect(hostLine(host, true)).toContain("private");
   });
 });
+
+describe("a shared project coming here by itself", () => {
+  const team = { id: 12, owner: "misha" };
+  const row = { name: "notes", updatedAt: null, from: "misha", mode: "git" as const };
+
+  it("brings accepted projects, each once, and not one with nothing saved", () => {
+    const rows = [
+      { ...row, team },
+      { ...row, name: "empty", team: { id: 13, owner: "misha" }, waiting: true },
+      { ...row, name: "mine" },
+      { ...row, name: "old", team: { id: 14, owner: "misha" } },
+    ];
+    expect(arrivalsToBring("env", rows, new Set()).map((item) => item.name)).toEqual([
+      "notes",
+      "old",
+    ]);
+    expect(arrivalsToBring("env", rows, new Set(["env:12"])).map((item) => item.name)).toEqual([
+      "old",
+    ]);
+    // Another computer of the person's in the same window has its own try.
+    expect(arrivalsToBring("other", rows, new Set(["env:12"]))).toHaveLength(2);
+  });
+
+  it("says it's here, wherever Accept was", () => {
+    for (const afterAccept of [true, false]) {
+      expect(arrivalWords("notes", "here", afterAccept)).toEqual({
+        type: "success",
+        title: "notes is on this computer",
+        description: SHARED_PROJECT_HERE,
+      });
+    }
+  });
+
+  it("after Accept never leaves the person without a word", () => {
+    expect(arrivalWords("notes", "waiting", true)).toEqual({
+      type: "info",
+      title: "You're in notes",
+      description: "Nothing is saved in notes yet. It comes here once its owner has saved it.",
+    });
+    expect(arrivalWords("notes", "taken", true)?.description).toContain("Get it here");
+    expect(arrivalWords("notes", "gone", true)?.title).toBe("You're in notes");
+  });
+
+  it("by itself stays quiet: the row says the rest", () => {
+    expect(arrivalWords("notes", "waiting", false)).toBeNull();
+    expect(arrivalWords("notes", "taken", false)).toBeNull();
+    expect(arrivalWords("notes", "gone", false)).toBeNull();
+  });
+
+  it("says the same as the engine about a project with nothing saved", () => {
+    expect(sharedWaitingLine("notes")).toBe(
+      "Nothing is saved in notes yet. It comes here once its owner has saved it.",
+    );
+  });
+});
+

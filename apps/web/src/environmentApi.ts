@@ -111,6 +111,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       syncNow: rpcClient.projectSync.syncNow,
       resolve: rpcClient.projectSync.resolve,
       getHere: rpcClient.projectSync.getHere,
+      arrive: rpcClient.projectSync.arrive,
       opened: (input) => rpcClient.projectSync.opened(input).then(() => undefined),
       history: rpcClient.projectSync.history,
       restore: rpcClient.projectSync.restore,

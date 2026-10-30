@@ -71,6 +71,7 @@ import {
   type ContextMenuItem,
   type EnvironmentId,
   type ProjectId,
+  type ProjectSyncElsewhere,
   type ProviderDriverKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -216,6 +217,7 @@ import { ProjectSyncMark, ProjectsElsewhere, mostUrgent } from "./projectSync/Pr
 import { ProjectSyncWelcome } from "./projectSync/ProjectSyncWelcome";
 import { toggleMenuLabel } from "./projectSync/projectSync.logic";
 import { useProjectSyncStatuses, useRefreshProjectSync } from "./projectSync/useProjectSync";
+import { useSharedArrivals } from "./projectSync/useSharedArrivals";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
 import { setThreadAgentsClosed } from "../agentsAccess";
 import { readEnvironmentSupportsAgentsCloseChat } from "../environments/agentsCloseChatSupport";
@@ -584,6 +586,7 @@ const dChipFor = (environmentId: string) => (
 
 /** Flag off: no other computer is asked for its home folder. */
 const NO_ENVIRONMENT_IDS: ReadonlyArray<EnvironmentId> = [];
+const NO_ELSEWHERE: ReadonlyArray<ProjectSyncElsewhere> = [];
 
 /** One list shows this many chats before "Show N more". */
 const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
@@ -3176,11 +3179,24 @@ export default function Sidebar() {
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
     null,
   );
+  // The computer the person is on, even with no project on it: a shared one may be coming.
+  const projectSyncHere = activeEnvironmentId ?? primaryEnvironmentId;
   const projectSyncEnvironments = useMemo(
-    () => projects.map((project) => project.environmentId),
-    [projects],
+    () => [
+      ...projects.map((project) => project.environmentId),
+      ...(projectSyncHere ? [projectSyncHere] : []),
+    ],
+    [projects, projectSyncHere],
   );
   const projectSync = useProjectSyncStatuses(projectSyncEnvironments);
+  const projectSyncHereStatus = projectSync.statuses.find(
+    (item) => item.environmentId === projectSyncHere,
+  );
+  // Here and not next to the list: it runs on every panel of the sidebar.
+  const arrivingTeam = useSharedArrivals(
+    projectSyncHereStatus?.environmentId ?? null,
+    projectSyncHereStatus?.status?.elsewhere ?? NO_ELSEWHERE,
+  );
   const refreshProjectSync = useRefreshProjectSync();
   const syncEntryOf = useCallback(
     (project: Project) => projectSync.entries.get(`${project.environmentId}:${project.id}`) ?? null,
@@ -4640,25 +4656,14 @@ export default function Sidebar() {
                 </button>
               </li>
             ) : null}
-            <ProjectInvites
-              environmentId={
-                projectSync.statuses.find((item) => item.environmentId === dThisComputer)
-                  ?.environmentId ?? null
-              }
-            />
-            {dThisComputer
-              ? (() => {
-                  const here = projectSync.statuses.find(
-                    (item) => item.environmentId === dThisComputer,
-                  );
-                  return here?.status ? (
-                    <ProjectsElsewhere
-                      environmentId={here.environmentId}
-                      projects={here.status.elsewhere}
-                    />
-                  ) : null;
-                })()
-              : null}
+            <ProjectInvites environmentId={projectSyncHereStatus?.environmentId ?? null} />
+            {projectSyncHereStatus?.status ? (
+              <ProjectsElsewhere
+                environmentId={projectSyncHereStatus.environmentId}
+                projects={projectSyncHereStatus.status.elsewhere}
+                arrivingTeam={arrivingTeam}
+              />
+            ) : null}
             {!dLegacyInbox && snoozedThreads.length > 0 ? (
               <SidebarSectionHeader
                 kind="snoozed"

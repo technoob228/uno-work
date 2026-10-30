@@ -14,6 +14,7 @@ import {
   ProjectId,
   ProjectSyncError,
   type ProjectSecretsList,
+  type ProjectSyncArrival,
   type ProjectSyncEntry,
   type ProjectSyncFiles,
   type ProjectSyncGetHereResult,
@@ -56,6 +57,10 @@ export interface ProjectSyncShape {
     name: string,
     teamId?: number,
   ) => Effect.Effect<ProjectSyncGetHereResult, ProjectSyncError>;
+  readonly arrive: (
+    name: string,
+    teamId: number,
+  ) => Effect.Effect<ProjectSyncArrival, ProjectSyncError>;
   readonly opened: (projectId: string) => Effect.Effect<void>;
   readonly history: (
     projectId: string,
@@ -282,6 +287,7 @@ const make = Effect.gen(function* () {
         const result = await core.getHere(name, teamId);
         return { projectId: ProjectId.make(result.projectId), entry: result.entry };
       }),
+    arrive: (name, teamId) => attempt(() => core.arrive(name, teamId)),
     opened: (projectId) => Effect.sync(() => core.touched(projectId, "opened")),
     history: (projectId, skip) => attempt(() => core.history(projectId, skip)),
     restore: (projectId, version, files) => attempt(() => core.restore(projectId, version, files)),

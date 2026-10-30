@@ -43,6 +43,7 @@ describe("consoleProjectTeams", () => {
             id: 12,
             name: "notes",
             role: "editor",
+            joined_at: "2026-10-30T12:00:00.123456Z",
             owner: { user_id: 85, email: "a@b.c", username: "misha" },
           },
           { id: "13", name: "broken", role: "editor" },
@@ -57,6 +58,7 @@ describe("consoleProjectTeams", () => {
         name: "notes",
         role: "editor",
         owner: { username: "misha", email: "a@b.c" },
+        joinedAt: "2026-10-30T12:00:00.123456Z",
       },
     ]);
     expect(sent).toEqual([

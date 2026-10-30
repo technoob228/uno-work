@@ -176,6 +176,11 @@ export declare function peekSharedProject(
   mode: "snapshot" | "git";
 } | null>;
 
+export declare function claimSharedArrival(
+  input: { name: string; team: number; membership: string },
+  ctx: SyncCtx,
+): Promise<boolean>;
+
 export declare function listCloudProjects(ctx: SyncCtx): Promise<
   Array<{
     name: string;

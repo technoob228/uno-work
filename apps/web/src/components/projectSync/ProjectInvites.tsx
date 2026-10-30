@@ -10,7 +10,7 @@ import { useState } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import { toastManager } from "../ui/toast";
-import { SHARED_PROJECT_HERE } from "./ProjectSyncParts";
+import { arrivalWords } from "./projectSync.logic";
 import { projectTeamsQueryKey } from "./ProjectTeam";
 import { acceptInvite, declineInvite, loadTeams } from "./projectTeam.api";
 import { personLabel, teamErrorMessage, type TeamIncomingInvite } from "./projectTeam.logic";
@@ -44,13 +44,10 @@ export function ProjectInvites(props: { environmentId: EnvironmentId | null }) {
       return;
     }
     try {
-      const result = await api.projectSync.getHere({ name, teamId: item.project_id });
+      const result = await api.projectSync.arrive({ name, teamId: item.project_id });
       refresh(environmentId, result.entry);
-      toastManager.add({
-        type: "success",
-        title: `${name} is on this computer`,
-        description: SHARED_PROJECT_HERE,
-      });
+      const words = arrivalWords(name, result.outcome, true);
+      if (words) toastManager.add(words);
     } catch (error) {
       refresh(environmentId);
       toastManager.add({

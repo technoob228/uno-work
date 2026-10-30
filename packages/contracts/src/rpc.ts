@@ -360,6 +360,8 @@ import {
   ProjectSyncEntry,
   ProjectSyncError,
   ProjectSyncFiles,
+  ProjectSyncArrival,
+  ProjectSyncArriveInput,
   ProjectSyncGetHereInput,
   ProjectSyncGetHereResult,
   ProjectSyncHistory,
@@ -500,6 +502,7 @@ export const WS_METHODS = {
   projectSyncSyncNow: "projectSync.syncNow",
   projectSyncResolve: "projectSync.resolve",
   projectSyncGetHere: "projectSync.getHere",
+  projectSyncArrive: "projectSync.arrive",
   projectSyncOpened: "projectSync.opened",
   projectSyncHistory: "projectSync.history",
   projectSyncRestore: "projectSync.restore",
@@ -820,6 +823,12 @@ export const WsProjectSyncResolveRpc = Rpc.make(WS_METHODS.projectSyncResolve, {
 export const WsProjectSyncGetHereRpc = Rpc.make(WS_METHODS.projectSyncGetHere, {
   payload: ProjectSyncGetHereInput,
   success: ProjectSyncGetHereResult,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncArriveRpc = Rpc.make(WS_METHODS.projectSyncArrive, {
+  payload: ProjectSyncArriveInput,
+  success: ProjectSyncArrival,
   error: ProjectSyncError,
 });
 
@@ -2423,6 +2432,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectSyncSyncNowRpc,
   WsProjectSyncResolveRpc,
   WsProjectSyncGetHereRpc,
+  WsProjectSyncArriveRpc,
   WsProjectSyncOpenedRpc,
   WsProjectSyncHistoryRpc,
   WsProjectSyncRestoreRpc,

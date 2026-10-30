@@ -6,6 +6,8 @@ import type {
   ProjectSyncConnectHostInput,
   ProjectSyncEntry,
   ProjectSyncFiles,
+  ProjectSyncArrival,
+  ProjectSyncArriveInput,
   ProjectSyncGetHereInput,
   ProjectSyncGetHereResult,
   ProjectSyncHistory,
@@ -1020,6 +1022,7 @@ export interface EnvironmentApi {
     syncNow: (input: ProjectSyncProjectInput) => Promise<ProjectSyncEntry>;
     resolve: (input: ProjectSyncResolveInput) => Promise<ProjectSyncEntry>;
     getHere: (input: ProjectSyncGetHereInput) => Promise<ProjectSyncGetHereResult>;
+    arrive: (input: ProjectSyncArriveInput) => Promise<ProjectSyncArrival>;
     opened: (input: ProjectSyncProjectInput) => Promise<void>;
     history: (input: ProjectSyncHistoryInput) => Promise<ProjectSyncHistory>;
     restore: (input: ProjectSyncRestoreInput) => Promise<ProjectSyncEntry>;

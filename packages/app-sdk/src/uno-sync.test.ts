@@ -14,6 +14,7 @@ import { FAKE_STORAGE_ENV, FAKE_TEAM_STORAGE_ENV, remoteUrl } from "./git-remote
 import {
   MAX_FILE_BYTES,
   builtFolders,
+  claimSharedArrival,
   getProject,
   heldFromPublishMessage,
   isKeyFile,
@@ -1123,6 +1124,61 @@ describe("a project shared with someone else", { timeout: 120_000 }, () => {
     expect(got.message).toMatch(/Nothing is saved in notes yet/);
     expect(exists(path.join(anya.home, "projects", "notes"))).toBe(false);
     expect(await peekSharedProject({ name: "notes", team: TEAM }, anya)).toBeNull();
+  });
+
+  describe("whose turn it is to take it", () => {
+    const claim = { name: "notes", team: TEAM, membership: "2026-10-30T12:00:00.123456Z" };
+    const marker = () => path.join(cloud, ".uno-git", "notes", "arrivals", "20261030120000123456");
+
+    it("the first computer, and nobody after it", async () => {
+      const { anya } = people();
+      expect(await claimSharedArrival(claim, anya)).toBe(true);
+      expect(await claimSharedArrival(claim, anya)).toBe(false);
+      expect(exists(marker())).toBe(true);
+      // Nothing about the person or their computer lies in the owner's cloud.
+      expect(fs.readFileSync(marker(), "utf8")).toMatch(/^[0-9a-f-]{36}\n$/);
+    });
+
+    it("of two at the same moment, one", async () => {
+      const { anya } = people();
+      const other = { ...anya };
+      const wins = await Promise.all([
+        claimSharedArrival(claim, anya),
+        claimSharedArrival(claim, other),
+        claimSharedArrival(claim, anya),
+      ]);
+      expect(wins.filter(Boolean)).toHaveLength(1);
+    });
+
+    it("an answer lost on the way still counts as won", async () => {
+      const { anya } = people();
+      const lost = { ...anya, env: { ...anya.env, UNO_GIT_FAKE_FAULTS: "lost-answer" } };
+      expect(await claimSharedArrival(claim, lost)).toBe(true);
+    });
+
+    it("a new membership is a new turn; a person's owner keeps nothing from it", async () => {
+      const { misha, anya } = people();
+      const dir = path.join(misha.home, "notes");
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "plan.md"), "plan\n");
+      const first = await syncProject({ dir, name: "notes" }, misha);
+      expect(first.ok).toBe(true);
+      expect(await claimSharedArrival(claim, anya)).toBe(true);
+      expect(
+        await claimSharedArrival({ ...claim, membership: "2026-11-02T08:00:00Z" }, anya),
+      ).toBe(true);
+      // The project itself doesn't notice.
+      fs.writeFileSync(path.join(dir, "plan.md"), "plan 2\n");
+      expect((await syncProject({ dir, name: "notes" }, misha)).state).toBe("synced");
+      const there = await getProject({ name: "notes", team: TEAM }, anya);
+      expect(there.ok).toBe(true);
+    });
+
+    it("no date of joining: no turn, and nothing written", async () => {
+      const { anya } = people();
+      expect(await claimSharedArrival({ ...claim, membership: "" }, anya)).toBe(false);
+      expect(exists(path.join(cloud, ".uno-git", "notes"))).toBe(false);
+    });
   });
 
   it("shows how a shared project syncs", async () => {

@@ -39,6 +39,8 @@ export interface SharedProject {
   readonly name: string;
   readonly role: "owner" | "editor";
   readonly owner: { readonly username: string | null; readonly email: string | null };
+  /** When this person joined: their membership, new after being removed and invited again. */
+  readonly joinedAt: string | null;
 }
 
 export type SharedProjectKeys = Pick<ProjectVault, "list" | "reveal">;
@@ -223,6 +225,7 @@ export function consoleProjectTeams(input: ConsoleAccess): ProjectTeams {
                         typeof project.owner?.username === "string" ? project.owner.username : null,
                       email: typeof project.owner?.email === "string" ? project.owner.email : null,
                     },
+                    joinedAt: typeof project.joined_at === "string" ? project.joined_at : null,
                   },
                 ]
               : [],
