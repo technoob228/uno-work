@@ -682,6 +682,26 @@ export function projectEvent(
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
           .slice(-MAX_THREAD_CHECKPOINTS);
 
+        // The checkpoint of a turn can land after the next turn has already
+        // started (the capture is slower than a quick follow-up message). Such
+        // a late checkpoint must not roll latestTurn back to the older turn:
+        // the decider would then see the newer user message as a queued turn
+        // start for two minutes (snooze/settle refused), and clients the
+        // wrong run.
+        const newerTurnStarted =
+          thread.latestTurn !== null &&
+          thread.latestTurn.turnId !== payload.turnId &&
+          Date.parse(thread.latestTurn.requestedAt) > Date.parse(payload.completedAt);
+        if (newerTurnStarted) {
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              checkpoints,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {

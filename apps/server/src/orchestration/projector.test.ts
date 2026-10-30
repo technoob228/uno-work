@@ -788,6 +788,93 @@ describe("orchestration projector", () => {
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
   });
 
+  it("keeps the newer running turn when an older turn's checkpoint lands late", async () => {
+    const createdAt = "2026-02-23T10:00:00.000Z";
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+    const running = (sequence: number, turnId: string, at: string) =>
+      makeEvent({
+        sequence,
+        type: "thread.session-set",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: at,
+        commandId: `cmd-running-${turnId}`,
+        payload: {
+          threadId: "thread-1",
+          session: {
+            threadId: "thread-1",
+            status: "running",
+            providerName: "codex",
+            providerSessionId: "session-1",
+            providerThreadId: "provider-thread-1",
+            runtimeMode: "approval-required",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: at,
+          },
+        },
+      });
+    const events: ReadonlyArray<OrchestrationEvent> = [
+      running(2, "turn-1", "2026-02-23T10:00:01.000Z"),
+      // turn-1 ends at 10:00:02, turn-2 starts at 10:00:03 …
+      running(3, "turn-2", "2026-02-23T10:00:03.000Z"),
+      // … and only then turn-1's checkpoint arrives.
+      makeEvent({
+        sequence: 4,
+        type: "thread.turn-diff-completed",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: "2026-02-23T10:00:02.000Z",
+        commandId: "cmd-turn-1-complete",
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          checkpointTurnCount: 1,
+          checkpointRef: "refs/t3/checkpoints/thread-1/turn/1",
+          status: "ready",
+          files: [],
+          assistantMessageId: null,
+          completedAt: "2026-02-23T10:00:02.000Z",
+        },
+      }),
+    ];
+    const after = await events.reduce<Promise<ReturnType<typeof createEmptyReadModel>>>(
+      (statePromise, event) =>
+        statePromise.then((state) => Effect.runPromise(projectEvent(state, event))),
+      Promise.resolve(created),
+    );
+    const thread = after.threads[0];
+    expect(thread?.latestTurn?.turnId).toBe("turn-2");
+    expect(thread?.latestTurn?.state).toBe("running");
+    expect(thread?.checkpoints.map((checkpoint) => checkpoint.turnId)).toEqual(["turn-1"]);
+  });
+
   it("does not fallback-retain messages tied to removed turn IDs", async () => {
     const createdAt = "2026-02-26T12:00:00.000Z";
     const model = createEmptyReadModel(createdAt);

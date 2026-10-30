@@ -855,9 +855,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          // A late checkpoint of an older turn (it landed after the next turn
+          // started) keeps the newer turn as the latest — same rule as the
+          // in-memory projector.
+          const currentLatestTurnId = existingRow.value.latestTurnId;
+          const currentLatestTurn =
+            currentLatestTurnId !== null && currentLatestTurnId !== event.payload.turnId
+              ? yield* projectionTurnRepository.getByTurnId({
+                  threadId: event.payload.threadId,
+                  turnId: currentLatestTurnId,
+                })
+              : Option.none();
+          const newerTurnStarted =
+            Option.isSome(currentLatestTurn) &&
+            Date.parse(currentLatestTurn.value.requestedAt) > Date.parse(event.payload.completedAt);
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.turnId,
+            latestTurnId: newerTurnStarted ? currentLatestTurnId : event.payload.turnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
