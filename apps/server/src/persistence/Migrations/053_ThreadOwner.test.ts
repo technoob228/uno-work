@@ -177,7 +177,7 @@ layer("053_ThreadOwner", (it) => {
           last_visited_at: null,
         },
       ]);
-      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 53 }), []);
     }),
   );
 });
