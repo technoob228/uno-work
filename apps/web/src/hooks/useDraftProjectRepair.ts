@@ -15,6 +15,8 @@ import { findProjectByPath } from "../lib/projectPaths";
 import { selectEnvironmentState, useStore } from "../store";
 import { useFolderChats } from "./useFolderChats";
 
+const MISSING_PROJECT_GRACE_MS = 8_000;
+
 export type DraftProjectRepair =
   | { readonly kind: "none" }
   | { readonly kind: "relink"; readonly projectId: ProjectId }
@@ -69,24 +71,31 @@ export function useDraftProjectRepair(
   useEffect(() => {
     if (!draftId || !draft || !environmentId || !ready || projectKnown) return;
     if (draft.promotedTo) return;
-    const environment = selectEnvironmentState(useStore.getState(), environmentId);
-    const repair = draftProjectRepair({
-      draft,
-      projects: environment.projectIds.flatMap((id) => {
-        const project = environment.projectById[id];
-        return project ? [project] : [];
-      }),
-    });
+    const repairNow = () => {
+      const environment = selectEnvironmentState(useStore.getState(), environmentId);
+      return draftProjectRepair({
+        draft,
+        projects: environment.projectIds.flatMap((id) => {
+          const project = environment.projectById[id];
+          return project ? [project] : [];
+        }),
+      });
+    };
+    const repair = repairNow();
     if (repair.kind === "relink") {
       useComposerDraftStore.getState().setDraftThreadContext(draftId, {
         projectRef: scopeProjectRef(environmentId, repair.projectId),
       });
       return;
     }
-    if (repair.kind === "move-home" && movedDraftId.current !== draftId) {
+    if (repair.kind === "none" || movedDraftId.current === draftId) return;
+    // A project made a moment ago is on its way: only one that stays away is gone.
+    const timer = setTimeout(() => {
+      if (repairNow().kind !== "move-home") return;
       movedDraftId.current = draftId;
       // Not reachable right now: the composer says so when the person sends.
       void moveDraftToFolder(draftId, null).catch(() => undefined);
-    }
+    }, MISSING_PROJECT_GRACE_MS);
+    return () => clearTimeout(timer);
   }, [draft, draftId, environmentId, moveDraftToFolder, projectKnown, ready]);
 }
