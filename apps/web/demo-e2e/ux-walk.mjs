@@ -390,8 +390,19 @@ async function desktop() {
     page,
     "d20-advanced",
     "Where are computer / apps / AI / instructions?",
-    "Visible on the page, not hidden",
+    "Each on its own tab, no long scroll",
     async () => {
+      const tabs = page.getByTestId("assistant-profile-tabs");
+      if ((await tabs.count()) > 0) {
+        await snap(page, "d20a-tab-general");
+        await page.getByTestId("assistant-profile-tab-where").click();
+        await page.waitForTimeout(800);
+        await snap(page, "d20-advanced");
+        await page.getByTestId("assistant-profile-tab-apps").click();
+        await page.waitForTimeout(800);
+        await snap(page, "d20b-tab-apps");
+        return { tabs: true };
+      }
       const toggle = page.getByTestId("assistant-advanced-toggle");
       const hidden = (await toggle.count()) > 0;
       if (hidden) await toggle.click();
@@ -403,12 +414,14 @@ async function desktop() {
   await run(
     page,
     "d21-instructions",
-    "Edit its instructions (Memory ▸ Edit)",
+    "Edit its instructions",
     "Its instructions open right here",
     async () => {
-      await page.getByTestId("assistant-profile-memory-edit").click();
+      const tab = page.getByTestId("assistant-profile-tab-memory");
+      if ((await tab.count()) > 0) await tab.click();
+      else await page.getByTestId("assistant-profile-memory-edit").click();
       await page.waitForTimeout(1500);
-      await snap(page, "d21-instructions", true);
+      await snap(page, "d21-instructions");
       return { heading: await headingText(page) };
     },
   );
@@ -454,7 +467,9 @@ async function desktop() {
       await home(page);
       await row(page, "assistant-mia").getByTestId("sidebar-assistant-face").click();
       await page.getByTestId("assistant-profile").waitFor();
-      const section = page.getByText(/Automations/).first();
+      const tasksTab = page.getByTestId("assistant-profile-tab-tasks");
+    if ((await tasksTab.count()) > 0) await tasksTab.click();
+    const section = page.getByText(/Automations/).first();
       await section.scrollIntoViewIfNeeded();
       await snap(page, "d24-automations");
     },
