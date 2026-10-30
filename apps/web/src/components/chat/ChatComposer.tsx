@@ -1,3 +1,4 @@
+import { scopedThreadKey } from "@t3tools/client-runtime";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -19,6 +20,7 @@ import {
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
   type UnoVideoJobResult,
   type VideoMimeType,
@@ -40,11 +42,13 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import {
   clampCollapsedComposerCursor,
+  type ComposerSubmissionIntent,
   type ComposerTrigger,
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  resolveComposerSubmissionIntent,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import { useComposerQuotes, useComposerQuotesStore } from "../../composerQuotesStore";
@@ -63,6 +67,7 @@ import {
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
 import {
+  appendTerminalContextsToPrompt,
   type TerminalContextDraft,
   type TerminalContextSelection,
   insertInlineTerminalContextPlaceholder,
@@ -88,6 +93,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
@@ -109,6 +115,22 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { withAppShortcutDefaults } from "../appShortcuts.logic";
+import {
+  acceptsChatDrop,
+  chatTranscriptFile,
+  type ComposerDrop,
+  readChatDrag,
+  useComposerDropStore,
+} from "./chatDrop";
+import {
+  loadComposerStash,
+  registerStashTarget,
+  type StashedMessage,
+  useComposerStashStore,
+} from "../../composerStashStore";
+import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
+import { ComposerStashMenu } from "./ComposerStashMenu";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
 import { useSettings } from "../../hooks/useSettings";
@@ -122,7 +144,13 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
 import { Explain } from "../Explain";
-import { cn, randomUUID } from "~/lib/utils";
+import {
+  isPasteAsTextShortcut,
+  nextPastedTextFileName,
+  pastedTextDisposition,
+  wouldTextPasteExceedLimit,
+} from "~/lib/textPaste";
+import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -179,6 +207,7 @@ import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import type { ProjectUploadFile } from "../../projectUpload";
 import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projectUploadPickers";
 
+const ANSWER_IS_THE_FILES = "See the attached files.";
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
@@ -475,6 +504,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  sendAndNewShortcut?: string | null;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -503,6 +533,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        sendAndNewShortcut={props.sendAndNewShortcut ?? null}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
@@ -535,6 +566,12 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** ⌘S: set the message aside, or bring one back on an empty box. */
+  setAside: () => void;
+  /** Files or chats dropped anywhere on the chat. */
+  acceptTransfer: (dataTransfer: DataTransfer) => void;
+  /** What goes with the answer to the agent's open question. */
+  getAnswerFiles: () => File[];
   clearVideoAttachments: () => void;
   setVideoAttachments: (videos: ComposerVideoAttachment[]) => void;
   /** Non-image files (staged on send); cleared/restored like videos. */
@@ -597,6 +634,8 @@ export interface ChatComposerProps {
    * (w0138 p3): no frame of its own, a 40px row with small chips.
    */
   inDock?: boolean;
+  /** The chat in the panel doesn't answer ⌘S or the sidebar's Drafts: the main one does. */
+  isEmbedded?: boolean;
   /**
    * Встроенный чат панели плагина не переключает права треда: плагинная
    * поверхность может права только сузить, но не расширить (`permissionPolicy:
@@ -623,6 +662,7 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
+    resolvedAnswer: string | string[] | null;
     activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
@@ -670,7 +710,7 @@ export interface ChatComposerProps {
   scheduleStickToBottom: () => void;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -722,6 +762,7 @@ export const ChatComposer = memo(
       isLocalDraftThread,
       forceCompact = false,
       inDock = false,
+      isEmbedded = false,
       hideRuntimeModeControl = false,
       phase,
       isConnecting,
@@ -790,6 +831,10 @@ export const ChatComposer = memo(
     const [composerVideos, setComposerVideos] = useState<ComposerVideoAttachment[]>([]);
     // Non-image files: in memory only, staged on the chat's computer on send.
     const [composerFiles, setComposerFiles] = useState<ComposerFileAttachment[]>([]);
+    // Files for the agent's open question; the message draft stays as it is.
+    const [answerFiles, setAnswerFiles] = useState<ComposerFileAttachment[]>([]);
+    const answerFilesRef = useRef(answerFiles);
+    answerFilesRef.current = answerFiles;
     const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
     const setComposerFilesState = useCallback(
       (
@@ -807,6 +852,7 @@ export const ChatComposer = memo(
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
     const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+    const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
     const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
     const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
     const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -975,6 +1021,11 @@ export const ChatComposer = memo(
       () => selectedProviderEntry?.models ?? [],
       [selectedProviderEntry],
     );
+    const chatPlanLimits = useChatPlanLimits({
+      environmentId,
+      driver: selectedProvider,
+      instanceId: selectedInstanceId,
+    });
 
     const composerProviderState = useMemo(
       () =>
@@ -1157,7 +1208,12 @@ export const ChatComposer = memo(
     const mobileComposerExpandFrameRef = useRef<number | null>(null);
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
+    const [isPlanLimitsOpen, setIsPlanLimitsOpen] = useState(false);
+    const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
+    // A computer on an older Work doesn't list the composer's newer shortcuts.
+    const shortcutBindings = useMemo(() => withAppShortcutDefaults(keybindings), [keybindings]);
     const dragDepthRef = useRef(0);
+    const pasteAsTextUntilRef = useRef(0);
     const videoAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
     // ------------------------------------------------------------------
@@ -1231,6 +1287,17 @@ export const ChatComposer = memo(
             label: "/model",
             description: "Switch the model for this chat",
           },
+          ...(chatPlanLimits.accounts.length > 0
+            ? ([
+                {
+                  id: "slash:limits",
+                  type: "slash-command",
+                  command: "limits",
+                  label: "/limits",
+                  description: "See how much of your AI plan is left",
+                },
+              ] as const)
+            : []),
           ...(planModeUiEnabled
             ? ([
                 {
@@ -1287,6 +1354,7 @@ export const ChatComposer = memo(
     }, [
       composerTrigger,
       planModeUiEnabled,
+      chatPlanLimits.accounts.length,
       selectedProvider,
       selectedProviderStatus,
       workspaceEntries,
@@ -1619,7 +1687,14 @@ export const ChatComposer = memo(
       cleanupComposerVideos();
       setComposerVideos([]);
       setComposerFilesState(() => []);
+      setAnswerFiles([]);
     }, [draftId, activeThreadId, cleanupComposerVideos, promptRef, setComposerFilesState]);
+
+    // An answered question takes its files with it.
+    const openQuestionRequestId = pendingUserInputs[0]?.requestId ?? null;
+    useEffect(() => {
+      setAnswerFiles([]);
+    }, [openQuestionRequestId]);
 
     // Files attached on Home's composer for this new chat (after the reset
     // above, before ChatView's pending send).
@@ -1631,6 +1706,21 @@ export const ChatComposer = memo(
       const handed = useComposerFileHandoffStore.getState().take(draftId);
       if (handed.length > 0) setComposerFilesState((current) => [...current, ...handed]);
     }, [draftId, handedOffFileCount, setComposerFilesState]);
+
+    // ⌘⇧V keeps a big paste as text. Browsers deliver the keydown before the paste.
+    useEffect(() => {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (
+          event.target instanceof Node &&
+          composerFormRef.current?.contains(event.target) &&
+          isPasteAsTextShortcut(event, isMacPlatform(navigator.platform))
+        ) {
+          pasteAsTextUntilRef.current = Date.now() + 1_000;
+        }
+      };
+      window.addEventListener("keydown", onKeyDown, true);
+      return () => window.removeEventListener("keydown", onKeyDown, true);
+    }, []);
 
     // ------------------------------------------------------------------
     // Footer compact layout observation
@@ -2051,6 +2141,17 @@ export const ChatComposer = memo(
             }
             return;
           }
+          if (item.command === "limits") {
+            const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+              focusEditorAfterReplace: false,
+            });
+            if (applied) {
+              setComposerHighlightedItemId(null);
+              setIsPlanLimitsOpen(true);
+            }
+            return;
+          }
           void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -2157,7 +2258,7 @@ export const ChatComposer = memo(
     ]);
 
     const submitComposer = useCallback(
-      (event?: { preventDefault: () => void }) => {
+      (event?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => {
         if (hasKnownUnsupportedCodingTools) {
           event?.preventDefault();
           toastManager.add({
@@ -2196,7 +2297,7 @@ export const ChatComposer = memo(
           }
           return;
         }
-        onSend(event);
+        onSend(event, intent);
         if (shouldBlurMobileComposerOnSubmit()) {
           blurMobileComposerAfterSend();
         }
@@ -2299,7 +2400,14 @@ export const ChatComposer = memo(
         return navigatePromptHistory(key === "ArrowUp" ? "backward" : "forward", event);
       }
       if (key === "Enter" && !event.shiftKey) {
-        submitComposer();
+        submitComposer(
+          undefined,
+          resolveComposerSubmissionIntent({
+            event,
+            keybindings: shortcutBindings,
+            isDraftThread: isLocalDraftThread,
+          }),
+        );
         return true;
       }
       return false;
@@ -2656,15 +2764,42 @@ export const ChatComposer = memo(
       startComposerVideoProcessing(retryVideo);
     };
 
+    // Files in the answer to the agent's question: saved on the computer when
+    // the answer goes, the agent gets the paths. A file can be the whole
+    // answer: the box then says so, and the person can change the words.
+    const addAnswerFiles = (files: File[]) => {
+      const next: ComposerFileAttachment[] = [];
+      for (const file of files) {
+        const rejection = chatFileRejection(file);
+        if (rejection) {
+          toastManager.add({ type: "error", title: rejection });
+          continue;
+        }
+        next.push(composerFileFromFile(file));
+      }
+      if (next.length === 0) return;
+      setAnswerFiles((current) =>
+        [...current, ...next].slice(0, PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
+      );
+      const question = activePendingProgress?.activeQuestion;
+      if (question && !activePendingProgress?.resolvedAnswer) {
+        const text = ANSWER_IS_THE_FILES;
+        onChangeActivePendingUserInputCustomAnswer(
+          question.id,
+          text,
+          text.length,
+          text.length,
+          false,
+        );
+      }
+    };
+
     // Any other file (pdf, docx, xlsx, zip…): kept here and staged on the
     // chat's computer when the message goes; it lands in ~/Uploads/YYYY-MM.
     const addComposerPlainFiles = (files: File[]) => {
       if (!activeThreadId || files.length === 0) return;
       if (pendingUserInputs.length > 0) {
-        toastManager.add({
-          type: "error",
-          title: "Attach files after answering plan questions.",
-        });
+        addAnswerFiles(files);
         return;
       }
       const nextFiles: ComposerFileAttachment[] = [];
@@ -2692,15 +2827,26 @@ export const ChatComposer = memo(
       setThreadError(activeThreadId, error);
     };
 
+    const addComposerPlainFilesRef = useRef(addComposerPlainFiles);
+    addComposerPlainFilesRef.current = addComposerPlainFiles;
+
     const removeComposerFile = (fileId: string) => {
       setComposerFilesState((current) => current.filter((file) => file.id !== fileId));
     };
 
     const addComposerFiles = (files: File[]) => {
       if (files.length === 0) return;
+      if (pendingUserInputs.length > 0) {
+        addAnswerFiles(files);
+        return;
+      }
       const routed = routeComposerFiles(files, {
         isVideo: (file) => inferVideoMimeType(file) !== null,
         imagesSupported: imageAttachmentSupport !== "unsupported",
+        inlineImages: {
+          count: composerImagesRef.current.length,
+          bytes: composerImagesRef.current.reduce((sum, image) => sum + image.sizeBytes, 0),
+        },
       });
       if (routed.images.length > 0) {
         addComposerImages(routed.images);
@@ -2723,22 +2869,56 @@ export const ChatComposer = memo(
       addComposerFiles(files);
     };
 
+    // Capture: Lexical reads the paste on the editor's own element, before
+    // React's bubbling `onPaste` sees it.
+    const onComposerPasteCapture = (event: React.ClipboardEvent<HTMLElement>) => {
+      if (event.clipboardData.files.length > 0) return;
+      const keepAsText = Date.now() <= pasteAsTextUntilRef.current;
+      pasteAsTextUntilRef.current = 0;
+      const text = event.clipboardData.getData("text/plain");
+      const snapshot = composerEditorRef.current?.readSnapshot();
+      const disposition = pastedTextDisposition({
+        text,
+        canAttach: pendingUserInputs.length === 0 && !isComposerApprovalState,
+        bypassAutoAttachment: keepAsText,
+        wouldExceedInputLimit: wouldTextPasteExceedLimit({
+          valueLength: snapshot?.value.length ?? promptRef.current.length,
+          selection: {
+            start: snapshot?.expandedCursor ?? promptRef.current.length,
+            end: snapshot?.expandedCursor ?? promptRef.current.length,
+          },
+          textLength: text.length,
+          maxLength: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+        }),
+      });
+      if (disposition !== "attachment") return;
+      event.preventDefault();
+      event.stopPropagation();
+      addComposerPlainFiles([
+        new File(
+          [text],
+          nextPastedTextFileName(composerFilesRef.current.map((file) => file.name)),
+          { type: "text/plain" },
+        ),
+      ]);
+    };
+
     const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
       setIsDragOverComposer(true);
     };
 
     const onComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "copy";
       setIsDragOverComposer(true);
     };
 
     const onComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
@@ -2748,22 +2928,154 @@ export const ChatComposer = memo(
       }
     };
 
-    const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
-      event.preventDefault();
-      dragDepthRef.current = 0;
-      setIsDragOverComposer(false);
-      if (onDropFolder && dataTransferHasFolderOrZip(event.dataTransfer)) {
+    // ⌘S: what's typed goes aside and the box is free; on an empty box it
+    // comes back here, whichever chat this is.
+    const restoreStashedEntry = (entry: StashedMessage) => {
+      const current = promptRef.current.trim();
+      if (entry.text) {
+        setPromptFromTraits(
+          current ? `${promptRef.current.trimEnd()}\n\n${entry.text}` : entry.text,
+        );
+      }
+      if (entry.files.length > 0) addComposerFiles([...entry.files]);
+      if (entry.quotes.length > 0 && activeThreadId) {
+        useComposerQuotesStore.getState().restore(activeThreadId, entry.quotes);
+      }
+      window.requestAnimationFrame(() => composerEditorRef.current?.focusAtEnd());
+    };
+
+    const setComposerAside = () => {
+      if (!activeThreadId || pendingUserInputs.length > 0 || isComposerApprovalState) return;
+      const text = appendTerminalContextsToPrompt(
+        promptRef.current,
+        composerTerminalContextsRef.current,
+      );
+      const quotes = useComposerQuotesStore.getState().items[activeThreadId] ?? [];
+      const entry = useComposerStashStore.getState().stash({
+        text,
+        files: [
+          ...composerImagesRef.current.map((image) => image.file),
+          ...composerFilesRef.current.map((attachment) => attachment.file),
+        ],
+        quotes,
+      });
+      if (!entry) {
+        const { entries } = useComposerStashStore.getState();
+        const only = entries.length === 1 ? entries[0] : undefined;
+        if (only) {
+          const taken = useComposerStashStore.getState().take(only.id);
+          if (taken) restoreStashedEntry(taken);
+        } else if (entries.length > 1) {
+          setIsStashMenuOpen(true);
+        }
+        return;
+      }
+      useComposerQuotesStore.getState().take(activeThreadId);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      setComposerFilesState(() => []);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      const leftBehind =
+        composerVideosRef.current.length > 0 ||
+        useScreenRecordingStore.getState().items[activeThreadId] !== undefined;
+      toastManager.add({
+        type: "success",
+        title: "Set aside",
+        description: leftBehind
+          ? "Videos and recordings stay in this chat."
+          : "⌘S on an empty box brings it back, in any chat.",
+        timeout: 4_000,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            const taken = useComposerStashStore.getState().take(entry.id);
+            if (taken) restoreStashedEntryRef.current(taken);
+          },
+        },
+      });
+    };
+
+    const restoreStashedEntryRef = useRef(restoreStashedEntry);
+    restoreStashedEntryRef.current = restoreStashedEntry;
+    const setComposerAsideRef = useRef(setComposerAside);
+    setComposerAsideRef.current = setComposerAside;
+    useEffect(() => {
+      loadComposerStash();
+      if (isEmbedded) return;
+      return registerStashTarget((entry) => restoreStashedEntryRef.current(entry));
+    }, [isEmbedded]);
+
+    /** Another chat's transcript goes along as a file the agent opens when it needs it. */
+    const attachChats = async (chats: ReadonlyArray<ScopedThreadRef>) => {
+      const others = chats.filter(
+        (chat) => chat.environmentId !== environmentId || chat.threadId !== activeThreadId,
+      );
+      for (const chat of others) {
+        try {
+          addComposerPlainFilesRef.current([await chatTranscriptFile(chat)]);
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Couldn't read that chat",
+            description: error instanceof Error ? error.message : undefined,
+          });
+        }
+      }
+    };
+
+    const acceptDrop = (drop: ComposerDrop) => {
+      if (drop.files.length > 0) addComposerFiles([...drop.files]);
+      if (drop.chats.length > 0) void attachChats(drop.chats);
+    };
+
+    const acceptTransfer = (dataTransfer: DataTransfer) => {
+      const chats = readChatDrag(dataTransfer);
+      if (chats.length > 0) {
+        void attachChats(chats);
+      } else if (
+        onDropFolder &&
+        pendingUserInputs.length === 0 &&
+        dataTransferHasFolderOrZip(dataTransfer)
+      ) {
         // Read now: the dropped items are gone once this handler returns.
-        void readDroppedUploadFiles(event.dataTransfer).then((dropped) => {
+        void readDroppedUploadFiles(dataTransfer).then((dropped) => {
           if (dropped.length > 0) onDropFolder(dropped);
         });
         return;
+      } else {
+        addComposerFiles(Array.from(dataTransfer.files));
       }
-      const files = Array.from(event.dataTransfer.files);
-      addComposerFiles(files);
       focusComposer();
     };
+
+    const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+      if (!acceptsChatDrop(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDragOverComposer(false);
+      acceptTransfer(event.dataTransfer);
+    };
+
+    // Stable handle and store effects read these fresh.
+    const acceptTransferRef = useRef(acceptTransfer);
+    acceptTransferRef.current = acceptTransfer;
+    const acceptDropRef = useRef(acceptDrop);
+    acceptDropRef.current = acceptDrop;
+
+    // What was dropped on this chat in the sidebar waits here until it opens.
+    const composerDropKey =
+      typeof composerDraftTarget === "string"
+        ? composerDraftTarget
+        : scopedThreadKey(composerDraftTarget);
+    const hasOfferedDrop = useComposerDropStore(
+      (store) => store.pending[composerDropKey] !== undefined,
+    );
+    useEffect(() => {
+      if (!hasOfferedDrop) return;
+      const drop = useComposerDropStore.getState().take(composerDropKey);
+      if (drop) acceptDropRef.current(drop);
+    }, [composerDropKey, hasOfferedDrop]);
     const onImageAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.currentTarget.files ?? []);
       event.currentTarget.value = "";
@@ -2915,6 +3227,9 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
+        acceptTransfer: (dataTransfer) => acceptTransferRef.current(dataTransfer),
+        setAside: () => setComposerAsideRef.current(),
+        getAnswerFiles: () => answerFilesRef.current.map((attachment) => attachment.file),
         addQuote: (quote) => {
           if (activeThreadIdRef.current) {
             useComposerQuotesStore.getState().add(activeThreadIdRef.current, quote);
@@ -3272,6 +3587,7 @@ export const ChatComposer = memo(
           onDragOver={onComposerDragOver}
           onDragLeave={onComposerDragLeave}
           onDrop={onComposerDrop}
+          onPasteCapture={onComposerPasteCapture}
         >
           <div
             ref={composerSurfaceRef}
@@ -3533,6 +3849,42 @@ export const ChatComposer = memo(
                 </div>
               ) : null}
 
+              {!isComposerCollapsedMobile &&
+              pendingUserInputs.length > 0 &&
+              answerFiles.length > 0 ? (
+                <div className="mb-3 flex flex-wrap gap-2" data-testid="composer-answer-files">
+                  {answerFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="relative flex h-12 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-1.5 pr-7 pl-2.5"
+                      title={`${file.name} — saved to Uploads when you answer`}
+                    >
+                      <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-foreground/80">
+                          {file.name}
+                        </div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {formatFileSize(file.sizeBytes)}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                        onClick={() =>
+                          setAnswerFiles((current) =>
+                            current.filter((entry) => entry.id !== file.id),
+                          )
+                        }
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
@@ -3942,6 +4294,17 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  <ComposerStashMenu
+                    open={isStashMenuOpen}
+                    onOpenChange={setIsStashMenuOpen}
+                    onRestore={restoreStashedEntry}
+                  />
+                  <ComposerPlanLimits
+                    limits={chatPlanLimits}
+                    compact={isComposerPrimaryActionsCompact}
+                    open={isPlanLimitsOpen}
+                    onOpenChange={setIsPlanLimitsOpen}
+                  />
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
@@ -3959,6 +4322,11 @@ export const ChatComposer = memo(
                       composerSendState.hasSendableContent && !hasKnownUnsupportedImageAttachments
                     }
                     preserveComposerFocusOnPointerDown={isMobileViewport}
+                    sendAndNewShortcut={shortcutLabelForCommand(
+                      shortcutBindings,
+                      isLocalDraftThread ? "composer.sendBackground" : "composer.sendAndNewThread",
+                      { context: { composerFocus: true, draftThreadRoute: isLocalDraftThread } },
+                    )}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

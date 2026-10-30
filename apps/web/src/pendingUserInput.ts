@@ -166,3 +166,18 @@ export function derivePendingUserInputProgress(
     canAdvance: Boolean(resolvedAnswer),
   };
 }
+
+/** The saved files go with the last answer, as paths the agent can open. */
+export function withAttachedFiles(
+  answers: Record<string, unknown>,
+  paths: ReadonlyArray<string>,
+): Record<string, unknown> {
+  const last = Object.keys(answers).at(-1);
+  if (last === undefined || paths.length === 0) return answers;
+  const note = ["Attached files:", ...paths.map((path) => `- ${path}`)].join("\n");
+  const value = answers[last];
+  return {
+    ...answers,
+    [last]: Array.isArray(value) ? [...value, note] : `${String(value)}\n\n${note}`,
+  };
+}

@@ -24,6 +24,8 @@ interface ComposerPrimaryActionsProps {
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  /** Shown over Send: the shortcut for "send and start a new chat". */
+  sendAndNewShortcut?: string | null;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -63,6 +65,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isPreparingWorktree,
   hasSendableContent,
   preserveComposerFocusOnPointerDown = false,
+  sendAndNewShortcut = null,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
@@ -218,6 +221,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       className="flex h-9 w-9 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
       {...pointerFocusProps}
       disabled={isSendBusy || isConnecting || isEnvironmentUnavailable || !hasSendableContent}
+      title={
+        sendAndNewShortcut ? `Send. ${sendAndNewShortcut} sends and starts a new chat` : "Send"
+      }
       aria-label={
         isEnvironmentUnavailable
           ? "Machine disconnected"

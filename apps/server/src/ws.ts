@@ -19,7 +19,9 @@ import {
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadTranscriptError,
   OrchestrationGetTurnDiffError,
+  OrchestrationRegenerateThreadTitleError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -74,6 +76,8 @@ import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { buildThreadTranscript, threadTitleSource } from "./orchestration/threadTranscript.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import {
   liveAfter,
   planShellResume,
@@ -283,6 +287,7 @@ const makeWsRpcLayer = (
       const browserBridge = yield* BrowserBridge;
       const serverBrowser = yield* ServerBrowser;
       const serverSettings = yield* ServerSettingsService;
+      const textGeneration = yield* TextGeneration;
       const credentialsVault = yield* CredentialsVaultService;
       const projectSync = yield* ProjectSyncService;
       const startup = yield* ServerRuntimeStartup;
@@ -1119,6 +1124,78 @@ const makeWsRpcLayer = (
                     message: "Failed to load full thread diff",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.regenerateThreadTitle]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.regenerateThreadTitle,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+              if (Option.isNone(thread)) {
+                return yield* new OrchestrationRegenerateThreadTitleError({
+                  message: "This chat is gone.",
+                });
+              }
+              const source = threadTitleSource(thread.value.messages);
+              if (source === null) {
+                return yield* new OrchestrationRegenerateThreadTitleError({
+                  message: "Nothing to name yet: this chat has no messages.",
+                });
+              }
+              const project = yield* projectionSnapshotQuery.getProjectShellById(
+                thread.value.projectId,
+              );
+              const { textGenerationModelSelection: modelSelection } =
+                yield* serverSettings.getSettings;
+              const generated = yield* textGeneration.generateThreadTitle({
+                cwd:
+                  thread.value.worktreePath ??
+                  Option.getOrUndefined(project)?.workspaceRoot ??
+                  config.cwd,
+                message: source,
+                modelSelection,
+              });
+              yield* orchestrationEngine.dispatch({
+                type: "thread.meta.update",
+                commandId: serverCommandId("thread-title-regenerate"),
+                threadId: input.threadId,
+                title: generated.title,
+              });
+              return { title: generated.title };
+            }).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationRegenerateThreadTitleError)(cause)
+                  ? cause
+                  : new OrchestrationRegenerateThreadTitleError({
+                      message: "Couldn't make a new title. Try again.",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getThreadTranscript]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadTranscript,
+            projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetThreadTranscriptError({
+                    message: "Couldn't read that chat.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((thread) =>
+                Option.isNone(thread)
+                  ? Effect.fail(
+                      new OrchestrationGetThreadTranscriptError({ message: "This chat is gone." }),
+                    )
+                  : Effect.succeed({
+                      title: thread.value.title,
+                      markdown: buildThreadTranscript(thread.value),
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },

@@ -50,6 +50,7 @@ import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   collapseExpandedComposerCursor,
+  type ComposerSubmissionIntent,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -73,6 +74,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
+  withAttachedFiles,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -121,6 +123,7 @@ import {
 import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { withAppShortcutDefaults } from "./appShortcuts.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { BellIcon, ChevronDownIcon, ClockIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
@@ -146,7 +149,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
-import { stageChatFileUpload } from "../chatUploads";
+import { saveFilesToUploads, stageChatFileUpload } from "../chatUploads";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -155,14 +158,19 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type ComposerVideoAttachment,
   type DraftThreadEnvMode,
+  finalizePromotedDraftThreadByRef,
+  restorePromotingDraftThread,
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { acceptsChatDrop } from "./chat/chatDrop";
+import { useComposerFileHandoffStore } from "./computer/composerFileHandoffStore";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { recordingFrameAttachments } from "../screenRecording/frameAttachments";
 import { appendRecordingToPrompt } from "../screenRecording/recordingLogic";
 import { recordingReadiness } from "../screenRecording/pipeline";
@@ -454,6 +462,12 @@ interface TerminalLaunchContext {
 }
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
+
+function isEditableOutsideComposer(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  if (element.closest('[data-chat-composer-form="true"]')) return false;
+  return element.isContentEditable || element.matches("input, textarea, select");
+}
 
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
@@ -763,6 +777,7 @@ export default function ChatView(props: ChatViewProps) {
   const timestampFormat = settings.timestampFormat;
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const navigate = useNavigate();
+  const { handleNewThread } = useNewThreadHandler();
   const rawSearch = useSearch({
     strict: false,
     select: (params) => parseDiffRouteSearch(params),
@@ -2860,6 +2875,54 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
 
+  // Files or a chat dropped anywhere in the window land in this chat's box,
+  // unless something under the pointer took them (the box, a sidebar chat, Files).
+  const [isDraggingOverWindow, setIsDraggingOverWindow] = useState(false);
+  useEffect(() => {
+    if (isEmbedded) return;
+    let depth = 0;
+    const accepts = (event: DragEvent) =>
+      event.dataTransfer !== null && acceptsChatDrop(event.dataTransfer);
+    const onDragEnter = (event: DragEvent) => {
+      if (!accepts(event)) return;
+      depth += 1;
+      setIsDraggingOverWindow(true);
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!accepts(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setIsDraggingOverWindow(false);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (!accepts(event) || event.defaultPrevented) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (event: DragEvent) => {
+      depth = 0;
+      setIsDraggingOverWindow(false);
+      if (!accepts(event) || event.defaultPrevented || !event.dataTransfer) return;
+      event.preventDefault();
+      composerRef.current?.acceptTransfer(event.dataTransfer);
+    };
+    const onDragEnd = () => {
+      depth = 0;
+      setIsDraggingOverWindow(false);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("dragend", onDragEnd);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("dragend", onDragEnd);
+    };
+  }, [isEmbedded]);
+
   useEffect(() => {
     // Глобальные хоткеи чата вешает только основной экземпляр — иначе открытая
     // панель со встроенным чатом обрабатывала бы каждое сочетание дважды.
@@ -2874,7 +2937,7 @@ export default function ChatView(props: ChatViewProps) {
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
 
-      const command = resolveShortcutCommand(event, keybindings, {
+      const command = resolveShortcutCommand(event, withAppShortcutDefaults(keybindings), {
         context: shortcutContext,
       });
       if (!command) return;
@@ -2932,6 +2995,16 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         composerRef.current?.toggleModelPicker();
+        return;
+      }
+
+      if (command === "composer.stash") {
+        // ⌘S in another text field (a file open in the panel) is that field's.
+        const focused = document.activeElement;
+        if (isEditableOutsideComposer(focused)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        composerRef.current?.setAside();
         return;
       }
 
@@ -3025,8 +3098,13 @@ export default function ChatView(props: ChatViewProps) {
    * `queued`: a message from "Up next" (queuedMessageStore.ts) goes instead of
    * the composer's content — the composer, whatever is typed in it now, stays.
    */
-  const onSend = async (e?: { preventDefault: () => void }, queued?: QueuedChatMessage) => {
+  const onSend = async (
+    e?: { preventDefault: () => void },
+    queued?: QueuedChatMessage,
+    intent: ComposerSubmissionIntent = "foreground",
+  ) => {
     e?.preventDefault();
+    const inBackground = intent === "background" && !queued;
     // A queued message that can't go now is not lost: back first, held.
     const keepQueued = () => {
       if (queued) useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued);
@@ -3190,7 +3268,8 @@ export default function ChatView(props: ChatViewProps) {
         agentWorking: phase === "running",
         linkDown,
         hasAttachments: hasComposerAttachments || sendableComposerTerminalContexts.length > 0,
-        sendNow: false,
+        // Leaving the chat: "Up next" only moves while the chat is on screen.
+        sendNow: inBackground,
       })
     ) {
       useQueuedMessageStore
@@ -3207,6 +3286,19 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const threadIdForSend = activeThread.id;
+    const projectRefForNextChat = scopeProjectRef(activeProject.environmentId, activeProject.id);
+    const nextChatOptions = {
+      envMode: sendEnvMode,
+      branch: activeThreadBranch,
+      worktreePath: sendEnvMode === "worktree" ? null : activeThread.worktreePath,
+      runtimeMode,
+    };
+    const startNextChat = () =>
+      handleNewThread(projectRefForNextChat, nextChatOptions).catch(() => {
+        toastManager.add(
+          stackedThreadToast({ type: "warning", title: "Couldn't open a new chat" }),
+        );
+      });
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -3278,12 +3370,19 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
+      if (inBackground) void startNextChat();
       return;
     }
     if (!api) return;
 
+    // A new chat sent in the background leaves the screen right away: this
+    // view is the next chat's by the time the send finishes. An open chat
+    // goes on to the next one once the computer has the message.
+    const backgroundDraftId = inBackground && isLocalDraftThread ? (draftId ?? null) : null;
     sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+    if (!backgroundDraftId) {
+      beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+    }
 
     const composerImagesSnapshot = [...composerImages];
     const composerVideosSnapshot = [...composerVideos];
@@ -3392,17 +3491,19 @@ export default function ChatView(props: ChatViewProps) {
     setShowScrollToBottom(false);
     await legendListRef.current?.scrollToEnd?.({ animated: false });
 
-    setOptimisticUserMessages((existing) => [
-      ...existing,
-      {
-        id: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        createdAt: messageCreatedAt,
-        streaming: false,
-      },
-    ]);
+    if (!backgroundDraftId) {
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: outgoingMessageText,
+          ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+          createdAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+    }
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -3424,6 +3525,19 @@ export default function ChatView(props: ChatViewProps) {
       composerRef.current?.clearVideoAttachments();
       composerRef.current?.setFileAttachments([]);
       composerRef.current?.resetCursorState();
+    }
+
+    if (backgroundDraftId) {
+      // The draft stays until the server has the chat; its project is free
+      // for the next one. The next message can go right away.
+      useComposerDraftStore
+        .getState()
+        .markDraftThreadPromoting(
+          backgroundDraftId,
+          scopeThreadRef(environmentId, threadIdForSend),
+        );
+      await startNextChat();
+      sendInFlightRef.current = false;
     }
 
     let turnStartSucceeded = false;
@@ -3537,7 +3651,7 @@ export default function ChatView(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
-      beginLocalDispatch({ preparingWorktree: false });
+      if (!backgroundDraftId) beginLocalDispatch({ preparingWorktree: false });
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: turnCommandId,
@@ -3557,6 +3671,34 @@ export default function ChatView(props: ChatViewProps) {
       });
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
+      if (backgroundDraftId) {
+        // Nothing reached the computer: the draft comes back whole, reachable
+        // from the toast, and the chat on screen isn't touched.
+        restorePromotingDraftThread(backgroundDraftId);
+        setComposerDraftPrompt(backgroundDraftId, promptForSend);
+        addComposerDraftImages(
+          backgroundDraftId,
+          composerImagesSnapshot.map(cloneComposerImageForRetry),
+        );
+        useComposerFileHandoffStore.getState().handOff(backgroundDraftId, composerFilesSnapshot);
+        useComposerQuotesStore.getState().restore(threadIdForSend, takenQuotes);
+        setComposerDraftTerminalContexts(backgroundDraftId, composerTerminalContextsSnapshot);
+        if (takenRecording) useScreenRecordingStore.getState().restore(takenRecording.item);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "The task didn't start",
+            description: err instanceof Error ? err.message : "Failed to send message.",
+            actionProps: {
+              children: "Open draft",
+              onClick: () => {
+                void navigate({ to: "/draft/$draftId", params: { draftId: backgroundDraftId } });
+              },
+            },
+          }),
+        );
+        return;
+      }
       if (!turnStartSucceeded && outboxFallbackCommand && isConnectionShapedSendError(err)) {
         // The link dropped under the send (queued or typed): the outbox
         // delivers this same command (same commandId) once it is back.
@@ -3614,16 +3756,45 @@ export default function ChatView(props: ChatViewProps) {
         err instanceof Error ? err.message : "Failed to send message.",
       );
     });
+    if (backgroundDraftId) {
+      if (turnStartSucceeded) {
+        const startedRef = scopeThreadRef(environmentId, threadIdForSend);
+        finalizePromotedDraftThreadByRef(startedRef);
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: "Started in the background",
+            timeout: 5_000,
+            actionProps: {
+              children: "Open",
+              onClick: () => {
+                void navigate({
+                  to: "/$environmentId/$threadId",
+                  params: buildThreadRouteParams(startedRef),
+                });
+              },
+            },
+          }),
+        );
+      }
+      return;
+    }
     sendInFlightRef.current = false;
     if (!turnStartSucceeded) {
       resetLocalDispatch();
     }
+    if (inBackground && turnStartSucceeded) await startNextChat();
   };
 
   // Home's composer opened this chat with a task typed in and asked it to send
   // it: do exactly what Enter would, once the chat is ready (see pendingSendStore).
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
+  const onComposerSend = useCallback(
+    (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) =>
+      void onSendRef.current(e, undefined, intent),
+    [],
+  );
 
   // "Up next" (S4, upstream cc839c42b1): the first waiting message goes by
   // itself once the agent is done and nothing else needs the person.
@@ -3753,13 +3924,31 @@ export default function ChatView(props: ChatViewProps) {
       setRespondingUserInputRequestIds((existing) =>
         existing.includes(requestId) ? existing : [...existing, requestId],
       );
+      let answersToSend = answers;
+      const answerFiles = composerRef.current?.getAnswerFiles() ?? [];
+      if (answerFiles.length > 0) {
+        try {
+          answersToSend = withAttachedFiles(
+            answers,
+            await saveFilesToUploads(environmentId, answerFiles),
+          );
+        } catch (err) {
+          // Nothing went: the answer and its files stay, ready to try again.
+          setThreadError(
+            activeThreadId,
+            err instanceof Error ? err.message : "Couldn't upload the files.",
+          );
+          setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
+          return;
+        }
+      }
       await api.orchestration
         .dispatchCommand({
           type: "thread.user-input.respond",
           commandId: newCommandId(),
           threadId: activeThreadId,
           requestId,
-          answers,
+          answers: answersToSend,
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
@@ -4573,6 +4762,16 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {isDraggingOverWindow ? (
+        <div
+          className="pointer-events-none fixed inset-1.5 z-50 flex items-start justify-center rounded-2xl pt-4 ring-2 ring-primary/50"
+          data-testid="chat-drop-overlay"
+        >
+          <span className="rounded-full bg-primary px-3 py-1 text-primary-foreground text-xs">
+            Drop to add to this chat
+          </span>
+        </div>
+      ) : null}
       {/* Top bar */}
       {!isPreviewFocusMode && !isEmbedded ? (
         <header
@@ -4971,7 +5170,8 @@ export default function ChatView(props: ChatViewProps) {
                     composerTerminalContextsRef={composerTerminalContextsRef}
                     shouldAutoScrollRef={isAtEndRef}
                     scheduleStickToBottom={scrollToEnd}
-                    onSend={onSend}
+                    isEmbedded={isEmbedded}
+                    onSend={onComposerSend}
                     onInterrupt={onInterrupt}
                     onImplementPlanInNewThread={onImplementPlanInNewThread}
                     onRespondToApproval={onRespondToApproval}

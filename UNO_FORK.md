@@ -243,6 +243,19 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - Ответ: `ReplySelectionToolbar.tsx` + `lib/selectionActions.ts` (T3 как есть). Панель: сообщение `selection` в `pageToolsScript.ts` и в прелоаде десктопа, `SelectionQuote` в `CommentLayer.tsx`. Выделение внутри полей не передаётся (там может быть пароль). Браузер компьютера спрашивает выделение один раз после отпускания мыши, скрипт в страницу агента не ставится, правило Миши 28.10 (DevTools выключены) не нарушено.
 - На сайтах Uno в вебе скрипт раздаёт консоль (`site_page_tools.js` в fishcode, `bun scripts/print-site-page-tools.ts`): пока он не перегенерирован, кнопки Quote там нет.
 
+**Композер, волна T3 30.10** (`feat/t3p-composer-1030`):
+
+- Большая вставка: от 32 КиБ текст становится файлом (`lib/textPaste.ts`), ⌘⇧V оставляет текст. Вставку ловим в `onPasteCapture`: Lexical читает её на элементе раньше React. Лимиты в `contracts/orchestration.ts`: 100 вложений, из них 20 картинок внутри команды на 80 МиБ, остальные картинки идут файлом.
+- Фон: ⌘Enter на новом чате уводит его сразу, композер уже на следующем черновике (`resolveComposerSubmissionIntent`, `markDraftThreadPromoting`). При ошибке черновик возвращается с тостом Open draft. Очередь «Up next» в фоне пропускается: она двигается только на экране. На открытом чате переход после подтверждения.
+- ⌘S (`composerStashStore.ts`, `lib/stashDb.ts`): IndexedDB в браузере, не синхронизируется. Видео и записи экрана не откладываются.
+- Drafts (`sidebar/SidebarDraftsBlock.tsx`): неотправленные черновики и отложенное.
+- Дропы (`chat/chatDrop.ts`, `sidebar/useSidebarChatDrag.ts`): файл на окно или строку чата, чат на чат даёт транскрипт файлом (`orchestration.getThreadTranscript`, `threadTranscript.ts`).
+- Файлы в ответе на вопрос агента: кладём в Uploads, пути приписываем к последнему ответу (`pendingUserInput.ts`).
+- Regenerate title: `orchestration.regenerateThreadTitle`, пункт меню.
+- Turn into project: команда `thread.project.adopt`. Ничего не переезжает: чат остаётся в прежнем cwd (`worktreePath`), потому что история Claude привязана к cwd. Новые чаты проекта стартуют в его папке.
+- Лимиты: чип у Send (`ComposerPlanLimits.tsx`, `/limits`) на тех же данных, что и виджет Home.
+- Prompt links (`packages/shared/src/promptLinks.ts`, `routes/_chat.new.tsx`, `open-url` в десктопе): `/new?prompt=` и `uno-work://new?prompt=` только заполняют поле. Отправки нет, остальные параметры игнорируются, скрытые символы вырезаются с предупреждением, лимит 8000 символов. Только Mac: на Windows и Linux нет single-instance lock.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

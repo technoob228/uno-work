@@ -56,6 +56,8 @@ const BROWSER_CREDENTIALS_DELETE_CHANNEL = "desktop:browser-credentials-delete";
 const BROWSER_CREDENTIALS_REVEAL_CHANNEL = "desktop:browser-credentials-reveal";
 const BROWSER_CLEAR_DATA_CHANNEL = "desktop:browser-clear-data";
 const BROWSER_OPEN_URL_CHANNEL = "desktop:browser-open-url";
+const PROMPT_LINK_CHANNEL = "desktop:prompt-link";
+const PROMPT_LINK_TAKE_CHANNEL = "desktop:prompt-link-take";
 const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
@@ -210,6 +212,19 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   revealBrowserCredentialPassword: (id) =>
     ipcRenderer.invoke(BROWSER_CREDENTIALS_REVEAL_CHANNEL, id),
   clearBrowserData: (input) => ipcRenderer.invoke(BROWSER_CLEAR_DATA_CHANNEL, input),
+  onPromptLink: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, appPath: unknown) => {
+      if (typeof appPath !== "string" || appPath.length === 0) return;
+      listener(appPath);
+    };
+    ipcRenderer.on(PROMPT_LINK_CHANNEL, wrappedListener);
+    void ipcRenderer.invoke(PROMPT_LINK_TAKE_CHANNEL).then((appPath: unknown) => {
+      if (typeof appPath === "string" && appPath.length > 0) listener(appPath);
+    });
+    return () => {
+      ipcRenderer.removeListener(PROMPT_LINK_CHANNEL, wrappedListener);
+    };
+  },
   onBrowserOpenUrlRequest: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, url: unknown) => {
       if (typeof url !== "string" || url.length === 0) return;

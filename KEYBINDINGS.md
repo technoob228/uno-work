@@ -34,7 +34,11 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+]", "command": "navigation.forward", "when": "!terminalFocus" },
   { "key": "mod+shift+s", "command": "thread.settle", "when": "!terminalFocus" },
   { "key": "mod+shift+p", "command": "thread.pin", "when": "!terminalFocus" },
-  { "key": "mod+z", "command": "thread.undo", "when": "!terminalFocus && !editableFocus" }
+  { "key": "mod+z", "command": "thread.undo", "when": "!terminalFocus && !editableFocus" },
+  { "key": "mod+enter", "command": "composer.sendBackground", "when": "composerFocus && draftThreadRoute" },
+  { "key": "mod+alt+enter", "command": "composer.sendBackground", "when": "composerFocus && draftThreadRoute" },
+  { "key": "mod+alt+enter", "command": "composer.sendAndNewThread", "when": "composerFocus && !draftThreadRoute" },
+  { "key": "mod+s", "command": "composer.stash", "when": "!terminalFocus" }
 ]
 ```
 
@@ -71,6 +75,9 @@ Before 0.0.136 `mod+j` was `terminal.toggle`. On start the server moves that unt
 - `navigation.back` / `navigation.forward`: back / forward through the app's screens, like a browser
 - `thread.settle`: Done for the open chat (it moves to the Done shelf)
 - `thread.pin`: pin or unpin the open chat
+- `composer.sendBackground`: on a new chat, send it and stay on a fresh one; the chat works in the background
+- `composer.sendAndNewThread`: on an open chat, send and start a new chat once the message has gone through
+- `composer.stash`: set the typed message aside with its images and files, or bring it back in any chat when the box is empty
 - `thread.undo`: undo the last Done, snooze, unpin or archive (the note at the bottom of the sidebar). In a text field `mod+z` stays the field's own undo, except right after the action
 
 ### Key Syntax

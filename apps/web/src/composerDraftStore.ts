@@ -328,7 +328,7 @@ interface ProjectDraftSession extends DraftSessionState {
  * Raw `ThreadId` is intentionally excluded so callers cannot drop environment
  * identity for real threads.
  */
-type ComposerThreadTarget = ScopedThreadRef | DraftId;
+export type ComposerThreadTarget = ScopedThreadRef | DraftId;
 
 /**
  * Persisted store for composer content plus draft-session metadata.
@@ -3159,6 +3159,23 @@ export function markPromotedDraftThreadsByRef(serverThreadRefs: Iterable<ScopedT
   for (const threadRef of serverThreadRefs) {
     markPromotedDraftThreadByRef(threadRef);
   }
+}
+
+/**
+ * A draft sent in the background that never reached the server: it is a draft
+ * again, open from the error toast.
+ */
+export function restorePromotingDraftThread(draftId: DraftId): void {
+  useComposerDraftStore.setState((state) => {
+    const existing = state.draftThreadsByThreadKey[draftId];
+    if (!existing || !isDraftThreadPromoting(existing)) return state;
+    return {
+      draftThreadsByThreadKey: {
+        ...state.draftThreadsByThreadKey,
+        [draftId]: { ...existing, promotedTo: null },
+      },
+    };
+  });
 }
 
 export function finalizePromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {

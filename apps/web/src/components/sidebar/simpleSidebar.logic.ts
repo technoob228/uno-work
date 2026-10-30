@@ -14,6 +14,8 @@ import type { ContextMenuItem } from "@t3tools/contracts";
  */
 export const SIMPLE_THREAD_MENU_IDS = [
   "rename",
+  "regenerate-title",
+  "turn-into-project",
   "pin",
   "settle",
   "unsettle",
@@ -26,7 +28,7 @@ export const SIMPLE_THREAD_MENU_IDS = [
 ] as const;
 
 /**
- * The right-click menu of a chat. Without Dev mode Rename, Pin, Done, Snooze,
+ * The right-click menu of a chat. Without Dev mode Rename, Regenerate title, Pin, Done, Snooze,
  * Mark as read, "Don't let agents write here", Archive and Delete; with it,
  * everything (mark unread, copy path / id, continue on another machine).
  */

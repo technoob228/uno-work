@@ -1,3 +1,4 @@
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,6 +9,7 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  resolveComposerSubmissionIntent,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -310,5 +312,35 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("resolveComposerSubmissionIntent", () => {
+  const MAC = "MacIntel";
+  const enter = (mods: { meta?: boolean; alt?: boolean } = {}) => ({
+    key: "Enter",
+    metaKey: mods.meta === true,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: mods.alt === true,
+  });
+  const intent = (event: ReturnType<typeof enter>, isDraftThread: boolean) =>
+    resolveComposerSubmissionIntent({
+      event,
+      keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+      isDraftThread,
+      platform: MAC,
+    });
+
+  it("sends a new chat in the background on ⌘Enter", () => {
+    expect(intent(enter({ meta: true }), true)).toBe("background");
+    expect(intent(enter({ meta: true, alt: true }), true)).toBe("background");
+    expect(intent(enter(), true)).toBe("foreground");
+  });
+
+  it("keeps ⌘Enter a plain send in an open chat, ⌥⌘Enter moves on", () => {
+    expect(intent(enter({ meta: true }), false)).toBe("foreground");
+    expect(intent(enter({ meta: true, alt: true }), false)).toBe("background");
+    expect(intent(enter(), false)).toBe("foreground");
   });
 });

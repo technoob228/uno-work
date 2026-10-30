@@ -35,6 +35,7 @@ import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
+import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
@@ -192,6 +193,11 @@ const ChatSetupRoute = ChatSetupRouteImport.update({
 const ChatOfficeRoute = ChatOfficeRouteImport.update({
   id: '/office',
   path: '/office',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatNewRoute = ChatNewRouteImport.update({
+  id: '/new',
+  path: '/new',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatMyUnoRoute = ChatMyUnoRouteImport.update({
@@ -367,6 +373,7 @@ export interface FileRoutesByFullPath {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -421,6 +428,7 @@ export interface FileRoutesByTo {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -479,6 +487,7 @@ export interface FileRoutesById {
   '/_chat/drive': typeof ChatDriveRoute
   '/_chat/files': typeof ChatFilesRoute
   '/_chat/my-uno': typeof ChatMyUnoRoute
+  '/_chat/new': typeof ChatNewRoute
   '/_chat/office': typeof ChatOfficeRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
@@ -538,6 +547,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -592,6 +602,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -649,6 +660,7 @@ export interface FileRouteTypes {
     | '/_chat/drive'
     | '/_chat/files'
     | '/_chat/my-uno'
+    | '/_chat/new'
     | '/_chat/office'
     | '/_chat/setup'
     | '/_chat/sites'
@@ -884,6 +896,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatOfficeRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/new': {
+      id: '/_chat/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/my-uno': {
       id: '/_chat/my-uno'
       path: '/my-uno'
@@ -1115,6 +1134,7 @@ interface ChatRouteChildren {
   ChatDriveRoute: typeof ChatDriveRoute
   ChatFilesRoute: typeof ChatFilesRoute
   ChatMyUnoRoute: typeof ChatMyUnoRoute
+  ChatNewRoute: typeof ChatNewRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
@@ -1133,6 +1153,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatDriveRoute: ChatDriveRoute,
   ChatFilesRoute: ChatFilesRoute,
   ChatMyUnoRoute: ChatMyUnoRoute,
+  ChatNewRoute: ChatNewRoute,
   ChatOfficeRoute: ChatOfficeRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,

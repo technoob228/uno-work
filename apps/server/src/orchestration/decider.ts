@@ -645,6 +645,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.project.adopt": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const target = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (thread.session?.status === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This chat is still working. Wait until it stops, or stop it first.",
+        });
+      }
+      const current = readModel.projects.find((project) => project.id === thread.projectId);
+      // Nothing moves: the chat keeps working in its folder, so an agent's
+      // session and memory carry on. In the project's root it needs no folder
+      // of its own.
+      const cwd = thread.worktreePath ?? current?.workspaceRoot ?? null;
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.projectId,
+          worktreePath: cwd === target.workspaceRoot ? null : cwd,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.snooze": {
       const thread = yield* requireThreadNotArchived({
         readModel,
