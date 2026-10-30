@@ -6,8 +6,13 @@ export declare const MAX_PROJECT_BYTES: number;
 export declare const MAX_FILE_BYTES: number;
 export declare const LOCK_STALE_MS: number;
 export declare const DEFAULT_EXCLUDES: ReadonlyArray<string>;
+export declare const SECRET_PATTERN: RegExp;
+export declare const BUILD_FOLDERS: ReadonlyArray<string>;
 
 export declare function isKeyFile(relative: string): boolean;
+export declare function builtFolders(files: string[]): string[];
+export declare function heldMessage(files: string[]): string;
+export declare function safeRelative(raw: unknown): string | null;
 export declare function safeRemoteUrl(raw: unknown): string | null;
 export declare const SNAPSHOT_GIT_DIR: string;
 export declare function snapshotGitDir(dir: string): string;
@@ -26,6 +31,8 @@ export interface ConflictRecord {
   mine: string;
   theirs: string;
   theirsFrom: string | null;
+  /** Someone else's name, when another person changed the file. */
+  theirsPerson?: string | null;
   at: string;
 }
 
@@ -40,6 +47,8 @@ export interface SyncResult {
   changedFiles: number;
   head: string | null;
   conflict: ConflictRecord | null;
+  /** Files with something that looks like a key inside: they wait on this computer. */
+  held: string[];
   message: string;
 }
 
@@ -55,6 +64,8 @@ export interface SyncCtx {
   home: string;
   env: NodeJS.ProcessEnv;
   hostname?: string;
+  /** The name on the versions this computer saves. */
+  person?: string | null;
   now?: () => number;
   storage?: Storage;
 }
@@ -76,6 +87,44 @@ export declare function resolveConflict(
   input: { dir: string; name: string; keep: "mine" | "theirs" | "dismiss" },
   ctx: SyncCtx,
 ): Promise<SyncResult>;
+
+export declare function versionAuthor(ctx: SyncCtx): string;
+
+export interface ProjectVersion {
+  id: string;
+  at: string;
+  person: string | null;
+  computer: string | null;
+  note: string | null;
+  files: Array<{ path: string; change: "added" | "changed" | "removed" }>;
+  moreFiles: number;
+}
+
+export declare function projectHistory(
+  input: { dir: string; skip?: number; limit?: number },
+  ctx: SyncCtx,
+): Promise<{ mode: "snapshot" | "git"; versions: ProjectVersion[]; more: boolean }>;
+
+export declare function restoreVersion(
+  input: { dir: string; name: string; version: string; files?: string[] | null },
+  ctx: SyncCtx,
+): Promise<SyncResult>;
+
+export declare function projectFiles(
+  input: { dir: string },
+  ctx: SyncCtx,
+): Promise<{
+  mode: "snapshot" | "git";
+  synced: number;
+  localOnly: Array<{ path: string; yours: boolean }>;
+  keyFiles: string[];
+  more: number;
+}>;
+
+export declare function setLocalOnly(
+  input: { dir: string; path: string; localOnly: boolean },
+  ctx: SyncCtx,
+): Promise<void>;
 
 export declare function getProject(
   input: { name: string; dir?: string | null },

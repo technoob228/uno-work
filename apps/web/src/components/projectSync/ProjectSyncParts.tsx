@@ -11,6 +11,7 @@ import {
   CloudCheckIcon,
   CloudDownloadIcon,
   CloudIcon,
+  KeyRoundIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -23,15 +24,15 @@ import { toastManager } from "../ui/toast";
 import { syncLabel, syncMarkOf } from "./projectSync.logic";
 import { useRefreshProjectSync } from "./useProjectSync";
 
-const RANK = { conflict: 4, problem: 3, syncing: 2, synced: 1 } as const;
+const RANK = { conflict: 5, problem: 4, held: 3, syncing: 2, synced: 1 } as const;
 
 /** The most urgent entry of a project's copies on several computers. */
 export function mostUrgent(entries: ReadonlyArray<ProjectSyncEntry>): ProjectSyncEntry | null {
   let best: ProjectSyncEntry | null = null;
   for (const entry of entries) {
-    const mark = syncMarkOf(entry.state);
+    const mark = syncMarkOf(entry.state, entry.held);
     if (!mark) continue;
-    const bestMark = best ? syncMarkOf(best.state) : null;
+    const bestMark = best ? syncMarkOf(best.state, best.held) : null;
     if (!bestMark || RANK[mark] > RANK[bestMark]) best = entry;
   }
   return best;
@@ -40,7 +41,7 @@ export function mostUrgent(entries: ReadonlyArray<ProjectSyncEntry>): ProjectSyn
 /** The row's mark; ⚠ and problems open the project's settings (Keep mine / Keep theirs there). */
 export function ProjectSyncMark(props: { entry: ProjectSyncEntry | null; onOpen: () => void }) {
   const { entry } = props;
-  const mark = syncMarkOf(entry?.state);
+  const mark = syncMarkOf(entry?.state, entry?.held);
   if (!entry || !mark) return null;
   const label = syncLabel(entry);
   const icon =
@@ -50,6 +51,8 @@ export function ProjectSyncMark(props: { entry: ProjectSyncEntry | null; onOpen:
       <RefreshCwIcon className="size-3 animate-spin text-sky-500 [animation-duration:1.6s]" />
     ) : mark === "conflict" ? (
       <TriangleAlertIcon className="size-3.5 text-amber-500" />
+    ) : mark === "held" ? (
+      <KeyRoundIcon className="size-3.5 text-amber-500/80" />
     ) : (
       <CircleAlertIcon className="size-3.5 text-red-500" />
     );

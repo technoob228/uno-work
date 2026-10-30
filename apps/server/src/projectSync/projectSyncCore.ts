@@ -5,6 +5,8 @@
  * keys go to the Uno vault (`vaultProjectSecrets.ts`) and land in the
  * project's `.env` (0600) on every computer — never in the synced files.
  *
+ * New folders in ~/projects sync by themselves; older ones get one question.
+ *
  * Plain promises with every dependency injected (tests use fakes); the
  * Effect service around it is `ProjectSyncService.ts`.
  *
@@ -13,18 +15,23 @@
 import { chmod, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type {
-  ProjectSecretsList,
-  ProjectSyncConflict,
-  ProjectSyncElsewhere,
-  ProjectSyncEntry,
-  ProjectSyncMode,
-  ProjectSyncSnapshot,
-  ProjectSyncState,
+import {
+  isAssistantProjectId,
+  type ProjectSecretsList,
+  type ProjectSyncConflict,
+  type ProjectSyncElsewhere,
+  type ProjectSyncEntry,
+  type ProjectSyncFiles,
+  type ProjectSyncHistory,
+  type ProjectSyncMode,
+  type ProjectSyncProjectRef,
+  type ProjectSyncSnapshot,
+  type ProjectSyncState,
 } from "@t3tools/contracts";
 
 import { secretNameProblem, upsertEnvContent } from "../secretsEnv.ts";
 import {
+  MAX_WAIT_FOR_TURNS_MS,
   OWN_WRITES_QUIET_MS,
   POLL_EVERY_MS,
   createSyncScheduler,
@@ -59,8 +66,10 @@ export interface EngineResult {
     readonly files: ReadonlyArray<string>;
     readonly kept: Readonly<Record<string, "mine" | "theirs">>;
     readonly theirsFrom: string | null;
+    readonly theirsPerson?: string | null;
     readonly at: string;
   } | null;
+  readonly held?: ReadonlyArray<string>;
   readonly message: string;
 }
 
@@ -68,6 +77,7 @@ export interface EngineCtx {
   readonly home: string;
   readonly env: NodeJS.ProcessEnv;
   readonly hostname?: string;
+  readonly person?: string | null;
 }
 
 export interface SyncEngine {
@@ -83,6 +93,24 @@ export interface SyncEngine {
     input: { dir: string; name: string; keep: "mine" | "theirs" | "dismiss" },
     ctx: EngineCtx,
   ) => Promise<EngineResult>;
+  readonly projectHistory: (
+    input: { dir: string; skip?: number; limit?: number },
+    ctx: EngineCtx,
+  ) => Promise<ProjectSyncHistory>;
+  readonly restoreVersion: (
+    input: {
+      dir: string;
+      name: string;
+      version: string;
+      files?: ReadonlyArray<string> | null;
+    },
+    ctx: EngineCtx,
+  ) => Promise<EngineResult>;
+  readonly projectFiles: (input: { dir: string }, ctx: EngineCtx) => Promise<ProjectSyncFiles>;
+  readonly setLocalOnly: (
+    input: { dir: string; path: string; localOnly: boolean },
+    ctx: EngineCtx,
+  ) => Promise<void>;
   readonly listCloudProjects: (ctx: EngineCtx) => Promise<
     ReadonlyArray<{
       readonly name: string;
@@ -98,6 +126,7 @@ export interface ProjectRef {
   readonly id: string;
   readonly title: string;
   readonly workspaceRoot: string;
+  readonly createdAt?: string;
 }
 
 export interface ProjectSyncDeps {
@@ -108,6 +137,10 @@ export interface ProjectSyncDeps {
   readonly engine: () => Promise<SyncEngine>;
   /** A key to the person's Uno cloud is on this computer. */
   readonly available: () => Promise<boolean>;
+  /** The name on the versions this computer saves, when known. */
+  readonly person?: () => Promise<string | null>;
+  /** A chat is working in the project's folder right now. */
+  readonly turnRunning?: (projectId: string) => Promise<boolean>;
   readonly vault: ProjectVault;
   readonly projects: () => Promise<ReadonlyArray<ProjectRef>>;
   readonly createProject: (input: { title: string; workspaceRoot: string }) => Promise<string>;
@@ -130,6 +163,20 @@ interface Stored {
   conflict: ProjectSyncConflict | null;
   /** Vault version of each key last written into `.env` here. */
   keyVersions: Record<string, number>;
+  /** Files with something that looks like a key inside, waiting here (names only). */
+  held?: ReadonlyArray<string>;
+  /** Turned on by itself (a new folder in ~/projects), not by the person. */
+  auto?: boolean;
+}
+
+/** What this computer remembers across projects. */
+interface Notes {
+  /** When this computer started syncing by default: older projects are asked about once. */
+  since: string | null;
+  /** The one line about the first project was shown. */
+  introSeen: boolean;
+  /** The one question to older projects was answered. */
+  askedOld: boolean;
 }
 
 const STORE_FILE = "project-sync.json";
@@ -138,9 +185,20 @@ const UNAVAILABLE =
 const ELSEWHERE_TTL_MS = 2 * 60_000;
 /** Turn starts and opens don't need a fresh look more often than this. */
 const FRESH_ENOUGH_MS = 60_000;
+const HISTORY_PAGE = 100;
 
 const expandHome = (home: string, dir: string) =>
   dir === "~" ? home : dir.startsWith("~/") ? path.join(home, dir.slice(2)) : dir;
+
+/** The name to sign versions with: the account's, never the generated `uno_1234`. */
+export function personName(account: {
+  readonly username?: string | null;
+  readonly email?: string | null;
+}): string | null {
+  const username = account.username?.trim() ?? "";
+  if (username && !/^uno_\d+$/.test(username)) return username;
+  return account.email?.split("@")[0]?.trim() || null;
+}
 
 /** Remove every active assignment of `name` from a dotenv file. */
 export function removeEnvName(content: string, name: string): string {
@@ -160,43 +218,64 @@ async function writePrivate(file: string, contents: string) {
 export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const storeFile = path.join(deps.stateDir, STORE_FILE);
   let store: Record<string, Stored> = {};
+  const notes: Notes = { since: null, introSeen: false, askedOld: false };
   let loaded = false;
   const watchers = new Map<string, () => void>();
   const quietUntil = new Map<string, number>();
   const pendingResolve = new Map<string, "mine" | "theirs" | "dismiss">();
   const pendingUpload = new Set<string>();
+  const pendingRestore = new Map<
+    string,
+    { version: string; files: ReadonlyArray<string> | null }
+  >();
   const lastRun = new Map<string, EngineResult>();
+  /** Since when a project's syncs have been waiting for chats to finish. */
+  const waitingSince = new Map<string, number>();
+  /** The answer "turn on" to the question about older projects, working through them. */
+  let adopting: Promise<void> = Promise.resolve();
   let elsewhere: { at: number; list: ReadonlyArray<ProjectSyncElsewhere> } | null = null;
   let elsewhereLoading: Promise<void> | null = null;
   let pollTimer: unknown = null;
   let stopped = false;
-  const engineCtx = (): EngineCtx => ({
+  const engineCtx = async (): Promise<EngineCtx> => ({
     home: deps.home,
     env: { ...deps.env, HOME: deps.home },
     hostname: deps.hostname,
+    person: (await deps.person?.().catch(() => null)) ?? null,
   });
 
   const load = async () => {
     if (loaded) return;
     loaded = true;
     try {
-      const raw = JSON.parse(await readFile(storeFile, "utf8")) as { projects?: unknown };
+      const raw = JSON.parse(await readFile(storeFile, "utf8")) as Partial<Notes> & {
+        projects?: unknown;
+      };
       if (raw.projects && typeof raw.projects === "object") {
         store = raw.projects as Record<string, Stored>;
       }
+      notes.since = typeof raw.since === "string" ? raw.since : null;
+      notes.introSeen = raw.introSeen === true;
+      notes.askedOld = raw.askedOld === true;
     } catch {
       store = {};
     }
+    if (notes.since === null) {
+      notes.since = new Date(deps.timers.now()).toISOString();
+      await persist();
+    }
   };
   const persist = () =>
-    writePrivate(storeFile, `${JSON.stringify({ version: 1, projects: store }, null, 2)}\n`).catch(
-      (error) =>
-        deps.log("warn", "project sync: couldn't save its state", { error: String(error) }),
+    writePrivate(
+      storeFile,
+      `${JSON.stringify({ version: 1, ...notes, projects: store }, null, 2)}\n`,
+    ).catch((error) =>
+      deps.log("warn", "project sync: couldn't save its state", { error: String(error) }),
     );
 
   const scheduler = createSyncScheduler({
-    run: (key) =>
-      runSync(key).catch(async (error) => {
+    run: (key, manual) =>
+      runSync(key, manual).catch(async (error) => {
         // Never silent: the row says it, the log has it.
         const reason = error instanceof Error ? error.message : String(error);
         deps.log("warn", "project sync failed", { projectId: key, reason });
@@ -212,6 +291,53 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
 
   const projectOf = async (projectId: string) =>
     (await deps.projects()).find((project) => project.id === projectId) ?? null;
+
+  const folderOf = (project: ProjectRef) =>
+    path.resolve(expandHome(deps.home, project.workspaceRoot));
+
+  /** A folder of its own right in ~/projects: what syncs without being asked. */
+  const inProjectsFolder = (project: ProjectRef) =>
+    path.dirname(folderOf(project)) === path.join(path.resolve(deps.home), "projects");
+
+  /** Projects of this computer nobody decided about yet, by whether they came after `since`. */
+  const undecided = async () => {
+    const since = Date.parse(notes.since ?? "");
+    const open = (await deps.projects()).filter(
+      (project) =>
+        !store[project.id] && !isAssistantProjectId(project.id) && inProjectsFolder(project),
+    );
+    const isNew = (project: ProjectRef) => Date.parse(project.createdAt ?? "") >= since;
+    return { fresh: open.filter(isNew), old: open.filter((project) => !isNew(project)) };
+  };
+
+  const newEntry = (dir: string): Stored => ({
+    name: null,
+    dir,
+    enabled: false,
+    mode: null,
+    state: "off",
+    message: "",
+    lastSyncedAt: null,
+    conflict: null,
+    keyVersions: {},
+  });
+
+  /** A new folder in ~/projects starts syncing by itself, after it settles (a clone may be running). */
+  const adoptNewProjects = async () => {
+    await load();
+    if (stopped) return;
+    const { fresh } = await undecided();
+    if (fresh.length === 0 || !(await deps.available())) return;
+    for (const project of fresh) {
+      const dir = folderOf(project);
+      if (!(await stat(dir).catch(() => null))?.isDirectory()) continue;
+      store[project.id] = { ...newEntry(dir), enabled: true, state: "empty", auto: true };
+      pendingUpload.add(project.id);
+      startWatch(project.id, dir);
+      scheduler.schedule(project.id, "app-start");
+    }
+    await persist();
+  };
 
   const view = (projectId: string): ProjectSyncEntry => {
     const entry = store[projectId];
@@ -236,6 +362,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       message: entry.enabled ? entry.message : "",
       lastSyncedAt: entry.lastSyncedAt,
       conflict: entry.enabled ? entry.conflict : null,
+      held: entry.enabled ? (entry.held ?? []) : [],
     };
   };
 
@@ -256,10 +383,17 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
 
   // ── One sync ──────────────────────────────────────────────────────────
 
-  async function runSync(projectId: string): Promise<void> {
+  async function runSync(projectId: string, manual: boolean): Promise<void> {
     await load();
     const entry = store[projectId];
     if (!entry?.enabled || stopped) return;
+    if (!manual && (await deps.turnRunning?.(projectId))) {
+      // A chat is mid-way: its turn's end, or the next poll, runs this again.
+      const since = waitingSince.get(projectId) ?? deps.timers.now();
+      waitingSince.set(projectId, since);
+      if (deps.timers.now() - since < MAX_WAIT_FOR_TURNS_MS) return;
+    }
+    waitingSince.delete(projectId);
     const project = await projectOf(projectId);
     if (!project) {
       // The project was removed from Uno Work: stop syncing it (the cloud copy stays).
@@ -275,12 +409,21 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       startWatch(projectId, dir);
     }
     const engine = await deps.engine();
-    const ctx = engineCtx();
+    const ctx = await engineCtx();
     let result: EngineResult;
     const keep = pendingResolve.get(projectId);
     pendingResolve.delete(projectId);
+    const restore = pendingRestore.get(projectId);
+    pendingRestore.delete(projectId);
     if (keep && entry.name) {
       result = await engine.resolveConflict({ dir, name: entry.name, keep }, ctx);
+    } else if (restore && entry.name) {
+      result = await engine.restoreVersion({ dir, name: entry.name, ...restore }, ctx);
+      // The person's click is answered directly: it says nothing about the project's sync.
+      if (!result.ok) {
+        lastRun.set(projectId, result);
+        return;
+      }
     } else if (entry.name) {
       // Ours already: it may (re)join the cloud's history (a moved folder).
       result = await engine.syncProject({ dir, name: entry.name, adopt: true }, ctx);
@@ -303,9 +446,11 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
           files: [...result.conflict.files],
           kept: { ...result.conflict.kept },
           from: result.conflict.theirsFrom,
+          person: result.conflict.theirsPerson ?? null,
           at: result.conflict.at,
         }
       : null;
+    if (result.state !== "busy") entry.held = [...(result.held ?? [])];
     if (result.ok) entry.lastSyncedAt = new Date(deps.timers.now()).toISOString();
     if (result.ok && entry.name) {
       await syncKeys(projectId, entry, pendingUpload.delete(projectId)).catch((error) =>
@@ -396,12 +541,53 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     if (!(await deps.available())) throw new ProjectSyncFailure(UNAVAILABLE);
   };
 
+  const disable = async (projectId: string): Promise<ProjectSyncEntry> => {
+    await load();
+    const project = await projectOf(projectId);
+    if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+    const entry: Stored = store[projectId] ?? newEntry(folderOf(project));
+    store[projectId] = entry;
+    entry.enabled = false;
+    entry.state = "off";
+    scheduler.cancel(projectId);
+    stopWatch(projectId);
+    await persist();
+    return view(projectId);
+  };
+
+  const enable = async (projectId: string): Promise<ProjectSyncEntry> => {
+    await load();
+    const project = await projectOf(projectId);
+    if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+    const dir = folderOf(project);
+    const entry: Stored = store[projectId] ?? newEntry(dir);
+    store[projectId] = entry;
+    await ensureAvailable();
+    if (dir === path.resolve(deps.home)) {
+      throw new ProjectSyncFailure(
+        "The home folder itself can't be on all computers. Put the project in its own folder.",
+      );
+    }
+    const info = await stat(dir).catch(() => null);
+    if (!info?.isDirectory())
+      throw new ProjectSyncFailure(`${dir} isn't a folder on this computer.`);
+    entry.enabled = true;
+    entry.dir = dir;
+    entry.state = "syncing";
+    pendingUpload.add(projectId);
+    await persist();
+    startWatch(projectId, dir);
+    await scheduler.runNow(projectId);
+    elsewhere = null;
+    return view(projectId);
+  };
+
   const refreshElsewhere = () => {
     if (elsewhereLoading) return elsewhereLoading;
     elsewhereLoading = (async () => {
       try {
         const engine = await deps.engine();
-        const list = await engine.listCloudProjects(engineCtx());
+        const list = await engine.listCloudProjects(await engineCtx());
         elsewhere = {
           at: deps.timers.now(),
           list: list.map((project) => ({
@@ -428,6 +614,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       for (const [projectId, entry] of Object.entries(store)) {
         if (entry.enabled) scheduler.schedule(projectId, "poll");
       }
+      void adoptNewProjects().catch((error) =>
+        deps.log("warn", "project sync: couldn't look for new projects", { error: String(error) }),
+      );
       schedulePolls();
     }, POLL_EVERY_MS);
   };
@@ -446,8 +635,13 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         startWatch(projectId, entry.dir);
         scheduler.schedule(projectId, "app-start");
       }
+      await adoptNewProjects().catch((error) =>
+        deps.log("warn", "project sync: couldn't look for new projects", { error: String(error) }),
+      );
       schedulePolls();
     },
+
+    adoptNewProjects,
 
     stop: () => {
       stopped = true;
@@ -474,6 +668,14 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
           .map((entry) => entry.name)
           .filter((name): name is string => !!name),
       );
+      const introProject = notes.introSeen
+        ? null
+        : Object.entries(store).find(([, entry]) => entry.auto && entry.lastSyncedAt)?.[0];
+      const titles = (list: ReadonlyArray<ProjectRef>): ReadonlyArray<ProjectSyncProjectRef> =>
+        list.map((project) => ({
+          projectId: project.id as ProjectSyncProjectRef["projectId"],
+          title: project.title,
+        }));
       return {
         available,
         unavailableReason: available ? null : UNAVAILABLE,
@@ -481,58 +683,52 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         elsewhere: available
           ? (elsewhere?.list ?? []).filter((project) => !here.has(project.name))
           : [],
+        intro: introProject
+          ? (titles((await deps.projects()).filter((item) => item.id === introProject))[0] ?? null)
+          : null,
+        askAbout: available && !notes.askedOld ? titles((await undecided()).old) : [],
       };
     },
+
+    /** The first project's one line was shown: never again on this computer. */
+    introSeen: async () => {
+      await load();
+      notes.introSeen = true;
+      await persist();
+    },
+
+    /**
+     * The one question to older projects. Whatever the answer, it isn't asked
+     * again; "yes" turns them on one after another, in the background.
+     */
+    answerOld: async (turnOn: boolean) => {
+      await load();
+      const { old } = await undecided();
+      notes.askedOld = true;
+      await persist();
+      if (!turnOn) return;
+      adopting = (async () => {
+        for (const project of old) {
+          await enable(project.id).catch((error) =>
+            deps.log("warn", "project sync: an older project didn't turn on", {
+              project: project.title,
+              reason: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      })();
+    },
+
+    /** Tests: the older projects are all on. */
+    adoptionDone: () => adopting,
 
     entry: async (projectId: string) => {
       await load();
       return view(projectId);
     },
 
-    setEnabled: async (projectId: string, enabled: boolean): Promise<ProjectSyncEntry> => {
-      await load();
-      const project = await projectOf(projectId);
-      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
-      const dir = path.resolve(expandHome(deps.home, project.workspaceRoot));
-      const entry: Stored = store[projectId] ?? {
-        name: null,
-        dir,
-        enabled: false,
-        mode: null,
-        state: "off",
-        message: "",
-        lastSyncedAt: null,
-        conflict: null,
-        keyVersions: {},
-      };
-      store[projectId] = entry;
-      if (!enabled) {
-        entry.enabled = false;
-        entry.state = "off";
-        scheduler.cancel(projectId);
-        stopWatch(projectId);
-        await persist();
-        return view(projectId);
-      }
-      await ensureAvailable();
-      if (dir === path.resolve(deps.home)) {
-        throw new ProjectSyncFailure(
-          "The home folder itself can't be on all computers. Put the project in its own folder.",
-        );
-      }
-      const info = await stat(dir).catch(() => null);
-      if (!info?.isDirectory())
-        throw new ProjectSyncFailure(`${dir} isn't a folder on this computer.`);
-      entry.enabled = true;
-      entry.dir = dir;
-      entry.state = "syncing";
-      pendingUpload.add(projectId);
-      await persist();
-      startWatch(projectId, dir);
-      await scheduler.runNow(projectId);
-      elsewhere = null;
-      return view(projectId);
-    },
+    setEnabled: (projectId: string, enabled: boolean): Promise<ProjectSyncEntry> =>
+      enabled ? enable(projectId) : disable(projectId),
 
     syncNow: async (projectId: string) => {
       await load();
@@ -574,7 +770,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         dir = path.join(root, `${name}-${n}`);
       }
       const engine = await deps.engine();
-      const result = await engine.getProject({ name, dir }, engineCtx());
+      const result = await engine.getProject({ name, dir }, await engineCtx());
       if (!result.ok) throw new ProjectSyncFailure(result.message);
       const projectId = await deps.createProject({ title: name, workspaceRoot: dir });
       const entry: Stored = {
@@ -611,6 +807,64 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       if (!entry?.enabled) return;
       if (trigger !== "turn-end" && fresh(projectId)) return;
       scheduler.schedule(projectId, trigger);
+    },
+
+    // ── Versions ────────────────────────────────────────────────────────
+
+    history: async (projectId: string, skip?: number): Promise<ProjectSyncHistory> => {
+      await load();
+      const project = await projectOf(projectId);
+      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+      const engine = await deps.engine();
+      return engine.projectHistory(
+        { dir: folderOf(project), limit: HISTORY_PAGE, ...(skip ? { skip } : {}) },
+        await engineCtx(),
+      );
+    },
+
+    /** Bring a version back: the whole project, or `files` of it. Only by the person's click. */
+    restore: async (projectId: string, version: string, files?: ReadonlyArray<string>) => {
+      await load();
+      if (!store[projectId]?.enabled)
+        throw new ProjectSyncFailure("This project isn't on all your computers.");
+      if (await deps.turnRunning?.(projectId)) {
+        throw new ProjectSyncFailure(
+          "A chat is working in this project. Try again when it's done.",
+        );
+      }
+      pendingRestore.set(projectId, { version, files: files ?? null });
+      await scheduler.runNow(projectId);
+      const result = lastRun.get(projectId);
+      if (result && !result.ok) throw new ProjectSyncFailure(result.message);
+      return view(projectId);
+    },
+
+    // ── What travels ────────────────────────────────────────────────────
+
+    files: async (projectId: string): Promise<ProjectSyncFiles> => {
+      await load();
+      const project = await projectOf(projectId);
+      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+      const engine = await deps.engine();
+      return engine.projectFiles({ dir: folderOf(project) }, await engineCtx());
+    },
+
+    setLocalOnly: async (
+      projectId: string,
+      relative: string,
+      localOnly: boolean,
+    ): Promise<ProjectSyncFiles> => {
+      await load();
+      const project = await projectOf(projectId);
+      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+      if (!store[projectId]?.enabled)
+        throw new ProjectSyncFailure("This project isn't on all your computers.");
+      const engine = await deps.engine();
+      const dir = folderOf(project);
+      const ctx = await engineCtx();
+      await engine.setLocalOnly({ dir, path: relative, localOnly }, ctx);
+      await scheduler.runNow(projectId);
+      return engine.projectFiles({ dir }, ctx);
     },
 
     // ── Keys ────────────────────────────────────────────────────────────

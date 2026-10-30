@@ -2,12 +2,18 @@ import type {
   ProjectSecretRemoveInput,
   ProjectSecretSetInput,
   ProjectSecretsList,
+  ProjectSyncAnswerInput,
   ProjectSyncEntry,
+  ProjectSyncFiles,
   ProjectSyncGetHereInput,
   ProjectSyncGetHereResult,
+  ProjectSyncHistory,
+  ProjectSyncHistoryInput,
   ProjectSyncProjectInput,
   ProjectSyncResolveInput,
+  ProjectSyncRestoreInput,
   ProjectSyncSetEnabledInput,
+  ProjectSyncSetLocalOnlyInput,
   ProjectSyncSnapshot,
 } from "./projectSync.ts";
 import type {
@@ -976,6 +982,12 @@ export interface EnvironmentApi {
     resolve: (input: ProjectSyncResolveInput) => Promise<ProjectSyncEntry>;
     getHere: (input: ProjectSyncGetHereInput) => Promise<ProjectSyncGetHereResult>;
     opened: (input: ProjectSyncProjectInput) => Promise<void>;
+    history: (input: ProjectSyncHistoryInput) => Promise<ProjectSyncHistory>;
+    restore: (input: ProjectSyncRestoreInput) => Promise<ProjectSyncEntry>;
+    files: (input: ProjectSyncProjectInput) => Promise<ProjectSyncFiles>;
+    setLocalOnly: (input: ProjectSyncSetLocalOnlyInput) => Promise<ProjectSyncFiles>;
+    introSeen: () => Promise<void>;
+    answerOld: (input: ProjectSyncAnswerInput) => Promise<void>;
     secretsList: (input: ProjectSyncProjectInput) => Promise<ProjectSecretsList>;
     secretsSet: (input: ProjectSecretSetInput) => Promise<ProjectSecretsList>;
     secretsRemove: (input: ProjectSecretRemoveInput) => Promise<ProjectSecretsList>;

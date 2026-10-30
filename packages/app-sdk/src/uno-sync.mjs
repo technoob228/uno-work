@@ -25,9 +25,17 @@
 // file someone edited meanwhile: the sync then simply runs again later.
 //
 // Never synced: .env* and key files (keys travel through the Uno vault, not
-// in files), node_modules, build outputs, anything .gitignore lists; a size
-// cap with a clear message.
+// in files), node_modules, anything .gitignore lists, what the person keeps
+// "only on this computer"; a size cap with a clear message. build/, dist/ and
+// out/ stay out only next to a project file (package.json…): anywhere else
+// they are the person's own folders and travel like any other.
+//
+// What leaves is read first. A file with something that looks like a key
+// inside waits on this computer and the rest goes; a repository's commits
+// can't leave without the file, so there they wait as a whole (the pull still
+// happens). The person sees the file's name, never the value.
 
+import { spawn } from "node:child_process";
 import { closeSync, openSync, writeSync } from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -55,10 +63,40 @@ export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 export const LOCK_STALE_MS = 10 * 60_000;
 /** Conflicts looked at one by one up to this many (more: by the tips' time). */
 const MAX_CONFLICT_LOOKUPS = 500;
+/** Versions of a project shown at most at once, and files listed per version. */
+const MAX_HISTORY_PAGE = 200;
+const MAX_VERSION_FILES = 30;
+/** Entries listed under "Only on this computer". */
+const MAX_LOCAL_ENTRIES = 200;
+
+/**
+ * Keys by their look. The same list as SECRET_TOKEN_PATTERN in the daemon's
+ * apps/server/src/secretRedaction.ts (a test keeps them equal): this file
+ * runs on its own, with no imports from the daemon.
+ */
+export const SECRET_PATTERN = new RegExp(
+  [
+    // Uno: gateway key, user/agent/box tokens, GPU, refresh.
+    String.raw`\b(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa)_|unor_)[A-Za-z0-9_\-]{12,}`,
+    // Anthropic / OpenRouter / OpenAI project keys.
+    String.raw`\b(sk-ant-|sk-or-v1-|sk-proj-)[A-Za-z0-9_\-]{16,}`,
+    // GitHub.
+    String.raw`\b(ghp_|gho_|ghs_|ghu_|github_pat_)[A-Za-z0-9_]{20,}`,
+  ].join("|"),
+);
+/** Enough of one read kept for the next, so a key across two reads is seen whole. */
+const SCAN_OVERLAP = 96;
+
+/** Skipped only next to a project file: elsewhere a person's own folder of that name. */
+export const BUILD_FOLDERS = ["build", "dist", "out"];
+/** A file that says "software is built here" for the folder it lies in. */
+const PROJECT_FILE_RE =
+  /^(package\.json|pyproject\.toml|setup\.py|requirements\.txt|Pipfile|Cargo\.toml|go\.mod|Gemfile|composer\.json|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|Makefile|CMakeLists\.txt|.*\.(sln|csproj))$/;
 
 /**
  * What never travels with a project (git ignore syntax). Keys go through the
- * Uno vault; packages and builds are made again on each computer.
+ * Uno vault; packages and builds are made again on each computer. BUILD_FOLDERS
+ * join this list per folder (`excludesFor`).
  */
 export const DEFAULT_EXCLUDES = [
   "# Kept by Uno: never synced to your other computers.",
@@ -93,9 +131,6 @@ export const DEFAULT_EXCLUDES = [
   ".mypy_cache/",
   ".pytest_cache/",
   ".tox/",
-  "dist/",
-  "build/",
-  "out/",
   ".next/",
   ".nuxt/",
   ".svelte-kit/",
@@ -125,11 +160,12 @@ export function isKeyFile(/** @type {string} */ relative) {
 
 /**
  * @typedef {{ files: string[], kept: Record<string, "mine" | "theirs">, mine: string,
- *   theirs: string, theirsFrom: string | null, at: string }} ConflictRecord
+ *   theirs: string, theirsFrom: string | null, theirsPerson?: string | null, at: string }} ConflictRecord
+ *   theirsPerson: someone else's name, when another person changed the file.
  * @typedef {"synced" | "conflict" | "too-big" | "blocked" | "busy" | "error" | "empty"} SyncState
  * @typedef {{ ok: boolean, name: string, dir: string, mode: "snapshot" | "git", state: SyncState,
  *   pushed: boolean, pulled: boolean, changedFiles: number, head: string | null,
- *   conflict: ConflictRecord | null, message: string }} SyncResult
+ *   conflict: ConflictRecord | null, held: string[], message: string }} SyncResult
  * @typedef {{ mode: "snapshot" | "git", remotes?: Record<string, string>, folderName?: string,
  *   createdBy?: string, createdAt?: string }} ProjectMeta
  */
@@ -224,8 +260,9 @@ export async function ensureHelperLauncher(/** @type {string} */ home) {
 }
 
 /**
- * @typedef {{ home: string, env: NodeJS.ProcessEnv, hostname?: string,
+ * @typedef {{ home: string, env: NodeJS.ProcessEnv, hostname?: string, person?: string | null,
  *   now?: () => number, storage?: import("./git-remote-uno.mjs").Storage }} Ctx
+ *   person: the name on the versions this computer saves.
  */
 
 /** The environment our git runs with. */
@@ -246,6 +283,35 @@ async function gitEnv(/** @type {Ctx} */ ctx, /** @type {Record<string, string>}
     delete env.GIT_WORK_TREE;
   }
   return env;
+}
+
+/**
+ * Who saved a version: the person and the computer, in the author line
+ * ("Misha (macbook)"), which `projectHistory` reads back. Without a known
+ * person: "Uno (macbook)".
+ */
+export function versionAuthor(/** @type {Ctx} */ ctx) {
+  return `${personOf(ctx) ?? "Uno"} (${cleanName(ctx.hostname ?? os.hostname()) || "computer"})`;
+}
+
+const cleanName = (/** @type {string} */ text) =>
+  text
+    .replace(/[<>()\n\r\0]/g, "")
+    .trim()
+    .slice(0, 80);
+
+/** This person's name as versions carry it. */
+const personOf = (/** @type {Ctx} */ ctx) => cleanName(ctx.person ?? "") || null;
+
+/** The environment that signs versions as `versionAuthor`. */
+function authorEnv(/** @type {Ctx} */ ctx) {
+  const name = versionAuthor(ctx);
+  return {
+    GIT_AUTHOR_NAME: name,
+    GIT_AUTHOR_EMAIL: "sync@uno4.me",
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: "sync@uno4.me",
+  };
 }
 
 /**
@@ -335,6 +401,23 @@ export async function ownGit(/** @type {string} */ dir, /** @type {NodeJS.Proces
   return { top: top.stdout.trim(), gitDir: gitDir.stdout.trim() };
 }
 
+/**
+ * The folder's own git when that is how it syncs. A folder Uno already keeps
+ * versions of stays that way when a `.git` appears in it (`git init` by an
+ * agent, or for a tool that needs one): saving must not stop.
+ */
+async function ownGitToSync(/** @type {string} */ dir, /** @type {NodeJS.ProcessEnv} */ env) {
+  const snapshot = await fsp.stat(snapshotGitDir(dir)).catch(() => null);
+  return snapshot?.isDirectory() ? null : ownGit(dir, env);
+}
+
+/**
+ * Uno's versions don't belong in a `.git` the folder gets later: a first
+ * `git add -A` would carry them, and a push would take them to GitHub.
+ */
+const keepOutOfOwnGit = (/** @type {string} */ gitDir) =>
+  fsp.writeFile(path.join(gitDir, ".gitignore"), "*\n", { flag: "wx" }).catch(() => {});
+
 /** The name a folder syncs as when the person doesn't pick one. */
 export function defaultName(/** @type {string} */ dir) {
   return slugName(path.basename(dir)) ?? "project";
@@ -385,6 +468,256 @@ async function checkSize(at, workTree) {
     );
   }
   return total;
+}
+
+// ── What the folder leaves out ──────────────────────────────────────────
+
+const localOnlyFile = (/** @type {string} */ gitDir) => path.join(gitDir, "uno-local-only.json");
+
+/** What the person keeps only on this computer: paths relative to the folder. */
+async function readLocalOnly(/** @type {string} */ gitDir) {
+  try {
+    const raw = JSON.parse(await fsp.readFile(localOnlyFile(gitDir), "utf8"));
+    return Array.isArray(raw?.paths)
+      ? raw.paths.filter((/** @type {unknown} */ item) => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** One exact path as an ignore pattern, anchored at the folder. */
+const exactPattern = (/** @type {string} */ relative) =>
+  `/${relative.replace(/[\\*?[\]]/g, "\\$&")}`;
+
+/**
+ * BUILD_FOLDERS that lie next to a project file, as ignore patterns: the
+ * outermost one on each path. A folder with no project file beside it is the
+ * person's own and syncs.
+ * @param {string[]} files every file the folder would sync, "/"-separated
+ */
+export function builtFolders(files) {
+  /** @type {Set<string>} */
+  const projects = new Set();
+  for (const file of files) {
+    const slash = file.lastIndexOf("/");
+    if (PROJECT_FILE_RE.test(file.slice(slash + 1))) projects.add(file.slice(0, slash + 1));
+  }
+  /** @type {Set<string>} */
+  const built = new Set();
+  for (const file of files) {
+    const parts = file.split("/").slice(0, -1);
+    for (const [index, part] of parts.entries()) {
+      if (!BUILD_FOLDERS.includes(part)) continue;
+      const parent = parts
+        .slice(0, index)
+        .map((item) => `${item}/`)
+        .join("");
+      if (!projects.has(parent)) continue;
+      built.add(`${parent}${part}/`);
+      break;
+    }
+  }
+  return [...built].toSorted();
+}
+
+/**
+ * `<gitDir>/info/exclude` as this folder needs it now: the fixed list, what
+ * the person keeps here, and the build folders of what is in it today.
+ * Rewritten on each sync, so a folder saved under an older list follows too.
+ * @param {string} gitDir @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ */
+async function refreshExcludes(gitDir, at) {
+  const file = path.join(gitDir, "info", "exclude");
+  const fixed = [
+    ...DEFAULT_EXCLUDES,
+    ...(await readLocalOnly(gitDir)).map((relative) => exactPattern(relative)),
+  ];
+  const write = async (/** @type {string[]} */ lines) => {
+    const next = `${lines.join("\n")}\n`;
+    if ((await fsp.readFile(file, "utf8").catch(() => null)) === next) return;
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fsp.writeFile(tmp, next);
+    await fsp.rename(tmp, file);
+  };
+  await write(fixed);
+  const listed = await gitOk(
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    at,
+    "Couldn't list the project's files",
+  );
+  const built = builtFolders(listed.split("\0").filter(Boolean));
+  if (built.length > 0) {
+    await write([...fixed, "# Made again on each computer:", ...built.map(exactPattern)]);
+  }
+}
+
+// ── What leaves is read first ───────────────────────────────────────────
+
+/**
+ * Which of `oids` look like they hold a key. Streams `git cat-file --batch`
+ * (a blob can be as big as a file can sync: no blob is ever held in memory,
+ * and the daemon's loop gets a turn between reads). Text or not doesn't
+ * matter: keys are ASCII, so a binary is read the same way. Any failure
+ * throws: nothing leaves unread.
+ * @param {string[]} oids
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @returns {Promise<Set<string>>}
+ */
+async function objectsWithKeys(oids, at) {
+  /** @type {Set<string>} */
+  const found = new Set();
+  if (oids.length === 0) return found;
+  const failed = () => new SyncError("Couldn't check the project's files before syncing.");
+  const child = spawn("git", ["cat-file", "--batch"], {
+    cwd: at.cwd,
+    env: at.env,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  const closed = new Promise((resolve) => {
+    child.on("error", () => resolve(1));
+    child.on("close", (code) => resolve(code ?? 1));
+  });
+  child.stdin.on("error", () => {});
+  child.stdin.end(`${oids.join("\n")}\n`);
+  let header = Buffer.alloc(0);
+  /** @type {string | null} */
+  let blob = null;
+  let left = 0;
+  let newline = 0;
+  let carry = "";
+  for await (const chunk of child.stdout) {
+    let offset = 0;
+    while (offset < chunk.length) {
+      if (left > 0) {
+        const take = Math.min(left, chunk.length - offset);
+        const text = chunk.toString("latin1", offset, offset + take);
+        if (blob !== null && !found.has(blob) && SECRET_PATTERN.test(carry + text)) {
+          found.add(blob);
+        }
+        carry = (carry + text).slice(-SCAN_OVERLAP);
+        left -= take;
+        offset += take;
+        if (left === 0) newline = 1;
+        continue;
+      }
+      if (newline > 0) {
+        offset += 1;
+        newline = 0;
+        continue;
+      }
+      const end = chunk.indexOf(10, offset);
+      if (end < 0) {
+        header = Buffer.concat([header, chunk.subarray(offset)]);
+        break;
+      }
+      const line = Buffer.concat([header, chunk.subarray(offset, end)]).toString("latin1");
+      header = Buffer.alloc(0);
+      offset = end + 1;
+      const [id, kind, size] = line.split(" ");
+      if (!id || !kind || kind === "missing") throw failed();
+      blob = kind === "blob" ? id : null;
+      left = Number(size);
+      carry = "";
+      if (left === 0) newline = 1;
+    }
+  }
+  if ((await closed) !== 0 || left > 0) throw failed();
+  return found;
+}
+
+/**
+ * Read what `git add -A` just staged; a file with a key goes back out of the
+ * index, so it stays out of this version and the rest goes. Reads the staged
+ * objects, not the files: what's read is exactly what would leave.
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @returns {Promise<string[]>} the files held back
+ */
+async function holdFilesWithKeys(at) {
+  const raw = await gitOk(
+    ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames", "--diff-filter=d"],
+    at,
+    "Couldn't check the project's files before syncing",
+  );
+  const fields = raw.split("\0");
+  /** @type {Map<string, string[]>} */
+  const byObject = new Map();
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const [, mode, , oid] = /** @type {string} */ (fields[index]).split(" ");
+    const file = /** @type {string} */ (fields[index + 1]);
+    if (!oid || mode === "160000") continue;
+    byObject.set(oid, [...(byObject.get(oid) ?? []), file]);
+  }
+  const flagged = await objectsWithKeys([...byObject.keys()], at);
+  const held = [...flagged].flatMap((oid) => byObject.get(oid) ?? []).toSorted();
+  if (held.length > 0) {
+    await gitOk(
+      ["--literal-pathspecs", "reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"],
+      { ...at, input: `${held.join("\0")}\0` },
+      "Couldn't check the project's files before syncing",
+    );
+  }
+  return held;
+}
+
+const scanFile = (/** @type {string} */ gitDir) => path.join(gitDir, "uno-held.json");
+
+/**
+ * A repository: what would leave with `tip` — every object of the commits
+ * that aren't on any remote yet, history included (a key taken out in a later
+ * commit still leaves with the earlier one). Commits already on a remote
+ * aren't read: a clone doesn't start by answering for its whole past.
+ * @param {string} tip @param {string} gitDir
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @returns {Promise<string[]>} the files with a key (by name, or by what's inside)
+ */
+async function keysLeavingWith(tip, gitDir, at) {
+  // A held project is looked at on every sync: its answer stays until the tip moves.
+  const seen = await fsp
+    .readFile(scanFile(gitDir), "utf8")
+    .then((text) => JSON.parse(text))
+    .catch(() => null);
+  if (seen?.tip === tip && Array.isArray(seen.held)) return seen.held;
+  const listed = await gitOk(
+    ["-c", "core.quotePath=false", "rev-list", "--objects", tip, "--not", "--remotes"],
+    at,
+    "Couldn't check the project before syncing",
+  );
+  /** @type {Set<string>} */
+  const held = new Set();
+  /** @type {Map<string, string>} */
+  const byObject = new Map();
+  for (const line of listed.split("\n")) {
+    const space = line.indexOf(" ");
+    if (space <= 0) continue;
+    const file = line.slice(space + 1);
+    if (!file) continue;
+    if (isKeyFile(file)) held.add(file);
+    const oid = line.slice(0, space);
+    if (!byObject.has(oid)) byObject.set(oid, file);
+  }
+  for (const oid of await objectsWithKeys([...byObject.keys()], at)) {
+    held.add(/** @type {string} */ (byObject.get(oid)));
+  }
+  const result = [...held].toSorted();
+  await fsp.writeFile(scanFile(gitDir), JSON.stringify({ tip, held: result })).catch(() => {});
+  return result;
+}
+
+const fileList = (/** @type {string[]} */ files) =>
+  `${files.slice(0, 3).join(", ")}${files.length > 3 ? ", …" : ""}`;
+
+/** Calm, and never the value. */
+export function heldMessage(/** @type {string[]} */ files) {
+  return files.length === 1
+    ? `${files[0]} is waiting on this computer: it looks like there's a key in it. Move the key to this project's Keys and the file syncs.`
+    : `${files.length} files are waiting on this computer (${fileList(files)}): it looks like there are keys in them. Move the keys to this project's Keys and the files sync.`;
+}
+
+/** A repository can't send a file on its own: everything new waits with it. */
+function heldInHistoryMessage(/** @type {string[]} */ files) {
+  return `New versions of this project are waiting on this computer: it looks like there's a key in ${fileList(files)}. Ask the agent to take it out of the project's history; the key itself goes to this project's Keys.`;
 }
 
 // ── The merge: newer version of a file wins, both stay in history ───────
@@ -557,7 +890,7 @@ async function writeConflict(gitDir, record) {
 export async function syncProject(input, ctx) {
   const dir = path.resolve(input.dir);
   const env = await gitEnv(ctx);
-  const own = await ownGit(dir, env);
+  const own = await ownGitToSync(dir, env);
   const mode = own ? "git" : "snapshot";
   /** @type {SyncResult} */
   const result = {
@@ -571,6 +904,7 @@ export async function syncProject(input, ctx) {
     changedFiles: 0,
     head: null,
     conflict: null,
+    held: [],
     message: "",
   };
   try {
@@ -596,7 +930,7 @@ async function remoteName(/** @type {string} */ top, /** @type {NodeJS.ProcessEn
   if (url.code !== 0) return null;
   const value = url.stdout.trim();
   if (!value.startsWith("uno::")) {
-    throw new SyncError(`The git remote "uno" here points to ${value}, not to your Uno cloud.`);
+    throw new SyncError(`This project is linked to ${value}, not to your Uno cloud.`);
   }
   return value.slice("uno::".length);
 }
@@ -616,7 +950,11 @@ async function syncSnapshot(input, ctx, result) {
   const host = ctx.hostname ?? os.hostname();
   const fresh = !(await fsp.stat(gitDir).catch(() => null));
   if (fresh) await initSnapshot(gitDir, input.name, ctx);
-  const env = await gitEnv(ctx, { GIT_DIR: gitDir, GIT_WORK_TREE: input.dir });
+  const env = await gitEnv(ctx, {
+    GIT_DIR: gitDir,
+    GIT_WORK_TREE: input.dir,
+    ...authorEnv(ctx),
+  });
   if (!fresh) await pointAt(gitDir, input.name, { env, cwd: input.dir });
   const at = { env, cwd: input.dir };
   const release = await lock(gitDir);
@@ -626,8 +964,12 @@ async function syncSnapshot(input, ctx, result) {
     return;
   }
   try {
+    await keepOutOfOwnGit(gitDir);
+    await refreshExcludes(gitDir, at);
     await checkSize(at, input.dir);
     await gitOk(["add", "-A"], at, "Couldn't save the project's changes");
+    const held = await holdFilesWithKeys(at);
+    result.held = held;
     const before = await revOf("HEAD", at);
     if ((await git(["diff", "--cached", "--quiet"], at)).code !== 0) {
       result.changedFiles = (await gitOk(["diff", "--cached", "--name-only", "-z"], at, "git diff"))
@@ -643,7 +985,7 @@ async function syncSnapshot(input, ctx, result) {
     const meta = await readMeta(storage, input.name);
     if (meta?.mode === "git") {
       throw new SyncError(
-        `"${input.name}" in your Uno cloud is a git project; this folder has no git. Turn sync off and on again to save it under another name.`,
+        `"${input.name}" in your Uno cloud is a different kind of project. Turn sync off and on again to save this folder under another name.`,
         "blocked",
       );
     }
@@ -653,7 +995,8 @@ async function syncSnapshot(input, ctx, result) {
       if (Object.keys(remote.refs).length === 0) {
         result.ok = true;
         result.state = "empty";
-        result.message = "Nothing to sync yet: the folder is empty.";
+        result.message =
+          held.length > 0 ? heldMessage(held) : "Nothing to sync yet: the folder is empty.";
         return;
       }
     }
@@ -671,7 +1014,12 @@ async function syncSnapshot(input, ctx, result) {
         return stats ? Math.floor(stats.mtimeMs / 1000) : commitTimeOf("HEAD", file, at);
       },
       mergeMessage: (from) => `Synced with ${from ?? "your other computer"}`,
+      person: personOf(ctx),
       refuseUnrelated: input.adopt !== true,
+      dirtyHint:
+        held.length > 0
+          ? "Your other computer changed a file that's waiting here because of a key. Move the key to this project's Keys and it syncs."
+          : undefined,
     });
   } finally {
     await release();
@@ -752,7 +1100,10 @@ async function syncGit(input, gitDir, ctx, result) {
   try {
     const branch = (await git(["symbolic-ref", "--quiet", "--short", "HEAD"], at)).stdout.trim();
     if (!branch)
-      throw new SyncError("Switch this project to a branch first (git switch main).", "blocked");
+      throw new SyncError(
+        "This project is on an old version. Ask the agent to go back to the latest one and it syncs.",
+        "blocked",
+      );
     const head = await revOf("HEAD", at);
     const tracked = head
       ? (await gitOk(["ls-tree", "-r", "-z", "--name-only", "HEAD"], at, "git ls-tree"))
@@ -762,7 +1113,7 @@ async function syncGit(input, gitDir, ctx, result) {
     const keys = tracked.filter(isKeyFile);
     if (keys.length > 0) {
       throw new SyncError(
-        `This project's git keeps ${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", …" : ""}. Keys never travel in files: take them out of git (git rm --cached <file>, then commit) and Uno will sync the project; the keys go with it through Uno.`,
+        `This project's versions keep ${fileList(keys)}. Keys never travel in files: ask the agent to take them out of the project's versions and Uno will sync it; the keys go with it through Uno.`,
         "blocked",
       );
     }
@@ -772,18 +1123,13 @@ async function syncGit(input, gitDir, ctx, result) {
       throw new SyncError(`This project already syncs as "${already}".`, "blocked");
     }
     if (!(await git(["config", "user.email"], at)).stdout.trim()) {
-      Object.assign(env, {
-        GIT_AUTHOR_NAME: "Uno",
-        GIT_AUTHOR_EMAIL: "sync@uno4.me",
-        GIT_COMMITTER_NAME: "Uno",
-        GIT_COMMITTER_EMAIL: "sync@uno4.me",
-      });
+      Object.assign(env, authorEnv(ctx));
     }
     const storage = storageOf(ctx);
     const meta = await readMeta(storage, input.name);
     if (meta?.mode === "snapshot") {
       throw new SyncError(
-        `"${input.name}" in your Uno cloud is a folder without git; this one has git. Turn sync off and on again to save it under another name.`,
+        `"${input.name}" in your Uno cloud is a different kind of project. Turn sync off and on again to save this folder under another name.`,
         "blocked",
       );
     }
@@ -793,7 +1139,7 @@ async function syncGit(input, gitDir, ctx, result) {
         result.ok = true;
         result.state = "empty";
         result.message =
-          'Nothing to sync yet: commit first (git add -A && git commit -m "First version").';
+          "Nothing to sync yet: no version is saved. Ask the agent to save the first one.";
         return;
       }
     }
@@ -820,14 +1166,16 @@ async function syncGit(input, gitDir, ctx, result) {
       },
       localTime: (file) => commitTimeOf("HEAD", file, at),
       mergeMessage: (from) => `Merge changes from ${from ?? "your other computer"} (Uno sync)`,
+      person: personOf(ctx),
       refuseUnrelated: !hasRemote && input.adopt !== true,
+      keysLeaving: (tip) => keysLeavingWith(tip, gitDir, at),
       dirtyHint: dirty
-        ? "Changes from your other computer touch files you haven't committed here. Commit (or put aside) your changes and it syncs."
+        ? "Your other computer changed files you're still working on here. Ask the agent to save your changes as a version and it syncs."
         : undefined,
     });
     if (dirty && result.state === "synced") {
       result.message =
-        `${result.message} Changes that aren't committed stay on this computer until they are.`.trim();
+        `${result.message} Changes not saved as a version stay on this computer until they are.`.trim();
     }
   } finally {
     await release();
@@ -855,7 +1203,9 @@ async function remotesToShare(/** @type {any} */ at) {
  *   result: SyncResult, storage: import("./git-remote-uno.mjs").Storage,
  *   meta: ProjectMeta | null, writeMetaAs: ProjectMeta,
  *   localTime: (file: string) => Promise<number>, mergeMessage: (from: string | null) => string,
- *   refuseUnrelated?: boolean, dirtyHint?: string }} x
+ *   person: string | null, refuseUnrelated?: boolean, dirtyHint?: string,
+ *   keysLeaving?: (tip: string) => Promise<string[]> }} x
+ *   keysLeaving: what would leave is read first; with a finding nothing is pushed.
  */
 async function exchange(x) {
   const { at, branch, result } = x;
@@ -931,13 +1281,16 @@ async function exchange(x) {
             mine: local,
             theirs: remote,
             theirsFrom: from,
+            theirsPerson: await otherPerson(remote, files, x.person, at),
             at: new Date().toISOString(),
           };
           await writeConflict(x.gitDir, conflict);
         }
       }
     }
-    if (next && next !== remote) {
+    const leaving = next && next !== remote;
+    const waiting = leaving && x.keysLeaving ? await x.keysLeaving(next) : [];
+    if (leaving && waiting.length === 0) {
       const pushed = await git(["push", "-q", "--no-verify", "uno", `${ref}:${ref}`], at);
       if (pushed.code !== 0) {
         if (/fetch first|non-fast-forward|rejected/i.test(pushed.stderr) && attempt < 3) continue;
@@ -952,21 +1305,39 @@ async function exchange(x) {
       result.pushed = true;
       await git(["update-ref", remoteRef, next], at);
     }
-    if (!x.meta && next) {
+    if (!x.meta && next && waiting.length === 0) {
       await writeMeta(x.storage, x.input.name, x.writeMetaAs).catch(() => undefined);
     }
+    if (waiting.length > 0) result.held = waiting;
     result.head = next;
     result.conflict = conflict;
     result.ok = true;
     result.state = conflict ? "conflict" : "synced";
     result.message = conflict
       ? `${conflict.files.length === 1 ? conflict.files[0] : `${conflict.files.length} files`} changed on both computers; the newer version is kept, the other one is in the history.`
-      : result.pulled || result.pushed
-        ? "Up to date on all your computers."
-        : "Already up to date.";
+      : waiting.length > 0
+        ? heldInHistoryMessage(waiting)
+        : result.held.length > 0
+          ? heldMessage(result.held)
+          : result.pulled || result.pushed
+            ? "Up to date on all your computers."
+            : "Already up to date.";
     return;
   }
   busy(result);
+}
+
+/**
+ * Who changed the first of these files on `tip`, when it wasn't this person:
+ * a colleague's change reads differently from one's own other computer.
+ * @param {string} tip @param {string[]} files @param {string | null} person
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ */
+async function otherPerson(tip, files, person, at) {
+  const out = await git(["log", "-1", "--format=%an%x1f%s", tip, "--", files[0] ?? "."], at);
+  const [author = "", subject = ""] = out.stdout.trim().split("\x1f");
+  const who = whoSaved(author, subject).person;
+  return who && who !== person ? who : null;
 }
 
 /** @param {SyncResult} result @param {string} [hint] */
@@ -999,11 +1370,7 @@ export async function resolveConflict(input, ctx) {
   // First save what changed here meanwhile, so nothing is overwritten unseen.
   const first = await syncProject({ dir, name: input.name, adopt: true }, ctx);
   if (first.state === "busy") return first;
-  const baseEnv = await gitEnv(ctx);
-  const own = await ownGit(dir, baseEnv);
-  const gitDir = own ? own.gitDir : snapshotGitDir(dir);
-  const env = own ? baseEnv : await gitEnv(ctx, { GIT_DIR: gitDir, GIT_WORK_TREE: dir });
-  const at = { env, cwd: own ? own.top : dir };
+  const { gitDir, at } = await repositoryOf(dir, ctx);
   const record = await readConflict(gitDir);
   if (record && input.keep !== "dismiss") {
     const release = await lock(gitDir);
@@ -1022,24 +1389,20 @@ export async function resolveConflict(input, ctx) {
         const changes = new Map();
         for (const file of record.files) changes.set(file, await entryAt(source, file, at));
         const tree = await treeWith(head, changes, at, gitDir);
-        const headTree = (await gitOk(["rev-parse", `${head}^{tree}`], at, "git")).trim();
-        if (tree !== headTree) {
-          const what = record.files.length === 1 ? record.files[0] : `${record.files.length} files`;
-          const side = input.keep === "mine" ? "this computer's" : "the other computer's";
-          const commit = (
-            await gitOk(
-              ["commit-tree", tree, "-p", head, "-m", `Kept ${side} version of ${what}`],
-              at,
-              "Couldn't keep that version",
-            )
-          ).trim();
-          if (!(await moveTo(branchRef, head, commit, at))) {
-            return {
-              ...first,
-              state: "busy",
-              message: "The folder changed meanwhile; try again in a moment.",
-            };
-          }
+        const what = record.files.length === 1 ? record.files[0] : `${record.files.length} files`;
+        const side = input.keep === "mine" ? "this computer's" : "the other computer's";
+        const moved = await versionFrom(
+          tree,
+          { head, branchRef },
+          `Kept ${side} version of ${what}`,
+          at,
+        );
+        if (!moved) {
+          return {
+            ...first,
+            state: "busy",
+            message: "The folder changed meanwhile; try again in a moment.",
+          };
         }
       }
     } finally {
@@ -1048,6 +1411,297 @@ export async function resolveConflict(input, ctx) {
   }
   await writeConflict(gitDir, null);
   return syncProject({ dir, name: input.name, adopt: true }, ctx);
+}
+
+/**
+ * Where a folder's versions are, signed as this person when the repository
+ * has no author of its own.
+ * @param {string} dir @param {Ctx} ctx
+ */
+async function repositoryOf(dir, ctx) {
+  const env = await gitEnv(ctx);
+  const own = await ownGitToSync(dir, env);
+  if (own) {
+    const at = { env, cwd: own.top };
+    if (!(await git(["config", "user.email"], at)).stdout.trim()) {
+      Object.assign(env, authorEnv(ctx));
+    }
+    return { mode: /** @type {const} */ ("git"), gitDir: own.gitDir, at };
+  }
+  const gitDir = snapshotGitDir(dir);
+  const snapshotEnv = await gitEnv(ctx, {
+    GIT_DIR: gitDir,
+    GIT_WORK_TREE: dir,
+    ...authorEnv(ctx),
+  });
+  return { mode: /** @type {const} */ ("snapshot"), gitDir, at: { env: snapshotEnv, cwd: dir } };
+}
+
+/**
+ * A new version with this tree on top of `head`; the folder follows.
+ * Nothing to do when it already is that tree.
+ * @param {string} tree
+ * @param {{ head: string, branchRef: string }} on
+ * @param {string} message
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @returns {Promise<boolean>} false: the folder changed meanwhile
+ */
+async function versionFrom(tree, on, message, at) {
+  const headTree = (await gitOk(["rev-parse", `${on.head}^{tree}`], at, "git")).trim();
+  if (tree === headTree) return true;
+  const commit = (
+    await gitOk(
+      ["commit-tree", tree, "-p", on.head, "-m", message],
+      at,
+      "Couldn't save that version",
+    )
+  ).trim();
+  return moveTo(on.branchRef, on.head, commit, at);
+}
+
+// ── Versions: how the project was ───────────────────────────────────────
+
+/**
+ * @typedef {{ path: string, change: "added" | "changed" | "removed" }} VersionFile
+ * @typedef {{ id: string, at: string, person: string | null, computer: string | null,
+ *   note: string | null, files: VersionFile[], moreFiles: number }} ProjectVersion
+ */
+
+/** "Misha (macbook)" → both; an older "Uno" version → the computer from "Saved on …". */
+function whoSaved(/** @type {string} */ author, /** @type {string} */ subject) {
+  const match = /^(.*) \(([^()]*)\)$/.exec(author);
+  const saved = /^Saved on (.+)$/.exec(subject);
+  const person = match ? match[1] : author;
+  return {
+    person: !person || person === "Uno" ? null : person,
+    computer: match?.[2] ?? saved?.[1] ?? null,
+  };
+}
+
+const CHANGE_OF = /** @type {Record<string, VersionFile["change"]>} */ ({
+  A: "added",
+  D: "removed",
+});
+
+/**
+ * The project's versions, newest first, from every computer (a version made
+ * when two computers joined isn't one: nobody saved it).
+ * @param {{ dir: string, skip?: number, limit?: number }} input
+ * @param {Ctx} ctx
+ * @returns {Promise<{ mode: "snapshot" | "git", versions: ProjectVersion[], more: boolean }>}
+ */
+export async function projectHistory(input, ctx) {
+  const dir = path.resolve(input.dir);
+  const { mode, gitDir, at } = await repositoryOf(dir, ctx);
+  if (!(await fsp.stat(gitDir).catch(() => null))) return { mode, versions: [], more: false };
+  const limit = Math.min(Math.max(1, input.limit ?? 50), MAX_HISTORY_PAGE);
+  const log = await git(
+    [
+      "-c",
+      "core.quotePath=false",
+      "log",
+      "--no-merges",
+      "--no-renames",
+      "--name-status",
+      "--format=%x1e%H%x1f%ct%x1f%an%x1f%s",
+      `--max-count=${limit + 1}`,
+      `--skip=${Math.max(0, input.skip ?? 0)}`,
+      "HEAD",
+      "--",
+    ],
+    at,
+  );
+  // No version yet.
+  if (log.code !== 0) return { mode, versions: [], more: false };
+  /** @type {ProjectVersion[]} */
+  const versions = log.stdout
+    .split("\x1e")
+    .filter((block) => block.trim())
+    .map((block) => {
+      const [head = "", ...lines] = block.split("\n");
+      const [id = "", time = "0", author = "", subject = ""] = head.split("\x1f");
+      const changed = lines.flatMap((line) => {
+        const tab = line.indexOf("\t");
+        if (tab <= 0) return [];
+        return [
+          {
+            path: line.slice(tab + 1),
+            change: CHANGE_OF[line.slice(0, tab)] ?? /** @type {const} */ ("changed"),
+          },
+        ];
+      });
+      return {
+        id,
+        at: new Date(Number(time) * 1000).toISOString(),
+        ...whoSaved(author, subject),
+        note: /^Saved on /.test(subject) ? null : subject || null,
+        files: changed.slice(0, MAX_VERSION_FILES),
+        moreFiles: Math.max(0, changed.length - MAX_VERSION_FILES),
+      };
+    });
+  return { mode, versions: versions.slice(0, limit), more: versions.length > limit };
+}
+
+/** "12 Oct, 14:20", the way the versions list says it. */
+function versionDate(/** @type {number} */ seconds) {
+  return new Date(seconds * 1000).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Bring a version back: the whole project, or some of its files. What is
+ * there now is saved first and stays a version, so going back can be undone
+ * the same way; the version brought back is a new one, on every computer.
+ * @param {{ dir: string, name: string, version: string, files?: string[] | null }} input
+ * @param {Ctx} ctx
+ * @returns {Promise<SyncResult>}
+ */
+export async function restoreVersion(input, ctx) {
+  const dir = path.resolve(input.dir);
+  const first = await syncProject({ dir, name: input.name, adopt: true }, ctx);
+  if (first.state === "busy") return first;
+  const refuse = (/** @type {string} */ message, /** @type {SyncState} */ state = "blocked") => ({
+    ...first,
+    ok: false,
+    state,
+    message,
+  });
+  if (!/^[0-9a-f]{40,64}$/.test(input.version))
+    return refuse("That version isn't in this project.");
+  const files = (input.files ?? []).map(safeRelative);
+  if (files.includes(null)) return refuse("That file isn't in this project.");
+  const { gitDir, at } = await repositoryOf(dir, ctx);
+  const release = await lock(gitDir);
+  if (!release) return refuse("Another sync of this project is running; try again.", "busy");
+  try {
+    const branchRef = (await git(["symbolic-ref", "--quiet", "HEAD"], at)).stdout.trim();
+    const head = await revOf("HEAD", at);
+    const known = head ? await git(["cat-file", "-e", `${input.version}^{commit}`], at) : null;
+    if (!head || !branchRef || known?.code !== 0 || !(await isAncestor(input.version, head, at))) {
+      return refuse("That version isn't in this project.");
+    }
+    /** @type {string} */
+    let tree;
+    /** @type {string} */
+    let message;
+    const seconds = await commitTimeOf(input.version, null, at);
+    if (files.length > 0) {
+      /** @type {Map<string, { mode: string, oid: string } | null>} */
+      const changes = new Map();
+      for (const file of /** @type {string[]} */ (files)) {
+        changes.set(file, await entryAt(input.version, file, at));
+      }
+      tree = await treeWith(head, changes, at, gitDir);
+      const what = files.length === 1 ? files[0] : `${files.length} files`;
+      message = `Brought back ${what} from ${versionDate(seconds)}`;
+    } else {
+      tree = (await gitOk(["rev-parse", `${input.version}^{tree}`], at, "git")).trim();
+      message = `Went back to ${versionDate(seconds)}`;
+    }
+    if (!(await versionFrom(tree, { head, branchRef }, message, at))) {
+      return refuse("The folder changed meanwhile; try again in a moment.", "busy");
+    }
+  } finally {
+    await release();
+  }
+  return syncProject({ dir, name: input.name, adopt: true }, ctx);
+}
+
+// ── What travels and what stays ─────────────────────────────────────────
+
+/**
+ * The folder's files by what happens to them: how many travel, what stays
+ * only on this computer (`yours`: the person chose it; else Uno's rules or
+ * the project's own ignore list), and the key files, by name.
+ * @param {{ dir: string }} input
+ * @param {Ctx} ctx
+ * @returns {Promise<{ mode: "snapshot" | "git", synced: number,
+ *   localOnly: Array<{ path: string, yours: boolean }>, keyFiles: string[], more: number }>}
+ */
+export async function projectFiles(input, ctx) {
+  const dir = path.resolve(input.dir);
+  const { mode, gitDir, at } = await repositoryOf(dir, ctx);
+  const none = { mode, synced: 0, localOnly: [], keyFiles: [], more: 0 };
+  if (!(await fsp.stat(gitDir).catch(() => null))) return none;
+  if (mode === "snapshot") await refreshExcludes(gitDir, at);
+  const list = async (/** @type {string[]} */ args) =>
+    (await gitOk(["ls-files", "-z", ...args], at, "Couldn't list the project's files"))
+      .split("\0")
+      .filter(Boolean);
+  const synced = new Set(await list(["--cached"]));
+  if (mode === "snapshot") {
+    for (const file of await list(["--others", "--exclude-standard"])) synced.add(file);
+  }
+  const ignored = await list(["--others", "--ignored", "--exclude-standard", "--directory"]);
+  const yours = new Set(mode === "snapshot" ? await readLocalOnly(gitDir) : []);
+  const stays = ignored.filter((entry) => !/^\.(uno-)?git(\/|\.|$)/.test(entry));
+  const keyFiles = stays.filter((entry) => isKeyFile(entry.replace(/\/$/, "")));
+  const localOnly = stays
+    .filter((entry) => !isKeyFile(entry.replace(/\/$/, "")))
+    .map((entry) => ({ path: entry, yours: yours.has(entry.replace(/\/$/, "")) }))
+    .toSorted((a, b) => Number(b.yours) - Number(a.yours) || a.path.localeCompare(b.path));
+  return {
+    mode,
+    synced: synced.size,
+    localOnly: localOnly.slice(0, MAX_LOCAL_ENTRIES),
+    keyFiles: keyFiles.slice(0, MAX_LOCAL_ENTRIES),
+    more: Math.max(0, localOnly.length - MAX_LOCAL_ENTRIES),
+  };
+}
+
+/** A folder-relative path, or null when it isn't one inside the folder. */
+export function safeRelative(/** @type {unknown} */ raw) {
+  if (typeof raw !== "string") return null;
+  const relative = raw
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/^(\.\/)+/, "")
+    .replace(/\/+$/, "");
+  if (!relative || relative.length > 1024 || /[\n\r\0]/.test(relative)) return null;
+  if (path.posix.isAbsolute(relative)) return null;
+  const parts = relative.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) return null;
+  return /^\.(uno-)?git$/.test(parts[0] ?? "") ? null : relative;
+}
+
+/**
+ * Keep a file or folder only on this computer, or let it travel again. A
+ * tracked file leaves the project (it is removed from the other computers at
+ * the next sync, and stays in the history); the file here is not touched.
+ * Only for folders Uno keeps versions of: a repository has its own ignore list.
+ * @param {{ dir: string, path: string, localOnly: boolean }} input
+ * @param {Ctx} ctx
+ */
+export async function setLocalOnly(input, ctx) {
+  const dir = path.resolve(input.dir);
+  const relative = safeRelative(input.path);
+  if (!relative) throw new SyncError("That isn't a file in this project.", "blocked");
+  const { mode, gitDir, at } = await repositoryOf(dir, ctx);
+  if (mode !== "snapshot") {
+    throw new SyncError("This project's own rules say what stays on this computer.", "blocked");
+  }
+  const release = await lock(gitDir);
+  if (!release) throw new SyncError("Another sync of this project is running; try again.", "busy");
+  try {
+    const current = await readLocalOnly(gitDir);
+    const others = current.filter((/** @type {string} */ item) => item !== relative);
+    const next = input.localOnly ? [...others, relative].toSorted() : others;
+    await fsp.writeFile(localOnlyFile(gitDir), `${JSON.stringify({ paths: next }, null, 2)}\n`);
+    await refreshExcludes(gitDir, at);
+    if (input.localOnly) {
+      await gitOk(
+        ["--literal-pathspecs", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", relative],
+        at,
+        "Couldn't keep that file here",
+      );
+    }
+  } finally {
+    await release();
+  }
 }
 
 // ── Get it here ─────────────────────────────────────────────────────────
@@ -1073,6 +1727,7 @@ export async function getProject(input, ctx) {
     changedFiles: 0,
     head: null,
     conflict: null,
+    held: [],
     message,
   });
   try {

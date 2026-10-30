@@ -18,7 +18,9 @@ import {
   ProjectSyncError,
   type ProjectSecretsList,
   type ProjectSyncEntry,
+  type ProjectSyncFiles,
   type ProjectSyncGetHereResult,
+  type ProjectSyncHistory,
   type ProjectSyncSnapshot,
   ThreadId,
 } from "@t3tools/contracts";
@@ -30,9 +32,15 @@ import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { watchProjectFolder } from "./folderWatch.ts";
-import { createProjectSyncCore, type ProjectSyncCore, type SyncEngine } from "./projectSyncCore.ts";
+import {
+  createProjectSyncCore,
+  personName,
+  type ProjectSyncCore,
+  type SyncEngine,
+} from "./projectSyncCore.ts";
 import { consoleProjectVault } from "./vaultProjectSecrets.ts";
 
 export interface ProjectSyncShape {
@@ -48,6 +56,23 @@ export interface ProjectSyncShape {
   ) => Effect.Effect<ProjectSyncEntry, ProjectSyncError>;
   readonly getHere: (name: string) => Effect.Effect<ProjectSyncGetHereResult, ProjectSyncError>;
   readonly opened: (projectId: string) => Effect.Effect<void>;
+  readonly history: (
+    projectId: string,
+    skip?: number,
+  ) => Effect.Effect<ProjectSyncHistory, ProjectSyncError>;
+  readonly restore: (
+    projectId: string,
+    version: string,
+    files?: ReadonlyArray<string>,
+  ) => Effect.Effect<ProjectSyncEntry, ProjectSyncError>;
+  readonly files: (projectId: string) => Effect.Effect<ProjectSyncFiles, ProjectSyncError>;
+  readonly setLocalOnly: (
+    projectId: string,
+    path: string,
+    localOnly: boolean,
+  ) => Effect.Effect<ProjectSyncFiles, ProjectSyncError>;
+  readonly introSeen: Effect.Effect<void, ProjectSyncError>;
+  readonly answerOld: (turnOn: boolean) => Effect.Effect<void, ProjectSyncError>;
   readonly secretsList: (projectId: string) => Effect.Effect<ProjectSecretsList, ProjectSyncError>;
   readonly secretSet: (
     projectId: string,
@@ -105,6 +130,7 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
   const projections = yield* ProjectionSnapshotQuery;
   const orchestration = yield* OrchestrationEngineService;
+  const cloud = yield* Effect.serviceOption(UnoCloudService);
   const home = os.homedir();
   const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
@@ -128,6 +154,30 @@ const make = Effect.gen(function* () {
         throw error;
       })),
     available: async () => (await cloudKey()) !== null,
+    person: () =>
+      Option.isSome(cloud)
+        ? run(
+            cloud.value.getState().pipe(
+              Effect.map((state) => (state.account ? personName(state.account) : null)),
+              Effect.orElseSucceed(() => null),
+            ),
+          )
+        : Promise.resolve(null),
+    turnRunning: (projectId) =>
+      run(
+        projections.getShellSnapshot().pipe(
+          Effect.map((snapshot) =>
+            snapshot.threads.some(
+              (thread) =>
+                thread.projectId === projectId &&
+                // A chat in its own copy of the project isn't touching this folder.
+                thread.worktreePath === null &&
+                thread.session?.status === "running",
+            ),
+          ),
+          Effect.orElseSucceed(() => false),
+        ),
+      ),
     vault: consoleProjectVault({ baseUrl: controlPlaneBaseUrl(), token: cloudKey }),
     projects: () =>
       run(
@@ -137,6 +187,7 @@ const make = Effect.gen(function* () {
               id: project.id,
               title: project.title,
               workspaceRoot: project.workspaceRoot,
+              createdAt: project.createdAt,
             })),
           ),
           Effect.orElseSucceed(() => []),
@@ -186,8 +237,14 @@ const make = Effect.gen(function* () {
   );
 
   // Agents' turns: the end sends their edits out; the start brings the other computers' changes in.
+  // A new project starts syncing by itself.
   yield* Effect.forkScoped(
     Stream.runForEach(orchestration.streamDomainEvents, (event) => {
+      if (event.type === "project.created") {
+        return Effect.sync(() => {
+          void core.adoptNewProjects().catch(() => undefined);
+        });
+      }
       const trigger =
         event.type === "thread.turn-diff-completed"
           ? ("turn-end" as const)
@@ -225,6 +282,13 @@ const make = Effect.gen(function* () {
         return { projectId: ProjectId.make(result.projectId), entry: result.entry };
       }),
     opened: (projectId) => Effect.sync(() => core.touched(projectId, "opened")),
+    history: (projectId, skip) => attempt(() => core.history(projectId, skip)),
+    restore: (projectId, version, files) => attempt(() => core.restore(projectId, version, files)),
+    files: (projectId) => attempt(() => core.files(projectId)),
+    setLocalOnly: (projectId, relative, localOnly) =>
+      attempt(() => core.setLocalOnly(projectId, relative, localOnly)),
+    introSeen: attempt(() => core.introSeen()),
+    answerOld: (turnOn) => attempt(() => core.answerOld(turnOn)),
     secretsList: (projectId) => attempt(() => core.secretsList(projectId)),
     secretSet: (projectId, name, value) =>
       attempt(async () => {

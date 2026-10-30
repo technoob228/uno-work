@@ -1464,6 +1464,34 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "projectSync",
           }),
         // Values go in (set) and never come back out: the list has names only.
+        [WS_METHODS.projectSyncHistory]: ({ projectId, skip }) =>
+          observeRpcEffect(WS_METHODS.projectSyncHistory, projectSync.history(projectId, skip), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncRestore]: ({ projectId, version, files }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSyncRestore,
+            projectSync.restore(projectId, version, files),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        [WS_METHODS.projectSyncFiles]: ({ projectId }) =>
+          observeRpcEffect(WS_METHODS.projectSyncFiles, projectSync.files(projectId), {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncSetLocalOnly]: ({ projectId, path, localOnly }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSyncSetLocalOnly,
+            projectSync.setLocalOnly(projectId, path, localOnly),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        [WS_METHODS.projectSyncIntroSeen]: (_input) =>
+          observeRpcEffect(WS_METHODS.projectSyncIntroSeen, projectSync.introSeen, {
+            "rpc.aggregate": "projectSync",
+          }),
+        [WS_METHODS.projectSyncAnswerOld]: ({ turnOn }) =>
+          observeRpcEffect(WS_METHODS.projectSyncAnswerOld, projectSync.answerOld(turnOn), {
+            "rpc.aggregate": "projectSync",
+          }),
         [WS_METHODS.projectSecretsList]: ({ projectId }) =>
           observeRpcEffect(WS_METHODS.projectSecretsList, projectSync.secretsList(projectId), {
             "rpc.aggregate": "projectSync",

@@ -1,13 +1,23 @@
-import type { EnvironmentId, ProjectId, ProjectSyncEntry } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ProjectSyncEntry,
+  ProjectVersion,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
   conflictLine,
   entriesByProject,
+  fileCount,
+  groupVersions,
+  nameList,
   refreshEveryMs,
   syncLabel,
   syncMarkOf,
   toggleMenuLabel,
+  versionDay,
+  versionLine,
 } from "./projectSync.logic";
 import { mostUrgent } from "./ProjectSyncParts";
 
@@ -21,6 +31,107 @@ const entry = (patch: Partial<ProjectSyncEntry>): ProjectSyncEntry => ({
   lastSyncedAt: null,
   conflict: null,
   ...patch,
+});
+
+const version = (patch: Partial<ProjectVersion>): ProjectVersion => ({
+  id: "a".repeat(40),
+  at: "2026-10-30T12:00:00.000Z",
+  person: "Misha",
+  computer: "macbook",
+  note: null,
+  files: [{ path: "plan.md", change: "changed" }],
+  moreFiles: 0,
+  ...patch,
+});
+
+describe("versions", () => {
+  const now = new Date(2026, 9, 30, 15, 0).getTime();
+
+  it("says today, yesterday, then the date", () => {
+    expect(versionDay(new Date(2026, 9, 30, 0, 5).toISOString(), now)).toBe("Today");
+    expect(versionDay(new Date(2026, 9, 29, 23, 55).toISOString(), now)).toBe("Yesterday");
+    expect(versionDay(new Date(2026, 9, 26, 9, 0).toISOString(), now)).toContain("26 Oct");
+    expect(versionDay(new Date(2025, 9, 26, 9, 0).toISOString(), now)).toContain("2025");
+  });
+
+  it("groups by day, keeping the order", () => {
+    const groups = groupVersions(
+      [
+        version({ id: "1", at: new Date(2026, 9, 30, 14, 0).toISOString() }),
+        version({ id: "2", at: new Date(2026, 9, 30, 9, 0).toISOString() }),
+        version({ id: "3", at: new Date(2026, 9, 29, 20, 0).toISOString() }),
+      ],
+      now,
+    );
+    expect(groups.map((group) => [group.day, group.versions.map((item) => item.id)])).toEqual([
+      ["Today", ["1", "2"]],
+      ["Yesterday", ["3"]],
+    ]);
+  });
+
+  it("reads like a person wrote it, with no git words", () => {
+    expect(versionLine(version({}))).toBe("Misha on macbook · plan.md");
+    expect(versionLine(version({ person: null }))).toBe("macbook · plan.md");
+    expect(versionLine(version({ person: null, computer: null }))).toBe("Saved · plan.md");
+    expect(
+      versionLine(
+        version({
+          files: [
+            { path: "a", change: "added" },
+            { path: "b", change: "removed" },
+          ],
+          moreFiles: 3,
+        }),
+      ),
+    ).toBe("Misha on macbook · 5 files");
+    expect(versionLine(version({ note: "Went back to 29 Oct, 14:20", files: [] }))).toBe(
+      "Went back to 29 Oct, 14:20",
+    );
+  });
+});
+
+describe("words", () => {
+  it("counts files and lists names", () => {
+    expect(fileCount(1)).toBe("1 file");
+    expect(fileCount(1280)).toBe("1,280 files");
+    expect(nameList(["a"])).toBe("a");
+    expect(nameList(["a", "b", "c"])).toBe("a, b and c");
+    expect(nameList(["a", "b", "c", "d"], 2)).toBe("a, b and 2 more");
+  });
+});
+
+describe("a conflict with another person", () => {
+  const conflict = (kept: "mine" | "theirs") =>
+    entry({
+      state: "conflict",
+      conflict: {
+        files: ["plan.md"],
+        kept: { "plan.md": kept },
+        from: "anyas-laptop",
+        person: "Anya",
+        at: "2026-10-30T12:00:00.000Z",
+      },
+    });
+
+  it("names them and says the person's version is safe", () => {
+    expect(conflictLine(conflict("theirs"))).toBe(
+      "Anya changed the same file. Your version is saved.",
+    );
+    expect(conflictLine(conflict("mine"))).toBe(
+      "Anya changed the same file. Yours stays here, and theirs is saved.",
+    );
+  });
+});
+
+describe("files waiting because of a key", () => {
+  it("get their own quiet mark and say why", () => {
+    const held = entry({ held: ["config.json"], message: "config.json is waiting" });
+    expect(syncMarkOf("synced", ["config.json"])).toBe("held");
+    expect(syncMarkOf("synced", [])).toBe("synced");
+    expect(syncLabel(held)).toBe("config.json is waiting");
+    expect(mostUrgent([entry({}), held])).toBe(held);
+    expect(mostUrgent([held, entry({ state: "error" })])?.state).toBe("error");
+  });
 });
 
 describe("project sync marks", () => {

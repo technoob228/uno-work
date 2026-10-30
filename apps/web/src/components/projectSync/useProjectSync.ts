@@ -5,7 +5,12 @@
  *
  * @module projectSync/useProjectSync
  */
-import type { EnvironmentId, ProjectSyncEntry, ProjectSyncSnapshot } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ProjectSyncEntry,
+  ProjectSyncSnapshot,
+} from "@t3tools/contracts";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
@@ -14,6 +19,12 @@ import { entriesByProject, refreshEveryMs } from "./projectSync.logic";
 
 export const projectSyncQueryKey = (environmentId: EnvironmentId) =>
   ["projectSync", environmentId] as const;
+
+export const projectVersionsQueryKey = (environmentId: EnvironmentId, projectId: ProjectId) =>
+  ["projectVersions", environmentId, projectId] as const;
+
+export const projectFilesQueryKey = (environmentId: EnvironmentId, projectId: ProjectId) =>
+  ["projectFiles", environmentId, projectId] as const;
 
 export function useProjectSyncStatuses(environmentIds: ReadonlyArray<EnvironmentId>) {
   const unique = useMemo(() => [...new Set(environmentIds)].toSorted(), [environmentIds]);

@@ -12,8 +12,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { installSdkFiles } from "../appSdk/sdkFiles.ts";
 
+import { SECRET_TOKEN_PATTERN } from "../secretRedaction.ts";
 import {
   createProjectSyncCore,
+  personName,
   removeEnvName,
   type ProjectRef,
   type SyncEngine,
@@ -21,6 +23,9 @@ import {
 import type { ProjectVault } from "./vaultProjectSecrets.ts";
 
 let root = "";
+
+/** Obviously fake, and put together here so no scanner flags this test file. */
+const FAKE_KEY = ["sk-ant-", "FAKE".repeat(6)].join("");
 
 /** The Uno vault: per project, name → versions. */
 function memoryVault() {
@@ -60,6 +65,9 @@ function computer(label: string, vault: ProjectVault) {
   const stateDir = path.join(home, ".t3", "userdata");
   fs.mkdirSync(stateDir, { recursive: true });
   const projects: ProjectRef[] = [];
+  /** Projects with a chat working in them, and a clock that can jump. */
+  const busy = new Set<string>();
+  const clock = { shift: 0 };
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "",
     GIT_CONFIG_NOSYSTEM: "1",
@@ -78,6 +86,8 @@ function computer(label: string, vault: ProjectVault) {
       return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
     },
     available: async () => true,
+    person: async () => "Misha",
+    turnRunning: async (projectId) => busy.has(projectId),
     vault,
     projects: async () => projects,
     createProject: async (input) => {
@@ -88,7 +98,7 @@ function computer(label: string, vault: ProjectVault) {
     timers: {
       setTimeout: (run, ms) => setTimeout(run, ms),
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-      now: () => Date.now(),
+      now: () => Date.now() + clock.shift,
     },
     log: (_level, message, data) => {
       if (process.env.PSYNC_DEBUG) console.log(message, data);
@@ -101,7 +111,15 @@ function computer(label: string, vault: ProjectVault) {
     projects.push({ id, title: name, workspaceRoot: dir });
     return { id, dir };
   };
-  return { home, core, projects, addProject };
+  /** A folder in ~/projects, created `at`. */
+  const addInProjects = (name: string, at: string) => {
+    const dir = path.join(home, "projects", name);
+    fs.mkdirSync(dir, { recursive: true });
+    const id = `p-${label}-${projects.length + 1}`;
+    projects.push({ id, title: name, workspaceRoot: dir, createdAt: at });
+    return { id, dir };
+  };
+  return { home, core, projects, addProject, addInProjects, busy, clock };
 }
 
 beforeEach(() => {
@@ -229,6 +247,208 @@ describe("project sync on two computers", { timeout: 120_000 }, () => {
     const laptop = computer("laptop", vault);
     laptop.projects.push({ id: "home", title: "Home", workspaceRoot: "~" });
     await expect(laptop.core.setEnabled("home", true)).rejects.toThrow("home folder");
+  });
+});
+
+const PAST = "2020-01-01T00:00:00.000Z";
+const later = () => new Date(Date.now() + 1000).toISOString();
+const versions = (dir: string) =>
+  fs
+    .readFileSync(path.join(dir, ".uno-git", "logs", "refs", "heads", "main"), "utf8")
+    .trim()
+    .split("\n").length;
+
+describe("on by default", { timeout: 120_000 }, () => {
+  it("a new folder in ~/projects syncs by itself, with one line once", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    await laptop.core.status();
+    const first = laptop.addInProjects("site", later());
+    const second = laptop.addInProjects("blog", later());
+    const elsewhere = laptop.addProject("downloads");
+    fs.writeFileSync(path.join(first.dir, "index.html"), "hi\n");
+    fs.writeFileSync(path.join(second.dir, "post.md"), "hi\n");
+
+    await laptop.core.adoptNewProjects();
+    expect((await laptop.core.entry(first.id)).enabled).toBe(true);
+    expect((await laptop.core.entry(elsewhere.id)).enabled).toBe(false);
+    // Not a word before it has really been saved.
+    expect((await laptop.core.status()).intro).toBeNull();
+
+    await laptop.core.syncNow(first.id);
+    await laptop.core.syncNow(second.id);
+    const status = await laptop.core.status();
+    expect(status.intro).toEqual({ projectId: first.id, title: "site" });
+    await laptop.core.introSeen();
+    expect((await laptop.core.status()).intro).toBeNull();
+    laptop.core.stop();
+  });
+
+  it("what the person turned off stays off", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    await laptop.core.status();
+    const { id } = laptop.addInProjects("site", later());
+    await laptop.core.setEnabled(id, false);
+    await laptop.core.adoptNewProjects();
+    expect((await laptop.core.entry(id)).enabled).toBe(false);
+    laptop.core.stop();
+  });
+
+  it("older projects get one question; no is final, nothing turns on silently", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addInProjects("old-site", PAST);
+    fs.writeFileSync(path.join(dir, "index.html"), "hi\n");
+    await laptop.core.adoptNewProjects();
+    expect((await laptop.core.entry(id)).enabled).toBe(false);
+    expect((await laptop.core.status()).askAbout).toEqual([{ projectId: id, title: "old-site" }]);
+
+    await laptop.core.answerOld(false);
+    expect((await laptop.core.status()).askAbout).toEqual([]);
+    expect((await laptop.core.entry(id)).enabled).toBe(false);
+    laptop.core.stop();
+  });
+
+  it("yes turns the older projects on, and the answer survives a restart", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addInProjects("old-site", PAST);
+    fs.writeFileSync(path.join(dir, "index.html"), "hi\n");
+    await laptop.core.answerOld(true);
+    await laptop.core.adoptionDone();
+    expect(await laptop.core.entry(id)).toMatchObject({ enabled: true, state: "synced" });
+    laptop.core.stop();
+
+    const again = computer("laptop", vault);
+    again.addInProjects("old-other", PAST);
+    expect((await again.core.status()).askAbout).toEqual([]);
+    again.core.stop();
+  });
+});
+
+describe("two chats in one folder", { timeout: 120_000 }, () => {
+  const turnEnd = async (laptop: ReturnType<typeof computer>, id: string) => {
+    laptop.core.touched(id, "turn-end");
+    await new Promise((resolve) => setTimeout(resolve, 2_400));
+  };
+
+  it("nothing is saved while a chat is working; its end, or the person, saves", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addProject("shared");
+    fs.writeFileSync(path.join(dir, "plan.md"), "one\n");
+    await laptop.core.setEnabled(id, true);
+    const saved = versions(dir);
+
+    // Chat A's turn ends; chat B is half way through this file.
+    laptop.busy.add(id);
+    fs.writeFileSync(path.join(dir, "plan.md"), "half done by B\n");
+    await turnEnd(laptop, id);
+    expect(versions(dir)).toBe(saved);
+
+    // B finishes.
+    laptop.busy.delete(id);
+    await turnEnd(laptop, id);
+    expect(versions(dir)).toBe(saved + 1);
+
+    // The person's own "Sync now" doesn't wait.
+    laptop.busy.add(id);
+    fs.writeFileSync(path.join(dir, "plan.md"), "asked for\n");
+    await laptop.core.syncNow(id);
+    expect(versions(dir)).toBe(saved + 2);
+  });
+
+  it("a stuck chat doesn't stop saving for good", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addProject("stuck");
+    fs.writeFileSync(path.join(dir, "plan.md"), "one\n");
+    await laptop.core.setEnabled(id, true);
+    const saved = versions(dir);
+    laptop.busy.add(id);
+    fs.writeFileSync(path.join(dir, "plan.md"), "two\n");
+    await turnEnd(laptop, id);
+    expect(versions(dir)).toBe(saved);
+    laptop.clock.shift = 31 * 60_000;
+    await turnEnd(laptop, id);
+    expect(versions(dir)).toBe(saved + 1);
+  });
+});
+
+describe("versions, files, keys in files", { timeout: 120_000 }, () => {
+  it("shows what waits, and says nothing of the value", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addProject("held");
+    fs.writeFileSync(path.join(dir, "plan.md"), "plan\n");
+    fs.writeFileSync(path.join(dir, "config.json"), `{ "key": "${FAKE_KEY}" }\n`);
+    const entry = await laptop.core.setEnabled(id, true);
+    expect(entry).toMatchObject({ state: "synced", held: ["config.json"] });
+    expect(JSON.stringify(entry)).not.toContain(FAKE_KEY);
+    fs.writeFileSync(path.join(dir, "config.json"), `{ "key": "moved" }\n`);
+    expect((await laptop.core.syncNow(id)).held).toEqual([]);
+  });
+
+  it("goes back, says who saved, refuses while a chat works, and keeps the row clean", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addProject("timeline");
+    fs.writeFileSync(path.join(dir, "plan.md"), "yesterday\n");
+    await laptop.core.setEnabled(id, true);
+    fs.writeFileSync(path.join(dir, "plan.md"), "today\n");
+    await laptop.core.syncNow(id);
+
+    const history = await laptop.core.history(id);
+    expect(history.versions).toHaveLength(2);
+    expect(history.versions[0]).toMatchObject({ person: "Misha", computer: "laptop" });
+    const yesterday = history.versions.at(-1)?.id ?? "";
+
+    laptop.busy.add(id);
+    await expect(laptop.core.restore(id, yesterday)).rejects.toThrow("A chat is working");
+    laptop.busy.delete(id);
+
+    await expect(laptop.core.restore(id, "f".repeat(40))).rejects.toThrow("isn't in this project");
+    expect((await laptop.core.entry(id)).state).toBe("synced");
+
+    expect(await laptop.core.restore(id, yesterday)).toMatchObject({ state: "synced" });
+    expect(fs.readFileSync(path.join(dir, "plan.md"), "utf8")).toBe("yesterday\n");
+  });
+
+  it("sorts the folder into what travels and what stays", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    const { id, dir } = laptop.addProject("classes");
+    fs.writeFileSync(path.join(dir, "plan.md"), "plan\n");
+    fs.writeFileSync(path.join(dir, "movie.mov"), "big\n");
+    fs.writeFileSync(path.join(dir, ".env"), "A=1\n");
+    await laptop.core.setEnabled(id, true);
+    expect(await laptop.core.files(id)).toMatchObject({ synced: 2, keyFiles: [".env"] });
+    const files = await laptop.core.setLocalOnly(id, "movie.mov", true);
+    expect(files.synced).toBe(1);
+    expect(files.localOnly).toEqual([{ path: "movie.mov", yours: true }]);
+    expect(fs.existsSync(path.join(dir, "movie.mov"))).toBe(true);
+    expect((await laptop.core.setLocalOnly(id, "movie.mov", false)).synced).toBe(2);
+  });
+
+  it("the engine's key patterns are the daemon's", async () => {
+    const { vault } = memoryVault();
+    const laptop = computer("laptop", vault);
+    await installSdkFiles(laptop.home);
+    const file = path.join(laptop.home, ".uno", "sdk", "js", "uno-sync.mjs");
+    const engine = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as {
+      SECRET_PATTERN: RegExp;
+    };
+    expect(engine.SECRET_PATTERN.source).toBe(SECRET_TOKEN_PATTERN.source);
+  });
+});
+
+describe("personName", () => {
+  it("prefers a chosen name over a generated one", () => {
+    expect(personName({ username: "misha", email: "m@x.io" })).toBe("misha");
+    expect(personName({ username: "uno_1058", email: "anna@x.io" })).toBe("anna");
+    expect(personName({ username: "uno_1058", email: null })).toBeNull();
+    expect(personName({})).toBeNull();
   });
 });
 
