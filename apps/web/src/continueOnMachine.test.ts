@@ -32,6 +32,8 @@ import {
   waitUntil,
   type ContinueOnMachineDeps,
   type ContinueOnMachineInput,
+  pagesLeftBehind,
+  pickProjectMoveChat,
   type ContinueOnMachineStep,
   type ContinueTargetProject,
 } from "./continueOnMachine";
@@ -148,6 +150,120 @@ function makeDeps(overrides: Partial<ContinueOnMachineDeps> = {}) {
 
 const continueError = (reason: string, message = reason) =>
   Object.assign(new Error(message), { reason });
+
+const PAGES_TRANSFER_ID = "1f8fad5b-d9cb-469f-a165-70867728950f";
+const PAGES = {
+  transferId: PAGES_TRANSFER_ID,
+  sizeBytes: 4,
+  sha256: "pages",
+  chunkCount: 1,
+  pageCount: 2,
+};
+
+describe("the chat's pages on the move", () => {
+  const withPages = { ...SNAPSHOT, pagesTransfer: PAGES };
+
+  it("asks for them only when the target can take them, and sends them after the files", async () => {
+    const { deps, calls } = makeDeps({
+      targetCarriesPages: () => true,
+      snapshot: vi.fn(async () => withPages),
+      land: vi.fn(async () => ({ ...LANDED, pagesCarried: 2 })),
+    });
+    const result = await runContinueOnMachine(deps, INPUT);
+
+    expect(deps.snapshot).toHaveBeenCalledWith({
+      threadId: SOURCE_THREAD_ID,
+      includeEnv: false,
+      includePages: true,
+    });
+    expect(calls.slice(calls.indexOf("write:8"), calls.indexOf("write:8") + 3)).toEqual([
+      "write:8",
+      "read:0",
+      "write:0",
+    ]);
+    expect(deps.land).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pages: { transferId: PAGES_TRANSFER_ID, sizeBytes: 4, sha256: "pages" },
+      }),
+    );
+    expect(deps.discardSource).toHaveBeenCalledWith({ transferId: PAGES_TRANSFER_ID });
+    expect(pagesLeftBehind(result)).toBe(0);
+  });
+
+  it("lands without them when they don't arrive, and says how many stayed", async () => {
+    const { deps } = makeDeps({
+      targetCarriesPages: () => true,
+      snapshot: vi.fn(async () => ({ ...withPages, pagesLeftBehind: 1 })),
+      readChunk: vi.fn(async ({ transferId, index }) => {
+        if (transferId === PAGES_TRANSFER_ID) throw new Error("dropped");
+        return { data: chunkOf(index) };
+      }),
+    });
+    const result = await runContinueOnMachine(deps, INPUT);
+
+    const landInput = vi.mocked(deps.land).mock.calls[0]?.[0];
+    expect(landInput).not.toHaveProperty("pages");
+    expect(pagesLeftBehind(result)).toBe(3);
+  });
+
+  it("leaves them out for a target that doesn't know them", async () => {
+    const { deps } = makeDeps({ targetCarriesPages: () => false });
+    await runContinueOnMachine(deps, INPUT);
+    expect(deps.snapshot).toHaveBeenCalledWith({ threadId: SOURCE_THREAD_ID, includeEnv: false });
+  });
+});
+
+describe("moving a project", () => {
+  it("snapshots the project and lands it in its own folder, keeping the source's branch", async () => {
+    const { deps } = makeDeps();
+    await runContinueOnMachine(deps, { ...INPUT, moveProject: true, copyEnv: true });
+
+    expect(deps.snapshot).toHaveBeenCalledWith({
+      threadId: SOURCE_THREAD_ID,
+      includeEnv: true,
+      scope: "project",
+    });
+    expect(deps.land).toHaveBeenCalledWith(
+      expect.objectContaining({ placement: "project-root", sourceBranch: "main" }),
+    );
+  });
+
+  it("sends .env.local only when env files are on", async () => {
+    const envFiles = [{ name: ".env.local", text: "A=1" }];
+    const { deps } = makeDeps({ snapshot: vi.fn(async () => ({ ...SNAPSHOT, envFiles })) });
+    await runContinueOnMachine(deps, { ...INPUT, copyEnv: true });
+    expect(deps.land).toHaveBeenCalledWith(expect.objectContaining({ envFiles }));
+
+    const off = makeDeps({ snapshot: vi.fn(async () => ({ ...SNAPSHOT, envFiles })) });
+    await runContinueOnMachine(off.deps, INPUT);
+    expect(vi.mocked(off.deps.land).mock.calls[0]?.[0]).not.toHaveProperty("envFiles");
+  });
+
+  it("picks the latest chat in the project's own folder, then any, and never an archived one", () => {
+    const chat = (
+      id: string,
+      updatedAt: string,
+      over: { archivedAt?: string; worktreePath?: string } = {},
+    ) => ({
+      id,
+      createdAt: updatedAt,
+      updatedAt,
+      archivedAt: over.archivedAt ?? null,
+      worktreePath: over.worktreePath ?? null,
+    });
+    expect(
+      pickProjectMoveChat([
+        chat("old", "2026-10-01"),
+        chat("newest-worktree", "2026-10-30", { worktreePath: "/w" }),
+        chat("archived", "2026-10-29", { archivedAt: "2026-10-29" }),
+        chat("mid", "2026-10-20"),
+      ])?.id,
+    ).toBe("mid");
+    expect(pickProjectMoveChat([chat("w", "2026-10-30", { worktreePath: "/w" })])?.id).toBe("w");
+    expect(pickProjectMoveChat([chat("a", "2026-10-30", { archivedAt: "x" })])).toBeNull();
+    expect(pickProjectMoveChat([])).toBeNull();
+  });
+});
 
 describe("runContinueOnMachine", () => {
   it("snapshots on the source, relays every chunk to the target, lands, discards, marks and opens, in order", async () => {

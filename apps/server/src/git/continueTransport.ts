@@ -109,6 +109,12 @@ export interface ContinueTransportShape {
     readonly path: string;
     readonly startPoint: string;
   }) => Effect.Effect<void, VcsError>;
+  /** Point the checkout at `branch`, created or moved to `startPoint`. For a folder just created. */
+  readonly checkoutBranch: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+    readonly startPoint: string;
+  }) => Effect.Effect<void, VcsError>;
   /** Put the tree of `ref` into the working tree; HEAD and the current branch stay as they are. */
   readonly restoreTree: (input: {
     readonly cwd: string;
@@ -294,6 +300,14 @@ const make = Effect.gen(function* () {
       timeoutMs: BUNDLE_TIMEOUT_MS,
     }).pipe(Effect.asVoid);
 
+  const checkoutBranch: ContinueTransportShape["checkoutBranch"] = (input) =>
+    git({
+      operation: "ContinueTransport.checkoutBranch",
+      cwd: input.cwd,
+      args: ["checkout", "--quiet", "-B", input.branch, input.startPoint],
+      timeoutMs: BUNDLE_TIMEOUT_MS,
+    }).pipe(Effect.asVoid);
+
   const restoreTree: ContinueTransportShape["restoreTree"] = (input) =>
     checkpointStore.restoreCheckpoint({
       cwd: input.cwd,
@@ -317,6 +331,7 @@ const make = Effect.gen(function* () {
     initRepository,
     branchExists,
     addWorktree,
+    checkoutBranch,
     restoreTree,
     deleteRef,
   } satisfies ContinueTransportShape;

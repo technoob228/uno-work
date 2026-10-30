@@ -40,6 +40,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   SkillsError,
   WsRpcGroup,
+  isCarriedEnvFileName,
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
@@ -146,6 +147,8 @@ import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
 import { ContinueTransport } from "./git/continueTransport.ts";
 import { makeContinueTransferStore } from "./git/continueTransferStore.ts";
+import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import { storePage } from "./htmlRender/htmlRender.ts";
 import {
   makeThreadContinueComplete,
   makeThreadContinueDiscard,
@@ -378,8 +381,8 @@ const makeWsRpcLayer = (
         getMachineLabel: serverEnvironment.getDescriptor.pipe(
           Effect.map((descriptor) => descriptor.label),
         ),
-        readEnvFile: (folder: string) =>
-          workspaceFileSystem.readFile({ path: nodePath.join(folder, ".env") }).pipe(
+        readEnvFile: (folder: string, name = ".env") =>
+          workspaceFileSystem.readFile({ path: nodePath.join(folder, name) }).pipe(
             Effect.map((file) =>
               file.encoding === "utf8"
                 ? file.content
@@ -387,10 +390,32 @@ const makeWsRpcLayer = (
             ),
             Effect.catch(() => Effect.succeed(null)),
           ),
-        writeEnvFile: (folder: string, text: string) =>
+        writeEnvFile: (folder: string, text: string, name = ".env") =>
           workspaceFileSystem
-            .writeFile({ cwd: folder, relativePath: ".env", contents: text, encoding: "utf8" })
+            .writeFile({ cwd: folder, relativePath: name, contents: text, encoding: "utf8" })
             .pipe(Effect.asVoid),
+        listEnvFiles: (folder: string) =>
+          Effect.promise(() =>
+            fsPromises
+              .readdir(folder)
+              .then((names) => names.filter(isCarriedEnvFileName))
+              .catch(() => []),
+          ),
+        readPage: (attachmentId: string) =>
+          Effect.promise(async () => {
+            const filePath = resolveAttachmentRelativePath({
+              attachmentsDir: config.attachmentsDir,
+              relativePath: `${attachmentId}.html`,
+            });
+            return filePath === null
+              ? null
+              : fsPromises.readFile(filePath, "utf8").catch(() => null);
+          }),
+        storePage: (input: { readonly threadId: ThreadId; readonly html: string }) =>
+          Effect.tryPromise({
+            try: () => storePage({ attachmentsDir: config.attachmentsDir, ...input }),
+            catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+          }),
         cloneRepository: (input: {
           readonly remoteUrl: string;
           readonly destinationPath: string;

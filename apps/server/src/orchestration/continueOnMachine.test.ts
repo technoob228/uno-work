@@ -16,6 +16,7 @@ import {
   ThreadContinueError,
   type ThreadContinueLandInput,
   ThreadId,
+  isCarriedEnvFileName,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
@@ -39,6 +40,7 @@ const PROJECT_ID = ProjectId.make("project-1");
 const THREAD_ID = ThreadId.make("thread-1");
 const NOW = "2026-09-12T10:00:00.000Z";
 const TRANSFER_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const PAGES_TRANSFER_ID = "1f8fad5b-d9cb-469f-a165-70867728950f";
 const TRANSFER_REF = `refs/t3/continue/${TRANSFER_ID}`;
 const WORKTREES = "/home/unowork/.t3/worktrees";
 
@@ -167,7 +169,13 @@ interface Fixture {
   readonly transportCalls: Call[];
   readonly transferCalls: Call[];
   readonly envReads: string[];
-  readonly writtenEnv: Array<{ readonly folder: string; readonly text: string }>;
+  readonly writtenEnv: Array<{
+    readonly folder: string;
+    readonly text: string;
+    readonly name?: string;
+  }>;
+  readonly storedPages: Array<{ readonly threadId: ThreadId; readonly html: string }>;
+  readonly outgoingText: Map<string, string>;
   readonly clones: Array<{ readonly remoteUrl: string; readonly destinationPath: string }>;
   readonly madeDirectories: string[];
 }
@@ -184,12 +192,18 @@ function makeFixture(options?: {
   readonly envFiles?: Readonly<Record<string, string>>;
   readonly existingDirectories?: ReadonlySet<string>;
   readonly writeEnvFails?: boolean;
+  readonly envFileNames?: Readonly<Record<string, ReadonlyArray<string>>>;
+  readonly pageFiles?: Readonly<Record<string, string>>;
+  readonly storePageFails?: boolean;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const transportCalls: Call[] = [];
   const transferCalls: Call[] = [];
   const envReads: string[] = [];
   const writtenEnv: Fixture["writtenEnv"] = [];
+  const storedPages: Fixture["storedPages"] = [];
+  const outgoingText: Fixture["outgoingText"] = new Map();
+  let transferCounter = 0;
   const clones: Fixture["clones"] = [];
   const madeDirectories: string[] = [];
   const projects = [...(options?.projects ?? [projectShell()])];
@@ -223,6 +237,7 @@ function makeFixture(options?: {
     initRepository: () => Effect.void,
     branchExists: () => Effect.succeed(false),
     addWorktree: () => Effect.void,
+    checkoutBranch: () => Effect.void,
     restoreTree: () => Effect.succeed(true),
     deleteRef: () => Effect.void,
   };
@@ -230,6 +245,11 @@ function makeFixture(options?: {
     prepareOutgoing: (id) => Effect.succeed(`/scratch/outgoing/${id}.bundle`),
     digest: () => Effect.succeed(DIGEST),
     incomingPath: (id) => Effect.succeed(`/scratch/incoming/${id}.bundle`),
+    writeOutgoingText: (id, text) =>
+      Effect.sync(() => {
+        outgoingText.set(id, text);
+      }),
+    readIncomingText: () => Effect.succeed(JSON.stringify({ pages: [] })),
     readChunk: () => Effect.succeed(""),
     writeChunk: () => Effect.succeed(0),
     discard: () => Effect.succeed(true),
@@ -267,16 +287,26 @@ function makeFixture(options?: {
     },
     getProviders: Effect.succeed(options?.providers ?? [codex, claude]),
     getMachineLabel: Effect.succeed("Misha's Mac"),
-    readEnvFile: (folder) =>
+    readEnvFile: (folder, name = ".env") =>
       Effect.sync(() => {
         envReads.push(folder);
-        return options?.envFiles?.[folder] ?? null;
+        return options?.envFiles?.[name === ".env" ? folder : `${folder}/${name}`] ?? null;
       }),
-    writeEnvFile: (folder, text) =>
+    writeEnvFile: (folder, text, name = ".env") =>
       options?.writeEnvFails
         ? Effect.fail(new Error("disk full"))
         : Effect.sync(() => {
-            writtenEnv.push({ folder, text });
+            writtenEnv.push(name === ".env" ? { folder, text } : { folder, text, name });
+          }),
+    listEnvFiles: (folder) => Effect.succeed(options?.envFileNames?.[folder] ?? []),
+    readPage: (attachmentId) => Effect.succeed(options?.pageFiles?.[attachmentId] ?? null),
+    storePage: (input) =>
+      options?.storePageFails
+        ? Effect.fail(new Error("disk full"))
+        : Effect.sync(() => {
+            storedPages.push(input);
+            const attachmentId = `new-${storedPages.length}`;
+            return { attachmentId, path: `/attachments/${attachmentId}.html` };
           }),
     cloneRepository: (input) =>
       Effect.sync(() => {
@@ -290,7 +320,10 @@ function makeFixture(options?: {
       }),
     expandPath: (path) => path.replace(/^~/, "/home/unowork"),
     now: () => NOW,
-    newTransferId: () => TRANSFER_ID,
+    newTransferId: () => {
+      transferCounter += 1;
+      return transferCounter === 1 ? TRANSFER_ID : PAGES_TRANSFER_ID;
+    },
   };
 
   return {
@@ -300,6 +333,8 @@ function makeFixture(options?: {
     transferCalls,
     envReads,
     writtenEnv,
+    storedPages,
+    outgoingText,
     clones,
     madeDirectories,
   };
@@ -804,6 +839,295 @@ describe("thread.continue.land", () => {
       const skippedResult = yield* makeThreadContinueLand(skipped.deps)(landInput());
       assert.equal(skippedResult.envWritten, false);
       assert.deepEqual(skipped.writtenEnv, []);
+    }),
+  );
+});
+
+const pageActivity = (attachmentId: string, title: string, height = 400) =>
+  ({
+    id: `activity-${attachmentId}`,
+    tone: "info",
+    kind: "html.render",
+    summary: title,
+    payload: { attachmentId, path: `/old/attachments/${attachmentId}.html`, title, height },
+    turnId: null,
+    createdAt: NOW,
+  }) as unknown as OrchestrationThread["activities"][number];
+
+describe("the chat's HTML pages", () => {
+  it.effect("packs the pages in order when asked, and counts a page whose file is gone", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        thread: Option.some(
+          threadDetail({
+            activities: [
+              pageActivity("a", "First"),
+              pageActivity("gone", "Gone"),
+              pageActivity("b", "Second"),
+            ],
+          }),
+        ),
+        pageFiles: { a: "<p>a</p>", b: "<p>b</p>" },
+      });
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({
+        threadId: THREAD_ID,
+        includePages: true,
+      });
+
+      assert.equal(result.pagesTransfer?.transferId, PAGES_TRANSFER_ID);
+      assert.equal(result.pagesTransfer?.pageCount, 2);
+      assert.equal(result.pagesTransfer?.sha256, DIGEST.sha256);
+      assert.equal(result.pagesLeftBehind, 1);
+      const packed = JSON.parse(fixture.outgoingText.get(PAGES_TRANSFER_ID) ?? "{}");
+      assert.deepEqual(
+        packed.pages.map((page: { title: string; html: string }) => [page.title, page.html]),
+        [
+          ["First", "<p>a</p>"],
+          ["Second", "<p>b</p>"],
+        ],
+      );
+    }),
+  );
+
+  it.effect("carries nothing unless the target can take it", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        thread: Option.some(threadDetail({ activities: [pageActivity("a", "First")] })),
+        pageFiles: { a: "<p>a</p>" },
+      });
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID });
+      assert.isUndefined(result.pagesTransfer);
+      assert.equal(fixture.outgoingText.size, 0);
+    }),
+  );
+
+  it.effect("a page that can't be packed never stops the move", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        thread: Option.some(threadDetail({ activities: [pageActivity("a", "First")] })),
+        pageFiles: { a: "<p>a</p>" },
+        transfers: {
+          writeOutgoingText: () =>
+            Effect.fail(new ThreadContinueError({ reason: "capture_failed", message: "full" })),
+        },
+      });
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({
+        threadId: THREAD_ID,
+        includePages: true,
+      });
+      assert.isUndefined(result.pagesTransfer);
+      assert.equal(result.pagesLeftBehind, 1);
+      assert.equal(result.transferId, TRANSFER_ID);
+    }),
+  );
+
+  const arrivedPages = {
+    readIncomingText: () =>
+      Effect.succeed(
+        JSON.stringify({
+          pages: [
+            { title: "First", height: 400, html: "<p>a</p>" },
+            { title: "Second", height: 500, html: "<p>b</p>" },
+          ],
+        }),
+      ),
+  };
+  const pagesInput = {
+    transferId: PAGES_TRANSFER_ID,
+    sizeBytes: DIGEST.sizeBytes,
+    sha256: DIGEST.sha256,
+  };
+
+  it.effect("saves them under the new chat and puts them in its timeline after the seed", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ transfers: arrivedPages });
+      const result = yield* makeThreadContinueLand(fixture.deps)(landInput({ pages: pagesInput }));
+
+      assert.equal(result.pagesCarried, 2);
+      assert.deepEqual(fixture.storedPages, [
+        { threadId: result.threadId, html: "<p>a</p>" },
+        { threadId: result.threadId, html: "<p>b</p>" },
+      ]);
+      const pages = fixture.dispatched.flatMap((entry) =>
+        entry.command.type === "thread.activity.append" &&
+        entry.command.activity.kind === "html.render"
+          ? [entry.command.activity]
+          : [],
+      );
+      assert.deepEqual(
+        pages.map((page) => [page.payload, page.createdAt > NOW]),
+        [
+          [
+            {
+              attachmentId: "new-1",
+              path: "/attachments/new-1.html",
+              title: "First",
+              height: 400,
+            },
+            true,
+          ],
+          [
+            {
+              attachmentId: "new-2",
+              path: "/attachments/new-2.html",
+              title: "Second",
+              height: 500,
+            },
+            true,
+          ],
+        ],
+      );
+      assert.isTrue(pages[0]!.createdAt < pages[1]!.createdAt);
+      assert.deepEqual(callInput(fixture.transferCalls, "discard"), TRANSFER_ID);
+      assert.equal(fixture.transferCalls.filter((call) => call.op === "discard").length, 2);
+    }),
+  );
+
+  it.effect("lands the chat without them when they arrive broken", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ transfers: arrivedPages });
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({ pages: { ...pagesInput, sha256: "other" } }),
+      );
+      assert.equal(result.pagesCarried, 0);
+      assert.deepEqual(fixture.storedPages, []);
+      assert.equal(fixture.dispatched.length, 3);
+    }),
+  );
+
+  it.effect("lands the chat when a page can't be saved", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({ transfers: arrivedPages, storePageFails: true });
+      const result = yield* makeThreadContinueLand(fixture.deps)(landInput({ pages: pagesInput }));
+      assert.equal(result.pagesCarried, 0);
+    }),
+  );
+});
+
+describe("moving a project", () => {
+  const createProject = {
+    kind: "create",
+    remoteUrl: "git@github.com:uno/uno.git",
+    destinationPath: "/home/unowork/projects/uno",
+    title: "uno",
+  } as const;
+
+  it.effect("snapshots the project's own folder, whichever worktree the chat is in", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        thread: Option.some(threadDetail({ worktreePath: "/worktrees/chat" })),
+      });
+      yield* makeThreadContinueSnapshot(fixture.deps)({ threadId: THREAD_ID, scope: "project" });
+      assert.equal(callInput<string>(fixture.transportCalls, "readHead"), "/Users/dev/uno");
+    }),
+  );
+
+  it.effect("reads .env.local with .env, the chat's folder first, and never a template", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        thread: Option.some(threadDetail({ worktreePath: "/worktrees/chat" })),
+        envFileNames: {
+          "/worktrees/chat": [".env.local"],
+          "/Users/dev/uno": [".env.local", ".env.production"],
+        },
+        envFiles: {
+          "/worktrees/chat/.env.local": "A=chat",
+          "/Users/dev/uno/.env.local": "A=root",
+          "/Users/dev/uno/.env.production": "B=2",
+        },
+      });
+      const result = yield* makeThreadContinueSnapshot(fixture.deps)({
+        threadId: THREAD_ID,
+        includeEnv: true,
+      });
+      assert.deepEqual(result.envFiles, [
+        { name: ".env.local", text: "A=chat" },
+        { name: ".env.production", text: "B=2" },
+      ]);
+    }),
+  );
+
+  it("treats example files as templates, and a path as nothing at all", () => {
+    assert.isTrue(isCarriedEnvFileName(".env.local"));
+    assert.isTrue(isCarriedEnvFileName(".env.production.local"));
+    assert.isFalse(isCarriedEnvFileName(".env"));
+    assert.isFalse(isCarriedEnvFileName(".env.example"));
+    assert.isFalse(isCarriedEnvFileName(".env.sample.local"));
+    assert.isFalse(isCarriedEnvFileName(".env.template"));
+    assert.isFalse(isCarriedEnvFileName(".env./../secret"));
+  });
+
+  it.effect("puts the files in a folder it just created, on the source's branch", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture();
+      const result = yield* makeThreadContinueLand(fixture.deps)(
+        landInput({
+          project: createProject,
+          placement: "project-root",
+          sourceBranch: "feat/login",
+          envText: "TOKEN=1\n",
+          envFiles: [{ name: ".env.local", text: "A=1\n" }],
+        }),
+      );
+
+      const root = createProject.destinationPath;
+      assert.deepEqual(callInput(fixture.transportCalls, "checkoutBranch"), {
+        cwd: root,
+        branch: "feat/login",
+        startPoint: "headsha",
+      });
+      assert.isFalse(ops(fixture.transportCalls).includes("addWorktree"));
+      assert.equal(callInput<{ cwd: string }>(fixture.transportCalls, "restoreTree").cwd, root);
+      assert.deepEqual(fixture.writtenEnv, [
+        { folder: root, text: "TOKEN=1\n" },
+        { folder: root, text: "A=1\n", name: ".env.local" },
+      ]);
+      const create = fixture.dispatched.find((entry) => entry.command.type === "thread.create");
+      assert.equal(
+        create?.command.type === "thread.create" ? create.command.worktreePath : "unset",
+        null,
+      );
+      assert.equal(result.worktreePath, result.projectPath);
+      assert.equal(result.branch, "feat/login");
+    }),
+  );
+
+  it.effect("names a branch itself when the source was on none, or on a name like a flag", () =>
+    Effect.gen(function* () {
+      for (const sourceBranch of [null, "--force"]) {
+        const fixture = makeFixture();
+        yield* makeThreadContinueLand(fixture.deps)(
+          landInput({ project: createProject, placement: "project-root", sourceBranch }),
+        );
+        assert.equal(
+          callInput<{ branch: string }>(fixture.transportCalls, "checkoutBranch").branch,
+          "uno/continue/thread-1",
+        );
+      }
+    }),
+  );
+
+  it.effect("never touches a project that was already there", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture();
+      yield* makeThreadContinueLand(fixture.deps)(
+        landInput({ placement: "project-root", sourceBranch: "main" }),
+      );
+      assert.isFalse(ops(fixture.transportCalls).includes("checkoutBranch"));
+      assert.include(ops(fixture.transportCalls), "addWorktree");
+    }),
+  );
+
+  it.effect("never touches a repository it found at the destination", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        existingDirectories: new Set([createProject.destinationPath]),
+      });
+      yield* makeThreadContinueLand(fixture.deps)(
+        landInput({ project: createProject, placement: "project-root", sourceBranch: "main" }),
+      );
+      assert.isFalse(ops(fixture.transportCalls).includes("checkoutBranch"));
+      assert.include(ops(fixture.transportCalls), "addWorktree");
     }),
   );
 });

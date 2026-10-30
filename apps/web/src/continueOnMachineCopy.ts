@@ -18,7 +18,7 @@ export const CONTINUE_ON_MACHINE_COPY = {
   needsUpdate: "Needs update",
   copyEnv: "Also copy .env secrets",
   copyEnvHint:
-    "Off by default. When on, the project's .env is sent to the other machine over your connection and saved in the chat's new folder there.",
+    "Off by default. When on, .env and files like .env.local go to the other machine over your connection and are saved in the chat's new folder there.",
   archiveSource: "Archive this chat here once it opens there",
   submit: "Continue there",
   submitting: "Continuing…",
@@ -28,17 +28,23 @@ export const CONTINUE_ON_MACHINE_COPY = {
   updateRequired: (machineLabel: string) =>
     `Update Uno Work on ${machineLabel} to continue chats there. The new version sends files directly between your machines instead of through GitHub.`,
   successTitle: (machineLabel: string) => `Now on ${machineLabel}`,
-  successDescription: (input: {
-    readonly branch: string;
-    readonly projectCreated: boolean;
-    readonly envWritten: boolean;
-    readonly modelFallbackApplied: boolean;
-  }): string => {
+  successDescription: (
+    input: {
+      readonly branch: string;
+      readonly projectCreated: boolean;
+      readonly envWritten: boolean;
+      readonly modelFallbackApplied: boolean;
+      readonly pagesCarried?: number | undefined;
+    },
+    pagesLeftBehind = 0,
+  ): string => {
     const parts: string[] = [`The chat and files are there, on a new branch ${input.branch}`];
     if (input.projectCreated) parts.push("the project was added to that machine");
     if (input.envWritten) parts.push(".env copied");
     if (input.modelFallbackApplied)
       parts.push("it runs on a different model, see the first message");
+    if (input.pagesCarried) parts.push(pagesPhrase(input.pagesCarried, "moved"));
+    if (pagesLeftBehind > 0) parts.push(pagesPhrase(pagesLeftBehind, "stayed here"));
     return `${parts.join(" · ")}.`;
   },
   failureTitle: "Could not continue on that machine",
@@ -69,6 +75,50 @@ export const CONTINUE_ON_MACHINE_COPY = {
   seedShowHistory: "Show history",
   seedHideHistory: "Hide history",
 } as const;
+
+/** The same dialog, moving a whole project. */
+export const MOVE_PROJECT_COPY = {
+  action: "Move to another computer…",
+  title: "Move to another computer",
+  description: (projectName: string) =>
+    `"${projectName}" opens on the computer you pick, with all its files, including work you haven't committed. Your latest chat continues there. Other chats stay here, and so does this copy of the files.`,
+  targetLabel: "Move to",
+  copyEnv: "Copy .env files",
+  copyEnvHint:
+    "Your keys go straight to that computer, not through GitHub. Turn this off if it shouldn't have them.",
+  submit: "Move project",
+  submitting: "Moving…",
+  successDescription: (
+    input: {
+      readonly worktreePath: string;
+      readonly projectPath: string;
+      readonly branch: string;
+      readonly envWritten: boolean;
+      readonly pagesCarried?: number | undefined;
+    },
+    pagesLeftBehind = 0,
+  ): string => {
+    const parts: string[] = [
+      input.worktreePath === input.projectPath
+        ? `The project is in ${input.projectPath}`
+        : `The project was already there. Your work is on a new branch ${input.branch}`,
+    ];
+    if (input.envWritten) parts.push(".env copied");
+    if (input.pagesCarried) parts.push(pagesPhrase(input.pagesCarried, "moved"));
+    if (pagesLeftBehind > 0) parts.push(pagesPhrase(pagesLeftBehind, "stayed here"));
+    return `${parts.join(" · ")}.`;
+  },
+  targetExists: (projectPath: string, machineLabel: string) =>
+    `${machineLabel} already has this project. Your work opens in a separate copy on a new branch, and the files in ${projectPath} stay as they are.`,
+  connectComputer: "Connect",
+  connecting: "Connecting…",
+  notConnected: "Not connected yet",
+  connectFailed: (machineLabel: string) => `Couldn't connect to ${machineLabel}.`,
+} as const;
+
+function pagesPhrase(count: number, what: string): string {
+  return `${count} ${count === 1 ? "page" : "pages"} ${what}`;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

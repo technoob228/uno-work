@@ -111,6 +111,33 @@ export function findMachineNeedingUpdate(
   );
 }
 
+/** Whether the target can take a chat's HTML pages; asked after connecting. */
+export function descriptorCarriesPages(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.threadContinuePages === true;
+}
+
+/**
+ * The chat that carries a project across: the latest one in the project's own
+ * folder, else the latest of any. Its recent history opens on the other side.
+ */
+export function pickProjectMoveChat<
+  T extends {
+    readonly archivedAt: string | null;
+    readonly worktreePath: string | null;
+    readonly createdAt: string;
+    readonly updatedAt?: string | undefined;
+  },
+>(chats: ReadonlyArray<T>): T | null {
+  const latest = chats
+    .filter((chat) => chat.archivedAt === null)
+    .toSorted((left, right) =>
+      (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt),
+    );
+  return latest.find((chat) => chat.worktreePath === null) ?? latest[0] ?? null;
+}
+
 export interface ContinueOnMachineDeps {
   /** Makes sure the target environment has a live connection before any RPC. */
   readonly ensureTargetConnected: () => Promise<void>;
@@ -120,6 +147,8 @@ export interface ContinueOnMachineDeps {
    * target's descriptor is fresh.
    */
   readonly assertMachinesSupported: () => void;
+  /** The target takes the chat's HTML pages. Older daemons don't; the chat moves without them. */
+  readonly targetCarriesPages?: () => boolean;
   /** `thread.continue.inspect` on the TARGET environment (read-only). */
   readonly inspect: (input: ThreadContinueInspectInput) => Promise<ThreadContinueInspectResult>;
   /** `thread.continue.snapshot` on the SOURCE environment. */
@@ -157,6 +186,11 @@ export interface ContinueOnMachineInput {
   /** Send `.env` along. Off unless the person ticked the box. */
   readonly copyEnv: boolean;
   readonly archiveSource: boolean;
+  /**
+   * Move the project, not just this chat: the snapshot takes the project's own
+   * folder, and a project new to the target gets the files in that folder.
+   */
+  readonly moveProject?: boolean;
 }
 
 /** What has already succeeded; passed back in on retry so finished steps are skipped. */
@@ -164,8 +198,20 @@ export interface ContinueOnMachineProgress {
   readonly snapshot?: ThreadContinueSnapshotResult;
   /** Chunks that reached the target, in order. */
   readonly sentChunks?: number;
+  /** The pages file is whole on the target. Sent again from the start otherwise. */
+  readonly pagesSent?: boolean;
   readonly landed?: ThreadContinueLandResult;
   readonly completed?: ThreadContinueCompleteResult;
+}
+
+/** Pages that did not make it, for the success line. */
+export function pagesLeftBehind(result: {
+  readonly snapshot: ThreadContinueSnapshotResult;
+  readonly landed: ThreadContinueLandResult;
+}): number {
+  const packed = result.snapshot.pagesTransfer?.pageCount ?? 0;
+  const lost = Math.max(0, packed - (result.landed.pagesCarried ?? 0));
+  return (result.snapshot.pagesLeftBehind ?? 0) + lost;
 }
 
 export interface ContinueOnMachineResult {
@@ -248,18 +294,22 @@ export async function runContinueOnMachine(
   const snapshot =
     current.snapshot ??
     (await step("saving", () =>
-      deps.snapshot({ threadId: input.sourceThreadId, includeEnv: input.copyEnv }),
+      deps.snapshot({
+        threadId: input.sourceThreadId,
+        includeEnv: input.copyEnv,
+        ...(deps.targetCarriesPages?.() === true ? { includePages: true } : {}),
+        ...(input.moveProject ? { scope: "project" as const } : {}),
+      }),
     ));
   current = { ...current, snapshot };
+  const pages = snapshot.pagesTransfer;
+  const totalBytes = snapshot.sizeBytes + (pages?.sizeBytes ?? 0);
 
   if (!current.landed) {
     await step("sending", async () => {
       let sent = current.sentChunks ?? 0;
       let restarted = false;
-      deps.onSendProgress?.(
-        Math.min(sent * snapshot.chunkBytes, snapshot.sizeBytes),
-        snapshot.sizeBytes,
-      );
+      deps.onSendProgress?.(Math.min(sent * snapshot.chunkBytes, snapshot.sizeBytes), totalBytes);
       while (sent < snapshot.chunkCount) {
         try {
           const chunk = await deps.readChunk({ transferId: snapshot.transferId, index: sent });
@@ -270,7 +320,7 @@ export async function runContinueOnMachine(
           });
           sent += 1;
           current = { ...current, sentChunks: sent };
-          deps.onSendProgress?.(receivedBytes, snapshot.sizeBytes);
+          deps.onSendProgress?.(receivedBytes, totalBytes);
         } catch (cause) {
           const reason = continueErrorReason(cause);
           if (reason === "transfer_not_found") {
@@ -288,6 +338,24 @@ export async function runContinueOnMachine(
             continue;
           }
           throw cause;
+        }
+      }
+      // Pages come second and never stop the move: if they don't arrive, the
+      // chat lands without them and the success line says so.
+      if (pages && current.pagesSent !== true) {
+        try {
+          for (let index = 0; index < pages.chunkCount; index += 1) {
+            const chunk = await deps.readChunk({ transferId: pages.transferId, index });
+            const { receivedBytes } = await deps.writeChunk({
+              transferId: pages.transferId,
+              offset: index * snapshot.chunkBytes,
+              data: chunk.data,
+            });
+            deps.onSendProgress?.(snapshot.sizeBytes + receivedBytes, totalBytes);
+          }
+          current = { ...current, pagesSent: true };
+        } catch {
+          current = { ...current, pagesSent: false };
         }
       }
     });
@@ -309,8 +377,21 @@ export async function runContinueOnMachine(
         interactionMode: snapshot.interactionMode,
         seedText: snapshot.seedText,
         envText: input.copyEnv ? snapshot.envText : null,
+        ...(input.copyEnv && snapshot.envFiles ? { envFiles: snapshot.envFiles } : {}),
         sourceMachineLabel: snapshot.sourceMachineLabel,
         sourceThreadId: snapshot.sourceThreadId,
+        ...(input.moveProject
+          ? { placement: "project-root" as const, sourceBranch: snapshot.sourceBranch }
+          : {}),
+        ...(pages && current.pagesSent === true
+          ? {
+              pages: {
+                transferId: pages.transferId,
+                sizeBytes: pages.sizeBytes,
+                sha256: pages.sha256,
+              },
+            }
+          : {}),
       }),
     ));
 
@@ -330,6 +411,9 @@ export async function runContinueOnMachine(
     // The target has its copy; the source's bundle is only clutter. The
     // daemon also sweeps old bundles, so a failure here is ignored.
     await deps.discardSource({ transferId: snapshot.transferId }).catch(() => undefined);
+    if (pages) {
+      await deps.discardSource({ transferId: pages.transferId }).catch(() => undefined);
+    }
   }
   current = { ...current, landed };
 

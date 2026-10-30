@@ -151,6 +151,9 @@ import { useUiStateStore } from "../uiStateStore";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { CONTINUE_ON_MACHINE_COPY } from "../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "./ContinueOnMachineDialog";
+import { MoveProjectToBoxDialog } from "./MoveProjectToBoxDialog";
+import { pickProjectMoveChat } from "../continueOnMachine";
+import { MOVE_PROJECT_COPY } from "../continueOnMachineCopy";
 import { MachineChip } from "./MachineChip";
 import { MachineIdentityProvider, useMachineIdentity } from "./MachineIdentityContext";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -3158,6 +3161,8 @@ export default function Sidebar() {
     setSnoozePickerTarget(null);
   }, [attemptSnooze, snoozePickerTarget, snoozePickerWake]);
   const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
+  const [moveProjectChat, setMoveProjectChat] = useState<ScopedThreadRef | null>(null);
+  const [moveEmptyProject, setMoveEmptyProject] = useState<Project | null>(null);
   const [projectFolderTarget, setProjectFolderTarget] = useState<ScopedThreadRef | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRenameTarget | null>(null);
   // "On all my computers": each computer's daemon syncs its own projects.
@@ -4043,6 +4048,21 @@ export default function Sidebar() {
           if (!open) setContinueThreadTarget(null);
         }}
       />
+      <ContinueOnMachineDialog
+        moveProject
+        threadRef={moveProjectChat}
+        open={moveProjectChat !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveProjectChat(null);
+        }}
+      />
+      <MoveProjectToBoxDialog
+        project={moveEmptyProject}
+        open={moveEmptyProject !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveEmptyProject(null);
+        }}
+      />
       <Dialog
         open={snoozePickerTarget !== null}
         onOpenChange={(open) => {
@@ -4151,6 +4171,20 @@ export default function Sidebar() {
   });
   const dRenameProject = (project: Project | null) =>
     project ? () => setProjectRenameTarget(toRenameTarget(project)) : null;
+  // A chat carries the project across; a project with none only has its remote to go on.
+  const openProjectMove = (project: Project) => {
+    const chat = pickProjectMoveChat(
+      selectSidebarThreadsAcrossEnvironments(useStore.getState()).filter(
+        (thread) =>
+          thread.environmentId === project.environmentId && thread.projectId === project.id,
+      ),
+    );
+    if (chat) {
+      setMoveProjectChat(scopeThreadRef(chat.environmentId, chat.id));
+    } else {
+      setMoveEmptyProject(project);
+    }
+  };
   // A project row's menu. A project on several computers is one row: each
   // action then asks which computer's entry it is about.
   const dProjectMenu =
@@ -4175,6 +4209,11 @@ export default function Sidebar() {
           label: "On all my computers",
           labelFor: (member: Project) => toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
           run: (member: Project) => void toggleProjectSync(member),
+        },
+        {
+          id: "move",
+          label: MOVE_PROJECT_COPY.action,
+          run: (member: Project) => openProjectMove(member),
         },
         {
           id: "settings",

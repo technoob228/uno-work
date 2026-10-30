@@ -173,6 +173,7 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       threadSettlement: true,
       agentThreads: true,
       threadContinueDirect: true,
+      threadContinuePages: true,
       assistantChat: true,
       // p7: the assistant's AI and sign-ins (assistantsFixtures.ts answers them).
       assistantLlm: true,

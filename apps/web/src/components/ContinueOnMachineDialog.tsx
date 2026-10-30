@@ -3,6 +3,10 @@
  * `.env` only when ticked) to another connected machine and opens it there in
  * a new worktree. The files travel through this client, never through GitHub.
  *
+ * With `moveProject` the same run moves the project a chat belongs to: its own
+ * folder, `.env` on by default, into the project folder on a computer that
+ * doesn't have it yet.
+ *
  * The dialog only wires environment APIs and the store into
  * `runContinueOnMachine`; the step order, retry checkpointing and target
  * project resolution live in `continueOnMachine.ts`.
@@ -35,8 +39,10 @@ import {
   ContinueOnMachineFailure,
   ContinueUpdateRequiredError,
   describeContinueTarget,
+  descriptorCarriesPages,
   findMachineNeedingUpdate,
   inspectContinueTarget,
+  pagesLeftBehind,
   resolveContinueTargetProject,
   runContinueOnMachine,
   waitUntil,
@@ -45,7 +51,11 @@ import {
   type ContinueOnMachineStep,
   type ContinueTargetProject,
 } from "../continueOnMachine";
-import { CONTINUE_ON_MACHINE_COPY, STEP_LABEL_WITH_MACHINE } from "../continueOnMachineCopy";
+import {
+  CONTINUE_ON_MACHINE_COPY,
+  MOVE_PROJECT_COPY,
+  STEP_LABEL_WITH_MACHINE,
+} from "../continueOnMachineCopy";
 import { createEnvironmentApi, ensureEnvironmentApi } from "../environmentApi";
 import {
   readPrimaryEnvironmentDescriptor,
@@ -58,6 +68,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { useMachineRows } from "../hooks/useMachineRows";
 import { cn } from "../lib/utils";
 import {
   selectProjectByRef,
@@ -67,6 +78,7 @@ import {
   useStore,
 } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { connectUnoBoxById, isBoxDead } from "../unoBoxConnect";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogBackdrop, DialogPortal, DialogViewport } from "./ui/dialog";
@@ -82,6 +94,8 @@ export interface ContinueOnMachineDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   /** Picked when the dialog opens ("Continue on the MacBook" from a plan at its limit). */
   readonly initialTargetEnvironmentId?: EnvironmentId | null;
+  /** Move the project of `threadRef`, with that chat continuing on the other computer. */
+  readonly moveProject?: boolean;
 }
 
 interface TargetOption {
@@ -141,6 +155,7 @@ export function ContinueOnMachineDialog({
   open,
   onOpenChange,
   initialTargetEnvironmentId = null,
+  moveProject = false,
 }: ContinueOnMachineDialogProps) {
   const navigate = useNavigate();
   const savedRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
@@ -156,7 +171,7 @@ export function ContinueOnMachineDialog({
   );
 
   const [targetEnvironmentId, setTargetEnvironmentId] = useState<EnvironmentId | null>(null);
-  const [copyEnv, setCopyEnv] = useState(false);
+  const [copyEnv, setCopyEnv] = useState(moveProject);
   const [archiveSource, setArchiveSource] = useState(false);
   const [inspection, setInspection] = useState<InspectionState>(IDLE_INSPECTION);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
@@ -181,10 +196,60 @@ export function ContinueOnMachineDialog({
     [project, savedRuntime],
   );
 
+  const machines = useMachineRows();
+  const primaryEnvironmentId = primaryDescriptor?.environmentId ?? null;
+  // Boxes on the account this device has never opened: one click connects them.
+  const unconnectedBoxes = useMemo(
+    () =>
+      machines.flatMap((row) =>
+        row.environmentId === null && row.box && !isBoxDead(row.box.status)
+          ? [{ key: row.key, label: row.label, boxId: row.box.id }]
+          : [],
+      ),
+    [machines],
+  );
+  const [connectingKey, setConnectingKey] = useState<string | null>(null);
+  const connectBox = useCallback(
+    async (box: { readonly key: string; readonly label: string; readonly boxId: number }) => {
+      if (primaryEnvironmentId === null || connectingKey !== null) return;
+      setConnectingKey(box.key);
+      try {
+        const record = await connectUnoBoxById(primaryEnvironmentId, box.boxId, box.label);
+        setTargetEnvironmentId(record.environmentId);
+        setRun(IDLE_RUN);
+      } catch {
+        toastManager.add({ type: "error", title: MOVE_PROJECT_COPY.connectFailed(box.label) });
+      } finally {
+        setConnectingKey(null);
+      }
+    },
+    [connectingKey, primaryEnvironmentId],
+  );
+
   const targets = useMemo<ReadonlyArray<TargetOption>>(() => {
-    return (
-      Object.values(savedRegistry)
-        .filter((record) => record.environmentId !== threadRef?.environmentId)
+    // The computer serving this app can take a chat too: a box's chat back to the Mac.
+    const primary: ReadonlyArray<TargetOption> =
+      primaryDescriptor && primaryDescriptor.environmentId !== threadRef?.environmentId
+        ? [
+            {
+              environmentId: primaryDescriptor.environmentId,
+              label: primaryDescriptor.label,
+              connected: true,
+              needsUpdate: primaryDescriptor.capabilities.threadContinueDirect !== true,
+              hasProject:
+                resolveTargetProjectFor(primaryDescriptor.environmentId)?.kind === "existing",
+              detail: CONTINUE_ON_MACHINE_COPY.connected,
+            },
+          ]
+        : [];
+    return [
+      ...primary,
+      ...Object.values(savedRegistry)
+        .filter(
+          (record) =>
+            record.environmentId !== threadRef?.environmentId &&
+            record.environmentId !== primaryDescriptor?.environmentId,
+        )
         .map((record) => {
           const runtime = savedRuntime[record.environmentId];
           const connected = runtime?.connectionState === "connected";
@@ -208,15 +273,19 @@ export function ContinueOnMachineDialog({
               ? CONTINUE_ON_MACHINE_COPY.needsUpdate
               : `${hasProject ? CONTINUE_ON_MACHINE_COPY.hasProject : CONTINUE_ON_MACHINE_COPY.willAddProject} · ${status}`,
           };
-        })
-        // Machines that already have the project first.
-        .toSorted(
-          (left, right) =>
-            Number(right.hasProject) - Number(left.hasProject) ||
-            left.label.localeCompare(right.label),
-        )
+        }),
+    ].toSorted(
+      // Machines that already have the project first.
+      (left, right) =>
+        Number(right.hasProject) - Number(left.hasProject) || left.label.localeCompare(right.label),
     );
-  }, [resolveTargetProjectFor, savedRegistry, savedRuntime, threadRef?.environmentId]);
+  }, [
+    primaryDescriptor,
+    resolveTargetProjectFor,
+    savedRegistry,
+    savedRuntime,
+    threadRef?.environmentId,
+  ]);
 
   const selectedTarget = targets.find((target) => target.environmentId === targetEnvironmentId);
 
@@ -248,24 +317,32 @@ export function ContinueOnMachineDialog({
 
   const reset = useCallback(() => {
     setTargetEnvironmentId(null);
-    setCopyEnv(false);
+    setCopyEnv(moveProject);
     setArchiveSource(false);
     setSendProgress(null);
     setInspection(IDLE_INSPECTION);
     setRun(IDLE_RUN);
     setPending(false);
-  }, []);
+  }, [moveProject]);
+
+  // The dialog stays mounted between projects: the default follows what it opens for.
+  useEffect(() => {
+    if (open) setCopyEnv(moveProject);
+  }, [moveProject, open]);
 
   const ensureTargetConnected = useCallback(
     async (targetId: EnvironmentId) => {
       await ensureEnvironmentConnectionBootstrapped(targetId);
-      if (savedRuntime[targetId]?.connectionState !== "connected") {
+      if (
+        targetId !== primaryEnvironmentId &&
+        savedRuntime[targetId]?.connectionState !== "connected"
+      ) {
         await reconnectSavedEnvironment(targetId).catch(() => undefined);
       }
       // Throws with a useful message when the connection never came up.
       createEnvironmentApi(requireEnvironmentConnection(targetId).client);
     },
-    [savedRuntime],
+    [primaryEnvironmentId, savedRuntime],
   );
 
   useEffect(() => {
@@ -361,6 +438,7 @@ export function ContinueOnMachineDialog({
           ]);
           if (blocked !== null) throw new ContinueUpdateRequiredError(blocked);
         },
+        targetCarriesPages: () => descriptorCarriesPages(readDescriptor(targetId)),
         inspect: (input) => ensureEnvironmentApi(targetId).threadContinue.inspect(input),
         snapshot: (input) =>
           ensureEnvironmentApi(threadRef.environmentId).threadContinue.snapshot(input),
@@ -386,15 +464,19 @@ export function ContinueOnMachineDialog({
             targetMachineLabel: target.label,
             targetProject,
             copyEnv,
-            archiveSource,
+            archiveSource: !moveProject && archiveSource,
+            moveProject,
           },
           progress,
         );
         handleOpenChange(false);
+        const leftBehind = pagesLeftBehind(result);
         toastManager.add({
           type: "success",
           title: CONTINUE_ON_MACHINE_COPY.successTitle(target.label),
-          description: CONTINUE_ON_MACHINE_COPY.successDescription(result.landed),
+          description: moveProject
+            ? MOVE_PROJECT_COPY.successDescription(result.landed, leftBehind)
+            : CONTINUE_ON_MACHINE_COPY.successDescription(result.landed, leftBehind),
         });
       } catch (caught) {
         const failure =
@@ -424,6 +506,7 @@ export function ContinueOnMachineDialog({
       ensureTargetConnected,
       handleOpenChange,
       inspection,
+      moveProject,
       openThreadOnTarget,
       pending,
       project,
@@ -466,10 +549,14 @@ export function ContinueOnMachineDialog({
           >
             <div className="flex flex-col gap-1 border-b border-border p-6">
               <DialogPrimitive.Title className="font-heading font-semibold text-lg leading-none">
-                {CONTINUE_ON_MACHINE_COPY.title}
+                {moveProject ? MOVE_PROJECT_COPY.title : CONTINUE_ON_MACHINE_COPY.title}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-                {thread ? CONTINUE_ON_MACHINE_COPY.description(thread.title) : "Pick a chat first."}
+                {!thread
+                  ? "Pick a chat first."
+                  : moveProject
+                    ? MOVE_PROJECT_COPY.description(project?.name ?? thread.title)
+                    : CONTINUE_ON_MACHINE_COPY.description(thread.title)}
               </DialogPrimitive.Description>
             </div>
 
@@ -484,9 +571,11 @@ export function ContinueOnMachineDialog({
               <div className="flex flex-col gap-4 px-6 py-4">
                 <div className="flex flex-col gap-2">
                   <span className="text-muted-foreground text-xs">
-                    {CONTINUE_ON_MACHINE_COPY.targetLabel}
+                    {moveProject
+                      ? MOVE_PROJECT_COPY.targetLabel
+                      : CONTINUE_ON_MACHINE_COPY.targetLabel}
                   </span>
-                  {targets.length === 0 ? (
+                  {targets.length === 0 && unconnectedBoxes.length === 0 ? (
                     <p className="text-muted-foreground text-sm">
                       {CONTINUE_ON_MACHINE_COPY.noTargets}
                     </p>
@@ -532,6 +621,30 @@ export function ContinueOnMachineDialog({
                           </button>
                         );
                       })}
+                      {unconnectedBoxes.map((box) => (
+                        <div
+                          key={box.key}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <ServerIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate text-sm text-foreground">{box.label}</span>
+                            <span className="shrink-0 text-[11px] text-muted-foreground">
+                              {MOVE_PROJECT_COPY.notConnected}
+                            </span>
+                          </span>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={pending || connectingKey !== null}
+                            onClick={() => void connectBox(box)}
+                          >
+                            {connectingKey === box.key
+                              ? MOVE_PROJECT_COPY.connecting
+                              : MOVE_PROJECT_COPY.connectComputer}
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {machineNeedingUpdate !== null ? (
@@ -547,6 +660,7 @@ export function ContinueOnMachineDialog({
                       machineLabel={selectedTarget.label}
                       inspection={inspectionForTarget}
                       targetState={targetState}
+                      moveProject={moveProject}
                       disabled={pending}
                       onRetry={() => setInspectionAttempt((attempt) => attempt + 1)}
                     />
@@ -564,24 +678,28 @@ export function ContinueOnMachineDialog({
                     />
                     <div className="flex flex-col gap-0.5">
                       <Label htmlFor="continue-copy-env" className="text-sm text-foreground">
-                        {CONTINUE_ON_MACHINE_COPY.copyEnv}
+                        {moveProject ? MOVE_PROJECT_COPY.copyEnv : CONTINUE_ON_MACHINE_COPY.copyEnv}
                       </Label>
                       <span className="text-muted-foreground text-xs">
-                        {CONTINUE_ON_MACHINE_COPY.copyEnvHint}
+                        {moveProject
+                          ? MOVE_PROJECT_COPY.copyEnvHint
+                          : CONTINUE_ON_MACHINE_COPY.copyEnvHint}
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="continue-archive-source"
-                      checked={archiveSource}
-                      disabled={pending}
-                      onCheckedChange={(checked) => setArchiveSource(checked === true)}
-                    />
-                    <Label htmlFor="continue-archive-source" className="text-sm text-foreground">
-                      {CONTINUE_ON_MACHINE_COPY.archiveSource}
-                    </Label>
-                  </div>
+                  {moveProject ? null : (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="continue-archive-source"
+                        checked={archiveSource}
+                        disabled={pending}
+                        onCheckedChange={(checked) => setArchiveSource(checked === true)}
+                      />
+                      <Label htmlFor="continue-archive-source" className="text-sm text-foreground">
+                        {CONTINUE_ON_MACHINE_COPY.archiveSource}
+                      </Label>
+                    </div>
+                  )}
                 </div>
 
                 {showSteps ? (
@@ -650,10 +768,14 @@ export function ContinueOnMachineDialog({
                   <ArrowRightIcon className="size-3.5" />
                 )}
                 {pending
-                  ? CONTINUE_ON_MACHINE_COPY.submitting
+                  ? moveProject
+                    ? MOVE_PROJECT_COPY.submitting
+                    : CONTINUE_ON_MACHINE_COPY.submitting
                   : run.failedStep !== null
                     ? CONTINUE_ON_MACHINE_COPY.retry
-                    : CONTINUE_ON_MACHINE_COPY.submit}
+                    : moveProject
+                      ? MOVE_PROJECT_COPY.submit
+                      : CONTINUE_ON_MACHINE_COPY.submit}
               </Button>
             </div>
           </DialogPrimitive.Popup>
@@ -671,6 +793,7 @@ function TargetProjectNotice(props: {
   readonly machineLabel: string;
   readonly inspection: Exclude<InspectionState, { status: "idle" }>;
   readonly targetState: ReturnType<typeof describeContinueTarget> | null;
+  readonly moveProject: boolean;
   readonly disabled: boolean;
   readonly onRetry: () => void;
 }) {
@@ -701,7 +824,10 @@ function TargetProjectNotice(props: {
       </p>
     );
   }
-  const text = CONTINUE_ON_MACHINE_COPY.targetState(targetState, machineLabel);
+  const text =
+    props.moveProject && targetState.kind === "exists"
+      ? MOVE_PROJECT_COPY.targetExists(targetState.projectPath, machineLabel)
+      : CONTINUE_ON_MACHINE_COPY.targetState(targetState, machineLabel);
   return (
     <p
       className={cn(
