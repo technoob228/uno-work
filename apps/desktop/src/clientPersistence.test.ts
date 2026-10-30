@@ -70,6 +70,7 @@ const clientSettings: ClientSettings = {
   sidebarEnvironmentScope: "all",
   sidebarGroupBy: "project_machine",
   sidebarInboxMode: false,
+  sidebarHideWorkingChats: false,
   sidebarGroupLevels: null,
   sidebarMachineSortOrder: "name",
   sidebarMachineIdentity: {
