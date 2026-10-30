@@ -26,6 +26,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed, type PendingApproval } from "../../session-logic";
+import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
@@ -784,6 +785,15 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             environmentId={ctx.activeThreadEnvironmentId}
             cwd={ctx.markdownCwd}
             workspaceRoot={ctx.workspaceRoot}
+          />
+        </div>
+      )}
+
+      {row.kind === "html-render" && (
+        <div className="min-w-0">
+          <HtmlRenderFrame
+            environmentId={ctx.activeThreadEnvironmentId}
+            htmlRender={row.htmlRender}
           />
         </div>
       )}

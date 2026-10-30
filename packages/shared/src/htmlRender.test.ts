@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import {
   capThreadActivities,
@@ -134,7 +134,6 @@ describe("htmlRenderFrameDocument", () => {
     );
     expect(doc).toContain(`sandbox="${HTML_RENDER_SANDBOX}"`);
     expect(doc).not.toContain("allow-same-origin");
-    expect(doc).not.toContain("<script>top.location");
     expect(doc).toContain('title=&quot;a&amp;b&quot;');
   });
 

@@ -57,6 +57,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveHtmlRenderEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -1796,8 +1797,13 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        deriveHtmlRenderEntries(threadActivities),
+      ),
+    [activeThread?.proposedPlans, threadActivities, timelineMessages, workLogEntries],
   );
   // Фильтр видимости встроенного чата: применяем на выборке строк, а не в
   // рендере — плагин не может ни добавить строку, ни расширить права.
