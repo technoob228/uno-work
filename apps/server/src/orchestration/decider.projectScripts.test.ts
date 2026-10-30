@@ -279,6 +279,106 @@ describe("decider project scripts", () => {
     });
   });
 
+  it("a turn runs in the thread's stored mode: only runtime-mode.set narrows it", async () => {
+    const now = new Date().toISOString();
+    const base = {
+      occurredAt: now,
+      causationEventId: null,
+      metadata: {},
+    };
+    const withProject = await Effect.runPromise(
+      projectEvent(createEmptyReadModel(now), {
+        ...base,
+        sequence: 1,
+        eventId: asEventId("evt-project"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        commandId: CommandId.make("cmd-project"),
+        correlationId: CommandId.make("cmd-project"),
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const fullAccess = await Effect.runPromise(
+      projectEvent(withProject, {
+        ...base,
+        sequence: 2,
+        eventId: asEventId("evt-thread"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.created",
+        commandId: CommandId.make("cmd-thread"),
+        correlationId: CommandId.make("cmd-thread"),
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const turnMode = async (readModel: typeof fullAccess) => {
+      const events = await Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-turn"),
+            threadId: ThreadId.make("thread-1"),
+            message: { messageId: asMessageId("m-1"), role: "user", text: "hi", attachments: [] },
+            runtimeMode: "approval-required",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            createdAt: now,
+          },
+          readModel,
+        }),
+      );
+      const started = (Array.isArray(events) ? events : [events]).find(
+        (event) => event.type === "thread.turn-start-requested",
+      );
+      return (started?.payload as { runtimeMode?: string } | undefined)?.runtimeMode;
+    };
+    // The command's mode is ignored: Ask on the turn alone would stay full access.
+    expect(await turnMode(fullAccess)).toBe("full-access");
+
+    const narrowed = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.make("cmd-mode"),
+          threadId: ThreadId.make("thread-1"),
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        readModel: fullAccess,
+      }),
+    );
+    if (Array.isArray(narrowed)) throw new Error("Expected a single event.");
+    const asked = await Effect.runPromise(
+      projectEvent(fullAccess, {
+        ...narrowed,
+        sequence: 3,
+        eventId: asEventId("evt-mode"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-mode"),
+      } as never),
+    );
+    expect(await turnMode(asked)).toBe("approval-required");
+  });
+
   it("emits thread.interaction-mode-set from thread.interaction-mode.set", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);

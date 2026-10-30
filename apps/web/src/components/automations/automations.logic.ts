@@ -124,7 +124,7 @@ export function emptyHint(name: string): string {
 /** How a webhook or a form works in a chat, on its card and in the dialog. */
 export function askLine(ask: boolean): string {
   return ask
-    ? "Ask mode: it reads and answers in the chat, anything else waits for your Allow"
+    ? "Ask mode: it reads and answers, anything else waits for your Allow"
     : "Works without asking, in the chat's own mode";
 }
 

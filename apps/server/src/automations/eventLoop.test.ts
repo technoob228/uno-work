@@ -400,6 +400,16 @@ describe("an automation a chat runs (29.10)", () => {
     expect(chatTurns[0]!.prompt).toContain("<outside_input_");
   });
 
+  it("a webhook to an assistant: its own thread, in Ask, whatever the trigger says", async () => {
+    const { world, loop } = stand();
+    world.queue = [event(33, { kind: "webhook", payload: { ask: false, body: "x" } })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(world.turns[0]).toMatchObject({ ask: true, threadTitle: "From outside" });
+    expect(world.turns[0]!.prompt).toContain("<outside_input_");
+    expect(world.turns[0]!.prompt).not.toContain("chat_create");
+  });
+
   it("the person turned Ask off: the chat's own mode", async () => {
     const chatTurns: ChatTurnInput[] = [];
     const { world, loop } = stand({

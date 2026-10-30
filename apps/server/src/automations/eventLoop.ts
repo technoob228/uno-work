@@ -72,6 +72,8 @@ const FAST_EMPTY_PAUSE_MS = 5_000;
 const TURN_TIMEOUT_SEC = 30 * 60;
 /** A form or a webhook waits for a busy chat this long: the person is often in it. */
 const OUTSIDE_BUSY_WAIT_MS = 25 * 60_000;
+/** Where an assistant reads what came from outside (never its main conversation). */
+export const OUTSIDE_THREAD_TITLE = "From outside";
 const RESULT_ATTEMPTS = 3;
 
 // ── Journal of processed events ────────────────────────────────────────
@@ -356,6 +358,7 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
           return "ran" as const;
         }
 
+        const outside = isOutsideRun(event);
         const name = yield* deps.assistantName(event.assistant);
         if (name === null) {
           yield* report(event, {
@@ -369,9 +372,14 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
             projectId: ProjectId.make(event.assistant),
             prompt: automationEventPrompt(event),
             header: automationHeader(event.name),
-            threadTitle: AUTOMATION_THREAD_TITLE,
+            // A stranger's text stays out of the assistant's other work: its
+            // own thread, in Ask mode, whatever the assistant's mode is.
+            threadTitle: outside ? OUTSIDE_THREAD_TITLE : AUTOMATION_THREAD_TITLE,
             source: AUTOMATION_SOURCE,
             timeoutSec: TURN_TIMEOUT_SEC,
+            ...(outside
+              ? { ask: true, ...(deps.markOutside ? { onThread: deps.markOutside } : {}) }
+              : {}),
           })
           .pipe(
             Effect.map((result) => ({ ok: true as const, result })),

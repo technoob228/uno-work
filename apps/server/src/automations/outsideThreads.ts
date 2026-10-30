@@ -5,8 +5,10 @@
  * only read this computer or tell the person (`outsideTextAsks`,
  * `unoWork/policy.ts`) — whatever mode the chat is put back in.
  *
- * A file in the state dir (the last 500 chats): a restart in the middle of a
- * run must not open the gate.
+ * A file in the state dir: a restart in the middle of a run must not open the
+ * gate. It fails closed: a file that can't be read gates every chat until the
+ * next write, and a mark that can't be written stops the run. The console caps
+ * outside runs at 100 a day, so the last 50,000 chats are over a year of them.
  *
  * @module automations/outsideThreads
  */
@@ -19,7 +21,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../config.ts";
 
 export const OUTSIDE_THREADS_FILE = "automations-outside-threads.json";
-export const OUTSIDE_THREADS_KEEP = 500;
+export const OUTSIDE_THREADS_KEEP = 50_000;
 
 export interface OutsideThreadsShape {
   readonly has: (threadId: string) => Effect.Effect<boolean>;
@@ -40,21 +42,31 @@ export function parseOutsideThreads(raw: unknown, keep = OUTSIDE_THREADS_KEEP): 
 
 export const makeOutsideThreads = (file: string, keep = OUTSIDE_THREADS_KEEP) =>
   Effect.gen(function* () {
-    const ids = yield* Effect.promise(async () => {
+    const read = yield* Effect.promise(async () => {
       try {
-        return parseOutsideThreads(JSON.parse(await fs.readFile(file, "utf8")), keep);
-      } catch {
-        return [];
+        const raw: unknown = JSON.parse(await fs.readFile(file, "utf8"));
+        const shaped = typeof raw === "object" && raw !== null && "threads" in raw;
+        return { ids: parseOutsideThreads(raw, keep), unreadable: !shaped };
+      } catch (error) {
+        const missing = (error as { code?: string }).code === "ENOENT";
+        return { ids: [] as string[], unreadable: !missing };
       }
     });
+    const { ids } = read;
+    let unreadable = read.unreadable;
+    if (unreadable) {
+      yield* Effect.logError("outside threads file unreadable: every chat asks first").pipe(
+        Effect.annotateLogs({ file }),
+      );
+    }
     const set = new Set(ids);
     const lock = yield* Semaphore.make(1);
     const shape: OutsideThreadsShape = {
-      has: (threadId) => Effect.sync(() => set.has(threadId)),
+      has: (threadId) => Effect.sync(() => unreadable || set.has(threadId)),
       mark: (threadId) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            if (set.has(threadId)) return;
+            if (set.has(threadId) && !unreadable) return;
             ids.push(threadId);
             set.add(threadId);
             while (ids.length > keep) set.delete(ids.shift()!);
@@ -64,7 +76,8 @@ export const makeOutsideThreads = (file: string, keep = OUTSIDE_THREADS_KEEP) =>
               const tmp = `${file}.${process.pid}.tmp`;
               await fs.writeFile(tmp, snapshot, { mode: 0o600 });
               await fs.rename(tmp, file);
-            }).pipe(Effect.ignoreCause({ log: true }));
+            });
+            unreadable = false;
           }),
         ),
     };

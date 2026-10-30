@@ -462,10 +462,13 @@ export function AutomationCard(props: {
             computer={props.computer}
           />
         ) : null}
-        {isOutsideTrigger(automation.trigger) &&
-        automationExecutorOf(automation).kind !== "assistant" ? (
+        {isOutsideTrigger(automation.trigger) ? (
           <p className="text-xs text-muted-foreground" data-testid="automation-ask-line">
-            {askLine(automation.trigger.ask !== false)}
+            {askLine(
+              // An assistant has no switch: it always reads this in Ask.
+              automationExecutorOf(automation).kind === "assistant" ||
+                automation.trigger.ask !== false,
+            )}
           </p>
         ) : null}
         {automation.trigger.kind === "webhook" ? (

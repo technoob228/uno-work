@@ -8,6 +8,7 @@ import {
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
+  holdsOutsideText,
 } from "./MessagesTimeline.logic";
 
 describe("workingReassurance", () => {
@@ -649,5 +650,21 @@ describe("changed files for people", () => {
     expect(displayChangedFilePath("/home/unowork")).toBe("~");
     expect(displayChangedFilePath("src/app")).toBe("src/app");
     expect(displayChangedFilePath("homework/x")).toBe("homework/x");
+  });
+});
+
+describe("holdsOutsideText", () => {
+  const message = (role: string, text: string) => ({ kind: "message", message: { role, text } });
+
+  it("sees the tag in a person's message, not in the agent's quote of it", () => {
+    expect(holdsOutsideText([message("user", "Plain question")])).toBe(false);
+    expect(holdsOutsideText([message("assistant", "<outside_input_ab12>")])).toBe(false);
+    expect(holdsOutsideText([{ kind: "work" }])).toBe(false);
+    expect(
+      holdsOutsideText([
+        message("user", "Plain question"),
+        message("user", "[Automation]\n<outside_input_ab12>\nhello\n</outside_input_ab12>"),
+      ]),
+    ).toBe(true);
   });
 });

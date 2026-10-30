@@ -86,6 +86,13 @@ export interface AssistantEventTurnInput {
   readonly timeoutSec?: number;
   /** Who started it, for the command origin ("notetaker"). */
   readonly source: string;
+  /**
+   * The prompt carries a stranger's text (a webhook): the turn runs in its own
+   * thread `threadTitle`, never in Uno's main conversation, and that thread
+   * works in Ask mode. `onThread` runs before the turn starts.
+   */
+  readonly ask?: boolean;
+  readonly onThread?: (threadId: string) => Effect.Effect<void>;
 }
 
 /**
@@ -169,10 +176,15 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const pollMs = options?.pollMs ?? POLL_MS;
 
     /** The thread a scheduled turn of `projectId` runs in (created if needed). */
-    const targetThread = (projectId: ProjectId, tokenId: string, title = SCHEDULED_THREAD_TITLE) =>
+    const targetThread = (
+      projectId: ProjectId,
+      tokenId: string,
+      title = SCHEDULED_THREAD_TITLE,
+      ownThread = false,
+    ) =>
       Effect.gen(function* () {
         const snapshot = yield* projections.getShellSnapshot();
-        if (projectId === ASSISTANT_PROJECT_ID) {
+        if (projectId === ASSISTANT_PROJECT_ID && !ownThread) {
           const main = findMarkedAssistantChat(snapshot.threads);
           if (main !== null) return main.id;
         }
@@ -202,6 +214,28 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
           { origin: assistantCommandOrigin({ assistantKey: projectId, tokenId }) },
         );
         return threadId;
+      });
+
+    /**
+     * Ask mode for a chat about to read a stranger's text. The turn itself
+     * can't do it: `thread.turn.start` runs in the thread's stored mode,
+     * whatever the command says. After the wait for idle, because a mode
+     * change restarts the harness session.
+     */
+    const narrowToAsk = (threadId: ThreadId, reason: string) =>
+      Effect.gen(function* () {
+        const shell = yield* projections.getThreadShellById(threadId);
+        if (Option.isSome(shell) && shell.value.runtimeMode === "approval-required") return;
+        yield* engine.dispatch(
+          {
+            type: "thread.runtime-mode.set",
+            commandId: CommandId.make(`automation:${crypto.randomUUID()}`),
+            threadId,
+            runtimeMode: "approval-required",
+            createdAt: new Date().toISOString(),
+          },
+          { origin: systemCommandOrigin("automations", reason) },
+        );
       });
 
     const sessionBusy = (threadId: ThreadId) =>
@@ -318,6 +352,8 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         timeoutSec: input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60,
         logName: input.source,
         failurePrefix: "The assistant could not finish",
+        ...(input.ask ? { ask: true } : {}),
+        ...(input.onThread ? { onThread: input.onThread } : {}),
       });
 
     const runIn = (input: {
@@ -329,13 +365,22 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
       readonly timeoutSec: number;
       readonly logName: string | null;
       readonly failurePrefix: string;
+      readonly ask?: boolean;
+      readonly onThread?: (threadId: string) => Effect.Effect<void>;
     }) =>
       Effect.gen(function* () {
         const { projectId } = input;
         const caller = { tokenId: input.tokenId };
         const deadlineMs = Date.now() + input.timeoutSec * 1_000;
-        const threadId = yield* targetThread(projectId, caller.tokenId, input.threadTitle);
+        const threadId = yield* targetThread(
+          projectId,
+          caller.tokenId,
+          input.threadTitle,
+          input.ask === true,
+        );
+        if (input.onThread) yield* input.onThread(threadId);
         yield* waitUntilIdle(threadId);
+        if (input.ask) yield* narrowToAsk(threadId, `${input.logName ?? "assistant"} outside run`);
         const shell = yield* projections
           .getThreadShellById(threadId)
           .pipe(Effect.orElseSucceed(() => Option.none()));
@@ -354,7 +399,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             },
             // The assistant's own mode ("Autonomous" = full access,
             // "Cautious" = auto-accept-edits) — never widened here.
-            runtimeMode: yield* ownRuntimeMode(projectId),
+            runtimeMode: input.ask ? "approval-required" : yield* ownRuntimeMode(projectId),
             interactionMode: Option.isSome(shell) ? shell.value.interactionMode : "default",
             createdAt: requestedAtIso,
           },
@@ -470,6 +515,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         const threadId = yield* chatOf(input.target, input.reason, ask);
         if (input.onThread) yield* input.onThread(threadId);
         yield* waitUntilIdle(threadId, input.busyWaitMs);
+        if (ask) yield* narrowToAsk(threadId, input.reason);
         const shell = yield* projections
           .getThreadShellById(threadId)
           .pipe(Effect.orElseSucceed(() => Option.none()));

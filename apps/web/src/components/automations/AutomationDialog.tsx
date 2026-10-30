@@ -875,6 +875,14 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                 ? "Runs in this chat, with what it already knows, in the chat's own mode"
                 : "Opens a new chat in the project each time, set up like this one"}
           </p>
+        ) : choice && outsideEvent && !formEvent ? (
+          <p
+            className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            data-testid="automation-mode-line"
+          >
+            <HandIcon className="size-3.5 text-amber-500" />
+            {askLine(true)}
+          </p>
         ) : choice && !formEvent ? (
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"

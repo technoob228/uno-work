@@ -234,6 +234,72 @@ describe("scheduled assistant turn", () => {
     expect(event).toMatchObject({ status: "delivered", reply: "Reviewed PR #12: two nits." });
   });
 
+  describe("a stranger's text (a form, a webhook)", () => {
+    const inChat = (world: World, ask: boolean, marks: string[]) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const turns = yield* AssistantScheduledTurns;
+          return yield* turns.runInChat!({
+            target: { kind: "chat", threadId: MAIN },
+            prompt: "[Automation …]",
+            timeoutSec: 30,
+            reason: "automation 7",
+            ...(ask ? { ask: true, onThread: (id) => Effect.sync(() => void marks.push(id)) } : {}),
+          });
+        }).pipe(Effect.provide(makeLayer(world, { mainChat: true, projectId: "assistant-home" }))),
+      );
+
+    it("puts a Full access chat in Ask before the turn, marked first", async () => {
+      const world = freshWorld("Read it.");
+      const marks: string[] = [];
+      await inChat(world, true, marks);
+      expect(marks).toEqual([MAIN]);
+      expect(world.dispatched.map((command) => command.type)).toEqual([
+        "thread.runtime-mode.set",
+        "thread.turn.start",
+      ]);
+      expect(world.dispatched[0]).toMatchObject({
+        threadId: MAIN,
+        runtimeMode: "approval-required",
+      });
+    });
+
+    it("leaves a chat alone when no stranger's text is in it", async () => {
+      const world = freshWorld("Done.");
+      await inChat(world, false, []);
+      expect(world.dispatched.map((command) => command.type)).toEqual(["thread.turn.start"]);
+    });
+
+    it("an assistant reads it in its own thread, never in Uno's main conversation", async () => {
+      const world = freshWorld("A new order came in.");
+      const marks: string[] = [];
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const turns = yield* AssistantScheduledTurns;
+          return yield* turns.runEvent({
+            projectId: ProjectId.make("assistant-home"),
+            prompt: "[Automation …]",
+            header: "⚙️ Orders\n\n",
+            threadTitle: "From outside",
+            source: "automation",
+            timeoutSec: 30,
+            ask: true,
+            onThread: (id) => Effect.sync(() => void marks.push(id)),
+          });
+        }).pipe(Effect.provide(makeLayer(world, { mainChat: true, projectId: "assistant-home" }))),
+      );
+      expect(world.dispatched.map((command) => command.type)).toEqual([
+        "thread.create",
+        "thread.runtime-mode.set",
+        "thread.turn.start",
+      ]);
+      const start = world.dispatched[2]!;
+      expect(start.threadId).not.toBe(MAIN);
+      expect(start.runtimeMode).toBe("approval-required");
+      expect(marks).toEqual([start.threadId]);
+    });
+  });
+
   it("stays silent on NO_REPLY", async () => {
     const world = freshWorld("NO_REPLY");
     const result = await runTurn(

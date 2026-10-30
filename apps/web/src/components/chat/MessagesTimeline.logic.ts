@@ -541,3 +541,18 @@ export function changedFilesSummaryLabel(count: number): string {
 export function displayChangedFilePath(path: string): string {
   return path.replace(/^\/?home\/[^/]+(?=\/|$)/u, "~");
 }
+
+/** Text from outside Uno is in this chat (the server's automations/prompt.ts writes this tag). */
+export function holdsOutsideText(
+  entries: ReadonlyArray<{
+    readonly kind: string;
+    readonly message?: { readonly role: string; readonly text: string };
+  }>,
+): boolean {
+  return entries.some(
+    (entry) =>
+      entry.kind === "message" &&
+      entry.message?.role === "user" &&
+      entry.message.text.includes("<outside_input_"),
+  );
+}

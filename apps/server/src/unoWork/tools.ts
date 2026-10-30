@@ -3607,6 +3607,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       if (chat === "this_chat") parts.push("start this chat in Ask mode");
       if (chat === "new_chat") parts.push("start a new chat in Ask mode each time");
       if (chat === "off") parts.push("stop starting a chat");
+      const instruction = str(args, "chatInstruction")?.trim();
+      if (instruction && chat !== "off") parts.push(`what it does: ${instruction.slice(0, 200)}`);
       return parts.join(" · ") || undefined;
     },
     run: (deps, args) =>
@@ -4103,7 +4105,7 @@ export function runUnoWorkTool(
     const outward = asksFirstCategory(tool.name, args);
     const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
     const outside =
-      outsideTextAsks(tool.name) && deps.outsideText ? yield* deps.outsideText : false;
+      outsideTextAsks(tool.name, args) && deps.outsideText ? yield* deps.outsideText : false;
     if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null || outside) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").

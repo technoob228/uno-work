@@ -1,6 +1,7 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Suspense,
+  createContext,
   use,
   useCallback,
   memo,
@@ -229,6 +230,13 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(href.trim()) ?? href.trim();
 }
 
+/**
+ * A chat holding text from outside Uno (a form, a webhook): an image address
+ * written by an agent that text steered would carry data out the moment the
+ * chat opens. There a remote image stays a link.
+ */
+export const RemoteImagesOffContext = createContext(false);
+
 function isSafeMarkdownImageSrc(src: string | undefined): src is string {
   if (!src) return false;
   return MARKDOWN_SAFE_IMAGE_DATA_URL_REGEX.test(src) || /^https?:\/\//i.test(src);
@@ -272,11 +280,19 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
     }
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
+  const remoteImagesOff = use(RemoteImagesOffContext);
   const markdownComponents = useMemo<Components>(
     () => ({
       img({ node: _node, src, alt }) {
         if (!isSafeMarkdownImageSrc(src)) {
           return alt ? <span>{alt}</span> : null;
+        }
+        if (remoteImagesOff && /^https?:/i.test(src)) {
+          return (
+            <a href={src} target="_blank" rel="noopener noreferrer">
+              {alt || "Image"}
+            </a>
+          );
         }
         return (
           <img
@@ -390,7 +406,14 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
         );
       },
     }),
-    [diffThemeName, fileLinkByHref, fileLinkParentSuffixByPath, isStreaming, openUrl],
+    [
+      diffThemeName,
+      fileLinkByHref,
+      fileLinkParentSuffixByPath,
+      isStreaming,
+      openUrl,
+      remoteImagesOff,
+    ],
   );
 
   return (

@@ -28,6 +28,10 @@ import { automationErrorBody, type AutomationClientError } from "./consoleClient
 
 const json = (body: unknown, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
 
+/** A webhook's URL and signing secret: no cache keeps them. */
+const secretJson = (body: unknown) =>
+  HttpServerResponse.setHeader(json(body), "Cache-Control", "no-store");
+
 const refused = (error: AutomationClientError) => json(automationErrorBody(error), error.status);
 
 const readJson = Effect.gen(function* () {
@@ -165,7 +169,7 @@ export const automationsHookRouteLayer = HttpRouter.add(
     Effect.gen(function* () {
       const id = yield* automationId;
       return yield* automations.hook(id).pipe(
-        Effect.map((hook) => json(hook)),
+        Effect.map((hook) => secretJson(hook)),
         Effect.catch((error) => Effect.succeed(refused(error))),
       );
     }),
@@ -179,7 +183,7 @@ export const automationsHookRotateRouteLayer = HttpRouter.add(
     Effect.gen(function* () {
       const id = yield* automationId;
       return yield* automations.rotateHook(id).pipe(
-        Effect.map((hook) => json(hook)),
+        Effect.map((hook) => secretJson(hook)),
         Effect.catch((error) => Effect.succeed(refused(error))),
       );
     }),

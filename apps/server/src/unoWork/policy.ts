@@ -59,22 +59,22 @@ export function decideUnoWorkGate(
  * tools still run on their level; every other tool asks first. Only what reads
  * this computer's state or speaks to the person: a stranger who steers the
  * agent gets nothing out through them. Left out on purpose: `open_in_panel`
- * (opens any URL), `site_publish`, `project_keys`, `request_secret`.
+ * (opens any URL), `site_publish`, `project_keys`, `request_secret`,
+ * `messenger_send` (a link in Telegram is fetched without a click, a button's
+ * value comes back as the person's words), `chat_status` and `app_logs` (other
+ * chats' text, an app's output).
  */
 const OUTSIDE_TEXT_FREE_TOOLS: ReadonlySet<string> = new Set([
   "computer_status",
   "apps_list",
-  "app_logs",
   "files_list",
   "cloud_list",
   "drive_find",
   "file_open",
   "chats_list",
-  "chat_status",
   "chat_call_person",
   "chat_person_not_needed",
   "notify",
-  "messenger_send",
   "sites_list",
   "site_forms_get",
   "db_list",
@@ -85,7 +85,15 @@ const OUTSIDE_TEXT_FREE_TOOLS: ReadonlySet<string> = new Set([
   "uno_guide",
 ]);
 
-export function outsideTextAsks(tool: string): boolean {
+export function outsideTextAsks(
+  tool: string,
+  args: Readonly<Record<string, unknown>> = {},
+): boolean {
+  // Only the Inbox line runs free: its button can open any URL, and its copy
+  // to the messenger is the path `messenger_send` asks for.
+  if (tool === "notify" && (args["open"] !== undefined || args["alsoMessenger"] === true)) {
+    return true;
+  }
   return !OUTSIDE_TEXT_FREE_TOOLS.has(tool);
 }
 

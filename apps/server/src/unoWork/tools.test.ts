@@ -561,9 +561,15 @@ describe("approval gate", () => {
       "browser_command",
       "site_set_password",
       "automation_create",
+      "messenger_send",
+      "chat_status",
+      "app_logs",
     ]) {
       expect(outsideTextAsks(name), name).toBe(true);
     }
+    // The Inbox line stays; a button to any URL and the messenger copy ask.
+    expect(outsideTextAsks("notify", { open: { url: "https://x.test" } })).toBe(true);
+    expect(outsideTextAsks("notify", { alsoMessenger: true })).toBe(true);
     // Reads of this computer and telling the person stay.
     for (const name of ["computer_status", "files_list", "notify", "uno_guide"]) {
       expect(outsideTextAsks(name), name).toBe(false);
