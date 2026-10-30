@@ -226,6 +226,15 @@ function setRun(automationId: number, runId: number, patch: Partial<AutomationRu
   if (machine) update(machine, automationId, { lastRun: list[0] ?? null });
 }
 
+/** A webhook's URL in the demo: made up here, nothing listens on it. */
+const demoHook = (id: number) => ({
+  url: `https://api.uno.place/api/v1/hooks/${id}/demo-token`,
+  signingSecret: "whsec_demo",
+  requireSignature: false,
+  perMinute: 60,
+  maxBodyBytes: 262_144,
+});
+
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 /** The demo's start: a few automations on uno-work in the live account (`automations=some`). */
@@ -312,6 +321,37 @@ export function resetAutomations(input: { readonly world: AssistWorld }) {
     executor: { kind: "chat", threadId: "w-export", title: "Daily orders export to Drive" },
     enabled: false,
     createdAgo: 86_400_000,
+  });
+  // From the outside (30.10): a form on a report, a webhook from a shop.
+  const form = make("work", {
+    assistant: "",
+    assistantName: "",
+    name: "Questions from the Q3 report",
+    instruction: "Answer the question using the report in this project.",
+    trigger: { kind: "site.form", slug: "q3-report" },
+    executor: { kind: "chat", threadId: "w-export", title: "Daily orders export to Drive" },
+    createdAgo: 86_400_000,
+  });
+  addRun(form, {
+    kind: "site.form",
+    title: "Form on q3-report",
+    url: null,
+    state: "done",
+    reason: null,
+    threadId: "w-export",
+    summary: "Answered the question about churn. Nothing changed.",
+    createdAt: ago(35),
+    startedAt: ago(35),
+    finishedAt: ago(34),
+  });
+  make("work", {
+    assistant: "",
+    assistantName: "",
+    name: "New order from the shop",
+    instruction: "Check the order and tell me if the address looks wrong.",
+    trigger: { kind: "webhook" },
+    executor: { kind: "chat", threadId: "w-export", title: "Daily orders export to Drive" },
+    createdAgo: 86_400_000 * 2,
   });
   make("work", {
     assistant: "assistant-mia",
@@ -442,7 +482,12 @@ export function automationHandlers(deps: {
       if (machine.key === "mac") {
         return json({ available: false, reason: "not_cloud_computer", automations: [] });
       }
-      return json({ available: true, reason: null, automations: listOf(machine.key).map(fresh) });
+      return json({
+        available: true,
+        reason: null,
+        hooksEnabled: true,
+        automations: listOf(machine.key).map(fresh),
+      });
     }),
     http.post("*/api/manager/automations", async ({ request }) => {
       const machine = deps.machineOf(request);
@@ -476,6 +521,12 @@ export function automationHandlers(deps: {
       });
       return json(created, { status: 201 });
     }),
+    http.get("*/api/manager/automations/:id/hook", ({ params }) =>
+      json(demoHook(Number(params.id))),
+    ),
+    http.post("*/api/manager/automations/:id/hook/rotate", ({ params }) =>
+      json(demoHook(Number(params.id))),
+    ),
     http.get("*/api/manager/automations/:id/runs", ({ params }) =>
       json({ runs: runs.get(Number(params.id)) ?? [] }),
     ),
