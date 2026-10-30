@@ -34,6 +34,8 @@ import {
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
+import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
+import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -181,9 +183,13 @@ import {
 } from "./chat/embeddedChatVisibility";
 import { ChatHeader } from "./chat/ChatHeader";
 import { DraftHeroHeadline, DraftHeroStarters } from "./chat/DraftHeroHeadline";
-import { ChatPlanLimitNotice, DraftPlanRoomNotice } from "./chat/PlanRoomNotice";
+import { ChatPlanLimitNotice, DraftPlanRoomNotice, PlanResumeLine } from "./chat/PlanRoomNotice";
 import { unoSmartTarget } from "./chat/unoCreditsChoice.logic";
-import { isPlanLimitText, planProviderForDriver } from "../planRoom/planRoom.logic";
+import {
+  isPlanLimitText,
+  pendingPlanResume,
+  planProviderForDriver,
+} from "../planRoom/planRoom.logic";
 import { resolveDraftHeroState } from "./chat/draftHero.logic";
 import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransition";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -4040,7 +4046,67 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.messages,
     selectedProvider,
   ]);
+  // The daemon goes on by itself after the reset (planResume/): "Resumes at 16:40".
+  const planResume = useMemo(() => pendingPlanResume(threadActivities), [threadActivities]);
   const smartTargetHere = useMemo(() => unoSmartTarget(providerStatuses), [providerStatuses]);
+  /**
+   * "Continue with <account>": the person's click moves this chat to their
+   * other account. The chat keeps running there, so its saved model goes too.
+   */
+  const onContinueWithAccount = useCallback(
+    async (selection: ModelSelection) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api || !activeThread || !isServerThread || isSendBusy || sendInFlightRef.current) return;
+      const threadIdForSend = activeThread.id;
+      const messageIdForSend = newMessageId();
+      const createdAt = new Date().toISOString();
+      const text = `${UNO_WORK_NOTE_PREFIX}${ACCOUNT_SWITCH_NOTE_BODY}`;
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      setThreadError(threadIdForSend, null);
+      isAtEndRef.current = true;
+      setComposerDraftModelSelection(
+        scopeThreadRef(activeThread.environmentId, threadIdForSend),
+        selection,
+      );
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.meta.update",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          modelSelection: selection,
+        });
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: { messageId: messageIdForSend, role: "user", text, attachments: [] },
+          modelSelection: selection,
+          titleSeed: activeThread.title,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+        sendInFlightRef.current = false;
+      } catch (error) {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+        throw error;
+      }
+    },
+    [
+      activeThread,
+      beginLocalDispatch,
+      environmentId,
+      interactionMode,
+      isSendBusy,
+      isServerThread,
+      resetLocalDispatch,
+      runtimeMode,
+      setComposerDraftModelSelection,
+      setThreadError,
+    ],
+  );
   const onRetryAfterReauth = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
     if (
@@ -4624,11 +4690,24 @@ export default function ChatView(props: ChatViewProps) {
                         environmentId={activeThread.environmentId}
                         threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
                         driver={selectedProvider}
+                        instanceId={
+                          activeThread.session?.providerInstanceId ??
+                          activeThread.modelSelection.instanceId
+                        }
+                        currentModel={activeThread.modelSelection.model}
                         stopText={planLimitStopText}
                         stoppedAt={activeLatestTurn?.completedAt ?? null}
                         lastRequest={lastUserMessageText ?? ""}
                         smartTarget={smartTargetHere}
                         canContinueWithHistory={isElectron && Boolean(activeProject)}
+                        onContinueWithAccount={onContinueWithAccount}
+                      />
+                    ) : null}
+                    {planResume !== null && isServerThread ? (
+                      <PlanResumeLine
+                        environmentId={activeThread.environmentId}
+                        threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
+                        resumeAt={planResume.resumeAt}
                       />
                     ) : null}
                   </>
@@ -4911,6 +4990,7 @@ export default function ChatView(props: ChatViewProps) {
                   environmentId={activeThread.environmentId}
                   draftId={draftId}
                   driver={selectedProvider}
+                  instanceId={composerActiveProvider ?? activeProviderInstanceId}
                   smartTarget={smartTargetHere}
                   onUseModel={(selection) =>
                     onProviderModelSelect(selection.instanceId, selection.model)

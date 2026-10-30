@@ -4,12 +4,20 @@
  * #10300): every Claude / ChatGPT plan the person is signed in to on any of
  * their computers, once per account, with where it's signed in, the room
  * left now and when a full one comes back — plus what a new chat does when
- * the plan on its computer is at its limit.
+ * the plan on its computer is at its limit, whether a stopped chat goes on by
+ * itself after the reset, and second accounts on the computer open here.
  *
  * Home's "AI plan limits" widget stays the detailed view of one computer.
  */
-import { memo } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { memo, useState } from "react";
 
+import { useEnvironmentPlanFeatures } from "../../environments/planLimitsSupport";
+import {
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../environments/settings/serverSettings";
+import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { cn } from "../../lib/utils";
@@ -23,7 +31,9 @@ import {
 import { usePlanComputers } from "../../planRoom/usePlanComputers";
 import { ClaudeAI, OpenAI } from "../Icons";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
+import { MultipleAccountsRows } from "./MultipleAccounts";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const SWITCH_LABEL = {
@@ -45,7 +55,49 @@ function planSummary(plan: PooledPlan, now: number): string {
   return `Room on ${plan.withRoom} of ${total} accounts.${back}`;
 }
 
+/** "Resume automatically": on this computer, whose daemon does the resuming. */
+function ResumeAutomaticallyRow({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const settings = useEnvironmentSettings(environmentId);
+  const { updateSettings } = useUpdateEnvironmentSettings(environmentId);
+  const [saving, setSaving] = useState(false);
+  const { isCloud } = useActiveMachine();
+  const checked = settings?.resumeAfterPlanLimit ?? true;
+  const save = (next: boolean) => {
+    setSaving(true);
+    void Promise.resolve(updateSettings({ resumeAfterPlanLimit: next }))
+      .catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Couldn't save",
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      )
+      .finally(() => setSaving(false));
+  };
+  return (
+    <SettingsRow
+      title="Resume automatically"
+      description={
+        isCloud
+          ? "A chat stopped by the limit goes on by itself once, right after the reset. If this computer is asleep then, it goes on when the computer wakes."
+          : "A chat stopped by the limit goes on by itself once, right after the reset, if Uno Work is running on this computer then."
+      }
+      control={
+        <Switch
+          checked={checked}
+          disabled={saving || settings === null}
+          onCheckedChange={(next) => save(next === true)}
+          aria-label="Resume automatically"
+          data-testid="settings-resume-automatically"
+        />
+      }
+    />
+  );
+}
+
 export const AiPlansSection = memo(function AiPlansSection() {
+  const { environmentId } = useActiveMachine();
+  const features = useEnvironmentPlanFeatures(environmentId);
   const { computers, pending } = usePlanComputers();
   const clock = useMinuteClock();
   const now = Math.max(Date.parse(clock), Date.now());
@@ -167,6 +219,12 @@ export const AiPlansSection = memo(function AiPlansSection() {
           </Select>
         }
       />
+      {environmentId && features.planResume ? (
+        <ResumeAutomaticallyRow environmentId={environmentId} />
+      ) : null}
+      {environmentId && features.providerAccounts ? (
+        <MultipleAccountsRows environmentId={environmentId} />
+      ) : null}
     </SettingsSection>
   );
 });
