@@ -77,6 +77,7 @@ const makeV1Client = () => RpcTest.makeClient(WsRpcGroup);
 type V1Client = Effect.Success<ReturnType<typeof makeV1Client>>;
 type V1Requirements = Exclude<Effect.Services<ReturnType<typeof makeV1Client>>, Scope.Scope>;
 
+// @effect-diagnostics-next-line anyUnknownInErrorContext:off
 export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
   Effect.gen(function* () {
     const projections = yield* ProjectionSnapshotQuery;
@@ -205,6 +206,7 @@ export const makeV2HandlersLayer = WsRpcGroupV2.toLayer(
             Stream.filter((event) => event.sequence > sequence),
             Stream.groupedWithin(V2_BATCH_MAX, V2_COALESCE),
             Stream.mapEffect((batch) =>
+              // @effect-diagnostics-next-line anyUnknownInErrorContext:off
               Effect.gen(function* (): Generator<any, ReadonlyArray<V2Json>, any> {
                 const lastSequence = Math.max(...batch.map((event) => event.sequence));
                 const deleted = batch.find((event) => event.type === "thread.deleted");
