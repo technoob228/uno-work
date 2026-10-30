@@ -1914,82 +1914,110 @@ describe("ProviderCommandReactor", () => {
     expect(input.indexOf("User: (Uno Work)")).toBe(-1);
   });
 
-  it("rejects provider changes after a thread is already bound to a session provider", async () => {
-    const harness = await createHarness();
-    const now = new Date().toISOString();
-
-    await Effect.runPromise(
+  const sendInThread = (
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    input: {
+      readonly tag: string;
+      readonly text: string;
+      readonly createdAt: string;
+      readonly instanceId?: string;
+      readonly model?: string;
+    },
+  ) =>
+    Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-provider-switch-1"),
+        commandId: CommandId.make(`cmd-turn-start-${input.tag}`),
         threadId: ThreadId.make("thread-1"),
         message: {
-          messageId: asMessageId("user-message-provider-switch-1"),
+          messageId: asMessageId(`user-message-${input.tag}`),
           role: "user",
-          text: "first",
+          text: input.text,
           attachments: [],
         },
+        ...(input.instanceId !== undefined
+          ? {
+              modelSelection: {
+                instanceId: ProviderInstanceId.make(input.instanceId),
+                model: input.model ?? "claude-opus-4-6",
+              },
+            }
+          : {}),
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        createdAt: now,
+        createdAt: input.createdAt,
       }),
     );
 
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
+  const threadOf = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
+    const readModel = await harness.readModel();
+    return readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+  };
+
+  const failedTurnDetail = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
+    await waitFor(
+      async () =>
+        (await threadOf(harness))?.activities.some(
+          (activity) => activity.kind === "provider.turn.start.failed",
+        ) ?? false,
+    );
+    const failed = (await threadOf(harness))?.activities.find(
+      (activity) => activity.kind === "provider.turn.start.failed",
+    );
+    return (failed?.payload as { detail?: string } | undefined)?.detail ?? "";
+  };
+
+  it("moves a chat to another agent: fresh session, history in the prompt, a line in the feed", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, { tag: "switch-1", text: "first", createdAt: now });
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-provider-switch-2"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-provider-switch-2"),
-          role: "user",
-          text: "second",
-          attachments: [],
-        },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-6",
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(async () => {
-      const readModel = await harness.readModel();
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
+    await sendInThread(harness, {
+      tag: "switch-2",
+      text: "second",
+      createdAt: now,
+      instanceId: "claudeAgent",
     });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
 
-    expect(harness.startSession.mock.calls.length).toBe(1);
-    expect(harness.sendTurn.mock.calls.length).toBe(1);
-    expect(harness.stopSession.mock.calls.length).toBe(0);
+    expect(harness.stopSession.mock.calls.length).toBe(1);
+    const started = harness.startSession.mock.calls[1]?.[1] as {
+      readonly providerInstanceId?: string;
+      readonly resumeCursor?: unknown;
+      readonly runtimeMode?: string;
+    };
+    expect(started.providerInstanceId).toBe("claudeAgent");
+    expect(started.resumeCursor).toBeUndefined();
+    expect(started.runtimeMode).toBe("approval-required");
 
-    const readModel = await harness.readModel();
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.session?.threadId).toBe("thread-1");
-    expect(thread?.session?.providerName).toBe("codex");
-    expect(thread?.session?.runtimeMode).toBe("approval-required");
-    expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
+    const turn = harness.sendTurn.mock.calls[1]?.[0] as {
+      input?: string;
+      contextMessages?: unknown;
+    };
+    expect(turn.input).toContain("This chat was with Codex");
+    expect(turn.input).toContain("User: first");
+    expect(turn.input?.endsWith("second")).toBe(true);
+    expect(turn.input).not.toContain("User: second");
+    // The history goes once: Hermes would carry its own on top of it.
+    expect(turn.contextMessages).toBeUndefined();
+
+    const thread = await threadOf(harness);
+    const line = thread?.activities.find((activity) => activity.kind === "chat.agent-switched");
+    expect(line?.summary).toBe("Switched to Claude");
+    expect(line?.payload).toMatchObject({
+      to: "Claude",
+      fromInstanceId: "codex",
+      toInstanceId: "claudeAgent",
     });
+    expect(thread?.messages.at(-1)?.text).toBe("second");
   });
 
-  it("rejects cross-driver provider changes after the existing thread session has stopped", async () => {
+  it("moves a chat whose session already stopped, and still carries the history", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
-
+    await sendInThread(harness, { tag: "stopped-1", text: "first", createdAt: now });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.session.set",
@@ -2009,47 +2037,183 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
+    await sendInThread(harness, {
+      tag: "stopped-2",
+      text: "continue with claude",
+      createdAt: now,
+      instanceId: "claudeAgent",
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    const input = (harness.sendTurn.mock.calls[1]?.[0] as { input?: string }).input ?? "";
+    expect(input).toContain("User: first");
+    expect(input.endsWith("continue with claude")).toBe(true);
+  });
+
+  it("carries the history again when the moved chat's first turn never finished", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, { tag: "owed-1", text: "first", createdAt: now });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await sendInThread(harness, {
+      tag: "owed-2",
+      text: "second",
+      createdAt: new Date(Date.parse(now) + 1_000).toISOString(),
+      instanceId: "claudeAgent",
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await waitFor(
+      async () =>
+        (await threadOf(harness))?.activities.some(
+          (activity) => activity.kind === "chat.agent-switched",
+        ) ?? false,
+    );
+
+    await sendInThread(harness, {
+      tag: "owed-3",
+      text: "third",
+      createdAt: new Date(Date.parse(now) + 2_000).toISOString(),
+      instanceId: "claudeAgent",
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+
+    const input = (harness.sendTurn.mock.calls[2]?.[0] as { input?: string }).input ?? "";
+    expect(input).toContain("User: first");
+    expect(input.endsWith("third")).toBe(true);
+    const lines = (await threadOf(harness))?.activities.filter(
+      (activity) => activity.kind === "chat.agent-switched",
+    );
+    expect(lines?.length).toBe(1);
+  });
+
+  it("won't cut into a running turn to move to another agent", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, { tag: "busy-1", text: "first", createdAt: now });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     await Effect.runPromise(
       harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-stopped-provider-switch"),
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-busy"),
         threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-stopped-provider-switch"),
-          role: "user",
-          text: "continue with claude",
-          attachments: [],
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-busy"),
+          lastError: null,
+          updatedAt: now,
         },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-6",
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
         createdAt: now,
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await harness.readModel();
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
+    await sendInThread(harness, {
+      tag: "busy-2",
+      text: "second",
+      createdAt: now,
+      instanceId: "claudeAgent",
     });
 
-    expect(harness.startSession.mock.calls.length).toBe(0);
-    expect(harness.sendTurn.mock.calls.length).toBe(0);
-    const readModel = await harness.readModel();
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
+    expect(await failedTurnDetail(harness)).toContain("still working");
+    expect(harness.stopSession.mock.calls.length).toBe(0);
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
+  });
+
+  it("keeps an Ask chat off Hermes, which doesn't ask before every command", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, { tag: "ask-1", text: "first", createdAt: now });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await sendInThread(harness, {
+      tag: "ask-2",
+      text: "second",
+      createdAt: now,
+      instanceId: "hermes",
+      model: "uno-smart",
     });
+
+    expect(await failedTurnDetail(harness)).toContain("stays in Ask");
+    expect(harness.stopSession.mock.calls.length).toBe(0);
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
+  });
+
+  it("puts a chat with a stranger's text back in Ask when it moves", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, {
+      tag: "outside-1",
+      text: "A form came in. <outside_input_ab12>hello</outside_input_ab12>",
+      createdAt: now,
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("cmd-runtime-mode-outside"),
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+    await waitFor(async () => (await threadOf(harness))?.runtimeMode === "full-access");
+
+    await sendInThread(harness, {
+      tag: "outside-2",
+      text: "second",
+      createdAt: now,
+      instanceId: "claudeAgent",
+    });
+    await waitFor(() =>
+      harness.sendTurn.mock.calls.some(
+        (call) => (call[0] as { input?: string }).input?.endsWith("second") === true,
+      ),
+    );
+
+    expect((await threadOf(harness))?.runtimeMode).toBe("approval-required");
+    const lastStart = harness.startSession.mock.calls.at(-1)?.[1] as {
+      readonly providerInstanceId?: string;
+      readonly runtimeMode?: string;
+    };
+    expect(lastStart.providerInstanceId).toBe("claudeAgent");
+    expect(lastStart.runtimeMode).toBe("approval-required");
+    const input =
+      (harness.sendTurn.mock.calls.at(-1)?.[0] as { input?: string } | undefined)?.input ?? "";
+    expect(input).toContain("came from outside Uno");
+  });
+
+  it("refuses Hermes for a chat with a stranger's text in any mode", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    await sendInThread(harness, {
+      tag: "outside-hermes-1",
+      text: "<outside_input_ab12>hello</outside_input_ab12>",
+      createdAt: now,
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("cmd-runtime-mode-outside-hermes"),
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+    await waitFor(async () => (await threadOf(harness))?.runtimeMode === "full-access");
+
+    await sendInThread(harness, {
+      tag: "outside-hermes-2",
+      text: "second",
+      createdAt: now,
+      instanceId: "hermes",
+      model: "uno-smart",
+    });
+
+    expect(await failedTurnDetail(harness)).toContain("stays in Ask");
   });
 
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {

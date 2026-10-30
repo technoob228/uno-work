@@ -1289,7 +1289,13 @@ const make = Effect.gen(function* () {
         }
         switch (event.type) {
           case "session.exited":
-            return true;
+            // The session a chat just left says goodbye late: the one it moved
+            // to is alive.
+            return (
+              event.providerInstanceId === undefined ||
+              thread.session?.providerInstanceId === undefined ||
+              event.providerInstanceId === thread.session.providerInstanceId
+            );
           case "session.started":
           case "thread.started":
             return true;

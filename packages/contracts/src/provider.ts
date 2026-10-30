@@ -114,6 +114,8 @@ export type ProviderInterruptTurnInput = typeof ProviderInterruptTurnInput.Type;
 
 export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,
+  /** The session's history is no use any more: the next one starts empty. */
+  forgetResume: Schema.optional(Schema.Boolean),
 });
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
 

@@ -471,6 +471,44 @@ describe("agent threads bridge: reading children", () => {
     }),
   );
 
+  it.effect("pages back through a chat and reads a long message on", () =>
+    Effect.gen(function* () {
+      const long = "y".repeat(16_000) + "the rest";
+      const { handlers } = makeFixture({
+        messages: [
+          message({ role: "user", text: "first" }),
+          message({ role: "assistant", text: long }),
+          message({ role: "user", text: "third" }),
+          message({ role: "assistant", text: "fourth" }),
+        ],
+      });
+      const page = yield* handlers.getThread(scoped(), {
+        threadId: CHILD,
+        limit: "2",
+        waitMs: null,
+        before: "2",
+      });
+      const paged = body(page).messages as Array<Record<string, unknown>>;
+      assert.strictEqual(body(page).totalMessages, 4);
+      assert.deepStrictEqual(
+        paged.map((entry) => (entry.text as string).length),
+        [5, 16_000],
+      );
+      assert.strictEqual(paged[1]?.truncated, true);
+
+      const rest = yield* handlers.getThread(scoped(), {
+        threadId: CHILD,
+        limit: "1",
+        waitMs: null,
+        before: "2",
+        textOffset: "16000",
+      });
+      const onward = body(rest).messages as Array<Record<string, unknown>>;
+      assert.strictEqual(onward[0]?.text, "the rest");
+      assert.strictEqual(onward[0]?.truncated, undefined);
+    }),
+  );
+
   it.effect("long-polls while running and returns once the thread settles", () =>
     Effect.gen(function* () {
       let sleeps = 0;

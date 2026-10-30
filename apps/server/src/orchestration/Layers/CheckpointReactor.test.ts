@@ -78,6 +78,9 @@ function createProviderServiceHarness(
   const rollbackConversation = vi.fn(
     (_input: { readonly threadId: ThreadId; readonly numTurns: number }) => Effect.void,
   );
+  const stopSession = vi.fn(
+    (_input: { readonly threadId: ThreadId; readonly forgetResume?: boolean }) => Effect.void,
+  );
 
   const unsupported = <A>() =>
     Effect.die(new Error("Unsupported provider call in test")) as Effect.Effect<A, never>;
@@ -101,7 +104,7 @@ function createProviderServiceHarness(
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
-    stopSession: () => unsupported(),
+    stopSession,
     listSessions,
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     getInstanceInfo: (instanceId) =>
@@ -128,6 +131,7 @@ function createProviderServiceHarness(
   return {
     service,
     rollbackConversation,
+    stopSession,
     emit,
   };
 }
@@ -955,6 +959,83 @@ describe("CheckpointReactor", () => {
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
     ).toBe(false);
+  });
+
+  it("forgets the session when a revert empties it after the chat moved to another agent", async () => {
+    const harness = await createHarness();
+    const createdAt = new Date().toISOString();
+    const threadId = ThreadId.make("thread-1");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-switch"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+    for (const turn of [1, 2]) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.diff.complete",
+          commandId: CommandId.make(`cmd-diff-switch-${turn}`),
+          threadId,
+          turnId: asTurnId(`turn-${turn}`),
+          completedAt: createdAt,
+          checkpointRef: checkpointRefForThreadTurn(threadId, turn),
+          status: "ready",
+          files: [],
+          checkpointTurnCount: turn,
+          createdAt,
+        }),
+      );
+    }
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-agent-switched"),
+        threadId,
+        activity: {
+          id: EventId.make("activity-agent-switched"),
+          tone: "info",
+          kind: "chat.agent-switched",
+          summary: "Switched to Claude",
+          payload: {
+            to: "Claude",
+            toInstanceId: "claudeAgent",
+            fromInstanceId: "codex",
+            carried: 1,
+            total: 1,
+            turnCount: 1,
+          },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.make("cmd-revert-switch"),
+        threadId,
+        turnCount: 1,
+        createdAt,
+      }),
+    );
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+    expect(harness.provider.stopSession).toHaveBeenCalledWith({ threadId, forgetResume: true });
   });
 
   it("executes provider revert and emits thread.reverted for claude sessions", async () => {

@@ -889,6 +889,10 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       readonly threadId: string | undefined;
       readonly limit: string | null;
       readonly waitMs: string | null;
+      /** How many of the newest messages to skip: paging back through a chat. */
+      readonly before?: string | null;
+      /** Where to pick up a message that came back `truncated`. */
+      readonly textOffset?: string | null;
     },
   ) =>
     run("get", authorization, (caller) =>
@@ -904,6 +908,16 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           min: 0,
           max: AGENT_THREAD_MAX_WAIT_MS,
         });
+        const before = clampInteger(input.before ?? null, {
+          fallback: 0,
+          min: 0,
+          max: Number.MAX_SAFE_INTEGER,
+        });
+        const textOffset = clampInteger(input.textOffset ?? null, {
+          fallback: 0,
+          min: 0,
+          max: Number.MAX_SAFE_INTEGER,
+        });
         const deadline = nowMs() + waitMs;
         while (deriveAgentThreadStatus(shell) === "running" && nowMs() < deadline) {
           yield* sleep(Math.max(1, Math.min(pollIntervalMs, deadline - nowMs())));
@@ -911,7 +925,9 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         }
 
         const detail = yield* deps.projections.getThreadDetailById(shell.id);
-        const messages = Option.isSome(detail) ? detail.value.messages.slice(-limit) : [];
+        const allMessages = Option.isSome(detail) ? detail.value.messages : [];
+        const end = Math.max(0, allMessages.length - before);
+        const messages = allMessages.slice(Math.max(0, end - limit), end);
         return {
           status: 200,
           body: {
@@ -926,6 +942,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             agentsClosed: isClosedToAgents(shell),
             pendingApproval: shell.hasPendingApprovals,
             pendingUserInput: shell.hasPendingUserInput,
+            totalMessages: allMessages.length,
             messages: messages.map((message) => {
               const view: Record<string, unknown> = {
                 role: message.role,
@@ -935,10 +952,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
                 message.sentByThreadId !== caller.id
                   ? { fromThreadId: message.sentByThreadId }
                   : {}),
-                text: message.text.slice(0, AGENT_THREAD_MESSAGE_TEXT_CHARS),
+                text: message.text.slice(textOffset, textOffset + AGENT_THREAD_MESSAGE_TEXT_CHARS),
                 createdAt: message.createdAt,
               };
-              if (message.text.length > AGENT_THREAD_MESSAGE_TEXT_CHARS) view.truncated = true;
+              if (message.text.length > textOffset + AGENT_THREAD_MESSAGE_TEXT_CHARS) {
+                view.truncated = true;
+              }
               return view;
             }),
           },

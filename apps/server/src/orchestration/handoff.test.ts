@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentSwitchStillOwed,
   applyHandoffSeed,
+  buildAgentSwitchSeed,
   buildContinueSeed,
   buildHandoffContext,
   buildModelFallbackNote,
   CONTINUE_HANDOFF_OPTIONS,
   CONTINUE_SEED_PREFIX,
+  DEFAULT_HANDOFF_TOKEN_CAP,
   HANDOFF_PREAMBLE_END,
   HANDOFF_PREAMBLE_START,
+  handoffHistoryBudget,
+  handoffItems,
+  handoffTokenCap,
   isContinueSeedText,
   LEGACY_TELEGRAM_HANDOFF_PREAMBLE_START,
   resolvePendingHandoffSeed,
+  selectHandoffItems,
   stripHandoffPreamble,
   TELEGRAM_HANDOFF_OPTIONS,
   wrapHandoffPreamble,
@@ -193,5 +200,266 @@ describe("buildModelFallbackNote", () => {
     expect(note).toContain("Mac");
     expect(note).toContain("claudeAgent / claude-sonnet-4-6");
     expect(note).toContain("codex / gpt-5");
+  });
+});
+
+describe("handoff budget", () => {
+  it("defaults like T3 and clamps the override", () => {
+    expect(handoffTokenCap(undefined)).toBe(DEFAULT_HANDOFF_TOKEN_CAP);
+    expect(handoffTokenCap("")).toBe(16_000);
+    expect(handoffTokenCap("not a number")).toBe(16_000);
+    expect(handoffTokenCap("10")).toBe(1_024);
+    expect(handoffTokenCap("999999")).toBe(64_000);
+    expect(handoffTokenCap("32000")).toBe(32_000);
+  });
+
+  it("is the cap while the window has room", () => {
+    expect(handoffHistoryBudget({ tokenCap: 16_000, userText: "hi" })).toBe(16_000);
+  });
+
+  it("charges the request and attachments, leaves a reserve, and stops at zero", () => {
+    // 32k window: 16k reserved, 8k an image, the rest is the budget.
+    expect(
+      handoffHistoryBudget({
+        tokenCap: 16_000,
+        userText: "",
+        attachments: [{ type: "image" }],
+        contextWindow: 32_000,
+      }),
+    ).toBe(32_000 - 16_000 - 8_192 - 2);
+    expect(
+      handoffHistoryBudget({
+        tokenCap: 16_000,
+        userText: "x".repeat(200_000),
+      }),
+    ).toBe(0);
+  });
+});
+
+const say = (id: string, role: "user" | "assistant", text: string, second: number) => ({
+  id,
+  role,
+  text,
+  createdAt: `2026-10-30T10:00:${String(second).padStart(2, "0")}.000Z`,
+});
+
+const command = (id: string, input: string, second: number, status = "completed") => ({
+  id: id as never,
+  tone: "tool" as const,
+  kind: "tool.completed",
+  summary: "Ran command",
+  payload: {
+    itemType: "command_execution",
+    status,
+    detail: "exit 1",
+    data: { item: { command: input } },
+  },
+  turnId: null,
+  createdAt: `2026-10-30T10:00:${String(second).padStart(2, "0")}.000Z`,
+});
+
+describe("handoffItems", () => {
+  it("keeps order and role, adds commands and plans, drops the message being sent", () => {
+    const items = handoffItems(
+      {
+        messages: [
+          say("m1", "user", "build it", 1),
+          say("m2", "assistant", "done", 4),
+          say("m3", "user", "now", 5),
+        ],
+        activities: [command("a1", "bun test", 2, "failed")],
+        proposedPlans: [{ planMarkdown: "1. Do it", createdAt: "2026-10-30T10:00:03.000Z" }],
+      },
+      "m3",
+    );
+    expect(items.map((item) => [item.role, item.label])).toEqual([
+      ["user", "User"],
+      ["assistant", "Command (failed)"],
+      ["assistant", "Plan"],
+      ["assistant", "Assistant"],
+    ]);
+    expect(items[1]?.text).toBe("bun test\nexit 1");
+  });
+
+  it("drops notes that only moved the chat along, and a carried preamble", () => {
+    const items = handoffItems(
+      {
+        messages: [
+          say("m1", "user", wrapHandoffPreamble("User: older"), 1),
+          say(
+            "m2",
+            "user",
+            "(Uno Work) Your plan's limit has reset. Continue where you left off, without repeating finished work.",
+            2,
+          ),
+          say("m3", "assistant", "partial work", 3),
+        ],
+        activities: [],
+      },
+      "none",
+    );
+    expect(items.map((item) => item.text)).toEqual(["partial work"]);
+  });
+});
+
+describe("selectHandoffItems", () => {
+  const items = [
+    { role: "user", label: "User", text: "the original ask", createdAt: "1" },
+    { role: "assistant", label: "Assistant", text: "a".repeat(300), createdAt: "2" },
+    { role: "user", label: "User", text: "b".repeat(300), createdAt: "3" },
+    { role: "assistant", label: "Assistant", text: "the last answer", createdAt: "4" },
+    { role: "user", label: "User", text: "the last ask", createdAt: "5" },
+  ] as const;
+
+  it("carries a short chat whole", () => {
+    expect(selectHandoffItems(items, 16_000)).toEqual(items);
+  });
+
+  it("puts the last ask, the last answer and the original ask first, keeping their order", () => {
+    expect(selectHandoffItems(items, 90).map((item) => item.text)).toEqual([
+      "the original ask",
+      "the last answer",
+      "the last ask",
+    ]);
+  });
+
+  it("skips what doesn't fit whole, never cuts it", () => {
+    const selected = selectHandoffItems(items, 400);
+    expect(selected.map((item) => item.text.length)).toEqual([16, 300, 15, 12]);
+  });
+});
+
+describe("buildAgentSwitchSeed", () => {
+  const thread = (count: number, size = 40) => ({
+    messages: Array.from({ length: count }, (_, index) =>
+      say(
+        `m${index}`,
+        index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        `${String(index).padStart(3, "0")}${"x".repeat(size)}`,
+        index % 60,
+      ),
+    ),
+    activities: [],
+  });
+
+  it("says nothing when the chat has nothing to carry", () => {
+    expect(
+      buildAgentSwitchSeed({
+        threadId: "t",
+        thread: { messages: [], activities: [] },
+        currentMessageId: "none",
+        fromAgent: "Codex",
+        budget: 16_000,
+      }),
+    ).toBeNull();
+  });
+
+  it("carries a short chat whole and says so", () => {
+    const seed = buildAgentSwitchSeed({
+      threadId: "t",
+      thread: thread(4),
+      currentMessageId: "none",
+      fromAgent: "Codex",
+      budget: 16_000,
+    });
+    expect(seed).toMatchObject({ carried: 4, total: 4 });
+    expect(seed?.text).toContain("This chat was with Codex");
+    expect(seed?.text).toContain("This is the whole chat.");
+    expect(seed?.text).toContain(HANDOFF_PREAMBLE_START);
+    expect(seed?.text).toContain(HANDOFF_PREAMBLE_END);
+    expect(seed?.text).toContain("not a new request");
+  });
+
+  it("stays within the budget and points at what was left out", () => {
+    const seed = buildAgentSwitchSeed({
+      threadId: "thread-7",
+      thread: thread(400),
+      currentMessageId: "none",
+      fromAgent: "Codex",
+      budget: 16_000,
+    });
+    expect(seed?.total).toBe(400);
+    expect(seed?.carried).toBeLessThan(400);
+    expect(Buffer.byteLength(seed?.text ?? "")).toBeLessThanOrEqual(16_000);
+    expect(seed?.text).toContain(`${400 - (seed?.carried ?? 0)} of 400 items are left out`);
+    expect(seed?.text).toContain('threadId "thread-7"');
+    // The original ask survives a long chat.
+    expect(seed?.text).toContain("User: 000");
+  });
+
+  it("with no room left the agent still hears the chat exists", () => {
+    const seed = buildAgentSwitchSeed({
+      threadId: "t",
+      thread: thread(4),
+      currentMessageId: "none",
+      fromAgent: "Codex",
+      budget: 0,
+    });
+    expect(seed).toMatchObject({ carried: 0, total: 4 });
+    expect(seed?.text).toContain("chat_status");
+    expect(seed?.text).not.toContain(HANDOFF_PREAMBLE_START);
+  });
+
+  it("names the other account instead of an agent, and warns about outside text", () => {
+    const seed = buildAgentSwitchSeed({
+      threadId: "t",
+      thread: thread(2),
+      currentMessageId: "none",
+      fromAgent: null,
+      budget: 16_000,
+      holdsOutsideText: true,
+    });
+    expect(seed?.text).toContain("on the person's other account");
+    expect(seed?.text).toContain("came from outside Uno");
+  });
+
+  it("never touches the person's request", () => {
+    const request = "x".repeat(50_000);
+    expect(applyHandoffSeed("seed", request).endsWith(request)).toBe(true);
+  });
+});
+
+describe("agentSwitchStillOwed", () => {
+  const switched = {
+    id: "a1" as never,
+    tone: "info" as const,
+    kind: "chat.agent-switched",
+    summary: "Switched to Claude",
+    payload: {
+      to: "Claude",
+      toInstanceId: "claudeAgent",
+      fromInstanceId: "codex",
+      carried: 2,
+      total: 2,
+      turnCount: 1,
+    },
+    turnId: null,
+    createdAt: "2026-10-30T10:00:10.000Z",
+  };
+
+  it("is false for a chat that never moved", () => {
+    expect(agentSwitchStillOwed({ messages: [], activities: [] })).toBe(false);
+  });
+
+  it("is true until the new agent answers or finishes a turn", () => {
+    expect(
+      agentSwitchStillOwed({
+        messages: [say("m1", "assistant", "before", 5)],
+        activities: [switched],
+      }),
+    ).toBe(true);
+    expect(
+      agentSwitchStillOwed({
+        messages: [say("m2", "assistant", "after", 20)],
+        activities: [switched],
+      }),
+    ).toBe(false);
+    expect(
+      agentSwitchStillOwed({
+        messages: [],
+        activities: [switched],
+        latestTurn: { state: "completed", completedAt: "2026-10-30T10:00:20.000Z" },
+      }),
+    ).toBe(false);
   });
 });
