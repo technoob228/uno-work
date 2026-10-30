@@ -4,7 +4,8 @@
  * [This Mac ▾]?". Both are real pickers, the first thing a new chat asks:
  *
  * - the folder — the chat moves there with what was typed (the folder chip
- *   used to sit in the header, easy to miss);
+ *   used to sit in the header, easy to miss); the same list has the assistants,
+ *   and with one picked the question becomes "Ask [Ada ▾]";
  * - the computer — a new chat in that computer's home folder, with the words
  *   carried over. In the browser on a Work address a computer that runs
  *   another Uno Work version opens in its own interface (a page load, as the
@@ -13,7 +14,8 @@
  * `DraftHeroStarters` — a few hints under the box, Home's own (made from the
  * work this person did here): a click only types them in.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
@@ -24,6 +26,7 @@ import { currentStaleBundlePage, switchReloadUrl } from "../../staleBundle";
 import { readStaleBundleMachine } from "../../staleBundleMachine";
 import { useHomeStarters } from "../computer/home/useHomeStarters";
 import { useHomeThreads } from "../computer/home/HomeThreads";
+import { useStartableAssistants } from "../assistants/useAssistantTeam";
 import { toastManager } from "../ui/toast";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { NewChatComputerPicker, useNewChatComputerName } from "./NewChatComputerPicker";
@@ -37,17 +40,24 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 export const DraftHeroHeadline = memo(function DraftHeroHeadline({
   environmentId,
   draftId,
+  projectId,
   projectName,
   projectCwd,
 }: {
   environmentId: EnvironmentId;
   draftId: DraftId;
+  projectId: ProjectId;
   projectName: string;
   projectCwd: string;
 }) {
   const home = useHomeFolderPath(environmentId);
   const { moveDraftToFolder } = useFolderChats(environmentId);
-  const { moveDraft } = useChatOnComputer();
+  const { moveDraft, moveDraftToAssistant } = useChatOnComputer();
+  const assistants = useStartableAssistants();
+  const assistant =
+    assistants.find(
+      (member) => member.environmentId === environmentId && member.projectId === projectId,
+    ) ?? null;
   const switchEnvironment = useSwitchEnvironment();
   const computerName = useNewChatComputerName(environmentId);
   const inHome =
@@ -60,6 +70,20 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
       variant="inline"
       environmentId={environmentId}
       folder={folder}
+      assistants={assistants}
+      assistant={assistant}
+      onPickAssistant={(member) =>
+        moveDraftToAssistant(
+          draftId,
+          scopeProjectRef(member.environmentId as EnvironmentId, member.projectId as ProjectId),
+        ).catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: `Couldn't start a chat with ${member.profile.name}`,
+            description: errorText(error),
+          });
+        })
+      }
       onPick={(next, projectRef) => {
         if (next === null ? inHome : next.cwd === projectCwd) return;
         return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch((error: unknown) => {
@@ -97,9 +121,10 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2">
       <DraftHeroProjectHeading
         folderPicker={folderPicker}
-        computerPicker={computerPicker}
-        folderName={folder ? folder.name : "Home folder"}
-        computerName={computerName}
+        computerPicker={assistant ? null : computerPicker}
+        folderName={assistant ? assistant.profile.name : folder ? folder.name : "Home folder"}
+        computerName={assistant ? null : computerName}
+        asksAssistant={assistant !== null}
       />
     </div>
   );

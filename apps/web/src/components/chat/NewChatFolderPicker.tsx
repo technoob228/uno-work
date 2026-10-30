@@ -4,7 +4,9 @@
  * field, "Add project" last) over this computer's folders: the home folder,
  * every folder already worked in (newest chat first), then the ways to bring
  * one in — Another folder…, New folder…, Upload a folder…, Clone from
- * GitHub… (the folder chip's choices, so both say the same).
+ * GitHub… (the folder chip's choices, so both say the same). With the
+ * assistants update the list also has the assistants, right under the home
+ * folder (Misha 30.10): a chat can start with one instead of in a folder.
  *
  * `variant`: "inline" — a word in the draft screen's question; "chip" —
  * Home's composer row.
@@ -16,6 +18,8 @@ import { useMemo, useState } from "react";
 import { cn } from "~/lib/utils";
 import { folderDisplayName, useHomeFolderPath } from "../../hooks/useFolderChats";
 import { type ChatFolderSource, openFolderForChat } from "../../navigation/newProjectStore";
+import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
+import type { TeamMember } from "../assistants/useAssistantTeam";
 import { ChatInFolderDialog } from "../computer/ChatInFolderDialog";
 import { BRING_FOLDER, type PickedFolder, useRecentFolders } from "../computer/FolderChipMenu";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -33,9 +37,11 @@ import {
 import { DraftProjectName } from "./DraftProjectName";
 import { usePickerShortcut, withShortcutHint } from "./usePickerShortcut";
 
+const NO_ASSISTANTS: ReadonlyArray<TeamMember> = [];
 const HOME_VALUE = "home";
 const ANOTHER_VALUE = "action:another";
 const sourceValue = (source: ChatFolderSource) => `action:${source}`;
+const assistantValue = (member: TeamMember) => `assistant:${member.key}`;
 
 interface PickerItem {
   readonly value: string;
@@ -49,6 +55,9 @@ export function NewChatFolderPicker({
   variant,
   testId = "new-chat-folder-picker",
   shortcut = true,
+  assistants = NO_ASSISTANTS,
+  assistant = null,
+  onPickAssistant,
 }: {
   environmentId: EnvironmentId | null;
   /** The current folder; null = the home folder. */
@@ -62,6 +71,11 @@ export function NewChatFolderPicker({
   testId?: string;
   /** ⌘⇧F opens it (on by default; one picker per screen). */
   shortcut?: boolean;
+  /** Offered next to the folders; empty - folders only. */
+  assistants?: ReadonlyArray<TeamMember>;
+  /** The chat starts with this assistant; it says so instead of the folder. */
+  assistant?: TeamMember | null;
+  onPickAssistant?: (member: TeamMember) => void | Promise<void>;
 }) {
   const home = useHomeFolderPath(environmentId);
   const folders = useRecentFolders(environmentId, home);
@@ -77,14 +91,22 @@ export function NewChatFolderPicker({
       ),
     [folders],
   );
+  const assistantByValue = useMemo(
+    () => new Map(assistants.map((member) => [assistantValue(member), member] as const)),
+    [assistants],
+  );
   const items = useMemo<PickerItem[]>(
     () => [
       { value: HOME_VALUE, label: "Home folder" },
+      ...assistants.map((member) => ({
+        value: assistantValue(member),
+        label: member.profile.name,
+      })),
       ...folders.map((project) => ({ value: `project:${project.id}`, label: project.name })),
       { value: ANOTHER_VALUE, label: "Another folder…" },
       ...BRING_FOLDER.map(({ source, label }) => ({ value: sourceValue(source), label })),
     ],
-    [folders],
+    [assistants, folders],
   );
   const search = query.trim();
   // While searching: folders only (the ways to bring one in stay for an empty field).
@@ -96,19 +118,36 @@ export function NewChatFolderPicker({
             !item.value.startsWith("action:") &&
             filter.contains(item, search, (candidate) => candidate.label),
         );
-  const selected =
-    folder === null
+  const selected = assistant
+    ? (items.find((item) => item.value === assistantValue(assistant)) ?? null)
+    : folder === null
       ? (items[0] ?? null)
       : (items.find((item) => folderByValue.get(item.value)?.cwd === folder.cwd) ?? null);
-  const label = folder ? folder.name : "Home folder";
+  const label = assistant ? assistant.profile.name : folder ? folder.name : "Home folder";
+  // A hairline opens each group, while the whole list shows.
+  const firstOfGroup = new Set(
+    search.length > 0
+      ? []
+      : [
+          assistants[0] ? assistantValue(assistants[0]) : null,
+          assistants.length > 0 && folders[0] ? `project:${folders[0].id}` : null,
+          ANOTHER_VALUE,
+        ],
+  );
+  const searchNoun = assistants.length > 0 ? "folders and assistants" : "folders";
   const shortcutLabel = usePickerShortcut("composer.folder", shortcut, () => {
     setOpen((value) => !value);
     setQuery("");
   });
-  const title = withShortcutHint(folder ? folder.cwd : (home ?? "Home folder"), shortcutLabel);
+  const title = withShortcutHint(
+    assistant ? assistant.profile.name : folder ? folder.cwd : (home ?? "Home folder"),
+    shortcutLabel,
+  );
 
   const pick = (item: PickerItem) => {
     if (item.value === HOME_VALUE) return onPick(null);
+    const member = assistantByValue.get(item.value);
+    if (member) return onPickAssistant?.(member);
     if (item.value === ANOTHER_VALUE) {
       setPickingFolder(true);
       return;
@@ -167,7 +206,18 @@ export function NewChatFolderPicker({
               />
             }
           >
-            {folder ? <FolderIcon /> : <HouseIcon />}
+            {assistant ? (
+              <AssistantAvatar
+                emoji={assistant.profile.emoji}
+                image={avatarImageOf(assistant.profile)}
+                tone={assistant.profile.tone}
+                className="size-4"
+              />
+            ) : folder ? (
+              <FolderIcon />
+            ) : (
+              <HouseIcon />
+            )}
             <span className="min-w-0 max-w-48 truncate">{label}</span>
             <ChevronDownIcon className="opacity-60" />
           </ComboboxTrigger>
@@ -177,15 +227,16 @@ export function NewChatFolderPicker({
           className="w-72 overflow-hidden"
         >
           <ComboboxSearchInput
-            aria-label="Search folders"
-            placeholder="Search folders..."
+            aria-label={`Search ${searchNoun}`}
+            placeholder={assistants.length > 0 ? "Search..." : "Search folders..."}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <ComboboxEmpty>No matching folders.</ComboboxEmpty>
+          <ComboboxEmpty>No matching {searchNoun}.</ComboboxEmpty>
           <ComboboxList className="p-1" scrollAreaClassName="max-h-72">
             {(item: PickerItem) => {
               const project = folderByValue.get(item.value);
+              const member = assistantByValue.get(item.value);
               const bring = BRING_FOLDER.find(({ source }) => sourceValue(source) === item.value);
               const isAction = item.value.startsWith("action:");
               return (
@@ -195,14 +246,21 @@ export function NewChatFolderPicker({
                   value={item}
                   className={cn(
                     "h-8 min-h-8 py-0",
-                    // The ways to bring a folder in sit under a hairline.
-                    item.value === ANOTHER_VALUE && "mt-1 border-t border-border/60 pt-1",
+                    firstOfGroup.has(item.value) &&
+                      "mt-1 h-9 min-h-9 border-t border-border/60 pt-1",
                   )}
                   contentClassName="flex min-w-0 items-center gap-2"
                   data-testid={`new-chat-folder-${item.value.replace(/[:]/g, "-")}`}
                 >
                   {item.value === HOME_VALUE ? (
                     <HouseIcon className="size-4 shrink-0 text-muted-foreground" />
+                  ) : member ? (
+                    <AssistantAvatar
+                      emoji={member.profile.emoji}
+                      image={avatarImageOf(member.profile)}
+                      tone={member.profile.tone}
+                      className="size-4"
+                    />
                   ) : project ? (
                     <ProjectFavicon
                       environmentId={project.environmentId}

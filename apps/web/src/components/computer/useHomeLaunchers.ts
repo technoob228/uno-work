@@ -12,7 +12,7 @@
  * (`project.create`, the draft-thread machinery); nothing new on the server.
  */
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -113,9 +113,12 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       prompt: string,
       folder?: string | null,
       onEnvironmentId?: EnvironmentId | null,
+      assistant?: ScopedProjectRef | null,
     ): Promise<DraftId | null> => {
       if (environmentId === null) return null;
-      if (onEnvironmentId && onEnvironmentId !== environmentId) {
+      if (assistant) {
+        await newThreadContext.handleNewThread(assistant, { envMode: "local" });
+      } else if (onEnvironmentId && onEnvironmentId !== environmentId) {
         // Home's "on [computer ▾]": another connected computer.
         await chatOnComputer.chatIn(onEnvironmentId, folder ?? null);
       } else {
@@ -133,7 +136,7 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       if (route?.kind === "server") store.setPrompt(route.threadRef, prompt);
       return null;
     },
-    [chatInFolder, chatOnComputer, context, environmentId, router],
+    [chatInFolder, chatOnComputer, context, environmentId, newThreadContext, router],
   );
 
   /**
@@ -155,11 +158,19 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
    */
   const startTask = useCallback(
     async (prompt: string, options: HomeStartOptions) => {
-      const draftId = await openChatWithPrompt(prompt, options.folder, options.environmentId);
+      const draftId = await openChatWithPrompt(
+        prompt,
+        options.folder,
+        options.environmentId,
+        options.assistant,
+      );
       if (!draftId) return;
       const store = useComposerDraftStore.getState();
       // Set on the draft itself: a reused draft doesn't pick up the sticky model.
-      if (options.modelSelection) store.setModelSelection(draftId, options.modelSelection);
+      // An assistant works on its own model and permissions.
+      if (options.modelSelection && !options.assistant) {
+        store.setModelSelection(draftId, options.modelSelection);
+      }
       if (options.images?.length) store.addImages(draftId, [...options.images]);
       if (options.files?.length) {
         useComposerFileHandoffStore.getState().handOff(draftId, options.files);
@@ -169,8 +180,10 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
       if (options.recordingKey && threadId) {
         useScreenRecordingStore.getState().moveTo(options.recordingKey, threadId);
       }
-      store.setRuntimeMode(draftId, options.runtimeMode);
-      store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
+      if (!options.assistant) {
+        store.setRuntimeMode(draftId, options.runtimeMode);
+        store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
+      }
       usePendingSendStore.getState().request(draftId, prompt);
     },
     [openChatWithPrompt],

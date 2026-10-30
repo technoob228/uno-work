@@ -55,10 +55,8 @@ export const SidebarPinned = memo(function SidebarPinned({
 
   return (
     <section aria-label="Pinned" className="flex flex-col gap-px">
-      <div className="flex h-6 items-center justify-between pr-0.5 pl-2">
-        <span className="text-[11px] font-medium tracking-wide text-muted-foreground/80 uppercase">
-          Pinned
-        </span>
+      <div className="flex h-6 items-center justify-between pr-1 pl-2.5">
+        <span className="text-xs font-medium text-sidebar-muted-foreground/70">Pinned</span>
         <button
           type="button"
           aria-label="Pin a link"
@@ -239,7 +237,7 @@ function PinRow({
         title={peekable ? undefined : item.target}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg pr-7 pl-2 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2",
+          "flex h-8 w-full cursor-pointer items-center gap-2 rounded-md pr-7 pl-2.5 text-left text-sm outline-hidden ring-ring transition-colors focus-visible:ring-2",
           active
             ? "bg-sidebar-row-active text-foreground"
             : "text-sidebar-foreground/90 hover:bg-sidebar-row-hover hover:text-foreground",

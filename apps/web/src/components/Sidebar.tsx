@@ -41,7 +41,9 @@ import {
   HouseIcon,
   MessageCircleQuestionIcon,
   MoreHorizontalIcon,
+  MessageSquareIcon,
   PinIcon,
+  PinOffIcon,
   PlusIcon,
   ShieldQuestionIcon,
   TerminalIcon,
@@ -1272,14 +1274,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const parked = section === "settled" || section === "snoozed";
     // Read and Snooze come first: the chat stays or comes back. Done is the
     // quiet one, an icon that just takes the chat out of the list.
+    // A pinned chat is kept at hand (Misha 30.10): Read and Unpin, no more.
+    const pinnedRow = section === "pinned";
     const showRead = yourTurn && !parked;
-    const showDSnooze = showSnoozeButton && !parked;
-    const showDone = canSettle && !parked;
-    const hasActions = showRead || showDSnooze || showDone;
+    const showDSnooze = showSnoozeButton && !parked && !pinnedRow;
+    const showDone = canSettle && !parked && !pinnedRow;
+    const hasActions = showRead || showDSnooze || showDone || pinnedRow;
     const dActionClassName =
       "inline-flex h-6 cursor-pointer items-center rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground";
     // Buttons are h-6 px-1.5 (1.625rem wide) with gap-0.5 between them.
-    const actionCount = [showRead, showDSnooze, showDone].filter(Boolean).length;
+    const actionCount = [showRead, showDSnooze, showDone, pinnedRow].filter(Boolean).length;
     const actionsWidthRem = actionCount * 1.625 + Math.max(0, actionCount - 1) * 0.125;
     const tailHide = hasActions ? D_ROW_TAIL_HIDE : undefined;
     // Every row says its age; only the working spinner stands in for it
@@ -1320,6 +1324,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               hasActions && D_ROW_FADE,
             )}
           >
+            {/* Next to apps and files in Pinned the icon says "a chat" (Misha 30.10). */}
+            {pinnedRow ? (
+              <span
+                className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
+                data-testid="sidebar-row-chat-icon"
+              >
+                <MessageSquareIcon className="size-4" />
+              </span>
+            ) : null}
             {props.placeName ? (
               <Tooltip>
                 <TooltipTrigger
@@ -1368,7 +1381,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 {thread.title}
               </span>
             )}
-            {pinIndicator}
+            {pinnedRow ? null : pinIndicator}
             {props.computerIcon ? (
               (props.showMachine ?? isRemote) ? (
                 <span className={cn("contents", tailHide)}>
@@ -1447,6 +1460,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     <CheckIcon className="size-3.5" />
                   </TooltipTrigger>
                   <TooltipPopup side="top">Done — take it out of the list</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              {pinnedRow ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Unpin chat"
+                        data-testid="sidebar-row-unpin"
+                        onClick={stopAnd(onUnpin)}
+                        className={dActionClassName}
+                      />
+                    }
+                  >
+                    <PinOffIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Unpin chat</TooltipPopup>
                 </Tooltip>
               ) : null}
             </span>
@@ -3798,8 +3829,8 @@ export default function Sidebar() {
     },
   ) => {
     const threadKey = threadKeyOf(thread);
-    // Pinned chats live in the compact Pinned group above every sidebar mode.
-    // Sidebar D: every live chat is one line.
+    // Pinned chats are compact rows in the Pinned group.
+    // Sidebar D: every live chat is one line, a pinned one too.
     const variant = options?.d ? "d" : section === "active" ? "card" : "slim";
     const projectKey = projectKeyOf(thread);
     return (
@@ -4489,6 +4520,18 @@ export default function Sidebar() {
                     )}
               </>
             )}
+            {/* Pinned sits under the assistants (Misha 30.10) and scrolls with
+                the chats: a block of its own held 40% of the sidebar. */}
+            {pins.length > 0 || pinnedThreads.length > 0 ? (
+              <li className="mt-2 list-none" data-testid="sidebar-d-pinned">
+                <SidebarPinned
+                  hasPinnedChats={pinnedThreads.length > 0}
+                  pinnedChats={pinnedThreads.map((thread) =>
+                    renderRow(thread, "pinned", { d: true }),
+                  )}
+                />
+              </li>
+            ) : null}
             {!sidebarViewMenu ? (
               <LegacySidebarDChatsBar
                 onNewChat={handleNewThreadClick}
@@ -4655,7 +4698,6 @@ export default function Sidebar() {
             <SidebarSetupRow />
             <SidebarDPlaces />
           </SidebarGroup>
-          {pins.length > 0 || pinnedThreads.length > 0 ? pinnedGroup : null}
           {dChatList(false)}
           <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
             <SidebarThreadUndoNotice />

@@ -266,6 +266,17 @@ export function useChatOnComputer() {
     [handleNewThread],
   );
 
+  // An assistant's folder is a project already. What was typed comes along,
+  // the model doesn't: an assistant works on its own.
+  const moveDraftToAssistant = useCallback(
+    async (draftId: DraftId, projectRef: ScopedProjectRef): Promise<void> => {
+      const carry = readDraftCarry(draftId);
+      await handleNewThread(projectRef, { envMode: "local" });
+      applyDraftCarry(router, draftId, carry, { keepModel: false });
+    },
+    [handleNewThread, router],
+  );
+
   const moveDraft = useCallback(
     async (
       draftId: DraftId,
@@ -307,5 +318,5 @@ export function useChatOnComputer() {
     [chatIn, router],
   );
 
-  return { chatIn, moveDraft, startChatOn };
+  return { chatIn, moveDraft, moveDraftToAssistant, startChatOn };
 }

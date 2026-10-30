@@ -40,6 +40,7 @@ import {
   assistantActivity,
   assistantKeyOf,
   chatsOfAssistant,
+  startableAssistants,
 } from "./assistantTeam.logic";
 import { pickAccountUno, useAccountHomeEnvironmentId } from "./accountUno";
 import { useAssistantTeamStore } from "./assistantTeamStore";
@@ -127,6 +128,13 @@ export function useAssistantsUpdate(): AssistantsUpdate {
  */
 export function useTeamShown(): boolean {
   return useAssistantsUpdate() === "on";
+}
+
+/** The assistants a new chat can start with (the new chat's picker). */
+export function useStartableAssistants(): ReadonlyArray<TeamMember> {
+  const team = useAssistantTeam();
+  const teamShown = useTeamShown();
+  return useMemo(() => startableAssistants(team, teamShown), [team, teamShown]);
 }
 
 /** The daemon's list of assistants, per computer. */

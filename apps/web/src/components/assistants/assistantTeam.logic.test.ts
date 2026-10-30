@@ -23,6 +23,7 @@ import {
   setConnectorLevel,
   setConnectorMode,
   setPicksMode,
+  startableAssistants,
   suggestName,
   togglePicked,
   toggleRole,
@@ -147,6 +148,28 @@ describe("who set up whom", () => {
 });
 
 const at = (item: { at: number }) => item.at;
+
+const startable = (key: string, configured: boolean, revoked: boolean) => ({
+  key,
+  configured,
+  revoked,
+});
+
+describe("startableAssistants", () => {
+  const team = [
+    startable("ready", true, false),
+    startable("unfinished", false, false),
+    startable("revoked", true, true),
+  ];
+
+  it("offers the assistants that are set up and not revoked", () => {
+    expect(startableAssistants(team, true).map(({ key }) => key)).toEqual(["ready"]);
+  });
+
+  it("offers nobody without the assistants update", () => {
+    expect(startableAssistants(team, false)).toEqual([]);
+  });
+});
 
 describe("chatsOfAssistant", () => {
   const threads = [

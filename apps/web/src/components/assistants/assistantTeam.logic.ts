@@ -177,6 +177,16 @@ export function nextAvatar(current: string | null, seed: number): (typeof AVATAR
 /** "env:project" — a project id is unique per computer, not across them. */
 export type AssistantKey = string;
 
+/**
+ * Who a new chat can start with (Misha 30.10): set up and not revoked. Nobody
+ * without the assistants update: the picker stays what it was.
+ */
+export function startableAssistants<
+  T extends { readonly configured: boolean; readonly revoked: boolean },
+>(team: ReadonlyArray<T>, teamShown: boolean): ReadonlyArray<T> {
+  return teamShown ? team.filter((member) => member.configured && !member.revoked) : [];
+}
+
 export function assistantKeyOf(environmentId: string, projectId: string): AssistantKey {
   return `${environmentId}:${projectId}`;
 }
