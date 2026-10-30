@@ -30,8 +30,15 @@ async function open(clientSettings) {
     }
   }, clientSettings);
   const page = await context.newPage();
+  current = page;
   page.setDefaultTimeout(20_000);
-  page.on("pageerror", (error) => log.push(`  pageerror: ${String(error.message).slice(0, 160)}`));
+  page.on("pageerror", (error) =>
+    log.push(
+      `  pageerror: ${String(error.stack ?? error.message)
+        .replace(/\s+/g, " ")
+        .slice(0, 400)}`,
+    ),
+  );
   const params = new URLSearchParams({ world: "live", plans: "full", speed: "3", panel: "closed" });
   await page.goto(`${server.url}?${params}`);
   await page.waitForFunction(() => Boolean(window.__assistDemo), null, { timeout: 60_000 });
@@ -42,12 +49,16 @@ async function open(clientSettings) {
 }
 
 const shot = (page, name) => page.screenshot({ path: join(out, `${name}.png`) });
+let current = null;
+let failures = 0;
 async function step(name, fn) {
   try {
     await fn();
     log.push(`ok   ${name}`);
   } catch (error) {
     log.push(`FAIL ${name}: ${String(error.message).split("\n")[0].slice(0, 200)}`);
+    failures += 1;
+    await current?.screenshot({ path: join(out, `fail-${failures}.png`) }).catch(() => {});
   }
 }
 const text = async (page, testId) =>
