@@ -35,6 +35,9 @@ export type PickerShortcutCommand = (typeof PICKER_SHORTCUT_COMMANDS)[number];
 const DEFAULTED_COMMANDS: ReadonlyArray<KeybindingCommand> = [
   ...APP_SHORTCUT_COMMANDS,
   ...PICKER_SHORTCUT_COMMANDS,
+  "composer.sendBackground",
+  "composer.sendAndNewThread",
+  "composer.stash",
 ];
 
 export function withAppShortcutDefaults(

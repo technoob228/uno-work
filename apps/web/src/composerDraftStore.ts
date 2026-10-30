@@ -3161,6 +3161,23 @@ export function markPromotedDraftThreadsByRef(serverThreadRefs: Iterable<ScopedT
   }
 }
 
+/**
+ * A draft sent in the background that never reached the server: it is a draft
+ * again, open from the error toast.
+ */
+export function restorePromotingDraftThread(draftId: DraftId): void {
+  useComposerDraftStore.setState((state) => {
+    const existing = state.draftThreadsByThreadKey[draftId];
+    if (!existing || !isDraftThreadPromoting(existing)) return state;
+    return {
+      draftThreadsByThreadKey: {
+        ...state.draftThreadsByThreadKey,
+        [draftId]: { ...existing, promotedTo: null },
+      },
+    };
+  });
+}
+
 export function finalizePromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {
   const draftStore = useComposerDraftStore.getState();
   for (const [draftId, draftThread] of Object.entries(draftStore.draftThreadsByThreadKey)) {

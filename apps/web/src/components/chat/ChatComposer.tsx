@@ -41,11 +41,13 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import {
   clampCollapsedComposerCursor,
+  type ComposerSubmissionIntent,
   type ComposerTrigger,
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  resolveComposerSubmissionIntent,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import { useComposerQuotes, useComposerQuotesStore } from "../../composerQuotesStore";
@@ -110,6 +112,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { withAppShortcutDefaults } from "../appShortcuts.logic";
 import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
@@ -678,7 +681,7 @@ export interface ChatComposerProps {
   scheduleStickToBottom: () => void;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1171,6 +1174,8 @@ export const ChatComposer = memo(
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
     const [isPlanLimitsOpen, setIsPlanLimitsOpen] = useState(false);
+    // A computer on an older Work doesn't list the composer's newer shortcuts.
+    const shortcutBindings = useMemo(() => withAppShortcutDefaults(keybindings), [keybindings]);
     const dragDepthRef = useRef(0);
     const pasteAsTextUntilRef = useRef(0);
     const videoAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -2210,7 +2215,7 @@ export const ChatComposer = memo(
     ]);
 
     const submitComposer = useCallback(
-      (event?: { preventDefault: () => void }) => {
+      (event?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => {
         if (hasKnownUnsupportedCodingTools) {
           event?.preventDefault();
           toastManager.add({
@@ -2249,7 +2254,7 @@ export const ChatComposer = memo(
           }
           return;
         }
-        onSend(event);
+        onSend(event, intent);
         if (shouldBlurMobileComposerOnSubmit()) {
           blurMobileComposerAfterSend();
         }
@@ -2352,7 +2357,14 @@ export const ChatComposer = memo(
         return navigatePromptHistory(key === "ArrowUp" ? "backward" : "forward", event);
       }
       if (key === "Enter" && !event.shiftKey) {
-        submitComposer();
+        submitComposer(
+          undefined,
+          resolveComposerSubmissionIntent({
+            event,
+            keybindings: shortcutBindings,
+            isDraftThread: isLocalDraftThread,
+          }),
+        );
         return true;
       }
       return false;

@@ -1,7 +1,32 @@
+import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
+
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
+export type ComposerSubmissionIntent = "foreground" | "background";
+
+/**
+ * "Background": the task goes and the person stays on a fresh chat. One
+ * action with two shortcuts by where they are (upstream `composer.sendBackground`
+ * on a new chat, `composer.sendAndNewThread` on an open one).
+ */
+export function resolveComposerSubmissionIntent(input: {
+  readonly event: ShortcutEventLike;
+  readonly keybindings: ResolvedKeybindingsConfig;
+  readonly isDraftThread: boolean;
+  readonly platform?: string;
+}): ComposerSubmissionIntent {
+  const command = resolveShortcutCommand(input.event, input.keybindings, {
+    ...(input.platform === undefined ? {} : { platform: input.platform }),
+    context: { composerFocus: true, draftThreadRoute: input.isDraftThread },
+  });
+  return command === "composer.sendBackground" || command === "composer.sendAndNewThread"
+    ? "background"
+    : "foreground";
+}
+
 export type ComposerSlashCommand = "model" | "plan" | "default" | "limits";
 
 export interface ComposerTrigger {

@@ -35,6 +35,7 @@ import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
+import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
@@ -44,7 +45,6 @@ import { Route as ChatAssistantsRouteImport } from './routes/_chat.assistants'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAppRouteImport } from './routes/_chat.app'
 import { Route as ChatAiRouteImport } from './routes/_chat.ai'
-import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatAssistantIndexRouteImport } from './routes/_chat.assistant.index'
 import { Route as SettingsEnvironmentEnvironmentIdRouteImport } from './routes/settings.environment.$environmentId'
 import { Route as SettingsAppPhoneRouteImport } from './routes/settings.app.phone'
@@ -192,6 +192,11 @@ const ChatOfficeRoute = ChatOfficeRouteImport.update({
   path: '/office',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatNewRoute = ChatNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatMyUnoRoute = ChatMyUnoRouteImport.update({
   id: '/my-uno',
   path: '/my-uno',
@@ -230,11 +235,6 @@ const ChatAssistantRoute = ChatAssistantRouteImport.update({
 const ChatAppRoute = ChatAppRouteImport.update({
   id: '/app',
   path: '/app',
-  getParentRoute: () => ChatRoute,
-} as any)
-const ChatNewRoute = ChatNewRouteImport.update({
-  id: '/new',
-  path: '/new',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatAiRoute = ChatAiRouteImport.update({
@@ -344,7 +344,6 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/ai': typeof ChatAiRoute
-  '/new': typeof ChatNewRoute
   '/app': typeof ChatAppRoute
   '/assistant': typeof ChatAssistantRouteWithChildren
   '/assistants': typeof ChatAssistantsRoute
@@ -353,6 +352,7 @@ export interface FileRoutesByFullPath {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -397,7 +397,6 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/ai': typeof ChatAiRoute
-  '/new': typeof ChatNewRoute
   '/app': typeof ChatAppRoute
   '/assistants': typeof ChatAssistantsRoute
   '/automations': typeof ChatAutomationsRoute
@@ -405,6 +404,7 @@ export interface FileRoutesByTo {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -452,7 +452,6 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/ai': typeof ChatAiRoute
-  '/_chat/new': typeof ChatNewRoute
   '/_chat/app': typeof ChatAppRoute
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
   '/_chat/assistants': typeof ChatAssistantsRoute
@@ -461,6 +460,7 @@ export interface FileRoutesById {
   '/_chat/drive': typeof ChatDriveRoute
   '/_chat/files': typeof ChatFilesRoute
   '/_chat/my-uno': typeof ChatMyUnoRoute
+  '/_chat/new': typeof ChatNewRoute
   '/_chat/office': typeof ChatOfficeRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
@@ -509,7 +509,6 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/ai'
-    | '/new'
     | '/app'
     | '/assistant'
     | '/assistants'
@@ -518,6 +517,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -562,7 +562,6 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/ai'
-    | '/new'
     | '/app'
     | '/assistants'
     | '/automations'
@@ -570,6 +569,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -616,7 +616,6 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/_chat/ai'
-    | '/_chat/new'
     | '/_chat/app'
     | '/_chat/assistant'
     | '/_chat/assistants'
@@ -625,6 +624,7 @@ export interface FileRouteTypes {
     | '/_chat/drive'
     | '/_chat/files'
     | '/_chat/my-uno'
+    | '/_chat/new'
     | '/_chat/office'
     | '/_chat/setup'
     | '/_chat/sites'
@@ -857,6 +857,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatOfficeRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/new': {
+      id: '/_chat/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/my-uno': {
       id: '/_chat/my-uno'
       path: '/my-uno'
@@ -911,13 +918,6 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof ChatAppRouteImport
-      parentRoute: typeof ChatRoute
-    }
-    '/_chat/new': {
-      id: '/_chat/new'
-      path: '/new'
-      fullPath: '/new'
-      preLoaderRoute: typeof ChatNewRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/ai': {
@@ -1066,7 +1066,6 @@ const ChatAssistantRouteWithChildren = ChatAssistantRoute._addFileChildren(
 
 interface ChatRouteChildren {
   ChatAiRoute: typeof ChatAiRoute
-  ChatNewRoute: typeof ChatNewRoute
   ChatAppRoute: typeof ChatAppRoute
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
   ChatAssistantsRoute: typeof ChatAssistantsRoute
@@ -1075,6 +1074,7 @@ interface ChatRouteChildren {
   ChatDriveRoute: typeof ChatDriveRoute
   ChatFilesRoute: typeof ChatFilesRoute
   ChatMyUnoRoute: typeof ChatMyUnoRoute
+  ChatNewRoute: typeof ChatNewRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
@@ -1085,7 +1085,6 @@ interface ChatRouteChildren {
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatAiRoute: ChatAiRoute,
-  ChatNewRoute: ChatNewRoute,
   ChatAppRoute: ChatAppRoute,
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
   ChatAssistantsRoute: ChatAssistantsRoute,
@@ -1094,6 +1093,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatDriveRoute: ChatDriveRoute,
   ChatFilesRoute: ChatFilesRoute,
   ChatMyUnoRoute: ChatMyUnoRoute,
+  ChatNewRoute: ChatNewRoute,
   ChatOfficeRoute: ChatOfficeRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,
