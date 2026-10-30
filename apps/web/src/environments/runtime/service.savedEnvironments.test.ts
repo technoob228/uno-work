@@ -117,6 +117,7 @@ vi.mock("~/lib/providerReactQuery", () => ({
 }));
 
 vi.mock("~/store", () => ({
+  setThreadReadAtSink: vi.fn(),
   useStore: {
     getState: () => ({
       syncServerShellSnapshot: vi.fn(),

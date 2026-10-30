@@ -1114,6 +1114,9 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   const threadRef = threadId ? scopeThreadRef(environmentId, threadId) : null;
   const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
 
+  // Read marks first: a summary built below then already has the server readAt,
+  // so a read-state-only upsert leaves the app store untouched.
+  if (event.kind === "thread-upserted") mergeServerThreadReadState(environmentId, [event.thread]);
   const stateBefore = useStore.getState();
   stateBefore.applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
@@ -1126,10 +1129,9 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   });
   if (event.kind === "thread-upserted" && useStore.getState() === stateBefore) {
     // Nothing the app renders changed — typically only the server read mark
-    // moved (often our own thread.visit coming back). Take the mark and stop:
-    // the UI syncs and subscription upkeep below re-rendered the sidebar and
-    // the open chat for nothing (bench 29.10, +2 commits per opened chat).
-    mergeServerThreadReadState(environmentId, [event.thread]);
+    // moved (often our own thread.visit coming back). Stop: the UI syncs and
+    // subscription upkeep below re-rendered the sidebar and the open chat for
+    // nothing (bench 29.10, +2 commits per opened chat).
     return;
   }
 
@@ -1140,7 +1142,6 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       return;
     case "thread-upserted":
       syncThreadUiFromStore();
-      mergeServerThreadReadState(environmentId, [event.thread]);
       if (!previousThread && threadRef) {
         markPromotedDraftThreadByRef(threadRef);
       }
@@ -1176,9 +1177,9 @@ function createEnvironmentConnectionHandlers() {
         return;
       }
 
+      mergeServerThreadReadState(environmentId, snapshot.threads);
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
       markAppliedProjectionSnapshot(environmentId, snapshot);
-      mergeServerThreadReadState(environmentId, snapshot.threads);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),

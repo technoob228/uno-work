@@ -38,7 +38,7 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
-import { readThreadReadAt, writeThreadReadAt } from "./threadReadMarks";
+import { readThreadReadAt, writeThreadReadAt, writeThreadReadAts } from "./threadReadMarks";
 
 export interface EnvironmentState {
   projectIds: ProjectId[];
@@ -2171,6 +2171,20 @@ interface AppStore extends AppState {
   ) => void;
   setThreadArchivedAt: (threadRef: ScopedThreadRef, archivedAt: string | null) => void;
   setThreadReadAt: (threadRef: ScopedThreadRef, readAt: string | null) => void;
+  /** Server read marks (another device pressed Read / marked unread): one
+   *  write for the batch, no echo back to the server. */
+  applyServerThreadReadAts: (
+    entries: ReadonlyArray<{ readonly threadRef: ScopedThreadRef; readonly readAt: string | null }>,
+  ) => void;
+}
+
+/** Where a person's Read / Mark unread goes besides this browser (the server,
+ *  threadReadStateSync.ts). Set once at startup. */
+let threadReadAtSink: ((threadRef: ScopedThreadRef, readAt: string | null) => void) | null = null;
+export function setThreadReadAtSink(
+  sink: ((threadRef: ScopedThreadRef, readAt: string | null) => void) | null,
+) {
+  threadReadAtSink = sink;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -2197,5 +2211,21 @@ export const useStore = create<AppStore>((set) => ({
   setThreadReadAt: (threadRef, readAt) => {
     writeThreadReadAt(threadRef.environmentId, threadRef.threadId, readAt);
     set((state) => setThreadReadAt(state, threadRef, readAt));
+    threadReadAtSink?.(threadRef, readAt);
+  },
+  applyServerThreadReadAts: (entries) => {
+    if (entries.length === 0) return;
+    writeThreadReadAts(
+      entries.map(({ threadRef, readAt }) => ({
+        environmentId: threadRef.environmentId,
+        threadId: threadRef.threadId,
+        readAt,
+      })),
+    );
+    set((state) => {
+      let next: AppState = state;
+      for (const { threadRef, readAt } of entries) next = setThreadReadAt(next, threadRef, readAt);
+      return next;
+    });
   },
 }));
