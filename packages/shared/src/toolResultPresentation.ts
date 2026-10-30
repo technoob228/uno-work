@@ -519,6 +519,12 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Couldn't open it in the panel",
   ],
   image_generate: ["Making an image…", "Made an image", "Couldn't make the image"],
+  html_preview: ["Checking the page…", "Checked the page", "Couldn't check the page"],
+  html_render: [
+    "Making a page…",
+    (c) => named("Page:", text(c.args, "title"), "Made a page"),
+    "Couldn't show the page",
+  ],
   browser_command: [
     "Using the browser…",
     (c) =>

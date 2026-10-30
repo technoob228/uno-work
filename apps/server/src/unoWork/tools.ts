@@ -71,6 +71,7 @@ import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
+import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import type { LateToolApprovalOutcome, ToolApprovalOutcome } from "../browserBridge.ts";
 import { lateApprovalNote, queuedApprovalMessage } from "../personApproval.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
@@ -97,6 +98,7 @@ import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
+import { htmlRenderTools } from "./htmlTools.ts";
 import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
 import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
 import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
@@ -175,8 +177,32 @@ export interface BridgeReply {
   readonly body: unknown;
 }
 
+/** What `html_preview` learned about a page, with its picture. */
+export interface HtmlPageCapture {
+  /** PNG, base64. */
+  readonly png: string;
+  readonly contentHeight: number;
+  readonly capturedHeight: number;
+  readonly consoleMessages: ReadonlyArray<{ readonly level: string; readonly text: string }>;
+  /** Addresses the page tried to reach and wasn't allowed to. */
+  readonly blockedRequests: ReadonlyArray<string>;
+}
+
 export interface UnoWorkToolDeps {
   readonly caller: UnoWorkCaller;
+  /** A page in this chat (`html_render`, `html_preview`). Absent: not on this daemon. */
+  readonly htmlRender?: {
+    readonly publish: (input: {
+      readonly html: string;
+      readonly title: string;
+      readonly height: number;
+    }) => Effect.Effect<HtmlRenderReference, UnoWorkToolError>;
+    readonly capture: (input: {
+      readonly html: string;
+      readonly width: number;
+      readonly appearance: "dark" | "light";
+    }) => Effect.Effect<HtmlPageCapture, UnoWorkToolError>;
+  };
   /**
    * The calling chat's assistant preset refuses tools that change things
    * (an Observer's chats): the text the model reads, or null. Absent: no
@@ -3786,6 +3812,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       }),
   },
 
+  // A page in the chat instead of only text (htmlTools.ts)
+  ...htmlRenderTools({ resolvePath: resolveUserPath, fail: toolError }),
   // Spark: one JS/Python file answers HTTPS, no server, free (sparkTools.ts)
   ...sparkTools({
     resolvePath: (raw, deps) => resolveUserPath(raw, deps),

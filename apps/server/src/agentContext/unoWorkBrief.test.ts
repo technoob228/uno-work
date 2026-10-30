@@ -44,7 +44,8 @@ describe("Uno Work environment brief", () => {
     // agents start can be hidden, so an agent has to call the person into one);
     // ~20 for `messenger_send` with answer buttons (Misha 29.10: any chat writes to
     // the person's Telegram and asks with buttons; the details are uno_guide("notify")).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2080);
+    // ~45 for a page in the chat (T3 port 30.10: when to answer with `html_render`, one line).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2135);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

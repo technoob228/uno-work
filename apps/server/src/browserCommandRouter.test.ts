@@ -92,6 +92,7 @@ function makeFakeServerBrowser(
         calls.push(input);
         return reply(input);
       }),
+    capturePage: () => Effect.succeed({ error: "not in this test" }),
     live: unavailableServerBrowserLive,
     shutdown: Effect.void,
   });

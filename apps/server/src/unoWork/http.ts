@@ -19,12 +19,20 @@ import { promises as fsp } from "node:fs";
 
 import {
   ASSISTANT_PROJECT_ID,
+  CommandId,
+  EventId,
   ManagerTelegramConnectorConfig,
   ThreadId,
   UNO_GATEWAY_BASE_URL,
   type UnoMachineApp,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import {
+  clampHtmlRenderHeight,
+  HTML_RENDER_ACTIVITY_KIND,
+  HTML_RENDER_MAX_TITLE_LENGTH,
+  type HtmlRenderReference,
+} from "@t3tools/shared/htmlRender";
 import { Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -43,7 +51,9 @@ import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { replyButtons } from "../manager/connectorButtons.ts";
+import { storePage } from "../htmlRender/htmlRender.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
+import { ServerBrowser } from "../serverBrowser.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
@@ -248,6 +258,8 @@ const makeDeps = (input: {
   Effect.gen(function* () {
     const browserBridge = yield* BrowserBridge;
     const projections = yield* ProjectionSnapshotQuery;
+    const engine = yield* OrchestrationEngineService;
+    const serverBrowser = yield* ServerBrowser;
     const machineApps = yield* MachineAppsService;
     const computerResources = yield* ComputerResourcesService;
     const files = yield* FilesService;
@@ -372,6 +384,58 @@ const makeDeps = (input: {
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
+      htmlRender: {
+        publish: (page) =>
+          Effect.gen(function* () {
+            const stored = yield* Effect.tryPromise({
+              try: () =>
+                storePage({
+                  attachmentsDir: serverConfig.attachmentsDir,
+                  threadId: input.threadId,
+                  html: page.html,
+                }),
+              catch: () => new UnoWorkToolError({ message: "The page could not be saved." }),
+            });
+            const reference: HtmlRenderReference = {
+              ...stored,
+              title: page.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "Page",
+              height: clampHtmlRenderHeight(page.height),
+            };
+            const createdAt = new Date().toISOString();
+            // From the daemon, not from the harness's tool events: the same
+            // row in the chat whatever the harness (Claude, Codex, OpenCode…).
+            yield* engine
+              .dispatch({
+                type: "thread.activity.append",
+                commandId: CommandId.make(`html-render:${stored.attachmentId}`),
+                threadId: ThreadId.make(input.threadId),
+                activity: {
+                  id: EventId.make(crypto.randomUUID()),
+                  tone: "info",
+                  kind: HTML_RENDER_ACTIVITY_KIND,
+                  summary: reference.title,
+                  payload: reference,
+                  turnId: thread?.session?.activeTurnId ?? thread?.latestTurn?.turnId ?? null,
+                  createdAt,
+                },
+                createdAt,
+              })
+              .pipe(
+                Effect.mapError(
+                  () => new UnoWorkToolError({ message: "The page could not be shown." }),
+                ),
+              );
+            return reference;
+          }),
+        capture: (page) =>
+          serverBrowser.capturePage(page).pipe(
+            Effect.flatMap((shot) =>
+              "error" in shot
+                ? Effect.fail(new UnoWorkToolError({ message: shot.error }))
+                : Effect.succeed(shot),
+            ),
+          ),
+      },
       // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
       ...(projectSync
         ? {
