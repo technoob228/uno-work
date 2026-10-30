@@ -143,6 +143,13 @@ async function newChat(page) {
 // ── Switch by itself ──
 {
   const { page, context } = await open({ newChatModelSelection: CLAUDE, planLimitSwitch: "auto" });
+  await step("Switch by itself: Home's box moves to the MacBook and says so", async () => {
+    await page.getByTestId("home-plan-room-switched").waitFor({ timeout: 20_000 });
+    await page.getByTestId("home-composer").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(600);
+    await shot(page, "07a-auto-home-switched");
+    log.push(`  home: ${await text(page, "home-plan-room-switched")}`);
+  });
   await step("Switch by itself: a new chat starts on the MacBook and says so", async () => {
     await page
       .getByTestId("sidebar-new-chat")
@@ -152,7 +159,7 @@ async function newChat(page) {
       .click();
     await page.getByTestId("plan-room-started-on").waitFor({ timeout: 25_000 });
     await page.waitForTimeout(1500);
-    await shot(page, "07-auto-started-on-macbook");
+    await shot(page, "07b-auto-new-chat-started-on-macbook");
     log.push(`  note: ${await text(page, "plan-room-started-on")}`);
   });
   await context.close();
