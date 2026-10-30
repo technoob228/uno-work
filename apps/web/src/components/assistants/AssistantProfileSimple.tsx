@@ -7,10 +7,12 @@
  * - the one next step: Connect Telegram (@BotFather, paste the token, then
  *   Start in Telegram) until a bot is linked; Slack and its email are small
  *   rows under it;
- * - its chats and what is on it now, its memory;
- * - Advanced, folded: its mode (Autonomous / Cautious) and projects,
- *   where it works, the apps it may open, the AI (one per computer), its
- *   email rules, role, routines, the team and "Set up again";
+ * - its permission level, where it can look, where it works, the apps it
+ *   may open and the AI (one per computer) — in plain sight (29.10);
+ * - its chats and what is on it now, its memory and instructions (edited
+ *   right on the page);
+ * - Advanced, folded: projects by name, its email rules, role, routines,
+ *   the team and "Set up again";
  * - its automations (28.10): what it does on a schedule or on an event.
  *
  * Everything here reads and changes what its computer keeps. The mock's page
@@ -19,7 +21,7 @@
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ChevronRightIcon,
@@ -54,6 +56,7 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
+import { MemoryBlock } from "./AssistantMemoryModels";
 import { AssistantModeSwitch } from "./PersonaMode";
 import { AutomationsSection } from "../automations/AutomationsSection";
 import { JoinCallsSection } from "./JoinCallsSection";
@@ -63,7 +66,6 @@ import {
   TeamPresetEditor,
   TeamRoutines,
   TeamRunsOn,
-  useOpenAssistantSettings,
 } from "./AssistantProfileReal";
 import { ACTIVITY_LABEL, buildAssistantTree, descendantKeys } from "./assistantTeam.logic";
 import { setupProgressLine } from "./teamFromDaemon.logic";
@@ -265,7 +267,7 @@ function Advanced(props: { readonly children: ReactNode }) {
         <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
         Advanced
         <span className="font-normal">
-          · permission level, projects, where it works, apps, AI, email
+          · projects by name, its email, role and routines, team
         </span>
       </button>
       {open ? props.children : null}
@@ -285,21 +287,30 @@ export function AssistantProfileSimple(props: {
       (item) => item.environmentId === props.environmentId && item.projectId === props.projectId,
     ) ?? null;
   const navigate = useNavigate();
+  const router = useRouter();
   const machines = useMachineRows();
   const { handleNewThread } = useNewThreadHandler();
   const actions = useTeamActions();
   const quick = useQuickCreateAssistant();
-  const openSettings = useOpenAssistantSettings();
   const [editingWho, setEditingWho] = useState(false);
   const [changingBrain, setChangingBrain] = useState(false);
   const [faceOpen, setFaceOpen] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [editingMemory, setEditingMemory] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Back where the person came from (its chat, the sidebar, the list); a page
+  // opened by a link goes to the list of assistants (29.10).
+  const canGoBack = useCanGoBack();
   const back = (
-    <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/assistants" })}>
+    <Button
+      size="xs"
+      variant="ghost"
+      onClick={() => (canGoBack ? router.history.back() : void navigate({ to: "/assistants" }))}
+      data-testid="assistant-profile-back"
+    >
       <ArrowLeftIcon className="size-3.5" />
-      <span className="hidden sm:inline">Assistants</span>
+      <span className="hidden sm:inline">{canGoBack ? "Back" : "All assistants"}</span>
     </Button>
   );
 
@@ -562,6 +573,44 @@ export function AssistantProfileSimple(props: {
               </div>
             </Section>
 
+            {/* Its computer, apps and AI in plain sight (29.10: they were under Advanced). */}
+            <Section title="Where it works" testId="assistant-profile-works-on-section">
+              <TeamWorksOn member={member} />
+            </Section>
+
+            <Section
+              title="Apps it can open"
+              testId="assistant-profile-can-use"
+              action={
+                <button
+                  type="button"
+                  onClick={() => void navigate({ to: "/settings/connectors" })}
+                  className="cursor-pointer text-xs text-primary hover:underline"
+                >
+                  Connectors in Settings
+                </button>
+              }
+            >
+              <TeamConnectors member={member} place={place} nameOf={nameOf} />
+            </Section>
+
+            <Section
+              title="The AI it runs on"
+              action={
+                member.revoked ? null : (
+                  <button
+                    type="button"
+                    onClick={() => setChangingBrain((value) => !value)}
+                    className="cursor-pointer text-xs text-primary hover:underline"
+                  >
+                    {changingBrain ? "Done" : "Change"}
+                  </button>
+                )
+              }
+            >
+              <TeamRunsOn member={member} changing={changingBrain} />
+            </Section>
+
             <div className="grid gap-6 md:grid-cols-2">
               <Section title={`Chats · ${member.chats.conversations.length}`}>
                 {member.chats.conversations.length > 0 ? (
@@ -600,20 +649,35 @@ export function AssistantProfileSimple(props: {
               action={
                 <button
                   type="button"
-                  onClick={() => openSettings(member)}
+                  onClick={() => setEditingMemory((value) => !value)}
                   className="cursor-pointer text-xs text-primary hover:underline"
                   data-testid="assistant-profile-memory-edit"
                 >
-                  Edit
+                  {editingMemory ? "Done" : "Edit memory and instructions"}
                 </button>
               }
             >
-              <MemoryFile
-                member={uno ?? member}
-                name="NOTES.md"
-                what="what Uno and helpers learned"
-              />
-              <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
+              {/* Edited right here (29.10): "Edit" used to open an older page of it. */}
+              {editingMemory ? (
+                <div className="px-3 py-2" data-testid="assistant-profile-memory-editor">
+                  <MemoryBlock
+                    name={name}
+                    environmentId={member.environmentId as EnvironmentId}
+                    projectId={member.projectId}
+                    waking={false}
+                    onWake={() => undefined}
+                  />
+                </div>
+              ) : (
+                <>
+                  <MemoryFile
+                    member={uno ?? member}
+                    name="NOTES.md"
+                    what="what Uno and helpers learned"
+                  />
+                  <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
+                </>
+              )}
             </Section>
 
             {/* Variant D: removing a persona is a visible, plain action. */}
@@ -662,43 +726,6 @@ export function AssistantProfileSimple(props: {
                 <div className="px-3 py-2">
                   <TeamPresetEditor member={member} nameOf={nameOf} />
                 </div>
-              </Section>
-
-              <Section title="Where it works" testId="assistant-profile-works-on-section">
-                <TeamWorksOn member={member} />
-              </Section>
-
-              <Section
-                title="Apps it can open"
-                testId="assistant-profile-can-use"
-                action={
-                  <button
-                    type="button"
-                    onClick={() => void navigate({ to: "/settings/connectors" })}
-                    className="cursor-pointer text-xs text-primary hover:underline"
-                  >
-                    Connectors in Settings
-                  </button>
-                }
-              >
-                <TeamConnectors member={member} place={place} nameOf={nameOf} />
-              </Section>
-
-              <Section
-                title="The AI it runs on"
-                action={
-                  member.revoked ? null : (
-                    <button
-                      type="button"
-                      onClick={() => setChangingBrain((value) => !value)}
-                      className="cursor-pointer text-xs text-primary hover:underline"
-                    >
-                      {changingBrain ? "Done" : "Change"}
-                    </button>
-                  )
-                }
-              >
-                <TeamRunsOn member={member} changing={changingBrain} />
               </Section>
 
               <TeamMail
