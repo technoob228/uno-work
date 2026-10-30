@@ -655,10 +655,13 @@ function MakeItYours(props: { readonly start: GalleryPersona; readonly onBack: (
     <div className="flex flex-col gap-5" data-testid="persona-builder" data-step={step}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          {step === "channel" ? `${shown} is ready` : `Make ${start.name} yours`}
+          {step === "channel" ? `${shown} is ready` : `Make ${name.trim() || start.name} yours`}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Step {STEP_NUMBER[step]} of 5. You can change all of it later.
+          Step {STEP_NUMBER[step]} of 5.{" "}
+          {step === "channel"
+            ? "Change any of it later: Settings at the top of its chat."
+            : "You can change all of it later."}
         </p>
       </div>
       {step === "channel" && made ? (
