@@ -41,7 +41,6 @@ import {
   HouseIcon,
   MessageCircleQuestionIcon,
   MoreHorizontalIcon,
-  MessageSquareIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -1324,15 +1323,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               hasActions && D_ROW_FADE,
             )}
           >
-            {/* Next to apps and files in Pinned the icon says "a chat" (Misha 30.10). */}
-            {pinnedRow ? (
-              <span
-                className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
-                data-testid="sidebar-row-chat-icon"
-              >
-                <MessageSquareIcon className="size-4" />
-              </span>
-            ) : null}
             {props.placeName ? (
               <Tooltip>
                 <TooltipTrigger
@@ -4527,7 +4517,8 @@ export default function Sidebar() {
                 <SidebarPinned
                   hasPinnedChats={pinnedThreads.length > 0}
                   pinnedChats={pinnedThreads.map((thread) =>
-                    renderRow(thread, "pinned", { d: true }),
+                    // Pinned isn't grouped: each chat says its project (Misha 30.10).
+                    renderRow(thread, "pinned", { d: true, place: dRowPlace(thread) }),
                   )}
                 />
               </li>
