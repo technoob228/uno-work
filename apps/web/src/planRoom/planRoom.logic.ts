@@ -76,7 +76,9 @@ export interface PlanLimitHit {
  * resets — a full weekly window outlasts a full 5-hour one.
  */
 export function planAtLimit(account: PlanLimitsAccount, now: number): PlanLimitHit | null {
-  const full = account.windows.filter((window) => blocksWork(window) && usedNow(window, now) >= 100);
+  const full = account.windows.filter(
+    (window) => blocksWork(window) && usedNow(window, now) >= 100,
+  );
   if (full.length === 0) return null;
   let latest: PlanLimitsWindow | null = null;
   for (const window of full) {

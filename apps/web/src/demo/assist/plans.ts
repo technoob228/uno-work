@@ -152,10 +152,7 @@ export const PLAN_LIMIT_CHAT = {
   role: "solo",
   harness: "claude",
   messages: [
-    [
-      "user",
-      "The signup form on the landing doesn't send the email field. Fix it and redeploy.",
-    ],
+    ["user", "The signup form on the landing doesn't send the email field. Fix it and redeploy."],
     [
       "assistant",
       "Found it: the form posts `mail` but the handler reads `email`. Renaming the field now.",

@@ -714,7 +714,7 @@ describe("wsApi", () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
       planModeEnabled: false,
-      planLimitSwitch: "ask",
+      planLimitSwitch: "ask" as const,
       browserAutomationLevel: "full" as const,
       browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,
@@ -794,7 +794,7 @@ describe("wsApi", () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
       planModeEnabled: false,
-      planLimitSwitch: "ask",
+      planLimitSwitch: "ask" as const,
       browserAutomationLevel: "full" as const,
       browserOpenIn: "auto" as const,
       browserProfileScope: "account" as const,

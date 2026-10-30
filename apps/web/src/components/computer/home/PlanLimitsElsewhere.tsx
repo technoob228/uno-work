@@ -33,9 +33,7 @@ export const PlanLimitsElsewhere = memo(function PlanLimitsElsewhere({
   if (others.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 border-t pt-3" data-testid="home-plan-limits-elsewhere">
-      <span className="text-[11px] font-medium text-muted-foreground">
-        On your other computers
-      </span>
+      <span className="text-[11px] font-medium text-muted-foreground">On your other computers</span>
       {others.map((entry) => {
         const until = entry.hit ? planUntilText(entry.hit.resetsAt, now) : null;
         return (
