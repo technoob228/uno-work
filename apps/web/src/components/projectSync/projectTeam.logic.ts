@@ -84,6 +84,20 @@ export function teamErrorMessage(error: unknown): string {
   return MESSAGES[teamErrorCode(error) ?? ""] ?? "That didn't work. Try again in a moment.";
 }
 
+/** The answer to an invitation: `email_skipped` says why no email went out. */
+export interface TeamInviteAnswer {
+  readonly email_skipped?: string;
+}
+
+/** Word for word as Misha approved it (30.10). */
+export const INVITE_EMAIL_NOT_SENT =
+  "The invite is saved, but no email went out. Confirm your email, then remove the invite and send it again.";
+
+/** What to say when the invitation's email didn't go; null when it did. */
+export function inviteEmailProblem(answer: TeamInviteAnswer): string | null {
+  return answer.email_skipped === "owner_email_not_verified" ? INVITE_EMAIL_NOT_SENT : null;
+}
+
 /** How a person is called: the name they chose, not the generated `uno_1234`. */
 export function personLabel(person: Pick<TeamPerson, "email" | "username">): string {
   const username = person.username?.trim() ?? "";

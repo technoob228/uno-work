@@ -6,7 +6,12 @@
  * @module projectSync/projectTeam.api
  */
 import { accountRequest, accountTransport } from "../../account/unoAccount";
-import { teamErrorCode, type TeamCard, type TeamList } from "./projectTeam.logic";
+import {
+  teamErrorCode,
+  type TeamCard,
+  type TeamInviteAnswer,
+  type TeamList,
+} from "./projectTeam.logic";
 
 const ROOT = "/api/v1/work/team";
 
@@ -28,7 +33,7 @@ export const loadTeam = (id: number) =>
   accountRequest("GET", `${ROOT}/projects/${id}`) as Promise<TeamCard>;
 
 export const invite = (id: number, email: string) =>
-  accountRequest("POST", `${ROOT}/projects/${id}/invites`, { email });
+  accountRequest("POST", `${ROOT}/projects/${id}/invites`, { email }) as Promise<TeamInviteAnswer>;
 
 export const cancelInvite = (id: number, inviteId: number) =>
   accountRequest("DELETE", `${ROOT}/projects/${id}/invites/${inviteId}`);

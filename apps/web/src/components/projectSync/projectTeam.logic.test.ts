@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  inviteEmailProblem,
   personLabel,
   rotateLine,
   teamErrorCode,
@@ -12,6 +13,15 @@ import {
 const owner = { user_id: 85, email: "a@b.c", username: "misha" };
 
 describe("project team words", () => {
+  it("says when the invitation's email didn't go, word for word", () => {
+    expect(inviteEmailProblem({ email_skipped: "owner_email_not_verified" })).toBe(
+      "The invite is saved, but no email went out. Confirm your email, then remove the invite and send it again.",
+    );
+    expect(inviteEmailProblem({})).toBeNull();
+    // Another reason, later: these words would be wrong for it.
+    expect(inviteEmailProblem({ email_skipped: "something_new" })).toBeNull();
+  });
+
   it("calls people by the name they chose", () => {
     expect(personLabel({ email: "a@b.c", username: "anya" })).toBe("anya");
     expect(personLabel({ email: "a@b.c", username: "uno_1058" })).toBe("a@b.c");
