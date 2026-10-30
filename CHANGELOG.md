@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.165 — 2026-10-30
+
+- Uno answers faster and stays on point: it hands real work to a separate chat in the right project, keeps its own context small, and starts fresh when its instructions change (instructions 2026-10-29.3).
+- Telegram buttons: when a chat needs your approval or asks you to pick an option, Telegram gets one message with buttons (Allow / Deny or the options); press one and the chat continues. Any chat can now send you text and files in Telegram or Slack, and your reply goes back to that chat.
+- Uno understands files you send it in Telegram (albums, forwards, replies to a file) and can send files from your projects back to you.
+
+---
+
 ## v0.0.164 — 2026-10-29
 
 - Claude Code no longer dies in the middle of a long task: when Claude moves a slow command (over 2 minutes) to the background, Uno Work now counts it as work in progress and keeps Claude running until the command finishes and Claude reports the result.
