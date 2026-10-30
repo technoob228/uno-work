@@ -1053,6 +1053,117 @@ describe("telling and showing", () => {
     });
   });
 
+  describe("a page in the chat", () => {
+    const withPages = () => {
+      const made = makeDeps();
+      const published: Array<{ html: string; title: string; height: number }> = [];
+      const captured: Array<{ html: string; width: number; appearance: string }> = [];
+      const deps: UnoWorkToolDeps = {
+        ...made.deps,
+        htmlRender: {
+          publish: (page) =>
+            Effect.sync(() => {
+              published.push(page);
+              return {
+                attachmentId: "t-1",
+                path: "/state/attachments/t-1.html",
+                title: page.title,
+                height: page.height,
+              };
+            }),
+          capture: (page) =>
+            Effect.sync(() => {
+              captured.push(page);
+              return {
+                png: "iVBOR",
+                contentHeight: 320,
+                capturedHeight: 320,
+                consoleMessages: [],
+                blockedRequests: [],
+              };
+            }),
+        },
+      };
+      return { ...made, deps, published, captured };
+    };
+
+    it("publishes a page: the theme is in, the answer tells the agent not to repeat it", async () => {
+      const { deps, published } = withPages();
+      const result = await run("html_render", deps, { html: "<p>Q3</p>", title: "Q3" });
+      expect(result._tag).toBe("Success");
+      expect(published[0]?.html).toContain('<style id="t3-theme">');
+      expect(published[0]?.height).toBe(400);
+      expect(JSON.stringify(result)).toContain("Don't mention or describe the page");
+    });
+
+    it("takes a file, with images next to it, and keeps nothing of the path", async () => {
+      const { deps, published, home } = withPages();
+      const folder = path.join(home, "projects", "notes", "report");
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(path.join(folder, "chart.gif"), Buffer.from("GIF89a"));
+      writeFileSync(path.join(folder, "index.html"), '<img src="chart.gif">');
+      const result = await run("html_render", deps, {
+        file: "report/index.html",
+        title: "Report",
+      });
+      expect(result._tag).toBe("Success");
+      expect(published[0]?.html).toContain("data:image/gif;base64,");
+      expect(published[0]?.html).not.toContain('src="chart.gif"');
+    });
+
+    it("asks for one source and a title, and says which image is missing", async () => {
+      const { deps } = withPages();
+      expect(JSON.stringify(await run("html_render", deps, { title: "x" }))).toContain(
+        "exactly one of html or file",
+      );
+      expect(
+        JSON.stringify(await run("html_render", deps, { html: "<p>x</p>", title: "  " })),
+      ).toContain("Give the page a title");
+      expect(
+        JSON.stringify(
+          await run("html_render", deps, { html: '<img src="/nope/x.png">', title: "x" }),
+        ),
+      ).toContain("/nope/x.png");
+    });
+
+    it("refuses a page that follows the frame's height", async () => {
+      const { deps } = withPages();
+      const result = await run("html_render", deps, {
+        html: "<style>body{height:100vh}</style>",
+        title: "x",
+      });
+      expect(result._tag).toBe("Failure");
+      expect(JSON.stringify(result)).toContain("viewport height unit");
+    });
+
+    it("keeps a sandboxed assistant out of files beyond its projects", async () => {
+      const { deps, home } = withPages();
+      writeFileSync(path.join(home, "secret.html"), "<p>private</p>");
+      const fenced: UnoWorkToolDeps = {
+        ...deps,
+        caller: { ...deps.caller, boundary: { roots: [path.join(home, "projects")], name: "Ada" } },
+      };
+      const result = await run("html_render", fenced, {
+        file: path.join(home, "secret.html"),
+        title: "x",
+      });
+      expect(result._tag).toBe("Failure");
+      expect(JSON.stringify(result)).toContain("Ada works only in its projects");
+    });
+
+    it("shows the agent its page as a picture with the facts beside it", async () => {
+      const { deps, captured } = withPages();
+      const result = await run("html_preview", deps, { html: "<p>x</p>", width: 390 });
+      expect(result).toMatchObject({
+        _tag: "Success",
+        success: {
+          content: [{ type: "image", mimeType: "image/png", data: "iVBOR" }, { type: "text" }],
+        },
+      });
+      expect(captured[0]).toMatchObject({ width: 390, appearance: "dark" });
+    });
+  });
+
   it("opens files in the panel through the bridge with absolute paths", async () => {
     const { deps, recorded, home } = makeDeps();
     await run("open_in_panel", deps, { file: "report.html" });

@@ -5,6 +5,7 @@
  * lives here as text; png/pdf/docx are real files in `public/demo-files/`.
  */
 import { WS_METHODS } from "@t3tools/contracts";
+import { injectHtmlRenderBootstrap } from "@t3tools/shared/htmlRender";
 
 import type { NormalizedWsRpcRequestBody } from "./rpcHarness";
 import type { DemoMachine } from "./heavyFixtures";
@@ -83,7 +84,39 @@ What nobody says: **what happens at night**. That's ours.
 `,
 };
 
+const bar = (label: string, september: number, october: number) => `
+  <div class="row"><span>${label}</span>
+    <div class="bars">
+      <i class="sep" style="width:${september}%"></i>
+      <i class="oct" style="width:${october}%"></i>
+    </div>
+    <b>+${Math.round((october / september - 1) * 100)}%</b>
+  </div>`;
+
+/** The page of the showcase chat, stored as the daemon stores one. */
+const DEMO_PAGE = injectHtmlRenderBootstrap(`<!doctype html><html><head><style>
+.head{display:flex;gap:28px;margin-bottom:18px}
+.head div{font-size:13px;color:var(--muted-foreground)}
+.head strong{display:block;font-size:30px;font-weight:600;color:var(--foreground)}
+.row{display:grid;grid-template-columns:110px 1fr 56px;gap:12px;align-items:center;margin:12px 0;font-size:14px}
+.bars i{display:block;height:11px;border-radius:3px;margin:3px 0}
+.sep{background:var(--border)}
+.oct{background:var(--info)}
+.row b{text-align:right;font-weight:600}
+.key{display:flex;gap:16px;margin-top:14px;font-size:12px;color:var(--muted-foreground)}
+.key i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+</style></head><body>
+<div class="head">
+  <div><strong>$4,180</strong>Revenue in October</div>
+  <div><strong>212</strong>New signups</div>
+  <div><strong>18.4%</strong>Paid after the brief</div>
+</div>
+${bar("Signups", 58, 78)}${bar("Finished brief", 41, 66)}${bar("Paid", 32, 52)}
+<div class="key"><span><i class="sep"></i>September</span><span><i class="oct"></i>October</span></div>
+</body></html>`);
+
 const DEMO_TEXT: Record<string, string> = {
+  "demo-october-page.html": DEMO_PAGE,
   "launch-report.md": `# Launch report
 
 Signups are up **18%** since the new form went live.

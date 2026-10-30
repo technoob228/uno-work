@@ -75,12 +75,21 @@ export interface PageToolsWirePin {
   readonly docRect: PageToolsWireRect;
 }
 
+/** What the person selected on the page, for a quote; empty text — nothing any more. */
+export interface PageToolsWireSelection {
+  readonly text: string;
+  readonly url: string;
+  /** The selection's last line, in the page's viewport (CSS pixels). */
+  readonly rect: PageToolsWireRect;
+}
+
 export type PageToolsWireMessage =
   | { readonly type: "ready"; readonly data: { readonly url: string; readonly title: string } }
   | { readonly type: "console"; readonly data: PageToolsWireConsoleEntry }
   | { readonly type: "network"; readonly data: PageToolsWireNetworkEntry }
   | { readonly type: "pick"; readonly data: PageToolsWirePick }
   | { readonly type: "pinClick"; readonly data: { readonly n: number } }
+  | { readonly type: "selection"; readonly data: PageToolsWireSelection }
   | { readonly type: "key"; readonly data: { readonly key: string } };
 
 /** What the app tells the page (the same three calls the in-page script takes). */

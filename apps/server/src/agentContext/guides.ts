@@ -214,6 +214,8 @@ export function buildUnoWorkGuide(
       return [
         "## Showing pages and files",
         '`open_in_panel` opens a URL or a file in the right panel of this chat (`scope`: chat by default, `project` or `global` only when asked). `file_open` with `where: "office"` or `"files"` shows a file in Uno Work\'s own Office or Files view. `browser_command` drives the page open in the panel (state, screenshot, click, type…).',
+        "## A page in the chat",
+        "`html_render` shows a page right in the chat, above your reply: numbers, a table, a chart, a diagram, a comparison, a mockup. Use it when seeing beats reading; a plain answer stays text, and something to keep or send is a file. Pass `file` (an .html you wrote) or `html`. `html_preview` first: you get a screenshot, the height, the console and what was blocked. It uses its own browser, which installs on first use: if it says to retry, retry, and it may be missing on a Mac; then just publish. The page takes the app's theme and follows it; use the CSS variables from the `html_render` description. Local images are embedded when you publish, so they may be deleted afterwards. The page has no network except public libraries: no fetch to other hosts, no remote images (save the image to a file and use its path), no iframes. Links open for the person only when they click.",
         HTTP_FALLBACK_NOTE,
         section(bridge, "Встроенный браузер"),
       ].join("\n\n");

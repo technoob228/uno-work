@@ -83,3 +83,14 @@ describe("developer tools of a tab (Misha 28.10)", () => {
     expect(tab()?.comments).toHaveLength(1);
   });
 });
+
+describe("text selected on the page", () => {
+  it("is gone with the document", () => {
+    const store = usePageToolsStore.getState();
+    const selection = { text: "Price", url: "https://a.test/", rect: { x: 1, y: 2, w: 3, h: 4 } };
+    store.patch("selected-tab", { selection });
+    expect(usePageToolsStore.getState().tabs["selected-tab"]?.selection).toEqual(selection);
+    store.resetLogs("selected-tab");
+    expect(usePageToolsStore.getState().tabs["selected-tab"]?.selection).toBeNull();
+  });
+});

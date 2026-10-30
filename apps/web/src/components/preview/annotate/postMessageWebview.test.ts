@@ -75,7 +75,7 @@ function fakeFramedPage(options: {
     port: "",
     ancestorOrigins: options.ancestorOrigins,
   };
-  const document = { title: "App" };
+  const document = { title: "App", addEventListener: () => {} };
   const consoleStub = {
     debug: () => {},
     error: () => {},

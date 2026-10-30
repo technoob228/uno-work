@@ -12,6 +12,7 @@ import {
   FileIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  WorkflowIcon,
   FolderIcon,
   GlobeIcon,
   ImageIcon,
@@ -32,13 +33,25 @@ import {
   ArrowLeftIcon,
   ListTodoIcon,
 } from "lucide-react";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as XLSX from "xlsx";
 
+import { extractCodeBlock } from "../chat/markdownCodeBlock";
+import { MarkdownMermaidCodeBlock } from "../chat/MarkdownMermaidCodeBlock";
 import { sanitizeDocumentHtml } from "../../lib/safeHtml";
 import { useOpenApp } from "../../navigation/useOpenApp";
 import { cn } from "../../lib/utils";
@@ -123,6 +136,7 @@ import { readFileBytes } from "../files/filesApi";
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   md: FileTextIcon,
+  mermaid: WorkflowIcon,
   html: FileCode2Icon,
   pdf: FileIcon,
   xlsx: FileSpreadsheetIcon,
@@ -143,6 +157,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
 
 const KIND_LABEL: Record<PreviewFileKind, string> = {
   md: "Markdown",
+  mermaid: "Diagram",
   html: "HTML",
   pdf: "PDF",
   xlsx: "Spreadsheet",
@@ -241,12 +256,35 @@ function UntrustedExternalLink({
   );
 }
 
+const MermaidViewer = lazy(() => import("../files/MermaidViewer"));
+
+function MermaidBody({ file, content }: { file: PreviewFile; content: string }) {
+  return (
+    <Suspense fallback={<div className="h-full w-full bg-background" />}>
+      <MermaidViewer key={`${file.id}:${content.length}`} text={content} />
+    </Suspense>
+  );
+}
+
 function MarkdownBody({ file, content }: { file: PreviewFile; content: string }) {
   const { openFile, currentChatEnvironmentId } = usePreviewPane();
   const fileEnv = file.environmentId ?? currentChatEnvironmentId ?? null;
 
   const components = useMemo<Components>(
     () => ({
+      pre({ node: _node, children, ...rest }) {
+        const block = extractCodeBlock(children);
+        if (!block?.className?.split(/\s+/).includes("language-mermaid")) {
+          return <pre {...rest}>{children}</pre>;
+        }
+        return (
+          <div className="relative [&>button]:absolute [&>button]:top-2 [&>button]:right-2">
+            <MarkdownMermaidCodeBlock code={block.code} isStreaming={false}>
+              <pre {...rest}>{children}</pre>
+            </MarkdownMermaidCodeBlock>
+          </div>
+        );
+      },
       a({ href, children, ...rest }) {
         const isExternal = !!href && /^[a-z][a-z0-9+.-]*:/i.test(href);
         const isAnchor = !!href && href.startsWith("#");
@@ -571,6 +609,7 @@ function JsonBody({ file, content }: { file: PreviewFile; content: string }) {
 /** Язык исходника для форматов с двойным представлением (превью ↔ код). */
 const SOURCE_VIEW_LANGUAGE: Partial<Record<PreviewFileKind, string>> = {
   md: "md",
+  mermaid: "text",
   html: "html",
   svg: "xml",
   csv: "csv",
@@ -897,6 +936,9 @@ function renderLoadedBody(file: PreviewFile, data: LoadedFileData, sourceView: b
           <MarkdownBody file={file} content={data.content} />
         </MemoizedScrollArea>
       );
+    }
+    if (file.kind === "mermaid") {
+      return <MermaidBody file={file} content={data.content} />;
     }
     if (file.kind === "html") {
       return (
@@ -1545,6 +1587,8 @@ function Body({ file }: { file: PreviewFile }) {
           <MarkdownBody file={file} content={file.content} />
         </MemoizedScrollArea>
       );
+    case "mermaid":
+      return <MermaidBody file={file} content={file.content} />;
     case "html":
       return <HtmlBody file={file} />;
     case "csv":

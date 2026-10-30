@@ -35,7 +35,8 @@ import { matchCredentialsForOrigin } from "./BrowserPane";
 import { BrowserHelpCard } from "./BrowserHelpCard";
 import { LiveBrowserOpenOutside } from "./LiveBrowserOpenOutside";
 import { BrowserSourceChip } from "./BrowserSourceChip";
-import { CommentBar, CommentLayer } from "./annotate/CommentLayer";
+import { CommentBar, CommentLayer, SelectionQuote } from "./annotate/CommentLayer";
+import { PAGE_SELECTION_EXPRESSION, pageSelectionFrom } from "./annotate/pageToolsScript";
 import { DebugDrawer } from "./annotate/DebugDrawer";
 import { boxPointToPage, fitFrame } from "./annotate/liveFrame.logic";
 import { LivePageView } from "./annotate/liveWebview";
@@ -917,6 +918,19 @@ function Screen({
     };
   }, [environmentId, human, pageId]);
 
+  // Selected on the page while the person drives: the same Quote as on their
+  // own site. Asked once per mouse up; nothing is put into the agent's page.
+  const readSelection = useCallback(() => {
+    const api = readEnvironmentApi(environmentId);
+    void api?.browserLive
+      .evaluate({ pageId, expression: PAGE_SELECTION_EXPRESSION })
+      .then(({ json }) => {
+        const selection = pageSelectionFrom(json === null ? null : JSON.parse(json));
+        usePageToolsStore.getState().patch(tabId, { selection });
+      })
+      .catch(() => undefined);
+  }, [environmentId, pageId, tabId]);
+
   // Выделенное на странице — в буфер этого устройства (Cmd/Ctrl+C и +X).
   const copyToClipboard = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
@@ -999,6 +1013,7 @@ function Screen({
             clickCount: Math.max(1, clickRef.current.count),
             modifiers: modifiersOf(event),
           });
+          if (event.button === 0) window.setTimeout(readSelection, 120);
         }}
         onPointerMove={(event) => {
           if (commentPointer) {
@@ -1146,6 +1161,7 @@ function Screen({
         ) : null}
       </div>
       {tools ? <CommentLayer tabId={tabId} pageRef={pictureRef} zoom={fit?.scale ?? 1} /> : null}
+      <SelectionQuote tabId={tabId} pageRef={pictureRef} zoom={fit?.scale ?? 1} />
     </div>
   );
 }

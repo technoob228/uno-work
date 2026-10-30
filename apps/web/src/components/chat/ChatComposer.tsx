@@ -47,6 +47,8 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { useComposerQuotes, useComposerQuotesStore } from "../../composerQuotesStore";
+import { ComposerQuoteChip } from "./ComposerQuoteChips";
 import { chatFileRejection, composerFileFromFile, routeComposerFiles } from "../../chatUploads";
 import { formatFileSize } from "../files/fileTypes";
 import { useComposerFileHandoffStore } from "../computer/composerFileHandoffStore";
@@ -541,6 +543,8 @@ export interface ChatComposerHandle {
    * From the right panel (the browser's Comment / Debug, the launcher's app
    * ideas): attach cards and/or put words into the box, then focus it.
    */
+  /** A quote from the panel's browser waits for the next message. */
+  addQuote?: (quote: { text: string; comment: string; page: string | null }) => void;
   attachFromPanel?: (input: {
     files?: ComposerFileAttachment[];
     /** Pictures (a comment's element): images when the model takes them, else files. */
@@ -1159,16 +1163,24 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Derived: composer send state
     // ------------------------------------------------------------------
+    const composerQuotes = useComposerQuotes(activeThreadId);
+    const activeThreadIdRef = useRef(activeThreadId);
+    activeThreadIdRef.current = activeThreadId;
     const composerSendState = useMemo(
       () =>
         deriveComposerSendState({
           prompt,
-          imageCount: composerImages.length + composerVideos.length + composerFiles.length,
+          imageCount:
+            composerImages.length +
+            composerVideos.length +
+            composerFiles.length +
+            composerQuotes.length,
           terminalContexts: composerTerminalContexts,
         }),
       [
         composerFiles.length,
         composerImages.length,
+        composerQuotes.length,
         composerTerminalContexts,
         composerVideos.length,
         prompt,
@@ -2903,6 +2915,11 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
+        addQuote: (quote) => {
+          if (activeThreadIdRef.current) {
+            useComposerQuotesStore.getState().add(activeThreadIdRef.current, quote);
+          }
+        },
         attachFromPanel: ({ files, images, text }) => {
           if (files && files.length > 0) {
             setComposerFilesState((current) => [...current, ...files]);
@@ -3520,6 +3537,7 @@ export const ChatComposer = memo(
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
                 (composerImages.length > 0 ||
+                  composerQuotes.length > 0 ||
                   composerVideos.length > 0 ||
                   composerFiles.length > 0) && (
                   <div className="mb-3 flex flex-wrap gap-2">
@@ -3639,6 +3657,15 @@ export const ChatComposer = memo(
                         </Button>
                       </div>
                     ))}
+                    {activeThreadId
+                      ? composerQuotes.map((quote) => (
+                          <ComposerQuoteChip
+                            key={quote.id}
+                            threadKey={activeThreadId}
+                            quote={quote}
+                          />
+                        ))
+                      : null}
                     {composerFiles.map((file) =>
                       file.panelContext ? (
                         <PanelContextChip

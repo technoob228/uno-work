@@ -55,6 +55,7 @@ describe("previewDownloadSource", () => {
       "docx",
       "xlsx",
       "md",
+      "mermaid",
       "text",
       "csv",
       "json",

@@ -9,7 +9,7 @@
  */
 import { create } from "zustand";
 
-import type { PagePick } from "./pageToolsScript";
+import type { PagePick, PageSelection } from "./pageToolsScript";
 import {
   type ConsoleEntry,
   type NetworkEntry,
@@ -34,6 +34,8 @@ export interface PageToolsTab {
   readonly commenting: boolean;
   readonly comments: ReadonlyArray<PageComment>;
   readonly draft: PageCommentDraft | null;
+  /** Text selected on the page right now: the Quote button stands at it. */
+  readonly selection: PageSelection | null;
   readonly console: ReadonlyArray<ConsoleEntry>;
   readonly network: ReadonlyArray<NetworkEntry>;
   /** With developer tools open: the console/network list is expanded (else just its header row). */
@@ -46,6 +48,7 @@ export const EMPTY_PAGE_TOOLS_TAB: PageToolsTab = {
   commenting: false,
   comments: [],
   draft: null,
+  selection: null,
   console: [],
   network: [],
   debugOpen: true,
@@ -105,7 +108,7 @@ export const usePageToolsStore = create<PageToolsStore>((set, get) => {
       else return false;
       return true;
     },
-    resetLogs: (tabId) => patch(tabId, { console: [], network: [] }),
+    resetLogs: (tabId) => patch(tabId, { console: [], network: [], selection: null }),
     addConsole: (tabId, entry) => patch(tabId, { console: pushCapped(tab(tabId).console, entry) }),
     addNetwork: (tabId, entry) => patch(tabId, { network: pushCapped(tab(tabId).network, entry) }),
     saveDraft: (tabId, note) => {

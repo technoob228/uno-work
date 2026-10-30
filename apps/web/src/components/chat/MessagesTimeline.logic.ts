@@ -6,6 +6,7 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { liveThoughtFromReasoningTail, workEntryIsThought } from "./workLogSummary";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
@@ -56,6 +57,13 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: ProposedPlan;
+    }
+  | {
+      /** A page the agent showed: outside the fold, it's the answer. */
+      kind: "html-render";
+      id: string;
+      createdAt: string;
+      htmlRender: HtmlRenderReference;
     }
   | {
       /** The agent waits for an OK: the question on its own row (upstream 1f8530ec3c). */
@@ -395,6 +403,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "html-render") {
+      nextRows.push({
+        kind: "html-render",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        htmlRender: timelineEntry.htmlRender,
+      });
+      continue;
+    }
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -487,6 +505,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "html-render":
+      return htmlRenderReferencesEqual(a.htmlRender, (b as typeof a).htmlRender);
 
     case "work": {
       const bw = b as typeof a;

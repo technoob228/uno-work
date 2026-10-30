@@ -8,6 +8,7 @@ import {
   FileIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  WorkflowIcon,
   FileUpIcon,
   FolderIcon,
   FolderUpIcon,
@@ -41,6 +42,7 @@ import { detectFileKind, type PreviewFileKind, usePreviewPane } from "./PreviewP
 
 const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
   md: FileTextIcon,
+  mermaid: WorkflowIcon,
   html: GlobeIcon,
   pdf: FileIcon,
   xlsx: FileSpreadsheetIcon,
@@ -61,6 +63,7 @@ const KIND_ICON: Record<PreviewFileKind, typeof FileIcon> = {
 
 const KIND_BG: Record<PreviewFileKind, string> = {
   md: "bg-emerald-500/16 text-emerald-700 dark:text-emerald-300",
+  mermaid: "bg-emerald-500/16 text-emerald-700 dark:text-emerald-300",
   html: "bg-orange-500/16 text-orange-700 dark:text-orange-300",
   pdf: "bg-red-500/16 text-red-700 dark:text-red-300",
   xlsx: "bg-green-500/16 text-green-700 dark:text-green-300",
