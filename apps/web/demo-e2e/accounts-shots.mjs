@@ -123,12 +123,16 @@ await step("Add another Claude account", async () => {
   await page.getByTestId("add-provider-account-continue").click();
   await settle(1500);
   await shot("07-sign-in");
+  await page.getByTestId("harness-sign-in-account").click();
+  await page.getByRole("button", { name: "Done" }).waitFor({ timeout: 20_000 });
+  await settle(600);
+  await shot("07b-signed-in");
+  await page.getByRole("button", { name: "Done" }).click();
 });
 await step("Signed in: its own row and its own limit", async () => {
   await page.getByTestId("ai-plans-claude").getByText("personal@getuno.xyz").waitFor({
     timeout: 20_000,
   });
-  await page.keyboard.press("Escape");
   await settle(800);
   await page
     .getByText("Your AI plans")
@@ -158,6 +162,8 @@ await step("Chat at the limit offers the account", async () => {
 await step("Model picker lists the account", async () => {
   await page.locator("[data-chat-provider-model-picker]").first().click({ timeout: 5000 });
   await settle(900);
+  await page.getByText("Personal", { exact: true }).first().click({ timeout: 3000 });
+  await settle(500);
   await shot("11-model-picker");
   await page.keyboard.press("Escape");
   await settle(400);

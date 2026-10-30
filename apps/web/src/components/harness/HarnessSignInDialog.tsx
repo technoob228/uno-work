@@ -84,9 +84,14 @@ const CODE_CHECKER: Readonly<Record<ProviderAuthDriver, string>> = {
 };
 
 /** One-line lead for the sign-in surface, shared by the dialog and the picker pane. */
-export function describeSignInState(label: string, job: AuthJobView | undefined): string {
-  return job?.state === "succeeded"
-    ? `${label} is signed in on this machine.`
+export function describeSignInState(
+  label: string,
+  job: AuthJobView | undefined,
+  accountOnly = false,
+): string {
+  if (job?.state === "succeeded") return `${label} is signed in on this machine.`;
+  return accountOnly
+    ? "Sign in with the account you want to add."
     : `Use your own ${label} account, or an API key.`;
 }
 
@@ -429,7 +434,7 @@ export function HarnessSignInDialog({
       <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>Sign in to {label}</DialogTitle>
-          <DialogDescription>{describeSignInState(label, job)}</DialogDescription>
+          <DialogDescription>{describeSignInState(label, job, accountOnly)}</DialogDescription>
         </DialogHeader>
 
         <HarnessSignInPanel

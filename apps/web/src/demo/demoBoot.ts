@@ -661,6 +661,7 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       if (thread) {
         if (typeof command.title === "string") thread.title = command.title;
         if (command.pinnedAt !== undefined) thread.pinnedAt = command.pinnedAt as string | null;
+        if (command.modelSelection) thread.modelSelection = command.modelSelection as never;
       }
       break;
     case "thread.delete":
@@ -722,6 +723,9 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       if (DEMO_ACCOUNTS && target && pendingPlanResume(target.activities as never)) {
         // The person went on themselves: the daemon drops the wait.
         (target.activities as unknown[]).push(planResumeEndedActivity());
+      }
+      if (DEMO_ACCOUNTS && target && command.modelSelection) {
+        target.modelSelection = command.modelSelection as never;
       }
       if (!target && create) {
         target = {

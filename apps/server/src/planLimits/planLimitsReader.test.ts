@@ -331,6 +331,26 @@ describe("second accounts", () => {
     expect(fetch).toHaveBeenCalledTimes(4);
   });
 
+  it("shows an account signed in after the last read, without waiting for the cache", async () => {
+    const { reader, fetch, files } = await setup({ files: signedIn });
+    const homes = { ...HOMES, accounts: [accounts[0]] };
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // Not signed in yet: the cache holds, nobody asks the provider again.
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    files.set(`${folder}/.credentials.json`, claudeCredentials(T0 + 3_600_000));
+    files.set(`${folder}/.claude.json`, secondConfig);
+    const { accounts: rows } = await reader.read({ homes });
+    expect(rows.map((row) => row.instanceId)).toContain("claudeAgent_account_ab12cd34");
+    expect(fetch).toHaveBeenCalledTimes(5);
+
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(5);
+  });
+
   it("doesn't read a second account's email from the main sign-in", async () => {
     const { reader } = await setup({
       files: { ...signedIn, [`${folder}/.credentials.json`]: claudeCredentials(T0 + 3_600_000) },

@@ -6,7 +6,8 @@
  * a chat offers "Continue with <account>", and that button is the only way.
  */
 import type { EnvironmentId, ProviderAuthDriver, ProviderInstanceId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { ensureEnvironmentApi } from "../../environmentApi";
 import {
@@ -70,6 +71,12 @@ function AccountSignIn({
   readonly onClose: () => void;
 }) {
   const setup = useHarnessSetup(environmentId, { instanceId });
+  const queryClient = useQueryClient();
+  const signedIn = setup.authJobs[driver]?.state === "succeeded";
+  useEffect(() => {
+    // Its row in "Your AI plans" and its "Continue with" come from these numbers.
+    if (signedIn) void queryClient.invalidateQueries({ queryKey: ["home", "plan-limits"] });
+  }, [queryClient, signedIn]);
   return (
     <HarnessSignInDialog
       open

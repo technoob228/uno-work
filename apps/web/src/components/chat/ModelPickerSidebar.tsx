@@ -35,10 +35,13 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
  * without names, OpenCode a black square — people guessed for ~40 s). The
  * whole name when it is short ("OpenCode", "Hermes"), else its first word
  * ("Claude Code" → "Claude", "Uno Hermes" → "Hermes"); custom instances keep their own name, cut by
- * the rail.
+ * the rail; a second account shows its own part ("Claude · Personal" → "Personal").
  */
 export function modelPickerRailLabel(displayName: string): string {
   const name = displayName.trim();
+  // A second account: "Claude · Personal" must not read as the main "Claude".
+  const account = name.split(" · ")[1]?.trim();
+  if (account) return account;
   if (name.length <= 9) return name;
   const words = name.split(/\s+/u);
   // "Uno Hermes" → "Hermes": the brand word doesn't tell Uno's harnesses apart.

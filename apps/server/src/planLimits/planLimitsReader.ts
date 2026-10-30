@@ -319,6 +319,8 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
       stale: true,
     });
   }
+  /** The second accounts the last read saw signed in. */
+  let readInstances: ReadonlySet<string> = new Set();
   let lastRead: {
     readonly at: number;
     readonly result: PlanLimits;
@@ -496,6 +498,7 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
 
   const readAll = async (homes: PlanLimitsHomes): Promise<PlanLimits> => {
     const found = await signIns(homes);
+    readInstances = new Set(found.flatMap((signIn) => signIn.instanceId ?? []));
     let changed = false;
     const accounts = await Promise.all(
       found.map(async (signIn): Promise<PlanLimitsAccount | null> => {
@@ -541,6 +544,20 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
   };
 
   /**
+   * A second account read before its sign-in finished has no row: without
+   * this, the person who has just signed it in waits for the cache to run out.
+   * Local files only, and only while a second account isn't signed in yet.
+   */
+  const secondAccountSignedInSince = async (homes: PlanLimitsHomes) => {
+    const seconds = homes.accounts ?? [];
+    if (seconds.every((second) => readInstances.has(second.instanceId))) return false;
+    const found = await signIns(homes);
+    return found.some(
+      (signIn) => signIn.instanceId !== undefined && !readInstances.has(signIn.instanceId),
+    );
+  };
+
+  /**
    * The sign-ins and their limits. `signInsOnly`: local files only, nothing
    * sent; windows as last read. Otherwise reads again when the last read is
    * older than {@link PLAN_LIMITS_MAX_AGE_MS}; concurrent callers share one.
@@ -555,7 +572,14 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
       if (running) return await running;
       const maxAge = Math.min(input.maxAgeMs ?? PLAN_LIMITS_MAX_AGE_MS, PLAN_LIMITS_MAX_AGE_MS);
       const key = JSON.stringify(input.homes);
-      if (lastRead && lastRead.key === key && now() - lastRead.at < maxAge) return lastRead.result;
+      if (
+        lastRead &&
+        lastRead.key === key &&
+        now() - lastRead.at < maxAge &&
+        !(await secondAccountSignedInSince(input.homes))
+      ) {
+        return lastRead.result;
+      }
       running = readAll(input.homes)
         .then((result) => {
           lastRead = { at: now(), result, key };

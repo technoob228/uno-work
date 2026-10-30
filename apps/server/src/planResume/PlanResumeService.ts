@@ -93,6 +93,8 @@ export interface PlanResumeLayerOptions {
   readonly now?: () => number;
 }
 
+const iso = (ms: number) => new Date(ms).toISOString();
+
 export const makePlanResume = (options: PlanResumeLayerOptions = {}) =>
   Effect.gen(function* () {
     const engine = yield* OrchestrationEngineService;
@@ -101,7 +103,6 @@ export const makePlanResume = (options: PlanResumeLayerOptions = {}) =>
     const planLimits = yield* PlanLimitsService;
     const repository = yield* makePlanResumeRepository;
     const nowMs = options.now ?? Date.now;
-    const iso = (ms: number) => new Date(ms).toISOString();
 
     const isOn = settings.getSettings.pipe(
       Effect.map((current) => current.resumeAfterPlanLimit),
