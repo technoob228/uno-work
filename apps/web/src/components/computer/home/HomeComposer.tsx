@@ -647,7 +647,7 @@ export function HomeComposer({
             // The first screen shows the model and its reasoning too (Misha
             // 28.10, P2: "why can't I pick?") — folder and permissions stay off.
             <div
-              className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:flex-wrap max-sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
               {assistant ? (
