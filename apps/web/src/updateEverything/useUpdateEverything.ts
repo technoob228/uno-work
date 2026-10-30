@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import type { AgentUpdateStatus } from "@t3tools/shared/agentVersions";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { resolveClient } from "../components/harness/useHarnessSetup";
 import { isElectron } from "../env";
@@ -27,7 +27,9 @@ import {
   fetchAgentUpdates,
   fetchSelfUpdateStatus,
   requestSelfUpdate,
+  selfUpdateQueryKey,
   selfUpdateQueryOptions,
+  type SelfUpdateWhen,
 } from "../selfUpdate/selfUpdate";
 import { useStore } from "../store";
 import { connectUnoBoxById, isBoxDead } from "../unoBoxConnect";
@@ -62,14 +64,20 @@ async function waitForAgentJob(environmentId: EnvironmentId, agent: AgentUpdateS
   throw new Error("The install took too long.");
 }
 
-async function waitForWorkUpdate(environmentId: EnvironmentId) {
-  await requestSelfUpdate(environmentId);
+async function waitForWorkUpdate(
+  environmentId: EnvironmentId,
+  when: SelfUpdateWhen,
+): Promise<"updated" | "waiting"> {
+  const started = await requestSelfUpdate(environmentId, when);
+  // Held for its agents: the computer goes on by itself, and tells so in its
+  // own notice. Nobody has to keep this window open for half an hour.
+  if (started.waiting) return "waiting";
   const deadline = Date.now() + WORK_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
     // The daemon restarts on the way: a failed read is part of the update.
     const status = await fetchSelfUpdateStatus(environmentId).catch(() => null);
-    if (status?.state === "done") return;
+    if (status?.state === "done") return "updated";
     if (status?.state === "failed") throw new Error(status.error ?? "The update didn't finish.");
   }
   throw new Error("The update took too long. It may still finish by itself.");
@@ -96,6 +104,11 @@ export function useUpdateEverything() {
   const agentUpdates = useQueries({
     queries: online.map((row) => agentUpdatesQueryOptions(row.environmentId)),
   });
+
+  // Mounted with the dialog: how many agents work now, not a minute ago.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["self-update"] });
+  }, [queryClient]);
 
   const rows = useMemo<ReadonlyArray<PlanRow>>(() => {
     const targets = machines.flatMap((row): UpdateTarget[] => {
@@ -129,7 +142,12 @@ export function useUpdateEverything() {
   const appAction = isElectron && desktop ? resolveDesktopUpdateButtonAction(desktop) : "none";
   const appVersion = desktop?.downloadedVersion ?? desktop?.availableVersion ?? null;
 
-  const runDeps: Omit<RunDeps, "onProgress"> = {
+  const runDeps: Omit<RunDeps, "onProgress" | "updateWork"> & {
+    readonly updateWork: (
+      environmentId: string,
+      when: SelfUpdateWhen,
+    ) => ReturnType<RunDeps["updateWork"]>;
+  } = {
     wake: async (row) => {
       if (row.boxId === null || primaryEnvironmentId === null) {
         throw new Error("Couldn't reach this computer.");
@@ -148,7 +166,15 @@ export function useUpdateEverything() {
       };
     },
     updateAgent: (environmentId, agent) => waitForAgentJob(environmentId as EnvironmentId, agent),
-    updateWork: (environmentId) => waitForWorkUpdate(environmentId as EnvironmentId),
+    updateWork: async (environmentId, when) => {
+      const id = environmentId as EnvironmentId;
+      try {
+        return await waitForWorkUpdate(id, when);
+      } finally {
+        // The notice on that computer: "waiting", "updating", or the error.
+        void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(id) });
+      }
+    },
   };
 
   /** Downloads this app's update and restarts into it: the very last step. */

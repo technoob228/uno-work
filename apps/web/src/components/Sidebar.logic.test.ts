@@ -1,3 +1,4 @@
+import { ORPHANED_PROVIDER_SESSION_ERROR } from "@t3tools/shared/turnErrorRetry";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
@@ -1318,6 +1319,31 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("defaults to ready with no session", () => {
     expect(resolveSidebarThreadStatus({ ...idle, session: null })).toBe("ready");
+  });
+
+  it("a chat a restart cut off is stopped, not failed", () => {
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        session: {
+          ...session,
+          status: "error",
+          orchestrationStatus: "error",
+          lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+        },
+      }),
+    ).toBe("stopped");
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        session: {
+          ...session,
+          status: "error",
+          orchestrationStatus: "error",
+          lastError: "Claude Code process exited with code 1",
+        },
+      }),
+    ).toBe("failed");
   });
 });
 

@@ -3,7 +3,13 @@
  * What each computer needs comes from the computer itself, so a row is true
  * until the moment it runs; a computer that's asleep wakes up to answer.
  */
-import { CheckIcon, MonitorIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  HourglassIcon,
+  MonitorIcon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -19,12 +25,13 @@ import {
 import { Spinner } from "../components/ui/spinner";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
-import { SELF_UPDATE_COPY } from "../selfUpdate/selfUpdate";
+import { SELF_UPDATE_COPY, type SelfUpdateWhen } from "../selfUpdate/selfUpdate";
 import {
   planCount,
   planNeedsWork,
   planRowSummary,
   planStoppedChats,
+  planWaitableAgents,
   runUpdatePlan,
   type PlanRow,
   type RowProgress,
@@ -52,6 +59,7 @@ const COPY = {
 function ProgressMark({ progress }: { progress: RowProgress | undefined }) {
   if (progress?.kind === "working") return <Spinner className="size-3.5" />;
   if (progress?.kind === "done") return <CheckIcon className="size-3.5 text-success" />;
+  if (progress?.kind === "held") return <HourglassIcon className="size-3.5 text-muted-foreground" />;
   if (progress?.kind === "failed") {
     return <TriangleAlertIcon className="size-3.5 text-warning-foreground" />;
   }
@@ -63,6 +71,7 @@ function progressText(row: PlanRow, progress: RowProgress | undefined): string {
     case "working":
       return `${progress.step}…`;
     case "done":
+    case "held":
       return progress.note;
     case "failed":
       return progress.message;
@@ -108,32 +117,37 @@ export function UpdateEverythingDialog(props: {
 
   const count = planCount(rows) + (app ? 1 : 0);
   const stopped = planStoppedChats(rows);
+  const waitable = planWaitableAgents(rows);
 
-  const start = useCallback(async () => {
-    setPhase("running");
-    const plan = rows;
-    const failed = new Set<string>();
-    await runUpdatePlan(plan, {
-      ...runDeps,
-      onProgress: (key, next) => {
-        if (next.kind === "failed") failed.add(key);
-        setProgress((current) => new Map(current).set(key, next));
-      },
-    });
-    if (app) {
-      try {
-        await updateApp();
-      } catch (error) {
-        setAppError(error instanceof Error ? error.message : "The update didn't finish.");
+  const start = useCallback(
+    async (when: SelfUpdateWhen) => {
+      setPhase("running");
+      const plan = rows;
+      const notUpdated = new Set<string>();
+      await runUpdatePlan(plan, {
+        ...runDeps,
+        updateWork: (environmentId) => runDeps.updateWork(environmentId, when),
+        onProgress: (key, next) => {
+          if (next.kind === "failed" || next.kind === "held") notUpdated.add(key);
+          setProgress((current) => new Map(current).set(key, next));
+        },
+      });
+      if (app) {
+        try {
+          await updateApp();
+        } catch (error) {
+          setAppError(error instanceof Error ? error.message : "The update didn't finish.");
+        }
       }
-    }
-    setPhase("finished");
-    // The page came from a computer that just restarted: it needs the new one.
-    const pageUpdated = plan.some(
-      (row) => row.isPrimary && row.work !== null && !failed.has(row.key),
-    );
-    if (pageUpdated && !isElectron) setTimeout(() => window.location.reload(), 1_500);
-  }, [app, rows, runDeps, updateApp]);
+      setPhase("finished");
+      // The page came from a computer that just restarted: it needs the new one.
+      const pageUpdated = plan.some(
+        (row) => row.isPrimary && row.work !== null && !notUpdated.has(row.key),
+      );
+      if (pageUpdated && !isElectron) setTimeout(() => window.location.reload(), 1_500);
+    },
+    [app, rows, runDeps, updateApp],
+  );
 
   const running = phase === "running";
   return (
@@ -176,7 +190,13 @@ export function UpdateEverythingDialog(props: {
               <p>
                 {COPY.time} {SELF_UPDATE_COPY.confirmSafety}
               </p>
-              {stopped > 0 ? <p>{COPY.stopped(stopped)}</p> : null}
+              {waitable > 0 ? (
+                <p data-testid="self-update-agents-working">
+                  {SELF_UPDATE_COPY.agentsWorking(stopped)} {SELF_UPDATE_COPY.confirmBodyAgents}
+                </p>
+              ) : stopped > 0 ? (
+                <p>{COPY.stopped(stopped)}</p>
+              ) : null}
             </div>
           ) : null}
           {phase === "plan" && count === 0 && !checking ? (
@@ -187,11 +207,31 @@ export function UpdateEverythingDialog(props: {
         <DialogFooter>
           {phase === "plan" ? (
             <>
-              <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+              <Button
+                variant={waitable > 0 ? "ghost" : "outline"}
+                onClick={() => props.onOpenChange(false)}
+              >
                 {count > 0 ? COPY.cancel : COPY.close}
               </Button>
-              {count > 0 ? (
-                <Button data-testid="self-update-confirm" onClick={() => void start()}>
+              {count > 0 && waitable > 0 ? (
+                <>
+                  <Button
+                    variant="outline"
+                    data-testid="self-update-confirm-now"
+                    onClick={() => void start("now")}
+                  >
+                    {SELF_UPDATE_COPY.confirm}
+                  </Button>
+                  <Button
+                    autoFocus
+                    data-testid="self-update-confirm"
+                    onClick={() => void start("after-agents")}
+                  >
+                    {SELF_UPDATE_COPY.updateWhenDone(waitable)}
+                  </Button>
+                </>
+              ) : count > 0 ? (
+                <Button data-testid="self-update-confirm" onClick={() => void start("now")}>
                   {COPY.update(count)}
                 </Button>
               ) : null}

@@ -209,6 +209,20 @@ export interface SelfUpdateController {
   readonly start: () => Promise<SelfUpdateStatus>;
   /** The last finished run, for the Security journal (see selfUpdateJournal.ts). */
   readonly lastRun: () => Promise<UpdaterStatus | null>;
+  /**
+   * An update is on its way and will restart the daemon: the request waits
+   * for the updater, or the updater is running. What it says and since when;
+   * null otherwise. Local files only, no network (selfUpdateTurns.ts asks
+   * every few seconds).
+   */
+  readonly inProgress: () => Promise<SelfUpdateInProgress | null>;
+}
+
+export interface SelfUpdateInProgress {
+  /** "requested": the updater has not taken the request yet. */
+  readonly phase: "requested" | "updating";
+  /** When the request was written / the updater started (ms). */
+  readonly since: number;
 }
 
 export class SelfUpdateUnavailableError extends Error {
@@ -376,9 +390,30 @@ export function makeSelfUpdateController(deps: SelfUpdateDeps): SelfUpdateContro
     return status({ canUpdate: true });
   };
 
+  const inProgress: SelfUpdateController["inProgress"] = async () => {
+    const paths = deps.paths;
+    if (!paths) return null;
+    const at = now();
+    const [updater, requestedAt] = await Promise.all([
+      readUpdater(paths.statusFile),
+      requestTime(paths.requestFile),
+    ]);
+    const updaterAt = updater?.updatedAt ? Date.parse(updater.updatedAt) : Number.NaN;
+    if (requestedAt !== null && !(updaterAt >= requestedAt)) {
+      return at - requestedAt > REQUEST_NOT_PICKED_MS
+        ? null
+        : { phase: "requested", since: requestedAt };
+    }
+    if (updater?.state !== "updating") return null;
+    const started = updater.startedAt ? Date.parse(updater.startedAt) : Number.NaN;
+    if (!Number.isFinite(started) || at - started > STALE_UPDATE_MS) return null;
+    return { phase: "updating", since: started };
+  };
+
   return {
     status,
     start,
     lastRun: async () => (deps.paths ? readUpdater(deps.paths.statusFile) : null),
+    inProgress,
   };
 }

@@ -683,7 +683,7 @@ export function chatsOfAssistant<T extends TeamThread>(
 /** Its dot: something waits for the person › something runs › free. */
 export function assistantActivity<T>(
   chats: ReadonlyArray<T>,
-  statusOf: (thread: T) => "approval" | "input" | "working" | "failed" | "ready",
+  statusOf: (thread: T) => "approval" | "input" | "working" | "failed" | "stopped" | "ready",
 ): AssistantActivity {
   let working = false;
   for (const thread of chats) {

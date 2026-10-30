@@ -32,6 +32,7 @@ import { homeSuggestionsRouteLayer } from "./homeSuggestionsHttp.ts";
 import { fixWorkPrepareRouteLayer } from "./fixWork/fixWorkHttp.ts";
 import {
   selfUpdateAgentsRouteLayer,
+  selfUpdateCancelRouteLayer,
   selfUpdateStartRouteLayer,
   selfUpdateStatusRouteLayer,
 } from "./selfUpdateHttp.ts";
@@ -683,6 +684,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   selfUpdateStatusRouteLayer,
   selfUpdateAgentsRouteLayer,
   selfUpdateStartRouteLayer,
+  selfUpdateCancelRouteLayer,
   fixWorkPrepareRouteLayer,
   homeSuggestionsRouteLayer,
   browserBridgeCommandRouteLayer,

@@ -4,11 +4,15 @@ import { UNO_WORK_NOTE_PREFIX, parseUnoWorkNote } from "./secretRequestCopy.ts";
 import {
   BUSY_DEFAULT_RETRY_SECONDS,
   NO_ANSWER_RETRY_DELAYS_MS,
+  ORPHANED_PROVIDER_SESSION_ERROR,
   TURN_AUTO_RETRY_MAX_ATTEMPTS,
+  UPDATE_RESTART_NOTE_BODY,
   classifyTurnError,
   decideTurnAutoRetry,
+  isRestartCutOffError,
   turnAutoRetryNoteBody,
   turnAutoRetryNoteLine,
+  updateRestartNoteLine,
 } from "./turnErrorRetry.ts";
 
 describe("classifyTurnError", () => {
@@ -161,5 +165,30 @@ describe("auto-retry note", () => {
     const body = turnAutoRetryNoteBody({ kind: "no-answer", attempt: 1, maxAttempts: 2 });
     expect(classifyTurnError(body).kind).toBe("other");
     expect(turnAutoRetryNoteLine("Continue please")).toBeNull();
+  });
+});
+
+describe("a turn cut off by a restart", () => {
+  it("is recognised in the error the daemon stamps, and in its older short form", () => {
+    expect(isRestartCutOffError(ORPHANED_PROVIDER_SESSION_ERROR)).toBe(true);
+    expect(isRestartCutOffError("Provider session did not survive a server restart.")).toBe(true);
+    expect(isRestartCutOffError("Claude Code process exited with code 1")).toBe(false);
+    expect(isRestartCutOffError(null)).toBe(false);
+  });
+
+  it("is never retried as busy / didn't answer: the update continuation handles it", () => {
+    expect(
+      decideTurnAutoRetry({ error: ORPHANED_PROVIDER_SESSION_ERROR, attemptsUsed: 0 }),
+    ).toEqual({ retry: false, reason: "not-retryable" });
+  });
+
+  it("the continuation after an update reads as one calm line in the chat", () => {
+    expect(UPDATE_RESTART_NOTE_BODY).toContain("Continue the task from where you stopped");
+    expect(parseUnoWorkNote(`${UNO_WORK_NOTE_PREFIX}${UPDATE_RESTART_NOTE_BODY}`)).toEqual({
+      kind: "update-restart",
+      text: "Uno Work restarted for an update. The agent goes on where it stopped.",
+    });
+    expect(updateRestartNoteLine("Continue please")).toBeNull();
+    expect(classifyTurnError(UPDATE_RESTART_NOTE_BODY).kind).toBe("other");
   });
 });

@@ -86,6 +86,7 @@ describe("sidebar D: marks", () => {
     expect(dRowMark("ready", false)).toBeNull();
     expect(dRowMark("working", true)).toBe("working");
     expect(dRowMark("approval", false)).toBe("approval");
+    expect(dRowMark("stopped", false)).toBe("stopped");
   });
 
   it("a folded project shows the most urgent dot: needs you › error › working", () => {
@@ -245,6 +246,7 @@ describe("sidebar D grouped by status", () => {
         { id: "working-1", mark: "working" },
         { id: "question", mark: "input" },
         { id: "failed-1", mark: "failed" },
+        { id: "stopped-1", mark: "stopped" },
         { id: "turn", mark: "your-turn" },
         { id: "approval", mark: "approval" },
         { id: "idle-2", mark: null },
@@ -253,6 +255,7 @@ describe("sidebar D grouped by status", () => {
       { id: "needs-you", label: "Needs you", chats: ["question", "approval"] },
       { id: "your-turn", label: "Ready", chats: ["turn"] },
       { id: "failed", label: "Failed", chats: ["failed-1"] },
+      { id: "stopped", label: "Stopped", chats: ["stopped-1"] },
       { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },
       { id: "working", label: "Working", chats: ["working-1"] },
     ]);
@@ -270,6 +273,7 @@ describe("sidebar D grouped by status", () => {
     expect(statusSectionOf("input")).toBe("needs-you");
     expect(statusSectionOf("your-turn")).toBe("your-turn");
     expect(statusSectionOf("failed")).toBe("failed");
+    expect(statusSectionOf("stopped")).toBe("stopped");
     expect(statusSectionOf("working")).toBe("working");
     expect(statusSectionOf(null)).toBe("idle");
   });

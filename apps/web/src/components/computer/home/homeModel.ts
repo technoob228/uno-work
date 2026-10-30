@@ -43,7 +43,7 @@ export function isHomeVisibleThread(thread: SidebarThreadSummary, now: number): 
 }
 
 export interface HomeThreadStatus {
-  readonly kind: "approval" | "input" | "working" | "failed" | "done";
+  readonly kind: "approval" | "input" | "working" | "failed" | "stopped" | "done";
   readonly label: string;
   readonly colorClass: string;
   readonly dotClass: string;
@@ -89,6 +89,14 @@ export function homeThreadStatus(thread: HomeThread): HomeThreadStatus | null {
         dotClass: "bg-red-500 dark:bg-red-300",
         pulse: false,
       };
+    case "stopped":
+      return {
+        kind: "stopped",
+        label: "Stopped",
+        colorClass: "text-muted-foreground",
+        dotClass: "bg-muted-foreground/50",
+        pulse: false,
+      };
     case "ready":
       return isYourTurn(thread, new Date().toISOString())
         ? {
@@ -115,6 +123,7 @@ const CONTINUE_RANK: Record<HomeThreadStatus["kind"], number> = {
   input: 1,
   working: 2,
   failed: 3,
+  stopped: 3,
   done: 3,
 };
 

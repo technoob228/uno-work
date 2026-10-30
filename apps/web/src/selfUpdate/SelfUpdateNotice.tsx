@@ -4,9 +4,15 @@
  * same thing and the confirmation is asked once.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useQuery } from "@tanstack/react-query";
-import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CircleCheckIcon,
+  DownloadIcon,
+  HourglassIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "../branding";
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
@@ -17,11 +23,15 @@ import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import {
   PAGE_LOADED_AT,
+  cancelWaitingSelfUpdate,
   dismissSelfUpdateNotice,
   isSelfUpdateNoticeDismissed,
+  requestSelfUpdate,
   resolveSelfUpdateView,
   SELF_UPDATE_COPY as COPY,
+  selfUpdateQueryKey,
   selfUpdateQueryOptions,
+  type SelfUpdateStatus,
   type SelfUpdateView,
 } from "./selfUpdate";
 import { UpdateEverythingDialog } from "../updateEverything/UpdateEverythingDialog";
@@ -30,7 +40,13 @@ export interface SelfUpdateController {
   readonly view: SelfUpdateView | null;
   /** The person dismissed this exact notice ("Later", ×). */
   readonly dismissed: boolean;
+  readonly starting: boolean;
+  readonly startError: string | null;
   readonly askToUpdate: () => void;
+  /** Start right away, no question (the "Update now" of a waiting update). */
+  readonly updateNow: () => void;
+  /** Call off "Update when they finish". */
+  readonly cancelWaiting: () => void;
   readonly dismiss: () => void;
   readonly reload: () => void;
   /** Mount once next to the notice: the confirmation dialog. */
@@ -38,9 +54,52 @@ export interface SelfUpdateController {
 }
 
 export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateController {
+  const queryClient = useQueryClient();
   const query = useQuery(selfUpdateQueryOptions(environmentId));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  /** This tab started the update: it reloads by itself when the new version is up. */
+  const startedHere = useRef(false);
+
+  // The "Update now" of a waiting update. Starting one goes through the dialog.
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (!environmentId) throw new Error("No computer to update.");
+      return requestSelfUpdate(environmentId, "now");
+    },
+    onMutate: () => setStartError(null),
+    onSuccess: (status: SelfUpdateStatus) => {
+      startedHere.current = true;
+      queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
+    },
+    onError: (error: unknown) => {
+      setStartError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Couldn't start the update. Try again in a minute.",
+      );
+      void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => {
+      if (!environmentId) throw new Error("No computer to update.");
+      return cancelWaitingSelfUpdate(environmentId);
+    },
+    onMutate: () => setStartError(null),
+    onSuccess: (status: SelfUpdateStatus) => {
+      startedHere.current = false;
+      queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
+    },
+    onError: (error: unknown) => {
+      setStartError(
+        error instanceof Error && error.message ? error.message : "Couldn't cancel. Try again.",
+      );
+      void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
+    },
+  });
 
   const view = useMemo(
     () =>
@@ -57,6 +116,13 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     key !== null && (dismissedKey === key || isSelfUpdateNoticeDismissed(environmentId, key));
 
   const reload = useCallback(() => window.location.reload(), []);
+  const needsReload = view?.kind === "done" && view.needsReload && !isElectron;
+  useEffect(() => {
+    if (!needsReload || !startedHere.current) return;
+    startedHere.current = false;
+    const timer = setTimeout(reload, 1_500);
+    return () => clearTimeout(timer);
+  }, [needsReload, reload]);
 
   const dismiss = useCallback(() => {
     if (key === null) return;
@@ -67,7 +133,11 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
   return {
     view,
     dismissed,
+    starting: mutation.isPending || cancelMutation.isPending,
+    startError,
     askToUpdate: () => setDialogOpen(true),
+    updateNow: () => mutation.mutate(),
+    cancelWaiting: () => cancelMutation.mutate(),
     dismiss,
     reload,
     // Mounted only when open: it asks every computer what it needs.
@@ -82,6 +152,14 @@ interface NoticeParts {
   readonly description: string;
   readonly actions: ReactNode;
   readonly dismissable: boolean;
+}
+
+/** "14:35" in the person's own clock. */
+function formatClock(iso: string): string | null {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime())
+    ? null
+    : at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 /** One wording for the banner and the card. */
@@ -101,6 +179,37 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
           </Button>
         ) : null,
         dismissable: true,
+      };
+    case "waiting":
+      return {
+        variant: "info",
+        icon: <HourglassIcon />,
+        title: COPY.waitingTitle(view.version),
+        description:
+          update.startError ?? COPY.waitingBody(view.agents, formatClock(view.deadlineAt)),
+        actions: view.canUpdate ? (
+          <>
+            <Button
+              size={size}
+              variant="ghost"
+              data-testid="self-update-cancel-waiting"
+              disabled={update.starting}
+              onClick={update.cancelWaiting}
+            >
+              {COPY.cancelWaiting}
+            </Button>
+            <Button
+              size={size}
+              variant="outline"
+              data-testid="self-update-now"
+              disabled={update.starting}
+              onClick={update.updateNow}
+            >
+              {COPY.confirm}
+            </Button>
+          </>
+        ) : null,
+        dismissable: false,
       };
     case "updating":
       return {

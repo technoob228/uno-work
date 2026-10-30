@@ -294,6 +294,62 @@ describe("self-update controller", () => {
   });
 });
 
+describe("self-update in progress (the watcher's question)", () => {
+  it("is the waiting request, then the running updater, then nothing", async () => {
+    const { paths } = dirs();
+    const controller = makeSelfUpdateController({
+      paths,
+      currentVersion: "0.0.111",
+      fetchImpl: sumsFetch(SUMS),
+    });
+    expect(await controller.inProgress()).toBeNull();
+    await controller.start();
+    const requested = await controller.inProgress();
+    expect(requested?.phase).toBe("requested");
+    expect(requested?.since).toBe(statSync(paths.requestFile).mtimeMs);
+
+    const startedAt = new Date(Date.now() + 1_000).toISOString();
+    writeFileSync(
+      paths.statusFile,
+      JSON.stringify({ state: "updating", step: "Installing", startedAt, updatedAt: startedAt }),
+    );
+    expect(await controller.inProgress()).toEqual({
+      phase: "updating",
+      since: Date.parse(startedAt),
+    });
+
+    writeFileSync(
+      paths.statusFile,
+      JSON.stringify({ state: "done", startedAt, updatedAt: startedAt, finishedAt: startedAt }),
+    );
+    expect(await controller.inProgress()).toBeNull();
+  });
+
+  it("a request nobody took, or an updater that went silent, is not in progress", async () => {
+    const { paths } = dirs();
+    const controller = makeSelfUpdateController({
+      paths,
+      currentVersion: "0.0.111",
+      fetchImpl: sumsFetch(SUMS),
+    });
+    await controller.start();
+    const old = new Date(Date.now() - 3 * 60_000);
+    utimesSync(paths.requestFile, old, old);
+    expect(await controller.inProgress()).toBeNull();
+
+    const longAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+    writeFileSync(
+      paths.statusFile,
+      JSON.stringify({
+        state: "updating",
+        startedAt: longAgo,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    expect(await controller.inProgress()).toBeNull();
+  });
+});
+
 describe("security journal report", () => {
   beforeEach(() => resetSelfUpdateReportState());
 

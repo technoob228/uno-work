@@ -7,6 +7,7 @@ import {
   planCount,
   planRowSummary,
   planStoppedChats,
+  planWaitableAgents,
   runUpdatePlan,
   type PlanRow,
   type RowProgress,
@@ -105,6 +106,21 @@ describe("buildUpdatePlan", () => {
   });
 });
 
+describe("waiting for the agents", () => {
+  it("counts only agents a computer can hold the update for", () => {
+    const rows = buildUpdatePlan([
+      // Counts its agents itself.
+      target({ key: "new", selfUpdate: self({ workingAgents: 2 }), runningChats: 2 }),
+      // Before "Update when they finish": it restarts at once whatever it is asked.
+      target({ key: "old", selfUpdate: self({}), runningChats: 1 }),
+      // Nothing to update: its agents aren't in the way.
+      target({ key: "fresh", selfUpdate: self({ available: false, workingAgents: 3 }) }),
+    ]);
+    expect(planWaitableAgents(rows)).toBe(2);
+    expect(planStoppedChats(rows)).toBe(3);
+  });
+});
+
 describe("runUpdatePlan", () => {
   const recorder = () => {
     const calls: string[] = [];
@@ -119,6 +135,7 @@ describe("runUpdatePlan", () => {
       },
       updateWork: async (environmentId) => {
         calls.push(`work:${environmentId}`);
+        return "updated";
       },
       onProgress: (key, progress) => last.set(key, progress),
     };
@@ -127,6 +144,15 @@ describe("runUpdatePlan", () => {
 
   const plan = (input: ReadonlyArray<Partial<UpdateTarget>>): ReadonlyArray<PlanRow> =>
     buildUpdatePlan(input.map(target));
+
+  it("leaves a computer holding the update for its agents to finish by itself", async () => {
+    const { last, deps } = recorder();
+    await runUpdatePlan(plan([{ selfUpdate: self({ workingAgents: 1 }) }]), {
+      ...deps,
+      updateWork: async () => "waiting",
+    });
+    expect(last.get("a")).toEqual({ kind: "held", note: "Updates when its agents finish" });
+  });
 
   it("updates the agents before Work on one computer", async () => {
     const { calls, last, deps } = recorder();

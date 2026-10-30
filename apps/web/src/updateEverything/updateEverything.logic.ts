@@ -12,7 +12,7 @@
  */
 import type { AgentUpdateStatus } from "@t3tools/shared/agentVersions";
 
-import type { SelfUpdateStatus } from "../selfUpdate/selfUpdate";
+import { workingAgentsOf, type SelfUpdateStatus } from "../selfUpdate/selfUpdate";
 
 export interface UpdateTarget {
   readonly key: string;
@@ -44,6 +44,8 @@ export interface PlanRow {
   /** Why this computer stays as it is; null when it takes part. */
   readonly skipped: string | null;
   readonly runningChats: number;
+  /** Agents the computer itself counts; 0 on one too old to wait for them. */
+  readonly workingAgents: number;
 }
 
 export function buildUpdatePlan(targets: ReadonlyArray<UpdateTarget>): ReadonlyArray<PlanRow> {
@@ -55,6 +57,7 @@ export function buildUpdatePlan(targets: ReadonlyArray<UpdateTarget>): ReadonlyA
       boxId: target.boxId,
       isPrimary: target.isPrimary,
       runningChats: target.runningChats,
+      workingAgents: workingAgentsOf(target.selfUpdate),
     };
     if (target.reach === "offline") {
       return { ...base, work: null, agents: [], wakes: false, skipped: "Offline" };
@@ -87,9 +90,21 @@ export function planCount(rows: ReadonlyArray<PlanRow>): number {
   return rows.filter(planNeedsWork).length;
 }
 
-/** Chats that stop once when Work restarts. */
+/** Chats a restart of Work would cut off. */
 export function planStoppedChats(rows: ReadonlyArray<PlanRow>): number {
-  return rows.reduce((sum, row) => sum + (row.work !== null ? row.runningChats : 0), 0);
+  return rows.reduce(
+    (sum, row) => sum + (row.work !== null ? Math.max(row.runningChats, row.workingAgents) : 0),
+    0,
+  );
+}
+
+/**
+ * Agents that "Update when they finish" can wait for: only a computer that
+ * counts its agents itself can hold the update back. An older one updates at
+ * once whatever it is asked.
+ */
+export function planWaitableAgents(rows: ReadonlyArray<PlanRow>): number {
+  return rows.reduce((sum, row) => sum + (row.work !== null ? row.workingAgents : 0), 0);
 }
 
 export function planRowSummary(row: PlanRow): string {
@@ -106,6 +121,8 @@ export type RowProgress =
   | { readonly kind: "waiting" }
   | { readonly kind: "working"; readonly step: string }
   | { readonly kind: "done"; readonly note: string }
+  /** Asked to update once its agents finish: it does that by itself, the app can close. */
+  | { readonly kind: "held"; readonly note: string }
   | { readonly kind: "failed"; readonly message: string };
 
 export interface RunDeps {
@@ -113,8 +130,11 @@ export interface RunDeps {
   readonly wake: (row: PlanRow) => Promise<Pick<PlanRow, "environmentId" | "work" | "agents">>;
   /** Resolves when the agent's install job ends; rejects with what went wrong. */
   readonly updateAgent: (environmentId: string, agent: AgentUpdateStatus) => Promise<void>;
-  /** Resolves when the computer is back on the new version; rejects when it isn't. */
-  readonly updateWork: (environmentId: string) => Promise<void>;
+  /**
+   * Resolves `updated` when the computer is back on the new version, `waiting`
+   * when it holds the update for its agents; rejects when it didn't work.
+   */
+  readonly updateWork: (environmentId: string) => Promise<"updated" | "waiting">;
   readonly onProgress: (key: string, progress: RowProgress) => void;
 }
 
@@ -139,16 +159,21 @@ async function runRow(row: PlanRow, deps: RunDeps): Promise<void> {
         failures.push(`${agent.name}: ${messageOf(error)}`);
       }
     }
+    let held = false;
     if (current.work !== null) {
       deps.onProgress(row.key, { kind: "working", step: "Updating Uno Work" });
       try {
-        await deps.updateWork(environmentId);
+        held = (await deps.updateWork(environmentId)) === "waiting";
       } catch (error) {
         failures.push(`Uno Work: ${messageOf(error)}`);
       }
     }
     if (failures.length > 0) {
       deps.onProgress(row.key, { kind: "failed", message: failures.join(" ") });
+      return;
+    }
+    if (held) {
+      deps.onProgress(row.key, { kind: "held", note: "Updates when its agents finish" });
       return;
     }
     const updated = current.work !== null || current.agents.length > 0;
