@@ -693,7 +693,11 @@ function claudeAuthMetadata(input: {
 
 // ── SDK capability probe ────────────────────────────────────────────
 
-const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
+// Starts Claude Code: 1-4 s on a healthy machine, past 8 s on one busy with
+// parallel agents and a queued disk.
+const CAPABILITIES_PROBE_TIMEOUT_MS = 20_000;
+/** A second, patient `claude auth status` once the probe told us nothing. */
+const AUTH_STATUS_FALLBACK_TIMEOUT_MS = 10_000;
 
 function nonEmptyProbeString(value: string): string | undefined {
   const candidate = value.trim();
@@ -845,9 +849,17 @@ const probeClaudeCapabilities = (
     ),
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
-    Effect.map((result) => {
-      if (Result.isFailure(result)) return undefined;
-      return Option.isSome(result.success) ? result.success.value : undefined;
+    Effect.flatMap((result) => {
+      if (Result.isFailure(result)) {
+        return Effect.logWarning("Claude capabilities probe failed", {
+          reason: String(result.failure).slice(0, 300),
+        }).pipe(Effect.as(undefined));
+      }
+      return Option.isSome(result.success)
+        ? Effect.succeed(result.success.value)
+        : Effect.logWarning("Claude capabilities probe timed out", {
+            timeoutMs: CAPABILITIES_PROBE_TIMEOUT_MS,
+          }).pipe(Effect.as(undefined));
     }),
   );
 };
@@ -925,18 +937,48 @@ export function hasOwnClaudeCredentialsInEnv(environment: NodeJS.ProcessEnv): bo
   return CLAUDE_OWN_CREDENTIAL_ENV.some((name) => (environment[name]?.trim().length ?? 0) > 0);
 }
 
-/** `claude auth status` → signed in on its own; null when it couldn't tell. */
-export function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | null {
+export interface ClaudeAuthStatus {
+  readonly loggedIn: boolean;
+  readonly email: string | undefined;
+  readonly subscriptionType: string | undefined;
+  readonly authMethod: string | undefined;
+}
+
+const stringOrUndefined = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+/** `claude auth status --json`; null when it couldn't tell. */
+export function parseClaudeAuthStatus(stdout: string): ClaudeAuthStatus | null {
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
   try {
-    const parsed = JSON.parse(stdout.slice(start, end + 1)) as { loggedIn?: unknown };
-    return typeof parsed.loggedIn === "boolean" ? parsed.loggedIn : null;
+    const parsed = JSON.parse(stdout.slice(start, end + 1)) as Record<string, unknown>;
+    if (typeof parsed.loggedIn !== "boolean") return null;
+    return {
+      loggedIn: parsed.loggedIn,
+      email: stringOrUndefined(parsed.email),
+      subscriptionType: stringOrUndefined(parsed.subscriptionType),
+      authMethod: stringOrUndefined(parsed.authMethod),
+    };
   } catch {
     return null;
   }
 }
+
+const readClaudeAuthStatus = (
+  claudeSettings: ClaudeSettings,
+  environment: NodeJS.ProcessEnv,
+  timeoutMs: number,
+) =>
+  runClaudeCommand(claudeSettings, ["auth", "status", "--json"], environment).pipe(
+    Effect.timeoutOption(timeoutMs),
+    Effect.result,
+    Effect.map((result) =>
+      Result.isSuccess(result) && Option.isSome(result.success)
+        ? parseClaudeAuthStatus(result.success.value.stdout)
+        : null,
+    ),
+  );
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
   claudeSettings: ClaudeSettings,
@@ -1046,19 +1088,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   let mode: ClaudeAuthMode = "own";
   // Not signed in, and the plan has no Claude on Uno AI (trial): ask for a sign-in.
   let unoUnavailable = false;
+  const hasEnvCredentials = hasOwnClaudeCredentialsInEnv(environment);
+  let authStatus: ClaudeAuthStatus | null = null;
   if (unoGateway && unoGateway.environment() !== null) {
-    let own = hasOwnClaudeCredentialsInEnv(environment);
+    let own = hasEnvCredentials;
     if (!own) {
-      const authStatus = yield* runClaudeCommand(
-        claudeSettings,
-        ["auth", "status", "--json"],
-        environment,
-      ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
-      const loggedIn =
-        Result.isSuccess(authStatus) && Option.isSome(authStatus.success)
-          ? parseClaudeAuthStatusLoggedIn(authStatus.success.value.stdout)
-          : null;
-      own = loggedIn !== false;
+      authStatus = yield* readClaudeAuthStatus(claudeSettings, environment, DEFAULT_TIMEOUT_MS);
+      own = authStatus?.loggedIn !== false;
     }
     const allowed =
       own || !unoGateway.available
@@ -1099,7 +1135,21 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  if (!capabilities) {
+  // No probe answer says nothing about the sign-in: it's a local start of
+  // Claude Code that a busy machine can miss. Ask `claude auth status`; warn
+  // only when it says signed out. If that can't answer either, don't raise an
+  // alarm over a Claude that is working — the sign-in just stays unknown.
+  const signInToConfirm = !capabilities && mode === "own" && !hasEnvCredentials;
+  if (signInToConfirm && authStatus === null) {
+    authStatus = yield* readClaudeAuthStatus(
+      claudeSettings,
+      environment,
+      AUTH_STATUS_FALLBACK_TIMEOUT_MS,
+    );
+  }
+  const signInUnknown = signInToConfirm && authStatus === null;
+
+  if (signInToConfirm && authStatus?.loggedIn === false) {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -1117,12 +1167,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const email = capabilities?.email ?? authStatus?.email;
   const authMetadata =
     mode === "uno"
       ? { type: "unoAi", label: "Uno AI" }
       : claudeAuthMetadata({
-          subscriptionType: capabilities.subscriptionType,
-          authMethod: capabilities.tokenSource,
+          subscriptionType: capabilities?.subscriptionType ?? authStatus?.subscriptionType,
+          authMethod: capabilities?.tokenSource ?? authStatus?.authMethod,
         });
   const message = [mode === "uno" ? CLAUDE_UNO_AI_MESSAGE : undefined, versionUpgradeMessage]
     .filter((part): part is string => part !== undefined)
@@ -1137,11 +1188,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       installed: true,
       version: parsedVersion,
       status: "ready",
-      auth: {
-        status: "authenticated",
-        ...(capabilities.email && mode === "own" ? { email: capabilities.email } : {}),
-        ...(authMetadata ? authMetadata : {}),
-      },
+      auth: signInUnknown
+        ? { status: "unknown" }
+        : {
+            status: "authenticated",
+            ...(email && mode === "own" ? { email } : {}),
+            ...(authMetadata ? authMetadata : {}),
+          },
       ...(message.length > 0 ? { message } : {}),
     },
     ...(updateAvailable ? { updateAvailable } : {}),
