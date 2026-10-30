@@ -67,3 +67,17 @@ export function trackFunnel(event: FunnelEvent, details: FunnelDetails = {}): vo
     () => undefined,
   );
 }
+
+/**
+ * A click on the "Bring your own" card in Add a machine: do people want to
+ * connect machines we don't run? `connect_path` with path `ssh` is what the
+ * console already accepts; `card` tells it from onboarding's own choice.
+ */
+export const BRING_YOUR_OWN_FUNNEL: FunnelDetails = {
+  path: "ssh",
+  props: { card: "bring_your_own", from: "add_machine" },
+};
+
+export function trackBringYourOwnClick(): void {
+  trackFunnel("connect_path", BRING_YOUR_OWN_FUNNEL);
+}
