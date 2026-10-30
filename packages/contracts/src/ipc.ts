@@ -136,8 +136,12 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetThreadTranscriptInput,
+  OrchestrationGetThreadTranscriptResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
+  OrchestrationRegenerateThreadTitleInput,
+  OrchestrationRegenerateThreadTitleResult,
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
@@ -917,6 +921,12 @@ export interface EnvironmentApi {
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
+    regenerateThreadTitle: (
+      input: OrchestrationRegenerateThreadTitleInput,
+    ) => Promise<OrchestrationRegenerateThreadTitleResult>;
+    getThreadTranscript: (
+      input: OrchestrationGetThreadTranscriptInput,
+    ) => Promise<OrchestrationGetThreadTranscriptResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;

@@ -140,6 +140,7 @@ import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
 import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { FilesRecentService } from "./files/FilesRecentService.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import { PlanLimitsService } from "./planLimits/PlanLimitsService.ts";
 import { PlanResume } from "./planResume/PlanResumeService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
@@ -731,6 +732,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
           Layer.mock(PlanLimitsService)({}),
+          Layer.mock(TextGeneration)({}),
           Layer.mock(PlanResume)({}),
           Layer.mock(ConnectorsService)({
             list: () =>

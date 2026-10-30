@@ -219,8 +219,12 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadTranscriptError,
+  OrchestrationGetThreadTranscriptInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
+  OrchestrationRegenerateThreadTitleError,
+  OrchestrationRegenerateThreadTitleInput,
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
@@ -1331,6 +1335,24 @@ export const WsOrchestrationDispatchCommandRpc = Rpc.make(
     payload: ClientOrchestrationCommand,
     success: OrchestrationRpcSchemas.dispatchCommand.output,
     error: OrchestrationDispatchCommandError,
+  },
+);
+
+export const WsOrchestrationRegenerateThreadTitleRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.regenerateThreadTitle,
+  {
+    payload: OrchestrationRegenerateThreadTitleInput,
+    success: OrchestrationRpcSchemas.regenerateThreadTitle.output,
+    error: OrchestrationRegenerateThreadTitleError,
+  },
+);
+
+export const WsOrchestrationGetThreadTranscriptRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadTranscript,
+  {
+    payload: OrchestrationGetThreadTranscriptInput,
+    success: OrchestrationRpcSchemas.getThreadTranscript.output,
+    error: OrchestrationGetThreadTranscriptError,
   },
 );
 
@@ -2541,6 +2563,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserLiveCaptureRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
+  WsOrchestrationRegenerateThreadTitleRpc,
+  WsOrchestrationGetThreadTranscriptRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,

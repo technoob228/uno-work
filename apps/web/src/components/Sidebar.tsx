@@ -337,6 +337,7 @@ import {
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
+import { regenerateThreadTitle } from "../hooks/threadTitleActions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
@@ -3361,6 +3362,9 @@ export default function Sidebar() {
           threadContextMenuItems<ContextMenuItem>(
             [
               { id: "rename", label: "Rename chat" },
+              ...(thread.assistantRole === "chat"
+                ? []
+                : [{ id: "regenerate-title", label: "Regenerate title" }]),
               { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
               ...lifecycleItems,
               // Read: seen, nothing to add — the chat stops asking for "Ready".
@@ -3401,6 +3405,9 @@ export default function Sidebar() {
         switch (clicked) {
           case "rename":
             startThreadRename(threadRef, thread.title);
+            return;
+          case "regenerate-title":
+            void regenerateThreadTitle(threadRef);
             return;
           case "pin":
             setThreadPinned(threadRef, !isPinned);

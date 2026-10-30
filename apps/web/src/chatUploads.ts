@@ -13,6 +13,8 @@ import {
   type EnvironmentId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGES,
   type UploadChatFileAttachment,
 } from "@t3tools/contracts";
 
@@ -46,24 +48,36 @@ export interface RoutedComposerFiles<T> {
 }
 
 /**
- * Sorts what was dropped/pasted/picked: pictures within the inline limit go
+ * Sorts what was dropped/pasted/picked: pictures within the inline limits go
  * as images (when the model can see them), videos as videos, and anything
- * else — a PDF, a sheet, a zip, a picture too big to inline — as a file.
+ * else — a PDF, a sheet, a zip, a picture too big to inline or past what one
+ * message carries inline — as a file.
  */
 export function routeComposerFiles<T extends { readonly type: string; readonly size: number }>(
   files: ReadonlyArray<T>,
-  options: { readonly isVideo: (file: T) => boolean; readonly imagesSupported: boolean },
+  options: {
+    readonly isVideo: (file: T) => boolean;
+    readonly imagesSupported: boolean;
+    /** Pictures already on the message: they count against the inline limits. */
+    readonly inlineImages?: { readonly count: number; readonly bytes: number };
+  },
 ): RoutedComposerFiles<T> {
   const images: T[] = [];
   const videos: T[] = [];
   const plain: T[] = [];
+  let inlineCount = options.inlineImages?.count ?? 0;
+  let inlineBytes = options.inlineImages?.bytes ?? 0;
   for (const file of files) {
     if (
       options.imagesSupported &&
       file.type.startsWith("image/") &&
-      file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+      file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES &&
+      inlineCount < PROVIDER_SEND_TURN_MAX_INLINE_IMAGES &&
+      inlineBytes + file.size <= PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES
     ) {
       images.push(file);
+      inlineCount += 1;
+      inlineBytes += file.size;
     } else if (options.isVideo(file)) {
       videos.push(file);
     } else {

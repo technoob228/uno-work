@@ -19,6 +19,7 @@ import {
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
   type UnoVideoJobResult,
   type VideoMimeType,
@@ -122,7 +123,13 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { PERMISSION_MODES, PERMISSION_MODE_ORDER, plainLabel } from "../../plainLanguage";
 import { basenameOfPath } from "../../vscode-icons";
 import { Explain } from "../Explain";
-import { cn, randomUUID } from "~/lib/utils";
+import {
+  isPasteAsTextShortcut,
+  nextPastedTextFileName,
+  pastedTextDisposition,
+  wouldTextPasteExceedLimit,
+} from "~/lib/textPaste";
+import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -1158,6 +1165,7 @@ export const ChatComposer = memo(
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
     const dragDepthRef = useRef(0);
+    const pasteAsTextUntilRef = useRef(0);
     const videoAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
     // ------------------------------------------------------------------
@@ -1631,6 +1639,21 @@ export const ChatComposer = memo(
       const handed = useComposerFileHandoffStore.getState().take(draftId);
       if (handed.length > 0) setComposerFilesState((current) => [...current, ...handed]);
     }, [draftId, handedOffFileCount, setComposerFilesState]);
+
+    // ⌘⇧V keeps a big paste as text. Browsers deliver the keydown before the paste.
+    useEffect(() => {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (
+          event.target instanceof Node &&
+          composerFormRef.current?.contains(event.target) &&
+          isPasteAsTextShortcut(event, isMacPlatform(navigator.platform))
+        ) {
+          pasteAsTextUntilRef.current = Date.now() + 1_000;
+        }
+      };
+      window.addEventListener("keydown", onKeyDown, true);
+      return () => window.removeEventListener("keydown", onKeyDown, true);
+    }, []);
 
     // ------------------------------------------------------------------
     // Footer compact layout observation
@@ -2701,6 +2724,10 @@ export const ChatComposer = memo(
       const routed = routeComposerFiles(files, {
         isVideo: (file) => inferVideoMimeType(file) !== null,
         imagesSupported: imageAttachmentSupport !== "unsupported",
+        inlineImages: {
+          count: composerImagesRef.current.length,
+          bytes: composerImagesRef.current.reduce((sum, image) => sum + image.sizeBytes, 0),
+        },
       });
       if (routed.images.length > 0) {
         addComposerImages(routed.images);
@@ -2721,6 +2748,40 @@ export const ChatComposer = memo(
       if (files.length === 0) return;
       event.preventDefault();
       addComposerFiles(files);
+    };
+
+    // Capture: Lexical reads the paste on the editor's own element, before
+    // React's bubbling `onPaste` sees it.
+    const onComposerPasteCapture = (event: React.ClipboardEvent<HTMLElement>) => {
+      if (event.clipboardData.files.length > 0) return;
+      const keepAsText = Date.now() <= pasteAsTextUntilRef.current;
+      pasteAsTextUntilRef.current = 0;
+      const text = event.clipboardData.getData("text/plain");
+      const snapshot = composerEditorRef.current?.readSnapshot();
+      const disposition = pastedTextDisposition({
+        text,
+        canAttach: pendingUserInputs.length === 0 && !isComposerApprovalState,
+        bypassAutoAttachment: keepAsText,
+        wouldExceedInputLimit: wouldTextPasteExceedLimit({
+          valueLength: snapshot?.value.length ?? promptRef.current.length,
+          selection: {
+            start: snapshot?.expandedCursor ?? promptRef.current.length,
+            end: snapshot?.expandedCursor ?? promptRef.current.length,
+          },
+          textLength: text.length,
+          maxLength: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+        }),
+      });
+      if (disposition !== "attachment") return;
+      event.preventDefault();
+      event.stopPropagation();
+      addComposerPlainFiles([
+        new File(
+          [text],
+          nextPastedTextFileName(composerFilesRef.current.map((file) => file.name)),
+          { type: "text/plain" },
+        ),
+      ]);
     };
 
     const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -3272,6 +3333,7 @@ export const ChatComposer = memo(
           onDragOver={onComposerDragOver}
           onDragLeave={onComposerDragLeave}
           onDrop={onComposerDrop}
+          onPasteCapture={onComposerPasteCapture}
         >
           <div
             ref={composerSurfaceRef}

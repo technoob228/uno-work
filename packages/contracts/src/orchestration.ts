@@ -28,6 +28,8 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  regenerateThreadTitle: "orchestration.regenerateThreadTitle",
+  getThreadTranscript: "orchestration.getThreadTranscript",
   replayEvents: "orchestration.replayEvents",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -140,7 +142,14 @@ export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unkn
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
-export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
+export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 100;
+/**
+ * Pictures the model sees inline in one message; the bytes travel inside the
+ * turn command. Past either ceiling a picture goes as a file in `~/Uploads`,
+ * like a picture too big to inline: the agent opens it from disk.
+ */
+export const PROVIDER_SEND_TURN_MAX_INLINE_IMAGES = 20;
+export const PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES = 80 * 1024 * 1024;
 /**
  * A screen recording's key frames ride along as pictures on top of what the
  * person attached (Loom Work 28.10: a few by default, never more than this).
@@ -1870,6 +1879,28 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationRegenerateThreadTitleInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationRegenerateThreadTitleInput =
+  typeof OrchestrationRegenerateThreadTitleInput.Type;
+
+export const OrchestrationRegenerateThreadTitleResult = Schema.Struct({
+  title: TrimmedNonEmptyString,
+});
+export type OrchestrationRegenerateThreadTitleResult =
+  typeof OrchestrationRegenerateThreadTitleResult.Type;
+
+export const OrchestrationGetThreadTranscriptInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationGetThreadTranscriptInput =
+  typeof OrchestrationGetThreadTranscriptInput.Type;
+
+/** The chat as Markdown: what the person and the agent said, no tool output. */
+export const OrchestrationGetThreadTranscriptResult = Schema.Struct({
+  title: Schema.String,
+  markdown: Schema.String,
+});
+export type OrchestrationGetThreadTranscriptResult =
+  typeof OrchestrationGetThreadTranscriptResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1882,6 +1913,14 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  regenerateThreadTitle: {
+    input: OrchestrationRegenerateThreadTitleInput,
+    output: OrchestrationRegenerateThreadTitleResult,
+  },
+  getThreadTranscript: {
+    input: OrchestrationGetThreadTranscriptInput,
+    output: OrchestrationGetThreadTranscriptResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,
@@ -1923,6 +1962,22 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationRegenerateThreadTitleError extends Schema.TaggedErrorClass<OrchestrationRegenerateThreadTitleError>()(
+  "OrchestrationRegenerateThreadTitleError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetThreadTranscriptError extends Schema.TaggedErrorClass<OrchestrationGetThreadTranscriptError>()(
+  "OrchestrationGetThreadTranscriptError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

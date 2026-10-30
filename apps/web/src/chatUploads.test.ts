@@ -1,6 +1,8 @@
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGES,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +18,27 @@ const entry = (name: string, type: string, size = 10) => ({ name, type, size });
 const isVideo = (file: { type: string }) => file.type.startsWith("video/");
 
 describe("routeComposerFiles", () => {
+  it("sends pictures past what one message carries inline as files", () => {
+    const pictures = Array.from({ length: 3 }, (_, index) =>
+      entry(`p${index}.png`, "image/png", 1024),
+    );
+    const byCount = routeComposerFiles(pictures, {
+      isVideo,
+      imagesSupported: true,
+      inlineImages: { count: PROVIDER_SEND_TURN_MAX_INLINE_IMAGES - 1, bytes: 0 },
+    });
+    expect(byCount.images.map((file) => file.name)).toEqual(["p0.png"]);
+    expect(byCount.files.map((file) => file.name)).toEqual(["p1.png", "p2.png"]);
+
+    const byBytes = routeComposerFiles(pictures, {
+      isVideo,
+      imagesSupported: true,
+      inlineImages: { count: 0, bytes: PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES - 1024 },
+    });
+    expect(byBytes.images).toHaveLength(1);
+    expect(byBytes.files).toHaveLength(2);
+  });
+
   it("sends pictures inline, videos as videos and the rest as files", () => {
     const routed = routeComposerFiles(
       [
