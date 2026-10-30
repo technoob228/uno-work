@@ -1,8 +1,9 @@
 /**
  * "Cloud storage" in Files — the Uno account's S3 buckets as a second disk.
  * Buckets at the top level (with how much space each uses), folders and files
- * inside. Uploads go browser → this computer (hidden staging folder) → cloud,
- * so the browser never needs S3 CORS; downloads open a presigned link.
+ * inside. Small uploads go browser → this computer (hidden staging folder) →
+ * cloud, big ones straight from the browser (see cloudDirectUpload.ts);
+ * downloads open a presigned link.
  */
 import type { EnvironmentId, FilesCloudObject } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -48,6 +49,7 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { MoveDialog, NameDialog } from "./FilesDialogs";
 import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
+import { splitCloudUpload, uploadFilesDirect } from "./cloudDirectUpload";
 import type { useFilesUploads } from "./FilesUploads";
 import {
   FILE_KIND_ICON,
@@ -141,17 +143,22 @@ export function CloudBrowser({
   const bucket =
     state.data?.buckets.find((candidate) => candidate.id === bucketId) ?? listing.data?.bucket;
 
-  /** Browser → hidden folder on this computer → the bucket, then clean up. */
-  const uploadToCloud = async (files: ProjectUploadFile[]) => {
-    const rootPath = home.data?.rootPath;
-    if (!rootPath || bucketId === null || files.length === 0 || !environmentId) return;
+  /**
+   * Browser → hidden folder on this computer → the bucket, then clean up.
+   * Null when it didn't work out (the person has been told).
+   */
+  const sendThroughComputer = async (
+    rootPath: string,
+    targetBucketId: number,
+    files: ReadonlyArray<ProjectUploadFile>,
+  ) => {
     const staging = joinPath(rootPath, `.uno-cloud-upload-${Date.now().toString(36)}`);
     const ok = await uploads.start({
       targetDir: staging,
-      files,
+      files: [...files],
       label: `Uploading to ${bucket?.name ?? "Cloud storage"}`,
     });
-    if (!ok) return;
+    if (!ok) return null;
     const topLevel = [...new Set(files.map((file) => file.relativePath.split("/")[0]!))];
     const toastId = toastManager.add({
       type: "loading",
@@ -161,20 +168,12 @@ export function CloudBrowser({
     try {
       const result = await filesApi(environmentId).cloudCopyToCloud({
         paths: topLevel.map((name) => joinPath(staging, name)),
-        bucketId,
+        bucketId: targetBucketId,
         prefix,
         removeSource: true,
       });
       toastManager.close(toastId);
-      toastManager.add({
-        type: result.skipped.length > 0 ? "warning" : "success",
-        title: `${result.files} ${result.files === 1 ? "file" : "files"} in ${bucket?.name ?? "Cloud storage"}`,
-        ...(result.skipped.length > 0
-          ? {
-              description: `Left out: ${result.skipped.map((item) => `${item.name} (${item.reason})`).join(", ")}`,
-            }
-          : {}),
-      });
+      return result;
     } catch (error) {
       toastManager.close(toastId);
       toastManager.add({
@@ -182,12 +181,71 @@ export function CloudBrowser({
         title: "Couldn't upload to Cloud storage",
         description: errorText(error),
       });
+      return null;
     } finally {
       await filesApi(environmentId)
         .delete({ paths: [staging] })
         .catch(() => undefined);
-      refresh();
     }
+  };
+
+  /** Big files straight from the browser, the rest through the computer. */
+  const uploadToCloud = async (files: ProjectUploadFile[]) => {
+    const rootPath = home.data?.rootPath;
+    if (!rootPath || bucketId === null || files.length === 0 || !environmentId) return;
+    const { direct, staged, leftOut } = splitCloudUpload(files);
+    let sent = 0;
+    let fallback: ReadonlyArray<ProjectUploadFile> = [];
+    if (direct.length > 0) {
+      const outcome = await uploads.enqueue({
+        label: `Uploading to ${bucket?.name ?? "Cloud storage"}`,
+        totalFiles: direct.length,
+        totalBytes: direct.reduce((sum, file) => sum + file.size, 0),
+        run: (signal, onProgress) =>
+          uploadFilesDirect({
+            step: (input) => filesApi(environmentId).cloudUploadStep(input),
+            bucketId,
+            prefix,
+            files: direct,
+            signal,
+            onProgress,
+          }),
+      });
+      if (outcome.status !== "done") {
+        if (outcome.status === "failed") {
+          toastManager.add({
+            type: "error",
+            title: "Couldn't upload to Cloud storage",
+            description: outcome.error,
+          });
+        }
+        refresh();
+        return;
+      }
+      sent = outcome.value.uploaded;
+      fallback = outcome.value.fallback;
+    }
+    const throughComputer = [...staged, ...fallback];
+    const result =
+      throughComputer.length > 0
+        ? await sendThroughComputer(rootPath, bucketId, throughComputer)
+        : null;
+    refresh();
+    if (throughComputer.length > 0 && result === null) return;
+    const count = sent + (result?.files ?? 0);
+    const skipped = [
+      ...leftOut.map((file) => ({ name: file.relativePath, reason: "hidden file" })),
+      ...(result?.skipped ?? []),
+    ];
+    toastManager.add({
+      type: skipped.length > 0 ? "warning" : "success",
+      title: `${count} ${count === 1 ? "file" : "files"} in ${bucket?.name ?? "Cloud storage"}`,
+      ...(skipped.length > 0
+        ? {
+            description: `Left out: ${skipped.map((item) => `${item.name} (${item.reason})`).join(", ")}`,
+          }
+        : {}),
+    });
   };
 
   const navigate = useNavigate();

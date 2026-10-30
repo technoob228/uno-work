@@ -21,6 +21,8 @@ import type {
   FilesCloudListResult,
   FilesCloudState,
   FilesCloudTransferResult,
+  FilesCloudUploadStepInput,
+  FilesCloudUploadStepResult,
 } from "@t3tools/contracts";
 import { DRIVE_GIT_ROOT } from "@t3tools/shared/unoDrive";
 
@@ -416,6 +418,57 @@ export async function cloudUpload(
     }
     throw new CloudError(describeCloudError(cause));
   }
+}
+
+/**
+ * One step of an upload the browser sends straight to storage (bigger files,
+ * which a small computer's disk couldn't hold on the way). The console's
+ * answer goes back as it came, its refusal as an answer too.
+ *
+ * Starting one keeps what it replaces, as {@link copyToCloud} does: only a
+ * *replaced* file over the limit goes without an older copy, however big the
+ * new one is. Asked after the console agrees, so a file over the plan's quota
+ * doesn't cost an older copy first. Never a reason not to upload.
+ */
+export async function cloudUploadStep(
+  deps: CloudDeps,
+  input: FilesCloudUploadStepInput,
+): Promise<FilesCloudUploadStepResult> {
+  const { bucketId, ...body } = input;
+  let answer: unknown;
+  try {
+    answer = await (deps.fetchJson ?? fetchControlPlaneJson)(
+      deps.token,
+      `/api/v1/buckets/${bucketId}/presign`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  } catch (cause) {
+    return {
+      refusal: {
+        status: controlPlaneErrorStatus(cause),
+        message: describeCloudError(cause),
+        detail: cause instanceof Error ? cause.message : String(cause),
+      },
+    };
+  }
+  if (input.method === "put" && input.upload_id === undefined) {
+    const existing = await existingObjectSizes(deps, bucketId, [input.key]).catch(
+      () => new Map<string, number>(),
+    );
+    const size = existing.get(input.key);
+    if (size !== undefined && cloudVersionSkipReason(input.key, size, 0) === null) {
+      // Never a reason not to save, as in `copyToCloud`.
+      const outcome = await keepCloudVersion(deps, {
+        bucketId,
+        key: input.key,
+        now: new Date(),
+      }).catch(() => null);
+      if (outcome?.kind === "kept") {
+        await pruneCloudVersions(deps, bucketId, input.key).catch(() => undefined);
+      }
+    }
+  }
+  return { answer };
 }
 
 // ── Older copies ───────────────────────────────────────────────────────────

@@ -31,7 +31,6 @@ export const NO_GATEWAY_ERROR = "Uno AI isn't set up on this computer";
 export const MATERIALS_JOB_TTL_MS = 60 * 60 * 1000;
 export const MATERIALS_MAX_FILES = 100;
 export const MATERIALS_MAX_LINKS = 20;
-export const CLOUD_UPLOAD_MAX_BYTES = 200 * 1024 * 1024;
 
 export type MaterialItemState = "queued" | "reading" | "read" | "skipped" | "failed";
 
@@ -303,11 +302,6 @@ export function makeMaterialsJobs(deps: MaterialsJobDeps): MaterialsJobs {
       if (cloud === null) return;
       let allSaved = true;
       for (const item of fileItems) {
-        if (item.size > CLOUD_UPLOAD_MAX_BYTES) {
-          item.cloudError = "not saved to Cloud storage: bigger than 200 MB";
-          allSaved = false;
-          continue;
-        }
         try {
           await cloud.upload({
             absolutePath: item.absolutePath!,

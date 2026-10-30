@@ -20,6 +20,7 @@ import { environmentFetchResponse, isPrimaryEnvironmentId } from "../../environm
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary/target";
 import {
   PROJECT_UPLOAD_CHUNK_BYTES,
+  computerUploadDeps,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
   type ProjectUploadProgress,
@@ -347,25 +348,22 @@ export async function uploadIntoFolder(options: FilesUploadOptions) {
     return path;
   };
   try {
-    return await uploadFilesIntoDirectory(
-      { writeFile: (write) => api.projects.writeFile(write) },
-      {
-        targetDir: options.targetDir,
-        files: options.files,
-        filterIgnored: false,
-        stagedPathFor,
-        onFileWritten: async ({ relativePath, stagedRelativePath }) => {
-          await api.files.rename({
-            path: joinPath(options.targetDir, stagedRelativePath),
-            newName: basename(relativePath),
-            onConflict: options.onConflict,
-          });
-          staged.delete(relativePath);
-        },
-        ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-        ...(options.signal ? { signal: options.signal } : {}),
+    return await uploadFilesIntoDirectory(computerUploadDeps(api), {
+      targetDir: options.targetDir,
+      files: options.files,
+      filterIgnored: false,
+      stagedPathFor,
+      onFileWritten: async ({ relativePath, stagedRelativePath }) => {
+        await api.files.rename({
+          path: joinPath(options.targetDir, stagedRelativePath),
+          newName: basename(relativePath),
+          onConflict: options.onConflict,
+        });
+        staged.delete(relativePath);
       },
-    );
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   } catch (error) {
     // Leave nothing half-uploaded behind.
     for (const path of staged.values()) {

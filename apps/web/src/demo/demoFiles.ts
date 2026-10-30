@@ -202,6 +202,16 @@ export function answerFileRpc(machine: DemoMachine, body: NormalizedWsRpcRequest
         skipped: [],
       }));
     }
+    case WS_METHODS.filesEnsureSpace:
+      return Promise.resolve({});
+    case WS_METHODS.filesCloudUploadStep:
+      return Promise.resolve({
+        refusal: {
+          status: null,
+          message: "Files this big don't upload in the demo.",
+          detail: "",
+        },
+      });
     case WS_METHODS.filesDriveShareCreate:
       return wait(500).then(() => ({
         id: Math.floor(Math.random() * 10_000),

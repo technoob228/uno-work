@@ -5,16 +5,45 @@ import { describe, expect, it } from "vitest";
 
 import {
   DISK_RESERVE_MIN_BYTES,
+  DISK_FULL_MESSAGE,
   DISK_SMALL_COPY_BYTES,
   NotEnoughSpaceError,
   agentDiskSpaceMessage,
   diskSpaceAt,
   ensureDiskSpace,
   fitsOnDisk,
+  isDiskFullError,
   reserveBytes,
+  spaceCheckPath,
 } from "./diskSpace.ts";
 
 const GB = 1024 ** 3;
+
+describe("a disk that fills up under a write", () => {
+  it("is found anywhere in the chain of causes", () => {
+    const enospc = Object.assign(new Error("write failed"), { code: "ENOSPC" });
+    expect(isDiskFullError(enospc)).toBe(true);
+    expect(isDiskFullError(new Error("wrapped", { cause: { cause: enospc } }))).toBe(true);
+    expect(isDiskFullError({ code: "EDQUOT" })).toBe(true);
+    expect(isDiskFullError(new Error("ENOSPC: no space left on device"))).toBe(true);
+    expect(DISK_FULL_MESSAGE).toMatch(/^Not enough space/);
+  });
+
+  it("isn't any other write failure", () => {
+    expect(isDiskFullError(Object.assign(new Error("nope"), { code: "EACCES" }))).toBe(false);
+    expect(isDiskFullError(new Error("Failed to write workspace file"))).toBe(false);
+    expect(isDiskFullError(null)).toBe(false);
+  });
+});
+
+describe("where a space check looks", () => {
+  it("reads the paths an upload targets", () => {
+    expect(spaceCheckPath("/home/me", "~")).toBe("/home/me");
+    expect(spaceCheckPath("/home/me", "~/projects/a")).toBe("/home/me/projects/a");
+    expect(spaceCheckPath("/home/me", "/mnt/data/a")).toBe("/mnt/data/a");
+    expect(spaceCheckPath("/home/me", "projects/a")).toBe("/home/me");
+  });
+});
 
 describe("disk space check", () => {
   it("keeps 1 GB, or 5% of a big disk", () => {
@@ -43,10 +72,14 @@ describe("disk space check", () => {
     const refusal = await ensureDiskSpace("/x", 2.5 * GB, measure).catch((error) => error);
     expect(refusal).toBeInstanceOf(NotEnoughSpaceError);
     expect(refusal.message).toBe(
-      "Not enough space on this computer: needs 2.5 GB, 3.0 GB free. Free up space or pick fewer files.",
+      "Not enough space on this computer: needs 2.5 GB and 1.0 GB left for the computer itself, 3.0 GB free. Free up space or pick fewer files.",
     );
     expect(agentDiskSpaceMessage(refusal.message)).toBe(
-      "Not enough space on this computer: needs 2.5 GB, 3.0 GB free. Free space with computer_cleanup or pick fewer files.",
+      "Not enough space on this computer: needs 2.5 GB and 1.0 GB left for the computer itself, 3.0 GB free. Free space with computer_cleanup or pick fewer files.",
+    );
+    const tooBig = await ensureDiskSpace("/x", 10 * GB, measure).catch((error) => error);
+    expect(tooBig.message).toBe(
+      "Not enough space on this computer: needs 10 GB, 3.0 GB free. Free up space or pick fewer files.",
     );
     expect(agentDiskSpaceMessage("Cloud storage is full.")).toBe("Cloud storage is full.");
     await expect(ensureDiskSpace("/x", GB, measure)).resolves.toBeUndefined();

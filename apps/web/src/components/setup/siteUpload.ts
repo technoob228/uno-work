@@ -7,8 +7,18 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import JSZip from "jszip";
 
 import { ensureEnvironmentApi } from "../../environmentApi";
-import { uploadFilesIntoDirectory, type ProjectUploadFile } from "../../projectUpload";
+import {
+  computerUploadDeps,
+  uploadFilesIntoDirectory,
+  type ProjectUploadFile,
+} from "../../projectUpload";
 import { hasIndexHtml, isJunkPath, siteSlugFrom, stripSharedTopFolder } from "./goals";
+
+/**
+ * A bigger .zip stays a file: unpacking happens in the tab, with the whole
+ * archive in memory, and a tab doesn't survive many gigabytes of that.
+ */
+export const ZIP_UNPACK_MAX_BYTES = 1024 ** 3;
 
 /** Unpacks every .zip among the files (in the browser), keeps the rest. */
 export async function expandZips(
@@ -16,7 +26,7 @@ export async function expandZips(
 ): Promise<ProjectUploadFile[]> {
   const out: ProjectUploadFile[] = [];
   for (const file of files) {
-    if (!/\.zip$/i.test(file.relativePath)) {
+    if (!/\.zip$/i.test(file.relativePath) || file.size > ZIP_UNPACK_MAX_BYTES) {
       out.push(file);
       continue;
     }
@@ -68,16 +78,13 @@ export async function uploadAndPublishSite(input: {
   const api = ensureEnvironmentApi(input.environmentId);
   const target = `${input.projectPath.replace(/\/+$/, "")}/site`;
   input.onPhase("uploading", 0, files.length);
-  await uploadFilesIntoDirectory(
-    { writeFile: (write) => api.projects.writeFile(write) },
-    {
-      targetDir: target,
-      files,
-      filterIgnored: true,
-      onProgress: (progress) =>
-        input.onPhase("uploading", progress.completedFiles, progress.totalFiles),
-    },
-  );
+  await uploadFilesIntoDirectory(computerUploadDeps(api), {
+    targetDir: target,
+    files,
+    filterIgnored: true,
+    onProgress: (progress) =>
+      input.onPhase("uploading", progress.completedFiles, progress.totalFiles),
+  });
   input.onPhase("publishing");
   const result = await api.files.publishSite({ path: target, slug: siteSlugFrom(input.name) });
   return {
