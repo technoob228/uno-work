@@ -804,6 +804,8 @@ interface ThreadTerminalDrawerProps {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
   cwd: string;
+  /** Whose shell this is, when the person has several computers. */
+  computerName?: string | null;
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
@@ -858,6 +860,7 @@ export default function ThreadTerminalDrawer({
   threadRef,
   threadId,
   cwd,
+  computerName,
   worktreePath,
   runtimeEnv,
   visible = true,
@@ -1125,7 +1128,15 @@ export default function ThreadTerminalDrawer({
       />
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
+        <div className="pointer-events-none absolute right-2 top-2 z-20 flex items-center gap-1.5">
+          {computerName ? (
+            <span
+              className="max-w-40 truncate rounded-md bg-background/80 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              data-testid="terminal-computer"
+            >
+              {computerName}
+            </span>
+          ) : null}
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
@@ -1227,6 +1238,14 @@ export default function ThreadTerminalDrawer({
           {hasTerminalSidebar && (
             <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
               <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
+                {computerName ? (
+                  <span
+                    className="mr-auto min-w-0 truncate px-1.5 text-[11px] leading-[22px] text-muted-foreground"
+                    data-testid="terminal-computer"
+                  >
+                    {computerName}
+                  </span>
+                ) : null}
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
                     className={`inline-flex h-full items-center px-1 text-foreground/90 transition-colors ${

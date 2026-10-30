@@ -189,7 +189,14 @@ export function useSwitcherMachines(): SwitcherMachine[] {
  * `onDone` runs when a pick takes the person somewhere (switch, connect,
  * "All computers") — the owner closes its menu.
  */
-export function useComputerSwitcher(onDone?: () => void) {
+/** The computer's name when there are several to tell apart; null with just one. */
+export function useNameAmongComputers(environmentId: EnvironmentId | null): string | null {
+  const machines = useSwitcherMachines();
+  if (machines.length < 2) return null;
+  return machines.find((machine) => machine.id === environmentId)?.name ?? null;
+}
+
+export function useComputerSwitcher(onDone?: () => void, chatEnvironmentId?: EnvironmentId | null) {
   const [addEnvOpen, setAddEnvOpen] = useState(false);
   const navigate = useNavigate();
   const [connecting, setConnecting] = useState<{ boxId: number; label: string } | null>(null);
@@ -263,7 +270,9 @@ export function useComputerSwitcher(onDone?: () => void) {
     }
   };
 
-  const currentId = activeEnvironmentId ?? primaryEnvironmentId ?? environments[0]?.id ?? null;
+  // In a chat the menu's "current" is the chat's computer, not the one picked on Home.
+  const currentId =
+    chatEnvironmentId ?? activeEnvironmentId ?? primaryEnvironmentId ?? environments[0]?.id ?? null;
   const current =
     environments.find((environment) => environment.id === currentId) ??
     (currentId

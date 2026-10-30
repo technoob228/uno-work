@@ -128,6 +128,7 @@ import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { withAppShortcutDefaults } from "./appShortcuts.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import { useNameAmongComputers } from "./computerSwitcher/useComputerSwitcher";
 import { BellIcon, ChevronDownIcon, ClockIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -565,6 +566,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   onAddTerminalContext,
 }: PersistentThreadTerminalDrawerProps) {
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const computerName = useNameAmongComputers(threadRef.environmentId);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const projectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
@@ -691,6 +693,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         threadRef={threadRef}
         threadId={threadId}
         cwd={cwd}
+        computerName={computerName}
         worktreePath={effectiveWorktreePath}
         runtimeEnv={runtimeEnv}
         visible={visible}

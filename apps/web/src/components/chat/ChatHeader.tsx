@@ -53,6 +53,7 @@ import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
 import { ComputerChip } from "../computer/home/ComputerChip";
+import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
 import { ChatDoneButton } from "./ChatDoneButton";
 import { ChatAutomationsButton } from "../automations/ChatAutomations";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
@@ -181,6 +182,8 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const computerName = useNameAmongComputers(activeThreadEnvironmentId);
+  const terminalWords = computerName ? `Terminal on ${computerName}` : "Toggle terminal drawer";
   const devMode = useDevMode();
   const { isMobile, open, openMobile } = useSidebar();
   // Sidebar D's rail counts as the sidebar: no extra "show sidebar" button.
@@ -363,8 +366,8 @@ export const ChatHeader = memo(function ChatHeader({
             threadId={activeThreadId}
           />
         )}
-        {/* Which computer, and switching to another, from any chat (0.0.96). */}
-        <ComputerChip />
+        {/* The computer this chat runs on, and switching to another, from any chat (0.0.96). */}
+        <ComputerChip environmentId={activeThreadEnvironmentId} />
         {isAssistantChat ? (
           <AssistantChatHeaderActions
             environmentId={activeThreadEnvironmentId}
@@ -441,8 +444,8 @@ export const ChatHeader = memo(function ChatHeader({
                 {!terminalAvailable
                   ? "Terminal is unavailable until this chat has an active project."
                   : terminalToggleShortcutLabel
-                    ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
-                    : "Toggle terminal drawer"}
+                    ? `${terminalWords} (${terminalToggleShortcutLabel})`
+                    : terminalWords}
               </TooltipPopup>
             </Tooltip>
           </Foldable>
