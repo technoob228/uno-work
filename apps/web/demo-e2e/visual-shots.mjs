@@ -3,7 +3,9 @@
 //   demo-e2e/build-demo.sh <dist> && DEMO_DIST=<dist> node demo-e2e/visual-shots.mjs <out-dir>
 // Screens: Home, the sidebar (close-up), a chat with an agent turn, a menu,
 // a dialog (the command palette), Settings. LOG.txt lists what was found.
-import { mkdirSync, writeFileSync } from "node:fs";
+// EXTRA_CSS=<file> lays a stylesheet over the build (a variant to decide on,
+// without a build of its own); ONLY=home,chat limits the screens.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
@@ -14,6 +16,8 @@ const out = process.argv[2] ?? "demo-e2e/shots/visual";
 const themes = (process.env.THEMES ?? "light,dark").split(",");
 // The demo's chats have fixed ages: one clock for both builds.
 const CLOCK = new Date(process.env.CLOCK ?? "2026-10-29T15:00:00Z");
+const EXTRA_CSS = process.env.EXTRA_CSS ? readFileSync(process.env.EXTRA_CSS, "utf8") : null;
+const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 mkdirSync(out, { recursive: true });
 
 async function launchBrowser() {
@@ -59,6 +63,7 @@ for (const theme of themes) {
     log.push(`${theme} ok ${name}`);
   };
   const step = async (name, fn) => {
+    if (ONLY && !ONLY.has(name)) return;
     try {
       await fn();
     } catch (error) {
@@ -72,6 +77,18 @@ for (const theme of themes) {
     } catch {}
   }, theme);
 
+  if (EXTRA_CSS) {
+    await page.addInitScript((css) => {
+      const add = () => {
+        const style = document.createElement("style");
+        style.dataset.variant = "";
+        style.textContent = css;
+        document.head.append(style);
+      };
+      if (document.head) add();
+      else document.addEventListener("DOMContentLoaded", add);
+    }, EXTRA_CSS);
+  }
   await openDemo(page, server.url);
   await page.waitForTimeout(1500);
 
