@@ -10,10 +10,13 @@ export function FilesLocationSwitch({
   location,
   onComputer,
   onCloud,
+  narrow = false,
 }: {
   location: "computer" | "cloud";
   onComputer: () => void;
   onCloud: () => void;
+  /** No room for both names (a phone, the panel's column): the open one keeps its name. */
+  narrow?: boolean | undefined;
 }) {
   const item = (active: boolean) =>
     cn(
@@ -22,6 +25,8 @@ export function FilesLocationSwitch({
         ? "bg-background font-medium text-foreground shadow-xs"
         : "text-muted-foreground hover:text-foreground",
     );
+  const label = (active: boolean) =>
+    narrow ? (active ? undefined : "sr-only") : "hidden sm:inline";
   return (
     <div
       className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/70 p-0.5"
@@ -33,43 +38,33 @@ export function FilesLocationSwitch({
         role="tab"
         aria-selected={location === "computer"}
         className={item(location === "computer")}
+        title="This computer"
         onClick={onComputer}
       >
         <HardDriveIcon className="size-3.5" />
-        <span className="hidden sm:inline">This computer</span>
+        <span className={label(location === "computer")}>This computer</span>
       </button>
       <button
         type="button"
         role="tab"
         aria-selected={location === "cloud"}
         className={item(location === "cloud")}
+        title="Cloud storage"
         onClick={onCloud}
       >
         <CloudIcon className="size-3.5" />
-        <span className="hidden sm:inline">Cloud storage</span>
+        <span className={label(location === "cloud")}>Cloud storage</span>
       </button>
     </div>
   );
 }
 
-/** One line on what this location is and what happens to it (flows v2, E5). */
-export const FILES_LOCATION_NOTE = {
-  computer:
-    "Files on this computer. They live with it: if the computer is deleted, they go too. Keep what must stay in Cloud storage.",
-  cloud:
-    "Shared by all your computers. It stays when a computer is deleted, and copies of your computers are kept here too.",
-} as const;
-
-export function FilesLocationNote({ location }: { location: "computer" | "cloud" }) {
+/** What Cloud storage is and what becomes of it (flows v2, E5). */
+export function CloudStorageNote() {
   return (
-    <p
-      className="mt-1.5 text-xs leading-snug text-muted-foreground"
-      data-testid="files-location-note"
-    >
-      <span className="font-medium text-foreground sm:hidden">
-        {location === "computer" ? "This computer. " : "Cloud storage. "}
-      </span>
-      {FILES_LOCATION_NOTE[location]}
+    <p className="mt-1.5 text-xs leading-snug text-muted-foreground" data-testid="files-cloud-note">
+      Shared by all your computers. It stays when a computer is deleted, and copies of your
+      computers are kept here too.
     </p>
   );
 }

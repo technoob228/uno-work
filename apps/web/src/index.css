@@ -208,12 +208,13 @@
   --sidebar-row-content-inset: 0.625rem;
   --secondary-label: var(--muted-foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-row-hover: --alpha(var(--color-black) / 4%);
-  --sidebar-row-active: --alpha(var(--color-black) / 7%);
+  --sidebar-row-hover: --alpha(var(--color-black) / 3%);
+  /* Misha 30.10: a gray sidebar, the open chat a white card (T3's light surfaces). */
+  --sidebar-row-active: var(--color-white);
   --sidebar-row-selected: --alpha(var(--color-black) / 5%);
   --sidebar-control-surface: --alpha(var(--color-black) / 4%);
   --sidebar-icon-color: var(--muted-foreground);
-  --sidebar: var(--background);
+  --sidebar: oklch(98.5% 0 0);
   --sidebar-border: var(--border);
   --app-scrollbar-thumb: rgb(0 0 0 / 14%);
   --app-scrollbar-thumb-hover: rgb(0 0 0 / 24%);
@@ -271,6 +272,7 @@
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
     --warning-foreground: var(--color-amber-400);
+    --sidebar: var(--background);
     --sidebar-row-hover: --alpha(var(--color-white) / 6%);
     --sidebar-row-active: --alpha(var(--color-white) / 9%);
     --sidebar-row-selected: --alpha(var(--color-white) / 6%);
@@ -592,6 +594,13 @@ label:has(> select#reasoning-effort) select {
 }
 
 /* Chat markdown rendering */
+/* The open chat's row in the light sidebar: a white card with a thin edge. */
+:root:not(.dark) .bg-sidebar-row-active {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 6%),
+    inset 0 0 0 1px rgb(0 0 0 / 7%);
+}
+
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -696,12 +705,7 @@ label:has(> select#reasoning-effort) select {
 
 /* A file named in an answer: its type's icon and its name in the link colour,
    part of the sentence. A soft tint appears only under the pointer. */
-.chat-markdown-file-link,
-.chat-markdown-file-link:hover {
-  text-decoration: none;
-}
-
-.chat-markdown-file-link {
+.chat-markdown a.chat-markdown-file-link {
   display: inline-flex;
   max-width: 100%;
   align-items: baseline;
@@ -710,17 +714,18 @@ label:has(> select#reasoning-effort) select {
   border-radius: 0.3rem;
   padding-inline: 0.12rem;
   color: var(--info-foreground);
+  text-decoration: none;
   cursor: pointer;
   vertical-align: bottom;
   transition: background-color 120ms ease;
 }
 
-.chat-markdown-file-link:hover {
+.chat-markdown a.chat-markdown-file-link:hover {
   opacity: 1;
   background: color-mix(in srgb, var(--info) 12%, transparent);
 }
 
-.chat-markdown-file-link:focus-visible {
+.chat-markdown a.chat-markdown-file-link:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--ring) 70%, transparent);
 }
@@ -736,7 +741,6 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown pre {
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--border);
   border-radius: 0.5rem;
   scrollbar-width: thin;
   background: var(--muted);
@@ -852,11 +856,26 @@ label:has(> select#reasoning-effort) select {
   border-collapse: collapse;
 }
 
+/* Tables read as text with hairlines between rows, not as a grid of boxes. */
 .chat-markdown th,
 .chat-markdown td {
-  border: 1px solid var(--border);
-  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.9rem 0.4rem 0;
   text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown tr > :last-child {
+  padding-right: 0;
+}
+
+.chat-markdown tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.chat-markdown th {
+  color: var(--muted-foreground);
+  font-weight: 500;
 }
 
 /* Diffs theme bridge (match diff surfaces to app palette) */

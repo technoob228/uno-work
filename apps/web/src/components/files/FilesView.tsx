@@ -31,7 +31,6 @@ import {
   PlusIcon,
   PresentationIcon,
   RefreshCwIcon,
-  SearchIcon,
   Share2Icon,
   TextCursorInputIcon,
   Trash2Icon,
@@ -94,7 +93,6 @@ import {
   recordFileOpened,
   filesListQueryOptions,
   filesQueryKeys,
-  filesSearchQueryOptions,
   filesSharesQueryOptions,
 } from "./filesApi";
 import { prefetchFileForView } from "./filesPrefetch";
@@ -114,7 +112,8 @@ import { isElectron } from "../../env";
 import { untitledFileName } from "./untitledName";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
-import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesSearchField, filesSearchScope, resultLocation, useFilesSearch } from "./FilesSearch";
 import { folderTagOf, folderTags, type FolderTag } from "./folderTags";
 import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
 import { SidebarShowButton, SidebarShowButtonHidden } from "../sidebar/SidebarShowButton";
@@ -544,8 +543,15 @@ export function FilesBrowser({
             listing={listing}
             history={history}
             viewSwitch={
-              <FilesViewSwitch mode={viewMode} onChange={setViewMode} compact={isMobile} />
+              <FilesViewSwitch
+                mode={viewMode}
+                onChange={setViewMode}
+                compact={isMobile}
+                iconsOnly={isMobile}
+              />
             }
+            narrow={isMobile}
+            projectFolder={panel ? preview.currentChatProjectCwd : null}
             onOpenFolder={openFolder}
             onOpenFile={pickFile}
             uploads={uploads}
@@ -680,6 +686,8 @@ function FolderBrowser({
   listing,
   history,
   viewSwitch,
+  narrow,
+  projectFolder,
   onOpenFolder,
   onOpenFile,
   uploads,
@@ -692,6 +700,10 @@ function FolderBrowser({
   listing: UseQueryResult<FilesListResult>;
   history: FilesHistory;
   viewSwitch?: React.ReactNode;
+  /** A phone or the panel's column: search on a row of its own, fewer buttons. */
+  narrow: boolean;
+  /** The chat's project, when Files sits beside a chat: search covers all of it. */
+  projectFolder: string | null;
   onOpenFolder: (path: string | undefined) => void;
   onOpenFile: (entry: FilesEntry) => void;
   uploads: ReturnType<typeof useFilesUploads>;
@@ -730,8 +742,15 @@ function FolderBrowser({
             : parentFolder,
         )
     : null;
-  const trimmedQuery = query.trim();
-  const searchResults = useQuery(filesSearchQueryOptions(environmentId, currentPath, trimmedQuery));
+  const searchScope = filesSearchScope({ currentPath, rootPath, projectFolder });
+  const search = useFilesSearch({
+    environmentId,
+    folderEntries: data?.entries,
+    scope: searchScope,
+    query,
+  });
+  const trimmedQuery = search.query;
+  const searchInput = useRef<HTMLInputElement>(null);
   const shares = useQuery(filesSharesQueryOptions(environmentId, null));
   // What a folder is beyond a folder: a project the agents work in, an app's code.
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -763,9 +782,9 @@ function FolderBrowser({
   }, [currentPath]);
 
   const entries = useMemo(() => {
-    const source = trimmedQuery ? (searchResults.data?.entries ?? []) : (data?.entries ?? []);
+    const source = trimmedQuery ? search.entries : (data?.entries ?? []);
     return sortEntries(source, sort.key, sort.ascending);
-  }, [data?.entries, searchResults.data?.entries, sort, trimmedQuery]);
+  }, [data?.entries, search.entries, sort, trimmedQuery]);
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
   const shownRows = useProgressiveRows(entries.length);
 
@@ -825,7 +844,17 @@ function FolderBrowser({
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col outline-none"
+      // Clicking anywhere in Files puts the keyboard here, for ⌘F.
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== "f" && event.key !== "F") return;
+        if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        searchInput.current?.focus();
+        searchInput.current?.select();
+      }}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         dragDepth.current += 1;
@@ -848,49 +877,42 @@ function FolderBrowser({
             location="computer"
             onComputer={() => onOpenFolder(undefined)}
             onCloud={() => onOpenCloud()}
+            narrow={narrow}
           />
           {viewSwitch}
           <span className="flex-1" />
-          <div className="relative hidden sm:block">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
+          {narrow ? null : (
+            <FilesSearchField
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search in this folder"
-              aria-label="Search files"
-              className="h-8 w-36 rounded-lg border border-input bg-background pr-7 pl-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 2xl:w-56"
+              onChange={setQuery}
+              inputRef={searchInput}
+              className="w-44 2xl:w-56"
             />
-            {query ? (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => setQuery("")}
-                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            ) : null}
-          </div>
-          {currentPath ? <PinPathButton kind="folder" path={currentPath} /> : null}
-          {currentPath ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => startChatIn(currentPath)}
-              data-testid="files-start-chat-here"
-            >
-              <MessageSquarePlusIcon />
-              <span className="hidden 2xl:inline">Start chat here</span>
-            </Button>
-          ) : null}
-          <Button size="sm" variant="ghost" onClick={() => onDialog({ type: "links" })}>
-            <LinkIcon />
-            <span className="hidden 2xl:inline">Shared links</span>
-          </Button>
+          )}
+          {narrow ? null : (
+            <>
+              {currentPath ? <PinPathButton kind="folder" path={currentPath} /> : null}
+              {currentPath ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => startChatIn(currentPath)}
+                  data-testid="files-start-chat-here"
+                >
+                  <MessageSquarePlusIcon />
+                  <span className="hidden 2xl:inline">Start chat here</span>
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => onDialog({ type: "links" })}>
+                <LinkIcon />
+                <span className="hidden 2xl:inline">Shared links</span>
+              </Button>
+            </>
+          )}
           <Menu>
             <MenuTrigger render={<Button size="sm" variant="outline" disabled={!currentPath} />}>
               <PlusIcon />
-              <span className="hidden sm:inline">New</span>
+              <span className={narrow ? "sr-only" : "hidden sm:inline"}>New</span>
             </MenuTrigger>
             <MenuPopup align="end" className="w-52">
               <MenuItem onClick={() => onDialog({ type: "newFolder" })}>
@@ -923,7 +945,7 @@ function FolderBrowser({
           <Menu>
             <MenuTrigger render={<Button size="sm" disabled={!currentPath} />}>
               <UploadIcon />
-              <span className="hidden sm:inline">Upload</span>
+              <span className={narrow ? "sr-only" : "hidden sm:inline"}>Upload</span>
             </MenuTrigger>
             <MenuPopup align="end" className="w-48">
               <MenuItem onClick={() => pickFilesForProjectUpload((files) => upload(files))}>
@@ -943,6 +965,21 @@ function FolderBrowser({
               <EllipsisIcon />
             </MenuTrigger>
             <MenuPopup align="end" className="w-52">
+              {narrow && currentPath ? (
+                <MenuItem
+                  onClick={() => startChatIn(currentPath)}
+                  data-testid="files-start-chat-here"
+                >
+                  <MessageSquarePlusIcon />
+                  Start chat here
+                </MenuItem>
+              ) : null}
+              {narrow ? (
+                <MenuItem onClick={() => onDialog({ type: "links" })}>
+                  <LinkIcon />
+                  Shared links
+                </MenuItem>
+              ) : null}
               <MenuItem onClick={() => setShowHidden((value) => !value)}>
                 {showHidden ? <EyeOffIcon /> : <EyeIcon />}
                 {showHidden ? "Hide hidden files" : "Show hidden files"}
@@ -995,17 +1032,14 @@ function FolderBrowser({
             )}
           </nav>
         </div>
-        <div className="relative mt-2 sm:hidden">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+        {narrow ? (
+          <FilesSearchField
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search in this folder"
-            aria-label="Search files"
-            className="h-8 w-full rounded-lg border border-input bg-background pl-8 text-sm outline-none"
+            onChange={setQuery}
+            inputRef={searchInput}
+            className="mt-2"
           />
-        </div>
-        <FilesLocationNote location="computer" />
+        ) : null}
       </header>
 
       {selectedEntries.length > 0 ? (
@@ -1066,7 +1100,7 @@ function FolderBrowser({
               </Button>
             }
           />
-        ) : trimmedQuery && searchResults.isPending ? (
+        ) : trimmedQuery && entries.length === 0 && search.searching ? (
           <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
             Searching…
@@ -1075,7 +1109,11 @@ function FolderBrowser({
           trimmedQuery ? (
             <EmptyState
               title={`Nothing called “${trimmedQuery}” here`}
-              detail="Search looks in this folder and the folders inside it."
+              detail={
+                searchScope === projectFolder
+                  ? "Search looks through this whole project."
+                  : "Search looks through all your files."
+              }
             />
           ) : (
             <EmptyState
@@ -1150,9 +1188,7 @@ function FolderBrowser({
                   tag={entry.kind === "directory" ? folderTagOf(tags, entry.path) : null}
                   selected={selected.has(entry.path)}
                   dropTarget={dropTarget === entry.path}
-                  locationHint={
-                    trimmedQuery && currentPath ? relativeFolder(currentPath, entry.path) : null
-                  }
+                  locationHint={trimmedQuery ? resultLocation(searchScope, entry.path) : null}
                   onToggle={(value) =>
                     setSelected((previous) => {
                       const next = new Set(previous);
@@ -1195,7 +1231,7 @@ function FolderBrowser({
             </tbody>
           </table>
         )}
-        {trimmedQuery && searchResults.data?.truncated ? (
+        {search.truncated ? (
           <p className="px-5 py-3 text-xs text-muted-foreground">
             Showing the first matches. Type more of the name to narrow it down.
           </p>
@@ -1227,12 +1263,6 @@ function TreeEmptyState({ folder, recent = false }: { folder: string | null; rec
       </p>
     </div>
   );
-}
-
-function relativeFolder(base: string, path: string): string | null {
-  const folder = dirname(path);
-  if (folder === base) return null;
-  return folder.startsWith(`${base}/`) ? folder.slice(base.length + 1) : folder;
 }
 
 function SortHeader({

@@ -28,7 +28,7 @@ import {
   UploadIcon,
 } from "lucide-react";
 import * as Schema from "effect/Schema";
-import { memo, useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { cn } from "../../lib/utils";
@@ -42,6 +42,7 @@ import { filesListQueryOptions, filesQueryKeys } from "./filesApi";
 import { prefetchFileForView } from "./filesPrefetch";
 import { useProgressiveRows } from "./useProgressiveRows";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesSearchField, FilesSearchResults, useFilesSearch } from "./FilesSearch";
 import { FilesNavButtons, type FilesHistory } from "./filesHistory";
 import { RecentFilesList } from "./RecentFilesList";
 import type { useFilesUploads } from "./FilesUploads";
@@ -220,6 +221,13 @@ export const FilesTree = memo(function FilesTree(props: {
   const open = useMemo(() => new Set(openList), [openList]);
   const root = useQuery(filesListQueryOptions(environmentId, null, showHidden));
   const rootPath = root.data?.rootPath ?? null;
+  const [query, setQuery] = useState("");
+  const search = useFilesSearch({
+    environmentId,
+    folderEntries: root.data?.entries,
+    scope: rootPath,
+    query,
+  });
 
   // A file opened from a link, or a rename: unfold the way down to it.
   useEffect(() => {
@@ -361,6 +369,7 @@ export const FilesTree = memo(function FilesTree(props: {
             <RefreshCwIcon />
           </Button>
         </div>
+        {recentMode ? null : <FilesSearchField value={query} onChange={setQuery} />}
       </div>
       {recentMode ? (
         <RecentFilesList
@@ -369,6 +378,19 @@ export const FilesTree = memo(function FilesTree(props: {
           selectedFile={selectedFile}
           onOpenFile={props.onOpenFile}
         />
+      ) : search.active ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
+          <FilesSearchResults
+            search={search}
+            scope={rootPath}
+            selectedFile={selectedFile}
+            onPick={(entry) =>
+              entry.kind === "directory"
+                ? props.onSelectFolder(entry.path)
+                : props.onOpenFile(entry)
+            }
+          />
+        </div>
       ) : (
         <div
           className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5"

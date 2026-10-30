@@ -3260,7 +3260,7 @@ export const ChatComposer = memo(
             ref={composerSurfaceRef}
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
+              "rounded-[20px] border bg-card shadow-[0_4px_16px_-8px_rgb(0_0_0/0.12)] transition-colors duration-200 has-focus-visible:border-ring/45",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               environmentUnavailable ? "opacity-75" : null,
               personalAiBlocksSend ? "bg-muted/30" : null,

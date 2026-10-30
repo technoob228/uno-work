@@ -143,7 +143,8 @@ const EMPTY_REQUEST_IDS: ReadonlyArray<ApprovalRequestId> = [];
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
+// Taller than the fade above the composer (ChatView): the last line ends clear of it.
+const TIMELINE_LIST_FOOTER = <div className="h-8" />;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -510,7 +511,8 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        "pb-4",
+        // A person's message keeps room for the line that shows under it on hover.
+        row.kind === "message" && row.message.role === "user" ? "pb-8" : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -577,16 +579,15 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const sentByThreadId = row.message.sentByThreadId ?? null;
           return (
             <div className="flex justify-end">
-              <div
-                className={cn(
-                  "group relative max-w-[80%] rounded-2xl rounded-br-sm border px-4 py-3",
-                  // Sent by another chat's agent: same side, but visibly not the human's own bubble.
-                  sentByThreadId
-                    ? "border-dashed border-info/30 bg-info/4"
-                    : "border-border bg-secondary",
-                )}
-                data-sent-by-agent={sentByThreadId ? "true" : undefined}
-              >
+              <div className="group relative flex max-w-[80%] min-w-0 flex-col items-end">
+                <div
+                  className={cn(
+                    "w-full min-w-0 rounded-2xl px-3.5 py-2",
+                    // Sent by another chat's agent: same side, but visibly not the human's own bubble.
+                    sentByThreadId ? "border border-dashed border-info/30 bg-info/4" : "bg-secondary",
+                  )}
+                  data-sent-by-agent={sentByThreadId ? "true" : undefined}
+                >
                 {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
@@ -662,27 +663,36 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     />
                   )
                 )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} />
-                    )}
-                    {canRevertAgentWork && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
-                        onClick={() => ctx.onRevertUserMessage(row.message.id)}
-                        title="Revert to this message"
-                      >
-                        <Undo2Icon className="size-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-right text-xs text-muted-foreground/50">
+                </div>
+                {/* Time and actions under the bubble, on hover (always on touch screens). */}
+                <div
+                  className="absolute top-full right-1 mt-0.5 flex h-6 items-center gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                  data-testid="user-message-actions"
+                >
+                  <p className="pr-1 text-xs whitespace-nowrap text-muted-foreground/70">
                     {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
                   </p>
+                  {canRevertAgentWork && (
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                      onClick={() => ctx.onRevertUserMessage(row.message.id)}
+                      title="Revert to this message"
+                    >
+                      <Undo2Icon className="size-3" />
+                    </Button>
+                  )}
+                  {displayedUserMessage.copyText && (
+                    <MessageCopyButton
+                      text={displayedUserMessage.copyText}
+                      size="icon-xs"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -729,8 +739,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   resolvedTheme={ctx.resolvedTheme}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
                 />
-                <div className="mt-1.5 flex items-center gap-2">
-                  <p className="text-[10px] text-muted-foreground/30">
+                {/* Time and copy on hover, like the person's messages. Same height either way. */}
+                <div
+                  className={cn(
+                    "mt-1 flex h-6 items-center gap-1.5 transition-opacity duration-150 focus-within:opacity-100 group-hover/assistant:opacity-100 [@media(hover:none)]:opacity-100",
+                    !row.message.streaming && "opacity-0",
+                  )}
+                >
+                  <p className="text-xs text-muted-foreground/70">
                     {row.message.streaming ? (
                       <LiveMessageMeta
                         createdAt={row.message.createdAt}
@@ -746,14 +762,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     )}
                   </p>
                   {assistantCopyState.visible ? (
-                    <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
-                      <MessageCopyButton
-                        text={assistantCopyState.text ?? ""}
-                        size="icon-xs"
-                        variant="outline"
-                        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-                      />
-                    </div>
+                    <MessageCopyButton
+                      text={assistantCopyState.text ?? ""}
+                      size="icon-xs"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                    />
                   ) : null}
                 </div>
               </div>
@@ -1001,18 +1015,21 @@ const TurnFoldRow = memo(function TurnFoldRow(props: {
   const { onToggleTurnFold, timestampFormat } = use(TimelineRowCtx);
   const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   return (
-    <div className="group/timeline-row flex items-center gap-3" data-testid="turn-fold">
+    <div
+      className="group/timeline-row flex items-center gap-3 border-b border-border/60 pb-2"
+      data-testid="turn-fold"
+    >
       <button
         type="button"
         data-scroll-anchor-ignore
         aria-expanded={props.expanded}
-        className="group/fold flex items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="group/fold flex items-center gap-1.5 rounded-md py-0.5 pr-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => onToggleTurnFold(props.turnId)}
       >
         <span>{props.label}</span>
-        <ToggleIcon className="size-3 shrink-0 opacity-60 group-hover/fold:opacity-100" />
+        <ToggleIcon className="size-3.5 shrink-0 opacity-60 group-hover/fold:opacity-100" />
       </button>
-      <span className="h-px flex-1 bg-border/60" />
+      <span className="flex-1" />
       <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={timestampFormat} />
     </div>
   );

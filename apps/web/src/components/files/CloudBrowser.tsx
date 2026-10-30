@@ -47,7 +47,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { MoveDialog, NameDialog } from "./FilesDialogs";
-import { FilesLocationNote, FilesLocationSwitch } from "./FilesLocationSwitch";
+import { CloudStorageNote, FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesSearchField } from "./FilesSearch";
 import type { useFilesUploads } from "./FilesUploads";
 import {
   FILE_KIND_ICON,
@@ -136,6 +137,13 @@ export function CloudBrowser({
   const [deleteTarget, setDeleteTarget] = useState<CloudTarget | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [filter, setFilter] = useState("");
+  const place = `${bucketId}:${prefix}`;
+  const [filterPlace, setFilterPlace] = useState(place);
+  if (place !== filterPlace) {
+    setFilterPlace(place);
+    setFilter("");
+  }
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["files", "cloud"] });
   const bucket =
@@ -307,7 +315,11 @@ export function CloudBrowser({
           </Menu>
         )}
       </div>
-      {embedded ? null : <FilesLocationNote location="cloud" />}
+      {embedded ? null : <CloudStorageNote />}
+      {bucketId !== null && listing.data?.listingSupported ? (
+        // Cloud storage has no search of its own: this filters the folder on screen.
+        <FilesSearchField value={filter} onChange={setFilter} className="mt-2" />
+      ) : null}
     </header>
   );
 
@@ -417,6 +429,7 @@ export function CloudBrowser({
       />
     );
   } else {
+    const needle = filter.trim().toLocaleLowerCase();
     const rows: CloudTarget[] = [
       ...listing.data.folders.map((folder) => ({
         key: folder.prefix,
@@ -428,7 +441,7 @@ export function CloudBrowser({
         name: object.name,
         isFolder: false,
       })),
-    ];
+    ].filter((row) => !needle || row.name.toLocaleLowerCase().includes(needle));
     const objectsByKey = new Map(listing.data.objects.map((object) => [object.key, object]));
     body = (
       <table className="w-full table-fixed text-sm">

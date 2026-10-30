@@ -112,6 +112,7 @@ export function remarkFileMentions() {
   return (tree: MarkdownNode) => {
     const found: string[] = [];
     walk(tree, { left: MAX_MENTIONS_PER_ANSWER }, found);
-    applyLabels(tree, fileLinkParentSuffixes(found));
+    // A bare name may well be the same file as a full path next to it.
+    applyLabels(tree, fileLinkParentSuffixes(found.filter((path) => path.includes("/"))));
   };
 }
