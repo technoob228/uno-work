@@ -5,6 +5,7 @@
  * the browser tests use). Nothing leaves the browser. Grown from the w0115
  * sidebar prototype (fix/w0115-sidebar-proto: protoBoot.ts).
  */
+import { AGENT_SWITCH_ACTIVITY_KIND, agentSwitchLine } from "@t3tools/shared/handoff";
 import {
   ASSISTANT_PROJECT_ID,
   ORCHESTRATION_WS_METHODS,
@@ -765,6 +766,7 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       }
       if (target && command.type === "thread.turn.start") {
         const message = command.message as { messageId: string; text: string };
+        recordAgentSwitch(target, command.modelSelection);
         if (typeof command.titleSeed === "string" && target.title === "New chat")
           target.title = command.titleSeed;
         startTurn(target, message.messageId, message.text);
@@ -788,6 +790,37 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
   touch(model);
   publishThread(machine, String(command.threadId));
   return { sequence: commandSequence };
+}
+
+/** The chat moved to another agent: the daemon's line in the feed (orchestration/handoff.ts). */
+function recordAgentSwitch(target: WireThread & Record<string, unknown>, selection: unknown) {
+  const next = selection as { instanceId: string; model: string } | undefined;
+  const session = target.session as { providerInstanceId?: string } | null;
+  const previous = session?.providerInstanceId ?? String(target.modelSelection.instanceId);
+  if (!next || next.instanceId === previous) return;
+  const names: Record<string, string> = { claudeAgent: "Claude", codex: "Codex" };
+  const total = (target.messages as unknown[]).length;
+  const to = names[next.instanceId] ?? next.instanceId;
+  const payload = {
+    to,
+    toInstanceId: next.instanceId,
+    fromInstanceId: previous,
+    carried: total,
+    total,
+    turnCount: 0,
+  };
+  const createdAt = new Date().toISOString();
+  (target.activities as Array<Record<string, unknown>>).push({
+    id: `activity-agent-switch-${commandSequence}`,
+    tone: "info",
+    kind: AGENT_SWITCH_ACTIVITY_KIND,
+    summary: agentSwitchLine(payload),
+    payload,
+    turnId: null,
+    createdAt,
+  });
+  target.modelSelection = next as never;
+  if (session) session.providerInstanceId = next.instanceId;
 }
 
 function startTurn(target: WireThread & Record<string, unknown>, messageId: string, text: string) {

@@ -79,7 +79,8 @@ function createProviderServiceHarness(
     (_input: { readonly threadId: ThreadId; readonly numTurns: number }) => Effect.void,
   );
   const stopSession = vi.fn(
-    (_input: { readonly threadId: ThreadId; readonly forgetResume?: boolean }) => Effect.void,
+    (_input: { readonly threadId: ThreadId; readonly forgetResume?: boolean | undefined }) =>
+      Effect.void,
   );
 
   const unsupported = <A>() =>

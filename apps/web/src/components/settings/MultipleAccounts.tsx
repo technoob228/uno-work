@@ -6,6 +6,7 @@
  * a chat offers "Continue with <account>", and that button is the only way.
  */
 import type { EnvironmentId, ProviderAuthDriver, ProviderInstanceId } from "@t3tools/contracts";
+import { isSecondAccountInstance } from "@t3tools/shared/planLimitRules";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -50,10 +51,7 @@ const PROVIDER_LABEL: Readonly<Record<ProviderAuthDriver, string>> = {
   codex: "ChatGPT",
 };
 
-const SECOND_ACCOUNT_ID = /^(claudeAgent|codex)_account_/;
-
-export const isSecondAccountInstance = (instanceId: string): boolean =>
-  SECOND_ACCOUNT_ID.test(instanceId);
+export { isSecondAccountInstance };
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 

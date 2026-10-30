@@ -161,6 +161,10 @@ export const PLAN_RESUME_MAX_WAIT_MS = 8 * 24 * HOUR_MS;
 export const PLAN_RESUME_NOTE_BODY =
   "Your plan's limit has reset. Continue where you left off, without repeating finished work.";
 
+/** A second Claude / ChatGPT account on this computer (Settings → AI → "Use more than one account"). */
+export const isSecondAccountInstance = (instanceId: string): boolean =>
+  /^(claudeAgent|codex)_account_/.test(instanceId);
+
 /** "Continue with <account>": the same chat, on the person's other account. */
 export const ACCOUNT_SWITCH_NOTE_BODY =
   "You now run on the person's other account of the same provider. Continue where you left off, without repeating finished work.";

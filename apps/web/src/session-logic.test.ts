@@ -15,6 +15,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
+  deriveAgentSwitchEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
   findSidebarProposedPlan,
@@ -1910,5 +1911,42 @@ describe("deriveActiveWorkStartedAt", () => {
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
+  });
+});
+
+describe("deriveAgentSwitchEntries", () => {
+  const moved = (id: string, payload: Record<string, unknown>) => ({
+    id: EventId.make(id),
+    tone: "info" as const,
+    kind: "chat.agent-switched",
+    summary: "Switched",
+    payload: {
+      to: "Claude",
+      toInstanceId: "claudeAgent",
+      fromInstanceId: "codex",
+      carried: 4,
+      total: 4,
+      turnCount: 2,
+      ...payload,
+    },
+    turnId: null,
+    createdAt: "2026-10-30T10:00:00.000Z",
+  });
+
+  it("says the chat moved, and how much went along when some stayed behind", () => {
+    expect(
+      deriveAgentSwitchEntries([moved("a1", {}), moved("a2", { carried: 12, total: 40 })]).map(
+        (entry) => entry.text,
+      ),
+    ).toEqual(["Switched to Claude", "Switched to Claude · 12 of 40 items carried over"]);
+  });
+
+  it("stays out of the work log, and leaves a line a note already says to the note", () => {
+    expect(deriveAgentSwitchEntries([moved("a1", { silent: true })])).toEqual([]);
+    expect(deriveWorkLogEntries([moved("a1", {})], undefined)).toEqual([]);
+  });
+
+  it("ignores a payload it can't read", () => {
+    expect(deriveAgentSwitchEntries([{ ...moved("a1", {}), payload: { to: 1 } }])).toEqual([]);
   });
 });

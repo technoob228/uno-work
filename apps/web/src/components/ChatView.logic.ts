@@ -1,3 +1,5 @@
+import { askHoldsOnAgent } from "@t3tools/shared/handoff";
+import { isSecondAccountInstance } from "@t3tools/shared/planLimitRules";
 import {
   type EnvironmentId,
   isProviderDriverKind,
@@ -274,6 +276,9 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
 // "unknown driver -> unlocked" semantics. Callers that want the lock to track
 // a custom instance's underlying driver kind should resolve the instance id
 // upstream and pass the correlated kind.
+//
+// The chat itself can move to another agent (`orchestration/handoff.ts`), so
+// this is the driver it runs on now; what is truly locked is `chatAgentLock`.
 export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
@@ -435,4 +440,61 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionOrchestrationStatus !== (session?.orchestrationStatus ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
+}
+
+/**
+ * What stays locked in a started chat. An assistant's conversation runs on the
+ * assistant's engine; every other chat can move to another agent.
+ */
+export function chatAgentLock(input: {
+  readonly chatProvider: ProviderDriverKind | null;
+  readonly isAssistantChat: boolean;
+}): ProviderDriverKind | null {
+  return input.isAssistantChat ? input.chatProvider : null;
+}
+
+interface AgentChoice {
+  readonly instanceId: string;
+  readonly driverKind: string;
+  readonly continuationGroupKey?: string | undefined;
+}
+
+const sameSession = (left: AgentChoice, right: AgentChoice): boolean =>
+  left.driverKind === right.driverKind &&
+  (left.continuationGroupKey === undefined ||
+    right.continuationGroupKey === undefined ||
+    left.continuationGroupKey === right.continuationGroupKey);
+
+/**
+ * Who a started chat can move to. Not a second account: a button at the limit
+ * is the only way there ("Continue with <account>"), so neither that account
+ * nor one that can't resume this chat's session is on offer. Not Hermes for a
+ * chat that stays in Ask: Hermes doesn't ask before every command.
+ */
+export function agentsForStartedChat<Entry extends AgentChoice>(input: {
+  readonly entries: ReadonlyArray<Entry>;
+  readonly chatInstanceId: string | null | undefined;
+  readonly keepsAsk: boolean;
+}): ReadonlyArray<Entry> {
+  const chat = input.entries.find((entry) => entry.instanceId === input.chatInstanceId);
+  if (!chat) return input.entries;
+  return input.entries.filter((entry) => {
+    if (entry.instanceId === chat.instanceId) return true;
+    if (entry.driverKind === chat.driverKind) return sameSession(entry, chat);
+    if (isSecondAccountInstance(entry.instanceId)) return false;
+    return !input.keepsAsk || askHoldsOnAgent(entry);
+  });
+}
+
+/** The agent the next message moves this chat to; null when it stays where it is. */
+export function agentMoveTarget<Entry extends AgentChoice>(input: {
+  readonly entries: ReadonlyArray<Entry>;
+  readonly chatInstanceId: string | null | undefined;
+  readonly selectedInstanceId: string;
+}): Entry | null {
+  if (!input.chatInstanceId || input.chatInstanceId === input.selectedInstanceId) return null;
+  const chat = input.entries.find((entry) => entry.instanceId === input.chatInstanceId);
+  const target = input.entries.find((entry) => entry.instanceId === input.selectedInstanceId);
+  if (!target) return null;
+  return chat && sameSession(chat, target) ? null : target;
 }

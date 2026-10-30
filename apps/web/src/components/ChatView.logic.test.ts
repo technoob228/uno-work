@@ -13,7 +13,10 @@ import { type Thread } from "../types";
 
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  agentMoveTarget,
+  agentsForStartedChat,
   buildExpiredTerminalContextToastCopy,
+  chatAgentLock,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
@@ -731,5 +734,85 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         threadError: null,
       }),
     ).toBe(true);
+  });
+});
+
+describe("moving a started chat to another agent", () => {
+  const entry = (instanceId: string, driverKind: string, continuationGroupKey?: string) => ({
+    instanceId,
+    driverKind,
+    ...(continuationGroupKey ? { continuationGroupKey } : {}),
+  });
+  const entries = [
+    entry("codex", "codex", "codex:home:/a"),
+    entry("codex_personal", "codex", "codex:home:/a"),
+    entry("codex_account_ab12", "codex", "codex:home:/b"),
+    entry("claudeAgent", "claudeAgent", "claude:1"),
+    entry("claudeAgent_account_cd34", "claudeAgent", "claude:2"),
+    entry("uno", "uno"),
+    entry("hermes", "hermes"),
+  ];
+  const ids = (list: ReadonlyArray<{ readonly instanceId: string }>) =>
+    list.map((item) => item.instanceId);
+
+  it("locks only an assistant's chat", () => {
+    const codex = ProviderDriverKind.make("codex");
+    expect(chatAgentLock({ chatProvider: codex, isAssistantChat: false })).toBeNull();
+    expect(chatAgentLock({ chatProvider: codex, isAssistantChat: true })).toBe(codex);
+    expect(chatAgentLock({ chatProvider: null, isAssistantChat: true })).toBeNull();
+  });
+
+  it("offers every other agent, and accounts that keep this chat's session", () => {
+    expect(
+      ids(agentsForStartedChat({ entries, chatInstanceId: "codex", keepsAsk: false })),
+    ).toEqual(["codex", "codex_personal", "claudeAgent", "uno", "hermes"]);
+  });
+
+  it("never offers a second account: the button at the limit is the way there", () => {
+    const offered = ids(
+      agentsForStartedChat({ entries, chatInstanceId: "claudeAgent", keepsAsk: false }),
+    );
+    expect(offered).not.toContain("claudeAgent_account_cd34");
+    expect(offered).not.toContain("codex_account_ab12");
+  });
+
+  it("keeps a chat on a second account where it is, and lets it move to another agent", () => {
+    const offered = ids(
+      agentsForStartedChat({
+        entries,
+        chatInstanceId: "claudeAgent_account_cd34",
+        keepsAsk: false,
+      }),
+    );
+    expect(offered).toContain("claudeAgent_account_cd34");
+    expect(offered).not.toContain("claudeAgent");
+    expect(offered).toContain("codex");
+  });
+
+  it("leaves Hermes out of a chat that stays in Ask", () => {
+    expect(
+      ids(agentsForStartedChat({ entries, chatInstanceId: "codex", keepsAsk: true })),
+    ).not.toContain("hermes");
+    expect(
+      ids(agentsForStartedChat({ entries, chatInstanceId: "hermes", keepsAsk: true })),
+    ).toContain("hermes");
+  });
+
+  it("offers everything to a chat whose agent is gone", () => {
+    expect(agentsForStartedChat({ entries, chatInstanceId: "gone", keepsAsk: false })).toBe(
+      entries,
+    );
+    expect(agentsForStartedChat({ entries, chatInstanceId: null, keepsAsk: false })).toBe(entries);
+  });
+
+  it("names the target only when the next message leaves the session", () => {
+    const move = (chatInstanceId: string | null, selectedInstanceId: string) =>
+      agentMoveTarget({ entries, chatInstanceId, selectedInstanceId })?.instanceId ?? null;
+    expect(move("codex", "claudeAgent")).toBe("claudeAgent");
+    expect(move("codex", "codex")).toBeNull();
+    expect(move("codex", "codex_personal")).toBeNull();
+    expect(move("codex", "codex_account_ab12")).toBe("codex_account_ab12");
+    expect(move(null, "claudeAgent")).toBeNull();
+    expect(move("gone", "claudeAgent")).toBe("claudeAgent");
   });
 });

@@ -10,7 +10,7 @@ import {
   PROVIDER_DISPLAY_NAMES,
   type ProviderContextMessage,
   ProviderDriverKind,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
@@ -71,6 +71,7 @@ import {
   buildAgentSwitchSeed,
   handoffHistoryBudget,
   handoffTokenCap,
+  latestAgentSwitch,
   resolvePendingHandoffSeed,
 } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
@@ -1204,23 +1205,34 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Once the new session is up: a start that failed moved nothing.
+    // Once the new session is up: a start that failed moved nothing. The
+    // daemon's clock, as `agentSwitchStillOwed` compares it with the replies.
     if (agentSwitch?.line != null) {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.activity.append",
-        commandId: serverCommandId("agent-switched"),
-        threadId: thread.id,
-        activity: {
-          id: EventId.make(crypto.randomUUID()),
-          tone: "info",
-          kind: AGENT_SWITCH_ACTIVITY_KIND,
-          summary: agentSwitchLine(agentSwitch.line),
-          payload: agentSwitch.line,
-          turnId: null,
-          createdAt: event.payload.createdAt,
-        },
-        createdAt: event.payload.createdAt,
-      });
+      const switchedAt = new Date().toISOString();
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("agent-switched"),
+          threadId: thread.id,
+          activity: {
+            id: EventId.make(crypto.randomUUID()),
+            tone: "info",
+            kind: AGENT_SWITCH_ACTIVITY_KIND,
+            summary: agentSwitchLine(agentSwitch.line),
+            payload: agentSwitch.line,
+            turnId: null,
+            createdAt: switchedAt,
+          },
+          createdAt: switchedAt,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider command reactor couldn't note an agent switch", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
     }
 
     const inFlightKey = String(event.payload.threadId);
@@ -1290,14 +1302,16 @@ const make = Effect.gen(function* () {
       const moved = next !== previous && (yield* leavesSession(previous, next));
       if (!moved && !agentSwitchStillOwed(thread)) return null;
 
-      const from = yield* agentName(previous);
+      // Once the session already moved, it is the one before that who left.
+      const owedFrom = moved ? null : latestAgentSwitch(thread.activities)?.fromInstanceId;
+      const from = yield* agentName(owedFrom ? ProviderInstanceId.make(owedFrom) : previous);
       const to = yield* agentName(next);
       const holdsOutsideText = thread.messages.some(messageHoldsOutsideText);
       const seed = buildAgentSwitchSeed({
         threadId: thread.id,
         thread,
         currentMessageId: input.currentMessageId,
-        fromAgent: moved && from.driverKind === to.driverKind ? null : from.name,
+        fromAgent: from.driverKind === to.driverKind ? null : from.name,
         budget: handoffHistoryBudget({
           tokenCap: handoffCap,
           userText: input.promptText,

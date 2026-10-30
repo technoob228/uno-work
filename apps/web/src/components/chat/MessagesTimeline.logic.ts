@@ -67,6 +67,13 @@ export type MessagesTimelineRow =
       htmlRender: HtmlRenderReference;
     }
   | {
+      /** The chat moved to another agent: a quiet line. */
+      kind: "agent-switch";
+      id: string;
+      createdAt: string;
+      text: string;
+    }
+  | {
       /** A letter to support: the person reads it and sends it (Fix Work). */
       kind: "support-draft";
       id: string;
@@ -421,6 +428,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "agent-switch") {
+      nextRows.push({
+        kind: "agent-switch",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        text: timelineEntry.text,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "support-draft") {
       nextRows.push({
         kind: "support-draft",
@@ -526,6 +543,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "html-render":
       return htmlRenderReferencesEqual(a.htmlRender, (b as typeof a).htmlRender);
+
+    case "agent-switch":
+      return a.text === (b as typeof a).text;
 
     case "support-draft":
       return a.draft === (b as typeof a).draft;

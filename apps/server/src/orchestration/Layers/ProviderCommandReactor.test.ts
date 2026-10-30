@@ -2078,6 +2078,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 3);
 
     const input = (harness.sendTurn.mock.calls[2]?.[0] as { input?: string }).input ?? "";
+    expect(input).toContain("This chat was with Codex");
     expect(input).toContain("User: first");
     expect(input.endsWith("third")).toBe(true);
     const lines = (await threadOf(harness))?.activities.filter(

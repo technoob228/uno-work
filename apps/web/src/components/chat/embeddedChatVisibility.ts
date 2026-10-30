@@ -32,6 +32,7 @@ function isAnswerEntry(entry: TimelineEntry): boolean {
   switch (entry.kind) {
     // Инструментальный шум — команды, патчи, статусы.
     case "work":
+    case "agent-switch":
       return false;
     // План — это вопрос к пользователю, а не шум.
     case "proposed-plan":

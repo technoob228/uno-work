@@ -88,6 +88,7 @@ import { AssistantModelPicker } from "./AssistantEngine";
 import { assistantEngineSendBlock } from "../../assistant/assistantEngine.logic";
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import { agentMoveTarget, agentsForStartedChat } from "../ChatView.logic";
 import { coerceAssistantModelSelection } from "@t3tools/shared/assistantLlm";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -685,6 +686,10 @@ export interface ChatComposerProps {
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
+  /** The driver a started chat runs on now; another pick moves it there. */
+  chatProvider: ProviderDriverKind | null;
+  /** A stranger's text is in the chat: it stays in Ask, whoever takes over. */
+  holdsOutsideText: boolean;
   providerStatuses: ServerProvider[];
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
@@ -787,6 +792,8 @@ export const ChatComposer = memo(
       runtimeMode,
       interactionMode,
       lockedProvider,
+      chatProvider,
+      holdsOutsideText,
       providerStatuses,
       activeProjectDefaultModelSelection,
       activeThreadModelSelection,
@@ -899,7 +906,7 @@ export const ChatComposer = memo(
           providerStatuses,
           selectedProviderByThreadId,
         ) ?? ProviderDriverKind.make("codex"))
-      : resolveDefaultThreadProvider(providerStatuses, threadProvider);
+      : (chatProvider ?? resolveDefaultThreadProvider(providerStatuses, threadProvider));
     const threadProviderKind = resolveProviderDriverKindForInstanceSelection(
       providerInstanceEntries,
       providerStatuses,
@@ -995,6 +1002,37 @@ export const ChatComposer = memo(
       providerInstanceEntries,
       selectedProvider,
     ]);
+
+    // A started chat can move to another agent: who is on offer, and whether
+    // the pick moves it (ChatView.logic). An assistant's chat stays locked.
+    const chatInstanceId =
+      chatProvider === null || lockedProvider !== null
+        ? null
+        : (activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId);
+    const pickerInstanceEntries = useMemo(
+      () =>
+        agentsForStartedChat({
+          entries: providerInstanceEntries,
+          chatInstanceId,
+          keepsAsk: runtimeMode === "approval-required" || holdsOutsideText,
+        }),
+      [chatInstanceId, holdsOutsideText, providerInstanceEntries, runtimeMode],
+    );
+    const agentMove = useMemo(
+      () =>
+        agentMoveTarget({
+          entries: providerInstanceEntries,
+          chatInstanceId,
+          selectedInstanceId,
+        }),
+      [chatInstanceId, providerInstanceEntries, selectedInstanceId],
+    );
+    const chatAgent = chatInstanceId
+      ? (providerInstanceEntries.find((entry) => entry.instanceId === chatInstanceId) ?? null)
+      : null;
+    const pickerNote = chatAgent
+      ? "Another agent continues this chat with its recent history."
+      : null;
 
     const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
       threadRef: composerDraftTarget,
@@ -3440,7 +3478,8 @@ export const ChatComposer = memo(
                   model={selectedModelForPickerWithCustomFallback}
                   lockedProvider={lockedProvider}
                   lockedContinuationGroupKey={lockedContinuationGroupKey}
-                  instanceEntries={providerInstanceEntries}
+                  note={pickerNote}
+                  instanceEntries={pickerInstanceEntries}
                   environmentId={environmentId}
                   keybindings={keybindings}
                   modelOptionsByInstance={modelOptionsByInstance}
@@ -3578,6 +3617,34 @@ export const ChatComposer = memo(
         {/* Outside the surface: a tap there expands the phone composer and
             would shift the chip from under the finger. */}
         <ComposerPanelNewsChip />
+        {agentMove && chatAgent ? (
+          <div
+            className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 px-2 pb-1.5 text-center text-xs text-muted-foreground"
+            role="status"
+            data-testid="composer-agent-move"
+          >
+            <span>
+              Your next message moves this chat to {agentMove.displayName}, with its recent history.
+              {holdsOutsideText && runtimeMode !== "approval-required"
+                ? " It goes back to Ask."
+                : ""}
+            </span>
+            <Button
+              size="xs"
+              variant="ghost"
+              data-testid="composer-agent-keep"
+              onClick={() => {
+                const model =
+                  activeThreadModelSelection?.instanceId === chatAgent.instanceId
+                    ? activeThreadModelSelection.model
+                    : chatAgent.models[0]?.slug;
+                if (model) onProviderModelSelect(chatAgent.instanceId, model);
+              }}
+            >
+              Keep {chatAgent.displayName}
+            </Button>
+          </div>
+        ) : null}
         <div
           className={cn(
             "group rounded-[22px] p-px transition-colors duration-200",
@@ -4223,7 +4290,8 @@ export const ChatComposer = memo(
                       model={selectedModelForPickerWithCustomFallback}
                       lockedProvider={lockedProvider}
                       lockedContinuationGroupKey={lockedContinuationGroupKey}
-                      instanceEntries={providerInstanceEntries}
+                      note={pickerNote}
+                      instanceEntries={pickerInstanceEntries}
                       environmentId={environmentId}
                       keybindings={keybindings}
                       modelOptionsByInstance={modelOptionsByInstance}

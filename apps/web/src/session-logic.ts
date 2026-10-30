@@ -13,6 +13,11 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import {
+  AGENT_SWITCH_ACTIVITY_KIND,
+  agentSwitchLine,
+  readAgentSwitch,
+} from "@t3tools/shared/handoff";
+import {
   HTML_RENDER_ACTIVITY_KIND,
   readHtmlRenderReference,
   type HtmlRenderReference,
@@ -178,6 +183,13 @@ export type TimelineEntry =
       kind: "support-draft";
       createdAt: string;
       draft: SupportDraft;
+    }
+  | {
+      /** The chat moved to another agent: a quiet line. */
+      id: string;
+      kind: "agent-switch";
+      createdAt: string;
+      text: string;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -590,6 +602,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "context-window.updated")
     .filter((activity) => !activity.kind.startsWith("plan-limit."))
     .filter((activity) => activity.kind !== HTML_RENDER_ACTIVITY_KIND)
+    .filter((activity) => activity.kind !== AGENT_SWITCH_ACTIVITY_KIND)
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .filter((activity) => !isClaudeBookkeepingWarning(activity))
@@ -616,6 +629,25 @@ export function deriveSupportDraftEntries(
           },
         ]
       : [];
+  });
+}
+
+/** Where the chat moved to another agent, every time it did. */
+export function deriveAgentSwitchEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Extract<TimelineEntry, { kind: "agent-switch" }>[] {
+  return activities.flatMap((activity) => {
+    if (activity.kind !== AGENT_SWITCH_ACTIVITY_KIND) return [];
+    const move = readAgentSwitch(activity.payload);
+    if (!move || move.silent === true) return [];
+    return [
+      {
+        id: `agent-switch:${activity.id}`,
+        kind: "agent-switch" as const,
+        createdAt: activity.createdAt,
+        text: agentSwitchLine(move),
+      },
+    ];
   });
 }
 
