@@ -31,7 +31,7 @@ const closestSource = (node: Node | null) =>
  * The selected text of one reply. A paragraph picked by triple click ends at
  * the start of whatever follows, so the range is cut to the reply it began in.
  */
-export function selectedReplyText(
+function selectedReplyText(
   viewport: HTMLElement,
   selection: Selection | null,
 ): { readonly text: string; readonly range: Range } | null {

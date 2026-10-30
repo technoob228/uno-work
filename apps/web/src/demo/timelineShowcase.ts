@@ -165,6 +165,20 @@ Open \`index.html\` to see the page. Your notes are in \`~/Documents/meeting not
 
 These stay text: the \`/api/signup\` route, \`npm test\`, example.com, version 1.2.3, \`not-there.md\`, and/or, https://uno.place/developers, the signup 24/7.`;
 
+const PAGE_ANSWER = `October beat September on signups and on payments, and the drop came from one step: people who finish the brief pay far more often.
+
+\`\`\`mermaid
+flowchart LR
+  A[Signup] --> B[Brief]
+  B --> C{Computer ready?}
+  C -- yes --> D[First task]
+  C -- no --> E[Reminder]
+  E --> D
+  D --> F[Payment]
+\`\`\`
+
+The reminder is the cheapest thing to try next.`;
+
 /** The showcase chats for the page's own computer, in `projectId`. */
 export function timelineShowcaseThreads(projectId: string, root: string) {
   const now = Date.now();
@@ -373,5 +387,51 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     updatedAt: at(t3, 79),
   });
 
-  return [running, finished, asking, naming];
+  // ── An answer with a page and a diagram (render stream, 30.10) ──
+  const t4 = now - 6 * 60_000;
+  const paged = "showcase-page";
+  const pagedTurn = "turn-showcase-page-1";
+  const report = thread({
+    id: paged,
+    projectId,
+    title: "How October went",
+    messages: [
+      message(
+        `${paged}-u1`,
+        "user",
+        "How did October go? Compare it with September and show me how a signup reaches payment.",
+        at(t4, 0),
+        null,
+      ),
+      message(`${paged}-a1`, "assistant", PAGE_ANSWER, at(t4, 64), pagedTurn),
+    ],
+    activities: [
+      tool(`${paged}-r1`, pagedTurn, at(t4, 8), "read", "dynamic_tool_call", {
+        filePath: "/home/uno/UnoWork/Reports/october-numbers.csv",
+      }),
+      {
+        id: `${paged}-page`,
+        tone: "info",
+        kind: "html.render",
+        summary: "Page",
+        payload: {
+          attachmentId: "demo-october-page",
+          path: "/home/uno/.uno-work/attachments/demo-october-page.html",
+          title: "October against September",
+          height: 390,
+        },
+        turnId: pagedTurn,
+        createdAt: at(t4, 52),
+      },
+    ],
+    turn: {
+      turnId: pagedTurn,
+      startedAt: at(t4, 0),
+      completedAt: at(t4, 64),
+      answerId: `${paged}-a1`,
+    },
+    updatedAt: at(t4, 64),
+  });
+
+  return [running, finished, asking, naming, report];
 }
