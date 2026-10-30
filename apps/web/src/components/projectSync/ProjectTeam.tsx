@@ -34,7 +34,7 @@ import {
 
 export const projectTeamsQueryKey = ["projectTeams"] as const;
 
-export function ProjectTeam(props: { syncName: string }) {
+export function ProjectTeam(props: { syncName: string; teamId?: number | null }) {
   const queryClient = useQueryClient();
   const teams = useQuery({
     queryKey: projectTeamsQueryKey,
@@ -42,7 +42,7 @@ export function ProjectTeam(props: { syncName: string }) {
     retry: false,
     staleTime: 15_000,
   });
-  const row = teamProjectOf(teams.data, props.syncName);
+  const row = teamProjectOf(teams.data, props.syncName, props.teamId);
   const teamId = row?.id ?? null;
   const cardKey = ["projectTeam", teamId] as const;
   const card = useQuery({

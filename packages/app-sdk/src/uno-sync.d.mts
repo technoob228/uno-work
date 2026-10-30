@@ -100,6 +100,8 @@ export declare function syncProject(
     hostRemote?: string | null;
     /** This computer has no way to the Uno cloud: only `hostRemote` syncs. */
     skipCloud?: boolean;
+    /** Someone else's project, shared with this person. */
+    team?: number | null;
   },
   ctx: SyncCtx,
 ): Promise<SyncResult>;
@@ -160,9 +162,19 @@ export declare function setLocalOnly(
 ): Promise<void>;
 
 export declare function getProject(
-  input: { name: string; dir?: string | null },
+  input: { name: string; dir?: string | null; team?: number | null },
   ctx: SyncCtx,
 ): Promise<SyncResult>;
+
+export declare function peekSharedProject(
+  input: { name: string; team: number },
+  ctx: SyncCtx,
+): Promise<{
+  name: string;
+  updatedAt: string | null;
+  updatedBy: { boxId: number | null; hostname: string } | null;
+  mode: "snapshot" | "git";
+} | null>;
 
 export declare function listCloudProjects(ctx: SyncCtx): Promise<
   Array<{

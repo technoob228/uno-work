@@ -39,7 +39,7 @@ import {
   type SyncEngine,
 } from "./projectSyncCore.ts";
 import { loadEngine } from "./syncEngine.ts";
-import { consoleProjectVault } from "./vaultProjectSecrets.ts";
+import { consoleProjectTeams, consoleProjectVault } from "./vaultProjectSecrets.ts";
 
 export interface ProjectSyncShape {
   readonly status: Effect.Effect<ProjectSyncSnapshot, ProjectSyncError>;
@@ -52,7 +52,10 @@ export interface ProjectSyncShape {
     projectId: string,
     keep: "mine" | "theirs" | "dismiss",
   ) => Effect.Effect<ProjectSyncEntry, ProjectSyncError>;
-  readonly getHere: (name: string) => Effect.Effect<ProjectSyncGetHereResult, ProjectSyncError>;
+  readonly getHere: (
+    name: string,
+    teamId?: number,
+  ) => Effect.Effect<ProjectSyncGetHereResult, ProjectSyncError>;
   readonly opened: (projectId: string) => Effect.Effect<void>;
   readonly history: (
     projectId: string,
@@ -176,6 +179,7 @@ const make = Effect.gen(function* () {
         ),
       ),
     vault: consoleProjectVault({ baseUrl: controlPlaneBaseUrl(), token: cloudKey }),
+    teams: consoleProjectTeams({ baseUrl: controlPlaneBaseUrl(), token: cloudKey }),
     projects: () =>
       run(
         projections.getShellSnapshot().pipe(
@@ -273,9 +277,9 @@ const make = Effect.gen(function* () {
     setEnabled: (projectId, enabled) => attempt(() => core.setEnabled(projectId, enabled)),
     syncNow: (projectId) => attempt(() => core.syncNow(projectId)),
     resolve: (projectId, keep) => attempt(() => core.resolve(projectId, keep)),
-    getHere: (name) =>
+    getHere: (name, teamId) =>
       attempt(async () => {
-        const result = await core.getHere(name);
+        const result = await core.getHere(name, teamId);
         return { projectId: ProjectId.make(result.projectId), entry: result.entry };
       }),
     opened: (projectId) => Effect.sync(() => core.touched(projectId, "opened")),

@@ -65,6 +65,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   INVITE_EMAIL_MISMATCH: "This invitation is for another email address.",
   INVITE_EXPIRED: "This invitation has expired. Ask for a new one.",
   INVITE_NOT_PENDING: "This invitation is no longer open.",
+  INVITE_RATE_LIMITED: "You've sent a lot of invites. Try again later.",
   OWNER_ONLY: "Only the project's owner can do that.",
   STORAGE_QUOTA_EXCEEDED: "The project owner's Uno cloud is full.",
   TEAM_LIMIT: "A project can have up to 20 people, invitations included.",
@@ -90,14 +91,21 @@ export function personLabel(person: Pick<TeamPerson, "email" | "username">): str
   return person.email ?? username;
 }
 
-/** The team of a synced project, when this person owns it or works in it. */
+/**
+ * The team of a synced project. `teamId`: the folder works in someone else's
+ * project; without it the folder is the person's own, and someone else's
+ * project with the same name is another project.
+ */
 export function teamProjectOf(
   list: TeamList | null | undefined,
   syncName: string,
+  teamId?: number | null,
 ): TeamProjectRow | null {
-  const rows = list?.projects.filter((project) => project.name === syncName) ?? [];
-  // Someone else's project may have the same name: this folder is one's own first.
-  return rows.find((project) => project.role === "owner") ?? rows[0] ?? null;
+  const rows = list?.projects ?? [];
+  if (teamId !== undefined && teamId !== null) {
+    return rows.find((project) => project.id === teamId) ?? null;
+  }
+  return rows.find((project) => project.name === syncName && project.role === "owner") ?? null;
 }
 
 /** The checkboxes' result: a key in or out of the set the console keeps whole. */

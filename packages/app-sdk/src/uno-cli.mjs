@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   UnoGitError,
+  addressOf,
   git,
   listProjects,
   openStorage,
@@ -849,7 +850,7 @@ async function projectSync(planned, ctx) {
   let name;
   if (hasRemote) {
     const url = remote.stdout.trim();
-    name = url.startsWith("uno::") ? projectNameOf(url) : null;
+    name = url.startsWith("uno::") ? (addressOf(url)?.name ?? null) : null;
     if (!name)
       throw new UnoCliError(`The git remote "uno" here points to ${url}, not to the Uno cloud.`);
     if (planned.name && planned.name !== name) {
