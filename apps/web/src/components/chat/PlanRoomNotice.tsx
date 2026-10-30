@@ -62,6 +62,8 @@ const STARTED_NOTE_TTL_MS = 30_000;
  * person who comes back to one on purpose is asked, not bounced again.
  */
 const autoMovedFrom = new Map<EnvironmentId, number>();
+/** The same for Home's box: its own switch doesn't stop a new chat's (and back). */
+const homeAutoMovedFrom = new Map<EnvironmentId, number>();
 const AUTO_MOVE_QUIET_MS = 15 * 60_000;
 
 function readStartedNote(environmentId: EnvironmentId, draftId: DraftId): string | null {
@@ -368,14 +370,14 @@ export const HomePlanRoomLine = memo(function HomePlanRoomLine({
   const alternative = room.kind === "full" ? room.alternative : null;
   const movedLately =
     environmentId !== null &&
-    Date.now() - (autoMovedFrom.get(environmentId) ?? 0) < AUTO_MOVE_QUIET_MS;
+    Date.now() - (homeAutoMovedFrom.get(environmentId) ?? 0) < AUTO_MOVE_QUIET_MS;
   const autoTarget =
     mode === "auto" && alternative && !movedLately ? alternative.environmentId : null;
   useEffect(() => {
     if (autoTarget === null || environmentId === null || room.kind !== "full" || !alternative) {
       return;
     }
-    autoMovedFrom.set(environmentId, Date.now());
+    homeAutoMovedFrom.set(environmentId, Date.now());
     setSwitchedFrom({
       text: planStartedOnLine({
         startedOn: alternative.computerName,
