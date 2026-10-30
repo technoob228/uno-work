@@ -149,7 +149,7 @@ export interface UploadPlan {
   readonly totalBytes: number;
 }
 
-function isUnsafeRelativePath(relativePath: string): boolean {
+export function isUnsafeRelativePath(relativePath: string): boolean {
   if (relativePath.length === 0) return true;
   if (relativePath.startsWith(PATH_SEPARATOR)) return true;
   return relativePath.split(PATH_SEPARATOR).some((segment) => segment === ".." || segment === "");

@@ -8,6 +8,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { stackedThreadToast, toastManager } from "./components/ui/toast";
 import { readEnvironmentApi } from "./environmentApi";
 import {
+  computerUploadDeps,
   formatUploadBytes,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
@@ -55,22 +56,19 @@ export async function runProjectUpload(input: {
   let lastUpdateAt = 0;
 
   try {
-    const result = await uploadFilesIntoDirectory(
-      { writeFile: (write) => api.projects.writeFile(write) },
-      {
-        targetDir: input.targetDir,
-        files: input.files,
-        filterIgnored: input.filterIgnored,
-        onProgress: (progress) => {
-          const now = Date.now();
-          if (now - lastUpdateAt < PROGRESS_UPDATE_INTERVAL_MS) return;
-          lastUpdateAt = now;
-          toastManager.update(toastId, {
-            description: `${progress.completedFiles} of ${progress.totalFiles} files · ${formatUploadBytes(progress.sentBytes)} of ${formatUploadBytes(progress.totalBytes)}`,
-          });
-        },
+    const result = await uploadFilesIntoDirectory(computerUploadDeps(api), {
+      targetDir: input.targetDir,
+      files: input.files,
+      filterIgnored: input.filterIgnored,
+      onProgress: (progress) => {
+        const now = Date.now();
+        if (now - lastUpdateAt < PROGRESS_UPDATE_INTERVAL_MS) return;
+        lastUpdateAt = now;
+        toastManager.update(toastId, {
+          description: `${progress.completedFiles} of ${progress.totalFiles} files · ${formatUploadBytes(progress.sentBytes)} of ${formatUploadBytes(progress.totalBytes)}`,
+        });
       },
-    );
+    });
     toastManager.close(toastId);
 
     if (result.uploadedFiles === 0) {

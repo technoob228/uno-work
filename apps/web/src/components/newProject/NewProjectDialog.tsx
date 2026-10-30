@@ -54,6 +54,7 @@ import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
 import {
   PROJECT_UPLOAD_MAX_FILE_COUNT,
+  PROJECT_UPLOAD_SIZE_LIMIT_LABEL,
   formatUploadBytes,
   planProjectUpload,
   type ProjectUploadFile,
@@ -810,9 +811,9 @@ function UploadStep({
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Up to {count(PROJECT_UPLOAD_MAX_FILE_COUNT)} files and 2 GB. node_modules, .git,
-                  Python environments and build folders are skipped. Your browser asks to confirm —
-                  that's expected.
+                  Up to {count(PROJECT_UPLOAD_MAX_FILE_COUNT)} files and{" "}
+                  {PROJECT_UPLOAD_SIZE_LIMIT_LABEL}. node_modules, .git, Python environments and
+                  build folders are skipped. Your browser asks to confirm — that's expected.
                 </p>
               </>
             )}
@@ -1048,8 +1049,8 @@ function UploadPlanNotes({
       {summary.tooLarge.length > 0 ? (
         <p className="text-warning-foreground">
           {summary.tooLarge.length === 1
-            ? `${summary.tooLarge[0]} is over 1 GB and stays on your computer.`
-            : `${count(summary.tooLarge.length)} files over 1 GB stay on your computer.`}
+            ? `${summary.tooLarge[0]} is over ${PROJECT_UPLOAD_SIZE_LIMIT_LABEL} and stays on your computer.`
+            : `${count(summary.tooLarge.length)} files over ${PROJECT_UPLOAD_SIZE_LIMIT_LABEL} stay on your computer.`}
         </p>
       ) : null}
       {truncated ? (

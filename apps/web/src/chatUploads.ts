@@ -19,7 +19,11 @@ import {
 import type { ComposerFileAttachment } from "./composerDraftStore";
 import { ensureEnvironmentApi } from "./environmentApi";
 import { randomUUID } from "./lib/utils";
-import { uploadFilesIntoDirectory } from "./projectUpload";
+import {
+  computerUploadDeps,
+  type ProjectUploadProgress,
+  uploadFilesIntoDirectory,
+} from "./projectUpload";
 
 export const CHAT_FILE_SIZE_LIMIT_LABEL = `${Math.round(
   PROVIDER_SEND_TURN_MAX_FILE_BYTES / (1024 * 1024 * 1024),
@@ -101,25 +105,28 @@ export function chatUploadIncomingRelativePath(uploadId: string): string {
 export async function stageChatFileUpload(
   environmentId: EnvironmentId,
   attachment: ComposerFileAttachment,
-  options: { readonly signal?: AbortSignal } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    readonly onProgress?: (progress: ProjectUploadProgress) => void;
+  } = {},
 ): Promise<UploadChatFileAttachment> {
   const api = ensureEnvironmentApi(environmentId);
   const uploadId = randomUUID();
-  const result = await uploadFilesIntoDirectory(
-    { writeFile: (write) => api.projects.writeFile(write) },
-    {
-      targetDir: "~",
-      files: [
-        {
-          relativePath: chatUploadIncomingRelativePath(uploadId),
-          size: attachment.sizeBytes,
-          blob: attachment.file,
-        },
-      ],
-      filterIgnored: false,
-      ...(options.signal ? { signal: options.signal } : {}),
-    },
-  );
+  const relativePath = chatUploadIncomingRelativePath(uploadId);
+  const result = await uploadFilesIntoDirectory(computerUploadDeps(api), {
+    targetDir: "~",
+    files: [{ relativePath, size: attachment.sizeBytes, blob: attachment.file }],
+    filterIgnored: false,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+  }).catch(async (error: unknown) => {
+    // What did arrive would sit on the disk until the daily sweep, and the disk
+    // may be exactly what ran out: empty it now.
+    await api.projects
+      .writeFile({ cwd: "~", relativePath, contents: "", encoding: "base64" })
+      .catch(() => undefined);
+    throw error;
+  });
   if (result.uploadedFiles !== 1) {
     throw new Error(`Couldn't upload '${attachment.name}'.`);
   }

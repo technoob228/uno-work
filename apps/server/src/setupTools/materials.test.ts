@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -301,6 +309,27 @@ describe("materials job", () => {
     const again = await jobs.start({ projectPath: root, links: [] });
     await jobs.settled(again.jobId);
     expect(jobs.get(again.jobId)!.items.map((item) => item.name)).not.toContain("README.md");
+  });
+
+  it("saves a file of any size to Cloud storage", async () => {
+    const root = project({ "film.bin": "" });
+    const big = 300 * 1024 * 1024;
+    truncateSync(path.join(root, "materials", "film.bin"), big); // sparse: takes no room
+    const sizes: number[] = [];
+    const { cloud } = fakeCloud();
+    const jobs = makeMaterialsJobs({
+      model: async () => fakeModel(),
+      cloud: async () => ({
+        ...cloud,
+        upload: async ({ size }) => {
+          sizes.push(size);
+        },
+      }),
+    });
+    const { jobId } = await jobs.start({ projectPath: root, links: [] });
+    await jobs.settled(jobId);
+    expect(sizes).toEqual([big]);
+    expect(jobs.get(jobId)!.savedToCloud).toBe("acme/materials");
   });
 
   it("moves items through queued → reading → read as the UI polls", async () => {

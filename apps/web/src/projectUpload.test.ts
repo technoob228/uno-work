@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   PROJECT_UPLOAD_CHUNK_BYTES,
   PROJECT_UPLOAD_MAX_FILE_BYTES,
+  computerUploadDeps,
   isFolderOrZipDrop,
+  isNotEnoughSpaceError,
   planProjectUpload,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
@@ -24,11 +26,24 @@ describe("planProjectUpload", () => {
   });
 
   it("still rejects files above the project-upload cap", () => {
-    const plan = planProjectUpload([makeFile("huge.bin", PROJECT_UPLOAD_MAX_FILE_BYTES + 1)], {
-      filterIgnored: true,
-    });
+    const plan = planProjectUpload(
+      [{ relativePath: "huge.bin", size: PROJECT_UPLOAD_MAX_FILE_BYTES + 1 }],
+      { filterIgnored: true },
+    );
     expect(plan.accepted).toEqual([]);
     expect(plan.skipped).toEqual([{ relativePath: "huge.bin", reason: "too-large" }]);
+  });
+
+  it("takes a 10 GB file, alone or among others", () => {
+    const big = { relativePath: "film.mov", size: 10 * 1024 ** 3 };
+    const plan = planProjectUpload([big, { relativePath: "notes.md", size: 5 }], {
+      filterIgnored: true,
+    });
+    expect(plan.accepted.map((entry) => entry.relativePath).toSorted()).toEqual([
+      "film.mov",
+      "notes.md",
+    ]);
+    expect(plan.skipped).toEqual([]);
   });
 
   it("keeps explicitly picked files even when their names look ignorable", () => {
@@ -46,6 +61,85 @@ describe("planProjectUpload", () => {
     const plan = planProjectUpload([makeFile("../escape.txt", 1)], { filterIgnored: false });
     expect(plan.accepted).toEqual([]);
     expect(plan.skipped).toEqual([{ relativePath: "../escape.txt", reason: "unsafe-path" }]);
+  });
+});
+
+describe("the space check before an upload", () => {
+  const upload = (
+    ensureSpace: (targetDir: string, bytes: number) => Promise<unknown>,
+    alreadyUploaded?: ReadonlySet<string>,
+  ) => {
+    const writes: ProjectUploadWriteInput[] = [];
+    const run = uploadFilesIntoDirectory(
+      {
+        ensureSpace,
+        writeFile: async (input) => {
+          writes.push(input);
+        },
+        readChunkBase64: async () => "AA==",
+      },
+      {
+        targetDir: "~/projects/a",
+        files: [makeFile("a.bin", 10), makeFile("b.bin", 20)],
+        filterIgnored: false,
+        ...(alreadyUploaded ? { alreadyUploaded } : {}),
+      },
+    );
+    return { run, writes };
+  };
+
+  it("asks once for everything that goes", async () => {
+    const asked: Array<[string, number]> = [];
+    const { run } = upload(async (targetDir, bytes) => asked.push([targetDir, bytes]));
+    await run;
+    expect(asked).toEqual([["~/projects/a", 30]]);
+  });
+
+  it("counts only what a resume still has to send", async () => {
+    const asked: number[] = [];
+    const { run } = upload(async (_, bytes) => asked.push(bytes), new Set(["a.bin"]));
+    await run;
+    expect(asked).toEqual([20]);
+  });
+
+  it("sends nothing when the disk can't take it", async () => {
+    const refusal = new Error("Not enough space on this computer: needs 30 B, 1 B free.");
+    const { run, writes } = upload(async () => {
+      throw refusal;
+    });
+    await expect(run).rejects.toBe(refusal);
+    expect(writes).toEqual([]);
+  });
+
+  it("isn't asked when there's nothing left to send", async () => {
+    const asked: number[] = [];
+    const { run } = upload(async (_, bytes) => asked.push(bytes), new Set(["a.bin", "b.bin"]));
+    await run;
+    expect(asked).toEqual([]);
+  });
+});
+
+describe("computerUploadDeps", () => {
+  const depsWith = (ensureSpace: () => Promise<unknown>) =>
+    computerUploadDeps({
+      projects: { writeFile: async () => ({ relativePath: "a" }) },
+      files: { ensureSpace },
+    } as unknown as Parameters<typeof computerUploadDeps>[0]);
+
+  it("stops the upload on a real refusal", async () => {
+    const refusal = new Error("Not enough space on this computer: needs 3 GB, 1 GB free.");
+    const deps = depsWith(async () => {
+      throw refusal;
+    });
+    await expect(deps.ensureSpace!("~", 1)).rejects.toBe(refusal);
+    expect(isNotEnoughSpaceError(refusal)).toBe(true);
+  });
+
+  it("goes on with a computer too old to know the question", async () => {
+    const deps = depsWith(async () => {
+      throw new Error("Unknown request files.ensureSpace");
+    });
+    await expect(deps.ensureSpace!("~", 1)).resolves.toBeUndefined();
   });
 });
 

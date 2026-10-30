@@ -12,6 +12,7 @@ import type { UploadPlan } from "./firstProject";
 import {
   PROJECT_UPLOAD_MAX_FILE_COUNT,
   PROJECT_UPLOAD_MAX_TOTAL_BYTES,
+  PROJECT_UPLOAD_SIZE_LIMIT_LABEL,
   formatUploadBytes,
 } from "./projectUpload";
 
@@ -89,7 +90,7 @@ function joinWords(names: ReadonlyArray<string>): string {
   return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-/** "Up to 20,000 files" / "Up to 2 GB" — the limit that cut, in plain words. */
+/** "Up to 20,000 files" / "Up to 100 GB" — the limit that cut, in plain words. */
 export function uploadLimitLine(by: "files" | "bytes"): string {
   return by === "files"
     ? `up to ${PROJECT_UPLOAD_MAX_FILE_COUNT.toLocaleString("en-US")} files`
@@ -137,7 +138,11 @@ export function leftOutListText(input: {
     );
   }
   if (summary.tooLarge.length > 0) {
-    lines.push(`Over 1 GB each: ${summary.tooLarge.length} files`, ...summary.tooLarge, "");
+    lines.push(
+      `Over ${PROJECT_UPLOAD_SIZE_LIMIT_LABEL} each: ${summary.tooLarge.length} files`,
+      ...summary.tooLarge,
+      "",
+    );
   }
   if (summary.skippedGroups.length > 0) {
     lines.push(

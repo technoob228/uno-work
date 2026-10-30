@@ -23,6 +23,7 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -882,6 +883,27 @@ it.effect("accepts a staged file upload in a client thread.turn.start", () =>
       clientTurnWithFile("0f8fad5b-d9cb-469f-a165-70867728950e"),
     );
     assert.strictEqual(parsed.type, "thread.turn.start");
+  }),
+);
+
+it.effect("takes a 10 GB staged file and refuses one over the ceiling", () =>
+  Effect.gen(function* () {
+    const withSize = (sizeBytes: number) => {
+      const command = clientTurnWithFile("0f8fad5b-d9cb-469f-a165-70867728950e");
+      return {
+        ...command,
+        message: {
+          ...command.message,
+          attachments: [{ ...command.message.attachments[0]!, sizeBytes }],
+        },
+      };
+    };
+    const parsed = yield* decodeClientCommand(withSize(10 * 1024 ** 3));
+    assert.strictEqual(parsed.type, "thread.turn.start");
+    const refused = yield* Effect.exit(
+      decodeClientCommand(withSize(PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1)),
+    );
+    assert.strictEqual(refused._tag, "Failure");
   }),
 );
 

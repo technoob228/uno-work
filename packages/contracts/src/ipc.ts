@@ -271,6 +271,9 @@ import type {
   FilesCloudDeleteResult,
   FilesCloudDownloadUrl,
   FilesCloudCopyToCloudInput,
+  FilesCloudUploadStepInput,
+  FilesCloudUploadStepResult,
+  FilesEnsureSpaceInput,
   FilesCloudCopyToComputerInput,
   FilesCloudOfficeOpenInput,
   FilesCloudOfficeOpened,
@@ -1056,6 +1059,8 @@ export interface EnvironmentApi {
     cloudDelete: (input: FilesCloudObjectInput) => Promise<FilesCloudDeleteResult>;
     cloudDownloadUrl: (input: FilesCloudObjectInput) => Promise<FilesCloudDownloadUrl>;
     cloudCopyToCloud: (input: FilesCloudCopyToCloudInput) => Promise<FilesCloudTransferResult>;
+    cloudUploadStep: (input: FilesCloudUploadStepInput) => Promise<FilesCloudUploadStepResult>;
+    ensureSpace: (input: FilesEnsureSpaceInput) => Promise<Record<string, never>>;
     cloudCopyToComputer: (
       input: FilesCloudCopyToComputerInput,
     ) => Promise<FilesCloudTransferResult>;

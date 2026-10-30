@@ -20,6 +20,8 @@ import { stripSharedTopFolder } from "./components/setup/goals";
 import { ensureEnvironmentApi } from "./environmentApi";
 import {
   PROJECT_UPLOAD_PARALLEL_FILES,
+  computerUploadDeps,
+  isNotEnoughSpaceError,
   uploadFilesIntoDirectory,
   type ProjectUploadFile,
 } from "./projectUpload";
@@ -169,44 +171,41 @@ async function run(id: string, attempt = 0): Promise<void> {
   let lastSave = Date.now();
   try {
     const api = ensureEnvironmentApi(job.environmentId);
-    await uploadFilesIntoDirectory(
-      { writeFile: (write) => api.projects.writeFile(write) },
-      {
-        targetDir: job.target,
-        files: runtime.files,
-        filterIgnored: true,
-        skipFolders: runtime.skipFolders,
-        concurrency: PROJECT_UPLOAD_PARALLEL_FILES,
-        alreadyUploaded: runtime.completed,
-        signal: controller.signal,
-        onFileUploaded: (relativePath) => {
-          runtime.completed.add(relativePath);
-          if (Date.now() - lastSave > SAVE_INTERVAL_MS) {
-            lastSave = Date.now();
-            void saveJob(id);
-          }
-        },
-        onProgress: (progress) => {
-          const now = Date.now();
-          const final = progress.completedFiles === progress.totalFiles;
-          if (now - lastPaint < PAINT_INTERVAL_MS && !final) return;
-          lastPaint = now;
-          const current = jobById(id);
-          const samples = [
-            ...(current?.samples ?? []),
-            { at: now, sentBytes: progress.sentBytes, completedFiles: progress.completedFiles },
-          ].slice(-SAMPLE_LIMIT);
-          patch(id, {
-            error: null,
-            completedFiles: progress.completedFiles,
-            sentBytes: progress.sentBytes,
-            totalFiles: progress.totalFiles,
-            totalBytes: progress.totalBytes,
-            samples,
-          });
-        },
+    await uploadFilesIntoDirectory(computerUploadDeps(api), {
+      targetDir: job.target,
+      files: runtime.files,
+      filterIgnored: true,
+      skipFolders: runtime.skipFolders,
+      concurrency: PROJECT_UPLOAD_PARALLEL_FILES,
+      alreadyUploaded: runtime.completed,
+      signal: controller.signal,
+      onFileUploaded: (relativePath) => {
+        runtime.completed.add(relativePath);
+        if (Date.now() - lastSave > SAVE_INTERVAL_MS) {
+          lastSave = Date.now();
+          void saveJob(id);
+        }
       },
-    );
+      onProgress: (progress) => {
+        const now = Date.now();
+        const final = progress.completedFiles === progress.totalFiles;
+        if (now - lastPaint < PAINT_INTERVAL_MS && !final) return;
+        lastPaint = now;
+        const current = jobById(id);
+        const samples = [
+          ...(current?.samples ?? []),
+          { at: now, sentBytes: progress.sentBytes, completedFiles: progress.completedFiles },
+        ].slice(-SAMPLE_LIMIT);
+        patch(id, {
+          error: null,
+          completedFiles: progress.completedFiles,
+          sentBytes: progress.sentBytes,
+          totalFiles: progress.totalFiles,
+          totalBytes: progress.totalBytes,
+          samples,
+        });
+      },
+    });
     if (runtime.leftOut) {
       const blob = new Blob([runtime.leftOut.text], { type: "text/plain" });
       await uploadFilesIntoDirectory(
@@ -229,8 +228,8 @@ async function run(id: string, attempt = 0): Promise<void> {
     const stopped = controller.signal.aborted;
     void saveJob(id);
     // A dropped connection is usually back in seconds: try again on our own
-    // a few times before asking the person.
-    if (!stopped && attempt < AUTO_RETRY_DELAYS_MS.length) {
+    // a few times before asking the person. A full disk isn't back in seconds.
+    if (!stopped && !isNotEnoughSpaceError(error) && attempt < AUTO_RETRY_DELAYS_MS.length) {
       patch(id, { error: "Connection dropped — trying again…" });
       await new Promise((resolve) => setTimeout(resolve, AUTO_RETRY_DELAYS_MS[attempt]));
       // Stopped or dismissed while waiting: leave it as the person left it.
@@ -252,6 +251,7 @@ const AUTO_RETRY_DELAYS_MS = [2_000, 5_000, 15_000];
 /** The person's words for a failure: the computer went away, or what it said. */
 export function uploadErrorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+  if (isNotEnoughSpaceError(error)) return `${message} Then Resume.`;
   if (/socket|websocket|closed|disconnect|network|timed? ?out|not connected/i.test(message)) {
     return "Lost the connection to the computer. What's already there stays — Resume sends the rest.";
   }
