@@ -164,4 +164,27 @@ describe("buildThreadActionItems", () => {
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
   });
+
+  it("finds an archived chat when asked to: marked, and it opens the archive", async () => {
+    const opened: string[] = [];
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-archived"),
+          title: "Archived thread",
+          archivedAt: "2026-03-20T00:00:00.000Z",
+          updatedAt: "2026-03-20T00:00:00.000Z",
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => void opened.push("thread"),
+      openArchive: async () => void opened.push("archive"),
+    });
+
+    expect(items[0]?.description).toContain("Archived");
+    await items[0]?.run();
+    expect(opened).toEqual(["archive"]);
+  });
 });

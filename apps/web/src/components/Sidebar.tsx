@@ -4630,6 +4630,17 @@ export default function Sidebar() {
                   if (isMobile) setOpenMobile(false);
                   void router.navigate({ to: "/settings" });
                 }}
+                snoozedCount={snoozedThreads.length}
+                onShowSnoozed={() => {
+                  setSnoozedShelfExpanded(true);
+                  // The shelf sits under the whole list, often below the fold.
+                  requestAnimationFrame(() =>
+                    document
+                      .querySelector('[data-testid="sidebar-snoozed-shelf-toggle"]')
+                      ?.scrollIntoView({ block: "start" }),
+                  );
+                }}
+                onOpenArchive={() => void router.navigate({ to: "/settings/archived" })}
                 onClearFilters={() => {
                   setDProjectPicks(null);
                   setDComputerPicks(null);
@@ -4928,6 +4939,7 @@ export default function Sidebar() {
                         label={doneShelfLabel(
                           snoozedThreads.length + settledThreads.length,
                           settledShelfExpanded,
+                          snoozedThreads.length > 0,
                         )}
                         expanded={settledShelfExpanded}
                         onToggle={() => setSettledShelfExpanded((value) => !value)}

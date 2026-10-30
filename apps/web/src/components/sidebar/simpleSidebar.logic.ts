@@ -42,6 +42,7 @@ export function threadContextMenuItems<T extends ContextMenuItem<string>>(
 }
 
 /** The one history shelf without Dev mode: settled and snoozed chats together. */
-export function doneShelfLabel(count: number, expanded: boolean): string {
-  return expanded ? "Done" : `Done (${count})`;
+export function doneShelfLabel(count: number, expanded: boolean, hasSnoozed = false): string {
+  const name = hasSnoozed ? "Done and snoozed" : "Done";
+  return expanded ? name : `${name} (${count})`;
 }

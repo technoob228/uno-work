@@ -40,5 +40,8 @@ describe("doneShelfLabel", () => {
   it("counts while folded", () => {
     expect(doneShelfLabel(3, false)).toBe("Done (3)");
     expect(doneShelfLabel(3, true)).toBe("Done");
+    // Snoozed chats share this shelf: the label has to say so.
+    expect(doneShelfLabel(3, false, true)).toBe("Done and snoozed (3)");
+    expect(doneShelfLabel(3, true, true)).toBe("Done and snoozed");
   });
 });

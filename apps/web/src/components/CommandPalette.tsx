@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Option } from "effect";
 import {
+  ArchiveIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
   BotIcon,
@@ -770,6 +771,29 @@ function OpenCommandPaletteDialog() {
     [activeThreadId, navigate, projectTitleById, settings.sidebarThreadSortOrder, threads],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  // Typing finds archived chats too: "archive" must not read as "gone".
+  const searchThreadItems = useMemo(
+    () =>
+      buildThreadActionItems({
+        threads,
+        ...(activeThreadId ? { activeThreadId } : {}),
+        projectTitleById,
+        sortOrder: settings.sidebarThreadSortOrder,
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
+        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        runThread: async (thread) => {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+          });
+        },
+        openArchive: async () => {
+          await navigate({ to: "/settings/archived" });
+        },
+      }),
+    [activeThreadId, navigate, projectTitleById, settings.sidebarThreadSortOrder, threads],
+  );
 
   function pushPaletteView(view: CommandPaletteView): void {
     setViewStack((previousViews) => [
@@ -1271,6 +1295,17 @@ function OpenCommandPaletteDialog() {
 
   actionItems.push({
     kind: "action",
+    value: "action:archived-chats",
+    searchTerms: ["archived chats", "archive", "unarchive", "restore a chat", "lost chat"],
+    title: "Archived chats",
+    icon: <ArchiveIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/archived" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:settings",
     searchTerms: ["settings", "preferences", "configuration", "keybindings"],
     title: "Open settings",
@@ -1326,7 +1361,7 @@ function OpenCommandPaletteDialog() {
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
-    threadSearchItems: allThreadItems,
+    threadSearchItems: searchThreadItems,
     messageSearchItems,
   });
 

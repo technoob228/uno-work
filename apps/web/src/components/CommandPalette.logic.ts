@@ -129,9 +129,12 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   renderTrailingContent?: (thread: TThread) => ReactNode;
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
+  /** Lists archived chats too, marked; they open the archive, where they can come back. */
+  openArchive?: () => Promise<void>;
 }): CommandPaletteActionItem[] {
+  const { openArchive } = input;
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
+    openArchive ? input.threads : input.threads.filter((thread) => thread.archivedAt === null),
     input.sortOrder,
   );
   const visibleThreads =
@@ -149,6 +152,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     }
     if (thread.id === input.activeThreadId) {
       descriptionParts.push("Current chat");
+    }
+    if (thread.archivedAt !== null) {
+      descriptionParts.push("Archived");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -170,7 +176,8 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       trailingContent ? { titleTrailingContent: trailingContent } : {},
       {
         run: async () => {
-          await input.runThread(thread);
+          if (thread.archivedAt !== null && openArchive) await openArchive();
+          else await input.runThread(thread);
         },
       },
     );

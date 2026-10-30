@@ -307,6 +307,10 @@ export function SidebarDChatsBar(props: {
   onLevelsChange: (levels: ReadonlyArray<SidebarGroupLevel>) => void;
   /** Variant B: the menu's line that leads to the grouping in Settings. */
   onOpenSettings: () => void;
+  /** Snoozed chats now; the menu leads to them while there are any. */
+  snoozedCount: number;
+  onShowSnoozed: () => void;
+  onOpenArchive: () => void;
   projects: ReadonlyArray<SidebarDPickOption>;
   pickedProjects: ReadonlyArray<string> | null;
   onProjectsChange: (picked: ReadonlyArray<string> | null) => void;
@@ -435,6 +439,15 @@ export function SidebarDChatsBar(props: {
                 onChange={props.onComputersChange}
               />
             ) : null}
+            <MenuSeparator />
+            {props.snoozedCount > 0 ? (
+              <MenuItem onClick={props.onShowSnoozed} data-testid="sidebar-d-show-snoozed">
+                Snoozed ({props.snoozedCount})
+              </MenuItem>
+            ) : null}
+            <MenuItem onClick={props.onOpenArchive} data-testid="sidebar-d-archived">
+              Archived chats
+            </MenuItem>
           </MenuPopup>
         </Menu>
         {filtered ? (
