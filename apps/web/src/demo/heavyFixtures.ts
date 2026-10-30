@@ -9,6 +9,7 @@
  * them as it would real computers; `CHAT_META` adds what the variants need
  * on top (who coordinates whom, what exactly a chat asks for).
  */
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   ASSISTANT_PROJECT_ID,
   DEFAULT_SERVER_SETTINGS,
@@ -201,7 +202,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
     },
     cwd: machine.home,
     keybindingsConfigPath: `${machine.home}/.t3code-keybindings.json`,
-    keybindings: [],
+    keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     issues: [],
     providers: [
       {

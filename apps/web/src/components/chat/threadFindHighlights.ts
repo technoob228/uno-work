@@ -4,7 +4,7 @@
  * Adapted from upstream t3code `threadFindHighlights.ts`.
  */
 import { findThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 const HIGHLIGHT_NAME = "uno-thread-find";
 const ACTIVE_HIGHLIGHT_NAME = "uno-thread-find-active";
@@ -86,8 +86,9 @@ export function useThreadFindHighlights(input: {
   const { container, query, activeMessageId, activeOccurrence, onActiveRange } = input;
   const rangesRef = useRef<readonly FoundRange[]>([]);
   const paintRef = useRef<((ranges: readonly FoundRange[]) => void) | null>(null);
-  const reportActive = useEffectEvent((range: Range | null) => onActiveRange(range));
-  const readActive = useEffectEvent(() => ({ activeMessageId, activeOccurrence }));
+  // Read from outside React too (the observer below): always this render's values.
+  const latestRef = useRef({ activeMessageId, activeOccurrence, onActiveRange });
+  latestRef.current = { activeMessageId, activeOccurrence, onActiveRange };
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- paints CSS Highlight ranges for the query, repainting on DOM mutations, and clears them on cleanup
   useEffect(() => {
@@ -99,7 +100,7 @@ export function useThreadFindHighlights(input: {
     rangesRef.current = [];
     if (!container || query.length === 0) {
       clear();
-      reportActive(null);
+      latestRef.current.onActiveRange(null);
       return;
     }
 
@@ -108,7 +109,7 @@ export function useThreadFindHighlights(input: {
     CSS.highlights.set(HIGHLIGHT_NAME, inactive);
     CSS.highlights.set(ACTIVE_HIGHLIGHT_NAME, active);
     const paint = (ranges: readonly FoundRange[]) => {
-      const { activeMessageId: messageId, activeOccurrence: occurrence } = readActive();
+      const { activeMessageId: messageId, activeOccurrence: occurrence } = latestRef.current;
       const selected =
         ranges.find((found) => found.messageId === messageId && found.occurrence === occurrence)
           ?.range ?? null;
@@ -116,7 +117,7 @@ export function useThreadFindHighlights(input: {
       active.clear();
       for (const found of ranges) if (found.range !== selected) inactive.add(found.range);
       if (selected) active.add(selected);
-      reportActive(selected);
+      latestRef.current.onActiveRange(selected);
     };
     paintRef.current = paint;
 

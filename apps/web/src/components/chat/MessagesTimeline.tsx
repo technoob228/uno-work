@@ -151,6 +151,8 @@ const EMPTY_REQUEST_IDS: ReadonlyArray<ApprovalRequestId> = [];
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
+// Room for the find bar, so even the first message can sit below it.
+const TIMELINE_LIST_HEADER_FINDING = <div className="h-14" />;
 // Taller than the fade above the composer (ChatView): the last line ends clear of it.
 const TIMELINE_LIST_FOOTER = <div className="h-8" />;
 
@@ -476,7 +478,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onScroll={handleScroll}
         onItemSizeChanged={handleItemSizeChanged}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-        ListHeaderComponent={TIMELINE_LIST_HEADER}
+        ListHeaderComponent={
+          findQuery.length > 0 ? TIMELINE_LIST_HEADER_FINDING : TIMELINE_LIST_HEADER
+        }
         ListFooterComponent={
           endOfFeed ? (
             <div className="mx-auto w-full min-w-0 max-w-3xl">

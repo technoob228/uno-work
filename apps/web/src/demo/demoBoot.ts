@@ -23,6 +23,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
+import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
 import { addSecretRequest } from "../secretRequestStore";
 import {
@@ -302,6 +303,13 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     const vaultAnswer = answerVaultRpc(machine.environmentId, String(tag), body);
     if (vaultAnswer !== undefined) return vaultAnswer;
   }
+  const searchAnswer = answerThreadSearchRpc(
+    modelFor(machine).threads,
+    String(tag),
+    body,
+    (threadId) => publishThread(machine, threadId),
+  );
+  if (searchAnswer !== undefined) return searchAnswer;
   // p9: the vault's entries for the teammate's access (assistantsFixtures.ts).
   const teamAnswer = answerTeamRpc(String(body._tag));
   if (teamAnswer !== undefined) return teamAnswer;
