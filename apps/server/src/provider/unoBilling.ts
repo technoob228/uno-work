@@ -199,8 +199,59 @@ function isPlainSentence(text: string): boolean {
   );
 }
 
+/** Harness wrappings in front of any error body: "Error:", "HTTP 502:", "Error code: 500 -". */
+const ERROR_BODY_PREFIX =
+  /^\s*(?:(?:[A-Za-z_]+Error|error)\s*:\s*|error code\s*:?\s*\d{3}\s*[-:]?\s*|http\s+\d{3}\b\s*[:\-—]?\s*|\d{3}\b\s*[:\-—]?\s*)/i;
+
+/** The sentence of one JSON error body (after its wrappers); undefined when `text` isn't one. */
+function errorBodySentence(text: string): string | undefined {
+  let body = text.trim();
+  for (let i = 0; i < 4; i += 1) {
+    const next = body.replace(ERROR_BODY_PREFIX, "").trim();
+    if (next === body) break;
+    body = next;
+  }
+  if (!body.startsWith("{") || !body.endsWith("}")) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  const inner =
+    record.error && typeof record.error === "object" && !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : null;
+  return (
+    readString(inner?.message) ??
+    readString(record.message) ??
+    readString(record.error) ??
+    readString(record.detail)
+  )?.trim();
+}
+
+/**
+ * A provider error that is nothing but a JSON error body → the sentence in
+ * it. The Uno AI gateway ends a broken stream with
+ * `{"error":{"message":"Uno AI stopped answering — try again.","type":"upstream_error",…}}`;
+ * the AI SDK inside OpenCode raises it as the inner object's JSON, and the
+ * person saw that JSON in the chat header and on Home's "Failed" card (walk
+ * on 0.0.162, 29.10.2026). Takes `message` (top level or `error.message`),
+ * `error` when it is a string, or `detail`. Null when `detail` is not such a
+ * body or carries no sentence — then it is shown as it came. Type and code
+ * are not lost: callers classify and log the raw detail.
+ */
+export function providerErrorBodyMessage(detail: string): string | null {
+  const sentence = errorBodySentence(detail);
+  if (sentence === undefined) return null;
+  // A body inside the body (the message is itself `{"error":{…}}`): once more.
+  return errorBodySentence(sentence) ?? sentence;
+}
+
 export function normalizeUnoBillingErrorMessage(detail: string): string {
-  if (!isUnoBillingErrorDetail(detail)) return detail;
+  if (!isUnoBillingErrorDetail(detail)) return providerErrorBodyMessage(detail) ?? detail;
   const gateway = parseGatewayError(detail);
   const human = gateway.message ?? stripWrappers(detail);
   if (isCompleteHumanBillingMessage(human)) return human.trim();

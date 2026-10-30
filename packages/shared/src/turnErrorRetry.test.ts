@@ -50,6 +50,20 @@ describe("classifyTurnError", () => {
     expect(classifyTurnError('{"code":"upstream_timeout"}').kind).toBe("no-answer");
   });
 
+  it("knows 'Uno AI stopped answering' (a broken stream), as the person reads it and as raw JSON", () => {
+    expect(classifyTurnError(STOPPED_ANSWERING).kind).toBe("no-answer");
+    expect(
+      classifyTurnError(
+        '{"message":"Uno AI stopped answering — try again.","type":"upstream_error","code":"upstream_error"}',
+      ).kind,
+    ).toBe("no-answer");
+    // A provider's refusal relayed as upstream_error is not a broken stream.
+    expect(
+      classifyTurnError('{"error":{"message":"Invalid model","type":"upstream_error","code":400}}')
+        .kind,
+    ).toBe("other");
+  });
+
   it("leaves everything else alone", () => {
     expect(classifyTurnError("Provider session did not survive a server restart.").kind).toBe(
       "other",
@@ -60,6 +74,7 @@ describe("classifyTurnError", () => {
 });
 
 const UPSTREAM_TIMEOUT = "Uno AI didn't answer in time — try again.";
+const STOPPED_ANSWERING = "Uno AI stopped answering — try again.";
 
 describe("decideTurnAutoRetry", () => {
   it("continues a turn the model didn't answer: 15 s, then 45 s, then the person decides", () => {
@@ -80,6 +95,25 @@ describe("decideTurnAutoRetry", () => {
       reason: "attempts-used",
     });
     expect(NO_ANSWER_RETRY_DELAYS_MS).toHaveLength(TURN_AUTO_RETRY_MAX_ATTEMPTS);
+  });
+
+  it("continues a broken stream the same way, within the same limit (Misha 29.10)", () => {
+    expect(decideTurnAutoRetry({ error: STOPPED_ANSWERING, attemptsUsed: 0 })).toEqual({
+      retry: true,
+      kind: "no-answer",
+      attempt: 1,
+      maxAttempts: TURN_AUTO_RETRY_MAX_ATTEMPTS,
+      delayMs: 15_000,
+    });
+    expect(decideTurnAutoRetry({ error: STOPPED_ANSWERING, attemptsUsed: 1 })).toMatchObject({
+      retry: true,
+      attempt: 2,
+      delayMs: 45_000,
+    });
+    expect(decideTurnAutoRetry({ error: STOPPED_ANSWERING, attemptsUsed: 2 })).toEqual({
+      retry: false,
+      reason: "attempts-used",
+    });
   });
 
   it("waits as long as a busy gateway asks", () => {
