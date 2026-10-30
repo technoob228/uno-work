@@ -27,6 +27,7 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+k", "command": "commandPalette.toggle", "when": "!terminalFocus" },
   { "key": "mod+b", "command": "sidebar.toggle", "when": "!terminalFocus" },
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
+  { "key": "mod+f", "command": "chat.find", "when": "!terminalFocus" },
   { "key": "mod+shift+o", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+n", "command": "chat.newLocal", "when": "!terminalFocus" },
   { "key": "mod+o", "command": "editor.openFavorite" },
@@ -81,6 +82,7 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 Before 0.0.136 `mod+j` was `terminal.toggle`. On start the server moves that untouched old default in your `keybindings.json` to `` ctrl+` `` (in place) and gives `mod+j` to `rightPanel.toggle`. A terminal you bound to another key, an existing `rightPanel.toggle` rule, or `` ctrl+` `` already taken by another rule — the file is left as you wrote it.
 
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
+- `chat.find`: find in the open chat (with the keyboard in the right panel, ⌘F stays with what is open there)
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)

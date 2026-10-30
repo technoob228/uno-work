@@ -135,6 +135,18 @@ import type {
 } from "./terminal.ts";
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
+  OrchestrationSetThreadGoalInput,
+  OrchestrationStopThreadGoalInput,
+  OrchestrationStopThreadGoalResult,
+  ThreadGoalState,
+} from "./threadGoal.ts";
+import type {
+  OrchestrationFindInThreadInput,
+  OrchestrationFindInThreadResult,
+  OrchestrationSearchThreadsInput,
+  OrchestrationSearchThreadsResult,
+} from "./threadSearch.ts";
+import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
@@ -934,6 +946,16 @@ export interface EnvironmentApi {
     getThreadTranscript: (
       input: OrchestrationGetThreadTranscriptInput,
     ) => Promise<OrchestrationGetThreadTranscriptResult>;
+    searchThreads: (
+      input: OrchestrationSearchThreadsInput,
+    ) => Promise<OrchestrationSearchThreadsResult>;
+    findInThread: (
+      input: OrchestrationFindInThreadInput,
+    ) => Promise<OrchestrationFindInThreadResult>;
+    setThreadGoal: (input: OrchestrationSetThreadGoalInput) => Promise<ThreadGoalState>;
+    stopThreadGoal: (
+      input: OrchestrationStopThreadGoalInput,
+    ) => Promise<OrchestrationStopThreadGoalResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;

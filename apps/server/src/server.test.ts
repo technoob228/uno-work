@@ -111,6 +111,9 @@ import {
 } from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegistry.ts";
+import { ThreadGoal } from "./goal/ThreadGoalService.ts";
+import { DatabaseCompactor } from "./maintenance/DatabaseCompactor.ts";
+import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
@@ -639,9 +642,14 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(Open)({
-          ...options?.layers?.open,
-        }),
+        Layer.mergeAll(
+          Layer.mock(Open)({
+            ...options?.layers?.open,
+          }),
+          Layer.mock(ThreadSearch)({}),
+          Layer.mock(ThreadGoal)({}),
+          Layer.mock(DatabaseCompactor)({}),
+        ),
       ),
       Layer.provide(gitManagerLayer),
       Layer.provide(gitVcsDriverLayer),

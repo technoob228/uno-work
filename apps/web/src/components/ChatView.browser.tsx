@@ -230,6 +230,18 @@ function createMockEnvironmentApi(input: {
       regenerateThreadTitle: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["regenerateThreadTitle"],
+      searchThreads: (() => {
+        throw new Error("searchThreads not implemented in browser test fixture");
+      }) as EnvironmentApi["orchestration"]["searchThreads"],
+      findInThread: (() => {
+        throw new Error("findInThread not implemented in browser test fixture");
+      }) as EnvironmentApi["orchestration"]["findInThread"],
+      setThreadGoal: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["setThreadGoal"],
+      stopThreadGoal: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["stopThreadGoal"],
       getThreadTranscript: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getThreadTranscript"],

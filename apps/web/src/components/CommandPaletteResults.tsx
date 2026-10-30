@@ -76,7 +76,7 @@ function DisabledCommandPaletteResultRow(props: {
             <span className="truncate">{props.item.title}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
-            {props.item.description}
+            {props.item.descriptionContent ?? props.item.description}
           </span>
         </span>
       ) : (
@@ -122,7 +122,7 @@ function CommandPaletteResultRow(props: {
             <span className="truncate">{props.item.title}</span>
           </span>
           <span className="truncate text-muted-foreground/70 text-xs">
-            {props.item.description}
+            {props.item.descriptionContent ?? props.item.description}
           </span>
         </span>
       ) : (

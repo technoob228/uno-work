@@ -10,6 +10,7 @@
  */
 
 import { ACCOUNT_SWITCH_NOTE_BODY, PLAN_RESUME_NOTE_BODY } from "./planLimitRules.ts";
+import { goalNoteLine } from "./threadGoal.ts";
 import { turnAutoRetryNoteLine } from "./turnErrorRetry.ts";
 
 /** Marks a message the computer (not the person) put into a chat for its agent. */
@@ -154,6 +155,7 @@ export type UnoWorkNote =
   | { readonly kind: "assistant-bot-connected"; readonly text: string }
   | { readonly kind: "auto-retry"; readonly text: string }
   | { readonly kind: "plan-resume"; readonly text: string }
+  | { readonly kind: "goal"; readonly text: string }
   | { readonly kind: "secret-saved"; readonly name: string; readonly text: string }
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "work-update"; readonly text: string }
@@ -231,6 +233,8 @@ export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const autoRetry = turnAutoRetryNoteLine(body);
   if (autoRetry !== null) return { kind: "auto-retry", text: autoRetry };
+  const goal = goalNoteLine(body);
+  if (goal !== null) return { kind: "goal", text: goal };
   if (body === PLAN_RESUME_NOTE_BODY) {
     return { kind: "plan-resume", text: "Your plan's limit reset. The chat went on by itself." };
   }

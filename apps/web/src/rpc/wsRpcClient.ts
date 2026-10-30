@@ -221,6 +221,10 @@ export interface WsRpcClient {
     readonly regenerateThreadTitle: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.regenerateThreadTitle
     >;
+    readonly searchThreads: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.searchThreads>;
+    readonly findInThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.findInThread>;
+    readonly setThreadGoal: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.setThreadGoal>;
+    readonly stopThreadGoal: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.stopThreadGoal>;
     readonly getThreadTranscript: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.getThreadTranscript
     >;
@@ -664,6 +668,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         ),
       getThreadTranscript: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadTranscript](input)),
+      searchThreads: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.searchThreads](input)),
+      findInThread: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.findInThread](input)),
+      setThreadGoal: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.setThreadGoal](input)),
+      stopThreadGoal: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.stopThreadGoal](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
       subscribeShell: (listener, options) =>
