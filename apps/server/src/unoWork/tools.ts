@@ -745,6 +745,9 @@ const waitForAppRunning = (deps: UnoWorkToolDeps, app: UnoMachineApp) =>
     return current;
   });
 
+const PUBLISH_HTTPS_PENDING_NOTE =
+  "This is the plain http address. The https one usually appears within a minute: check apps_list, and give webhooks only the https address.";
+
 const appAction = (
   deps: UnoWorkToolDeps,
   args: Record<string, unknown>,
@@ -765,7 +768,9 @@ const appAction = (
       app: after ? compactApp(after) : { id: app.id, removed: action === "remove" },
       ...(action === "publish" && result.publishBlockedReason
         ? { note: result.publishBlockedReason }
-        : {}),
+        : action === "publish" && after?.publication?.url?.startsWith("http:")
+          ? { note: PUBLISH_HTTPS_PENDING_NOTE }
+          : {}),
     };
   });
 
@@ -1564,7 +1569,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_show_on_internet",
     group: "computer",
     description:
-      'The explicit outside mode: give a running web app a PUBLIC address (http://<computer>:<port>/ — plain http, no sign-in) for other people, another device or a webhook (the "Show on the internet" button). Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
+      'The explicit outside mode: give a running web app a PUBLIC address, no sign-in, for other people, another device or a webhook (the "Show on the internet" button). It answers on http://<computer>:<port>/ at once and on https://<app>-<computer>.app.uno4.dev within a minute; once that is ready `onInternet.url` is the https one in apps_list. Webhooks such as Telegram need the https address. Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },

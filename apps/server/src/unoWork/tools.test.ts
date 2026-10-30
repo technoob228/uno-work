@@ -76,6 +76,15 @@ function app(overrides: Partial<UnoMachineApp> = {}): UnoMachineApp {
   } as UnoMachineApp;
 }
 
+const PUBLICATION = {
+  forwardId: 7,
+  externalPort: 43000,
+  url: null,
+  host: "box",
+  state: "applied",
+  forwards: [{ forwardId: 7, internalPort: 3000, externalPort: 43000, protocol: "tcp" }],
+} as const;
+
 interface Recorded {
   approvals: Array<{
     tool: string;
@@ -604,6 +613,35 @@ describe("approval gate", () => {
     if (result._tag === "Failure") expect(result.failure.message).toContain("declined");
     expect(recorded.approvals[0]?.sensitive).toBe(true);
     expect(recorded.actions).toEqual([]);
+  });
+
+  it("says when the https address isn't ready yet, and stays quiet once it is", async () => {
+    const { deps } = makeDeps();
+    const published = (url: string): UnoWorkToolDeps => ({
+      ...deps,
+      machineApps: {
+        list: deps.machineApps.list,
+        action: () =>
+          deps.machineApps.list.pipe(
+            Effect.map((apps) => ({
+              ...apps,
+              apps: apps.apps.map((one) =>
+                one.id === "manifest:notes"
+                  ? { ...one, publication: { ...PUBLICATION, url } }
+                  : one,
+              ),
+            })),
+          ),
+      },
+    });
+    const plain = await run("app_show_on_internet", published("http://box:43000/"), {
+      appId: "notes",
+    });
+    expect(JSON.stringify(plain)).toContain("give webhooks only the https address");
+    const https = await run("app_show_on_internet", published("https://notes-box.app.uno4.dev"), {
+      appId: "notes",
+    });
+    expect(JSON.stringify(https)).not.toContain("give webhooks only the https address");
   });
 
   it("publishes a plain site without asking, even in Ask mode", async () => {

@@ -44,6 +44,7 @@ function serviceLayer(input: {
   readonly calls?: Call[];
   readonly probe?: Partial<MachineProbe>;
   readonly storeApps?: unknown[];
+  readonly appLinks?: unknown[];
   readonly options?: Partial<Parameters<typeof makeMachineAppsService>[0]>;
 }) {
   const ports = [...(input.ports ?? [])] as Array<Record<string, unknown>>;
@@ -57,6 +58,9 @@ function serviceLayer(input: {
     if (path === "/api/v1/boxes/42/ports" && method === "GET") return { ports };
     if (path === "/api/v1/boxes/42/apps" && method === "GET" && input.storeApps) {
       return { apps: input.storeApps };
+    }
+    if (path === "/api/v1/boxes/42/app-links" && method === "GET" && input.appLinks) {
+      return { links: input.appLinks };
     }
     if (path === "/api/v1/boxes/42/ports" && method === "POST") {
       const forward = {
@@ -140,6 +144,41 @@ it.effect("lists programs and shows an app's public address once its port is pub
             visibility: "public",
             state: "applied",
           },
+        ],
+      }),
+    ),
+  ),
+);
+
+it.effect("a published app's address is https once ready, and never reads as private", () =>
+  Effect.gen(function* () {
+    const service = yield* MachineAppsService;
+    const listed = yield* service.list;
+    const app = listed.apps.find((a) => a.id === "port:3000");
+    assert.strictEqual(app?.publication?.url, "https://port-3000-work.app.uno4.dev");
+    assert.strictEqual(app?.privateUrl, undefined);
+    assert.strictEqual(
+      listed.apps.find((a) => a.id === "port:8787")?.privateUrl,
+      "https://port-8787-work.app.uno4.dev",
+    );
+  }).pipe(
+    Effect.provide(
+      serviceLayer({
+        ownBoxId: 42,
+        boxToken: "uno_agt_machine",
+        ports: [
+          {
+            id: 7,
+            internal_port: 3000,
+            external_port: 43007,
+            protocol: "tcp",
+            visibility: "public",
+            state: "applied",
+          },
+        ],
+        appLinks: [
+          { port: 3000, url: "https://port-3000-work.app.uno4.dev", access: "public" },
+          { port: 8787, url: "https://port-8787-work.app.uno4.dev", access: "owner" },
         ],
       }),
     ),
@@ -705,7 +744,23 @@ it("parseAppLinks keeps ready https addresses by port, ignores the rest", () => 
       { app_id: "odd", port: 9000, url: "http://plain.example" },
     ],
   });
-  assert.deepStrictEqual([...links.entries()], [[8660, "https://pult-box.app.uno4.dev"]]);
+  assert.deepStrictEqual(
+    [...links.entries()],
+    [[8660, { url: "https://pult-box.app.uno4.dev", open: false }]],
+  );
   assert.strictEqual(parseAppLinks(null).size, 0);
   assert.strictEqual(parseAppLinks({ links: "nope" }).size, 0);
+});
+
+it("parseAppLinks tells an open address from one behind sign-in", () => {
+  const links = parseAppLinks({
+    links: [
+      { port: 8443, url: "https://port-8443-box.app.uno4.dev", access: "public" },
+      { port: 8444, url: "https://port-8444-box.app.uno4.dev", access: "allowlist" },
+      { port: 8660, url: "https://pult-box.app.uno4.dev", access: "owner" },
+    ],
+  });
+  assert.strictEqual(links.get(8443)?.open, true);
+  assert.strictEqual(links.get(8444)?.open, true);
+  assert.strictEqual(links.get(8660)?.open, false);
 });
