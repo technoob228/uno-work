@@ -505,6 +505,7 @@ export function FilesBrowser({
             bucketId={search.bucket ?? null}
             prefix={search.prefix ?? ""}
             uploads={uploads}
+            narrow={isMobile}
             onOpenComputer={() => openFolder(undefined)}
             onNavigate={(bucket, prefix) =>
               setSearch({

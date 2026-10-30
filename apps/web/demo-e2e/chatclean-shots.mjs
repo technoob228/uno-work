@@ -184,10 +184,9 @@ for (const theme of themes) {
     await chat.click();
     await page.waitForTimeout(1800);
     await shot("08-feed-end");
-    const box = await page.locator("[data-timeline-root]").first().boundingBox();
-    await page.mouse.move(800, (box?.y ?? 100) + 120);
-    await page.mouse.wheel(0, -400);
-    await page.waitForTimeout(900);
+    await page.mouse.move(800, 320);
+    await page.mouse.wheel(0, -500);
+    await page.waitForTimeout(1200);
     await shot("09-scroll-to-end");
     await page.setViewportSize({ width: 1440, height: 900 });
   });

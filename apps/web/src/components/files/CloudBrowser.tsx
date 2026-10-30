@@ -113,6 +113,7 @@ export function CloudBrowser({
   onOpenComputer,
   embedded,
   onShare,
+  narrow = false,
 }: {
   environmentId: EnvironmentId | null;
   bucketId: number | null;
@@ -122,6 +123,8 @@ export function CloudBrowser({
   onOpenComputer: () => void;
   /** Inside another app (Uno Drive): its own leading control, a name for the root. */
   embedded?: { readonly rootLabel: string; readonly leading?: React.ReactNode };
+  /** A phone or the panel's column: names of buttons give way to the path. */
+  narrow?: boolean | undefined;
   /** Makes "Share link" work for files (Uno Drive's links). */
   onShare?: (object: FilesCloudObject) => void;
 }) {
@@ -234,6 +237,7 @@ export function CloudBrowser({
             location="cloud"
             onComputer={onOpenComputer}
             onCloud={() => onNavigate(null, "")}
+            narrow={narrow}
           />
         )}
         <nav
@@ -290,7 +294,7 @@ export function CloudBrowser({
             onClick={() => setNewBucketOpen(true)}
           >
             <PlusIcon />
-            New bucket
+            <span className={narrow ? "sr-only" : undefined}>New bucket</span>
           </Button>
         ) : (
           <Menu>
