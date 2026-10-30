@@ -10,7 +10,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { FAKE_STORAGE_ENV } from "./git-remote-uno.mjs";
+import { FAKE_STORAGE_ENV, FAKE_TEAM_STORAGE_ENV, remoteUrl } from "./git-remote-uno.mjs";
 import {
   MAX_FILE_BYTES,
   builtFolders,
@@ -19,6 +19,7 @@ import {
   isKeyFile,
   keysBeforePublish,
   listCloudProjects,
+  peekSharedProject,
   projectFiles,
   projectHistory,
   resolveConflict,
@@ -1016,5 +1017,263 @@ describe("a project that lives on GitHub or GitLab", { timeout: 60_000 }, () => 
     expect(result.host?.pushed).toBe(false);
     expect(result.message).toMatch(/^origin: /);
     expect(gitIn(dir, a.env, "ls-remote", "uno", "main")).toContain("refs/heads/main");
+  });
+});
+
+describe("a project shared with someone else", { timeout: 120_000 }, () => {
+  const TEAM = 12;
+
+  /** The owner on their own cloud; a colleague with a cloud of their own, working in the owner's. */
+  function people() {
+    const misha = { ...computer("misha"), person: "Misha" };
+    const anyaCloud = path.join(root, "anya-cloud");
+    fs.mkdirSync(anyaCloud);
+    const base = computer("anya");
+    const anya = {
+      ...base,
+      person: "Anya",
+      env: { ...base.env, [FAKE_STORAGE_ENV]: anyaCloud, [FAKE_TEAM_STORAGE_ENV]: cloud },
+    };
+    return { misha, anya, anyaCloud };
+  }
+
+  const remoteOf = (at: Computer, dir: string) =>
+    gitIn(dir, { ...at.env, GIT_DIR: snapshotGitDir(dir) }, "config", "remote.uno.url");
+
+  it("a folder without git arrives, syncs both ways and stays out of their own cloud", async () => {
+    const { misha, anya, anyaCloud } = people();
+    const notes = misha.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    expect(await syncProject({ dir: notes, name: "notes" }, misha)).toMatchObject({ ok: true });
+
+    const got = await getProject({ name: "notes", team: TEAM }, anya);
+    expect(got).toMatchObject({ ok: true, state: "synced", mode: "snapshot" });
+    const there = path.join(anya.home, "projects", "notes");
+    expect(read(path.join(there, "plan.md"))).toBe("plan\n");
+    expect(remoteOf(anya, there)).toBe(remoteUrl("notes", TEAM));
+
+    // A sync that isn't told about the team stays in it: the folder knows.
+    write(path.join(there, "from-anya.md"), "hi\n");
+    expect(await syncProject({ dir: there }, anya)).toMatchObject({ ok: true, pushed: true });
+    expect(remoteOf(anya, there)).toBe(remoteUrl("notes", TEAM));
+    expect(fs.readdirSync(anyaCloud)).toEqual([]);
+
+    expect(await syncProject({ dir: notes, name: "notes" }, misha)).toMatchObject({ pulled: true });
+    expect(read(path.join(notes, "from-anya.md"))).toBe("hi\n");
+
+    write(path.join(notes, "from-misha.md"), "back\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    expect(await syncProject({ dir: there, team: TEAM }, anya)).toMatchObject({ pulled: true });
+    expect(read(path.join(there, "from-misha.md"))).toBe("back\n");
+  });
+
+  it("a repository arrives as a clone of the shared address", async () => {
+    const { misha, anya, anyaCloud } = people();
+    const repo = misha.folder("repo");
+    fs.mkdirSync(repo);
+    gitIn(repo, misha.env, "init", "-q", "-b", "main");
+    write(path.join(repo, "a.md"), "a\n");
+    gitIn(repo, misha.env, "add", "a.md");
+    gitIn(repo, misha.env, "commit", "-q", "-m", "first");
+    expect(await syncProject({ dir: repo, name: "repo" }, misha)).toMatchObject({ pushed: true });
+
+    expect(await getProject({ name: "repo", team: TEAM }, anya)).toMatchObject({
+      ok: true,
+      mode: "git",
+    });
+    const there = path.join(anya.home, "projects", "repo");
+    expect(gitIn(there, anya.env, "remote", "get-url", "uno")).toBe(remoteUrl("repo", TEAM));
+
+    write(path.join(there, "b.md"), "b\n");
+    gitIn(there, anya.env, "add", "b.md");
+    gitIn(there, anya.env, "commit", "-q", "-m", "second");
+    // Told nothing: the remote says where this folder syncs.
+    expect(await syncProject({ dir: there }, anya)).toMatchObject({ ok: true, pushed: true });
+    expect(fs.readdirSync(anyaCloud)).toEqual([]);
+    expect(await syncProject({ dir: repo, name: "repo" }, misha)).toMatchObject({ pulled: true });
+    expect(read(path.join(repo, "b.md"))).toBe("b\n");
+  });
+
+  it("a project of their own with the same name stays apart", async () => {
+    const { misha, anya } = people();
+    const shared = misha.folder("notes");
+    write(path.join(shared, "plan.md"), "the shared one\n");
+    await syncProject({ dir: shared, name: "notes" }, misha);
+    const mine = anya.folder("notes");
+    write(path.join(mine, "plan.md"), "my own\n");
+    await syncProject({ dir: mine, name: "notes" }, anya);
+
+    await getProject({ name: "notes", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "notes");
+    expect(read(path.join(there, "plan.md"))).toBe("the shared one\n");
+    write(path.join(there, "plan.md"), "shared, changed\n");
+    await syncProject({ dir: there }, anya);
+    write(path.join(mine, "plan.md"), "my own, changed\n");
+    expect(await syncProject({ dir: mine, name: "notes" }, anya)).toMatchObject({ ok: true });
+
+    await syncProject({ dir: shared, name: "notes" }, misha);
+    expect(read(path.join(shared, "plan.md"))).toBe("shared, changed\n");
+    expect(remoteOf(anya, mine)).toBe("uno::notes");
+  });
+
+  it("nothing saved yet: it says so, and nothing is made", async () => {
+    const { anya } = people();
+    const got = await getProject({ name: "notes", team: TEAM }, anya);
+    expect(got).toMatchObject({ ok: false, state: "empty" });
+    expect(got.message).toMatch(/Nothing is saved in notes yet/);
+    expect(exists(path.join(anya.home, "projects", "notes"))).toBe(false);
+    expect(await peekSharedProject({ name: "notes", team: TEAM }, anya)).toBeNull();
+  });
+
+  it("shows how a shared project syncs", async () => {
+    const { misha, anya } = people();
+    const notes = misha.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    expect(await peekSharedProject({ name: "notes", team: TEAM }, anya)).toMatchObject({
+      name: "notes",
+      mode: "snapshot",
+      updatedBy: { hostname: expect.any(String) },
+    });
+  });
+
+  it("the one who synced second keeps theirs, and the other hears of it and brings theirs back", async () => {
+    const { misha, anya } = people();
+    const notes = misha.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    await getProject({ name: "notes", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "notes");
+
+    write(path.join(notes, "plan.md"), "misha's plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    write(path.join(there, "plan.md"), "anya's plan\n");
+    const anyas = await syncProject({ dir: there }, anya);
+    expect(anyas.conflict).toMatchObject({ theirsPerson: "Misha", kept: { "plan.md": "mine" } });
+
+    // Misha only fast-forwards here: without the note he'd never know.
+    const mishas = await syncProject({ dir: notes, name: "notes" }, misha);
+    expect(read(path.join(notes, "plan.md"))).toBe("anya's plan\n");
+    expect(mishas.state).toBe("conflict");
+    expect(mishas.conflict).toMatchObject({
+      files: ["plan.md"],
+      kept: { "plan.md": "theirs" },
+      theirsPerson: "Anya",
+    });
+
+    const back = await resolveConflict({ dir: notes, name: "notes", keep: "mine" }, misha);
+    expect(back).toMatchObject({ ok: true, state: "synced", conflict: null });
+    expect(read(path.join(notes, "plan.md"))).toBe("misha's plan\n");
+    await resolveConflict({ dir: there, name: "notes", keep: "dismiss" }, anya);
+    await syncProject({ dir: there }, anya);
+    expect(read(path.join(there, "plan.md"))).toBe("misha's plan\n");
+  });
+
+  it("when the other's change is newer, the one who merges sees it and brings theirs back", async () => {
+    const { misha, anya } = people();
+    const notes = misha.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    await getProject({ name: "notes", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "notes");
+
+    write(path.join(there, "plan.md"), "anya's plan\n");
+    age(path.join(there, "plan.md"), 3600);
+    write(path.join(notes, "plan.md"), "misha's plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+
+    const clash = await syncProject({ dir: there }, anya);
+    expect(clash.conflict).toMatchObject({ theirsPerson: "Misha", kept: { "plan.md": "theirs" } });
+    expect(read(path.join(there, "plan.md"))).toBe("misha's plan\n");
+
+    const back = await resolveConflict({ dir: there, name: "notes", keep: "mine" }, anya);
+    expect(back).toMatchObject({ ok: true, conflict: null });
+    expect(read(path.join(there, "plan.md"))).toBe("anya's plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    expect(read(path.join(notes, "plan.md"))).toBe("anya's plan\n");
+  });
+
+  it("in a repository too: the one who only pulls hears who replaced their file", async () => {
+    const { misha, anya } = people();
+    const repo = misha.folder("repo");
+    fs.mkdirSync(repo);
+    const signed = (at: Computer, name: string) => {
+      write(path.join(at.home, ".gitconfig"), `[user]\n\tname = ${name}\n\temail = t@e.co\n`);
+    };
+    signed(misha, "Misha");
+    signed(anya, "Anya");
+    const save = (at: Computer, dir: string, text: string) => {
+      write(path.join(dir, "plan.md"), text);
+      spawnSync("git", ["add", "plan.md"], { cwd: dir, env: at.env });
+      spawnSync("git", ["commit", "-q", "-m", "plan"], { cwd: dir, env: at.env });
+    };
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, env: misha.env });
+    save(misha, repo, "plan\n");
+    await syncProject({ dir: repo, name: "repo" }, misha);
+    await getProject({ name: "repo", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "repo");
+
+    save(misha, repo, "misha's\n");
+    await syncProject({ dir: repo, name: "repo" }, misha);
+    save(anya, there, "anya's\n");
+    const anyas = await syncProject({ dir: there }, anya);
+    expect(anyas.conflict).toMatchObject({ theirsPerson: "Misha" });
+
+    const mishas = await syncProject({ dir: repo, name: "repo" }, misha);
+    expect(read(path.join(repo, "plan.md"))).toBe("anya's\n");
+    expect(mishas.conflict).toMatchObject({ theirsPerson: "Anya", kept: { "plan.md": "theirs" } });
+  });
+
+  it("one person's two computers don't get told about themselves", async () => {
+    const laptop = { ...computer("laptop"), person: "Misha" };
+    const desk = { ...computer("desk"), person: "Misha" };
+    const notes = laptop.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    await sync(laptop, notes, "notes");
+    await getProject({ name: "notes" }, desk);
+    const there = path.join(desk.home, "projects", "notes");
+
+    write(path.join(notes, "plan.md"), "from the laptop\n");
+    await sync(laptop, notes, "notes");
+    write(path.join(there, "plan.md"), "from the desk\n");
+    const clash = await sync(desk, there, "notes");
+    expect(clash.conflict).toMatchObject({ theirsPerson: null });
+
+    const after = await sync(laptop, notes, "notes");
+    expect(after).toMatchObject({ state: "synced", conflict: null });
+    const log = gitIn(notes, { ...laptop.env, GIT_DIR: snapshotGitDir(notes) }, "log", "--all");
+    expect(log).not.toContain("Uno-Kept-Over");
+  });
+
+  it("a colleague's merge that didn't touch this person's file says nothing to them", async () => {
+    const { misha, anya } = people();
+    const boris = { ...computer("boris"), person: "Boris" };
+    const notes = misha.folder("notes");
+    write(path.join(notes, "plan.md"), "plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    await getProject({ name: "notes", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "notes");
+    await getProject(
+      { name: "notes", team: TEAM },
+      {
+        ...boris,
+        env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
+      },
+    );
+    const his = path.join(boris.home, "projects", "notes");
+
+    write(path.join(notes, "plan.md"), "misha's plan\n");
+    await syncProject({ dir: notes, name: "notes" }, misha);
+    write(path.join(there, "plan.md"), "anya's plan\n");
+    await syncProject({ dir: there }, anya);
+
+    const seen = await syncProject(
+      { dir: his },
+      {
+        ...boris,
+        env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
+      },
+    );
+    expect(seen).toMatchObject({ ok: true, state: "synced", conflict: null });
   });
 });

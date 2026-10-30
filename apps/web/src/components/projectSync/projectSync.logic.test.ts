@@ -12,6 +12,7 @@ import {
   fileCount,
   groupVersions,
   hostLine,
+  mineWasReplaced,
   nameList,
   projectKeyCount,
   refreshEveryMs,
@@ -124,6 +125,31 @@ describe("a conflict with another person", () => {
     expect(conflictLine(conflict("mine"))).toBe(
       "Anya changed the same file. Yours stays here, and theirs is saved.",
     );
+  });
+});
+
+describe("a project shared with this person", () => {
+  it("says whose it is", () => {
+    const shared = { team: { id: 12, owner: "misha" } };
+    expect(syncLabel(entry({ ...shared, state: "synced", lastSyncedAt: null }))).toBe(
+      "Shared by misha.",
+    );
+    expect(syncLabel(entry({ ...shared, state: "empty" }))).toBe(
+      "Shared by misha. Nothing to sync yet.",
+    );
+  });
+
+  it("offers Bring mine back only when a file here is someone else's version", () => {
+    const conflict = (side: "mine" | "theirs") => ({
+      files: ["plan.md"],
+      kept: { "plan.md": side },
+      from: null,
+      person: "Anya",
+      at: "",
+    });
+    expect(mineWasReplaced(conflict("theirs"))).toBe(true);
+    expect(mineWasReplaced(conflict("mine"))).toBe(false);
+    expect(mineWasReplaced(null)).toBe(false);
   });
 });
 

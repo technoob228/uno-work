@@ -35,7 +35,7 @@ import { toastManager } from "../ui/toast";
 import { ProjectFiles } from "./ProjectFiles";
 import { ProjectTeam } from "./ProjectTeam";
 import { ProjectVersions } from "./ProjectVersions";
-import { conflictLine, hostLine, syncLabel } from "./projectSync.logic";
+import { conflictLine, hostLine, mineWasReplaced, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
 
 export interface ProjectSettingsTarget {
@@ -215,18 +215,20 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             >
               <p className="text-foreground">⚠ {conflictLine(entry)}</p>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={working !== null}
-                  onClick={() =>
-                    void act("mine", () =>
-                      api!.projectSync.resolve({ projectId: target.projectId, keep: "mine" }),
-                    )
-                  }
-                >
-                  {entry.conflict?.person ? "Bring mine back" : "Keep mine"}
-                </Button>
+                {entry.conflict?.person && !mineWasReplaced(entry.conflict) ? null : (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={working !== null}
+                    onClick={() =>
+                      void act("mine", () =>
+                        api!.projectSync.resolve({ projectId: target.projectId, keep: "mine" }),
+                      )
+                    }
+                  >
+                    {entry.conflict?.person ? "Bring mine back" : "Keep mine"}
+                  </Button>
+                )}
                 <Button
                   size="xs"
                   variant="outline"
@@ -260,7 +262,9 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
           <>
             <ProjectVersions target={target} onRestored={syncRefreshed} />
             <ProjectFiles target={target} keyCount={keys.data?.secrets.length ?? 0} />
-            {entry?.name ? <ProjectTeam syncName={entry.name} /> : null}
+            {entry?.name ? (
+              <ProjectTeam syncName={entry.name} teamId={entry.team?.id ?? null} />
+            ) : null}
           </>
         ) : null}
 
@@ -270,9 +274,11 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             Keys
           </div>
           <p className="text-xs text-muted-foreground">
-            {keys.data?.synced
-              ? PROJECT_KEYS_LINE
-              : "API keys and tokens of this project, in its .env on this computer. Turn on On all my computers and they travel with the project, never in its files."}
+            {entry?.team
+              ? `${entry.team.owner} chooses which keys you get. They land in this project's .env on this computer. A key you add here stays here.`
+              : keys.data?.synced
+                ? PROJECT_KEYS_LINE
+                : "API keys and tokens of this project, in its .env on this computer. Turn on On all my computers and they travel with the project, never in its files."}
           </p>
           {keys.data?.vaultError ? (
             <p className="text-xs text-amber-600">{keys.data.vaultError}</p>
@@ -287,17 +293,23 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
                     {secret.name}
                   </code>
                   <span className="shrink-0 text-muted-foreground">
-                    {secret.inVault ? "all computers" : "this computer"}
+                    {secret.inVault
+                      ? entry?.team
+                        ? `from ${entry.team.owner}`
+                        : "all computers"
+                      : "this computer"}
                   </span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${secret.name}`}
-                    disabled={working !== null}
-                    onClick={() => void removeKey(secret.name)}
-                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                  >
-                    <TrashIcon className="size-3.5" />
-                  </button>
+                  {entry?.team && secret.inVault ? null : (
+                    <button
+                      type="button"
+                      aria-label={`Remove ${secret.name}`}
+                      disabled={working !== null}
+                      onClick={() => void removeKey(secret.name)}
+                      className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <TrashIcon className="size-3.5" />
+                    </button>
+                  )}
                 </li>
               ))
             )}

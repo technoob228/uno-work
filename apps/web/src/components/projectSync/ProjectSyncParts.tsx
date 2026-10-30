@@ -92,6 +92,10 @@ export function ProjectSyncMark(props: { entry: ProjectSyncEntry | null; onOpen:
   );
 }
 
+/** A shared project arrived. */
+export const SHARED_PROJECT_HERE =
+  "Your changes and theirs go both ways. Keys you were given are in its .env.";
+
 /** "Projects on your other computers": cloud projects this computer doesn't have yet. */
 export function ProjectsElsewhere(props: {
   environmentId: EnvironmentId;
@@ -100,17 +104,25 @@ export function ProjectsElsewhere(props: {
   const refresh = useRefreshProjectSync();
   const [busy, setBusy] = useState<string | null>(null);
   if (props.projects.length === 0) return null;
-  const getHere = async (name: string) => {
+  const rowOf = (project: ProjectSyncElsewhere) =>
+    project.team ? `team:${project.team.id}` : project.name;
+  const getHere = async (project: ProjectSyncElsewhere) => {
     const api = readEnvironmentApi(props.environmentId);
     if (!api) return;
-    setBusy(name);
+    const { name, team } = project;
+    setBusy(rowOf(project));
     try {
-      const result = await api.projectSync.getHere({ name });
+      const result = await api.projectSync.getHere({
+        name,
+        ...(team ? { teamId: team.id } : {}),
+      });
       refresh(props.environmentId, result.entry);
       toastManager.add({
         type: "success",
         title: `${name} is on this computer`,
-        description: "It stays the same on all your computers. Its keys came with it.",
+        description: team
+          ? SHARED_PROJECT_HERE
+          : "It stays the same on all your computers. Its keys came with it.",
       });
     } catch (error) {
       toastManager.add({
@@ -132,7 +144,7 @@ export function ProjectsElsewhere(props: {
       </li>
       {props.projects.map((project) => (
         <li
-          key={project.name}
+          key={rowOf(project)}
           className="group/elsewhere list-none"
           data-testid="sidebar-project-elsewhere"
         >
@@ -148,10 +160,10 @@ export function ProjectsElsewhere(props: {
             <button
               type="button"
               disabled={busy !== null}
-              onClick={() => void getHere(project.name)}
+              onClick={() => void getHere(project)}
               className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs text-foreground/80 hover:bg-accent disabled:cursor-wait disabled:opacity-60"
             >
-              {busy === project.name ? (
+              {busy === rowOf(project) ? (
                 <RefreshCwIcon className="size-3 animate-spin" />
               ) : (
                 <CloudDownloadIcon className="size-3" />

@@ -1697,8 +1697,8 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.projectSyncResolve, projectSync.resolve(projectId, keep), {
             "rpc.aggregate": "projectSync",
           }),
-        [WS_METHODS.projectSyncGetHere]: ({ name }) =>
-          observeRpcEffect(WS_METHODS.projectSyncGetHere, projectSync.getHere(name), {
+        [WS_METHODS.projectSyncGetHere]: ({ name, teamId }) =>
+          observeRpcEffect(WS_METHODS.projectSyncGetHere, projectSync.getHere(name, teamId), {
             "rpc.aggregate": "projectSync",
           }),
         [WS_METHODS.projectSyncOpened]: ({ projectId }) =>

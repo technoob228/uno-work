@@ -67,6 +67,15 @@ export const ProjectSyncHost = Schema.Struct({
 });
 export type ProjectSyncHost = typeof ProjectSyncHost.Type;
 
+/** A project someone shared with this person: it lives in the owner's Uno cloud. */
+export const ProjectSyncTeam = Schema.Struct({
+  /** The console's project id (`/api/v1/work/team/projects/{id}`). */
+  id: Schema.Number,
+  /** How the owner is called. */
+  owner: Schema.String,
+});
+export type ProjectSyncTeam = typeof ProjectSyncTeam.Type;
+
 export const ProjectSyncEntry = Schema.Struct({
   projectId: ProjectId,
   enabled: Schema.Boolean,
@@ -85,6 +94,8 @@ export const ProjectSyncEntry = Schema.Struct({
   held: Schema.optional(Schema.Array(Schema.String)),
   /** Set for a project that also lives in a GitHub or GitLab repository. */
   host: Schema.optional(Schema.NullOr(ProjectSyncHost)),
+  /** Set for a project someone else owns. */
+  team: Schema.optional(Schema.NullOr(ProjectSyncTeam)),
 });
 export type ProjectSyncEntry = typeof ProjectSyncEntry.Type;
 
@@ -95,6 +106,8 @@ export const ProjectSyncElsewhere = Schema.Struct({
   /** The computer that saved it last, when known. */
   from: Schema.NullOr(Schema.String),
   mode: ProjectSyncMode,
+  /** Set for a project someone shared with this person. */
+  team: Schema.optional(Schema.NullOr(ProjectSyncTeam)),
 });
 export type ProjectSyncElsewhere = typeof ProjectSyncElsewhere.Type;
 
@@ -221,6 +234,8 @@ export type ProjectSyncSetLocalOnlyInput = typeof ProjectSyncSetLocalOnlyInput.T
 
 export const ProjectSyncGetHereInput = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  /** The project's team: it is someone else's, shared with this person. */
+  teamId: Schema.optional(Schema.Number),
 });
 export type ProjectSyncGetHereInput = typeof ProjectSyncGetHereInput.Type;
 
