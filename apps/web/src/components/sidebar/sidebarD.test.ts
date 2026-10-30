@@ -8,6 +8,7 @@ import {
   foldedGroupChats,
   foldedProjectMark,
   groupChatsByStatusForSidebarD,
+  withoutWorkingChats,
   groupChatsForSidebarD,
   isHomePath,
   isRunningStatus,
@@ -214,7 +215,30 @@ describe("sidebar D grouped by status", () => {
       chats: section.chats.map((chat) => chat.id),
     }));
 
-  it("puts what waits for the person first, then failed, working and the rest", () => {
+  it("keeps the open chat when working chats are hidden, and all that waits or is done", () => {
+    const chats: ReadonlyArray<{ id: string; mark: DRowMark }> = [
+      { id: "running", mark: "working" },
+      { id: "running-open", mark: "working" },
+      { id: "question", mark: "input" },
+      { id: "approval", mark: "approval" },
+      { id: "turn", mark: "your-turn" },
+      { id: "idle", mark: null },
+    ];
+    const shown = withoutWorkingChats({
+      chats,
+      markOf: (chat) => chat.mark,
+      isOpen: (chat) => chat.id === "running-open",
+    });
+    expect(shown.map((chat) => chat.id)).toEqual([
+      "running-open",
+      "question",
+      "approval",
+      "turn",
+      "idle",
+    ]);
+  });
+
+  it("puts what waits for the person first, then failed, the rest, and working last", () => {
     expect(
       byStatus([
         { id: "idle-1", mark: null },
@@ -229,8 +253,8 @@ describe("sidebar D grouped by status", () => {
       { id: "needs-you", label: "Needs you", chats: ["question", "approval"] },
       { id: "your-turn", label: "Ready", chats: ["turn"] },
       { id: "failed", label: "Failed", chats: ["failed-1"] },
-      { id: "working", label: "Working", chats: ["working-1"] },
       { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },
+      { id: "working", label: "Working", chats: ["working-1"] },
     ]);
   });
 

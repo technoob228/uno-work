@@ -767,6 +767,34 @@ export function GeneralSettingsPanel({
         )}
 
         <SettingsRow
+          title="Hide working chats"
+          description="In the sidebar's view by status, chats an agent is working on stay out of the way. The open chat and chats waiting for you still show."
+          resetAction={
+            settings.sidebarHideWorkingChats !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarHideWorkingChats ? (
+              <SettingResetButton
+                label="working chats"
+                onClick={() =>
+                  updateSettings({
+                    sidebarHideWorkingChats: DEFAULT_UNIFIED_SETTINGS.sidebarHideWorkingChats,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarHideWorkingChats}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarHideWorkingChats: Boolean(checked) })
+              }
+              aria-label="Hide working chats"
+              data-testid="settings-sidebar-hide-working"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Time format"
           description="System default follows your browser or OS clock preference."
           resetAction={

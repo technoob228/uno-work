@@ -147,7 +147,10 @@ export interface DStatusSection<T> {
   readonly chats: ReadonlyArray<T>;
 }
 
-/** Top to bottom: what waits for the person, what broke, what runs, the rest. */
+/**
+ * Top to bottom: what waits for the person, what broke, the rest, and at the
+ * very bottom what runs: it needs nothing from the person (Misha 30.10).
+ */
 export const STATUS_SECTIONS: ReadonlyArray<{
   readonly id: DStatusSectionId;
   readonly label: string;
@@ -155,8 +158,8 @@ export const STATUS_SECTIONS: ReadonlyArray<{
   { id: "needs-you", label: "Needs you" },
   { id: "your-turn", label: "Ready" },
   { id: "failed", label: "Failed" },
-  { id: "working", label: "Working" },
   { id: "idle", label: "Idle" },
+  { id: "working", label: "Working" },
 ];
 
 export function statusSectionOf(mark: DRowMark): DStatusSectionId {
@@ -192,6 +195,18 @@ export function groupChatsByStatusForSidebarD<T>(input: {
     const chats = bySection.get(section.id);
     return chats ? [{ id: section.id, label: section.label, chats }] : [];
   });
+}
+
+/**
+ * "Hide working chats": the status view without its Working section. The chat
+ * on screen stays, wherever it is; one waiting for the person has its own mark.
+ */
+export function withoutWorkingChats<T>(input: {
+  readonly chats: ReadonlyArray<T>;
+  readonly markOf: (chat: T) => DRowMark;
+  readonly isOpen: (chat: T) => boolean;
+}): ReadonlyArray<T> {
+  return input.chats.filter((chat) => input.markOf(chat) !== "working" || input.isOpen(chat));
 }
 
 /**

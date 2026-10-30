@@ -246,6 +246,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // always in the sidebar with their chats, then Recents. On — inbox: the
   // chats by status (Needs you, Your turn, Failed, Working, Idle, Snoozed).
   sidebarInboxMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Status view: no Working section (Misha 30.10: running chats don't need the
+  // person). The open chat stays; a chat waiting for the person is not "working".
+  sidebarHideWorkingChats: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // How the sidebar groups chats since 0.0.138 (Misha 16.10): project,
   // status, computer in the order picked; [] — one list, newest first. Null —
   // not chosen yet: `sidebarInboxMode` above decides (status or project).
@@ -1102,6 +1105,7 @@ export const ClientSettingsPatch = Schema.Struct({
     ),
   ),
   sidebarEnvironmentScope: Schema.optionalKey(SidebarEnvironmentScope),
+  sidebarHideWorkingChats: Schema.optionalKey(Schema.Boolean),
   sidebarGroupLevels: Schema.optionalKey(Schema.NullOr(Schema.Array(SidebarGroupLevel))),
   sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
   sidebarMachineSortOrder: Schema.optionalKey(SidebarMachineSortOrder),

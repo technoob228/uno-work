@@ -293,6 +293,7 @@ import {
   previewDGroup,
   groupChatsByStatusForSidebarD,
   STATUS_SECTIONS,
+  withoutWorkingChats,
   statusSectionOf,
   type DGroupPreview,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
@@ -2374,13 +2375,26 @@ export default function Sidebar() {
     return activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread)));
   }, [activeThreads, dGroups.unoRunning]);
   // Flag off, inbox: the same live chats by status (0.0.137).
+  const dHideWorkingChats = useSettings((settings) => settings.sidebarHideWorkingChats);
+  const dStatusViewChats = useCallback(
+    (chats: ReadonlyArray<SidebarThreadSummary>) =>
+      dHideWorkingChats
+        ? withoutWorkingChats({
+            chats,
+            markOf: (thread) =>
+              dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+            isOpen: (thread) => threadKeyOf(thread) === routeThreadKey,
+          })
+        : chats,
+    [dHideWorkingChats, now, routeThreadKey],
+  );
   const dLegacyStatusSections = useMemo(() => {
     if (!dLegacyInbox) return [];
     return groupChatsByStatusForSidebarD({
-      chats: dLiveChats,
+      chats: dStatusViewChats(dLiveChats),
       markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
     });
-  }, [dLegacyInbox, dLiveChats, now]);
+  }, [dLegacyInbox, dLiveChats, dStatusViewChats, now]);
   // Filters (a choice of this device): some projects, some computers; null — all.
   const [dStoredProjectPicks, setDProjectPicks] = useLocalStorage<
     ReadonlyArray<string> | null,
@@ -2474,7 +2488,7 @@ export default function Sidebar() {
       !sidebarViewMenu
         ? null
         : groupSidebarChats({
-            chats: dShownChats,
+            chats: dLevels.includes("status") ? dStatusViewChats(dShownChats) : dShownChats,
             levels: dLevels,
             keyOf: {
               computer: (thread) => thread.environmentId,
@@ -2524,6 +2538,7 @@ export default function Sidebar() {
       dProjectInfo,
       dProjectPicks,
       dShownChats,
+      dStatusViewChats,
       now,
       sidebarViewMenu,
     ],
