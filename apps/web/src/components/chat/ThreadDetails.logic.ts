@@ -64,7 +64,7 @@ export function primaryPullRequest(
 ): ThreadPullRequest | null {
   const all = links ?? [];
   if (all.length === 0) return null;
-  const byNewest = [...all].sort((a, b) => b.linkedAt.localeCompare(a.linkedAt));
+  const byNewest = all.toSorted((a, b) => b.linkedAt.localeCompare(a.linkedAt));
   return byNewest.find((link) => link.snapshot?.state === "open") ?? byNewest[0] ?? null;
 }
 

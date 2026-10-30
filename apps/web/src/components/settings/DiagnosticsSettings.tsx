@@ -19,7 +19,7 @@ import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
 function formatDuration(value: number): string {
   if (value < 1_000) return `${Math.round(value)} ms`;
-  return `${(value / 1_000).toFixed(value >= 10_000 ? 1 : 2)} s`;
+  return `${Number((value / 1_000).toFixed(value >= 10_000 ? 0 : 1))} s`;
 }
 
 function formatTime(value: DateTime.Utc): string {
@@ -181,7 +181,9 @@ export function DiagnosticsSettingsPanel(props: { readonly environmentId: Enviro
       return connection.client.server.getTraceDiagnostics();
     },
     staleTime: 30_000,
-    retry: false,
+    // Opened directly, the page is ahead of the computer's connection.
+    retry: 4,
+    retryDelay: 1_500,
   });
   const data = query.data ?? null;
   const fileError = data ? Option.getOrNull(data.error) : null;
