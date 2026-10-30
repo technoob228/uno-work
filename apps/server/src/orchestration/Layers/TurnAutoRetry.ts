@@ -1,4 +1,5 @@
 import { CommandId, MessageId, type ThreadId } from "@t3tools/contracts";
+import { isPlanLimitText } from "@t3tools/shared/planLimitRules";
 import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import {
   decideTurnAutoRetry,
@@ -179,9 +180,11 @@ export const makeTurnAutoRetryLayer = (options: TurnAutoRetryLayerOptions = {}) 
           if (chain.pending !== null) return chain.pending.decision;
           // Billing words never read as busy / didn't answer, but a top-up
           // page in the same message must win over a stray "429".
-          const decision: TurnAutoRetryDecision = isUnoBillingErrorDetail(error)
-            ? { retry: false, reason: "not-retryable" }
-            : decideTurnAutoRetry({ error, attemptsUsed: chain.attemptsUsed });
+          // Nor does retrying help a plan at its limit: planResume/ waits for the reset.
+          const decision: TurnAutoRetryDecision =
+            isUnoBillingErrorDetail(error) || isPlanLimitText(error)
+              ? { retry: false, reason: "not-retryable" }
+              : decideTurnAutoRetry({ error, attemptsUsed: chain.attemptsUsed });
           if (!decision.retry) {
             chains.delete(threadId);
             if (decision.reason === "attempts-used") {

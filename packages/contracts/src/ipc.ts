@@ -64,6 +64,10 @@ import type {
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ProviderAuthJobStatus,
+  ProviderAccountAddInput,
+  ProviderAccountAddResult,
+  ProviderAccountRemoveInput,
+  ProviderAccountRemoveResult,
   ProviderAuthCancelInput,
   ProviderAuthCancelResult,
   ProviderAuthSignOutInput,
@@ -234,7 +238,12 @@ import type {
   UnoAiSpend,
   UnoAiStatus,
 } from "./appSdk.ts";
-import type { PlanLimits, PlanLimitsInput } from "./planLimits.ts";
+import type {
+  PlanLimits,
+  PlanLimitsInput,
+  PlanResumeCancelInput,
+  PlanResumeCancelResult,
+} from "./planLimits.ts";
 import type {
   UnoComputerResources,
   UnoDiskCleanInput,
@@ -1023,6 +1032,11 @@ export interface EnvironmentApi {
     appAiStatus: () => Promise<UnoAiStatus>;
     /** Home's "AI plan limits": this computer's Claude / ChatGPT plan sign-ins and their limits. */
     planLimits: (input: PlanLimitsInput) => Promise<PlanLimits>;
+    planResumeCancel: (input: PlanResumeCancelInput) => Promise<PlanResumeCancelResult>;
+    providerAccountAdd: (input: ProviderAccountAddInput) => Promise<ProviderAccountAddResult>;
+    providerAccountRemove: (
+      input: ProviderAccountRemoveInput,
+    ) => Promise<ProviderAccountRemoveResult>;
     /** The person's sites on Uno Hosting, read by this computer's daemon. */
     workSites: () => Promise<UnoWorkSites>;
     /** Take one of the person's sites off the internet (their click, with a confirm). */

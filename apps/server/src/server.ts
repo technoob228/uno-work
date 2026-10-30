@@ -72,6 +72,7 @@ import { UnoComputerServiceLive } from "./workspaceRegistry/UnoComputerService.t
 import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
 import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
 import { PlanLimitsServiceLive } from "./planLimits/PlanLimitsService.ts";
+import { PlanResumeLive } from "./planResume/PlanResumeService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
 import { HarnessSetupLive } from "./provider/setup/HarnessSetupService.ts";
@@ -479,6 +480,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // place on SIGUSR2 from uno-work-identity (cloneIdentity.ts).
       CloneIdentityRotationLive,
       ReminderSchedulerLive,
+      // A chat stopped at the plan's limit goes on after the reset; needs the
+      // engine and plan limits provided further down this pipe.
+      PlanResumeLive,
       SelfWatchdogLive,
       // Economy mode: tells the console what is going on inside (clients,
       // agent turns, always-on apps, next reminder); needs auth sessions,

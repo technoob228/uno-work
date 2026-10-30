@@ -171,6 +171,10 @@
     "./turnErrorRetry": {
       "types": "./src/turnErrorRetry.ts",
       "import": "./src/turnErrorRetry.ts"
+    },
+    "./planLimitRules": {
+      "types": "./src/planLimitRules.ts",
+      "import": "./src/planLimitRules.ts"
     }
   },
   "scripts": {

@@ -13,7 +13,8 @@
  */
 import { Schema } from "effect";
 
-import { ProviderDriverKind } from "./providerInstance.ts";
+import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 export const ProviderSetupJobId = Schema.String.pipe(Schema.brand("ProviderSetupJobId"));
 export type ProviderSetupJobId = typeof ProviderSetupJobId.Type;
@@ -100,6 +101,8 @@ export const ProviderAuthStartInput = Schema.Struct({
    * code are still good). True drops it and starts from scratch.
    */
   restart: Schema.optional(Schema.Boolean),
+  /** A second account's instance; absent: the harness's default sign-in. */
+  instanceId: Schema.optional(ProviderInstanceId),
 });
 export type ProviderAuthStartInput = typeof ProviderAuthStartInput.Type;
 
@@ -151,6 +154,7 @@ export type ProviderAuthSubmitCodeInput = typeof ProviderAuthSubmitCodeInput.Typ
 /** Stop a sign-in that is waiting for its browser half. */
 export const ProviderAuthCancelInput = Schema.Struct({
   driver: ProviderAuthDriver,
+  instanceId: Schema.optional(ProviderInstanceId),
 });
 export type ProviderAuthCancelInput = typeof ProviderAuthCancelInput.Type;
 
@@ -172,6 +176,7 @@ export type ProviderAuthCancelResult = typeof ProviderAuthCancelResult.Type;
  */
 export const ProviderAuthSignOutInput = Schema.Struct({
   driver: ProviderAuthDriver,
+  instanceId: Schema.optional(ProviderInstanceId),
 });
 export type ProviderAuthSignOutInput = typeof ProviderAuthSignOutInput.Type;
 
@@ -182,3 +187,40 @@ export const ProviderAuthSignOutResult = Schema.Struct({
   error: Schema.optional(Schema.String),
 });
 export type ProviderAuthSignOutResult = typeof ProviderAuthSignOutResult.Type;
+
+/* ------------------------------------------------------------------ *
+ * A second account of the same provider on one computer
+ * ------------------------------------------------------------------ */
+
+/**
+ * Add a provider instance with its own sign-in folder (Claude:
+ * `CLAUDE_CONFIG_DIR`, Codex: a shadow `CODEX_HOME`). Refused unless
+ * `multipleAccounts` is on. Signing in is the usual `authStart` with
+ * `instanceId`. The tokens stay in that folder (on a Mac, Claude Code's own
+ * Keychain item for it); nothing about them goes to settings or the database.
+ */
+export const ProviderAccountAddInput = Schema.Struct({
+  driver: ProviderAuthDriver,
+  /** "Personal", "Work" — the name in the model picker. */
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
+});
+export type ProviderAccountAddInput = typeof ProviderAccountAddInput.Type;
+
+export const ProviderAccountAddResult = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  displayName: TrimmedNonEmptyString,
+});
+export type ProviderAccountAddResult = typeof ProviderAccountAddResult.Type;
+
+/** Sign the account out, drop its folder and its instance. */
+export const ProviderAccountRemoveInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+});
+export type ProviderAccountRemoveInput = typeof ProviderAccountRemoveInput.Type;
+
+export const ProviderAccountRemoveResult = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  removed: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+});
+export type ProviderAccountRemoveResult = typeof ProviderAccountRemoveResult.Type;

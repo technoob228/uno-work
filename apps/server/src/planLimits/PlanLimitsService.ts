@@ -25,8 +25,15 @@ import {
 } from "./planLimitsReader.ts";
 
 export interface PlanLimitsServiceShape {
-  /** Never fails: a computer without sign-ins has no accounts. */
-  readonly read: (input: PlanLimitsInput) => Effect.Effect<PlanLimits>;
+  /**
+   * Never fails: a computer without sign-ins has no accounts. `maxAgeMs`: how
+   * old the numbers may be when this read has a reason to want them fresher
+   * than the 5-minute cache (a chat just stopped at the limit).
+   */
+  readonly read: (
+    input: PlanLimitsInput,
+    options?: { readonly maxAgeMs?: number },
+  ) => Effect.Effect<PlanLimits>;
 }
 
 export class PlanLimitsService extends Context.Service<PlanLimitsService, PlanLimitsServiceShape>()(
@@ -44,12 +51,16 @@ export const makePlanLimitsService = () =>
       }),
     );
 
-    const read: PlanLimitsServiceShape["read"] = (input) =>
+    const read: PlanLimitsServiceShape["read"] = (input, options) =>
       settings.getSettings.pipe(
         Effect.map((current) => planLimitsHomes(current, os.homedir(), process.env)),
         Effect.flatMap((homes) =>
           Effect.promise(() =>
-            reader.read({ homes, ...(input.signInsOnly ? { signInsOnly: true } : {}) }),
+            reader.read({
+              homes,
+              ...(input.signInsOnly ? { signInsOnly: true } : {}),
+              ...(options?.maxAgeMs !== undefined ? { maxAgeMs: options.maxAgeMs } : {}),
+            }),
           ),
         ),
         Effect.orElseSucceed((): PlanLimits => ({ accounts: [] })),

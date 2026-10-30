@@ -127,6 +127,8 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantConversations: true,
       assistantSandbox,
       planLimits: true,
+      planResume: true,
+      providerAccounts: true,
       worktreeCleanup: true,
     },
   } satisfies Omit<

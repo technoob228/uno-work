@@ -39,7 +39,12 @@ import {
   UnoAiStatus,
 } from "./appSdk.ts";
 import { InboxError, InboxSnapshot, InboxUpdateInput } from "./inbox.ts";
-import { PlanLimits, PlanLimitsInput } from "./planLimits.ts";
+import {
+  PlanLimits,
+  PlanLimitsInput,
+  PlanResumeCancelInput,
+  PlanResumeCancelResult,
+} from "./planLimits.ts";
 import { OpenError, OpenInEditorInput } from "./editor.ts";
 import {
   UnoComputerActivity,
@@ -233,6 +238,10 @@ import {
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProviderAuthJobStatus,
+  ProviderAccountAddInput,
+  ProviderAccountAddResult,
+  ProviderAccountRemoveInput,
+  ProviderAccountRemoveResult,
   ProviderAuthCancelInput,
   ProviderAuthCancelResult,
   ProviderAuthSignOutInput,
@@ -528,6 +537,9 @@ export const WS_METHODS = {
   appAiSpend: "uno.appAi.spend",
   appAiStatus: "uno.appAi.status",
   unoComputerPlanLimits: "uno.computer.planLimits",
+  unoComputerPlanResumeCancel: "uno.computer.planResumeCancel",
+  unoComputerProviderAccountAdd: "uno.computer.providerAccountAdd",
+  unoComputerProviderAccountRemove: "uno.computer.providerAccountRemove",
   workSites: "uno.sites.list",
   workSiteUnpublish: "uno.sites.unpublish",
   appAiModels: "uno.appAi.models",
@@ -2099,6 +2111,30 @@ export const WsUnoComputerPlanLimitsRpc = Rpc.make(WS_METHODS.unoComputerPlanLim
   error: UnoCloudRpcError,
 });
 
+export const WsUnoComputerPlanResumeCancelRpc = Rpc.make(WS_METHODS.unoComputerPlanResumeCancel, {
+  payload: PlanResumeCancelInput,
+  success: PlanResumeCancelResult,
+  error: UnoCloudRpcError,
+});
+
+export const WsUnoComputerProviderAccountAddRpc = Rpc.make(
+  WS_METHODS.unoComputerProviderAccountAdd,
+  {
+    payload: ProviderAccountAddInput,
+    success: ProviderAccountAddResult,
+    error: ProviderSetupRpcError,
+  },
+);
+
+export const WsUnoComputerProviderAccountRemoveRpc = Rpc.make(
+  WS_METHODS.unoComputerProviderAccountRemove,
+  {
+    payload: ProviderAccountRemoveInput,
+    success: ProviderAccountRemoveResult,
+    error: ProviderSetupRpcError,
+  },
+);
+
 /** The person's sites on Uno Hosting, read by this computer (works on its direct address). */
 export const WsWorkSitesRpc = Rpc.make(WS_METHODS.workSites, {
   payload: Schema.Struct({}),
@@ -2324,6 +2360,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsAppAiSpendRpc,
   WsAppAiStatusRpc,
   WsUnoComputerPlanLimitsRpc,
+  WsUnoComputerPlanResumeCancelRpc,
+  WsUnoComputerProviderAccountAddRpc,
+  WsUnoComputerProviderAccountRemoveRpc,
   WsWorkSitesRpc,
   WsWorkSiteUnpublishRpc,
   WsAppAiModelsRpc,
