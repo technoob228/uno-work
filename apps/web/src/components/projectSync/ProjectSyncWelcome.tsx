@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
-import { conflictLine, nameList } from "./projectSync.logic";
+import { conflictLine, mineWasReplaced, nameList } from "./projectSync.logic";
 import { useRefreshProjectSync } from "./useProjectSync";
 
 /** One line for the person, not one per computer. */
@@ -88,15 +88,19 @@ export function ProjectSyncWelcome(props: {
         toastManager.add({
           type: "warning",
           title: conflictLine(entry),
-          actionProps: {
-            children: "Bring mine back",
-            onClick: () => {
-              void readEnvironmentApi(environmentId)
-                ?.projectSync.resolve({ projectId: entry.projectId, keep: "mine" })
-                .then((next) => refresh(environmentId, next))
-                .catch(() => onOpenSettings(environmentId, entry.projectId));
-            },
-          },
+          ...(mineWasReplaced(conflict)
+            ? {
+                actionProps: {
+                  children: "Bring mine back",
+                  onClick: () => {
+                    void readEnvironmentApi(environmentId)
+                      ?.projectSync.resolve({ projectId: entry.projectId, keep: "mine" })
+                      .then((next) => refresh(environmentId, next))
+                      .catch(() => onOpenSettings(environmentId, entry.projectId));
+                  },
+                },
+              }
+            : {}),
         });
       }
     }

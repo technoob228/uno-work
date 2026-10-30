@@ -4,16 +4,21 @@
  *
  * @module projectSync/ProjectInvites
  */
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { readEnvironmentApi } from "../../environmentApi";
 import { toastManager } from "../ui/toast";
+import { SHARED_PROJECT_HERE } from "./ProjectSyncParts";
 import { projectTeamsQueryKey } from "./ProjectTeam";
 import { acceptInvite, declineInvite, loadTeams } from "./projectTeam.api";
 import { personLabel, teamErrorMessage, type TeamIncomingInvite } from "./projectTeam.logic";
+import { useRefreshProjectSync } from "./useProjectSync";
 
-export function ProjectInvites() {
+export function ProjectInvites(props: { environmentId: EnvironmentId | null }) {
   const queryClient = useQueryClient();
+  const refresh = useRefreshProjectSync();
   const teams = useQuery({
     queryKey: projectTeamsQueryKey,
     queryFn: loadTeams,
@@ -25,13 +30,42 @@ export function ProjectInvites() {
   const invites = teams.data?.invites ?? [];
   if (invites.length === 0) return null;
 
+  /** Accepted: the project comes to the computer the person is on. */
+  const bringHere = async (item: TeamIncomingInvite) => {
+    const { environmentId } = props;
+    const name = item.project_name;
+    const api = environmentId ? readEnvironmentApi(environmentId) : undefined;
+    if (!environmentId || !api) {
+      toastManager.add({
+        type: "success",
+        title: `You're in ${name}`,
+        description: "Open it from one of your computers to get it there.",
+      });
+      return;
+    }
+    try {
+      const result = await api.projectSync.getHere({ name, teamId: item.project_id });
+      refresh(environmentId, result.entry);
+      toastManager.add({
+        type: "success",
+        title: `${name} is on this computer`,
+        description: SHARED_PROJECT_HERE,
+      });
+    } catch (error) {
+      refresh(environmentId);
+      toastManager.add({
+        type: "info",
+        title: `You're in ${name}`,
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const answer = async (item: TeamIncomingInvite, yes: boolean) => {
     setBusy(item.id);
     try {
       await (yes ? acceptInvite(item.id) : declineInvite(item.id));
-      if (yes) {
-        toastManager.add({ type: "success", title: `You're in ${item.project_name}` });
-      }
+      if (yes) await bringHere(item);
     } catch (error) {
       toastManager.add({
         type: "error",

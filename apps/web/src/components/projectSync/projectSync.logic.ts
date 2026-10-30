@@ -6,6 +6,7 @@
  */
 import type {
   EnvironmentId,
+  ProjectSyncConflict,
   ProjectSyncEntry,
   ProjectSyncHost,
   ProjectSyncSnapshot,
@@ -48,15 +49,18 @@ export function syncLabel(entry: ProjectSyncEntry, now = Date.now()): string {
       return "Syncing…";
     case "synced":
       if ((entry.held?.length ?? 0) > 0) return entry.message;
-      return `On all your computers${entry.lastSyncedAt ? ` · synced ${ago(entry.lastSyncedAt, now)}` : ""}.`;
+      return `${whereItLives(entry)}${entry.lastSyncedAt ? ` · synced ${ago(entry.lastSyncedAt, now)}` : ""}.`;
     case "empty":
-      return "On all your computers. Nothing to sync yet.";
+      return `${whereItLives(entry)}. Nothing to sync yet.`;
     case "conflict":
       return conflictLine(entry);
     default:
       return entry.message || "Couldn't sync.";
   }
 }
+
+const whereItLives = (entry: ProjectSyncEntry) =>
+  entry.team ? `Shared by ${entry.team.owner}` : "On all your computers";
 
 /** Where else the project lives. Git's words only in Dev Mode. */
 export function hostLine(host: ProjectSyncHost, devMode: boolean): string {
@@ -87,6 +91,11 @@ export function conflictLine(entry: ProjectSyncEntry): string {
       ? `The version from ${conflict.from ?? "the other computer"} is kept`
       : "The newer version of each is kept";
   return `${what} changed ${where}. ${kept}; the other one is in the history.`;
+}
+
+/** A file here is someone else's version now: "Bring mine back" has something to bring. */
+export function mineWasReplaced(conflict: ProjectSyncConflict | null | undefined): boolean {
+  return Object.values(conflict?.kept ?? {}).some((side) => side === "theirs");
 }
 
 function ago(iso: string, now: number): string {

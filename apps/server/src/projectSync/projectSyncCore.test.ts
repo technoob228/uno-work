@@ -21,7 +21,7 @@ import {
   type ProjectRef,
   type SyncEngine,
 } from "./projectSyncCore.ts";
-import type { ProjectVault } from "./vaultProjectSecrets.ts";
+import type { ProjectTeams, ProjectVault, SharedProject } from "./vaultProjectSecrets.ts";
 
 let root = "";
 
@@ -61,7 +61,18 @@ function memoryVault() {
   return { vault, projects, reveals };
 }
 
-function computer(label: string, vault: ProjectVault, options?: { readonly cloud?: boolean }) {
+interface ComputerOptions {
+  readonly cloud?: boolean;
+  /** This person's own Uno cloud (default: the one everybody shares in these tests). */
+  readonly ownCloud?: string;
+  /** The owner's cloud behind `uno::team/...`. */
+  readonly teamCloud?: string;
+  readonly person?: string;
+  readonly teams?: ProjectTeams;
+  readonly log?: (message: string, data?: Record<string, unknown>) => void;
+}
+
+function computer(label: string, vault: ProjectVault, options?: ComputerOptions) {
   const home = path.join(root, label);
   const stateDir = path.join(home, ".t3", "userdata");
   fs.mkdirSync(stateDir, { recursive: true });
@@ -73,7 +84,8 @@ function computer(label: string, vault: ProjectVault, options?: { readonly cloud
     PATH: process.env.PATH ?? "",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"),
-    UNO_GIT_FAKE_STORAGE_DIR: path.join(root, "cloud"),
+    UNO_GIT_FAKE_STORAGE_DIR: options?.ownCloud ?? path.join(root, "cloud"),
+    ...(options?.teamCloud ? { UNO_GIT_FAKE_TEAM_STORAGE_DIR: options.teamCloud } : {}),
   };
   const core = createProjectSyncCore({
     home,
@@ -87,9 +99,10 @@ function computer(label: string, vault: ProjectVault, options?: { readonly cloud
       return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
     },
     available: async () => options?.cloud !== false,
-    person: async () => "Misha",
+    person: async () => options?.person ?? "Misha",
     turnRunning: async (projectId) => busy.has(projectId),
     vault,
+    ...(options?.teams ? { teams: options.teams } : {}),
     projects: async () => projects,
     createProject: async (input) => {
       const id = `p-${label}-${projects.length + 1}`;
@@ -102,6 +115,7 @@ function computer(label: string, vault: ProjectVault, options?: { readonly cloud
       now: () => Date.now() + clock.shift,
     },
     log: (_level, message, data) => {
+      options?.log?.(message, data);
       if (process.env.PSYNC_DEBUG) console.log(message, data);
     },
   });
@@ -120,7 +134,7 @@ function computer(label: string, vault: ProjectVault, options?: { readonly cloud
     projects.push({ id, title: name, workspaceRoot: dir, createdAt: at });
     return { id, dir };
   };
-  return { home, core, projects, addProject, addInProjects, busy, clock };
+  return { home, env, core, projects, addProject, addInProjects, busy, clock };
 }
 
 beforeEach(() => {
@@ -574,6 +588,316 @@ describe("chats without a project", { timeout: 120_000 }, () => {
     expect((await a.core.entry("promoted")).enabled).toBe(true);
     expect((await a.core.entry("no-project")).enabled).toBe(false);
     a.core.stop();
+  });
+});
+
+describe("a project shared with this person", { timeout: 120_000 }, () => {
+  const TEAM = 12;
+  const OWNER = { username: "misha", email: "misha@example.com" };
+  const row = (overrides?: Partial<SharedProject>): SharedProject => ({
+    id: TEAM,
+    name: "notes",
+    role: "editor",
+    owner: OWNER,
+    ...overrides,
+  });
+
+  /** What the console keeps for the team: the keys and which of them the owner ticked. */
+  function fakeTeams(rows: ReadonlyArray<SharedProject>) {
+    const keys = new Map<string, { value: string; version: number }>();
+    const given = new Set<string>();
+    const reveals: string[][] = [];
+    const teams: ProjectTeams = {
+      projects: async () => rows,
+      keys: (teamId) => {
+        expect(teamId).toBe(TEAM);
+        return {
+          list: async () =>
+            [...keys]
+              .filter(([name]) => given.has(name))
+              .map(([name, item]) => ({ name, version: item.version, updatedAt: null })),
+          reveal: async (_project, names) => {
+            reveals.push([...(names ?? [])]);
+            return Object.fromEntries(
+              [...keys]
+                .filter(([name]) => given.has(name) && (!names?.length || names.includes(name)))
+                .map(([name, item]) => [name, item.value]),
+            );
+          },
+        };
+      },
+    };
+    return { teams, keys, given, reveals };
+  }
+
+  function people(options?: { readonly rows?: ReadonlyArray<SharedProject> }) {
+    const ownerVault = memoryVault();
+    const anyaVault = memoryVault();
+    const console_ = fakeTeams(options?.rows ?? [row()]);
+    const logged: string[] = [];
+    const misha = computer("misha", ownerVault.vault);
+    const anya = computer("anya", anyaVault.vault, {
+      person: "Anya",
+      ownCloud: path.join(root, "anya-cloud"),
+      teamCloud: path.join(root, "cloud"),
+      teams: console_.teams,
+      log: (message, data) => logged.push(`${message} ${JSON.stringify(data ?? {})}`),
+    });
+    fs.mkdirSync(path.join(root, "anya-cloud"));
+    return { misha, anya, anyaVault, ownerVault, console: console_, logged };
+  }
+
+  async function ownerProject(misha: ReturnType<typeof computer>) {
+    const project = misha.addProject("notes");
+    fs.writeFileSync(path.join(project.dir, "plan.md"), "plan\n");
+    await misha.core.setEnabled(project.id, true);
+    return project;
+  }
+
+  const trackedIn = (dir: string) =>
+    spawnSync("git", ["--git-dir", path.join(dir, ".uno-git"), "ls-tree", "-r", "--name-only", "HEAD"], {
+      encoding: "utf8",
+    }).stdout;
+
+  it("arrives with the keys it was given, in .env and out of git; the rest stay with the owner", async () => {
+    const { misha, anya, console: team } = people();
+    await ownerProject(misha);
+    const secret = "stripe-value-only-in-the-vault";
+    team.keys.set("STRIPE_KEY", { value: secret, version: 3 });
+    team.keys.set("DB_URL", { value: "not-for-anya", version: 1 });
+    team.given.add("STRIPE_KEY");
+
+    const { projectId, entry } = await anya.core.getHere("notes", TEAM);
+
+    expect(entry).toMatchObject({
+      enabled: true,
+      name: "notes",
+      state: "synced",
+      team: { id: TEAM, owner: "misha" },
+    });
+    const there = path.join(anya.home, "projects", "notes");
+    expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("plan\n");
+    expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toBe(`STRIPE_KEY=${secret}\n`);
+    expect(mode(path.join(there, ".env"))).toBe(0o600);
+
+    await anya.core.syncNow(projectId);
+    expect(trackedIn(there)).not.toContain(".env");
+    const cloudFiles = spawnSync("grep", ["-rl", secret, path.join(root, "cloud")], {
+      encoding: "utf8",
+    });
+    expect(cloudFiles.stdout).toBe("");
+  });
+
+  it("syncs both ways and brings newly given keys, asking only for what changed", async () => {
+    const { misha, anya, console: team } = people();
+    const project = await ownerProject(misha);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    const there = path.join(anya.home, "projects", "notes");
+
+    fs.writeFileSync(path.join(there, "from-anya.md"), "hi\n");
+    expect(await anya.core.syncNow(projectId)).toMatchObject({ state: "synced" });
+    await misha.core.syncNow(project.id);
+    expect(fs.readFileSync(path.join(project.dir, "from-anya.md"), "utf8")).toBe("hi\n");
+
+    fs.writeFileSync(path.join(project.dir, "from-misha.md"), "back\n");
+    await misha.core.syncNow(project.id);
+    team.keys.set("STRIPE_KEY", { value: "v1", version: 1 });
+    team.given.add("STRIPE_KEY");
+    await anya.core.syncNow(projectId);
+    expect(fs.readFileSync(path.join(there, "from-misha.md"), "utf8")).toBe("back\n");
+    expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toBe("STRIPE_KEY=v1\n");
+    expect(team.reveals).toEqual([["STRIPE_KEY"]]);
+
+    await anya.core.syncNow(projectId);
+    expect(team.reveals).toHaveLength(1);
+
+    team.keys.set("STRIPE_KEY", { value: "v2", version: 2 });
+    await anya.core.syncNow(projectId);
+    expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toBe("STRIPE_KEY=v2\n");
+  });
+
+  it("keys added here stay here: nothing reaches her vault or the owner's", async () => {
+    const { misha, anya, anyaVault, ownerVault } = people();
+    await ownerProject(misha);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    const there = path.join(anya.home, "projects", "notes");
+
+    await anya.core.setEnabled(projectId, false);
+    fs.writeFileSync(path.join(there, ".env"), "ALREADY_HERE=mine\n");
+    await anya.core.setEnabled(projectId, true);
+    await anya.core.secretSet(projectId, "MY_OWN", "only-here");
+    await anya.core.secretWritten({
+      cwd: there,
+      file: ".env",
+      name: "REQUESTED",
+      value: "asked-for",
+    });
+
+    expect([...anyaVault.projects.values()].flatMap((keys) => [...keys.keys()])).toEqual([]);
+    expect([...ownerVault.projects.values()].flatMap((keys) => [...keys.keys()])).toEqual([]);
+    const list = await anya.core.secretsList(projectId);
+    expect(list.secrets.map((secret) => secret.name)).toEqual(["ALREADY_HERE", "MY_OWN"]);
+    expect(list.secrets.every((secret) => !secret.inVault && secret.inFile)).toBe(true);
+    expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toContain("MY_OWN=only-here");
+  });
+
+  it("a given key can't be removed here, where the next sync would bring it back", async () => {
+    const { misha, anya, console: team } = people();
+    await ownerProject(misha);
+    team.keys.set("STRIPE_KEY", { value: "v1", version: 1 });
+    team.given.add("STRIPE_KEY");
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    await anya.core.secretSet(projectId, "MY_OWN", "mine");
+
+    await expect(anya.core.secretRemove(projectId, "STRIPE_KEY")).rejects.toThrow(
+      /misha gave you this key/,
+    );
+    await anya.core.secretRemove(projectId, "MY_OWN");
+    const there = path.join(anya.home, "projects", "notes");
+    expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toBe("STRIPE_KEY=v1\n");
+  });
+
+  it("shows up on another computer, by the owner's name, until it's here", async () => {
+    const { misha, anya } = people();
+    await ownerProject(misha);
+
+    const seen = await anya.core.status();
+    expect(seen.elsewhere).toEqual([
+      expect.objectContaining({
+        name: "notes",
+        from: "misha",
+        team: { id: TEAM, owner: "misha" },
+      }),
+    ]);
+
+    await anya.core.getHere("notes", TEAM);
+    expect((await anya.core.status()).elsewhere).toEqual([]);
+  });
+
+  it("the owner's own row of a team isn't offered back, and a project with nothing saved waits", async () => {
+    const { misha, anya } = people({
+      rows: [row({ role: "owner" }), row({ id: 13, name: "empty" })],
+    });
+    await ownerProject(misha);
+    expect((await anya.core.status()).elsewhere).toEqual([]);
+    await expect(anya.core.getHere("notes", TEAM)).rejects.toThrow(/isn't shared with you/);
+    await expect(anya.core.getHere("empty", 13)).rejects.toThrow(/Nothing is saved in empty yet/);
+    expect(anya.projects).toEqual([]);
+  });
+
+  it("isn't taken on trust: a project the console doesn't list doesn't come", async () => {
+    const { misha, anya } = people({ rows: [] });
+    await ownerProject(misha);
+    await expect(anya.core.getHere("notes", TEAM)).rejects.toThrow(/isn't shared with you/);
+    expect(anya.projects).toEqual([]);
+  });
+
+  it("with teams off, nothing is different", async () => {
+    const vault = memoryVault();
+    const plain = computer("plain", vault.vault);
+    const off = computer("off", vault.vault, { teams: fakeTeams([]).teams });
+    const project = await ownerProject(plain);
+
+    expect(await off.core.status()).toEqual(await computer("third", vault.vault).core.status());
+    const here = await off.core.getHere("notes");
+    expect(here.entry).toMatchObject({ state: "synced" });
+    expect(here.entry).not.toHaveProperty("team");
+    expect(await plain.core.entry(project.id)).not.toHaveProperty("team");
+  });
+
+  it("a project of their own by the same name stays apart", async () => {
+    const { misha, anya, anyaVault } = people();
+    await ownerProject(misha);
+    const mine = anya.addProject("notes");
+    fs.writeFileSync(path.join(mine.dir, "plan.md"), "my own\n");
+    fs.writeFileSync(path.join(mine.dir, ".env"), "MINE=1\n");
+    await anya.core.setEnabled(mine.id, true);
+
+    // Her own is synced under the same name: the shared one still counts as elsewhere.
+    expect((await anya.core.status()).elsewhere.map((item) => item.team?.id)).toEqual([TEAM]);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    expect(projectId).not.toBe(mine.id);
+    const there = path.join(anya.home, "projects", "notes");
+    expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("plan\n");
+    expect([...(anyaVault.projects.get("notes")?.keys() ?? [])]).toEqual(["MINE"]);
+  });
+
+  it("someone else's change to the same file: the line and Bring mine back, in the real flow", async () => {
+    const { misha, anya } = people();
+    const project = await ownerProject(misha);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    const there = path.join(anya.home, "projects", "notes");
+
+    fs.writeFileSync(path.join(project.dir, "plan.md"), "misha's\n");
+    await misha.core.syncNow(project.id);
+    fs.writeFileSync(path.join(there, "plan.md"), "anya's\n");
+    const anyas = await anya.core.syncNow(projectId);
+    expect(anyas.conflict).toMatchObject({ person: "Misha", kept: { "plan.md": "mine" } });
+
+    const mishas = await misha.core.syncNow(project.id);
+    expect(mishas.state).toBe("conflict");
+    expect(mishas.conflict).toMatchObject({ person: "Anya", kept: { "plan.md": "theirs" } });
+    expect(fs.readFileSync(path.join(project.dir, "plan.md"), "utf8")).toBe("anya's\n");
+
+    const back = await misha.core.resolve(project.id, "mine");
+    expect(back).toMatchObject({ state: "synced", conflict: null });
+    expect(fs.readFileSync(path.join(project.dir, "plan.md"), "utf8")).toBe("misha's\n");
+
+    await anya.core.resolve(projectId, "dismiss");
+    expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("misha's\n");
+  });
+
+  it("names the owner when their storage is full", async () => {
+    const { misha, anya } = people();
+    await ownerProject(misha);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    const there = path.join(anya.home, "projects", "notes");
+
+    anya.env.UNO_GIT_FAKE_FAULTS = "owner-full";
+    fs.writeFileSync(path.join(there, "x.md"), "x\n");
+    const full = await anya.core.syncNow(projectId);
+    expect(full.state).toBe("error");
+    expect(full.message).toBe("misha's Uno cloud storage is full. Ask them to free up space.");
+
+    delete anya.env.UNO_GIT_FAKE_FAULTS;
+    expect(await anya.core.syncNow(projectId)).toMatchObject({ state: "synced" });
+  });
+
+  it("removed from the project: says so, keeps the copy, doesn't touch their own cloud", async () => {
+    const { misha, anya, anyaVault } = people();
+    await ownerProject(misha);
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    const there = path.join(anya.home, "projects", "notes");
+
+    anya.env.UNO_GIT_FAKE_FAULTS = "not-shared";
+    fs.writeFileSync(path.join(there, "plan.md"), "still mine here\n");
+    const gone = await anya.core.syncNow(projectId);
+
+    expect(gone.state).toBe("error");
+    expect(gone.message).toBe(
+      "You no longer have access to this project. Your copy stays on this computer.",
+    );
+    expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("still mine here\n");
+    expect(fs.readdirSync(path.join(root, "anya-cloud"))).toEqual([]);
+    expect([...anyaVault.projects.values()].flatMap((keys) => [...keys.keys()])).toEqual([]);
+  });
+
+  it("no value in logs, in errors, or in what the interface gets", async () => {
+    const secret = "very-secret-value-1234";
+    const { misha, anya, console: team, logged } = people();
+    await ownerProject(misha);
+    team.keys.set("STRIPE_KEY", { value: secret, version: 1 });
+    team.given.add("STRIPE_KEY");
+    const { projectId } = await anya.core.getHere("notes", TEAM);
+    await anya.core.syncNow(projectId);
+
+    const shown = JSON.stringify([
+      await anya.core.status(),
+      await anya.core.entry(projectId),
+      await anya.core.secretsList(projectId),
+    ]);
+    expect(shown).not.toContain(secret);
+    expect(logged.join("\n")).not.toContain(secret);
   });
 });
 

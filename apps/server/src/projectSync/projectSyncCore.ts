@@ -9,6 +9,10 @@
  * A project can also live in a private GitHub or GitLab repository (`host`):
  * it is a git project, and each sync pushes and pulls what's committed there.
  *
+ * A project someone shared with this person (`team`) lives in the owner's Uno
+ * cloud and syncs through the team routes. Its keys only come in: the ones the
+ * owner ticked land in `.env`; a key added here stays here.
+ *
  * Plain promises with every dependency injected (tests use fakes); the
  * Effect service around it is `ProjectSyncService.ts`.
  *
@@ -30,6 +34,7 @@ import {
   type ProjectSyncProjectRef,
   type ProjectSyncSnapshot,
   type ProjectSyncState,
+  type ProjectSyncTeam,
 } from "@t3tools/contracts";
 
 import { NO_PROJECT_FOLDER } from "@t3tools/shared/noProject";
@@ -46,7 +51,7 @@ import {
   type SchedulerTimers,
   type SyncTrigger,
 } from "./projectSyncRules.ts";
-import type { ProjectVault } from "./vaultProjectSecrets.ts";
+import type { ProjectTeams, ProjectVault, SharedProject } from "./vaultProjectSecrets.ts";
 
 // ── The engine, as this module uses it (uno-sync.d.mts) ─────────────────
 
@@ -94,6 +99,7 @@ export interface SyncEngine {
       adopt?: boolean;
       hostRemote?: string | null;
       skipCloud?: boolean;
+      team?: number | null;
     },
     ctx: EngineCtx,
   ) => Promise<EngineResult>;
@@ -104,7 +110,7 @@ export interface SyncEngine {
   ) => Promise<ReadonlyArray<string>>;
   readonly heldFromPublishMessage: (files: ReadonlyArray<string>) => string;
   readonly getProject: (
-    input: { name: string; dir?: string | null },
+    input: { name: string; dir?: string | null; team?: number | null },
     ctx: EngineCtx,
   ) => Promise<EngineResult>;
   readonly resolveConflict: (
@@ -137,6 +143,14 @@ export interface SyncEngine {
       readonly mode: ProjectSyncMode;
     }>
   >;
+  readonly peekSharedProject: (
+    input: { name: string; team: number },
+    ctx: EngineCtx,
+  ) => Promise<{
+    readonly name: string;
+    readonly updatedAt: string | null;
+    readonly mode: ProjectSyncMode;
+  } | null>;
   readonly defaultName: (dir: string) => string;
 }
 
@@ -160,6 +174,8 @@ export interface ProjectSyncDeps {
   /** A chat is working in the project's folder right now. */
   readonly turnRunning?: (projectId: string) => Promise<boolean>;
   readonly vault: ProjectVault;
+  /** Projects other people shared with this person; none when teams aren't on. */
+  readonly teams?: ProjectTeams;
   readonly projects: () => Promise<ReadonlyArray<ProjectRef>>;
   readonly createProject: (input: { title: string; workspaceRoot: string }) => Promise<string>;
   readonly timers: SchedulerTimers;
@@ -187,6 +203,8 @@ interface Stored {
   auto?: boolean;
   /** The project's GitHub or GitLab repository: pushed to and pulled from on each sync. */
   host?: ProjectSyncHost;
+  /** Someone else's project, shared with this person. */
+  team?: ProjectSyncTeam;
 }
 
 /** What this computer remembers across projects. */
@@ -252,6 +270,8 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     { version: string; files: ReadonlyArray<string> | null }
   >();
   const lastRun = new Map<string, EngineResult>();
+  /** Folders "Get it here" is filling: not new projects to adopt. */
+  const arriving = new Set<string>();
   /** Since when a project's syncs have been waiting for chats to finish. */
   const waitingSince = new Map<string, number>();
   /** The answer "turn on" to the question about older projects, working through them. */
@@ -266,6 +286,32 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     hostname: deps.hostname,
     person: (await deps.person?.().catch(() => null)) ?? null,
   });
+
+  /** The owner as this project's words name them. */
+  const teamOf = (project: SharedProject): ProjectSyncTeam => ({
+    id: project.id,
+    owner: personName(project.owner) ?? project.owner.username ?? "The owner",
+  });
+
+  /** Projects other people shared with this person, as the console says now. */
+  const sharedWithMe = async () =>
+    ((await deps.teams?.projects()) ?? []).filter((project) => project.role === "editor");
+
+  const sharedProject = async (teamId: number, name: string) => {
+    const found = (await sharedWithMe()).find(
+      (project) => project.id === teamId && project.name === name,
+    );
+    if (!found) throw new ProjectSyncFailure(`${name} isn't shared with you.`);
+    return teamOf(found);
+  };
+
+  /** A shared project is on this computer. */
+  const arrived = (teamId: number) =>
+    Object.values(store).some((entry) => entry.team?.id === teamId);
+
+  /** "The project owner's…" from the engine, with their name in it. */
+  const ownerNamed = (entry: Stored, message: string) =>
+    entry.team ? message.replace("The project owner's", `${entry.team.owner}'s`) : message;
 
   const load = async () => {
     if (loaded) return;
@@ -333,7 +379,10 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     const since = Date.parse(notes.since ?? "");
     const open = (await deps.projects()).filter(
       (project) =>
-        !store[project.id] && !isAssistantProjectId(project.id) && inProjectsFolder(project),
+        !store[project.id] &&
+        !isAssistantProjectId(project.id) &&
+        !arriving.has(folderOf(project)) &&
+        inProjectsFolder(project),
     );
     const isNew = (project: ProjectRef) => Date.parse(project.createdAt ?? "") >= since;
     return { fresh: open.filter(isNew), old: open.filter((project) => !isNew(project)) };
@@ -393,6 +442,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       conflict: entry.enabled ? entry.conflict : null,
       held: entry.enabled ? (entry.held ?? []) : [],
       host: entry.host ?? null,
+      ...(entry.team ? { team: entry.team } : {}),
     };
   };
 
@@ -442,7 +492,10 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     const ctx = await engineCtx();
     // Without a way to the Uno cloud a project with a repository still goes there.
     const cloud = await deps.available();
-    const toHost = entry.host ? { hostRemote: entry.host.remote, skipCloud: !cloud } : {};
+    const toHost = {
+      ...(entry.host ? { hostRemote: entry.host.remote, skipCloud: !cloud } : {}),
+      ...(entry.team ? { team: entry.team.id } : {}),
+    };
     let result: EngineResult;
     const keep = pendingResolve.get(projectId);
     pendingResolve.delete(projectId);
@@ -472,7 +525,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       deps.timers.setTimeout(() => scheduler.schedule(projectId, "poll"), 10_000);
     } else {
       entry.state = result.state;
-      entry.message = result.message;
+      entry.message = ownerNamed(entry, result.message);
     }
     entry.conflict = result.conflict
       ? {
@@ -501,7 +554,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     engine: SyncEngine,
     dir: string,
     ctx: EngineCtx,
-    toHost: { readonly hostRemote?: string; readonly skipCloud?: boolean },
+    toHost: { readonly hostRemote?: string; readonly skipCloud?: boolean; readonly team?: number },
   ) {
     let result = await engine.syncProject({ dir, name: null, ...toHost }, ctx);
     const base = result.name || engine.defaultName(dir);
@@ -515,19 +568,28 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     return result;
   }
 
+  /** Where a project's keys come from: the person's vault, or what its owner gave them. */
+  const keysOf = (entry: Stored): Pick<ProjectVault, "list" | "reveal"> => {
+    if (!entry.team) return deps.vault;
+    if (!deps.teams) throw new ProjectSyncFailure("Shared projects aren't available right now.");
+    return deps.teams.keys(entry.team.id);
+  };
+
   /**
    * Keys of the project between this computer and the vault. New or
    * changed keys in the vault are written into `.env` (merging: keys only
    * this computer has stay). `upload`: keys of `.env` the vault doesn't have
-   * yet go there (turning sync on).
+   * yet go there (turning sync on); never in someone else's project, whose
+   * keys are its owner's to add.
    */
   async function syncKeys(projectId: string, entry: Stored, upload: boolean) {
     const name = entry.name;
     if (!name) return;
     const envFile = path.join(entry.dir, ".env");
     const local = await readFile(envFile, "utf8").catch(() => "");
-    let remote = await deps.vault.list(name);
-    if (upload) {
+    const vault = keysOf(entry);
+    let remote = await vault.list(name);
+    if (upload && !entry.team) {
       const there = new Set(remote.map((secret) => secret.name));
       let uploaded = 0;
       for (const key of envNames(local)) {
@@ -538,7 +600,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         entry.keyVersions[key] = saved.version;
         uploaded += 1;
       }
-      if (uploaded > 0) remote = await deps.vault.list(name);
+      if (uploaded > 0) remote = await vault.list(name);
     }
     const present = new Set(envNames(local));
     const changed = remote
@@ -547,14 +609,16 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       )
       .map((secret) => secret.name);
     if (changed.length === 0) return;
-    const values = await deps.vault.reveal(name, changed);
+    const values = await vault.reveal(name, changed);
     const merged = mergeEnvContent(local, values);
     if (merged.content !== local) {
       await writePrivate(envFile, merged.content);
       await keepEnvOutOfGit(entry.dir);
     }
     for (const secret of remote) {
-      if (changed.includes(secret.name)) entry.keyVersions[secret.name] = secret.version;
+      if (changed.includes(secret.name) && secret.name in values) {
+        entry.keyVersions[secret.name] = secret.version;
+      }
     }
     void projectId;
   }
@@ -625,15 +689,19 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     elsewhereLoading = (async () => {
       try {
         const engine = await deps.engine();
-        const list = await engine.listCloudProjects(await engineCtx());
+        const ctx = await engineCtx();
+        const list = await engine.listCloudProjects(ctx);
         elsewhere = {
           at: deps.timers.now(),
-          list: list.map((project) => ({
-            name: project.name,
-            updatedAt: project.updatedAt,
-            from: project.updatedBy?.hostname ?? null,
-            mode: project.mode,
-          })),
+          list: [
+            ...list.map((project) => ({
+              name: project.name,
+              updatedAt: project.updatedAt,
+              from: project.updatedBy?.hostname ?? null,
+              mode: project.mode,
+            })),
+            ...(await sharedElsewhere(engine, ctx)),
+          ],
         };
       } catch (error) {
         deps.log("warn", "project sync: couldn't list the cloud's projects", {
@@ -644,6 +712,40 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       }
     })();
     return elsewhereLoading;
+  };
+
+  /** Projects shared with this person that aren't on this computer yet. */
+  const sharedElsewhere = async (
+    engine: SyncEngine,
+    ctx: EngineCtx,
+  ): Promise<ReadonlyArray<ProjectSyncElsewhere>> => {
+    const shared = await sharedWithMe().catch((error) => {
+      deps.log("warn", "project sync: couldn't list the shared projects", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    });
+    const rows = await Promise.all(
+      shared
+        .filter((project) => !arrived(project.id))
+        .map(async (project) => {
+          const peek = await engine
+            .peekSharedProject({ name: project.name, team: project.id }, ctx)
+            .catch(() => null);
+          if (!peek) return [];
+          const team = teamOf(project);
+          return [
+            {
+              name: project.name,
+              updatedAt: peek.updatedAt,
+              from: team.owner,
+              mode: peek.mode,
+              team,
+            },
+          ];
+        }),
+    );
+    return rows.flat();
   };
 
   const schedulePolls = () => {
@@ -703,6 +805,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       }
       const here = new Set(
         Object.values(store)
+          .filter((entry) => !entry.team)
           .map((entry) => entry.name)
           .filter((name): name is string => !!name),
       );
@@ -719,7 +822,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         unavailableReason: available ? null : UNAVAILABLE,
         projects: Object.keys(store).map(view),
         elsewhere: available
-          ? (elsewhere?.list ?? []).filter((project) => !here.has(project.name))
+          ? (elsewhere?.list ?? []).filter((project) =>
+              project.team ? !arrived(project.team.id) : !here.has(project.name),
+            )
           : [],
         intro: introProject
           ? (titles((await deps.projects()).filter((item) => item.id === introProject))[0] ?? null)
@@ -824,11 +929,18 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       return view(projectId);
     },
 
-    /** A project from "Projects on your other computers", here: a folder in ~/projects and a project row. */
-    getHere: async (name: string) => {
+    /**
+     * A project from "Projects on your other computers", here: a folder in
+     * ~/projects and a project row. `teamId`: someone else's project, shared
+     * with this person; checked with the console, not taken on trust.
+     */
+    getHere: async (name: string, teamId?: number) => {
       await load();
       await ensureAvailable();
-      const linked = Object.entries(store).find(([, entry]) => entry.name === name);
+      const team = teamId === undefined ? null : await sharedProject(teamId, name);
+      const linked = Object.entries(store).find(
+        ([, entry]) => entry.name === name && (entry.team?.id ?? null) === (team?.id ?? null),
+      );
       if (linked) {
         const [projectId, entry] = linked;
         if (!entry.enabled) {
@@ -847,9 +959,11 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         dir = path.join(root, `${name}-${n}`);
       }
       const engine = await deps.engine();
-      const result = await engine.getProject({ name, dir }, await engineCtx());
+      const result = await engine.getProject(
+        { name, dir, ...(team ? { team: team.id } : {}) },
+        await engineCtx(),
+      );
       if (!result.ok) throw new ProjectSyncFailure(result.message);
-      const projectId = await deps.createProject({ title: name, workspaceRoot: dir });
       const entry: Stored = {
         name,
         dir,
@@ -860,8 +974,16 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         lastSyncedAt: new Date(deps.timers.now()).toISOString(),
         conflict: null,
         keyVersions: {},
+        ...(team ? { team } : {}),
       };
-      store[projectId] = entry;
+      arriving.add(dir);
+      const projectId = await deps
+        .createProject({ title: name, workspaceRoot: dir })
+        .then((id) => {
+          store[id] = entry;
+          return id;
+        })
+        .finally(() => arriving.delete(dir));
       quietUntil.set(projectId, deps.timers.now() + OWN_WRITES_QUIET_MS);
       await syncKeys(projectId, entry, false).catch((error) =>
         deps.log("warn", "project sync: keys didn't arrive", {
@@ -969,7 +1091,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       let vaultError: string | null = null;
       if (synced) {
         try {
-          vaultNames = new Set((await deps.vault.list(entry.name!)).map((secret) => secret.name));
+          vaultNames = new Set((await keysOf(entry).list(entry.name!)).map((secret) => secret.name));
         } catch (error) {
           vaultError = error instanceof Error ? error.message : String(error);
         }
@@ -1000,7 +1122,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       await writePrivate(envFile, upsertEnvContent(local, name, value));
       await keepEnvOutOfGit(dir);
       const entry = store[projectId];
-      if (entry?.enabled && entry.name) {
+      if (entry?.enabled && entry.name && !entry.team) {
         const saved = await deps.vault.set(entry.name, name, value).catch((error) => {
           throw new ProjectSyncFailure(
             `Saved on this computer, but not for your other computers: ${error instanceof Error ? error.message : String(error)}`,
@@ -1016,13 +1138,24 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       const project = await projectOf(projectId);
       if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
       const dir = path.resolve(expandHome(deps.home, project.workspaceRoot));
+      const entry = store[projectId];
+      if (entry?.team) {
+        const given = await keysOf(entry)
+          .list(entry.name!)
+          .catch(() => []);
+        // The next sync would only bring it back.
+        if (given.some((key) => key.name === name)) {
+          throw new ProjectSyncFailure(
+            `${entry.team.owner} gave you this key. Ask them to take it off.`,
+          );
+        }
+      }
       const envFile = path.join(dir, ".env");
       const local = await readFile(envFile, "utf8").catch(() => null);
       if (local !== null && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
         await writePrivate(envFile, removeEnvName(local, name));
       }
-      const entry = store[projectId];
-      if (entry?.enabled && entry.name) {
+      if (entry?.enabled && entry.name && !entry.team) {
         await deps.vault.remove(entry.name, name);
         delete entry.keyVersions[name];
         await persist();
@@ -1038,7 +1171,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       if (input.file !== ".env") return;
       const cwd = path.resolve(expandHome(deps.home, input.cwd));
       const found = Object.entries(store).find(
-        ([, entry]) => entry.enabled && entry.name && entry.dir === cwd,
+        ([, entry]) => entry.enabled && entry.name && !entry.team && entry.dir === cwd,
       );
       if (!found) return;
       const [, entry] = found;

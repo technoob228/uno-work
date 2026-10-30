@@ -38,6 +38,17 @@ describe("project team words", () => {
     expect(teamProjectOf(null, "notes")).toBeNull();
   });
 
+  it("keeps someone else's project and a person's own of the same name apart", () => {
+    const theirs = { id: 12, name: "notes", role: "editor", owner } as const;
+    const mine = { id: 20, name: "notes", role: "owner", owner } as const;
+    const list = { projects: [theirs, mine], invites: [] };
+    expect(teamProjectOf(list, "notes")?.id).toBe(20);
+    expect(teamProjectOf(list, "notes", 12)?.id).toBe(12);
+    // Their folder, and the person has no team of their own under that name.
+    expect(teamProjectOf({ projects: [theirs], invites: [] }, "notes")).toBeNull();
+    expect(teamProjectOf({ projects: [theirs], invites: [] }, "notes", 99)).toBeNull();
+  });
+
   it("sends the whole set of keys", () => {
     expect(toggledKeys(["B"], "A", true)).toEqual(["A", "B"]);
     expect(toggledKeys(["A", "B"], "A", false)).toEqual(["B"]);

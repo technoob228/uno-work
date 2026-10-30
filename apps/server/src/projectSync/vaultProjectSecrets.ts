@@ -5,6 +5,11 @@
  * Work. Values are only ever returned to the caller; never logged, never in
  * an error message.
  *
+ * Someone else's project shared with this person goes through the team routes
+ * (`/api/v1/work/team/projects/{id}`, see TEAM_API.md): read only, and only what the
+ * owner ticked. Managing a team is not here and never will be: this computer's
+ * key can't do it, that's the person's own sign-in in the interface.
+ *
  * @module projectSync/vaultProjectSecrets
  */
 
@@ -28,6 +33,22 @@ export interface ProjectVault {
   readonly remove: (project: string, name: string) => Promise<void>;
 }
 
+/** A project with a team this person is in. */
+export interface SharedProject {
+  readonly id: number;
+  readonly name: string;
+  readonly role: "owner" | "editor";
+  readonly owner: { readonly username: string | null; readonly email: string | null };
+}
+
+export type SharedProjectKeys = Pick<ProjectVault, "list" | "reveal">;
+
+export interface ProjectTeams {
+  /** Empty when teams aren't on for this account. */
+  readonly projects: () => Promise<ReadonlyArray<SharedProject>>;
+  readonly keys: (teamId: number) => SharedProjectKeys;
+}
+
 export class ProjectVaultError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
@@ -39,6 +60,7 @@ export class ProjectVaultError extends Error {
 /** What a console answer means for the person (never the body: it could echo a value). */
 function problem(status: number, code: string): string {
   if (status === 401) return "Uno didn't accept this computer's key. Sign in to Uno again.";
+  if (code === "WORK_TEAM_DISABLED") return "Shared projects aren't available right now.";
   if (code === "ASSISTANT_COMPUTER_NO_PROJECT_KEYS") {
     return "An assistant's own computer doesn't get your project keys.";
   }
@@ -55,14 +77,16 @@ function problem(status: number, code: string): string {
   return `The Uno vault answered ${status}.`;
 }
 
-export function consoleProjectVault(input: {
+interface ConsoleAccess {
   readonly baseUrl: string;
   /** Read each time: the console may link the computer after start. */
   readonly token: () => Promise<string | null>;
   readonly fetch?: typeof fetch;
-}): ProjectVault {
+}
+
+function consoleCaller(input: ConsoleAccess) {
   const doFetch = input.fetch ?? fetch;
-  const call = async (
+  return async (
     method: string,
     route: string,
     body?: unknown,
@@ -107,38 +131,49 @@ export function consoleProjectVault(input: {
     }
     return { status: response.status, json };
   };
+}
+
+function secretsFrom(json: unknown): ReadonlyArray<VaultSecretMeta> {
+  const raw = (json as { secrets?: unknown } | null)?.secrets;
+  return Array.isArray(raw)
+    ? raw.flatMap((entry: any) =>
+        typeof entry?.name === "string"
+          ? [
+              {
+                name: entry.name,
+                version: Number(entry.version) || 0,
+                updatedAt: typeof entry.updated_at === "string" ? entry.updated_at : null,
+              },
+            ]
+          : [],
+      )
+    : [];
+}
+
+function valuesFrom(json: unknown): Readonly<Record<string, string>> {
+  const values = (json as { values?: unknown } | null)?.values;
+  const out: Record<string, string> = {};
+  if (values && typeof values === "object") {
+    for (const [name, value] of Object.entries(values)) {
+      if (typeof value === "string") out[name] = value;
+    }
+  }
+  return out;
+}
+
+export function consoleProjectVault(input: ConsoleAccess): ProjectVault {
+  const call = consoleCaller(input);
   const base = (project: string) => `/api/v1/work/projects/${encodeURIComponent(project)}/secrets`;
   return {
-    list: async (project) => {
-      const { json } = await call("GET", base(project));
-      const raw = (json as { secrets?: unknown } | null)?.secrets;
-      return Array.isArray(raw)
-        ? raw.flatMap((entry: any) =>
-            typeof entry?.name === "string"
-              ? [
-                  {
-                    name: entry.name,
-                    version: Number(entry.version) || 0,
-                    updatedAt: typeof entry.updated_at === "string" ? entry.updated_at : null,
-                  },
-                ]
-              : [],
-          )
-        : [];
-    },
-    reveal: async (project, names) => {
-      const { json } = await call("POST", `${base(project)}/reveal`, {
-        ...(names && names.length > 0 ? { names } : {}),
-      });
-      const values = (json as { values?: unknown } | null)?.values;
-      const out: Record<string, string> = {};
-      if (values && typeof values === "object") {
-        for (const [name, value] of Object.entries(values)) {
-          if (typeof value === "string") out[name] = value;
-        }
-      }
-      return out;
-    },
+    list: async (project) => secretsFrom((await call("GET", base(project))).json),
+    reveal: async (project, names) =>
+      valuesFrom(
+        (
+          await call("POST", `${base(project)}/reveal`, {
+            ...(names && names.length > 0 ? { names } : {}),
+          })
+        ).json,
+      ),
     set: async (project, name, value) => {
       const { json } = await call("PUT", `${base(project)}/${encodeURIComponent(name)}`, { value });
       const raw = json as { version?: unknown; changed?: unknown } | null;
@@ -152,5 +187,58 @@ export function consoleProjectVault(input: {
         throw error;
       }
     },
+  };
+}
+
+/**
+ * The projects this person is in, and the keys the owner gave them. Only what
+ * a computer's key may do: looking, never inviting or giving keys.
+ */
+export function consoleProjectTeams(input: ConsoleAccess): ProjectTeams {
+  const call = consoleCaller(input);
+  const root = "/api/v1/work/team/projects";
+  return {
+    projects: async () => {
+      let json: unknown;
+      try {
+        json = (await call("GET", root)).json;
+      } catch (error) {
+        // Teams aren't on here, or this key has no say in them: nothing changes for anyone.
+        if (error instanceof ProjectVaultError && [403, 404].includes(error.status)) return [];
+        throw error;
+      }
+      const raw = (json as { projects?: unknown } | null)?.projects;
+      return Array.isArray(raw)
+        ? raw.flatMap((project: any) =>
+            Number.isSafeInteger(project?.id) &&
+            typeof project?.name === "string" &&
+            (project?.role === "owner" || project?.role === "editor")
+              ? [
+                  {
+                    id: project.id as number,
+                    name: project.name as string,
+                    role: project.role as "owner" | "editor",
+                    owner: {
+                      username:
+                        typeof project.owner?.username === "string" ? project.owner.username : null,
+                      email: typeof project.owner?.email === "string" ? project.owner.email : null,
+                    },
+                  },
+                ]
+              : [],
+          )
+        : [];
+    },
+    keys: (teamId) => ({
+      list: async () => secretsFrom((await call("GET", `${root}/${teamId}/secrets`)).json),
+      reveal: async (_project, names) =>
+        valuesFrom(
+          (
+            await call("POST", `${root}/${teamId}/secrets/reveal`, {
+              ...(names && names.length > 0 ? { names } : {}),
+            })
+          ).json,
+        ),
+    }),
   };
 }

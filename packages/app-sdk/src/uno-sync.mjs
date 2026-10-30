@@ -22,7 +22,9 @@
 // computers changed it. Text changes in different places merge; one file
 // changed on both sides: the newer version wins and the other one stays in
 // the history (decision 08.10) — the conflict is recorded so the person can
-// pick "Keep mine" / "Keep theirs" afterwards. The work tree is only ever
+// pick "Keep mine" / "Keep theirs" afterwards. When two people did it, the
+// merge says so in its message (Uno-Kept-Over), because the one whose file
+// lost only fast-forwards and would never hear of it. The work tree is only ever
 // updated with `git read-tree -m -u`, which refuses rather than overwrite a
 // file someone edited meanwhile: the sync then simply runs again later.
 //
@@ -36,6 +38,10 @@
 // inside waits on this computer and the rest goes; a repository's commits
 // can't leave without the file, so there they wait as a whole (the pull still
 // happens). The person sees the file's name, never the value.
+//
+// A project someone shared with this person syncs the same way, through
+// `uno::team/<id>/<name>` (git-remote-uno.mjs); the folder remembers that in its
+// `uno` remote, so a sync can't drift into the person's own cloud.
 
 import { spawn } from "node:child_process";
 import { closeSync, openSync, writeSync } from "node:fs";
@@ -48,10 +54,12 @@ import {
   GIT_ROOT,
   NAME_RE,
   UnoGitError,
+  addressOf,
   git,
   listProjects,
   openStorage,
   readRemote,
+  remoteUrl,
   slugName,
 } from "./git-remote-uno.mjs";
 
@@ -965,8 +973,10 @@ async function writeConflict(gitDir, record) {
 
 /**
  * @typedef {{ dir: string, name?: string | null, adopt?: boolean, reason?: string,
- *   hostRemote?: string | null, skipCloud?: boolean }} SyncInput
+ *   hostRemote?: string | null, skipCloud?: boolean, team?: number | null }} SyncInput
  *   adopt: the folder may join a cloud project with a different history (Get it here).
+ *   team: the project is someone else's, shared with this person; a folder already
+ *   linked to one stays linked without being told.
  */
 
 /**
@@ -999,11 +1009,19 @@ export async function syncProject(input, ctx) {
   try {
     const stats = await fsp.stat(dir).catch(() => null);
     if (!stats?.isDirectory()) throw new SyncError(`${dir} isn't a folder on this computer.`);
-    const name = input.name ?? (own ? await remoteName(own.top, env) : null) ?? defaultName(dir);
+    const linked = own
+      ? await remoteAddress(own.top, env).catch((error) => {
+          if (input.name) return null;
+          throw error;
+        })
+      : await snapshotAddress(dir, env);
+    const shared = linked?.team === null ? null : linked;
+    const name = input.name ?? (own ? linked?.name : shared?.name) ?? defaultName(dir);
     if (!NAME_RE.test(name)) throw new SyncError(`"${name}" can't be a project name.`);
     result.name = name;
-    if (own) await syncGit({ ...input, dir: own.top, name }, own.gitDir, ctx, result);
-    else await syncSnapshot({ ...input, dir, name }, ctx, result);
+    const team = input.team ?? (shared?.name === name ? shared.team : null);
+    if (own) await syncGit({ ...input, team, dir: own.top, name }, own.gitDir, ctx, result);
+    else await syncSnapshot({ ...input, team, dir, name }, ctx, result);
   } catch (error) {
     if (!(error instanceof UnoGitError)) throw error;
     result.ok = false;
@@ -1013,19 +1031,32 @@ export async function syncProject(input, ctx) {
   return result;
 }
 
-/** The `uno::` name of a repository's `uno` remote, if it has one. */
-async function remoteName(/** @type {string} */ top, /** @type {NodeJS.ProcessEnv} */ env) {
+/** Where a repository's `uno` remote points, if it has one. */
+async function remoteAddress(/** @type {string} */ top, /** @type {NodeJS.ProcessEnv} */ env) {
   const url = await git(["remote", "get-url", "uno"], { env, cwd: top });
   if (url.code !== 0) return null;
   const value = url.stdout.trim();
   if (!value.startsWith("uno::")) {
     throw new SyncError(`This project is linked to ${value}, not to your Uno cloud.`);
   }
-  return value.slice("uno::".length);
+  return addressOf(value) ?? { name: value.slice("uno::".length), team: null };
 }
 
-const storageOf = (/** @type {Ctx} */ ctx) =>
-  ctx.storage ?? openStorage({ home: ctx.home, env: ctx.env });
+/** Where a folder's hidden history points, if it has one. */
+async function snapshotAddress(/** @type {string} */ dir, /** @type {NodeJS.ProcessEnv} */ env) {
+  const gitDir = snapshotGitDir(dir);
+  if (!(await fsp.stat(gitDir).catch(() => null))?.isDirectory()) return null;
+  const url = await git(["--git-dir", gitDir, "config", "--get", "remote.uno.url"], {
+    env,
+    cwd: dir,
+  });
+  return url.code === 0 ? addressOf(url.stdout) : null;
+}
+
+const storageOf = (
+  /** @type {Ctx} */ ctx,
+  /** @type {number | null | undefined} */ team = null,
+) => ctx.storage ?? openStorage({ home: ctx.home, env: ctx.env, team });
 
 /**
  * A folder without git: commit what changed into the snapshot repository,
@@ -1038,13 +1069,14 @@ async function syncSnapshot(input, ctx, result) {
   const gitDir = snapshotGitDir(input.dir);
   const host = ctx.hostname ?? os.hostname();
   const fresh = !(await fsp.stat(gitDir).catch(() => null));
-  if (fresh) await initSnapshot(gitDir, input.name, ctx);
+  const url = remoteUrl(input.name, input.team);
+  if (fresh) await initSnapshot(gitDir, url, ctx);
   const env = await gitEnv(ctx, {
     GIT_DIR: gitDir,
     GIT_WORK_TREE: input.dir,
     ...authorEnv(ctx),
   });
-  if (!fresh) await pointAt(gitDir, input.name, { env, cwd: input.dir });
+  if (!fresh) await pointAt(gitDir, url, { env, cwd: input.dir });
   const at = { env, cwd: input.dir };
   const release = await lock(gitDir);
   if (!release) {
@@ -1070,7 +1102,7 @@ async function syncSnapshot(input, ctx, result) {
         "Couldn't save the project's changes",
       );
     }
-    const storage = storageOf(ctx);
+    const storage = storageOf(ctx, input.team);
     const meta = await readMeta(storage, input.name);
     if (meta?.mode === "git") {
       throw new SyncError(
@@ -1118,7 +1150,7 @@ async function syncSnapshot(input, ctx, result) {
 /** A new snapshot repository: bare storage, the folder as its work tree. */
 async function initSnapshot(
   /** @type {string} */ gitDir,
-  /** @type {string} */ name,
+  /** @type {string} */ url,
   /** @type {Ctx} */ ctx,
 ) {
   await fsp.mkdir(path.dirname(gitDir), { recursive: true });
@@ -1135,7 +1167,7 @@ async function initSnapshot(
   await config(["user.name", "Uno"]);
   await config(["user.email", "sync@uno4.me"]);
   await config(["commit.gpgSign", "false"]);
-  await config(["remote.uno.url", `uno::${name}`]);
+  await config(["remote.uno.url", url]);
   await config(["remote.uno.fetch", "+refs/heads/*:refs/remotes/uno/*"]);
   await gitOk(["--git-dir", tmp, "symbolic-ref", "HEAD", "refs/heads/main"], at, "git");
   await fsp.mkdir(path.join(tmp, "info"), { recursive: true });
@@ -1151,10 +1183,9 @@ async function initSnapshot(
  * The folder now syncs under another name (turned off and on as a new
  * project): point `uno` there and forget what the old name's cloud had,
  * so the new name starts from this folder's history alone.
- * @param {string} gitDir @param {string} name @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @param {string} gitDir @param {string} url @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
  */
-async function pointAt(gitDir, name, at) {
-  const url = `uno::${name}`;
+async function pointAt(gitDir, url, at) {
   const current = (await git(["config", "--get", "remote.uno.url"], at)).stdout.trim();
   if (current === url) return;
   await gitOk(["config", "remote.uno.url", url], at, "Couldn't set up syncing");
@@ -1230,11 +1261,11 @@ async function syncGit(input, gitDir, ctx, result) {
       return;
     }
     const hasRemote = (await git(["remote", "get-url", "uno"], at)).code === 0;
-    const already = hasRemote ? await remoteName(input.dir, env) : null;
-    if (already && already !== input.name) {
-      throw new SyncError(`This project already syncs as "${already}".`, "blocked");
+    const already = hasRemote ? await remoteAddress(input.dir, env) : null;
+    if (already && (already.name !== input.name || already.team !== (input.team ?? null))) {
+      throw new SyncError(`This project already syncs as "${already.name}".`, "blocked");
     }
-    const storage = storageOf(ctx);
+    const storage = storageOf(ctx, input.team);
     const meta = await readMeta(storage, input.name);
     if (meta?.mode === "snapshot") {
       throw new SyncError(
@@ -1254,7 +1285,7 @@ async function syncGit(input, gitDir, ctx, result) {
     }
     if (!hasRemote) {
       await gitOk(
-        ["remote", "add", "uno", `uno::${input.name}`],
+        ["remote", "add", "uno", remoteUrl(input.name, input.team)],
         at,
         "Couldn't add the Uno remote",
       );
@@ -1375,6 +1406,17 @@ async function remotesToShare(/** @type {any} */ at) {
 }
 
 /**
+ * Why git failed, for the person: the helper's own line when it said one (git's
+ * last words after it are about refs), else git's last.
+ * @param {string} stderr @param {string} fallback
+ */
+function gitWhy(stderr, fallback) {
+  const lines = stderr.trim().split("\n");
+  const line = lines.findLast((item) => item.startsWith("uno: ")) ?? lines.at(-1) ?? fallback;
+  return (line || fallback).replace(/^(fatal|error|uno): /, "");
+}
+
+/**
  * Exchange the branch with the cloud: fetch, fast-forward or merge, push.
  * Retries when another computer pushed in between.
  * @param {{ at: any, gitDir: string, branch: string, input: SyncInput & { name: string },
@@ -1403,12 +1445,7 @@ async function exchange(x) {
     );
     // An empty cloud project has no such branch yet: that's fine.
     if (fetched.code !== 0 && !/couldn't find remote ref|no such ref/i.test(fetched.stderr)) {
-      throw new SyncError(
-        (fetched.stderr.trim().split("\n").at(-1) ?? `Couldn't reach ${place}.`).replace(
-          /^(fatal|error|uno): /,
-          "",
-        ),
-      );
+      throw new SyncError(gitWhy(fetched.stderr, `Couldn't reach ${place}.`));
     }
     if (fetched.code !== 0) await git(["update-ref", "-d", remoteRef], at);
     const local = await revOf(ref, at);
@@ -1429,6 +1466,7 @@ async function exchange(x) {
         if (!(await moveTo(ref, local, remote, at))) return busy(result, x.dirtyHint);
         result.pulled = true;
         next = remote;
+        if (x.storage) conflict = await heardFromMerge(local, remote, conflict, x);
       } else if (!(await isAncestor(remote, local, at))) {
         const related = (await git(["merge-base", local, remote], at)).code === 0;
         if (!related && x.refuseUnrelated) {
@@ -1446,9 +1484,20 @@ async function exchange(x) {
           message: x.mergeMessage(from),
           localTime: x.localTime,
         });
+        const files = Object.keys(merged.conflicts);
+        const person = files.length > 0 ? await otherPerson(remote, files, x, at) : null;
         const commit = (
           await gitOk(
-            ["commit-tree", merged.tree, "-p", local, "-p", remote, "-m", x.mergeMessage(from)],
+            [
+              "commit-tree",
+              merged.tree,
+              "-p",
+              local,
+              "-p",
+              remote,
+              "-m",
+              withKeptOver(x.mergeMessage(from), person ? merged.conflicts : {}),
+            ],
             at,
             "Couldn't merge the changes",
           )
@@ -1456,7 +1505,6 @@ async function exchange(x) {
         if (!(await moveTo(ref, local, commit, at))) return busy(result, x.dirtyHint);
         result.pulled = true;
         next = commit;
-        const files = Object.keys(merged.conflicts);
         if (files.length > 0) {
           conflict = {
             files,
@@ -1464,10 +1512,12 @@ async function exchange(x) {
             mine: local,
             theirs: remote,
             theirsFrom: from,
-            theirsPerson: await otherPerson(remote, files, x.person, at),
+            theirsPerson: person,
             at: new Date().toISOString(),
           };
           await writeConflict(x.gitDir, conflict);
+        } else if (x.storage) {
+          conflict = await heardFromMerge(local, remote, conflict, x);
         }
       }
     }
@@ -1478,10 +1528,7 @@ async function exchange(x) {
       if (pushed.code !== 0) {
         if (/fetch first|non-fast-forward|rejected/i.test(pushed.stderr) && attempt < 3) continue;
         throw new SyncError(
-          (pushed.stderr.trim().split("\n").at(-1) ?? `Couldn't save to ${place}.`).replace(
-            /^(fatal|error|uno): /,
-            "",
-          ),
+          gitWhy(pushed.stderr, `Couldn't save to ${place}.`),
           /too big/.test(pushed.stderr) ? "too-big" : "error",
         );
       }
@@ -1510,17 +1557,115 @@ async function exchange(x) {
   busy(result);
 }
 
+/** Who saved the newest version of `file` on `tip`. */
+async function savedBy(
+  /** @type {string} */ tip,
+  /** @type {string} */ file,
+  /** @type {{ env: NodeJS.ProcessEnv, cwd: string }} */ at,
+) {
+  const out = await git(["log", "-1", "--format=%an%x1f%s", tip, "--", file], at);
+  const [author = "", subject = ""] = out.stdout.trim().split("\x1f");
+  return whoSaved(author, subject).person;
+}
+
+/** The names this person's versions go by here: the account's, and a repository's own. */
+async function myNames(
+  /** @type {string | null} */ person,
+  /** @type {{ env: NodeJS.ProcessEnv, cwd: string }} */ at,
+) {
+  const configured = (await git(["config", "user.name"], at)).stdout.trim();
+  return new Set([person, configured].filter(Boolean));
+}
+
 /**
  * Who changed the first of these files on `tip`, when it wasn't this person:
  * a colleague's change reads differently from one's own other computer.
- * @param {string} tip @param {string[]} files @param {string | null} person
+ * @param {string} tip @param {string[]} files
+ * @param {{ person: string | null }} x
  * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
  */
-async function otherPerson(tip, files, person, at) {
-  const out = await git(["log", "-1", "--format=%an%x1f%s", tip, "--", files[0] ?? "."], at);
-  const [author = "", subject = ""] = out.stdout.trim().split("\x1f");
-  const who = whoSaved(author, subject).person;
-  return who && who !== person ? who : null;
+async function otherPerson(tip, files, x, at) {
+  const who = await savedBy(tip, files[0] ?? ".", at);
+  return who && !(await myNames(x.person, at)).has(who) ? who : null;
+}
+
+/** Says which files a merge kept over someone else's version. */
+const KEPT_OVER = "Uno-Kept-Over:";
+
+/**
+ * A merge's message, with the files whose other side lost to this one. The
+ * person who lost isn't there when it happens: they read this on their next sync.
+ * @param {string} message
+ * @param {Record<string, "mine" | "theirs">} kept
+ */
+function withKeptOver(message, kept) {
+  const files = Object.keys(kept)
+    .filter((file) => kept[file] === "mine")
+    .slice(0, MAX_CONFLICT_LOOKUPS);
+  return files.length > 0 ? `${message}\n\n${KEPT_OVER} ${JSON.stringify(files)}\n` : message;
+}
+
+/**
+ * What arrived from `before` to `after` that replaced this person's own file:
+ * someone else merged it and their version won. Their version stays in the
+ * history, so this reads like any conflict and "Bring mine back" works; it is
+ * the newest such merge, or `current` when there is none.
+ * @param {string} before @param {string} after
+ * @param {ConflictRecord | null} current
+ * @param {{ at: { env: NodeJS.ProcessEnv, cwd: string }, gitDir: string, person: string | null }} x
+ * @returns {Promise<ConflictRecord | null>}
+ */
+async function heardFromMerge(before, after, current, x) {
+  const me = await myNames(x.person, x.at);
+  if (me.size === 0) return current;
+  const log = await git(
+    [
+      "log",
+      "--merges",
+      `--grep=^${KEPT_OVER} `,
+      "--format=%H%x1f%P%x1f%an%x1f%s%x1f%B%x1e",
+      `${before}..${after}`,
+    ],
+    x.at,
+  );
+  for (const block of log.stdout.split("\x1e")) {
+    const [id = "", parents = "", author = "", subject = "", body = ""] = block
+      .trim()
+      .split("\x1f");
+    const [, overridden] = parents.split(" ");
+    const note = new RegExp(`^${KEPT_OVER} (.+)$`, "m").exec(body)?.[1];
+    const who = whoSaved(author, subject);
+    if (!overridden || !note || !who.person || me.has(who.person)) continue;
+    if (!(await isAncestor(overridden, before, x.at))) continue;
+    const files = [];
+    for (const file of parseFiles(note)) {
+      if (me.has((await savedBy(overridden, file, x.at)) ?? "")) files.push(file);
+    }
+    if (files.length === 0) continue;
+    /** @type {ConflictRecord} */
+    const record = {
+      files,
+      kept: Object.fromEntries(files.map((file) => [file, "theirs"])),
+      mine: overridden,
+      theirs: id,
+      theirsFrom: who.computer,
+      theirsPerson: who.person,
+      at: new Date().toISOString(),
+    };
+    await writeConflict(x.gitDir, record);
+    return record;
+  }
+  return current;
+}
+
+/** The file list of a `KEPT_OVER` line; a line that isn't one says nothing. */
+function parseFiles(/** @type {string} */ note) {
+  try {
+    const files = JSON.parse(note);
+    return Array.isArray(files) ? files.flatMap((file) => safeRelative(file) ?? []) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** @param {SyncResult} result @param {string} [hint] */
@@ -1915,13 +2060,15 @@ export async function setLocalOnly(input, ctx) {
 /**
  * A project from the cloud on this computer: a new folder (default
  * ~/projects/<name>), or the folder it already syncs into (then: sync).
- * @param {{ name: string, dir?: string | null }} input
+ * @param {{ name: string, dir?: string | null, team?: number | null }} input
+ *   team: someone else's project, shared with this person.
  * @param {Ctx} ctx
  * @returns {Promise<SyncResult>}
  */
 export async function getProject(input, ctx) {
   const dir = path.resolve(input.dir ?? path.join(ctx.home, "projects", input.name));
-  const storage = storageOf(ctx);
+  const team = input.team ?? null;
+  const storage = storageOf(ctx, team);
   const fail = (/** @type {string} */ message, /** @type {SyncState} */ state = "error") => ({
     ok: false,
     name: input.name,
@@ -1939,20 +2086,26 @@ export async function getProject(input, ctx) {
   try {
     const state = await readRemote(storage, input.name);
     if (Object.keys(state.refs).length === 0) {
-      return fail(`There's no project "${input.name}" in your Uno cloud.`, "blocked");
+      return fail(
+        team === null
+          ? `There's no project "${input.name}" in your Uno cloud.`
+          : `Nothing is saved in ${input.name} yet. It comes here once its owner has saved it.`,
+        team === null ? "blocked" : "empty",
+      );
     }
     const meta = await readMeta(storage, input.name);
     const entries = await fsp.readdir(dir).catch(() => null);
     if ((meta?.mode ?? "git") === "snapshot") {
       await fsp.mkdir(dir, { recursive: true });
-      return syncProject({ dir, name: input.name, adopt: true }, { ...ctx, storage });
+      return syncProject({ dir, name: input.name, team, adopt: true }, { ...ctx, storage });
     }
     // A git project: clone it, or sync the clone that's already here.
     const env = await gitEnv(ctx);
     if (entries !== null && entries.length > 0) {
       const own = await ownGit(dir, env);
-      if (own && (await remoteName(own.top, env).catch(() => null)) === input.name) {
-        return syncProject({ dir, name: input.name }, { ...ctx, storage });
+      const linked = own ? await remoteAddress(own.top, env).catch(() => null) : null;
+      if (own && linked?.name === input.name && linked.team === team) {
+        return syncProject({ dir, name: input.name, team }, { ...ctx, storage });
       }
       return fail(
         `${dir} already exists and isn't the project "${input.name}". Pick another folder.`,
@@ -1961,18 +2114,36 @@ export async function getProject(input, ctx) {
     }
     await fsp.mkdir(path.dirname(dir), { recursive: true });
     await gitOk(
-      ["clone", "-q", "-o", "uno", `uno::${input.name}`, dir],
+      ["clone", "-q", "-o", "uno", remoteUrl(input.name, team), dir],
       { env, cwd: path.dirname(dir) },
       `Couldn't get "${input.name}"`,
     );
     for (const [remote, url] of Object.entries(meta?.remotes ?? {})) {
       await git(["remote", "add", remote, url], { env, cwd: dir });
     }
-    return syncProject({ dir, name: input.name }, { ...ctx, storage });
+    return syncProject({ dir, name: input.name, team }, { ...ctx, storage });
   } catch (error) {
     if (!(error instanceof UnoGitError)) throw error;
     return fail(error.message, error instanceof SyncError ? error.state : "error");
   }
+}
+
+/**
+ * A project someone shared with this person, as "Projects on your other
+ * computers" shows it; null while nothing is saved in it.
+ * @param {{ name: string, team: number }} input
+ * @param {Ctx} ctx
+ */
+export async function peekSharedProject(input, ctx) {
+  const storage = storageOf(ctx, input.team);
+  const state = await readRemote(storage, input.name);
+  if (Object.keys(state.refs).length === 0) return null;
+  return {
+    name: input.name,
+    updatedAt: state.updatedAt,
+    updatedBy: state.updatedBy,
+    mode: (await readMeta(storage, input.name))?.mode ?? "git",
+  };
 }
 
 /**

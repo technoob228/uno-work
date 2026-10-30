@@ -4640,7 +4640,12 @@ export default function Sidebar() {
                 </button>
               </li>
             ) : null}
-            <ProjectInvites />
+            <ProjectInvites
+              environmentId={
+                projectSync.statuses.find((item) => item.environmentId === dThisComputer)
+                  ?.environmentId ?? null
+              }
+            />
             {dThisComputer
               ? (() => {
                   const here = projectSync.statuses.find(

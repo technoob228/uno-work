@@ -4,6 +4,10 @@
 //   git remote add uno uno::notes && git push uno main     (computer A)
 //   git clone -o uno uno::notes ~/projects/notes           (computer B)
 //
+// A project someone shared with this person is `uno::team/<id>/<name>`: the same
+// files, in the owner's Drive, through the console's team routes. Such a
+// computer only ever adds objects: tidying up stays with the owner's own push.
+//
 // A git remote helper (https://git-scm.com/docs/gitremote-helpers): git runs
 // `git-remote-uno <remote> <name>` and talks to it over stdin/stdout. Zero
 // dependencies, Node >= 18. The Uno Work daemon keeps this file at
@@ -33,7 +37,8 @@
 //
 // Tests only: UNO_GIT_FAKE_STORAGE_DIR=<dir> keeps the "cloud" in a folder
 // (UNO_GIT_FAKE_STORAGE_DELAY_MS=<ms> waits up to that long before each
-// conditional write, to make pushes race).
+// conditional write, to make pushes race); UNO_GIT_FAKE_TEAM_STORAGE_DIR=<dir>
+// is the owner's cloud behind `uno::team/...` addresses.
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -65,10 +70,14 @@ export const BUNDLE_GC_AGE_MS = 60 * 60_000;
 export const COMMIT_DEADLINE_MS = 30 * 60_000;
 /** A transfer with no bytes moving for this long is given up. */
 export const STALL_MS = 60_000;
+/** Names one bundle tries in someone else's project before giving up. */
+const UPLOAD_NAMES = 3;
 /** Test-only switch: the "cloud" is this folder. */
 export const FAKE_STORAGE_ENV = "UNO_GIT_FAKE_STORAGE_DIR";
+/** Test-only switch: the owner's cloud behind `uno::team/...` (default: the same folder). */
+export const FAKE_TEAM_STORAGE_ENV = "UNO_GIT_FAKE_TEAM_STORAGE_DIR";
 export const FAKE_STORAGE_DELAY_ENV = "UNO_GIT_FAKE_STORAGE_DELAY_MS";
-/** Test-only: faults of the fake storage ("lost-answer", "readback-fail"). */
+/** Test-only: faults of the fake storage ("lost-answer", "readback-fail", "owner-full", "not-shared"). */
 export const FAKE_FAULTS_ENV = "UNO_GIT_FAKE_FAULTS";
 /** Test-only: each fake upload "takes" this many minutes (helperClock). */
 export const FAKE_UPLOAD_MINUTES_ENV = "UNO_GIT_FAKE_UPLOAD_MINUTES";
@@ -81,8 +90,22 @@ export const NOT_CLOUD =
 export const SHALLOW =
   "This copy is shallow (cloned with --depth). Run git fetch --unshallow first.";
 
+/** Said to someone working in another person's project. */
+export const OWNER_STORAGE_FULL =
+  "The project owner's Uno cloud storage is full. Ask them to free up space.";
+export const NOT_SHARED_ANY_MORE =
+  "You no longer have access to this project. Your copy stays on this computer.";
+export const TEAMS_OFF = "Shared projects aren't available right now.";
+
 /** A failure to print as is. */
 export class UnoGitError extends Error {}
+
+/**
+ * Someone else's project takes new objects only: this key is taken, or the
+ * upload behind it was dropped because it got taken meanwhile. The bytes have
+ * to go under a new name.
+ */
+export class ObjectExists extends UnoGitError {}
 
 // ── Names ───────────────────────────────────────────────────────────────
 
@@ -96,6 +119,28 @@ export function projectNameOf(/** @type {string} */ raw) {
     .replace(/\.git$/, "");
   return NAME_RE.test(name) ? name : null;
 }
+
+/**
+ * What follows `uno::`: one of the person's own projects (`team` null), or
+ * one someone shared with them. Null when it's neither.
+ * @returns {{ name: string, team: number | null } | null}
+ */
+export function addressOf(/** @type {string} */ raw) {
+  const text = String(raw ?? "")
+    .trim()
+    .replace(/^uno::/, "")
+    .replace(/^uno:\/\//, "");
+  const shared = /^team\/([1-9][0-9]{0,14})\/(.+)$/.exec(text);
+  const name = projectNameOf(shared ? /** @type {string} */ (shared[2]) : text);
+  if (!name) return null;
+  return { name, team: shared ? Number(shared[1]) : null };
+}
+
+/** The git remote of a project; a shared one says whose (`addressOf` reads it back). */
+export const remoteUrl = (
+  /** @type {string} */ name,
+  /** @type {number | null | undefined} */ team = null,
+) => (team === null || team === undefined ? `uno::${name}` : `uno::team/${team}/${name}`);
 
 /** A folder name made into a project name ("My App" → "my-app"); null when nothing is left. */
 export function slugName(/** @type {string} */ raw) {
@@ -204,8 +249,11 @@ export function machineCredentials(where, fallbacks = defaultSettingsFiles(where
  *   list(prefix: string): Promise<{ folders: string[], objects: StoredObject[], truncated: boolean, now: number | null }>,
  *   remove(key: string): Promise<void>,
  *   who: { boxId: number | null, hostname: string },
+ *   shared?: boolean,
  * }} Storage
  *   write: false when `ifNoneMatch` and the key already exists (nothing written).
+ *   shared: someone else's project: an existing key can't be written (ObjectExists) and
+ *   nothing can be removed.
  *   list: `lastModified` and `now` are storage's own clock (ms), null when it doesn't say.
  */
 
@@ -218,23 +266,30 @@ const now = () => Date.now() + helperClock.skewMs;
 
 /**
  * The storage this process uses: the fake folder in tests, else the Drive.
- * @param {{ home: string, env: NodeJS.ProcessEnv }} where
+ * @param {{ home: string, env: NodeJS.ProcessEnv, team?: number | null }} where
+ *   team: someone else's project, shared with this person.
  * @returns {Storage}
  */
 export function openStorage(where) {
-  const fake = where.env[FAKE_STORAGE_ENV]?.trim();
+  const team = where.team ?? null;
+  const fake =
+    (team === null ? "" : where.env[FAKE_TEAM_STORAGE_ENV]?.trim()) ||
+    where.env[FAKE_STORAGE_ENV]?.trim();
   if (fake) {
     const faults = new Set((where.env[FAKE_FAULTS_ENV] ?? "").split(",").filter(Boolean));
     return folderStorage(fake, {
+      shared: team !== null,
       delayMs: Number(where.env[FAKE_STORAGE_DELAY_ENV]) || 0,
       lostAnswer: faults.has("lost-answer"),
       failReadBack: faults.has("readback-fail"),
+      ownerFull: faults.has("owner-full"),
+      notShared: faults.has("not-shared"),
       uploadMinutes: Number(where.env[FAKE_UPLOAD_MINUTES_ENV]) || 0,
     });
   }
   const creds = machineCredentials(where);
   if (!creds) throw new UnoGitError(NOT_CLOUD);
-  return consoleStorage(creds);
+  return consoleStorage(creds, fetch, team);
 }
 
 /**
@@ -246,7 +301,13 @@ export function openStorage(where) {
  *   beforeConditionalWrite?: (key: string) => Promise<void>,
  *   truncateAfter?: number,
  *   nowMs?: () => number,
+ *   shared?: boolean,
+ *   ownerFull?: boolean,
+ *   notShared?: boolean,
  * }} FakeStorageOptions
+ *   shared: behave like someone else's project (Storage.shared).
+ *   ownerFull: writes are refused, as the console does when the owner's quota is used up.
+ *   notShared: everything is refused, as the console does once this person was removed.
  *   delayMs: wait up to this long before each conditional write (races).
  *   lostAnswer: a conditional write lands but answers "exists" (an answer lost, a retry refused).
  *   failReadBack: reading the key just written conditionally fails.
@@ -295,22 +356,41 @@ export function folderStorage(root, options = {}) {
   };
   /** @type {string | null} */
   let justWritten = null;
+  const shared = options.shared === true;
+  /** The answer of someone else's project to a key that is taken. */
+  const landed = (/** @type {string} */ key, /** @type {boolean} */ written) => {
+    if (!written) throw new ObjectExists(`${key} is already there.`);
+  };
+  const reachable = () => {
+    if (options.notShared) throw new UnoGitError(NOT_SHARED_ANY_MORE);
+  };
+  const writable = () => {
+    reachable();
+    if (options.ownerFull) throw new UnoGitError(OWNER_STORAGE_FULL);
+  };
   return {
     who: { boxId: null, hostname: os.hostname() },
+    ...(shared ? { shared } : {}),
     read: async (key) => {
+      reachable();
       if (options.failReadBack && key === justWritten) {
         throw new UnoGitError("Couldn't reach Uno cloud storage.");
       }
       return fsp.readFile(fileOf(key)).catch(() => null);
     },
-    download: (key, file) =>
-      fsp.copyFile(fileOf(key), file).then(
+    download: async (key, file) => {
+      reachable();
+      return fsp.copyFile(fileOf(key), file).then(
         () => true,
         () => false,
-      ),
+      );
+    },
     write: async (key, bytes, writeOptions = {}) => {
+      writable();
       if (!writeOptions.ifNoneMatch) {
-        return place(key, (tmp) => fsp.writeFile(tmp, bytes));
+        const written = await place(key, (tmp) => fsp.writeFile(tmp, bytes), shared);
+        landed(key, written);
+        return written;
       }
       if (options.delayMs) {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * (options.delayMs ?? 0)));
@@ -321,10 +401,12 @@ export function folderStorage(root, options = {}) {
       return options.lostAnswer ? false : landed;
     },
     upload: async (key, file) => {
-      await place(key, (tmp) => fsp.copyFile(file, tmp));
+      writable();
+      landed(key, await place(key, (tmp) => fsp.copyFile(file, tmp), shared));
       helperClock.skewMs += (options.uploadMinutes ?? 0) * 60_000;
     },
     list: async (prefix) => {
+      reachable();
       const dir = path.join(root, prefix);
       const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
       const folders = [];
@@ -351,7 +433,10 @@ export function folderStorage(root, options = {}) {
         now: options.nowMs?.() ?? Date.now(),
       };
     },
-    remove: (key) => fsp.rm(fileOf(key), { recursive: true, force: true }),
+    remove: async (key) => {
+      if (shared) throw new UnoGitError(ONLY_THE_OWNER_TIDIES);
+      await fsp.rm(fileOf(key), { recursive: true, force: true });
+    },
   };
 }
 
@@ -365,6 +450,29 @@ function consoleMessage(/** @type {number} */ status, /** @type {string} */ body
     return "Uno Drive isn't available on this Uno console yet.";
   return `Uno cloud storage answered ${status}.`;
 }
+
+/** The `error` code of a console answer, when it has one. */
+function errorCode(/** @type {string} */ body) {
+  try {
+    const code = JSON.parse(body)?.error;
+    return typeof code === "string" ? code : "";
+  } catch {
+    return "";
+  }
+}
+
+/** What a console status means in someone else's project. */
+function teamMessage(/** @type {number} */ status, /** @type {string} */ body) {
+  const code = errorCode(body);
+  if (status === 402 || code === "STORAGE_QUOTA_EXCEEDED") return OWNER_STORAGE_FULL;
+  if (code === "WORK_TEAM_DISABLED") return TEAMS_OFF;
+  if (status === 404) return NOT_SHARED_ANY_MORE;
+  if (status === 403) return "This computer's key can't work on shared projects.";
+  if (status === 503) return "Uno cloud storage isn't available right now. Try again later.";
+  return consoleMessage(status, body);
+}
+
+const ONLY_THE_OWNER_TIDIES = "Only the project's owner can delete from it.";
 
 const PRESIGN_TTL = 3600;
 const PUT_ATTEMPTS = 4;
@@ -397,13 +505,38 @@ const kicking = (/** @type {() => void} */ kick) =>
   });
 
 /**
+ * The headers a link was signed with (`headers` of the console's answer), as
+ * `put` sends them: signed headers have to arrive exactly, once each.
+ * @param {{ headers?: unknown } | null | undefined} plan
+ * @param {number} size
+ * @returns {Record<string, string>}
+ */
+function signedHeaders(plan, size) {
+  const given = plan?.headers && typeof plan.headers === "object" ? plan.headers : {};
+  /** @type {Record<string, string>} */
+  const headers = {};
+  for (const [name, value] of Object.entries(given)) {
+    if (typeof value === "string") headers[name.toLowerCase()] = value;
+  }
+  const signedSize = headers["content-length"];
+  if (signedSize !== undefined && signedSize !== String(size)) {
+    throw new UnoGitError("The Uno console's upload plan doesn't match the file.");
+  }
+  return headers;
+}
+
+/**
  * The person's Drive bucket through the console (`/api/v1/drive`, bucket
- * presign/objects routes — the ones the daemon's Files use).
+ * presign/objects routes — the ones the daemon's Files use). With `team`: the
+ * owner's Drive through the routes of that project (see TEAM_API.md): same keys, no
+ * `/api/v1/drive`, signed PUT headers, new objects only, nothing removed.
  * @param {{ token: string, boxId: number | null, consoleUrl: string }} creds
  * @param {typeof fetch} [fetchImpl]
+ * @param {number | null} [team]
  * @returns {Storage}
  */
-export function consoleStorage(creds, fetchImpl = fetch) {
+export function consoleStorage(creds, fetchImpl = fetch, team = null) {
+  const shared = team !== null;
   /**
    * One console call: its JSON and the console's clock (the Date header).
    * @param {string} route @param {RequestInit} [init]
@@ -420,7 +553,12 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       throw new UnoGitError("Couldn't reach the Uno console. Check the internet connection.");
     }
     const text = await response.text();
-    if (!response.ok) throw new UnoGitError(consoleMessage(response.status, text));
+    if (!response.ok) {
+      if (shared && /^(OBJECT_EXISTS|UPLOAD_NOT_FOUND)$/.test(errorCode(text))) {
+        throw new ObjectExists("That name is taken in the cloud.");
+      }
+      throw new UnoGitError((shared ? teamMessage : consoleMessage)(response.status, text));
+    }
     const date = Date.parse(response.headers.get("date") ?? "");
     try {
       return { json: JSON.parse(text), date: Number.isFinite(date) ? date : null };
@@ -439,9 +577,12 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       }
       return drive.bucket_id;
     }));
+  /** Where the storage routes of this project are. */
+  const routes = async () =>
+    shared ? `/api/v1/work/team/projects/${team}/git` : `/api/v1/buckets/${await bucketId()}`;
   /** @param {Record<string, unknown>} body */
   const presign = async (body) =>
-    api(`/api/v1/buckets/${await bucketId()}/presign`, {
+    api(`${await routes()}/presign`, {
       method: "POST",
       body: JSON.stringify({ ttl: PRESIGN_TTL, ...body }),
     });
@@ -532,9 +673,21 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       if (typeof plan?.url !== "string") {
         throw new UnoGitError("The Uno console didn't return an upload link.");
       }
-      const status = await put(plan.url, range(0, size));
-      if (status !== -1) throw putFailed(status);
-      return;
+      const make = range(0, size);
+      let tries = 0;
+      const status = await put(
+        plan.url,
+        (kick) => {
+          tries += 1;
+          return make(kick);
+        },
+        signedHeaders(plan, size),
+      );
+      if (status === -1) return;
+      // A link for new objects only. Refused on a retry: the try before landed.
+      if (status === 412 && tries > 1) return;
+      if (status === 412) throw new ObjectExists("That name is taken in the cloud.");
+      throw putFailed(status);
     }
     const uploadId = String(plan.upload_id ?? "");
     const partSize = Number(plan.part_size);
@@ -607,6 +760,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
 
   return {
     who: { boxId: creds.boxId, hostname: os.hostname() },
+    ...(shared ? { shared } : {}),
     read: async (key) => {
       /** @type {Buffer[]} */
       const chunks = [];
@@ -622,12 +776,17 @@ export function consoleStorage(creds, fetchImpl = fetch) {
         return true;
       }
       // Small and conditional: always one PUT (parts can't be conditional).
-      const plan = await presign({ key, method: "put", size: bytes.length });
+      const plan = await presign({ key, method: "put", size: bytes.length }).catch((error) => {
+        if (error instanceof ObjectExists) return null;
+        throw error;
+      });
+      if (plan === null) return false;
       if (plan?.multipart === true || typeof plan?.url !== "string") {
         throw new UnoGitError("The Uno console didn't return an upload link.");
       }
       const status = await put(plan.url, () => ({ body: bytes, length: bytes.length }), {
         "if-none-match": "*",
+        ...signedHeaders(plan, bytes.length),
       });
       if (status === -1) return true;
       if (status === 412) return false;
@@ -645,7 +804,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       })),
     list: async (prefix) => {
       const { json: raw, date } = await apiWithDate(
-        `/api/v1/buckets/${await bucketId()}/objects?prefix=${encodeURIComponent(prefix)}`,
+        `${await routes()}/objects?prefix=${encodeURIComponent(prefix)}`,
       );
       return {
         folders: (Array.isArray(raw?.folders) ? raw.folders : []).filter(
@@ -670,6 +829,7 @@ export function consoleStorage(creds, fetchImpl = fetch) {
       };
     },
     remove: async (key) => {
+      if (shared) throw new UnoGitError(ONLY_THE_OWNER_TIDIES);
       await api(`/api/v1/buckets/${await bucketId()}/objects?key=${encodeURIComponent(key)}`, {
         method: "DELETE",
       });
@@ -1358,9 +1518,8 @@ export async function pushRefs(input) {
             return failAll("too big for the Uno cloud (over 2 GB in one push)");
           }
           if (input.progress) input.say(`uno: saving ${megabytes(size)} to your Uno cloud`);
-          const key = `${bundlesPrefix(input.name)}${stamp(madeAt)}.bundle`;
           const prerequisites = await bundlePrerequisites(file);
-          await input.storage.upload(key, file, size);
+          const key = await uploadBundle(input.storage, input.name, file, size, madeAt);
           entry = {
             key,
             created: new Date(madeAt).toISOString(),
@@ -1401,6 +1560,27 @@ export async function pushRefs(input) {
 }
 
 /**
+ * Upload one bundle; returns its key. Someone else's project can refuse a name
+ * that got taken (ObjectExists): the bytes go again under a new one.
+ * @param {Storage} storage
+ * @param {string} name
+ * @param {string} file
+ * @param {number} size
+ * @param {number} madeAt
+ */
+async function uploadBundle(storage, name, file, size, madeAt) {
+  for (let attempt = 1; ; attempt += 1) {
+    const key = `${bundlesPrefix(name)}${stamp(madeAt)}.bundle`;
+    try {
+      await storage.upload(key, file, size);
+      return key;
+    } catch (error) {
+      if (!(error instanceof ObjectExists) || attempt >= UPLOAD_NAMES) throw error;
+    }
+  }
+}
+
+/**
  * Once per repository: the storage must refuse to overwrite an existing log
  * entry (If-None-Match), else two computers pushing at the same moment
  * could lose one push. Writing the same bytes again is harmless either way.
@@ -1422,11 +1602,13 @@ async function checkStorageRefusesOverwrites(input, written) {
 
 /**
  * After a push, each step on its own (one failing doesn't stop the next):
- * prune the log, pack bundles when due, delete stray bundles.
+ * prune the log, pack bundles when due, delete stray bundles. In someone
+ * else's project none of them: only the owner deletes, with their own push.
  * @param {{ storage: Storage, name: string, tmpDir: string, progress: boolean,
  *   say: (line: string) => void }} input
  */
 async function housekeeping(input) {
+  if (input.storage.shared) return;
   const steps = [
     () => pruneLog(input.storage, input.name),
     async () => compact({ ...input, state: await readRemote(input.storage, input.name) }),
@@ -1525,7 +1707,7 @@ export async function compact(input) {
 export async function main(argv, options = {}) {
   const env = options.env ?? process.env;
   const home = options.home ?? os.homedir();
-  const name = projectNameOf(argv[1] ?? argv[0] ?? "");
+  const address = addressOf(argv[1] ?? argv[0] ?? "");
   /** @type {NodeJS.Signals[]} */
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
   const stop = () => {
@@ -1534,14 +1716,14 @@ export async function main(argv, options = {}) {
   };
   for (const signal of signals) process.on(signal, stop);
   try {
-    if (!name) {
+    if (!address) {
       throw new UnoGitError(
         `"${argv[1] ?? argv[0] ?? ""}" isn't an Uno project name: use uno::<name> with a-z, 0-9, ".", "_", "-".`,
       );
     }
     await serve({
-      name,
-      storage: () => openStorage({ home, env }),
+      name: address.name,
+      storage: () => openStorage({ home, env, team: address.team }),
       gitDir: path.resolve(env.GIT_DIR ?? ".git"),
       input: process.stdin,
       output: process.stdout,
