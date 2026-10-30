@@ -1359,7 +1359,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <span
                   data-testid="sidebar-row-age"
                   title={chatAgeTitle(props.activityAtMs ?? Number.NaN)}
-                  className="hidden text-[11px] whitespace-nowrap tabular-nums text-sidebar-muted-foreground/60 @[10rem]/sidebar-row-content:inline"
+                  className="hidden text-[11px] whitespace-nowrap tabular-nums text-sidebar-muted-foreground/60 @[12rem]/sidebar-row-content:inline"
                 >
                   {ageLabel}
                 </span>
