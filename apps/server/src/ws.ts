@@ -29,6 +29,8 @@ import {
   FilesystemBrowseError,
   FilesystemReadFileError,
   FilesystemWatchFileError,
+  type ProjectId,
+  ProjectSyncError,
   ThreadId,
   type TerminalEvent,
   UnoBillingRpcError,
@@ -162,6 +164,9 @@ import {
 import { expandHomePath } from "./pathExpansion.ts";
 import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
+import { isNoProjectRoot } from "@t3tools/shared/noProject";
+
+import { claimChatFolder } from "./project/noProjectFolder.ts";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner.ts";
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
@@ -584,6 +589,36 @@ const makeWsRpcLayer = (
         }
       };
 
+      /**
+       * A chat without a project gets a folder of its own when it starts. A
+       * folder that can't be made never stops the message: the chat works in
+       * `~/chats` itself.
+       */
+      const noProjectChatFolder = (input: {
+        readonly projectId: ProjectId;
+        readonly threadId: ThreadId;
+        readonly text: string;
+      }): Effect.Effect<string | null> =>
+        projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
+          Effect.flatMap((project) =>
+            Option.isSome(project) && isNoProjectRoot(project.value.workspaceRoot, os.homedir())
+              ? Effect.tryPromise(() =>
+                  claimChatFolder({
+                    root: project.value.workspaceRoot,
+                    threadId: input.threadId,
+                    text: input.text,
+                  }),
+                )
+              : Effect.succeed(null),
+          ),
+          Effect.catch((error) =>
+            Effect.logWarning("a chat without a project got no folder of its own", {
+              threadId: input.threadId,
+              detail: String(error),
+            }).pipe(Effect.as(null)),
+          ),
+        );
+
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
@@ -739,6 +774,13 @@ const makeWsRpcLayer = (
                   { threadId: command.threadId },
                 );
               } else {
+                const worktreePath =
+                  bootstrap.createThread.worktreePath ??
+                  (yield* noProjectChatFolder({
+                    projectId: bootstrap.createThread.projectId,
+                    threadId: command.threadId,
+                    text: command.message.text,
+                  }));
                 yield* orchestrationEngine.dispatch({
                   type: "thread.create",
                   commandId: serverCommandId("bootstrap-thread-create"),
@@ -749,7 +791,7 @@ const makeWsRpcLayer = (
                   runtimeMode: bootstrap.createThread.runtimeMode,
                   interactionMode: bootstrap.createThread.interactionMode,
                   branch: bootstrap.createThread.branch,
-                  worktreePath: bootstrap.createThread.worktreePath,
+                  worktreePath,
                   createdAt: bootstrap.createThread.createdAt,
                 });
                 createdThread = true;
@@ -1558,6 +1600,36 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.projectSyncSetEnabled,
             projectSync.setEnabled(projectId, enabled),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        [WS_METHODS.projectSyncStartRepository]: ({ folder, name }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSyncStartRepository,
+            projectSync.startRepository(folder, name),
+            { "rpc.aggregate": "projectSync" },
+          ),
+        // Always private; the key check runs inside `publishRepository`.
+        [WS_METHODS.projectSyncConnectHost]: ({ projectId, provider, repository }) =>
+          observeRpcEffect(
+            WS_METHODS.projectSyncConnectHost,
+            projectSync.folderOf(projectId).pipe(
+              Effect.flatMap((cwd) =>
+                sourceControlRepositories
+                  .publishRepository({ cwd, provider, repository, visibility: "private" })
+                  .pipe(
+                    Effect.mapError((error) => new ProjectSyncError({ message: error.detail })),
+                    Effect.tap(() => refreshGitStatus(cwd)),
+                  ),
+              ),
+              Effect.flatMap((published) =>
+                projectSync.hostConnected(projectId, {
+                  provider,
+                  repository: published.repository.nameWithOwner,
+                  url: published.repository.url,
+                  remote: published.remoteName,
+                }),
+              ),
+            ),
             { "rpc.aggregate": "projectSync" },
           ),
         [WS_METHODS.projectSyncSyncNow]: ({ projectId }) =>

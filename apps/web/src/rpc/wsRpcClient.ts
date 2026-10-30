@@ -289,6 +289,8 @@ export interface WsRpcClient {
     readonly setLocalOnly: RpcUnaryMethod<typeof WS_METHODS.projectSyncSetLocalOnly>;
     readonly introSeen: RpcUnaryNoArgMethod<typeof WS_METHODS.projectSyncIntroSeen>;
     readonly answerOld: RpcUnaryMethod<typeof WS_METHODS.projectSyncAnswerOld>;
+    readonly startRepository: RpcUnaryMethod<typeof WS_METHODS.projectSyncStartRepository>;
+    readonly connectHost: RpcUnaryMethod<typeof WS_METHODS.projectSyncConnectHost>;
     readonly secretsList: RpcUnaryMethod<typeof WS_METHODS.projectSecretsList>;
     readonly secretsSet: RpcUnaryMethod<typeof WS_METHODS.projectSecretsSet>;
     readonly secretsRemove: RpcUnaryMethod<typeof WS_METHODS.projectSecretsRemove>;
@@ -757,6 +759,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       setLocalOnly: (input) =>
         transport.request((client) => client[WS_METHODS.projectSyncSetLocalOnly](input)),
       introSeen: () => transport.request((client) => client[WS_METHODS.projectSyncIntroSeen]({})),
+      startRepository: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncStartRepository](input)),
+      connectHost: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncConnectHost](input)),
       answerOld: (input) =>
         transport.request((client) => client[WS_METHODS.projectSyncAnswerOld](input)),
       secretsList: (input) =>

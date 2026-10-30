@@ -114,6 +114,9 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       setLocalOnly: rpcClient.projectSync.setLocalOnly,
       introSeen: () => rpcClient.projectSync.introSeen().then(() => undefined),
       answerOld: (input) => rpcClient.projectSync.answerOld(input).then(() => undefined),
+      startRepository: (input) =>
+        rpcClient.projectSync.startRepository(input).then(() => undefined),
+      connectHost: rpcClient.projectSync.connectHost,
       secretsList: rpcClient.projectSync.secretsList,
       secretsSet: rpcClient.projectSync.secretsSet,
       secretsRemove: rpcClient.projectSync.secretsRemove,

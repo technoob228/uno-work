@@ -6,6 +6,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { GitCommandError, type SourceControlProviderError } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
+import { PublishKeyCheck, type PublishKeyCheckShape } from "../projectSync/publishKeyCheck.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
@@ -52,8 +53,14 @@ function processOutput(): GitVcsDriver.ExecuteGitResult {
 function makeLayer(input: {
   readonly provider?: SourceControlProvider.SourceControlProviderShape;
   readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
+  readonly keyCheck?: PublishKeyCheckShape["problem"];
 }) {
   return SourceControlRepositoryService.layer.pipe(
+    Layer.provide(
+      Layer.succeed(PublishKeyCheck, {
+        problem: input.keyCheck ?? (() => Effect.succeed(null)),
+      }),
+    ),
     Layer.provide(
       Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
         get: () => Effect.succeed(input.provider ?? makeProvider()),
@@ -244,6 +251,105 @@ it.effect("publishes to the remote name returned by ensureRemote", () => {
                 upstreamBranch: `${options?.remoteName ?? "missing"}/feature/remote-v1`,
                 setUpstream: true,
               };
+            }),
+        },
+      }),
+    ),
+  );
+});
+
+const PUBLISH_INPUT = {
+  cwd: "/workspace",
+  provider: "github",
+  repository: "octocat/t3code",
+  visibility: "private",
+} as const;
+
+it.effect("publishes nothing, and creates nothing, when the project holds a key", () => {
+  let created = 0;
+  const provider = makeProvider({
+    createRepository: () =>
+      Effect.sync(() => {
+        created += 1;
+        return CLONE_URLS;
+      }),
+  });
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const error = yield* service.publishRepository(PUBLISH_INPUT).pipe(Effect.flip);
+    assert.strictEqual(error.detail, "Nothing was published: config.json");
+    assert.strictEqual(created, 0);
+  }).pipe(
+    Effect.provide(
+      makeLayer({
+        provider,
+        keyCheck: () => Effect.succeed("Nothing was published: config.json"),
+      }),
+    ),
+  );
+});
+
+it.effect("a key check that can't run stops the publish", () => {
+  let created = 0;
+  const provider = makeProvider({
+    createRepository: () =>
+      Effect.sync(() => {
+        created += 1;
+        return CLONE_URLS;
+      }),
+  });
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const error = yield* service.publishRepository(PUBLISH_INPUT).pipe(Effect.flip);
+    assert.strictEqual(error.detail, "Couldn't check the project's files before syncing.");
+    assert.strictEqual(created, 0);
+  }).pipe(
+    Effect.provide(
+      makeLayer({
+        provider,
+        keyCheck: () =>
+          Effect.fail(new Error("Couldn't check the project's files before syncing.")),
+      }),
+    ),
+  );
+});
+
+it.effect("falls back to HTTPS when this computer has no SSH key for the host", () => {
+  const remotes: Array<ReadonlyArray<string>> = [];
+  let pushes = 0;
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const result = yield* service.publishRepository(PUBLISH_INPUT);
+    assert.strictEqual(result.status, "pushed");
+    assert.strictEqual(pushes, 2);
+    assert.deepStrictEqual(remotes, [["remote", "set-url", "origin", CLONE_URLS.url]]);
+  }).pipe(
+    Effect.provide(
+      makeLayer({
+        git: {
+          execute: (input) =>
+            Effect.sync(() => {
+              if (input.args[0] === "remote") remotes.push(input.args);
+              return processOutput();
+            }),
+          pushCurrentBranch: () =>
+            Effect.suspend(() => {
+              pushes += 1;
+              return pushes === 1
+                ? Effect.fail(
+                    new GitCommandError({
+                      operation: "push",
+                      command: "git push",
+                      cwd: "/workspace",
+                      detail: "git@github.com: Permission denied (publickey).",
+                    }),
+                  )
+                : Effect.succeed({
+                    status: "pushed" as const,
+                    branch: "main",
+                    upstreamBranch: "origin/main",
+                    setUpstream: true,
+                  });
             }),
         },
       }),
