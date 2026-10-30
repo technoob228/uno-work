@@ -117,6 +117,24 @@ describe("uno project", { timeout: 60_000 }, () => {
     expect(listed.stdout).toMatch(/^my-site {2}saved \d{4}-\d\d-\d\d \d\d:\d\d {2}from /);
   });
 
+  it("a clone of a shared project saves back to where it came from", () => {
+    const a = repo("site");
+    expect(uno(a, "project", "sync").code).toBe(0);
+    const b = path.join(root, "shared");
+    git(root, "clone", "-q", "-o", "uno", "uno::team/12/site", b);
+    fs.writeFileSync(path.join(b, "about.html"), "about\n");
+    git(b, "add", "-A");
+    git(b, "commit", "-q", "-m", "about");
+
+    const saved = uno(b, "project", "sync");
+
+    expect(saved.stderr).not.toMatch(/not to the Uno cloud/);
+    expect(saved.code).toBe(0);
+    expect(git(b, "remote", "get-url", "uno")).toBe("uno::team/12/site");
+    git(a, "pull", "-q", "uno", "main");
+    expect(fs.existsSync(path.join(a, "about.html"))).toBe(true);
+  });
+
   it("won't mix a different project into a name that's taken", () => {
     expect(uno(repo("one/app"), "project", "sync").code).toBe(0);
     const other = repo("two/app");

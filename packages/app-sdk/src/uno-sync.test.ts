@@ -1193,6 +1193,37 @@ describe("a project shared with someone else", { timeout: 120_000 }, () => {
     expect(read(path.join(notes, "plan.md"))).toBe("anya's plan\n");
   });
 
+  it("in a repository too: the one who only pulls hears who replaced their file", async () => {
+    const { misha, anya } = people();
+    const repo = misha.folder("repo");
+    fs.mkdirSync(repo);
+    const signed = (at: Computer, name: string) => {
+      write(path.join(at.home, ".gitconfig"), `[user]\n\tname = ${name}\n\temail = t@e.co\n`);
+    };
+    signed(misha, "Misha");
+    signed(anya, "Anya");
+    const save = (at: Computer, dir: string, text: string) => {
+      write(path.join(dir, "plan.md"), text);
+      spawnSync("git", ["add", "plan.md"], { cwd: dir, env: at.env });
+      spawnSync("git", ["commit", "-q", "-m", "plan"], { cwd: dir, env: at.env });
+    };
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, env: misha.env });
+    save(misha, repo, "plan\n");
+    await syncProject({ dir: repo, name: "repo" }, misha);
+    await getProject({ name: "repo", team: TEAM }, anya);
+    const there = path.join(anya.home, "projects", "repo");
+
+    save(misha, repo, "misha's\n");
+    await syncProject({ dir: repo, name: "repo" }, misha);
+    save(anya, there, "anya's\n");
+    const anyas = await syncProject({ dir: there }, anya);
+    expect(anyas.conflict).toMatchObject({ theirsPerson: "Misha" });
+
+    const mishas = await syncProject({ dir: repo, name: "repo" }, misha);
+    expect(read(path.join(repo, "plan.md"))).toBe("anya's\n");
+    expect(mishas.conflict).toMatchObject({ theirsPerson: "Anya", kept: { "plan.md": "theirs" } });
+  });
+
   it("one person's two computers don't get told about themselves", async () => {
     const laptop = { ...computer("laptop"), person: "Misha" };
     const desk = { ...computer("desk"), person: "Misha" };
