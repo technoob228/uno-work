@@ -24,6 +24,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 const [mode, BASE, PAIR, ...rest] = process.argv.slice(2);
+// Each run clicks its own 20 chats (BENCH_SLICE=k → chats k*20…k*20+19), each
+// getting its first turn during that run: runs compare chats of equal length
+// (reusing chats made every later run open a longer chat and look slower).
+const SLICE_SIZE = Number(process.env.BENCH_SLICE_SIZE ?? 20);
+const sliceOf = (ids) => {
+  const k = Number(process.env.BENCH_SLICE ?? 0);
+  return ids.slice(k * SLICE_SIZE, (k + 1) * SLICE_SIZE);
+};
 const HARNESS = process.env.BENCH_HARNESS ?? "harness-fake";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -113,15 +121,17 @@ async function seed(chats, turnChats, out) {
   }
   // The last `turnChats` get one finished turn each (one agent at a time, so
   // the machine never runs more than one fake agent).
-  const turnIds = ids.slice(-turnChats);
+  // Newest first, so the bench chats (the first slices) sit at the top of the list.
+  ids.reverse();
+  const turnIds = ids.slice(0, turnChats);
   for (const threadId of turnIds) await runTurn(token, threadId);
-  writeFileSync(out, JSON.stringify(turnIds));
+  writeFileSync(out, JSON.stringify(ids));
   console.log(`seeded ${chats} chats, ${turnIds.length} with a finished turn`);
 }
 
 async function unread(idsFile) {
   const token = await bearer(PAIR);
-  for (const threadId of JSON.parse(readFileSync(idsFile, "utf8"))) {
+  for (const threadId of sliceOf(JSON.parse(readFileSync(idsFile, "utf8")))) {
     await dispatch(token, { type: "thread.mark-unread", threadId });
   }
   console.log("server read marks cleared");
@@ -129,7 +139,7 @@ async function unread(idsFile) {
 
 async function visited(idsFile) {
   const token = await bearer(PAIR);
-  const ids = new Set(JSON.parse(readFileSync(idsFile, "utf8")));
+  const ids = new Set(sliceOf(JSON.parse(readFileSync(idsFile, "utf8"))));
   const rows = (await shell(token)).threads.filter((t) => ids.has(t.id));
   console.log(`server read marks: ${rows.filter((t) => t.lastVisitedAt).length}/${ids.size}`);
 }
@@ -205,7 +215,7 @@ async function measure(label, idsFile, out) {
   const { chromium } = await import(
     process.env.PW_CORE ?? "/opt/uno-work/app/node_modules/playwright-core/index.mjs"
   );
-  const ids = JSON.parse(readFileSync(idsFile, "utf8"));
+  const ids = sliceOf(JSON.parse(readFileSync(idsFile, "utf8")));
   const browser = await chromium.launch({
     executablePath:
       process.env.BENCH_CHROME ?? "/opt/uno-work/browsers/chromium-1208/chrome-linux64/chrome",
@@ -234,11 +244,10 @@ async function measure(label, idsFile, out) {
   const page = await context.newPage();
   await page.bringToFront();
   await page.goto(`${BASE}/pair#token=${PAIR}`);
-  await page.waitForFunction(
-    (first) => document.querySelector(`[data-testid="thread-title-${first}"]`) !== null,
-    ids[ids.length - 1],
-    { timeout: 120_000 },
-  );
+  await page.waitForFunction(() => document.querySelectorAll("[data-thread-item]").length >= 5, null, {
+    timeout: 120_000,
+  });
+  await sleep(2_000);
   // Worst case: every "Show N more" opened, so all chats are rows in the DOM
   // (BENCH_EXPAND=0 keeps the default short list).
   if (process.env.BENCH_EXPAND !== "0") {

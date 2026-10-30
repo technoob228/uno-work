@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sidebar speed before / after the server read state (cloud only, never on
 # the Mac). One throwaway daemon on its own port and folders, one account with
-# CHATS chats (TURNS of them with a finished turn, unread):
+# CHATS chats; every run gives its own 20 a first answer after the page loaded
+# (so they are unread for real and all runs open chats of the same length):
 #
 #   A0 / B0  before / after with the default short list (Show N more closed)
 #   A  BASE_REF  web + daemon (before), every Show N more opened
@@ -21,7 +22,7 @@ PORT=${PORT:-13792}
 BASE_REF=${BASE_REF:-v0.0.162}
 WORK_REF=${WORK_REF:-origin/feat/t3-v2-compat-1029}
 CHATS=${CHATS:-320}
-TURNS=${TURNS:-20}
+TURNS=${TURNS:-0}
 NODE=${NODE:-node}
 W=$ROOT/work
 B=$ROOT/bench
@@ -30,7 +31,7 @@ BASEURL="http://127.0.0.1:$PORT"
 mkdir -p "$B"
 exec > >(tee "$B/bench.log") 2>&1
 [ -f "$HOME/.toolsrc" ] && . "$HOME/.toolsrc"
-echo "== $(date -u +%FT%TZ) sidebar bench on $(hostname): $CHATS chats, $TURNS unread with a turn"
+echo "== $(date -u +%FT%TZ) sidebar bench on $(hostname): $CHATS chats; each run gets 20 of them a first answer after load and opens them"
 
 git -C "$W" fetch -q origin --tags
 # The bench scripts come from WORK_REF whatever is checked out.
@@ -94,35 +95,31 @@ HOME="$B/userhome" "$NODE" "$W/apps/server/src/bin.ts" project add --base-dir "$
   --title "T3 smoke" "$B/project" >/dev/null 2>&1
 start_daemon
 bench seed "$BASEURL" "$(pair)" "$CHATS" "$TURNS" "$B/turn-ids.json"
-measure "$BASEURL" "$(pair)" "A before ($BASE_REF)" "$B/turn-ids.json" "$B/A.json"
-BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "A before, short list" "$B/turn-ids.json" "$B/A0.json"
+BENCH_SLICE=0 measure "$BASEURL" "$(pair)" "A before ($BASE_REF)" "$B/turn-ids.json" "$B/A.json"
+BENCH_SLICE=1 BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "A before, short list" "$B/turn-ids.json" "$B/A0.json"
 stop_daemon
 
 # --- B / C / B2: after -------------------------------------------------------
 checkout_and_build "$WORK_REF"
 start_daemon
-bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
-sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
-bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
-sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
+BENCH_SLICE=2 measure "$BASEURL" "$(pair)" "B after, no phone" "$B/turn-ids.json" "$B/B.json"
+sleep 3; BENCH_SLICE=2 bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
+BENCH_SLICE=3 BENCH_EXPAND=0 measure "$BASEURL" "$(pair)" "B after, short list" "$B/turn-ids.json" "$B/B0.json"
+sleep 3; BENCH_SLICE=3 bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 
-bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-NEWEST=$("$NODE" -e 'const a=require(process.argv[1]);console.log(a[a.length-1])' "$B/turn-ids.json")
+NEWEST=$("$NODE" -e 'const a=require(process.argv[1]);console.log(a[4*20])' "$B/turn-ids.json")
 bench phone "$BASEURL" "$(pair)" "$NEWEST" > "$B/phone.log" 2>&1 &
 PHONE=$!
 sleep 5
-measure "$BASEURL" "$(pair)" "C after, v2 phone subscribed" "$B/turn-ids.json" "$B/C.json"
-sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
+BENCH_SLICE=4 measure "$BASEURL" "$(pair)" "C after, v2 phone subscribed" "$B/turn-ids.json" "$B/C.json"
+sleep 3; BENCH_SLICE=4 bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 kill -TERM $PHONE 2>/dev/null || true
 wait $PHONE 2>/dev/null || true
 PHONE=
 tail -2 "$B/phone.log"
 
-bench unread "$BASEURL" "$(pair)" "$B/turn-ids.json"
-measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.json" "$B/B2.json"
-sleep 3; bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
+BENCH_SLICE=5 measure "$BASEURL" "$(pair)" "B2 after, no phone (repeat)" "$B/turn-ids.json" "$B/B2.json"
+sleep 3; BENCH_SLICE=5 bench visited "$BASEURL" "$(pair)" "$B/turn-ids.json"
 stop_daemon
 
 "$NODE" -e '
