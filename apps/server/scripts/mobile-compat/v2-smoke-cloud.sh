@@ -28,6 +28,16 @@ exec > >(tee "$LOG") 2>&1
 
 echo "== $(date -u +%FT%TZ) T3 v2 smoke on $(hostname), port $PORT, root $ROOT"
 
+# bun for the Work checkout: the machine's, else a pinned copy under ROOT.
+if ! command -v bun >/dev/null 2>&1; then
+  BUN_VERSION=${BUN_VERSION:-1.3.11}
+  if [ ! -x "$ROOT/.bun-npm/node_modules/.bin/bun" ]; then
+    npm_config_cache="$ROOT/.npm-cache" nice -n 10 npm install -s --no-audit --no-fund \
+      --prefix "$ROOT/.bun-npm" "bun@$BUN_VERSION" >/dev/null
+  fi
+  export PATH="$ROOT/.bun-npm/node_modules/.bin:$PATH"
+fi
+
 # --- Work daemon from WORK_REF ------------------------------------------------
 if [ ! -d "$ROOT/work/.git" ] && [ ! -f "$ROOT/work/.git" ]; then
   git clone -q --filter=blob:none "$WORK_REPO" "$ROOT/work"
