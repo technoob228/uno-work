@@ -11,6 +11,7 @@
 import * as nodePath from "node:path";
 
 import { INSTALLABLE_PROVIDER_DRIVERS, type ProviderDriverKind } from "@t3tools/contracts";
+import { UNO_OPENCODE_VERSION } from "@t3tools/shared/agentVersions";
 
 /**
  * Python Hermes runs on. hermes-agent needs >=3.11,<3.14; without a pin uv
@@ -107,10 +108,15 @@ export type InstallPlan =
       readonly reason: string;
     };
 
-const NPM_PACKAGE_BY_DRIVER: Readonly<Record<string, string>> = {
-  codex: "@openai/codex",
-  claudeAgent: "@anthropic-ai/claude-code",
-  opencode: "opencode-ai",
+// `@latest`: the same button installs and updates. A CLI that is already
+// installed would otherwise stay on whatever version it has — too old for the
+// newest models (Claude Opus 5.5 needs Claude Code 2.1.280). Claude Code's own
+// auto-updater is left on. OpenCode is pinned: it also runs Uno Code, and a new
+// one reaches computers only after it passed our checks.
+const NPM_SPEC_BY_DRIVER: Readonly<Record<string, string>> = {
+  codex: "@openai/codex@latest",
+  claudeAgent: "@anthropic-ai/claude-code@latest",
+  opencode: `opencode-ai@${UNO_OPENCODE_VERSION}`,
 };
 
 export function isInstallableDriver(driver: ProviderDriverKind): boolean {
@@ -133,16 +139,12 @@ export function resolveInstallPlan(
     };
   }
 
-  const npmPackage = NPM_PACKAGE_BY_DRIVER[driver];
-  if (npmPackage) {
+  const npmSpec = NPM_SPEC_BY_DRIVER[driver];
+  if (npmSpec) {
     const env = context.npmGlobalWritable
       ? {}
       : { npm_config_prefix: userLocalNpmPrefix(context.homeDir) };
-    // `@latest`: the same button installs and updates. A CLI that is
-    // already installed would otherwise stay on whatever version it has —
-    // too old for the newest models (Claude Opus 5.5 needs Claude Code
-    // 2.1.280). Claude Code's own auto-updater is left on.
-    const args = ["install", "-g", `${npmPackage}@latest`];
+    const args = ["install", "-g", npmSpec];
     return {
       kind: "command",
       command: "npm",

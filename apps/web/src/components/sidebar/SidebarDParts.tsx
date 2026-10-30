@@ -33,6 +33,7 @@ import {
   SparklesIcon,
   SquarePenIcon,
   WorkflowIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { memo, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 
@@ -46,6 +47,8 @@ import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { toggleDevMode, useDevMode } from "../../devMode";
+import { FixWorkDialog } from "../../fixWork/FixWorkDialog";
+import { FIX_WORK_COPY } from "../../fixWork/fixWork";
 import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
@@ -152,8 +155,11 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   const trigger = (
     <SidebarDAccountTrigger label={props.computerName} who={who} variant={props.variant} />
   );
+  const [fixWorkOpen, setFixWorkOpen] = useState(false);
   return (
-    <Menu>
+    <>
+      {fixWorkOpen ? <FixWorkDialog open onOpenChange={setFixWorkOpen} /> : null}
+      <Menu>
       {trigger}
       <MenuPopup
         align="start"
@@ -213,6 +219,16 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           <span className="flex-1">Help</span>
           <ArrowUpRightIcon className="opacity-60" />
         </MenuItem>
+        <MenuItem
+          data-testid="sidebar-fix-work"
+          onClick={() => {
+            close();
+            setFixWorkOpen(true);
+          }}
+        >
+          <WrenchIcon />
+          {FIX_WORK_COPY.menu}
+        </MenuItem>
         {lines.desktopSignOut ? (
           <>
             <MenuSeparator />
@@ -243,7 +259,8 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           </>
         ) : null}
       </MenuPopup>
-    </Menu>
+      </Menu>
+    </>
   );
 });
 

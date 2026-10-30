@@ -1,3 +1,4 @@
+import { UNO_OPENCODE_VERSION } from "@t3tools/shared/agentVersions";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -56,7 +57,7 @@ describe("resolveInstallPlan", () => {
     };
     expect(packageFor("codex")).toBe("@openai/codex@latest");
     expect(packageFor("claudeAgent")).toBe("@anthropic-ai/claude-code@latest");
-    expect(packageFor("opencode")).toBe("opencode-ai@latest");
+    expect(packageFor("opencode")).toBe(`opencode-ai@${UNO_OPENCODE_VERSION}`);
   });
 
   it("installs the pinned Hermes that runs a Claude plan, falling back to PyPI's (15.10)", () => {

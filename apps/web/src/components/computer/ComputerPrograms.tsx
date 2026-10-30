@@ -13,12 +13,15 @@
  * each with "Show on Home" to put it back.
  */
 import type { UnoMachineApp, UnoMachineApps } from "@t3tools/contracts";
+import { usePins } from "../../navigation/usePins";
 import {
   AudioLinesIcon,
   FolderIcon,
   FolderOpenIcon,
   GlobeIcon,
   HardDriveIcon,
+  PinIcon,
+  PinOffIcon,
   SettingsIcon,
   LayoutGridIcon,
   ShoppingBagIcon,
@@ -260,7 +263,10 @@ export function TileShell({
   actionBusy = false,
   chip = null,
   problem = false,
+  pin,
 }: {
+  /** Pin to the sidebar's icon row, on hover like Settings. */
+  pin?: { readonly pinned: boolean; readonly onToggle: () => void };
   /** The app's one primary action: a chip under the name (except "Open"). */
   action?: AppPrimaryAction | null;
   /** A built-in's own chip ("Add"), when it has no primary action of an app. */
@@ -362,6 +368,23 @@ export function TileShell({
           data-testid="program-settings"
         >
           <SettingsIcon />
+        </Button>
+      ) : null}
+      {pin ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          className={cn(
+            "absolute top-1 left-1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100",
+            pin.pinned ? "opacity-100" : "opacity-0",
+          )}
+          aria-label={`${pin.pinned ? "Unpin" : "Pin"} ${label}`}
+          aria-pressed={pin.pinned}
+          title={pin.pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
+          onClick={pin.onToggle}
+          data-testid="program-pin"
+        >
+          {pin.pinned ? <PinOffIcon /> : <PinIcon />}
         </Button>
       ) : null}
     </li>
@@ -475,6 +498,7 @@ export function ComputerPrograms({
   onUnhide?: (appId: string) => void;
 }) {
   const startingId = useStartingAppId();
+  const pins = usePins();
   return (
     <section className="flex flex-col gap-3" aria-labelledby="programs-heading">
       <header className="flex flex-wrap items-center gap-2">
@@ -579,6 +603,20 @@ export function ComputerPrograms({
               }
               onClick={() => onOpenTile(tile)}
               onDetails={() => onTileDetails(tile)}
+              {...(tile.openUrl
+                ? {
+                    pin: {
+                      pinned: pins.isPinned("app", tile.openUrl),
+                      onToggle: () =>
+                        pins.toggle({
+                          kind: "app",
+                          title: tile.name,
+                          target: tile.openUrl!,
+                          icon: tile.icon,
+                        }),
+                    },
+                  }
+                : {})}
             />
           );
         })}

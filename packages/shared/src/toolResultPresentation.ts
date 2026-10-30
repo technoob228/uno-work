@@ -525,6 +525,7 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => named("Page:", text(c.args, "title"), "Made a page"),
     "Couldn't show the page",
   ],
+  support_draft: ["Writing to support…", "Wrote a letter to support", "Couldn't write the letter"],
   browser_command: [
     "Using the browser…",
     (c) =>

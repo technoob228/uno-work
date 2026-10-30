@@ -45,7 +45,8 @@ describe("Uno Work environment brief", () => {
     // ~20 for `messenger_send` with answer buttons (Misha 29.10: any chat writes to
     // the person's Telegram and asks with buttons; the details are uno_guide("notify")).
     // ~45 for a page in the chat (T3 port 30.10: when to answer with `html_render`, one line).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2135);
+    // ~10 for `support_draft` (Fix Work).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2145);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

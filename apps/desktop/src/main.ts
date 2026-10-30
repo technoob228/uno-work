@@ -47,6 +47,7 @@ import { autoUpdater } from "electron-updater";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
+import { SUPPORT_EMAIL } from "@t3tools/shared/supportDraft";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort.ts";
@@ -649,6 +650,11 @@ function getSafeExternalUrl(rawUrl: unknown): string | null {
     parsedUrl = new URL(rawUrl);
   } catch {
     return null;
+  }
+
+  // Fix Work's letter opens in the person's mail app, addressed to support only.
+  if (parsedUrl.protocol === "mailto:" && parsedUrl.pathname === SUPPORT_EMAIL) {
+    return parsedUrl.toString();
   }
 
   if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {

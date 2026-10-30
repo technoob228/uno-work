@@ -61,6 +61,7 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveHtmlRenderEntries,
+  deriveSupportDraftEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -1838,7 +1839,7 @@ export default function ChatView(props: ChatViewProps) {
         timelineMessages,
         activeThread?.proposedPlans ?? [],
         workLogEntries,
-        deriveHtmlRenderEntries(threadActivities),
+        [...deriveHtmlRenderEntries(threadActivities), ...deriveSupportDraftEntries(threadActivities)],
       ),
     [activeThread?.proposedPlans, threadActivities, timelineMessages, workLogEntries],
   );

@@ -29,7 +29,12 @@ import { SelfWatchdogLive } from "./selfWatchdog.ts";
 import { EconomyPresenceLive } from "./economy/EconomyPresence.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { homeSuggestionsRouteLayer } from "./homeSuggestionsHttp.ts";
-import { selfUpdateStartRouteLayer, selfUpdateStatusRouteLayer } from "./selfUpdateHttp.ts";
+import { fixWorkPrepareRouteLayer } from "./fixWork/fixWorkHttp.ts";
+import {
+  selfUpdateAgentsRouteLayer,
+  selfUpdateStartRouteLayer,
+  selfUpdateStatusRouteLayer,
+} from "./selfUpdateHttp.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
@@ -674,7 +679,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   officeEngineStatusRouteLayer,
   officeEngineInstallRouteLayer,
   selfUpdateStatusRouteLayer,
+  selfUpdateAgentsRouteLayer,
   selfUpdateStartRouteLayer,
+  fixWorkPrepareRouteLayer,
   homeSuggestionsRouteLayer,
   browserBridgeCommandRouteLayer,
   browserBridgeLoginRouteLayer,
