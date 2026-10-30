@@ -393,6 +393,13 @@ rm -rf /var/lib/uno-work-update/ask/request /var/lib/uno-work-update/status.json
   /var/lib/uno-work-update/work /var/lib/uno-work-update/state-before-update /opt/uno-work/app.prev \
   "${STATE_DIR}/userdata/self-update-intent.json" "${STATE_DIR}/userdata/self-update-reported.json" \
   2>/dev/null || true
+# Край ходит к демону по внутреннему адресу компьютера. Демон на localhost
+# снаружи не виден: все клоны из такого образа откроются с ошибкой.
+image_host="$(sed -n 's/^UNO_WORK_HOST=//p' /etc/uno-work/uno-work.env 2>/dev/null | tail -n 1 || true)"
+case "${image_host}" in
+  ''|127.*|localhost|::1)
+    die "UNO_WORK_HOST='${image_host}' in /etc/uno-work/uno-work.env: clones would not be reachable — set 0.0.0.0, check that this box has uno-box-agent" ;;
+esac
 # Тестовая подмена адреса релизов не должна попасть в образ.
 [ ! -e /etc/uno-work/update.conf ] \
   || die "/etc/uno-work/update.conf (test release URL) is present — remove it and rerun install.sh"

@@ -7,7 +7,8 @@
 #
 # Environment:
 #   UNO_WORK_TARBALL_URL  where to fetch the server bundle (default: uno4.dev)
-#   UNO_WORK_HOST         bind address  (default: 0.0.0.0)
+#   UNO_WORK_HOST         bind address  (default: 0.0.0.0 on a Uno computer, where our
+#                         edge proxies to it; 127.0.0.1 on any other machine)
 #   UNO_WORK_PORT         bind port     (default: 80 — the port our edge proxies)
 #   UNO_WORK_API_KEY      Uno gateway key; enables the bundled harnesses
 #   UNO_WORK_HERMES_VERSION  pin the Hermes Agent release (recommended for images)
@@ -26,12 +27,63 @@
 set -euo pipefail
 
 TARBALL_URL="${UNO_WORK_TARBALL_URL:-https://console.uno4.dev/cli/work/uno-work-server-latest.tar.gz}"
-HOST="${UNO_WORK_HOST:-0.0.0.0}"
+
+# >>> bind-address (run by apps/server/src/deployInstallBind.test.ts)
+# Where the daemon listens. On a Uno computer our edge reaches it over the
+# computer's private address, so it has to listen there. Any other machine has
+# nothing in front of it: 0.0.0.0:80 would put the sign-in page and everything
+# after it on plain HTTP for the whole network, so it stays on this machine
+# unless the person asks otherwise with UNO_WORK_HOST.
+#
+# uno-box-agent is baked into every Uno image: nothing else ships that path
+# (fishcode back/deploy/box-agent). The hostname is a fallback for the machine an
+# image is built on; on a real box it is whatever the person named it (2531 is
+# "stage-work"), so it can't be the only signal. A second check of this choice
+# sits in prepare-image.sh: an image that listens on localhost is refused.
+UNO_BOX_AGENT_BIN="${UNO_BOX_AGENT_BIN:-/usr/local/sbin/uno-box-agent}"
+UNO_WORK_ENV_FILE="${UNO_WORK_ENV_FILE:-/etc/uno-work/uno-work.env}"
+is_uno_computer() {
+  [ -x "${UNO_BOX_AGENT_BIN}" ] && return 0
+  case "$(hostname 2>/dev/null || true)" in
+    unowork-golden*|*.uno4.dev) return 0 ;;
+  esac
+  return 1
+}
+resolve_bind_host() {
+  if [ -n "${UNO_WORK_HOST:-}" ]; then
+    printf '%s\n' "${UNO_WORK_HOST}"
+    return
+  fi
+  # An upgrade keeps what the machine has: a box stays reachable, and a machine
+  # someone opened up on purpose isn't closed by an update.
+  local existing
+  existing="$(sed -n 's/^UNO_WORK_HOST=//p' "${UNO_WORK_ENV_FILE}" 2>/dev/null | tail -n 1 || true)"
+  if [ -n "${existing}" ]; then
+    printf '%s\n' "${existing}"
+    return
+  fi
+  if is_uno_computer; then
+    printf '0.0.0.0\n'
+  else
+    printf '127.0.0.1\n'
+  fi
+}
+is_loopback_host() {
+  case "$1" in
+    127.*|localhost|::1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# <<< bind-address
+
+HOST="$(resolve_bind_host)"
 PORT="${UNO_WORK_PORT:-}"
 if [ -z "${PORT}" ]; then
   # An upgrade keeps the machine's own settings file (below), so the daemon
   # stays on the port it already has: wait for it there, not on the default.
-  PORT="$(sed -n 's/^UNO_WORK_PORT=//p' /etc/uno-work/uno-work.env 2>/dev/null | tail -n 1)"
+  # `|| true`: on a clean machine the file isn't there, and with pipefail a
+  # failed sed would end the whole install here, silently.
+  PORT="$(sed -n 's/^UNO_WORK_PORT=//p' "${UNO_WORK_ENV_FILE}" 2>/dev/null | tail -n 1 || true)"
   case "${PORT}" in ''|*[!0-9]*) PORT=80 ;; esac
 fi
 API_KEY="${UNO_WORK_API_KEY:-}"
@@ -46,8 +98,17 @@ NODE_MAJOR=22
 log() { printf '\033[1;35m[uno-work]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[uno-work]\033[0m %s\n' "$*" >&2; exit 1; }
 
+warn_open_http() {
+  is_loopback_host "${HOST}" && return 0
+  is_uno_computer && return 0
+  log "WARNING: Uno Work listens on ${HOST}:${PORT} over plain HTTP."
+  log "  Anyone who can reach this machine sees the sign-in page, and nothing is encrypted."
+  log "  Put it behind HTTPS or a VPN, or set UNO_WORK_HOST=127.0.0.1 in ${CONFIG_DIR}/uno-work.env."
+}
+
 [ "$(id -u)" -eq 0 ] || die "Run as root (sudo)."
 command -v apt-get >/dev/null 2>&1 || die "This installer supports Debian/Ubuntu."
+warn_open_http
 
 export DEBIAN_FRONTEND=noninteractive
 base_tools_present() {
@@ -1091,6 +1152,13 @@ for _ in $(seq 1 120); do
   if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     log "Daemon is up on ${HOST}:${PORT}"
     log "Pair a browser:  uno-work auth pairing create --base-dir ${STATE_DIR} --ttl 10m --role owner --json"
+    if is_loopback_host "${HOST}"; then
+      log "It listens on this machine only. From your computer:"
+      log "  ssh -L 3773:127.0.0.1:${PORT} <you>@<this machine>   then open http://localhost:3773"
+      log "To open it to the network, set UNO_WORK_HOST in ${CONFIG_DIR}/uno-work.env and put HTTPS in front."
+    else
+      warn_open_http
+    fi
     exit 0
   fi
   sleep 1
