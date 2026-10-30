@@ -1,14 +1,25 @@
 import { type ServerProvider } from "@t3tools/contracts";
-import { memo } from "react";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { memo, useState } from "react";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, XIcon } from "lucide-react";
 import { formatProviderDriverKindLabel } from "../../providerModels";
 import { isWebApp } from "../../webMode";
 
 export interface ProviderStatusBannerAction {
   readonly label: string;
   readonly onClick: () => void;
+}
+
+/**
+ * Notices the person closed, for this run of the app. The key is the notice
+ * itself, so a new or different problem shows again.
+ */
+const dismissedNotices = new Set<string>();
+
+/** Tests only. */
+export function resetDismissedProviderNotices(): void {
+  dismissedNotices.clear();
 }
 
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
@@ -30,6 +41,8 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
    */
   hint?: string | null;
 }) {
+  const [, setDismissedCount] = useState(0);
+
   if (!status || status.status === "ready" || status.status === "disabled") {
     return null;
   }
@@ -50,6 +63,14 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   const title = `${providerLabel} agent status`;
   const message = status.message ?? defaultMessage;
   const description = hint ? `${message} ${hint}` : message;
+  const noticeKey = `${status.instanceId}|${status.status}|${message}`;
+  if (dismissedNotices.has(noticeKey)) {
+    return null;
+  }
+  const dismiss = () => {
+    dismissedNotices.add(noticeKey);
+    setDismissedCount((count) => count + 1);
+  };
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">
@@ -66,6 +87,16 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
             </Button>
           </div>
         ) : null}
+        <AlertAction>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
+            onClick={dismiss}
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </AlertAction>
       </Alert>
     </div>
   );

@@ -374,20 +374,27 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
   const parsed = parseHermesVersionOutput(versionProbe.success.value);
   const { auth, message: authMessage } = hermesAuth(unoApiKey);
 
+  // The catalog only refines the model list: without it Hermes runs on the
+  // built-in list, so a gateway hiccup is retried once and otherwise stays in
+  // the log — it is not a status to show in every chat.
   let discoveredModels: ReadonlyArray<ServerProviderModel> = [];
-  let discoveryWarning: string | undefined;
   if (auth.status === "authenticated") {
-    const catalogExit = yield* Effect.result(
-      Effect.tryPromise(() => fetchHermesModelCatalog(unoApiKey)),
+    const fetchCatalog = Effect.tryPromise(() => fetchHermesModelCatalog(unoApiKey)).pipe(
+      Effect.flatMap((catalog) =>
+        catalog.length > 0 ? Effect.succeed(catalog) : Effect.fail("empty catalog"),
+      ),
     );
-    if (Result.isSuccess(catalogExit) && catalogExit.success.length > 0) {
+    const catalogExit = yield* Effect.result(fetchCatalog.pipe(Effect.retry({ times: 1 })));
+    if (Result.isSuccess(catalogExit)) {
       discoveredModels = buildHermesModels(catalogExit.success);
     } else {
-      discoveryWarning = "Could not fetch the Uno Gateway model catalog for Hermes.";
+      yield* Effect.logWarning(
+        "Hermes: Uno Gateway model catalog unavailable, using built-in list",
+      );
     }
   }
 
-  const messages = [parsed.message, authMessage, discoveryWarning]
+  const messages = [parsed.message, authMessage]
     .map((message) => message?.trim())
     .filter((message): message is string => Boolean(message));
 
@@ -404,12 +411,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     probe: {
       installed: true,
       version: parsed.version,
-      status:
-        auth.status === "unauthenticated"
-          ? "error"
-          : discoveryWarning && parsed.status === "ready"
-            ? "warning"
-            : parsed.status,
+      status: auth.status === "unauthenticated" ? "error" : parsed.status,
       auth,
       ...(messages.length > 0 ? { message: messages.join(" ") } : {}),
     },
