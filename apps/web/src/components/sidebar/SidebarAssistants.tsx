@@ -33,6 +33,7 @@ import {
   EyeOffIcon,
   LoaderCircleIcon,
   PlusIcon,
+  Settings2Icon,
   SettingsIcon,
   SquarePenIcon,
 } from "lucide-react";
@@ -61,7 +62,6 @@ import { type TeamMember, useAssistantTeam, useTeamShown } from "../assistants/u
 import { useSidebar } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SIMPLE_SETTINGS_PATHS } from "../settings/settingsNavGroups";
 import {
   type AssistantFoldChoice,
   assistantChatsUnfolded,
@@ -320,7 +320,7 @@ const AssistantRow = memo(function AssistantRow(props: {
           </TooltipTrigger>
           <TooltipPopup side="right">
             {name} · {member.configured ? status : "Not set up yet"}
-            {props.note.computer ? ` · on ${props.note.computer}` : ""} — open its page
+            {props.note.computer ? ` · on ${props.note.computer}` : ""} — its settings
           </TooltipPopup>
         </Tooltip>
         <button
@@ -356,6 +356,15 @@ const AssistantRow = memo(function AssistantRow(props: {
             <ChevronRightIcon
               className={cn("size-3.5 transition-transform", unfolded && "rotate-90")}
             />
+          </HoverButton>
+        ) : null}
+        {member.configured && teamShown ? (
+          <HoverButton
+            label={`${name}'s settings`}
+            onClick={openPage}
+            testId="sidebar-assistant-settings"
+          >
+            <Settings2Icon className="size-3.5" />
           </HoverButton>
         ) : null}
         {member.configured ? (
@@ -502,9 +511,11 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
     leave();
     void navigate({ to: "/assistants", search: { view: "new" } });
   };
+  // The gear: every assistant and the way into each one's settings (29.10 —
+  // it led to Settings › Assistants & phone, a page about Telegram and the phone).
   const openSettings = () => {
     leave();
-    void navigate({ to: SIMPLE_SETTINGS_PATHS.assistants });
+    void navigate({ to: "/assistants" });
   };
 
   if (header.showRestore) {
@@ -544,7 +555,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
           </HeaderButton>
           {header.showSettings ? (
             <HeaderButton
-              label="Assistant settings"
+              label="All assistants and their settings"
               onClick={openSettings}
               testId="sidebar-assistants-settings"
             >
