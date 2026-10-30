@@ -205,6 +205,18 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Компромиссы:** снимки и `.env*` удалённых чатов не удаляются никогда (ref + папка живут, пока их не уберут руками). Прочие ignored-файлы (локальные БД, `dist/`, `node_modules`) не сохраняются. Авто-Done на сервере не знает клиентских отметок «прочитано»: завершённый и непрочитанный чат после 3 дней тишины считается Done.
 - **Тесты:** `worktreeCleanup/policy.test.ts`, `worktreeCleanup/WorktreeCleanup.test.ts` (реальный git во временном репозитории), `components/settings/chatCopiesCleanup.logic.test.ts`.
 
+### Dev mode: PR треда, auto-settle, настройки, журнал
+
+Всё видно только в Dev mode; без него поведение прежнее (промпты, имена веток, сайдбар).
+
+- **Флаг:** `devMode` + `devModeChangedAt` в `ServerSettings` каждого компьютера, в браузере кэш `ui_dev_mode` (`apps/web/src/devMode.ts`, `DevModeSync.tsx`). Решает последнее изменение, бэкенд не нужен. Заодно демон знает, что можно тратить лимиты GitHub.
+- **PR треда:** `apps/server/src/threadPullRequests/` (`ThreadPullRequestService`, чистые правила в `threadPullRequestRules.ts`, разбор `gh pr create` / `gh pr merge` в `commandDetection.ts`). Ссылки лежат на треде: колонки `pull_requests_json`, `auto_settle_disabled_at` (миграция 055), события `thread.pull-requests-updated`, `thread.auto-settle-updated`, они не двигают `updatedAt`. Чтение через `SourceControlProvider.readChangeRequestStatuses`: GitHub одним GraphQL на репозиторий (`gitHubPullRequestStatuses.ts`), GitLab по REST. От T3 взята логика, не слои: у нас orchestration v1.
+- **Опрос:** раз в минуту при открытом клиенте, после конца хода и после `gh pr merge` сразу. Тихие PR раз в 5 и 15 минут, merged не перечитываем, ниже 10 % лимита пауза до сброса, при rate limit и ошибке входа пауза на хост 15 минут.
+- **Auto-settle:** `shouldAutoSettle` + `thread.settle` от системы. Merge должен быть позже последнего сообщения человека. Открытый PR держит тред в сайдбаре и в чистке копий (`pullRequestHoldsThread`), но не дольше 14 дней без чтения.
+- **Настройки:** Source Control (Pull requests, Writing), Worktrees (имена веток, чистка копий, список копий), Projects (модель и действия, `runOnSettle`), Diagnostics. Маршруты закрыты Dev mode. Действие `runOnSettle` идёт только в своей копии чата и только на событие `thread.settled`: тихое завершение за 3 дня считается в клиенте и события не даёт.
+- **Журнал:** `apps/server/src/diagnostics/TraceDiagnostics.ts` читает локальные `server.trace.ndjson`, причины и сообщения проходят `redactSecretsInText`. Монитор ресурсов остаётся в `ResourcesView`. `ProcessDiagnostics` не переносили.
+- **Тесты:** `threadPullRequests/*.test.ts`, `decider.pullRequests.test.ts`, `gitHubPullRequestStatuses.test.ts`, `diagnostics/TraceDiagnostics.test.ts`, `chat/ThreadDetails.logic.test.ts`. В настоящий GitHub не ходят.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:
