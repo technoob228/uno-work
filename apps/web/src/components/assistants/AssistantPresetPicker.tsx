@@ -37,6 +37,7 @@ export function AssistantPresetPicker({
   disabled = false,
   sandbox = false,
   ownComputer = false,
+  projectsOnly = false,
   testId = "assistant-preset",
 }: {
   name: string;
@@ -49,6 +50,11 @@ export function AssistantPresetPicker({
   sandbox?: boolean;
   /** It lives on a computer of its own: its projects are all it has. */
   ownComputer?: boolean;
+  /**
+   * Its projects alone (an assistant's page, 29.10): the permission level is
+   * changed in one place there — its own switch — not twice.
+   */
+  projectsOnly?: boolean;
   testId?: string;
 }) {
   const [details, setDetails] = useState(false);
@@ -69,6 +75,8 @@ export function AssistantPresetPicker({
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
+      {projectsOnly ? null : (
+        <>
       <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`What ${name} may do`}>
         {ASSISTANT_MODES.map((option: AssistantMode) => {
           const selected = mode === option;
@@ -121,8 +129,10 @@ export function AssistantPresetPicker({
         </ul>
       ) : null}
 
+        </>
+      )}
       <div className="flex flex-col gap-1.5 pt-1" data-testid={`${testId}-projects`}>
-        <span className="text-xs font-medium">Projects</span>
+        {projectsOnly ? null : <span className="text-xs font-medium">Projects</span>}
         <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Projects">
           {(
             [

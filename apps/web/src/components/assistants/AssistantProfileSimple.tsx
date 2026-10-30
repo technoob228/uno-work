@@ -7,11 +7,12 @@
  * - the one next step: Connect Telegram (@BotFather, paste the token, then
  *   Start in Telegram) until a bot is linked; Slack and its email are small
  *   rows under it;
- * - its permission level, where it can look, where it works, the apps it
+ * - its permission level (one switch), where it can look (its projects,
+ *   changed right there), where it works, the apps it
  *   may open and the AI (one per computer) — in plain sight (29.10);
  * - its chats and what is on it now, its memory and instructions (edited
  *   right on the page);
- * - Advanced, folded: projects by name, its email rules, role, routines,
+ * - Advanced, folded: its email rules, role, routines,
  *   the team and "Set up again";
  * - its automations (28.10): what it does on a schedule or on an event.
  *
@@ -26,7 +27,6 @@ import {
   ArrowLeftIcon,
   ChevronRightIcon,
   LoaderCircleIcon,
-  LockIcon,
   MailIcon,
   MessageCircleIcon,
   PencilIcon,
@@ -549,20 +549,10 @@ export function AssistantProfileSimple(props: {
                 <AssistantModeSwitch member={member} />
               </div>
             </Section>
+            {/* Its projects are changed right here; the level has its one switch above (29.10). */}
             <Section title="Where it can look" testId="assistant-profile-where">
-              <div className="flex flex-col gap-1 px-3 py-2.5 text-sm">
-                {profile.projects === "all" ? (
-                  <span>All your projects, new ones too — like Uno.</span>
-                ) : (
-                  <>
-                    <span>Only: {profile.projects.join(", ") || "its own folder"}</span>
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <LockIcon className="size-3 text-success" /> Locked by a sandbox on{" "}
-                      {member.computerLabel || "its computer"}. On your other computers it's a note,
-                      not a lock.
-                    </span>
-                  </>
-                )}
+              <div className="px-3 py-2.5">
+                <TeamPresetEditor member={member} nameOf={nameOf} projectsOnly />
               </div>
             </Section>
 
@@ -715,12 +705,6 @@ export function AssistantProfileSimple(props: {
             )}
 
             <Advanced>
-              <Section title="What it may do" testId="assistant-profile-access">
-                <div className="px-3 py-2">
-                  <TeamPresetEditor member={member} nameOf={nameOf} />
-                </div>
-              </Section>
-
               <TeamMail
                 member={member}
                 section={(body) => (
