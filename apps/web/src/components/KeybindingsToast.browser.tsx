@@ -426,7 +426,13 @@ async function waitForServerConfigStreamReady(): Promise<void> {
   throw new Error("Timed out waiting for the server config stream to deliver updates.");
 }
 
-async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
+async function mountApp(options?: {
+  /**
+   * A remount subscribes again on the same harness connection: the snapshot
+   * arrives, later pushes of the harness don't, so this probe can't pass there.
+   */
+  readonly probeConfigStream?: boolean;
+}): Promise<{ cleanup: () => Promise<void> }> {
   // This suite tests the chat screen of someone who already set Uno Work up:
   // without this a fresh browser goes to the setup wizard, then Home.
   writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, onboardingCompleted: true });
@@ -454,7 +460,7 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
   await waitForInitialWsSubscriptions();
   await waitForWsConnection();
   await waitForServerConfigSnapshot();
-  await waitForServerConfigStreamReady();
+  if (options?.probeConfigStream !== false) await waitForServerConfigStreamReady();
   await waitForNoToasts();
 
   return {
@@ -585,7 +591,7 @@ describe("Keybindings update toast", () => {
       // Remount the app — onServerConfigUpdated replays the cached value
       // synchronously on subscribe. This should NOT produce a toast.
       await mounted.cleanup();
-      const remounted = await mountApp();
+      const remounted = await mountApp({ probeConfigStream: false });
 
       // Give it a moment to process the replayed value
       await new Promise((resolve) => setTimeout(resolve, 500));
