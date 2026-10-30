@@ -461,6 +461,12 @@ interface TerminalLaunchContext {
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
 
+function isEditableOutsideComposer(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  if (element.closest('[data-chat-composer-form="true"]')) return false;
+  return element.isContentEditable || element.matches("input, textarea, select");
+}
+
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
   activeLatestTurn: Thread["latestTurn"] | null;
@@ -3001,6 +3007,16 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "composer.stash") {
+        // ⌘S in another text field (a file open in the panel) is that field's.
+        const focused = document.activeElement;
+        if (isEditableOutsideComposer(focused)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        composerRef.current?.setAside();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -5163,6 +5179,7 @@ export default function ChatView(props: ChatViewProps) {
                     composerTerminalContextsRef={composerTerminalContextsRef}
                     shouldAutoScrollRef={isAtEndRef}
                     scheduleStickToBottom={scrollToEnd}
+                    isEmbedded={isEmbedded}
                     onSend={onComposerSend}
                     onInterrupt={onInterrupt}
                     onImplementPlanInNewThread={onImplementPlanInNewThread}

@@ -338,6 +338,10 @@ import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { regenerateThreadTitle } from "../hooks/threadTitleActions";
+import { chatProjectOffer, turnChatIntoProject } from "../hooks/turnChatIntoProject";
+import { resolveHomeFolder } from "../hooks/useFolderChats";
+import { ChatInFolderDialog } from "./computer/ChatInFolderDialog";
+import { SidebarDraftsBlock } from "./sidebar/SidebarDraftsBlock";
 import { useSidebarChatDrag } from "./sidebar/useSidebarChatDrag";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -902,6 +906,24 @@ interface SidebarThreadRowProps {
   onOpenPrLink: (event: ReactMouseEvent<HTMLElement>, url: string) => void;
   /** Without Dev mode: no snooze, and "Settle" reads "Done". */
   simple: boolean;
+}
+
+async function turnChatIntoProjectWithNotice(
+  threadRef: ScopedThreadRef,
+  folder: string,
+): Promise<void> {
+  try {
+    await turnChatIntoProject(threadRef, folder);
+    toastManager.add(stackedThreadToast({ type: "success", title: "The chat is a project now" }));
+  } catch (error) {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "Couldn't make the project",
+        description: error instanceof Error ? error.message : undefined,
+      }),
+    );
+  }
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -3105,6 +3127,7 @@ export default function Sidebar() {
     setSnoozePickerTarget(null);
   }, [attemptSnooze, snoozePickerTarget, snoozePickerWake]);
   const [continueThreadTarget, setContinueThreadTarget] = useState<ScopedThreadRef | null>(null);
+  const [projectFolderTarget, setProjectFolderTarget] = useState<ScopedThreadRef | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRenameTarget | null>(null);
   // "On all my computers": each computer's daemon syncs its own projects.
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
@@ -3330,6 +3353,13 @@ export default function Sidebar() {
         const agentsClosed = thread.agentsClosedAt != null;
         const status = resolveSidebarThreadStatus(thread);
         const snoozePresets = resolveSnoozePresets(nowDate);
+        const projectOffer = chatProjectOffer({
+          worktreePath: thread.worktreePath,
+          branch: thread.branch,
+          projectRoot: project?.cwd ?? null,
+          homeFolder: await resolveHomeFolder(thread.environmentId),
+          isAssistantChat: thread.assistantRole === "chat",
+        });
         const lifecycleItems: ContextMenuItem[] = [];
         if (supportsSettlement) {
           lifecycleItems.push(
@@ -3370,6 +3400,15 @@ export default function Sidebar() {
               ...(thread.assistantRole === "chat"
                 ? []
                 : [{ id: "regenerate-title", label: "Regenerate title" }]),
+              ...(projectOffer
+                ? [
+                    {
+                      id: "turn-into-project",
+                      label: "Turn into project",
+                      disabled: status === "working",
+                    },
+                  ]
+                : []),
               { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
               ...lifecycleItems,
               // Read: seen, nothing to add — the chat stops asking for "Ready".
@@ -3413,6 +3452,13 @@ export default function Sidebar() {
             return;
           case "regenerate-title":
             void regenerateThreadTitle(threadRef);
+            return;
+          case "turn-into-project":
+            if (projectOffer?.kind === "pick-folder") {
+              setProjectFolderTarget(threadRef);
+            } else if (projectOffer?.kind === "own-folder") {
+              void turnChatIntoProjectWithNotice(threadRef, projectOffer.folder);
+            }
             return;
           case "pin":
             setThreadPinned(threadRef, !isPinned);
@@ -3935,6 +3981,28 @@ export default function Sidebar() {
         statuses={projectSync.statuses}
         onOpenSettings={openProjectSettingsById}
       />
+      <ChatInFolderDialog
+        environmentId={projectFolderTarget?.environmentId ?? null}
+        open={projectFolderTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setProjectFolderTarget(null);
+        }}
+        title="Turn this chat into a project"
+        description="Pick the folder with this chat's work. The chat keeps its history and goes on working as before."
+        actionLabel={(folderName) => `Make ${folderName} a project`}
+        actionIcon={<FolderIcon />}
+        errorFallback="Couldn't make the project."
+        onStart={async (folder) => {
+          if (!projectFolderTarget) return;
+          const home = await resolveHomeFolder(projectFolderTarget.environmentId);
+          if (folder === home) throw new Error("Pick a folder inside your home folder.");
+          await turnChatIntoProject(projectFolderTarget, folder);
+          setProjectFolderTarget(null);
+          toastManager.add(
+            stackedThreadToast({ type: "success", title: "The chat is a project now" }),
+          );
+        }}
+      />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}
@@ -4387,6 +4455,7 @@ export default function Sidebar() {
   const dChatList = (inPanel: boolean) => (
     <SidebarContent className="min-h-full gap-0">
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
+        <SidebarDraftsBlock />
         <TooltipProvider delay={150} closeDelay={0} timeout={400}>
           <ul
             role="list"

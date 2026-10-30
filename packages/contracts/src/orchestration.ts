@@ -815,6 +815,17 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 
+/**
+ * "Turn into project": the chat joins the project of its folder. Nothing moves:
+ * the chat keeps working where it was (see upstream `thread.project.adopt-folder`).
+ */
+const ThreadProjectAdoptCommand = Schema.Struct({
+  type: Schema.Literal("thread.project.adopt"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+});
+
 // Wire-compatible with upstream T3 Code's thread.snooze / thread.unsnooze.
 const ThreadSnoozeCommand = Schema.Struct({
   type: Schema.Literal("thread.snooze"),
@@ -1018,6 +1029,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectAdoptCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
@@ -1047,6 +1059,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectAdoptCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
@@ -1293,6 +1306,8 @@ export const ThreadUnarchivedPayload = Schema.Struct({
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
+  /** Only "Turn into project" changes it. */
+  projectId: Schema.optional(ProjectId),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

@@ -67,6 +67,7 @@ import {
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
 import {
+  appendTerminalContextsToPrompt,
   type TerminalContextDraft,
   type TerminalContextSelection,
   insertInlineTerminalContextPlaceholder,
@@ -92,6 +93,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerSecretRequestPanel } from "./ComposerSecretRequestPanel";
@@ -121,7 +123,14 @@ import {
   readChatDrag,
   useComposerDropStore,
 } from "./chatDrop";
+import {
+  loadComposerStash,
+  registerStashTarget,
+  type StashedMessage,
+  useComposerStashStore,
+} from "../../composerStashStore";
 import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
+import { ComposerStashMenu } from "./ComposerStashMenu";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
 import { useSettings } from "../../hooks/useSettings";
@@ -495,6 +504,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  sendAndNewShortcut?: string | null;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -523,6 +533,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        sendAndNewShortcut={props.sendAndNewShortcut ?? null}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
@@ -555,6 +566,8 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** ⌘S: set the message aside, or bring one back on an empty box. */
+  setAside: () => void;
   /** Files or chats dropped anywhere on the chat. */
   acceptTransfer: (dataTransfer: DataTransfer) => void;
   /** What goes with the answer to the agent's open question. */
@@ -621,6 +634,8 @@ export interface ChatComposerProps {
    * (w0138 p3): no frame of its own, a 40px row with small chips.
    */
   inDock?: boolean;
+  /** The chat in the panel doesn't answer ⌘S or the sidebar's Drafts: the main one does. */
+  isEmbedded?: boolean;
   /**
    * Встроенный чат панели плагина не переключает права треда: плагинная
    * поверхность может права только сузить, но не расширить (`permissionPolicy:
@@ -747,6 +762,7 @@ export const ChatComposer = memo(
       isLocalDraftThread,
       forceCompact = false,
       inDock = false,
+      isEmbedded = false,
       hideRuntimeModeControl = false,
       phase,
       isConnecting,
@@ -836,6 +852,7 @@ export const ChatComposer = memo(
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
     const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+    const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
     const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
     const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
     const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -1192,6 +1209,7 @@ export const ChatComposer = memo(
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
     const [isPlanLimitsOpen, setIsPlanLimitsOpen] = useState(false);
+    const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
     // A computer on an older Work doesn't list the composer's newer shortcuts.
     const shortcutBindings = useMemo(() => withAppShortcutDefaults(keybindings), [keybindings]);
     const dragDepthRef = useRef(0);
@@ -2766,7 +2784,13 @@ export const ChatComposer = memo(
       const question = activePendingProgress?.activeQuestion;
       if (question && !activePendingProgress?.resolvedAnswer) {
         const text = ANSWER_IS_THE_FILES;
-        onChangeActivePendingUserInputCustomAnswer(question.id, text, text.length, text.length, false);
+        onChangeActivePendingUserInputCustomAnswer(
+          question.id,
+          text,
+          text.length,
+          text.length,
+          false,
+        );
       }
     };
 
@@ -2903,6 +2927,84 @@ export const ChatComposer = memo(
         setIsDragOverComposer(false);
       }
     };
+
+    // ⌘S: what's typed goes aside and the box is free; on an empty box it
+    // comes back here, whichever chat this is.
+    const restoreStashedEntry = (entry: StashedMessage) => {
+      const current = promptRef.current.trim();
+      if (entry.text) {
+        setPromptFromTraits(
+          current ? `${promptRef.current.trimEnd()}\n\n${entry.text}` : entry.text,
+        );
+      }
+      if (entry.files.length > 0) addComposerFiles([...entry.files]);
+      if (entry.quotes.length > 0 && activeThreadId) {
+        useComposerQuotesStore.getState().restore(activeThreadId, entry.quotes);
+      }
+      window.requestAnimationFrame(() => composerEditorRef.current?.focusAtEnd());
+    };
+
+    const setComposerAside = () => {
+      if (!activeThreadId || pendingUserInputs.length > 0 || isComposerApprovalState) return;
+      const text = appendTerminalContextsToPrompt(
+        promptRef.current,
+        composerTerminalContextsRef.current,
+      );
+      const quotes = useComposerQuotesStore.getState().items[activeThreadId] ?? [];
+      const entry = useComposerStashStore.getState().stash({
+        text,
+        files: [
+          ...composerImagesRef.current.map((image) => image.file),
+          ...composerFilesRef.current.map((attachment) => attachment.file),
+        ],
+        quotes,
+      });
+      if (!entry) {
+        const { entries } = useComposerStashStore.getState();
+        const only = entries.length === 1 ? entries[0] : undefined;
+        if (only) {
+          const taken = useComposerStashStore.getState().take(only.id);
+          if (taken) restoreStashedEntry(taken);
+        } else if (entries.length > 1) {
+          setIsStashMenuOpen(true);
+        }
+        return;
+      }
+      useComposerQuotesStore.getState().take(activeThreadId);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      setComposerFilesState(() => []);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      const leftBehind =
+        composerVideosRef.current.length > 0 ||
+        useScreenRecordingStore.getState().items[activeThreadId] !== undefined;
+      toastManager.add({
+        type: "success",
+        title: "Set aside",
+        description: leftBehind
+          ? "Videos and recordings stay in this chat."
+          : "⌘S on an empty box brings it back, in any chat.",
+        timeout: 4_000,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            const taken = useComposerStashStore.getState().take(entry.id);
+            if (taken) restoreStashedEntryRef.current(taken);
+          },
+        },
+      });
+    };
+
+    const restoreStashedEntryRef = useRef(restoreStashedEntry);
+    restoreStashedEntryRef.current = restoreStashedEntry;
+    const setComposerAsideRef = useRef(setComposerAside);
+    setComposerAsideRef.current = setComposerAside;
+    useEffect(() => {
+      loadComposerStash();
+      if (isEmbedded) return;
+      return registerStashTarget((entry) => restoreStashedEntryRef.current(entry));
+    }, [isEmbedded]);
 
     /** Another chat's transcript goes along as a file the agent opens when it needs it. */
     const attachChats = async (chats: ReadonlyArray<ScopedThreadRef>) => {
@@ -3126,6 +3228,7 @@ export const ChatComposer = memo(
           setComposerFilesState(() => files);
         },
         acceptTransfer: (dataTransfer) => acceptTransferRef.current(dataTransfer),
+        setAside: () => setComposerAsideRef.current(),
         getAnswerFiles: () => answerFilesRef.current.map((attachment) => attachment.file),
         addQuote: (quote) => {
           if (activeThreadIdRef.current) {
@@ -3746,7 +3849,9 @@ export const ChatComposer = memo(
                 </div>
               ) : null}
 
-              {!isComposerCollapsedMobile && pendingUserInputs.length > 0 && answerFiles.length > 0 ? (
+              {!isComposerCollapsedMobile &&
+              pendingUserInputs.length > 0 &&
+              answerFiles.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2" data-testid="composer-answer-files">
                   {answerFiles.map((file) => (
                     <div
@@ -4189,6 +4294,11 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  <ComposerStashMenu
+                    open={isStashMenuOpen}
+                    onOpenChange={setIsStashMenuOpen}
+                    onRestore={restoreStashedEntry}
+                  />
                   <ComposerPlanLimits
                     limits={chatPlanLimits}
                     compact={isComposerPrimaryActionsCompact}
@@ -4212,6 +4322,10 @@ export const ChatComposer = memo(
                       composerSendState.hasSendableContent && !hasKnownUnsupportedImageAttachments
                     }
                     preserveComposerFocusOnPointerDown={isMobileViewport}
+                    sendAndNewShortcut={shortcutLabelForCommand(
+                      shortcutBindings,
+                      "composer.sendAndNewThread",
+                    )}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

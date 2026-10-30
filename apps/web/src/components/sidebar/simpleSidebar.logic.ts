@@ -15,6 +15,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 export const SIMPLE_THREAD_MENU_IDS = [
   "rename",
   "regenerate-title",
+  "turn-into-project",
   "pin",
   "settle",
   "unsettle",
