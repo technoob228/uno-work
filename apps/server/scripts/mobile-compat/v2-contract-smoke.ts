@@ -16,7 +16,8 @@
  *   subscribeThread (snapshot + synchronized) → message.dispatch → agent
  *   reply → approval (runtime-request.respond) → «slow» turn → run.interrupt
  *   → snooze from the phone visible to Work (v1 shell) → settle from Work
- *   (v1 socket) visible to the phone → visit / mark-unread round trip.
+ *   (v1 socket) visible to the phone → visit round trip → Read in Work seen
+ *   read on the phone → mark-unread on the phone seen unread in Work.
  *
  * Needs the fake ACP agent registered as harness-fake
  * (v2-fake-acp-agent.mjs). See README.md «T3 v2 contract smoke».
@@ -368,9 +369,43 @@ const program = Effect.gen(function* () {
     (await v1Shell()).threads.find((thread) => thread.id === threadId)?.lastVisitedAt ?? null,
   );
   if (!workVisited) fail("visit visible in Work", "v1 shell row has no lastVisitedAt");
+  pass("read state round trip", { visitedAt: workVisited });
+
+  // Work's manual Read (Your turn) → the phone sees the chat read.
+  const workRow = async () =>
+    (await v1Shell()).threads.find((thread) => thread.id === threadId) ?? null;
+  const readAt = new Date(Date.now() + 1_000).toISOString();
+  yield* Effect.promise(async () => {
+    const response = await fetch(`${BASE}/api/orchestration/dispatch`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ type: "thread.read", commandId: randomUUID(), threadId, readAt }),
+    });
+    if (!response.ok) fail("thread.read (Work)", `${response.status} ${await response.text()}`);
+  });
+  yield* waitFor(
+    "Read in Work → read on the phone",
+    () => Date.parse(shellThread(threadId)?.lastVisitedAt ?? "") >= Date.parse(readAt),
+  );
+  const readRow = yield* Effect.promise(workRow);
+  if (readRow?.readAt !== readAt) fail("Read in Work → read on the phone", { workReadAt: readRow?.readAt });
+  pass("Read in Work → read on the phone", { phoneLastVisitedAt: shellThread(threadId).lastVisitedAt });
+
+  // Mark unread on the phone → Work shows the chat unread (dot and Your turn).
   yield* step("thread.mark-unread (phone)", dispatch({ type: "thread.mark-unread" }));
   yield* waitFor("unread in shell", () => shellThread(threadId)?.lastVisitedAt === null);
-  pass("read state round trip", { visitedAt: workVisited });
+  const unreadRow = yield* Effect.promise(async () => {
+    for (let i = 0; i < 50; i += 1) {
+      const row = await workRow();
+      if (row && row.lastVisitedAt === null && row.readAt === null) return row;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return null;
+  });
+  if (!unreadRow || unreadRow.readStateUpdatedAt === readRow.readStateUpdatedAt) {
+    fail("mark-unread on the phone → unread in Work", { row: unreadRow });
+  }
+  pass("mark-unread on the phone → unread in Work", { readStateUpdatedAt: unreadRow.readStateUpdatedAt });
 
   // ---- unsupported command stays polite ------------------------------------
   const refused = yield* dispatch({ type: "thread.model-selection.set", modelSelection: { instanceId: HARNESS, model: "x" } }).pipe(
