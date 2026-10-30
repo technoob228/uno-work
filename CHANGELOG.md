@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.170 — 2026-10-30
+
+- Files of any size into Cloud storage: big files from the browser go straight to storage, with a progress bar and a clear result. Chat attachments and Files take up to 100 GB and check there is room on the computer first.
+- Project materials no longer have a size limit. A zip over 1 GB stays a zip instead of being unpacked.
+- An app shown on the internet now displays its https address, and a public address is no longer labelled "Only you get in".
+
+---
+
 ## v0.0.169 — 2026-10-30
 
 - Long results from Uno now come as a link: a short message in Telegram or Slack with a clickable report that opens at once on a phone, without a password. Uno no longer names files you can't see, and it can make a fresh link when one expires.
