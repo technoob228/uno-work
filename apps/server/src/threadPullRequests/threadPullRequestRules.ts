@@ -268,8 +268,8 @@ function awaitedLinks(links: ReadonlyArray<ThreadPullRequest>): ReadonlyArray<Th
  * Does a finished PR settle this thread? The person pulled it back (`active`),
  * pinned it, snoozed it or turned auto-settle off: no. An open PR holds it. A
  * merge older than the person's last message doesn't count either: they came
- * back with more to do (upstream ca2afd8aea). A closed PR settles whatever the
- * switch says, as upstream: the switch is about merges.
+ * back with more to do (upstream ca2afd8aea). The switch covers a PR closed
+ * without a merge too: off, nothing moves a chat to Done on its own.
  */
 export function shouldAutoSettle(input: {
   readonly thread: SweepThread;
@@ -277,7 +277,7 @@ export function shouldAutoSettle(input: {
   readonly nowMs: number;
 }): boolean {
   const { thread, autoSettleOnMerge, nowMs } = input;
-  if (thread.settledOverride !== null) return false;
+  if (!autoSettleOnMerge || thread.settledOverride !== null) return false;
   if (thread.pinnedAt !== null || thread.autoSettleDisabledAt !== null) return false;
   const snoozedUntilMs = msOf(thread.snoozedUntil);
   if (snoozedUntilMs !== null && snoozedUntilMs > nowMs) return false;
@@ -291,7 +291,6 @@ export function shouldAutoSettle(input: {
   );
   const latestAtMs = terminalAtMs(latest);
   if (latestAtMs === null) return false;
-  if (latest.snapshot?.state === "merged" && !autoSettleOnMerge) return false;
 
   const anchorMs = Math.max(
     msOf(thread.createdAt) ?? 0,

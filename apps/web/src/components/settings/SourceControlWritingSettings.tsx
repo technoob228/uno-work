@@ -64,7 +64,7 @@ export function PullRequestSettingsSection(props: { readonly environmentId: Envi
     <SettingsSection title="Pull requests">
       <SettingsRow
         title="Move chats to Done after merge"
-        description="A chat with a merged PR moves to Done, unless you wrote in it after the merge. An open PR keeps the chat active."
+        description="A chat with a merged or closed PR moves to Done, unless you wrote in it afterwards. An open PR keeps the chat active."
         control={
           <Switch
             checked={settings.sidebarAutoSettleOnMerge}

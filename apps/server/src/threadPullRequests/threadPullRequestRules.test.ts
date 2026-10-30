@@ -319,9 +319,10 @@ describe("shouldAutoSettle", () => {
     expect(settles({ pullRequests: [link(merged(10))], snoozedUntil: ago(1) })).toBe(true);
   });
 
-  it("a closed PR settles even with the merge switch off", () => {
+  it("a PR closed without a merge follows the switch", () => {
     const pullRequests = [link({ state: "closed", closedAt: ago(10) })];
-    expect(settles({ pullRequests }, false)).toBe(true);
+    expect(settles({ pullRequests })).toBe(true);
+    expect(settles({ pullRequests }, false)).toBe(false);
   });
 
   it("a PR linked after it merged records done work and doesn't settle", () => {
