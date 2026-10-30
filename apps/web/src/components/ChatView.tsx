@@ -74,6 +74,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
+  withAttachedFiles,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -146,7 +147,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
-import { stageChatFileUpload } from "../chatUploads";
+import { saveFilesToUploads, stageChatFileUpload } from "../chatUploads";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -165,6 +166,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { acceptsChatDrop } from "./chat/chatDrop";
 import { useComposerFileHandoffStore } from "./computer/composerFileHandoffStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { recordingFrameAttachments } from "../screenRecording/frameAttachments";
@@ -2876,6 +2878,54 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
 
+  // Files or a chat dropped anywhere in the window land in this chat's box,
+  // unless something under the pointer took them (the box, a sidebar chat, Files).
+  const [isDraggingOverWindow, setIsDraggingOverWindow] = useState(false);
+  useEffect(() => {
+    if (isEmbedded) return;
+    let depth = 0;
+    const accepts = (event: DragEvent) =>
+      event.dataTransfer !== null && acceptsChatDrop(event.dataTransfer);
+    const onDragEnter = (event: DragEvent) => {
+      if (!accepts(event)) return;
+      depth += 1;
+      setIsDraggingOverWindow(true);
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!accepts(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setIsDraggingOverWindow(false);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (!accepts(event) || event.defaultPrevented) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (event: DragEvent) => {
+      depth = 0;
+      setIsDraggingOverWindow(false);
+      if (!accepts(event) || event.defaultPrevented || !event.dataTransfer) return;
+      event.preventDefault();
+      composerRef.current?.acceptTransfer(event.dataTransfer);
+    };
+    const onDragEnd = () => {
+      depth = 0;
+      setIsDraggingOverWindow(false);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("dragend", onDragEnd);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("dragend", onDragEnd);
+    };
+  }, [isEmbedded]);
+
   useEffect(() => {
     // Глобальные хоткеи чата вешает только основной экземпляр — иначе открытая
     // панель со встроенным чатом обрабатывала бы каждое сочетание дважды.
@@ -3867,13 +3917,31 @@ export default function ChatView(props: ChatViewProps) {
       setRespondingUserInputRequestIds((existing) =>
         existing.includes(requestId) ? existing : [...existing, requestId],
       );
+      let answersToSend = answers;
+      const answerFiles = composerRef.current?.getAnswerFiles() ?? [];
+      if (answerFiles.length > 0) {
+        try {
+          answersToSend = withAttachedFiles(
+            answers,
+            await saveFilesToUploads(environmentId, answerFiles),
+          );
+        } catch (err) {
+          // Nothing went: the answer and its files stay, ready to try again.
+          setThreadError(
+            activeThreadId,
+            err instanceof Error ? err.message : "Couldn't upload the files.",
+          );
+          setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
+          return;
+        }
+      }
       await api.orchestration
         .dispatchCommand({
           type: "thread.user-input.respond",
           commandId: newCommandId(),
           threadId: activeThreadId,
           requestId,
-          answers,
+          answers: answersToSend,
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
@@ -4687,6 +4755,16 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {isDraggingOverWindow ? (
+        <div
+          className="pointer-events-none fixed inset-1.5 z-50 flex items-start justify-center rounded-2xl pt-4 ring-2 ring-primary/50"
+          data-testid="chat-drop-overlay"
+        >
+          <span className="rounded-full bg-primary px-3 py-1 text-primary-foreground text-xs">
+            Drop to add to this chat
+          </span>
+        </div>
+      ) : null}
       {/* Top bar */}
       {!isPreviewFocusMode && !isEmbedded ? (
         <header

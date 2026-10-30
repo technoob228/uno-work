@@ -8,6 +8,7 @@ import {
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
+  withAttachedFiles,
 } from "./pendingUserInput";
 
 const singleSelectQuestion = {
@@ -246,5 +247,25 @@ describe("pending user input question progress", () => {
       canAdvance: true,
       isComplete: true,
     });
+  });
+});
+
+describe("withAttachedFiles", () => {
+  it("adds the paths to the last answer", () => {
+    expect(withAttachedFiles({ a: "first", b: "second" }, ["/home/u/Uploads/x.png"])).toEqual({
+      a: "first",
+      b: "second\n\nAttached files:\n- /home/u/Uploads/x.png",
+    });
+  });
+
+  it("adds them to a list of picked options as one more entry", () => {
+    expect(withAttachedFiles({ a: ["one"] }, ["/x", "/y"])).toEqual({
+      a: ["one", "Attached files:\n- /x\n- /y"],
+    });
+  });
+
+  it("leaves answers alone without files", () => {
+    const answers = { a: "first" };
+    expect(withAttachedFiles(answers, [])).toBe(answers);
   });
 });

@@ -20,6 +20,7 @@ import {
 
 import type { ComposerFileAttachment } from "./composerDraftStore";
 import { ensureEnvironmentApi } from "./environmentApi";
+import { resolveHomeFolder } from "./hooks/useFolderChats";
 import { randomUUID } from "./lib/utils";
 import { uploadFilesIntoDirectory } from "./projectUpload";
 
@@ -144,4 +145,45 @@ export async function stageChatFileUpload(
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
   };
+}
+
+/** `Uploads/2026-10/1a2b3c-photo.png`: the short id keeps same-named files apart. */
+export function chatUploadSavedRelativePath(name: string, now: Date, id: string): string {
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const safeName = name.replace(/[/\\]/g, "_") || "file";
+  return `${CHAT_UPLOADS_FOLDER}/${month}/${id.slice(0, 6)}-${safeName}`;
+}
+
+/**
+ * Save files on the chat's computer right away (a turn's files go through the
+ * server when the message is sent; an answer to the agent's question has no
+ * such step) and return where they are, for the agent to open.
+ */
+export async function saveFilesToUploads(
+  environmentId: EnvironmentId,
+  files: ReadonlyArray<File>,
+): Promise<string[]> {
+  const api = ensureEnvironmentApi(environmentId);
+  const now = new Date();
+  const saved = files.map((file) => ({
+    file,
+    relativePath: chatUploadSavedRelativePath(file.name, now, randomUUID()),
+  }));
+  const result = await uploadFilesIntoDirectory(
+    { writeFile: (write) => api.projects.writeFile(write) },
+    {
+      targetDir: "~",
+      files: saved.map(({ file, relativePath }) => ({
+        relativePath,
+        size: file.size,
+        blob: file,
+      })),
+      filterIgnored: false,
+    },
+  );
+  if (result.uploadedFiles !== files.length) {
+    throw new Error("Some files didn't upload. Try again.");
+  }
+  const home = await resolveHomeFolder(environmentId);
+  return saved.map(({ relativePath }) => `${home ?? "~"}/${relativePath}`);
 }

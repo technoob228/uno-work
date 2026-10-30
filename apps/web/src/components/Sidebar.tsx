@@ -338,6 +338,7 @@ import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { regenerateThreadTitle } from "../hooks/threadTitleActions";
+import { useSidebarChatDrag } from "./sidebar/useSidebarChatDrag";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
@@ -1039,6 +1040,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   // Never Done while it works or waits for an Allow / an answer (WG-13).
   const canSettle = settlementSupported && canOfferChatDone(status);
 
+  const chatDragProps = useSidebarChatDrag(threadRef);
   const handleClick = useCallback(
     (event: ReactMouseEvent) => onThreadClick(event, threadRef),
     [onThreadClick, threadRef],
@@ -1109,7 +1111,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   // One surface model for every row: status lives in the content, surface is
   // reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
-    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-1 focus-visible:ring-ring",
+    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-1 focus-visible:ring-ring data-[chat-drop-target]:ring-2 data-[chat-drop-target]:ring-inset data-[chat-drop-target]:ring-primary/60",
     section === "settled" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground"
@@ -1267,6 +1269,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     return (
       <li data-thread-item className="list-none">
         <div
+          {...chatDragProps}
           role="button"
           tabIndex={0}
           data-testid="sidebar-row-d"
@@ -1439,6 +1442,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     return (
       <li data-thread-item className="list-none">
         <div
+          {...chatDragProps}
           role="button"
           tabIndex={0}
           data-testid="sidebar-row-slim"
@@ -1536,6 +1540,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   return (
     <li data-thread-item className="list-none py-0.5">
       <div
+        {...chatDragProps}
         role="button"
         tabIndex={0}
         data-testid="sidebar-row-card"

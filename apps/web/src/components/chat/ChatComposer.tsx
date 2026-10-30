@@ -1,3 +1,4 @@
+import { scopedThreadKey } from "@t3tools/client-runtime";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -113,6 +114,13 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { withAppShortcutDefaults } from "../appShortcuts.logic";
+import {
+  acceptsChatDrop,
+  chatTranscriptFile,
+  type ComposerDrop,
+  readChatDrag,
+  useComposerDropStore,
+} from "./chatDrop";
 import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
@@ -190,6 +198,7 @@ import { useTeammateOfThread } from "../assistants/useAssistantTeam";
 import type { ProjectUploadFile } from "../../projectUpload";
 import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projectUploadPickers";
 
+const ANSWER_IS_THE_FILES = "See the attached files.";
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
@@ -546,6 +555,10 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** Files or chats dropped anywhere on the chat. */
+  acceptTransfer: (dataTransfer: DataTransfer) => void;
+  /** What goes with the answer to the agent's open question. */
+  getAnswerFiles: () => File[];
   clearVideoAttachments: () => void;
   setVideoAttachments: (videos: ComposerVideoAttachment[]) => void;
   /** Non-image files (staged on send); cleared/restored like videos. */
@@ -634,6 +647,7 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
+    resolvedAnswer: string | string[] | null;
     activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
@@ -801,6 +815,10 @@ export const ChatComposer = memo(
     const [composerVideos, setComposerVideos] = useState<ComposerVideoAttachment[]>([]);
     // Non-image files: in memory only, staged on the chat's computer on send.
     const [composerFiles, setComposerFiles] = useState<ComposerFileAttachment[]>([]);
+    // Files for the agent's open question; the message draft stays as it is.
+    const [answerFiles, setAnswerFiles] = useState<ComposerFileAttachment[]>([]);
+    const answerFilesRef = useRef(answerFiles);
+    answerFilesRef.current = answerFiles;
     const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
     const setComposerFilesState = useCallback(
       (
@@ -1651,7 +1669,14 @@ export const ChatComposer = memo(
       cleanupComposerVideos();
       setComposerVideos([]);
       setComposerFilesState(() => []);
+      setAnswerFiles([]);
     }, [draftId, activeThreadId, cleanupComposerVideos, promptRef, setComposerFilesState]);
+
+    // An answered question takes its files with it.
+    const openQuestionRequestId = pendingUserInputs[0]?.requestId ?? null;
+    useEffect(() => {
+      setAnswerFiles([]);
+    }, [openQuestionRequestId]);
 
     // Files attached on Home's composer for this new chat (after the reset
     // above, before ChatView's pending send).
@@ -2721,15 +2746,36 @@ export const ChatComposer = memo(
       startComposerVideoProcessing(retryVideo);
     };
 
+    // Files in the answer to the agent's question: saved on the computer when
+    // the answer goes, the agent gets the paths. A file can be the whole
+    // answer: the box then says so, and the person can change the words.
+    const addAnswerFiles = (files: File[]) => {
+      const next: ComposerFileAttachment[] = [];
+      for (const file of files) {
+        const rejection = chatFileRejection(file);
+        if (rejection) {
+          toastManager.add({ type: "error", title: rejection });
+          continue;
+        }
+        next.push(composerFileFromFile(file));
+      }
+      if (next.length === 0) return;
+      setAnswerFiles((current) =>
+        [...current, ...next].slice(0, PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
+      );
+      const question = activePendingProgress?.activeQuestion;
+      if (question && !activePendingProgress?.resolvedAnswer) {
+        const text = ANSWER_IS_THE_FILES;
+        onChangeActivePendingUserInputCustomAnswer(question.id, text, text.length, text.length, false);
+      }
+    };
+
     // Any other file (pdf, docx, xlsx, zip…): kept here and staged on the
     // chat's computer when the message goes; it lands in ~/Uploads/YYYY-MM.
     const addComposerPlainFiles = (files: File[]) => {
       if (!activeThreadId || files.length === 0) return;
       if (pendingUserInputs.length > 0) {
-        toastManager.add({
-          type: "error",
-          title: "Attach files after answering plan questions.",
-        });
+        addAnswerFiles(files);
         return;
       }
       const nextFiles: ComposerFileAttachment[] = [];
@@ -2757,12 +2803,19 @@ export const ChatComposer = memo(
       setThreadError(activeThreadId, error);
     };
 
+    const addComposerPlainFilesRef = useRef(addComposerPlainFiles);
+    addComposerPlainFilesRef.current = addComposerPlainFiles;
+
     const removeComposerFile = (fileId: string) => {
       setComposerFilesState((current) => current.filter((file) => file.id !== fileId));
     };
 
     const addComposerFiles = (files: File[]) => {
       if (files.length === 0) return;
+      if (pendingUserInputs.length > 0) {
+        addAnswerFiles(files);
+        return;
+      }
       const routed = routeComposerFiles(files, {
         isVideo: (file) => inferVideoMimeType(file) !== null,
         imagesSupported: imageAttachmentSupport !== "unsupported",
@@ -2827,21 +2880,21 @@ export const ChatComposer = memo(
     };
 
     const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
       setIsDragOverComposer(true);
     };
 
     const onComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "copy";
       setIsDragOverComposer(true);
     };
 
     const onComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
+      if (!acceptsChatDrop(event.dataTransfer)) return;
       event.preventDefault();
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
@@ -2851,22 +2904,76 @@ export const ChatComposer = memo(
       }
     };
 
-    const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes("Files")) return;
-      event.preventDefault();
-      dragDepthRef.current = 0;
-      setIsDragOverComposer(false);
-      if (onDropFolder && dataTransferHasFolderOrZip(event.dataTransfer)) {
+    /** Another chat's transcript goes along as a file the agent opens when it needs it. */
+    const attachChats = async (chats: ReadonlyArray<ScopedThreadRef>) => {
+      const others = chats.filter(
+        (chat) => chat.environmentId !== environmentId || chat.threadId !== activeThreadId,
+      );
+      for (const chat of others) {
+        try {
+          addComposerPlainFilesRef.current([await chatTranscriptFile(chat)]);
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Couldn't read that chat",
+            description: error instanceof Error ? error.message : undefined,
+          });
+        }
+      }
+    };
+
+    const acceptDrop = (drop: ComposerDrop) => {
+      if (drop.files.length > 0) addComposerFiles([...drop.files]);
+      if (drop.chats.length > 0) void attachChats(drop.chats);
+    };
+
+    const acceptTransfer = (dataTransfer: DataTransfer) => {
+      const chats = readChatDrag(dataTransfer);
+      if (chats.length > 0) {
+        void attachChats(chats);
+      } else if (
+        onDropFolder &&
+        pendingUserInputs.length === 0 &&
+        dataTransferHasFolderOrZip(dataTransfer)
+      ) {
         // Read now: the dropped items are gone once this handler returns.
-        void readDroppedUploadFiles(event.dataTransfer).then((dropped) => {
+        void readDroppedUploadFiles(dataTransfer).then((dropped) => {
           if (dropped.length > 0) onDropFolder(dropped);
         });
         return;
+      } else {
+        addComposerFiles(Array.from(dataTransfer.files));
       }
-      const files = Array.from(event.dataTransfer.files);
-      addComposerFiles(files);
       focusComposer();
     };
+
+    const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+      if (!acceptsChatDrop(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDragOverComposer(false);
+      acceptTransfer(event.dataTransfer);
+    };
+
+    // Stable handle and store effects read these fresh.
+    const acceptTransferRef = useRef(acceptTransfer);
+    acceptTransferRef.current = acceptTransfer;
+    const acceptDropRef = useRef(acceptDrop);
+    acceptDropRef.current = acceptDrop;
+
+    // What was dropped on this chat in the sidebar waits here until it opens.
+    const composerDropKey =
+      typeof composerDraftTarget === "string"
+        ? composerDraftTarget
+        : scopedThreadKey(composerDraftTarget);
+    const hasOfferedDrop = useComposerDropStore(
+      (store) => store.pending[composerDropKey] !== undefined,
+    );
+    useEffect(() => {
+      if (!hasOfferedDrop) return;
+      const drop = useComposerDropStore.getState().take(composerDropKey);
+      if (drop) acceptDropRef.current(drop);
+    }, [composerDropKey, hasOfferedDrop]);
     const onImageAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.currentTarget.files ?? []);
       event.currentTarget.value = "";
@@ -3018,6 +3125,8 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
+        acceptTransfer: (dataTransfer) => acceptTransferRef.current(dataTransfer),
+        getAnswerFiles: () => answerFilesRef.current.map((attachment) => attachment.file),
         addQuote: (quote) => {
           if (activeThreadIdRef.current) {
             useComposerQuotesStore.getState().add(activeThreadIdRef.current, quote);
@@ -3637,6 +3746,40 @@ export const ChatComposer = memo(
                 </div>
               ) : null}
 
+              {!isComposerCollapsedMobile && pendingUserInputs.length > 0 && answerFiles.length > 0 ? (
+                <div className="mb-3 flex flex-wrap gap-2" data-testid="composer-answer-files">
+                  {answerFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="relative flex h-12 w-44 min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background py-1.5 pr-7 pl-2.5"
+                      title={`${file.name} — saved to Uploads when you answer`}
+                    >
+                      <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-foreground/80">
+                          {file.name}
+                        </div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {formatFileSize(file.sizeBytes)}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                        onClick={() =>
+                          setAnswerFiles((current) =>
+                            current.filter((entry) => entry.id !== file.id),
+                          )
+                        }
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&

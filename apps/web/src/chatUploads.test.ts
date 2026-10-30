@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   chatFileRejection,
   chatUploadIncomingRelativePath,
+  chatUploadSavedRelativePath,
   displayUploadPath,
   routeComposerFiles,
 } from "./chatUploads";
@@ -114,5 +115,14 @@ describe("paths", () => {
       "Uploads/2026-10/a.pdf",
     );
     expect(displayUploadPath("/tmp/other.pdf")).toBe("/tmp/other.pdf");
+  });
+});
+
+describe("chatUploadSavedRelativePath", () => {
+  it("lands in the month's Uploads with a short id and a safe name", () => {
+    const now = new Date(2026, 9, 30, 12);
+    expect(chatUploadSavedRelativePath("a/b.png", now, "1a2b3c4d")).toBe(
+      "Uploads/2026-10/1a2b3c-a_b.png",
+    );
   });
 });
