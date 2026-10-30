@@ -26,7 +26,13 @@ import {
 } from "./filesPaths.ts";
 
 /** Folders a name search never walks into: noise, not documents. */
-export const SEARCH_SKIP_DIRS: ReadonlySet<string> = new Set(["node_modules", ".git", "__pycache__", ".venv", "venv"]);
+export const SEARCH_SKIP_DIRS: ReadonlySet<string> = new Set([
+  "node_modules",
+  ".git",
+  "__pycache__",
+  ".venv",
+  "venv",
+]);
 const SEARCH_DEFAULT_LIMIT = 200;
 const SEARCH_MAX_VISITED = 50_000;
 const SEARCH_BUDGET_MS = 2_500;

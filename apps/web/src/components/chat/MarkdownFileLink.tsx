@@ -194,6 +194,7 @@ export function FileMention({
   line,
   column,
   strong,
+  link,
   label,
   className,
   children,
@@ -202,6 +203,8 @@ export function FileMention({
   line?: string;
   column?: string;
   strong?: string;
+  /** The agent wrote a link to this file itself; the rest is spotted in its text. */
+  link?: boolean;
   label?: string;
   className?: string;
   children?: ReactNode;
@@ -215,7 +218,8 @@ export function FileMention({
   const name = label ?? mention;
   const text = position ? `${name} · ${position}` : name;
 
-  if (!mention) return <>{children}</>;
+  // Spotted paths mean something only on a computer (not in a settings guide, say).
+  if (!mention || (!environmentId && !link)) return <>{children}</>;
   if (state?.status === "found") {
     return (
       <MarkdownFileLink

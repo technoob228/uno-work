@@ -366,6 +366,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
             {...(fileLink.line !== undefined ? { line: String(fileLink.line) } : {})}
             {...(fileLink.column !== undefined ? { column: String(fileLink.column) } : {})}
             strong="true"
+            link
             label={parentSuffix ? `${name} · ${parentSuffix}` : name}
             {...(props.className ? { className: props.className } : {})}
           >

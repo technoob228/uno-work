@@ -115,9 +115,32 @@ for (const theme of themes) {
 
   await step("search", async () => {
     const search = page.getByTestId("files-search-input").or(page.getByLabel("Search files"));
-    await search.first().fill("report");
+    await page.getByTestId("panel-files-tab").click({ position: { x: 200, y: 500 } });
+    await page.keyboard.press("ControlOrMeta+f");
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    log.push(`${theme}   cmd+f focus: ${focused}`);
+    await search.first().fill("mail");
     await page.waitForTimeout(1200);
     await shot("05-files-search");
+    await search.first().fill("launch-report");
+    await page.waitForTimeout(1200);
+    const wider = page.getByRole("button", { name: "Search all files" });
+    if (await wider.isVisible().catch(() => false)) {
+      await wider.click();
+      await page.waitForTimeout(1200);
+    }
+    await shot("05b-files-search-wider");
+    await search.first().fill("");
+    await page.waitForTimeout(400);
+  });
+
+  await step("cloud", async () => {
+    await page
+      .getByTestId("panel-files-tab")
+      .getByRole("tab", { name: /Cloud storage/ })
+      .click();
+    await page.waitForTimeout(1200);
+    await shot("05c-files-cloud");
   });
 
   await step("scrolled", async () => {
@@ -130,6 +153,23 @@ for (const theme of themes) {
     await page.waitForTimeout(400);
     await page.screenshot({ path: join(out, `${theme}-07-user-hover.png`) });
     log.push(`${theme} ok 07-user-hover`);
+  });
+
+  await step("tree", async () => {
+    await page
+      .getByRole("button", { name: "Home" })
+      .first()
+      .click({ timeout: 3000 })
+      .catch(() => {});
+    await page.waitForTimeout(800);
+    await page.evaluate(() => {
+      location.hash = "#/files";
+    });
+    await page.waitForTimeout(1500);
+    const search = page.getByTestId("files-search-input").first();
+    await search.fill("report");
+    await page.waitForTimeout(1200);
+    await shot("10-files-screen-search");
   });
 
   await step("feed-end", async () => {
