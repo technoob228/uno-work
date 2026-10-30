@@ -19,7 +19,9 @@ import {
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadTranscriptError,
   OrchestrationGetTurnDiffError,
+  OrchestrationRegenerateThreadTitleError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -74,6 +76,8 @@ import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { buildThreadTranscript, threadTitleSource } from "./orchestration/threadTranscript.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import {
   liveAfter,
   planShellResume,
@@ -111,6 +115,7 @@ import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
@@ -282,11 +287,13 @@ const makeWsRpcLayer = (
       const browserBridge = yield* BrowserBridge;
       const serverBrowser = yield* ServerBrowser;
       const serverSettings = yield* ServerSettingsService;
+      const textGeneration = yield* TextGeneration;
       const credentialsVault = yield* CredentialsVaultService;
       const projectSync = yield* ProjectSyncService;
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const traceDiagnostics = yield* TraceDiagnostics.make;
       // Skills: the catalog ships in the UI's own dist (`<static>/skills`).
       const skillsCatalogDir = yield* (
         config.staticDir
@@ -1121,6 +1128,78 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.regenerateThreadTitle]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.regenerateThreadTitle,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+              if (Option.isNone(thread)) {
+                return yield* new OrchestrationRegenerateThreadTitleError({
+                  message: "This chat is gone.",
+                });
+              }
+              const source = threadTitleSource(thread.value.messages);
+              if (source === null) {
+                return yield* new OrchestrationRegenerateThreadTitleError({
+                  message: "Nothing to name yet: this chat has no messages.",
+                });
+              }
+              const project = yield* projectionSnapshotQuery.getProjectShellById(
+                thread.value.projectId,
+              );
+              const { textGenerationModelSelection: modelSelection } =
+                yield* serverSettings.getSettings;
+              const generated = yield* textGeneration.generateThreadTitle({
+                cwd:
+                  thread.value.worktreePath ??
+                  Option.getOrUndefined(project)?.workspaceRoot ??
+                  config.cwd,
+                message: source,
+                modelSelection,
+              });
+              yield* orchestrationEngine.dispatch({
+                type: "thread.meta.update",
+                commandId: serverCommandId("thread-title-regenerate"),
+                threadId: input.threadId,
+                title: generated.title,
+              });
+              return { title: generated.title };
+            }).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationRegenerateThreadTitleError)(cause)
+                  ? cause
+                  : new OrchestrationRegenerateThreadTitleError({
+                      message: "Couldn't make a new title. Try again.",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getThreadTranscript]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadTranscript,
+            projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetThreadTranscriptError({
+                    message: "Couldn't read that chat.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((thread) =>
+                Option.isNone(thread)
+                  ? Effect.fail(
+                      new OrchestrationGetThreadTranscriptError({ message: "This chat is gone." }),
+                    )
+                  : Effect.succeed({
+                      title: thread.value.title,
+                      markdown: buildThreadTranscript(thread.value),
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.replayEvents]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.replayEvents,
@@ -1400,6 +1479,15 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetTraceDiagnostics,
+            traceDiagnostics.read({
+              traceFilePath: config.serverTracePath,
+              maxFiles: config.traceMaxFiles,
+            }),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.vaultList]: (_input) =>
           observeRpcEffect(WS_METHODS.vaultList, credentialsVault.list, {

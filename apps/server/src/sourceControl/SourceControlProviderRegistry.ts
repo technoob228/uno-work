@@ -128,6 +128,15 @@ function bindProviderContext(
         ...input,
         context: input.context ?? context,
       }),
+    ...(provider.readChangeRequestStatuses
+      ? {
+          readChangeRequestStatuses: (input: SourceControlProvider.ChangeRequestStatusQuery) =>
+            provider.readChangeRequestStatuses!({
+              ...input,
+              context: input.context ?? context,
+            }),
+        }
+      : {}),
     createChangeRequest: (input) =>
       provider.createChangeRequest({
         ...input,

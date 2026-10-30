@@ -177,6 +177,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     "CursorTextGeneration.generateCommitMessage",
   )(function* (input) {
     const { prompt, outputSchema } = buildCommitMessagePrompt({
+      policy: input.policy,
       branch: input.branch,
       stagedSummary: input.stagedSummary,
       stagedPatch: input.stagedPatch,
@@ -204,6 +205,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     "CursorTextGeneration.generatePrContent",
   )(function* (input) {
     const { prompt, outputSchema } = buildPrContentPrompt({
+      policy: input.policy,
       baseBranch: input.baseBranch,
       headBranch: input.headBranch,
       commitSummary: input.commitSummary,
@@ -229,6 +231,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     "CursorTextGeneration.generateBranchName",
   )(function* (input) {
     const { prompt, outputSchema } = buildBranchNamePrompt({
+      policy: input.policy,
       message: input.message,
       attachments: input.attachments,
     });

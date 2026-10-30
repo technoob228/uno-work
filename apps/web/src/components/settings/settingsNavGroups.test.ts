@@ -44,6 +44,9 @@ describe("buildSettingsNavGroups", () => {
       "/settings/environment/env-box/assistants",
       "/settings/environment/env-box/apps",
       "/settings/environment/env-box/source-control",
+      "/settings/environment/env-box/worktrees",
+      "/settings/environment/env-box/projects",
+      "/settings/environment/env-box/diagnostics",
       "/settings/environment/env-box/archived",
     ]);
   });

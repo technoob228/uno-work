@@ -29,6 +29,8 @@ import {
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
   ThreadVisitedPayload,
+  ThreadPullRequestsUpdatedPayload,
+  ThreadAutoSettleUpdatedPayload,
   ThreadReadPayload,
   ThreadMarkedUnreadPayload,
   ThreadSnoozedPayload,
@@ -357,6 +359,7 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.projectId !== undefined ? { projectId: payload.projectId } : {}),
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.modelSelection !== undefined
               ? { modelSelection: payload.modelSelection }
@@ -419,6 +422,36 @@ export function projectEvent(
             settledOverride: payload.reason === "user" ? "active" : null,
             settledAt: null,
             updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.pull-requests-updated":
+      return decodeForEvent(
+        ThreadPullRequestsUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            pullRequests: payload.pullRequests,
+          }),
+        })),
+      );
+
+    case "thread.auto-settle-updated":
+      return decodeForEvent(
+        ThreadAutoSettleUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            autoSettleDisabledAt: payload.autoSettleDisabledAt,
           }),
         })),
       );

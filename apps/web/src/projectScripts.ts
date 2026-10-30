@@ -59,3 +59,26 @@ export function primaryProjectScript(scripts: ProjectScript[]): ProjectScript | 
   const regular = scripts.find((script) => !script.runOnWorktreeCreate);
   return regular ?? scripts[0] ?? null;
 }
+
+/**
+ * A project has one setup action and one settle action: the one just saved
+ * takes the role from any other, and everything else keeps its order.
+ */
+export function replaceProjectScript(
+  scripts: readonly ProjectScript[],
+  next: ProjectScript,
+): ProjectScript[] {
+  const exclusive = (script: ProjectScript): ProjectScript => {
+    if (script.id === next.id) return next;
+    const takenSetup = next.runOnWorktreeCreate && script.runOnWorktreeCreate;
+    const takenSettle = next.runOnSettle === true && script.runOnSettle === true;
+    if (!takenSetup && !takenSettle) return script;
+    return {
+      ...script,
+      ...(takenSetup ? { runOnWorktreeCreate: false } : {}),
+      ...(takenSettle ? { runOnSettle: false } : {}),
+    };
+  };
+  const updated = scripts.map(exclusive);
+  return scripts.some((script) => script.id === next.id) ? updated : [...updated, next];
+}

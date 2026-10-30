@@ -386,6 +386,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     revealBrowserCredentialPassword: async () => null,
     clearBrowserData: async () => undefined,
     onBrowserOpenUrlRequest: () => () => undefined,
+    onPromptLink: () => () => undefined,
     ...overrides,
   };
 }

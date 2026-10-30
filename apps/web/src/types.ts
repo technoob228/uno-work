@@ -20,6 +20,7 @@ import type {
   ThreadAssistantRole,
   ThreadStartedBy,
   ThreadController,
+  ThreadPullRequest,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -201,6 +202,9 @@ export interface SidebarThreadSummary {
   session: ThreadSession | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Dev mode's PR row. Empty for anyone who never turned Dev mode on. */
+  pullRequests?: ReadonlyArray<ThreadPullRequest>;
+  autoSettleDisabledAt?: string | null;
   pinnedAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;

@@ -15,6 +15,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { APP_DISPLAY_NAME } from "../branding";
 import { hideBootShell } from "../lib/bootShell";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { DevModeSync } from "../components/DevModeSync";
 import { SplashScreen } from "../components/SplashScreen";
 import { StaleBundleNotice } from "../components/StaleBundleNotice";
 import { CommandPalette } from "../components/CommandPalette";
@@ -256,6 +257,7 @@ function RootRouteView() {
         <SshPasswordPromptDialog />
         {isElectron && primaryEnvironmentAuthenticated ? <LinkRequestPromptDialog /> : null}
         <HostedStaticEnvironmentBootstrap />
+        <DevModeSync />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <EconomyPresenceBootstrap /> : null}

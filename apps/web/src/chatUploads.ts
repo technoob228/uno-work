@@ -13,11 +13,14 @@ import {
   type EnvironmentId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_IMAGES,
   type UploadChatFileAttachment,
 } from "@t3tools/contracts";
 
 import type { ComposerFileAttachment } from "./composerDraftStore";
 import { ensureEnvironmentApi } from "./environmentApi";
+import { resolveHomeFolder } from "./hooks/useFolderChats";
 import { randomUUID } from "./lib/utils";
 import { uploadFilesIntoDirectory } from "./projectUpload";
 
@@ -46,24 +49,36 @@ export interface RoutedComposerFiles<T> {
 }
 
 /**
- * Sorts what was dropped/pasted/picked: pictures within the inline limit go
+ * Sorts what was dropped/pasted/picked: pictures within the inline limits go
  * as images (when the model can see them), videos as videos, and anything
- * else — a PDF, a sheet, a zip, a picture too big to inline — as a file.
+ * else — a PDF, a sheet, a zip, a picture too big to inline or past what one
+ * message carries inline — as a file.
  */
 export function routeComposerFiles<T extends { readonly type: string; readonly size: number }>(
   files: ReadonlyArray<T>,
-  options: { readonly isVideo: (file: T) => boolean; readonly imagesSupported: boolean },
+  options: {
+    readonly isVideo: (file: T) => boolean;
+    readonly imagesSupported: boolean;
+    /** Pictures already on the message: they count against the inline limits. */
+    readonly inlineImages?: { readonly count: number; readonly bytes: number };
+  },
 ): RoutedComposerFiles<T> {
   const images: T[] = [];
   const videos: T[] = [];
   const plain: T[] = [];
+  let inlineCount = options.inlineImages?.count ?? 0;
+  let inlineBytes = options.inlineImages?.bytes ?? 0;
   for (const file of files) {
     if (
       options.imagesSupported &&
       file.type.startsWith("image/") &&
-      file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+      file.size <= PROVIDER_SEND_TURN_MAX_IMAGE_BYTES &&
+      inlineCount < PROVIDER_SEND_TURN_MAX_INLINE_IMAGES &&
+      inlineBytes + file.size <= PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES
     ) {
       images.push(file);
+      inlineCount += 1;
+      inlineBytes += file.size;
     } else if (options.isVideo(file)) {
       videos.push(file);
     } else {
@@ -130,4 +145,45 @@ export async function stageChatFileUpload(
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
   };
+}
+
+/** `Uploads/2026-10/1a2b3c-photo.png`: the short id keeps same-named files apart. */
+export function chatUploadSavedRelativePath(name: string, now: Date, id: string): string {
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const safeName = name.replace(/[/\\]/g, "_") || "file";
+  return `${CHAT_UPLOADS_FOLDER}/${month}/${id.slice(0, 6)}-${safeName}`;
+}
+
+/**
+ * Save files on the chat's computer right away (a turn's files go through the
+ * server when the message is sent; an answer to the agent's question has no
+ * such step) and return where they are, for the agent to open.
+ */
+export async function saveFilesToUploads(
+  environmentId: EnvironmentId,
+  files: ReadonlyArray<File>,
+): Promise<string[]> {
+  const api = ensureEnvironmentApi(environmentId);
+  const now = new Date();
+  const saved = files.map((file) => ({
+    file,
+    relativePath: chatUploadSavedRelativePath(file.name, now, randomUUID()),
+  }));
+  const result = await uploadFilesIntoDirectory(
+    { writeFile: (write) => api.projects.writeFile(write) },
+    {
+      targetDir: "~",
+      files: saved.map(({ file, relativePath }) => ({
+        relativePath,
+        size: file.size,
+        blob: file,
+      })),
+      filterIgnored: false,
+    },
+  );
+  if (result.uploadedFiles !== files.length) {
+    throw new Error("Some files didn't upload. Try again.");
+  }
+  const home = await resolveHomeFolder(environmentId);
+  return saved.map(({ relativePath }) => `${home ?? "~"}/${relativePath}`);
 }

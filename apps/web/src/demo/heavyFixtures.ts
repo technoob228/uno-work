@@ -1247,6 +1247,43 @@ function pendingOf(thread: WireThread) {
   };
 }
 
+/**
+ * Dev mode's chat details in the demo: the chat with a turn gets a branch, a
+ * copy and one open pull request. Only with Dev mode on, so the rest of the
+ * demo looks the way it always did.
+ */
+function demoDevDetails(thread: WireThread) {
+  if (localStorage.getItem("ui_dev_mode") !== "1" || thread.latestTurn === null) return {};
+  const syncedAt = new Date().toISOString();
+  return {
+    branch: "fix/login-timeout",
+    worktreePath: "/home/uno/.t3/worktrees/app/fix-login-timeout",
+    pullRequests: [
+      {
+        provider: "github",
+        repository: "acme/app",
+        number: 128,
+        url: "https://github.com/acme/app/pull/128",
+        source: "created",
+        linkedAt: syncedAt,
+        snapshot: {
+          title: "Fix login timeout on slow networks",
+          state: "open",
+          isDraft: false,
+          headBranch: "fix/login-timeout",
+          baseBranch: "main",
+          updatedAt: syncedAt,
+          mergedAt: null,
+          closedAt: null,
+          checks: "passing",
+          review: "review_required",
+          syncedAt,
+        },
+      },
+    ],
+  };
+}
+
 export function toShellThread(thread: WireThread) {
   const pending = pendingOf(thread);
   const lastUser = [...thread.messages].reverse().find((message) => message.role === "user");
@@ -1277,6 +1314,7 @@ export function toShellThread(thread: WireThread) {
     hasPendingApprovals: pending.approvals,
     hasPendingUserInput: pending.input,
     hasActionableProposedPlan: false,
+    ...demoDevDetails(thread),
   };
 }
 

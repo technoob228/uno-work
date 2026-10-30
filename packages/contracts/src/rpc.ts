@@ -219,8 +219,12 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadTranscriptError,
+  OrchestrationGetThreadTranscriptInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
+  OrchestrationRegenerateThreadTitleError,
+  OrchestrationRegenerateThreadTitleInput,
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
@@ -293,6 +297,7 @@ import {
   ServerConfig,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
+  ServerTraceDiagnosticsResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
@@ -460,6 +465,7 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
+  serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverListPlugins: "server.listPlugins",
   serverSetPluginEnabled: "server.setPluginEnabled",
   serverApprovePlugin: "server.approvePlugin",
@@ -719,6 +725,11 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
   success: SourceControlDiscoveryResult,
+});
+
+export const WsServerGetTraceDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetTraceDiagnostics, {
+  payload: Schema.Struct({}),
+  success: ServerTraceDiagnosticsResult,
 });
 
 export const WsVaultListRpc = Rpc.make(WS_METHODS.vaultList, {
@@ -1331,6 +1342,24 @@ export const WsOrchestrationDispatchCommandRpc = Rpc.make(
     payload: ClientOrchestrationCommand,
     success: OrchestrationRpcSchemas.dispatchCommand.output,
     error: OrchestrationDispatchCommandError,
+  },
+);
+
+export const WsOrchestrationRegenerateThreadTitleRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.regenerateThreadTitle,
+  {
+    payload: OrchestrationRegenerateThreadTitleInput,
+    success: OrchestrationRpcSchemas.regenerateThreadTitle.output,
+    error: OrchestrationRegenerateThreadTitleError,
+  },
+);
+
+export const WsOrchestrationGetThreadTranscriptRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadTranscript,
+  {
+    payload: OrchestrationGetThreadTranscriptInput,
+    success: OrchestrationRpcSchemas.getThreadTranscript.output,
+    error: OrchestrationGetThreadTranscriptError,
   },
 );
 
@@ -2332,6 +2361,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
+  WsServerGetTraceDiagnosticsRpc,
   WsVaultListRpc,
   WsVaultUpsertRpc,
   WsVaultDeleteRpc,
@@ -2541,6 +2571,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsBrowserLiveCaptureRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
+  WsOrchestrationRegenerateThreadTitleRpc,
+  WsOrchestrationGetThreadTranscriptRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,

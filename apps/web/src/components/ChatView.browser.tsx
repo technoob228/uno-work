@@ -225,6 +225,12 @@ function createMockEnvironmentApi(input: {
       getTurnDiff: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getTurnDiff"],
+      regenerateThreadTitle: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["regenerateThreadTitle"],
+      getThreadTranscript: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["getThreadTranscript"],
       getFullThreadDiff: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getFullThreadDiff"],

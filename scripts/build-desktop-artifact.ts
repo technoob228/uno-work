@@ -646,6 +646,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       macConfig.entitlementsInherit = "apps/desktop/resources/entitlements.mac.plist";
     }
     buildConfig.mac = macConfig;
+    // Prompt links: `uno-work://new?prompt=…` opens the app (macOS only for now).
+    buildConfig.protocols = [{ name: "Uno Work", schemes: ["uno-work"] }];
   }
 
   if (platform === "linux") {

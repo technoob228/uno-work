@@ -8,6 +8,8 @@ import {
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
+import * as GitHubPullRequestStatuses from "./gitHubPullRequestStatuses.ts";
+import type * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -56,6 +58,15 @@ export interface GitHubCliShape {
     readonly cwd: string;
     readonly reference: string;
   }) => Effect.Effect<GitHubPullRequestSummary, GitHubCliError>;
+
+  readonly readPullRequestStatuses: (input: {
+    readonly cwd: string;
+    /** `github.com`, or the host of a GitHub Enterprise server. */
+    readonly hostname: string;
+    readonly repository: string;
+    readonly numbers: ReadonlyArray<number>;
+    readonly branches: ReadonlyArray<string>;
+  }) => Effect.Effect<SourceControlProvider.ChangeRequestStatusRead, GitHubCliError>;
 
   readonly getRepositoryCloneUrls: (input: {
     readonly cwd: string;
@@ -308,6 +319,45 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           ),
         ),
       ),
+    readPullRequestStatuses: (input) => {
+      const { query, variables } = GitHubPullRequestStatuses.buildStatusQuery(input);
+      return process
+        .run({
+          operation: "GitHubCli.readPullRequestStatuses",
+          command: "gh",
+          args: [
+            "api",
+            "graphql",
+            "--hostname",
+            input.hostname,
+            "-f",
+            `query=${query}`,
+            // `-f`, not `-F`: a branch called `@file` must stay a string.
+            ...Object.entries(variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]),
+          ],
+          cwd: input.cwd,
+          timeoutMs: DEFAULT_TIMEOUT_MS,
+          // A PR number that is gone makes `gh` exit 1 next to a good document.
+          allowNonZeroExit: true,
+        })
+        .pipe(
+          Effect.mapError((error) => normalizeGitHubCliError("execute", error)),
+          Effect.flatMap((result) => {
+            const parsed = GitHubPullRequestStatuses.parseStatusResponse(
+              result.stdout,
+              input.branches,
+            );
+            return parsed.ok
+              ? Effect.succeed(parsed.read)
+              : Effect.fail(
+                  normalizeGitHubCliError(
+                    "stdout",
+                    new Error(`${parsed.detail}\n${result.stderr}`.trim()),
+                  ),
+                );
+          }),
+        );
+    },
     getRepositoryCloneUrls: (input) =>
       execute({
         cwd: input.cwd,

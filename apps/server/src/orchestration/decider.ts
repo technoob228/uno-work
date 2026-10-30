@@ -645,6 +645,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.project.adopt": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const target = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (thread.session?.status === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This chat is still working. Wait until it stops, or stop it first.",
+        });
+      }
+      const current = readModel.projects.find((project) => project.id === thread.projectId);
+      // Nothing moves: the chat keeps working in its folder, so an agent's
+      // session and memory carry on. In the project's root it needs no folder
+      // of its own.
+      const cwd = thread.worktreePath ?? current?.workspaceRoot ?? null;
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.projectId,
+          worktreePath: cwd === target.workspaceRoot ? null : cwd,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.snooze": {
       const thread = yield* requireThreadNotArchived({
         readModel,
@@ -838,6 +874,48 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           lastVisitedAt: new Date(visitedAtMs).toISOString(),
+        },
+      };
+    }
+
+    case "thread.pull-requests.sync": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.pull-requests-updated",
+        payload: {
+          threadId: command.threadId,
+          pullRequests: command.pullRequests,
+        },
+      };
+    }
+
+    case "thread.auto-settle.set": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (command.disabled === (thread.autoSettleDisabledAt != null)) {
+        return [];
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.auto-settle-updated",
+        payload: {
+          threadId: command.threadId,
+          autoSettleDisabledAt: command.disabled ? occurredAt : null,
         },
       };
     }

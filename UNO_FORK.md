@@ -205,6 +205,18 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Компромиссы:** снимки и `.env*` удалённых чатов не удаляются никогда (ref + папка живут, пока их не уберут руками). Прочие ignored-файлы (локальные БД, `dist/`, `node_modules`) не сохраняются. Авто-Done на сервере не знает клиентских отметок «прочитано»: завершённый и непрочитанный чат после 3 дней тишины считается Done.
 - **Тесты:** `worktreeCleanup/policy.test.ts`, `worktreeCleanup/WorktreeCleanup.test.ts` (реальный git во временном репозитории), `components/settings/chatCopiesCleanup.logic.test.ts`.
 
+### Dev mode: PR треда, auto-settle, настройки, журнал
+
+Всё видно только в Dev mode; без него поведение прежнее (промпты, имена веток, сайдбар).
+
+- **Флаг:** `devMode` + `devModeChangedAt` в `ServerSettings` каждого компьютера, в браузере кэш `ui_dev_mode` (`apps/web/src/devMode.ts`, `DevModeSync.tsx`). Решает последнее изменение, бэкенд не нужен. Заодно демон знает, что можно тратить лимиты GitHub.
+- **PR треда:** `apps/server/src/threadPullRequests/` (`ThreadPullRequestService`, чистые правила в `threadPullRequestRules.ts`, разбор `gh pr create` / `gh pr merge` в `commandDetection.ts`). Ссылки лежат на треде: колонки `pull_requests_json`, `auto_settle_disabled_at` (миграция 055), события `thread.pull-requests-updated`, `thread.auto-settle-updated`, они не двигают `updatedAt`. Чтение через `SourceControlProvider.readChangeRequestStatuses`: GitHub одним GraphQL на репозиторий (`gitHubPullRequestStatuses.ts`), GitLab по REST. От T3 взята логика, не слои: у нас orchestration v1.
+- **Опрос:** раз в минуту при открытом клиенте, после конца хода и после `gh pr merge` сразу. Тихие PR раз в 5 и 15 минут, merged не перечитываем, ниже 10 % лимита пауза до сброса, при rate limit и ошибке входа пауза на хост 15 минут.
+- **Auto-settle:** `shouldAutoSettle` + `thread.settle` от системы. Настройка `sidebarAutoSettleOnMerge` покрывает и PR, закрытый без merge. Merge должен быть позже последнего сообщения человека. Открытый PR держит тред в сайдбаре и в чистке копий (`pullRequestHoldsThread`), но не дольше 14 дней без чтения.
+- **Настройки:** Source Control (Pull requests, Writing), Worktrees (имена веток, чистка копий, список копий), Projects (модель и действия, `runOnSettle`), Diagnostics. Маршруты закрыты Dev mode. Действие `runOnSettle` идёт только в своей копии чата и только на событие `thread.settled`: тихое завершение за 3 дня считается в клиенте и события не даёт.
+- **Журнал:** `apps/server/src/diagnostics/TraceDiagnostics.ts` читает локальные `server.trace.ndjson`, причины и сообщения проходят `redactSecretsInText`. Монитор ресурсов остаётся в `ResourcesView`. `ProcessDiagnostics` не переносили.
+- **Тесты:** `threadPullRequests/*.test.ts`, `decider.pullRequests.test.ts`, `gitHubPullRequestStatuses.test.ts`, `diagnostics/TraceDiagnostics.test.ts`, `chat/ThreadDetails.logic.test.ts`. В настоящий GitHub не ходят.
+
 ### Страницы, схемы и цитаты в чате (T3 port, волна 3, 30.10)
 
 Агент отвечает не только текстом: страница с числами, таблицей или графиком прямо в ленте (свёрнутый ход её не прячет), кнопка на весь экран с зумом 50–200%, тема приложения. Mermaid-схемы рисуются в ответах, документах и файлах `.mmd`/`.mermaid`, библиотека (pele, 2,4 МБ) грузится только когда схема появилась.
@@ -238,6 +250,19 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Метка чата.** `automations/outsideThreads.ts`: файл с чатами, в которые попал текст снаружи (при сбое закрыто: файл не читается, спрашивают все чаты; метка не записалась, запуск не идёт). В них `uno-work` тулы (`outsideTextAsks`, `unoWork/policy.ts`) спрашивают человека, кроме короткого списка `OUTSIDE_TEXT_FREE_TOOLS`: читать файлы Ask не мешает, поэтому закрыты выходы наружу (`site_publish`, `open_in_panel`, `messenger_send`, кнопка и копия в мессенджер у `notify`). Удалённая картинка в ответе такого чата остаётся ссылкой (`RemoteImagesOffContext`, признак берётся из тега в сообщении).
 - **Куда идёт форма** задаёт только владелец: `site_forms_set {chat: this_chat|new_chat|off}`. Посетитель адрес не выбирает; ассистенту форма не отдаётся.
 - Подробности и лимиты: `back/knowledge/automations.md` в fishcode.
+
+**Композер, волна T3 30.10** (`feat/t3p-composer-1030`):
+
+- Большая вставка: от 32 КиБ текст становится файлом (`lib/textPaste.ts`), ⌘⇧V оставляет текст. Вставку ловим в `onPasteCapture`: Lexical читает её на элементе раньше React. Лимиты в `contracts/orchestration.ts`: 100 вложений, из них 20 картинок внутри команды на 80 МиБ, остальные картинки идут файлом.
+- Фон: ⌘Enter на новом чате уводит его сразу, композер уже на следующем черновике (`resolveComposerSubmissionIntent`, `markDraftThreadPromoting`). При ошибке черновик возвращается с тостом Open draft. Очередь «Up next» в фоне пропускается: она двигается только на экране. На открытом чате переход после подтверждения.
+- ⌘S (`composerStashStore.ts`, `lib/stashDb.ts`): IndexedDB в браузере, не синхронизируется. Видео и записи экрана не откладываются.
+- Drafts (`sidebar/SidebarDraftsBlock.tsx`): неотправленные черновики и отложенное.
+- Дропы (`chat/chatDrop.ts`, `sidebar/useSidebarChatDrag.ts`): файл на окно или строку чата, чат на чат даёт транскрипт файлом (`orchestration.getThreadTranscript`, `threadTranscript.ts`).
+- Файлы в ответе на вопрос агента: кладём в Uploads, пути приписываем к последнему ответу (`pendingUserInput.ts`).
+- Regenerate title: `orchestration.regenerateThreadTitle`, пункт меню.
+- Turn into project: команда `thread.project.adopt`. Ничего не переезжает: чат остаётся в прежнем cwd (`worktreePath`), потому что история Claude привязана к cwd. Новые чаты проекта стартуют в его папке.
+- Лимиты: чип у Send (`ComposerPlanLimits.tsx`, `/limits`) на тех же данных, что и виджет Home.
+- Prompt links (`packages/shared/src/promptLinks.ts`, `routes/_chat.new.tsx`, `open-url` в десктопе): `/new?prompt=` и `uno-work://new?prompt=` только заполняют поле. Отправки нет, остальные параметры игнорируются, скрытые символы вырезаются с предупреждением, лимит 8000 символов. Только Mac: на Windows и Linux нет single-instance lock.
 
 ## Мердж апстрима
 

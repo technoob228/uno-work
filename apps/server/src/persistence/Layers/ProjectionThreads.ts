@@ -11,11 +11,14 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, ThreadPullRequest } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    pullRequests: Schema.optional(
+      Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
+    ),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -45,6 +48,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           snoozed_at,
           settled_override,
           settled_at,
+          pull_requests_json,
+          auto_settle_disabled_at,
           last_visited_at,
           read_at,
           read_state_updated_at,
@@ -82,6 +87,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.snoozedAt ?? null},
           ${row.settledOverride ?? null},
           ${row.settledAt ?? null},
+          ${row.pullRequests == null ? null : JSON.stringify(row.pullRequests)},
+          ${row.autoSettleDisabledAt ?? null},
           ${row.lastVisitedAt ?? null},
           ${row.readAt ?? null},
           ${row.readStateUpdatedAt ?? null},
@@ -119,6 +126,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           snoozed_at = excluded.snoozed_at,
           settled_override = excluded.settled_override,
           settled_at = excluded.settled_at,
+          pull_requests_json = excluded.pull_requests_json,
+          auto_settle_disabled_at = excluded.auto_settle_disabled_at,
           last_visited_at = excluded.last_visited_at,
           read_at = excluded.read_at,
           read_state_updated_at = excluded.read_state_updated_at,
@@ -163,6 +172,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           snoozed_at AS "snoozedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
+          pull_requests_json AS "pullRequests",
+          auto_settle_disabled_at AS "autoSettleDisabledAt",
           last_visited_at AS "lastVisitedAt",
           read_at AS "readAt",
           read_state_updated_at AS "readStateUpdatedAt",
@@ -209,6 +220,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           snoozed_at AS "snoozedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
+          pull_requests_json AS "pullRequests",
+          auto_settle_disabled_at AS "autoSettleDisabledAt",
           last_visited_at AS "lastVisitedAt",
           read_at AS "readAt",
           read_state_updated_at AS "readStateUpdatedAt",

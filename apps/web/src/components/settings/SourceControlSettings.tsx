@@ -16,6 +16,7 @@ import {
   refreshSourceControlDiscovery,
   useSourceControlDiscovery,
 } from "../../lib/sourceControlDiscoveryState";
+import { useDevMode } from "../../devMode";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -40,6 +41,7 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { PullRequestSettingsSection, WritingSettingsSection } from "./SourceControlWritingSettings";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -333,6 +335,7 @@ export function SourceControlSettingsPanel({
   readonly environmentId: EnvironmentId;
 }) {
   const discovery = useSourceControlDiscovery({ environmentId });
+  const devMode = useDevMode();
 
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
   const hasDiscoveryItems =
@@ -363,6 +366,8 @@ export function SourceControlSettingsPanel({
 
   return (
     <SettingsPageContainer>
+      {devMode ? <PullRequestSettingsSection environmentId={environmentId} /> : null}
+      {devMode ? <WritingSettingsSection environmentId={environmentId} /> : null}
       {isInitialScanPending ? (
         <>
           <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />

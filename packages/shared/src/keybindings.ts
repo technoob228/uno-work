@@ -71,6 +71,24 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // which folder (⌘⇧F); handled only where those pickers are on screen.
   { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "composer.folder", when: "!terminalFocus" },
+  // The task goes, you stay on a fresh chat. In an open chat ⌘Enter stays a
+  // plain send, so the same move needs ⌥ there (as upstream).
+  {
+    key: "mod+enter",
+    command: "composer.sendBackground",
+    when: "composerFocus && draftThreadRoute",
+  },
+  {
+    key: "mod+alt+enter",
+    command: "composer.sendBackground",
+    when: "composerFocus && draftThreadRoute",
+  },
+  {
+    key: "mod+alt+enter",
+    command: "composer.sendAndNewThread",
+    when: "composerFocus && !draftThreadRoute",
+  },
+  { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },

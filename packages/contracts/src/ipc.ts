@@ -136,8 +136,12 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetThreadTranscriptInput,
+  OrchestrationGetThreadTranscriptResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
+  OrchestrationRegenerateThreadTitleInput,
+  OrchestrationRegenerateThreadTitleResult,
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
@@ -692,6 +696,11 @@ export interface DesktopBridge {
   clearBrowserData: (input: BrowserClearDataInput) => Promise<void>;
   /** Fired when a page inside the embedded browser asks to open a new window. */
   onBrowserOpenUrlRequest: (listener: (url: string) => void) => () => void;
+  /**
+   * `uno-work://new?prompt=…` opened from outside: the app path to go to. The
+   * listener also gets a link that arrived before the window was ready.
+   */
+  onPromptLink: (listener: (appPath: string) => void) => () => void;
 }
 
 export type UnoCodeInstallPhase =
@@ -917,6 +926,12 @@ export interface EnvironmentApi {
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
+    regenerateThreadTitle: (
+      input: OrchestrationRegenerateThreadTitleInput,
+    ) => Promise<OrchestrationRegenerateThreadTitleResult>;
+    getThreadTranscript: (
+      input: OrchestrationGetThreadTranscriptInput,
+    ) => Promise<OrchestrationGetThreadTranscriptResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;

@@ -8,6 +8,7 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo, type ReactNode, useRef, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
+import { ThreadDetailsButton } from "./ThreadDetailsButton";
 import { type DraftId } from "~/composerDraftStore";
 import {
   DiffIcon,
@@ -402,6 +403,12 @@ export const ChatHeader = memo(function ChatHeader({
           <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git
           </Badge>
+        )}
+        {devMode && activeProjectName && (
+          <ThreadDetailsButton
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+          />
         )}
         {devMode && activeProjectName && (
           <GitActionsControl

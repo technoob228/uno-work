@@ -188,10 +188,13 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
     async (
       folder: string,
       title?: string,
-      options?: { readonly createFolder?: boolean },
+      options?: { readonly createFolder?: boolean; readonly replaceRoute?: boolean },
     ): Promise<ScopedProjectRef> => {
       const projectRef = await ensureFolderProject(folder, title, options);
-      await handleNewThread(projectRef, { envMode: "local" });
+      await handleNewThread(projectRef, {
+        envMode: "local",
+        ...(options?.replaceRoute ? { replaceRoute: true } : {}),
+      });
       return projectRef;
     },
     [ensureFolderProject, handleNewThread],
@@ -201,12 +204,15 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
    * A new chat in the home folder. Null when the home folder can't be
    * resolved (machine unreachable) — the caller falls back to its old path.
    */
-  const chatInHomeFolder = useCallback(async (): Promise<ScopedProjectRef | null> => {
-    if (environmentId === null) return null;
-    const home = await resolveHomeFolder(environmentId);
-    if (!home) return null;
-    return chatInFolder(home, HOME_FOLDER_TITLE);
-  }, [chatInFolder, environmentId]);
+  const chatInHomeFolder = useCallback(
+    async (options?: { readonly replaceRoute?: boolean }): Promise<ScopedProjectRef | null> => {
+      if (environmentId === null) return null;
+      const home = await resolveHomeFolder(environmentId);
+      if (!home) return null;
+      return chatInFolder(home, HOME_FOLDER_TITLE, options);
+    },
+    [chatInFolder, environmentId],
+  );
 
   /**
    * The folder chip on a new (unsent) chat: the chat moves to `folder` (null

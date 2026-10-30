@@ -19,7 +19,8 @@ import {
 } from "@t3tools/contracts";
 import * as os from "node:os";
 
-import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { formatGeneratedBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { branchNamingPolicy } from "../../textGeneration/TextGenerationPresets.ts";
 import {
   Cache,
   Cause,
@@ -296,29 +297,6 @@ function stalePendingRequestDetail(
   requestId: string,
 ): string {
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
-}
-
-function buildGeneratedWorktreeBranchName(raw: string): string {
-  const normalized = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^refs\/heads\//, "")
-    .replace(/['"`]/g, "");
-
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
-    : normalized;
-
-  const branchFragment = withoutPrefix
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[./_-]+|[./_-]+$/g, "")
-    .slice(0, 64)
-    .replace(/[./_-]+$/g, "");
-
-  const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
 
 const make = Effect.gen(function* () {
@@ -913,18 +891,23 @@ const make = Effect.gen(function* () {
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const { textGenerationModelSelection: modelSelection } =
-        yield* serverSettingsService.getSettings;
+      const settings = yield* serverSettingsService.getSettings;
+      const naming = {
+        mode: settings.branchNamingMode,
+        prefix: settings.branchNamePrefix,
+        instructions: settings.branchNameInstructions,
+      };
 
       const generated = yield* textGeneration.generateBranchName({
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
+        modelSelection: settings.textGenerationModelSelection,
+        policy: branchNamingPolicy(naming),
       });
       if (!generated) return;
 
-      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
+      const targetBranch = formatGeneratedBranchName(generated.branch, naming);
       if (targetBranch === oldBranch) return;
 
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });

@@ -14,8 +14,15 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
+  PositiveInt,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  ChangeRequestChecksState,
+  ChangeRequestReviewState,
+  ChangeRequestState,
+  SourceControlProviderKind,
+} from "./sourceControl.ts";
 import {
   PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
   PROVIDER_SEND_TURN_MAX_VIDEO_DURATION_MS,
@@ -28,6 +35,8 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  regenerateThreadTitle: "orchestration.regenerateThreadTitle",
+  getThreadTranscript: "orchestration.getThreadTranscript",
   replayEvents: "orchestration.replayEvents",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -140,7 +149,14 @@ export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unkn
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
-export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
+export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 100;
+/**
+ * Pictures the model sees inline in one message; the bytes travel inside the
+ * turn command. Past either ceiling a picture goes as a file in `~/Uploads`,
+ * like a picture too big to inline: the agent opens it from disk.
+ */
+export const PROVIDER_SEND_TURN_MAX_INLINE_IMAGES = 20;
+export const PROVIDER_SEND_TURN_MAX_INLINE_IMAGE_TOTAL_BYTES = 80 * 1024 * 1024;
 /**
  * A screen recording's key frames ride along as pictures on top of what the
  * person attached (Loom Work 28.10: a few by default, never more than this).
@@ -289,6 +305,8 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  // Dev mode: runs in the chat's worktree when the chat settles, e.g. `cargo clean`.
+  runOnSettle: Schema.optional(Schema.Boolean),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
@@ -487,6 +505,36 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+/**
+ * A pull request tied to a thread. Dev mode only: found by the thread's branch
+ * or read from `gh pr create` in its output. `snapshot` is the host's last
+ * answer, null until the first read.
+ */
+export const ThreadPullRequest = Schema.Struct({
+  provider: SourceControlProviderKind,
+  repository: TrimmedNonEmptyString,
+  number: PositiveInt,
+  url: Schema.String,
+  source: Schema.Literals(["branch", "created"]),
+  linkedAt: IsoDateTime,
+  snapshot: Schema.NullOr(
+    Schema.Struct({
+      title: TrimmedNonEmptyString,
+      state: ChangeRequestState,
+      isDraft: Schema.Boolean,
+      headBranch: TrimmedNonEmptyString,
+      baseBranch: TrimmedNonEmptyString,
+      updatedAt: Schema.NullOr(Schema.String),
+      mergedAt: Schema.NullOr(Schema.String),
+      closedAt: Schema.NullOr(Schema.String),
+      checks: ChangeRequestChecksState,
+      review: ChangeRequestReviewState,
+      syncedAt: IsoDateTime,
+    }),
+  ),
+});
+export type ThreadPullRequest = typeof ThreadPullRequest.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -521,6 +569,10 @@ export const OrchestrationThread = Schema.Struct({
   // Optional so payloads from pre-settle servers still decode.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Dev mode (migration 055): the thread's pull requests, see ThreadPullRequest.
+  pullRequests: Schema.optional(Schema.Array(ThreadPullRequest)),
+  // The person keeps this thread from settling by itself when its PR merges.
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Read watermark (migration 052): the last time the person opened this chat
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
@@ -605,6 +657,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.settledOverride.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Dev mode (migration 055): the thread's pull requests, see ThreadPullRequest.
+  pullRequests: Schema.optional(Schema.Array(ThreadPullRequest)),
+  // The person keeps this thread from settling by itself when its PR merges.
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Read watermark (migration 052): the last time the person opened this chat
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
@@ -806,6 +862,17 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 
+/**
+ * "Turn into project": the chat joins the project of its folder. Nothing moves:
+ * the chat keeps working where it was (see upstream `thread.project.adopt-folder`).
+ */
+const ThreadProjectAdoptCommand = Schema.Struct({
+  type: Schema.Literal("thread.project.adopt"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+});
+
 // Wire-compatible with upstream T3 Code's thread.snooze / thread.unsnooze.
 const ThreadSnoozeCommand = Schema.Struct({
   type: Schema.Literal("thread.snooze"),
@@ -844,6 +911,14 @@ const ThreadUnsettleCommand = Schema.Struct({
 // Read state, wire-compatible with upstream T3 Code's thread.visit /
 // thread.mark-unread. visit moves the watermark forward only (an older
 // visitedAt is a no-op); mark-unread clears it.
+// Dev mode: "Settle when its PR merges" for this thread.
+const ThreadAutoSettleSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-settle.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  disabled: Schema.Boolean,
+});
+
 const ThreadVisitCommand = Schema.Struct({
   type: Schema.Literal("thread.visit"),
   commandId: CommandId,
@@ -1009,10 +1084,12 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectAdoptCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadAutoSettleSetCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
@@ -1038,10 +1115,12 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectAdoptCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadAutoSettleSetCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
@@ -1160,8 +1239,17 @@ const ThreadPersonReleaseCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadPullRequestsSyncCommand = Schema.Struct({
+  type: Schema.Literal("thread.pull-requests.sync"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  pullRequests: Schema.Array(ThreadPullRequest),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadPersonCallCommand,
+  ThreadPullRequestsSyncCommand,
   ThreadPersonReleaseCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1193,6 +1281,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unsnoozed",
   "thread.settled",
   "thread.unsettled",
+  "thread.pull-requests-updated",
+  "thread.auto-settle-updated",
   "thread.visited",
   "thread.marked-unread",
   "thread.read",
@@ -1284,6 +1374,8 @@ export const ThreadUnarchivedPayload = Schema.Struct({
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
+  /** Only "Turn into project" changes it. */
+  projectId: Schema.optional(ProjectId),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1324,6 +1416,17 @@ export const ThreadUnsettledPayload = Schema.Struct({
   // request) and the decider reset the override to neutral.
   reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
+});
+
+// Neither touches updatedAt: a PR moving along doesn't reorder the sidebar.
+export const ThreadPullRequestsUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  pullRequests: Schema.Array(ThreadPullRequest),
+});
+
+export const ThreadAutoSettleUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  autoSettleDisabledAt: Schema.NullOr(IsoDateTime),
 });
 
 export const ThreadVisitedPayload = Schema.Struct({
@@ -1662,6 +1765,16 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.pull-requests-updated"),
+    payload: ThreadPullRequestsUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-settle-updated"),
+    payload: ThreadAutoSettleUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.visited"),
     payload: ThreadVisitedPayload,
   }),
@@ -1870,6 +1983,28 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationRegenerateThreadTitleInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationRegenerateThreadTitleInput =
+  typeof OrchestrationRegenerateThreadTitleInput.Type;
+
+export const OrchestrationRegenerateThreadTitleResult = Schema.Struct({
+  title: TrimmedNonEmptyString,
+});
+export type OrchestrationRegenerateThreadTitleResult =
+  typeof OrchestrationRegenerateThreadTitleResult.Type;
+
+export const OrchestrationGetThreadTranscriptInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationGetThreadTranscriptInput =
+  typeof OrchestrationGetThreadTranscriptInput.Type;
+
+/** The chat as Markdown: what the person and the agent said, no tool output. */
+export const OrchestrationGetThreadTranscriptResult = Schema.Struct({
+  title: Schema.String,
+  markdown: Schema.String,
+});
+export type OrchestrationGetThreadTranscriptResult =
+  typeof OrchestrationGetThreadTranscriptResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1882,6 +2017,14 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  regenerateThreadTitle: {
+    input: OrchestrationRegenerateThreadTitleInput,
+    output: OrchestrationRegenerateThreadTitleResult,
+  },
+  getThreadTranscript: {
+    input: OrchestrationGetThreadTranscriptInput,
+    output: OrchestrationGetThreadTranscriptResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,
@@ -1923,6 +2066,22 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationRegenerateThreadTitleError extends Schema.TaggedErrorClass<OrchestrationRegenerateThreadTitleError>()(
+  "OrchestrationRegenerateThreadTitleError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetThreadTranscriptError extends Schema.TaggedErrorClass<OrchestrationGetThreadTranscriptError>()(
+  "OrchestrationGetThreadTranscriptError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

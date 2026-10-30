@@ -7,6 +7,7 @@ import {
   type ProviderInstanceRegistryShape,
 } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
 
 export type TextGenerationProvider = "codex" | "claudeAgent" | "cursor" | "opencode";
 
@@ -19,6 +20,8 @@ export interface CommitMessageGenerationInput {
   includeBranch?: boolean;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
+  /** Style from Settings; absent — the prompt's own defaults. */
+  policy?: TextGenerationPolicy | undefined;
 }
 
 export interface CommitMessageGenerationResult {
@@ -37,6 +40,8 @@ export interface PrContentGenerationInput {
   diffPatch: string;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
+  /** Style from Settings; absent — the prompt's own defaults. */
+  policy?: TextGenerationPolicy | undefined;
 }
 
 export interface PrContentGenerationResult {
@@ -50,6 +55,8 @@ export interface BranchNameGenerationInput {
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
+  /** Style from Settings; absent — the prompt's own defaults. */
+  policy?: TextGenerationPolicy | undefined;
 }
 
 export interface BranchNameGenerationResult {

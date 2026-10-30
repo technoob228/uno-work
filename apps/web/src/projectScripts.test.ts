@@ -10,6 +10,7 @@ import {
   nextProjectScriptId,
   primaryProjectScript,
   projectScriptIdFromCommand,
+  replaceProjectScript,
 } from "./projectScripts";
 
 describe("projectScripts helpers", () => {
@@ -87,5 +88,43 @@ describe("projectScripts helpers", () => {
         worktreePath: null,
       }),
     ).toBe("/repo");
+  });
+});
+
+describe("replaceProjectScript", () => {
+  const script = (id: string, flags: { setup?: boolean; settle?: boolean } = {}) => ({
+    id,
+    name: id,
+    command: id,
+    icon: "play" as const,
+    runOnWorktreeCreate: flags.setup === true,
+    runOnSettle: flags.settle === true,
+  });
+
+  it("adds a new action at the end", () => {
+    expect(replaceProjectScript([script("a")], script("b")).map((item) => item.id)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("keeps one action per automatic role", () => {
+    const next = replaceProjectScript(
+      [script("a", { setup: true }), script("b", { settle: true })],
+      script("c", { settle: true }),
+    );
+    expect(next.map((item) => [item.id, item.runOnWorktreeCreate, item.runOnSettle])).toEqual([
+      ["a", true, false],
+      ["b", false, false],
+      ["c", false, true],
+    ]);
+  });
+
+  it("replaces in place when editing", () => {
+    const next = replaceProjectScript([script("a", { setup: true }), script("b")], {
+      ...script("a"),
+      name: "renamed",
+    });
+    expect(next.map((item) => item.name)).toEqual(["renamed", "b"]);
   });
 });

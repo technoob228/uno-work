@@ -83,6 +83,8 @@ function useNewThreadState() {
         envMode?: DraftThreadEnvMode;
         /** The mode the new chat starts in (an assistant's chat: its own mode). */
         runtimeMode?: RuntimeMode;
+        /** Back doesn't return here (a link's landing route). */
+        replaceRoute?: boolean;
       },
     ): Promise<void> => {
       const {
@@ -157,6 +159,7 @@ function useNewThreadState() {
           await router.navigate({
             to: "/draft/$draftId",
             params: { draftId: storedDraftThread.draftId },
+            ...(options?.replaceRoute ? { replace: true } : {}),
           });
         })();
       }
@@ -209,6 +212,7 @@ function useNewThreadState() {
         await router.navigate({
           to: "/draft/$draftId",
           params: { draftId },
+          ...(options?.replaceRoute ? { replace: true } : {}),
         });
       })();
     },

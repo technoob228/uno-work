@@ -15,6 +15,7 @@
 // - No drag between sections (upstream Sidebar.drag / Sidebar.motion); our
 //   rows are not a sortable list and pin order is by pin time.
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import { pullRequestHoldsThread } from "@t3tools/shared/threadPullRequests";
 
 import { sortThreadsPinnedFirst, sortThreads, toSortableTimestamp } from "../lib/threadSort";
 import { isLatestTurnSettled } from "../session-logic";
@@ -53,7 +54,7 @@ export type SidebarSectionThread = Pick<
   | "latestTurn"
   | "session"
 > &
-  Partial<Pick<SidebarThreadSummary, "projectId" | "spawnedByThreadId">>;
+  Partial<Pick<SidebarThreadSummary, "projectId" | "spawnedByThreadId" | "pullRequests">>;
 
 function latestTimestampMs(values: ReadonlyArray<string | null | undefined>): number | null {
   let latest: number | null = null;
@@ -119,6 +120,9 @@ export function isThreadSettled(thread: SidebarSectionThread, now: string): bool
   }
   if (!isLatestTurnSettled(thread.latestTurn, thread.session)) return false;
   if (hasQueuedTurnStart(thread, now)) return false;
+  const nowMs = Date.parse(now);
+  // Dev mode: an open pull request is unfinished work however quiet the chat is.
+  if (pullRequestHoldsThread(thread.pullRequests, nowMs)) return false;
   let activityMs = resolveThreadActivityMs(thread);
   // Read ends the wait but not the chat's place: a chat that waited for days
   // would otherwise fall straight into Done the moment it is marked read, so
@@ -127,7 +131,6 @@ export function isThreadSettled(thread: SidebarSectionThread, now: string): bool
     const readMs = Date.parse(thread.readAt ?? "");
     if (!Number.isNaN(readMs) && (activityMs === null || readMs > activityMs)) activityMs = readMs;
   }
-  const nowMs = Date.parse(now);
   if (activityMs === null || Number.isNaN(nowMs)) return false;
   return nowMs - activityMs > SIDEBAR_SETTLE_AFTER_IDLE_MS;
 }

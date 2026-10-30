@@ -90,6 +90,7 @@ export interface NewProjectScriptInput {
   command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
+  runOnSettle: boolean;
   keybinding: string | null;
 }
 
@@ -174,6 +175,7 @@ export default function ProjectScriptsControl({
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
+  const [runOnSettle, setRunOnSettle] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -231,6 +233,7 @@ export default function ProjectScriptsControl({
         command: trimmedCommand,
         icon,
         runOnWorktreeCreate,
+        runOnSettle,
         keybinding: keybindingRule?.key ?? null,
       } satisfies NewProjectScriptInput;
       if (editingScriptId) {
@@ -252,6 +255,7 @@ export default function ProjectScriptsControl({
     setIcon("play");
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(false);
+    setRunOnSettle(false);
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
@@ -268,6 +272,7 @@ export default function ProjectScriptsControl({
     setIcon(script.icon);
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setRunOnSettle(script.runOnSettle === true);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setValidationError(null);
     setDialogOpen(true);
@@ -376,6 +381,7 @@ export default function ProjectScriptsControl({
           setCommand("");
           setIcon("play");
           setRunOnWorktreeCreate(false);
+          setRunOnSettle(false);
           setKeybinding("");
           setValidationError(null);
         }}
@@ -468,6 +474,13 @@ export default function ProjectScriptsControl({
                 <Switch
                   checked={runOnWorktreeCreate}
                   onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                <span>Run automatically when the chat moves to Done</span>
+                <Switch
+                  checked={runOnSettle}
+                  onCheckedChange={(checked) => setRunOnSettle(Boolean(checked))}
                 />
               </label>
               {validationError && <p className="text-sm text-destructive">{validationError}</p>}

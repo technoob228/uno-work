@@ -31,6 +31,7 @@ import {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
+  DEFAULT_SERVER_SETTINGS,
 } from "@t3tools/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
@@ -49,6 +50,11 @@ import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import {
+  conventionalCommitsTextGenerationPolicy,
+  customTextGenerationPolicy,
+  repositoryConventionsTextGenerationPolicy,
+} from "../textGeneration/TextGenerationPresets.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import { GitVcsDriver, type GitStatusDetails } from "../vcs/GitVcsDriver.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -713,6 +719,62 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     behindCount: 0,
     aheadOfDefaultCount: 0,
   } satisfies GitStatusDetails;
+  /** The last commit subjects, for "Repository conventions" to match. */
+  const readRecentCommitSubjects = (cwd: string) =>
+    gitCore
+      .execute({
+        operation: "GitManager.readRecentCommitSubjects",
+        cwd,
+        args: ["log", "-n", "20", "--format=%s"],
+        allowNonZeroExit: true,
+      })
+      .pipe(
+        Effect.map((result) =>
+          result.stdout
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0),
+        ),
+        Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+      );
+
+  /**
+   * Settings → Source Control → Writing, for commit messages and PR text. A
+   * Dev mode page, so with Dev mode off the prompts stay exactly as they were.
+   */
+  const resolveWritingPolicy = Effect.fn("GitManager.resolveWritingPolicy")(function* (
+    cwd: string,
+  ) {
+    const { devMode, sourceControlWritingStyle: style } =
+      yield* serverSettingsService.getSettings.pipe(
+        Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+      );
+    if (!devMode) return undefined;
+    switch (style.mode) {
+      case "conventional_commits":
+        return conventionalCommitsTextGenerationPolicy;
+      case "custom":
+        return customTextGenerationPolicy(
+          style.customInstructions
+            ? {
+                commitInstructions: style.customInstructions,
+                changeRequestInstructions: style.customInstructions,
+              }
+            : {},
+        );
+      case "repo_conventions": {
+        const subjects = yield* readRecentCommitSubjects(cwd);
+        if (subjects.length === 0) return repositoryConventionsTextGenerationPolicy;
+        const examples = ["Recent commit subjects from this repository:", ...subjects].join("\n");
+        return {
+          ...repositoryConventionsTextGenerationPolicy,
+          commitInstructions: `${repositoryConventionsTextGenerationPolicy.commitInstructions}\n\n${examples}`,
+          changeRequestInstructions: `${repositoryConventionsTextGenerationPolicy.changeRequestInstructions}\n\n${examples}`,
+        };
+      }
+    }
+  });
+
   const readLocalStatus = Effect.fn("readLocalStatus")(function* (cwd: string) {
     const details = yield* gitCore
       .statusDetailsLocal(cwd)
@@ -1112,6 +1174,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         };
       }
 
+      const policy = yield* resolveWritingPolicy(input.cwd);
       const generated = yield* textGeneration
         .generateCommitMessage({
           cwd: input.cwd,
@@ -1120,6 +1183,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           stagedPatch: limitContext(context.stagedPatch, 50_000),
           ...(input.includeBranch ? { includeBranch: true } : {}),
           modelSelection: input.modelSelection,
+          policy,
         })
         .pipe(Effect.map((result) => sanitizeCommitMessage(result)));
 
@@ -1301,6 +1365,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       diffSummary: limitContext(rangeContext.diffSummary, 20_000),
       diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       modelSelection,
+      policy: yield* resolveWritingPolicy(cwd),
     });
 
     const bodyFile = path.join(tempDir, `t3code-pr-body-${process.pid}-${randomUUID()}.md`);

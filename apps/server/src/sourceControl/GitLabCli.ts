@@ -7,6 +7,15 @@ import * as GitLabMergeRequests from "./gitLabMergeRequests.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const STATUS_READ_CONCURRENCY = 3;
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 export class GitLabCliError extends Schema.TaggedErrorClass<GitLabCliError>()("GitLabCliError", {
   operation: Schema.String,
@@ -56,6 +65,13 @@ export interface GitLabCliShape {
     readonly cwd: string;
     readonly reference: string;
   }) => Effect.Effect<GitLabMergeRequestSummary, GitLabCliError>;
+
+  readonly readMergeRequestStatuses: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly numbers: ReadonlyArray<number>;
+    readonly branches: ReadonlyArray<string>;
+  }) => Effect.Effect<SourceControlProvider.ChangeRequestStatusRead, GitLabCliError>;
 
   readonly getRepositoryCloneUrls: (input: {
     readonly cwd: string;
@@ -325,6 +341,63 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
           ),
         ),
       ),
+    readMergeRequestStatuses: (input) =>
+      Effect.gen(function* () {
+        // GitLab has no document to batch into, but it allows 2000 requests a minute.
+        const views = yield* Effect.forEach(
+          input.numbers,
+          (number) =>
+            execute({
+              cwd: input.cwd,
+              args: ["mr", "view", String(number), "--repo", input.repository, "--output", "json"],
+            }).pipe(
+              Effect.map((result) => parseJson(result.stdout)),
+              Effect.map(GitLabMergeRequests.decodeGitLabMergeRequestStatus),
+              // One merge request that is gone must not cost the rest their read.
+              Effect.catch((error) =>
+                error.detail.includes("404") ? Effect.succeed(null) : Effect.fail(error),
+              ),
+            ),
+          { concurrency: STATUS_READ_CONCURRENCY },
+        );
+        const lists = yield* Effect.forEach(
+          input.branches,
+          (branch) =>
+            execute({
+              cwd: input.cwd,
+              args: [
+                "mr",
+                "list",
+                "--source-branch",
+                branch,
+                ...stateArgs("all"),
+                "--per-page",
+                "3",
+                "--repo",
+                input.repository,
+                "--output",
+                "json",
+              ],
+            }).pipe(
+              Effect.map((result) => {
+                const entries = parseJson(result.stdout);
+                const statuses = (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+                  const status = GitLabMergeRequests.decodeGitLabMergeRequestStatus(entry);
+                  return status === null ? [] : [status];
+                });
+                return [branch, statuses] as const;
+              }),
+            ),
+          { concurrency: STATUS_READ_CONCURRENCY },
+        );
+        return {
+          byNumber: new Map(
+            views.flatMap((status) => (status === null ? [] : [[status.number, status] as const])),
+          ),
+          byBranch: new Map(lists),
+          budget: null,
+        };
+      }),
     getRepositoryCloneUrls: (input) =>
       execute({
         cwd: input.cwd,

@@ -23,6 +23,8 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectCwd?: string;
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
+  /** Which of the project's actions: the worktree's setup (default) or the one on settle. */
+  readonly trigger?: "worktree-create" | "settle";
 }
 
 export interface ProjectSetupScriptRunnerShape {

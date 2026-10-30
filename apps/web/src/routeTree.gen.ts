@@ -35,6 +35,7 @@ import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
+import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
 import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
@@ -53,10 +54,13 @@ import { Route as SettingsAppConnectionsRouteImport } from './routes/settings.ap
 import { Route as SettingsAppBrowserRouteImport } from './routes/settings.app.browser'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as SettingsEnvironmentEnvironmentIdWorktreesRouteImport } from './routes/settings.environment.$environmentId.worktrees'
 import { Route as SettingsEnvironmentEnvironmentIdSourceControlRouteImport } from './routes/settings.environment.$environmentId.source-control'
 import { Route as SettingsEnvironmentEnvironmentIdProvidersRouteImport } from './routes/settings.environment.$environmentId.providers'
+import { Route as SettingsEnvironmentEnvironmentIdProjectsRouteImport } from './routes/settings.environment.$environmentId.projects'
 import { Route as SettingsEnvironmentEnvironmentIdHarnessesRouteImport } from './routes/settings.environment.$environmentId.harnesses'
 import { Route as SettingsEnvironmentEnvironmentIdGeneralRouteImport } from './routes/settings.environment.$environmentId.general'
+import { Route as SettingsEnvironmentEnvironmentIdDiagnosticsRouteImport } from './routes/settings.environment.$environmentId.diagnostics'
 import { Route as SettingsEnvironmentEnvironmentIdAssistantsRouteImport } from './routes/settings.environment.$environmentId.assistants'
 import { Route as SettingsEnvironmentEnvironmentIdArchivedRouteImport } from './routes/settings.environment.$environmentId.archived'
 import { Route as SettingsEnvironmentEnvironmentIdAppsRouteImport } from './routes/settings.environment.$environmentId.apps'
@@ -191,6 +195,11 @@ const ChatOfficeRoute = ChatOfficeRouteImport.update({
   path: '/office',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatNewRoute = ChatNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatMyUnoRoute = ChatMyUnoRouteImport.update({
   id: '/my-uno',
   path: '/my-uno',
@@ -283,6 +292,12 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const SettingsEnvironmentEnvironmentIdWorktreesRoute =
+  SettingsEnvironmentEnvironmentIdWorktreesRouteImport.update({
+    id: '/worktrees',
+    path: '/worktrees',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
 const SettingsEnvironmentEnvironmentIdSourceControlRoute =
   SettingsEnvironmentEnvironmentIdSourceControlRouteImport.update({
     id: '/source-control',
@@ -295,6 +310,12 @@ const SettingsEnvironmentEnvironmentIdProvidersRoute =
     path: '/providers',
     getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
   } as any)
+const SettingsEnvironmentEnvironmentIdProjectsRoute =
+  SettingsEnvironmentEnvironmentIdProjectsRouteImport.update({
+    id: '/projects',
+    path: '/projects',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
 const SettingsEnvironmentEnvironmentIdHarnessesRoute =
   SettingsEnvironmentEnvironmentIdHarnessesRouteImport.update({
     id: '/harnesses',
@@ -305,6 +326,12 @@ const SettingsEnvironmentEnvironmentIdGeneralRoute =
   SettingsEnvironmentEnvironmentIdGeneralRouteImport.update({
     id: '/general',
     path: '/general',
+    getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
+  } as any)
+const SettingsEnvironmentEnvironmentIdDiagnosticsRoute =
+  SettingsEnvironmentEnvironmentIdDiagnosticsRouteImport.update({
+    id: '/diagnostics',
+    path: '/diagnostics',
     getParentRoute: () => SettingsEnvironmentEnvironmentIdRoute,
   } as any)
 const SettingsEnvironmentEnvironmentIdAssistantsRoute =
@@ -346,6 +373,7 @@ export interface FileRoutesByFullPath {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -380,10 +408,13 @@ export interface FileRoutesByFullPath {
   '/settings/environment/$environmentId/apps': typeof SettingsEnvironmentEnvironmentIdAppsRoute
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/diagnostics': typeof SettingsEnvironmentEnvironmentIdDiagnosticsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
   '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
+  '/settings/environment/$environmentId/projects': typeof SettingsEnvironmentEnvironmentIdProjectsRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
+  '/settings/environment/$environmentId/worktrees': typeof SettingsEnvironmentEnvironmentIdWorktreesRoute
 }
 export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
@@ -397,6 +428,7 @@ export interface FileRoutesByTo {
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
+  '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
@@ -432,10 +464,13 @@ export interface FileRoutesByTo {
   '/settings/environment/$environmentId/apps': typeof SettingsEnvironmentEnvironmentIdAppsRoute
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/diagnostics': typeof SettingsEnvironmentEnvironmentIdDiagnosticsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
   '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
+  '/settings/environment/$environmentId/projects': typeof SettingsEnvironmentEnvironmentIdProjectsRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
+  '/settings/environment/$environmentId/worktrees': typeof SettingsEnvironmentEnvironmentIdWorktreesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -452,6 +487,7 @@ export interface FileRoutesById {
   '/_chat/drive': typeof ChatDriveRoute
   '/_chat/files': typeof ChatFilesRoute
   '/_chat/my-uno': typeof ChatMyUnoRoute
+  '/_chat/new': typeof ChatNewRoute
   '/_chat/office': typeof ChatOfficeRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
@@ -487,10 +523,13 @@ export interface FileRoutesById {
   '/settings/environment/$environmentId/apps': typeof SettingsEnvironmentEnvironmentIdAppsRoute
   '/settings/environment/$environmentId/archived': typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   '/settings/environment/$environmentId/assistants': typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  '/settings/environment/$environmentId/diagnostics': typeof SettingsEnvironmentEnvironmentIdDiagnosticsRoute
   '/settings/environment/$environmentId/general': typeof SettingsEnvironmentEnvironmentIdGeneralRoute
   '/settings/environment/$environmentId/harnesses': typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
+  '/settings/environment/$environmentId/projects': typeof SettingsEnvironmentEnvironmentIdProjectsRoute
   '/settings/environment/$environmentId/providers': typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   '/settings/environment/$environmentId/source-control': typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
+  '/settings/environment/$environmentId/worktrees': typeof SettingsEnvironmentEnvironmentIdWorktreesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -508,6 +547,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -542,10 +582,13 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/apps'
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/diagnostics'
     | '/settings/environment/$environmentId/general'
     | '/settings/environment/$environmentId/harnesses'
+    | '/settings/environment/$environmentId/projects'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
+    | '/settings/environment/$environmentId/worktrees'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/onboarding'
@@ -559,6 +602,7 @@ export interface FileRouteTypes {
     | '/drive'
     | '/files'
     | '/my-uno'
+    | '/new'
     | '/office'
     | '/setup'
     | '/sites'
@@ -594,10 +638,13 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/apps'
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/diagnostics'
     | '/settings/environment/$environmentId/general'
     | '/settings/environment/$environmentId/harnesses'
+    | '/settings/environment/$environmentId/projects'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
+    | '/settings/environment/$environmentId/worktrees'
   id:
     | '__root__'
     | '/_chat'
@@ -613,6 +660,7 @@ export interface FileRouteTypes {
     | '/_chat/drive'
     | '/_chat/files'
     | '/_chat/my-uno'
+    | '/_chat/new'
     | '/_chat/office'
     | '/_chat/setup'
     | '/_chat/sites'
@@ -648,10 +696,13 @@ export interface FileRouteTypes {
     | '/settings/environment/$environmentId/apps'
     | '/settings/environment/$environmentId/archived'
     | '/settings/environment/$environmentId/assistants'
+    | '/settings/environment/$environmentId/diagnostics'
     | '/settings/environment/$environmentId/general'
     | '/settings/environment/$environmentId/harnesses'
+    | '/settings/environment/$environmentId/projects'
     | '/settings/environment/$environmentId/providers'
     | '/settings/environment/$environmentId/source-control'
+    | '/settings/environment/$environmentId/worktrees'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -845,6 +896,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatOfficeRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/new': {
+      id: '/_chat/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/my-uno': {
       id: '/_chat/my-uno'
       path: '/my-uno'
@@ -971,6 +1029,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/settings/environment/$environmentId/worktrees': {
+      id: '/settings/environment/$environmentId/worktrees'
+      path: '/worktrees'
+      fullPath: '/settings/environment/$environmentId/worktrees'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdWorktreesRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
     '/settings/environment/$environmentId/source-control': {
       id: '/settings/environment/$environmentId/source-control'
       path: '/source-control'
@@ -985,6 +1050,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRouteImport
       parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
     }
+    '/settings/environment/$environmentId/projects': {
+      id: '/settings/environment/$environmentId/projects'
+      path: '/projects'
+      fullPath: '/settings/environment/$environmentId/projects'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdProjectsRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
     '/settings/environment/$environmentId/harnesses': {
       id: '/settings/environment/$environmentId/harnesses'
       path: '/harnesses'
@@ -997,6 +1069,13 @@ declare module '@tanstack/react-router' {
       path: '/general'
       fullPath: '/settings/environment/$environmentId/general'
       preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdGeneralRouteImport
+      parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
+    }
+    '/settings/environment/$environmentId/diagnostics': {
+      id: '/settings/environment/$environmentId/diagnostics'
+      path: '/diagnostics'
+      fullPath: '/settings/environment/$environmentId/diagnostics'
+      preLoaderRoute: typeof SettingsEnvironmentEnvironmentIdDiagnosticsRouteImport
       parentRoute: typeof SettingsEnvironmentEnvironmentIdRoute
     }
     '/settings/environment/$environmentId/assistants': {
@@ -1055,6 +1134,7 @@ interface ChatRouteChildren {
   ChatDriveRoute: typeof ChatDriveRoute
   ChatFilesRoute: typeof ChatFilesRoute
   ChatMyUnoRoute: typeof ChatMyUnoRoute
+  ChatNewRoute: typeof ChatNewRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
@@ -1073,6 +1153,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatDriveRoute: ChatDriveRoute,
   ChatFilesRoute: ChatFilesRoute,
   ChatMyUnoRoute: ChatMyUnoRoute,
+  ChatNewRoute: ChatNewRoute,
   ChatOfficeRoute: ChatOfficeRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,
@@ -1087,10 +1168,13 @@ interface SettingsEnvironmentEnvironmentIdRouteChildren {
   SettingsEnvironmentEnvironmentIdAppsRoute: typeof SettingsEnvironmentEnvironmentIdAppsRoute
   SettingsEnvironmentEnvironmentIdArchivedRoute: typeof SettingsEnvironmentEnvironmentIdArchivedRoute
   SettingsEnvironmentEnvironmentIdAssistantsRoute: typeof SettingsEnvironmentEnvironmentIdAssistantsRoute
+  SettingsEnvironmentEnvironmentIdDiagnosticsRoute: typeof SettingsEnvironmentEnvironmentIdDiagnosticsRoute
   SettingsEnvironmentEnvironmentIdGeneralRoute: typeof SettingsEnvironmentEnvironmentIdGeneralRoute
   SettingsEnvironmentEnvironmentIdHarnessesRoute: typeof SettingsEnvironmentEnvironmentIdHarnessesRoute
+  SettingsEnvironmentEnvironmentIdProjectsRoute: typeof SettingsEnvironmentEnvironmentIdProjectsRoute
   SettingsEnvironmentEnvironmentIdProvidersRoute: typeof SettingsEnvironmentEnvironmentIdProvidersRoute
   SettingsEnvironmentEnvironmentIdSourceControlRoute: typeof SettingsEnvironmentEnvironmentIdSourceControlRoute
+  SettingsEnvironmentEnvironmentIdWorktreesRoute: typeof SettingsEnvironmentEnvironmentIdWorktreesRoute
 }
 
 const SettingsEnvironmentEnvironmentIdRouteChildren: SettingsEnvironmentEnvironmentIdRouteChildren =
@@ -1101,14 +1185,20 @@ const SettingsEnvironmentEnvironmentIdRouteChildren: SettingsEnvironmentEnvironm
       SettingsEnvironmentEnvironmentIdArchivedRoute,
     SettingsEnvironmentEnvironmentIdAssistantsRoute:
       SettingsEnvironmentEnvironmentIdAssistantsRoute,
+    SettingsEnvironmentEnvironmentIdDiagnosticsRoute:
+      SettingsEnvironmentEnvironmentIdDiagnosticsRoute,
     SettingsEnvironmentEnvironmentIdGeneralRoute:
       SettingsEnvironmentEnvironmentIdGeneralRoute,
     SettingsEnvironmentEnvironmentIdHarnessesRoute:
       SettingsEnvironmentEnvironmentIdHarnessesRoute,
+    SettingsEnvironmentEnvironmentIdProjectsRoute:
+      SettingsEnvironmentEnvironmentIdProjectsRoute,
     SettingsEnvironmentEnvironmentIdProvidersRoute:
       SettingsEnvironmentEnvironmentIdProvidersRoute,
     SettingsEnvironmentEnvironmentIdSourceControlRoute:
       SettingsEnvironmentEnvironmentIdSourceControlRoute,
+    SettingsEnvironmentEnvironmentIdWorktreesRoute:
+      SettingsEnvironmentEnvironmentIdWorktreesRoute,
   }
 
 const SettingsEnvironmentEnvironmentIdRouteWithChildren =

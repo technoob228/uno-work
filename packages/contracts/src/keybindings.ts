@@ -72,6 +72,12 @@ const STATIC_KEYBINDING_COMMANDS = [
   // upstream T3 Code's `composer.host` (Work 29.10: ⌘⇧H / ⌘⇧F).
   "composer.host",
   "composer.folder",
+  // Send and start the next chat: a new chat's ⌘Enter (upstream
+  // `composer.sendBackground`), an open chat's ⌥⌘Enter (`composer.sendAndNewThread`).
+  "composer.sendBackground",
+  "composer.sendAndNewThread",
+  // Set the typed message aside, or bring it back in any chat (Work 30.10).
+  "composer.stash",
   "editor.openFavorite",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,

@@ -46,6 +46,7 @@ import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { RotatingFileSink } from "@t3tools/shared/logging";
+import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort.ts";
@@ -190,6 +191,8 @@ const BROWSER_CREDENTIALS_DELETE_CHANNEL = "desktop:browser-credentials-delete";
 const BROWSER_CREDENTIALS_REVEAL_CHANNEL = "desktop:browser-credentials-reveal";
 const BROWSER_CLEAR_DATA_CHANNEL = "desktop:browser-clear-data";
 const BROWSER_OPEN_URL_CHANNEL = "desktop:browser-open-url";
+const PROMPT_LINK_CHANNEL = "desktop:prompt-link";
+const PROMPT_LINK_TAKE_CHANNEL = "desktop:prompt-link-take";
 const UNO_ACCOUNT_STATUS_CHANNEL = "desktop:uno-account-status";
 const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
 const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
@@ -2032,6 +2035,13 @@ function registerIpcHandlers(): void {
     event.returnValue = desktopAppBranding;
   });
 
+  ipcMain.removeHandler(PROMPT_LINK_TAKE_CHANNEL);
+  handleTrustedIpc(PROMPT_LINK_TAKE_CHANNEL, async () => {
+    const appPath = pendingPromptLinkPath;
+    pendingPromptLinkPath = null;
+    return appPath;
+  });
+
   ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
   onTrustedIpc(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
     event.returnValue = {
@@ -3061,6 +3071,28 @@ app.setPath("userData", resolveUserDataPath());
 
 configureAppIdentity();
 configureDevRemoteDebugging();
+
+// Prompt links (`uno-work://new?prompt=…`, macOS): a link only opens a new
+// chat with the text in its box. Only that route gets through; a link that
+// came before the window is taken by the page when it is ready.
+let pendingPromptLinkPath: string | null = null;
+
+function openPromptLink(url: string): void {
+  const appPath = promptLinkAppPath(url);
+  if (appPath === null) return;
+  const window = mainWindow ?? BrowserWindow.getAllWindows()[0];
+  if (!window || window.webContents.isLoading()) {
+    pendingPromptLinkPath = appPath;
+    return;
+  }
+  revealWindow(window);
+  window.webContents.send(PROMPT_LINK_CHANNEL, appPath);
+}
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  openPromptLink(url);
+});
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");

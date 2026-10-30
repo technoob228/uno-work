@@ -87,6 +87,16 @@ export const discovery = {
     "Install the GitHub command-line tool (`gh`) via https://cli.github.com/ or your package manager (for example `brew install gh`).",
 } satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
+function gitHubHostname(context: SourceControlProvider.SourceControlProviderContext | undefined) {
+  const baseUrl = context?.provider.baseUrl;
+  if (baseUrl === undefined) return "github.com";
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return "github.com";
+  }
+}
+
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli.GitHubCli;
 
@@ -164,6 +174,16 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         Effect.map(toChangeRequest),
         Effect.mapError((error) => providerError("getChangeRequest", error)),
       ),
+    readChangeRequestStatuses: (input) =>
+      github
+        .readPullRequestStatuses({
+          cwd: input.cwd,
+          hostname: gitHubHostname(input.context),
+          repository: input.repository,
+          numbers: input.numbers,
+          branches: input.branches,
+        })
+        .pipe(Effect.mapError((error) => providerError("readChangeRequestStatuses", error))),
     createChangeRequest: (input) =>
       github
         .createPullRequest({

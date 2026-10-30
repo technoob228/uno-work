@@ -279,6 +279,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     "CodexTextGeneration.generateCommitMessage",
   )(function* (input) {
     const { prompt, outputSchema } = buildCommitMessagePrompt({
+      policy: input.policy,
       branch: input.branch,
       stagedSummary: input.stagedSummary,
       stagedPatch: input.stagedPatch,
@@ -306,6 +307,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     "CodexTextGeneration.generatePrContent",
   )(function* (input) {
     const { prompt, outputSchema } = buildPrContentPrompt({
+      policy: input.policy,
       baseBranch: input.baseBranch,
       headBranch: input.headBranch,
       commitSummary: input.commitSummary,
@@ -335,6 +337,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       input.attachments,
     );
     const { prompt, outputSchema } = buildBranchNamePrompt({
+      policy: input.policy,
       message: input.message,
       attachments: input.attachments,
     });

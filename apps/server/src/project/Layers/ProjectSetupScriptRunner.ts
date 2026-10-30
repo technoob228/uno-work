@@ -1,5 +1,9 @@
 import { ProjectId } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
+import {
+  projectScriptRuntimeEnv,
+  settleProjectScript,
+  setupProjectScript,
+} from "@t3tools/shared/projectScripts";
 import { Effect, Layer, Option } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -32,14 +36,18 @@ const makeProjectSetupScriptRunner = Effect.gen(function* () {
         return yield* Effect.fail(new Error("Project was not found for setup script execution."));
       }
 
-      const script = setupProjectScript(project.scripts);
+      const settling = input.trigger === "settle";
+      const script = settling
+        ? settleProjectScript(project.scripts)
+        : setupProjectScript(project.scripts);
       if (!script) {
         return {
           status: "no-script",
         } as const;
       }
 
-      const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
+      const terminalId =
+        input.preferredTerminalId ?? `${settling ? "settle" : "setup"}-${script.id}`;
       const cwd = input.worktreePath;
       const env = projectScriptRuntimeEnv({
         project: { cwd: project.workspaceRoot },

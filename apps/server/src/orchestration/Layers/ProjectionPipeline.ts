@@ -663,6 +663,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            ...(event.payload.projectId !== undefined
+              ? { projectId: event.payload.projectId }
+              : {}),
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
             ...(event.payload.modelSelection !== undefined
               ? { modelSelection: event.payload.modelSelection }
@@ -769,6 +772,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                   }
                 : { lastVisitedAt: null, readAt: null }),
             readStateUpdatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.pull-requests-updated":
+        case "thread.auto-settle-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // updatedAt stays: a PR moving along never reorders the sidebar.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            ...(event.type === "thread.pull-requests-updated"
+              ? { pullRequests: event.payload.pullRequests }
+              : { autoSettleDisabledAt: event.payload.autoSettleDisabledAt }),
           });
           return;
         }
