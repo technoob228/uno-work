@@ -23,7 +23,8 @@ export function DevModeSync() {
 
   useEffect(() => {
     const computers: Array<[EnvironmentId, ServerConfig]> = [];
-    if (primaryEnvironmentId && primaryConfig) computers.push([primaryEnvironmentId, primaryConfig]);
+    if (primaryEnvironmentId && primaryConfig)
+      computers.push([primaryEnvironmentId, primaryConfig]);
     for (const [id, runtime] of Object.entries(savedEnvironments)) {
       if (id !== primaryEnvironmentId && runtime.serverConfig) {
         computers.push([id as EnvironmentId, runtime.serverConfig]);

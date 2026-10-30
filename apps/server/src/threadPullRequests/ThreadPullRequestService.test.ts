@@ -490,7 +490,11 @@ layer("ThreadPullRequestService", (it) => {
   it.effect("runs the project's action on settle once, in the chat's worktree", () =>
     Effect.gen(function* () {
       const world = newWorld();
-      world.shell = { ...world.shell, projectId: "project-1", worktreePath: "/copies/fix" } as never;
+      world.shell = {
+        ...world.shell,
+        projectId: "project-1",
+        worktreePath: "/copies/fix",
+      } as never;
       yield* seed({});
       const service = yield* serviceFor(world);
       const settled = {

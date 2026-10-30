@@ -161,10 +161,7 @@ export type StatusResponse =
  * non-zero exit of `gh`, while everything else in the document is good: what
  * decides is whether `data` is there.
  */
-export function parseStatusResponse(
-  raw: string,
-  branches: ReadonlyArray<string>,
-): StatusResponse {
+export function parseStatusResponse(raw: string, branches: ReadonlyArray<string>): StatusResponse {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

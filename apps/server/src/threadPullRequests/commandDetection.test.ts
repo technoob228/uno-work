@@ -6,9 +6,9 @@ const URL_12 = "https://github.com/acme/app/pull/12";
 
 describe("changeRequestsCreatedBy", () => {
   it("takes the URL `gh pr create` printed", () => {
-    expect(changeRequestsCreatedBy("gh pr create --fill", `Creating...\n${URL_12}\n`)).toMatchObject(
-      [{ provider: "github", repository: "acme/app", number: 12 }],
-    );
+    expect(
+      changeRequestsCreatedBy("gh pr create --fill", `Creating...\n${URL_12}\n`),
+    ).toMatchObject([{ provider: "github", repository: "acme/app", number: 12 }]);
   });
 
   it("reads a command Codex wrapped in a login shell", () => {
@@ -25,9 +25,7 @@ describe("changeRequestsCreatedBy", () => {
 
   it("ignores text that only mentions the command", () => {
     expect(changeRequestsCreatedBy('echo "gh pr create"', `${URL_12}\n`)).toEqual([]);
-    expect(
-      changeRequestsCreatedBy("cat <<EOF\ngh pr create\nEOF", `${URL_12}\n`),
-    ).toEqual([]);
+    expect(changeRequestsCreatedBy("cat <<EOF\ngh pr create\nEOF", `${URL_12}\n`)).toEqual([]);
   });
 
   it("ignores a URL an existing PR's command printed beside it", () => {
@@ -54,21 +52,20 @@ describe("changeRequestsCreatedBy", () => {
 
   it("does not take a GitLab URL from a GitHub create", () => {
     expect(
-      changeRequestsCreatedBy(
-        "gh pr create",
-        "https://gitlab.com/group/app/-/merge_requests/1\n",
-      ),
+      changeRequestsCreatedBy("gh pr create", "https://gitlab.com/group/app/-/merge_requests/1\n"),
     ).toEqual([]);
   });
 });
 
 describe("closesChangeRequest", () => {
-  it.each(["gh pr merge 12 --squash", "gh pr close 12", "glab mr merge 7", 'zsh -lc "gh pr merge"'])(
-    "sees %s",
-    (command) => {
-      expect(closesChangeRequest(command)).toBe(true);
-    },
-  );
+  it.each([
+    "gh pr merge 12 --squash",
+    "gh pr close 12",
+    "glab mr merge 7",
+    'zsh -lc "gh pr merge"',
+  ])("sees %s", (command) => {
+    expect(closesChangeRequest(command)).toBe(true);
+  });
 
   it("leaves other commands alone", () => {
     expect(closesChangeRequest("gh pr view 12")).toBe(false);

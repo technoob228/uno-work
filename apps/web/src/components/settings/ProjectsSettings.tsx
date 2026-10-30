@@ -7,11 +7,7 @@
  *
  * @module components/settings/ProjectsSettings
  */
-import {
-  type EnvironmentId,
-  type ModelSelection,
-  type ProjectScript,
-} from "@t3tools/contracts";
+import { type EnvironmentId, type ModelSelection, type ProjectScript } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { PlusIcon } from "lucide-react";

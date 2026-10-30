@@ -203,8 +203,12 @@ export function applyRead(input: {
   });
 
   const found =
-    read.branchStatuses === null ? null : pickBranchPullRequest(read.branchStatuses, thread.createdAt);
-  const known = found !== null && kept.some((link) => linkKey(link) === linkKey({ ...read, number: found.number }));
+    read.branchStatuses === null
+      ? null
+      : pickBranchPullRequest(read.branchStatuses, thread.createdAt);
+  const known =
+    found !== null &&
+    kept.some((link) => linkKey(link) === linkKey({ ...read, number: found.number }));
   if (found === null || known) return changed ? kept : thread.pullRequests;
 
   const added: ThreadPullRequest = {
@@ -220,7 +224,9 @@ export function applyRead(input: {
 }
 
 /** Keeps the list small: finished PRs go first, oldest first. */
-export function capLinks(links: ReadonlyArray<ThreadPullRequest>): ReadonlyArray<ThreadPullRequest> {
+export function capLinks(
+  links: ReadonlyArray<ThreadPullRequest>,
+): ReadonlyArray<ThreadPullRequest> {
   if (links.length <= MAX_LINKS_PER_THREAD) return links;
   const drop = new Set(
     links
@@ -236,7 +242,9 @@ export function capLinks(links: ReadonlyArray<ThreadPullRequest>): ReadonlyArray
 
 const terminalAtMs = (link: ThreadPullRequest): number | null => {
   const snapshot = link.snapshot;
-  return snapshot === null ? null : msOf(snapshot.state === "merged" ? snapshot.mergedAt : snapshot.closedAt);
+  return snapshot === null
+    ? null
+    : msOf(snapshot.state === "merged" ? snapshot.mergedAt : snapshot.closedAt);
 };
 
 /**
@@ -300,11 +308,17 @@ export type BudgetDecision = { readonly pauseUntilMs: number } | null;
 
 /** Leaves the person's budget to the person: below the floor, wait for the reset. */
 export function pauseForBudget(
-  budget: { readonly remaining: number; readonly limit: number; readonly resetAt: string | null } | null,
+  budget: {
+    readonly remaining: number;
+    readonly limit: number;
+    readonly resetAt: string | null;
+  } | null,
   nowMs: number,
 ): BudgetDecision {
   if (budget === null || budget.limit <= 0) return null;
   if (budget.remaining >= budget.limit * BUDGET_FLOOR) return null;
   const resetMs = msOf(budget.resetAt);
-  return { pauseUntilMs: resetMs !== null && resetMs > nowMs ? resetMs : nowMs + PAUSE_AFTER_FAILURE_MS };
+  return {
+    pauseUntilMs: resetMs !== null && resetMs > nowMs ? resetMs : nowMs + PAUSE_AFTER_FAILURE_MS,
+  };
 }

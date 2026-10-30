@@ -287,9 +287,9 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
           const pause = pauseForBudget(answer.budget, at);
           if (pause !== null) {
             pausedUntil.set(`${info.kind}:${info.host}`, pause.pauseUntilMs);
-            yield* Effect.logInfo("pull request sync: pausing to leave the host's limit alone").pipe(
-              Effect.annotateLogs({ host: info.host, remaining: answer.budget?.remaining }),
-            );
+            yield* Effect.logInfo(
+              "pull request sync: pausing to leave the host's limit alone",
+            ).pipe(Effect.annotateLogs({ host: info.host, remaining: answer.budget?.remaining }));
             break;
           }
         }
@@ -378,9 +378,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     /** Settled by hand or moving on: `thread.settle` refuses, and the next pass looks again. */
     const settleFinished = (threads: ReadonlyArray<SweepThread>, autoSettleOnMerge: boolean) =>
       Effect.forEach(
-        threads.filter((thread) =>
-          shouldAutoSettle({ thread, autoSettleOnMerge, nowMs: nowMs() }),
-        ),
+        threads.filter((thread) => shouldAutoSettle({ thread, autoSettleOnMerge, nowMs: nowMs() })),
         (thread) =>
           Effect.gen(function* () {
             const threadId = ThreadId.make(thread.threadId);
@@ -399,7 +397,9 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
             yield* engine.dispatch(
               {
                 type: "thread.settle",
-                commandId: CommandId.make(`${COMPONENT}:settle:${thread.threadId}:${crypto.randomUUID()}`),
+                commandId: CommandId.make(
+                  `${COMPONENT}:settle:${thread.threadId}:${crypto.randomUUID()}`,
+                ),
                 threadId,
               },
               { origin: systemCommandOrigin(COMPONENT, "pull request merged") },
@@ -447,10 +447,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
         yield* settleFinished(yield* repository.list, current.autoSettleOnMerge);
       });
 
-    const linkCreated = (
-      threadId: string,
-      created: ReturnType<typeof changeRequestsCreatedBy>,
-    ) =>
+    const linkCreated = (threadId: string, created: ReturnType<typeof changeRequestsCreatedBy>) =>
       Effect.gen(function* () {
         const thread = yield* repository.get(threadId);
         if (thread === null) return;

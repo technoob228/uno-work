@@ -424,7 +424,12 @@ export function projectEvent(
       );
 
     case "thread.pull-requests-updated":
-      return decodeForEvent(ThreadPullRequestsUpdatedPayload, event.payload, event.type, "payload").pipe(
+      return decodeForEvent(
+        ThreadPullRequestsUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -434,7 +439,12 @@ export function projectEvent(
       );
 
     case "thread.auto-settle-updated":
-      return decodeForEvent(ThreadAutoSettleUpdatedPayload, event.payload, event.type, "payload").pipe(
+      return decodeForEvent(
+        ThreadAutoSettleUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {

@@ -13,7 +13,8 @@ const CREATE_COMMANDS = [
   { provider: "github", command: /\bgh\s+pr\s+create\b/u },
   { provider: "gitlab", command: /\bglab\s+mr\s+create\b/u },
 ] as const;
-const CLOSE_COMMAND = /\b(?:gh\s+(?:pr\s+(?:merge|close)|stack\s+merge)|glab\s+mr\s+(?:merge|close))\b/u;
+const CLOSE_COMMAND =
+  /\b(?:gh\s+(?:pr\s+(?:merge|close)|stack\s+merge)|glab\s+mr\s+(?:merge|close))\b/u;
 
 // Where a shell starts a command, past `NAME=value` assignments and wrappers like `timeout 60`.
 // A create command anywhere else, as in `echo "gh pr create"`, is text, not a command that runs.

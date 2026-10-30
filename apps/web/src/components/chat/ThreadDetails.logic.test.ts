@@ -55,9 +55,7 @@ describe("pull request wording", () => {
     expect(pullRequestChecksLabel(link({}))).toBeNull();
     expect(pullRequestReviewLabel(link({}))).toBeNull();
     expect(pullRequestChecksLabel(link({ checks: "failing" }))).toBe("Checks failing");
-    expect(pullRequestReviewLabel(link({ review: "changes_requested" }))).toBe(
-      "Changes requested",
-    );
+    expect(pullRequestReviewLabel(link({ review: "changes_requested" }))).toBe("Changes requested");
   });
 
   it("shows branches once read", () => {

@@ -69,7 +69,9 @@ describe("parseStatusResponse", () => {
         data: {
           repository: {
             branch0: { nodes: [] },
-            branch1: { nodes: [node({ number: 3, state: "MERGED", mergedAt: "2026-10-30T09:00:00Z" })] },
+            branch1: {
+              nodes: [node({ number: 3, state: "MERGED", mergedAt: "2026-10-30T09:00:00Z" })],
+            },
           },
         },
       }),

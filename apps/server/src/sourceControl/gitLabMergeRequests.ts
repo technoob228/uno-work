@@ -174,7 +174,9 @@ const GitLabMergeRequestStatusSchema = Schema.Struct({
     Schema.NullOr(Schema.Struct({ status: Schema.optional(Schema.NullOr(Schema.String)) })),
   ),
 });
-const decodeGitLabMergeRequestStatusEntry = Schema.decodeUnknownExit(GitLabMergeRequestStatusSchema);
+const decodeGitLabMergeRequestStatusEntry = Schema.decodeUnknownExit(
+  GitLabMergeRequestStatusSchema,
+);
 
 function gitLabChecks(status: string | null | undefined): ChangeRequestChecksState {
   switch (status) {

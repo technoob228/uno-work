@@ -1,6 +1,12 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ThreadId, ThreadPullRequest } from "@t3tools/contracts";
-import { CheckIcon, CopyIcon, ExternalLinkIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";

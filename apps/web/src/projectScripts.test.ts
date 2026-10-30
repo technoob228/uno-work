@@ -121,10 +121,10 @@ describe("replaceProjectScript", () => {
   });
 
   it("replaces in place when editing", () => {
-    const next = replaceProjectScript(
-      [script("a", { setup: true }), script("b")],
-      { ...script("a"), name: "renamed" },
-    );
+    const next = replaceProjectScript([script("a", { setup: true }), script("b")], {
+      ...script("a"),
+      name: "renamed",
+    });
     expect(next.map((item) => item.name)).toEqual(["renamed", "b"]);
   });
 });

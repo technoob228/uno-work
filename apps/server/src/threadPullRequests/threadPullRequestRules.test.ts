@@ -186,7 +186,9 @@ describe("applyRead", () => {
   ) => ({
     provider: "github" as const,
     repository: "acme/app",
-    statuses: new Map(statuses.map((value) => [linkKey({ repository: "acme/app", ...value }), value])),
+    statuses: new Map(
+      statuses.map((value) => [linkKey({ repository: "acme/app", ...value }), value]),
+    ),
     branchStatuses,
   });
 
@@ -254,10 +256,10 @@ describe("applyRead", () => {
 describe("capLinks", () => {
   it("lets finished PRs go first", () => {
     const links = Array.from({ length: MAX_LINKS_PER_THREAD + 1 }, (_, index) =>
-      link(
-        index === 0 ? { state: "open" } : merged(index),
-        { number: index + 1, linkedAt: ago(100 - index) } as Partial<ThreadPullRequest>,
-      ),
+      link(index === 0 ? { state: "open" } : merged(index), {
+        number: index + 1,
+        linkedAt: ago(100 - index),
+      } as Partial<ThreadPullRequest>),
     );
     const kept = capLinks(links);
     expect(kept).toHaveLength(MAX_LINKS_PER_THREAD);
@@ -275,9 +277,9 @@ describe("shouldAutoSettle", () => {
   });
 
   it("doesn't settle when the person wrote after the merge", () => {
-    expect(
-      settles({ pullRequests: [link(merged(10))], latestPersonMessageAt: ago(5) }),
-    ).toBe(false);
+    expect(settles({ pullRequests: [link(merged(10))], latestPersonMessageAt: ago(5) })).toBe(
+      false,
+    );
   });
 
   it("an agent's message after the merge doesn't count as the person's", () => {
@@ -299,9 +301,9 @@ describe("shouldAutoSettle", () => {
   });
 
   it("waits for a link that hasn't been read yet", () => {
-    expect(
-      settles({ pullRequests: [link(merged(10)), link(null, { number: 13 } as never)] }),
-    ).toBe(false);
+    expect(settles({ pullRequests: [link(merged(10)), link(null, { number: 13 } as never)] })).toBe(
+      false,
+    );
   });
 
   it("respects the switch, the pin, the snooze and the person's override", () => {
