@@ -77,58 +77,63 @@ export function AssistantPresetPicker({
     <div className="flex flex-col gap-2" data-testid={testId}>
       {projectsOnly ? null : (
         <>
-      <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`What ${name} may do`}>
-        {ASSISTANT_MODES.map((option: AssistantMode) => {
-          const selected = mode === option;
-          return (
-            <button
-              key={option}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              disabled={disabled}
-              onClick={() => onChange(withMode(value, option))}
-              data-testid={`${testId}-${option}`}
-              className={cn(
-                "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default disabled:opacity-60",
-                selected
-                  ? "border-primary/50 bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
+          <div
+            className="flex flex-wrap gap-1"
+            role="radiogroup"
+            aria-label={`What ${name} may do`}
+          >
+            {ASSISTANT_MODES.map((option: AssistantMode) => {
+              const selected = mode === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={disabled}
+                  onClick={() => onChange(withMode(value, option))}
+                  data-testid={`${testId}-${option}`}
+                  className={cn(
+                    "h-6 cursor-pointer rounded-md border px-2 text-xs transition-colors disabled:cursor-default disabled:opacity-60",
+                    selected
+                      ? "border-primary/50 bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  {ASSISTANT_MODE_COPY[option].name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="-mt-1 text-xs text-muted-foreground" data-testid={`${testId}-line`}>
+            {readOnly ? ASSISTANT_PRESET_COPY.observer.line : ASSISTANT_MODE_COPY[mode].line}
+          </p>
+
+          <button
+            type="button"
+            className="inline-flex w-fit cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setDetails((open) => !open)}
+            aria-expanded={details}
+            data-testid={`${testId}-details-toggle`}
+          >
+            {mode === "asks-first" && !readOnly ? "What it asks you before" : "Details"}
+            <ChevronDownIcon
+              className={cn("size-3.5 transition-transform", details && "rotate-180")}
+            />
+          </button>
+          {details ? (
+            <ul
+              className="ml-1 flex flex-col gap-1 text-xs text-muted-foreground"
+              data-testid={`${testId}-details`}
             >
-              {ASSISTANT_MODE_COPY[option].name}
-            </button>
-          );
-        })}
-      </div>
-      <p className="-mt-1 text-xs text-muted-foreground" data-testid={`${testId}-line`}>
-        {readOnly ? ASSISTANT_PRESET_COPY.observer.line : ASSISTANT_MODE_COPY[mode].line}
-      </p>
-
-      <button
-        type="button"
-        className="inline-flex w-fit cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => setDetails((open) => !open)}
-        aria-expanded={details}
-        data-testid={`${testId}-details-toggle`}
-      >
-        {mode === "asks-first" && !readOnly ? "What it asks you before" : "Details"}
-        <ChevronDownIcon className={cn("size-3.5 transition-transform", details && "rotate-180")} />
-      </button>
-      {details ? (
-        <ul
-          className="ml-1 flex flex-col gap-1 text-xs text-muted-foreground"
-          data-testid={`${testId}-details`}
-        >
-          {(readOnly ? ASSISTANT_PRESET_COPY.observer : ASSISTANT_MODE_COPY[mode]).details.map(
-            (line) => (
-              <li key={line}>· {line}</li>
-            ),
-          )}
-          {readOnly ? <li>· Set up before the two levels. Pick one to change it.</li> : null}
-        </ul>
-      ) : null}
-
+              {(readOnly ? ASSISTANT_PRESET_COPY.observer : ASSISTANT_MODE_COPY[mode]).details.map(
+                (line) => (
+                  <li key={line}>· {line}</li>
+                ),
+              )}
+              {readOnly ? <li>· Set up before the two levels. Pick one to change it.</li> : null}
+            </ul>
+          ) : null}
         </>
       )}
       <div className="flex flex-col gap-1.5 pt-1" data-testid={`${testId}-projects`}>
