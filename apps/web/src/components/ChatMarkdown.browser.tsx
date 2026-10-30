@@ -49,7 +49,7 @@ vi.mock("./preview/PreviewPaneContext", async (importOriginal) => ({
   usePreviewPane: () => ({
     openUrl: openUrlMock,
     openFile: openFileMock,
-    currentChatEnvironmentId: null,
+    currentChatEnvironmentId: "env-open-chat",
     currentChatThreadId: "thread-1",
   }),
 }));
