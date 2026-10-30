@@ -35,10 +35,17 @@ async function step(name, world, fn, clientSettings) {
   const shot = async (label) => {
     await dismissBanners(page);
     await page.evaluate(() => {
+      // The demo's own card covers the chat; no address in a shot, even a made-up one.
       for (const el of document.querySelectorAll("div,button")) {
         const text = (el.textContent ?? "").trim();
-        if (text.length < 40 && /^(Что смотреть|What to look at)/.test(text)) {
+        if (/^(Что смотреть|What to look at|Ассистенты · D)/.test(text)) {
           if (String(el.className).includes("shadow")) el.style.display = "none";
+        }
+      }
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.nodeValue?.includes("@")) {
+          node.nodeValue = node.nodeValue.replace(/\S+@\S+\.\S+/g, "you@example.com");
         }
       }
     });
@@ -213,6 +220,8 @@ await step("08-prompt-link", {}, async ({ page, text, shot }) => {
 });
 
 await step("09-prompt-link-keeps-draft", {}, async ({ page, box, text, newChat, shot }) => {
+  await page.goto(server.url);
+  await page.getByRole("button", { name: "New chat", exact: true }).first().waitFor();
   await newChat();
   await box().pressSequentially("My own text");
   await page.evaluate(() => {
