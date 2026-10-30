@@ -322,6 +322,55 @@ describe("chatPlanLimit", () => {
     expect(limit?.alternative).toBeNull();
   });
 
+  it("gone once the plan is back: fresh numbers with room, the named reset passed, or 5 hours", () => {
+    const stoppedAt = at(-30);
+    expect(
+      chatPlanLimit({
+        driver: "claudeAgent",
+        stopText: "You've hit your limit",
+        stoppedAt,
+        currentEnvironmentId: WORK,
+        computers: [
+          computer(WORK, "uno-work", [claude("misha@uno.place", 10, 20, { checkedAt: at(-1) })]),
+        ],
+        now: NOW,
+      }),
+    ).toBeNull();
+    expect(
+      chatPlanLimit({
+        driver: "claudeAgent",
+        stopText: "You've hit your usage limit. Try again in 20 minutes.",
+        stoppedAt,
+        currentEnvironmentId: WORK,
+        computers: [computer(WORK, "uno-work", null)],
+        now: NOW,
+      }),
+    ).toBeNull();
+    expect(
+      chatPlanLimit({
+        driver: "claudeAgent",
+        stopText: "You've hit your limit",
+        stoppedAt: at(-6 * 60),
+        currentEnvironmentId: WORK,
+        computers: [computer(WORK, "uno-work", null)],
+        now: NOW,
+      }),
+    ).toBeNull();
+    // Numbers read before the stop don't clear it.
+    expect(
+      chatPlanLimit({
+        driver: "claudeAgent",
+        stopText: "You've hit your limit",
+        stoppedAt,
+        currentEnvironmentId: WORK,
+        computers: [
+          computer(WORK, "uno-work", [claude("misha@uno.place", 90, 20, { checkedAt: at(-40) })]),
+        ],
+        now: NOW,
+      })?.computerName,
+    ).toBe("uno-work");
+  });
+
   it("not for Uno AI, not for other errors", () => {
     expect(
       chatPlanLimit({

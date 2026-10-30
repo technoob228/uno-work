@@ -392,39 +392,49 @@ export interface ChatPlanLimit {
 export function chatPlanLimit(input: {
   readonly driver: string | null;
   readonly stopText: string | null;
+  /** When the chat stopped (the turn's end); the stop line's "3pm" is read from then. */
+  readonly stoppedAt?: string | null;
   readonly currentEnvironmentId: EnvironmentId;
   readonly computers: ReadonlyArray<PlanComputer>;
   readonly now: number;
 }): ChatPlanLimit | null {
   const provider = planProviderForDriver(input.driver);
   if (provider === null || !isPlanLimitText(input.stopText)) return null;
+  const stoppedMs = input.stoppedAt ? Date.parse(input.stoppedAt) : Number.NaN;
+  const stopped = Number.isFinite(stoppedMs) ? stoppedMs : input.now;
+  const textReset = planLimitResetFromText(input.stopText!, stopped);
   const room = pickComputerForNewChat({
     currentEnvironmentId: input.currentEnvironmentId,
     provider,
     computers: input.computers,
     now: input.now,
   });
-  const currentName =
-    input.computers.find((computer) => computer.environmentId === input.currentEnvironmentId)
-      ?.name ?? "this computer";
   if (room.kind === "full") {
     return {
       provider,
       computerName: room.computerName,
-      resetsAt: room.resetsAt ?? planLimitResetFromText(input.stopText!, input.now),
+      resetsAt: room.resetsAt ?? textReset,
       alternative: room.alternative,
     };
   }
-  // The numbers on this computer are older than the stop (5-minute cache):
-  // trust the stop line, and still look for a computer with room.
-  const hereAccount =
-    input.computers
-      .find((computer) => computer.environmentId === input.currentEnvironmentId)
-      ?.accounts?.find((account) => account.provider === provider) ?? null;
+  const here = input.computers.find(
+    (computer) => computer.environmentId === input.currentEnvironmentId,
+  );
+  const hereAccount = here?.accounts?.find((account) => account.provider === provider) ?? null;
+  // The plan is back: numbers read after the stop say there's room, or the
+  // reset the stop line named has passed, or (saying nothing) a 5-hour window has.
+  const readAfterStop = hereAccount?.checkedAt
+    ? Date.parse(hereAccount.checkedAt) > stopped
+    : false;
+  if (hereAccount && readAfterStop && planAtLimit(hereAccount, input.now) === null) return null;
+  if (textReset !== null && Date.parse(textReset) <= input.now) return null;
+  if (textReset === null && input.now - stopped >= 5 * HOUR_MS) return null;
+  // The numbers here are older than the stop (5-minute cache): trust the
+  // stop line, and still look for a computer with room.
   return {
     provider,
-    computerName: currentName,
-    resetsAt: planLimitResetFromText(input.stopText!, input.now),
+    computerName: here?.name ?? "this computer",
+    resetsAt: textReset,
     alternative: findAlternative({
       currentEnvironmentId: input.currentEnvironmentId,
       provider,

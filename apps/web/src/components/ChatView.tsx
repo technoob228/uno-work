@@ -4625,6 +4625,7 @@ export default function ChatView(props: ChatViewProps) {
                         threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
                         driver={selectedProvider}
                         stopText={planLimitStopText}
+                        stoppedAt={activeLatestTurn?.completedAt ?? null}
                         lastRequest={lastUserMessageText ?? ""}
                         smartTarget={smartTargetHere}
                         canContinueWithHistory={isElectron && Boolean(activeProject)}

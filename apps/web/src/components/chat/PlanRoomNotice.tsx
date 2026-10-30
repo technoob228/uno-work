@@ -57,6 +57,13 @@ let startedNote: {
 } | null = null;
 const STARTED_NOTE_TTL_MS = 30_000;
 
+/**
+ * "Switch by itself" moved a new chat away from these computers lately: a
+ * person who comes back to one on purpose is asked, not bounced again.
+ */
+const autoMovedFrom = new Map<EnvironmentId, number>();
+const AUTO_MOVE_QUIET_MS = 15 * 60_000;
+
 function readStartedNote(environmentId: EnvironmentId, draftId: DraftId): string | null {
   const note = startedNote;
   if (!note || note.environmentId !== environmentId) return null;
@@ -154,10 +161,13 @@ export const DraftPlanRoomNotice = memo(function DraftPlanRoomNotice({
   };
 
   // "Switch by itself": once per draft, as soon as the numbers say so.
-  const autoTarget = mode === "auto" && alternative ? alternative.environmentId : null;
+  const movedLately = Date.now() - (autoMovedFrom.get(environmentId) ?? 0) < AUTO_MOVE_QUIET_MS;
+  const autoTarget =
+    mode === "auto" && alternative && !movedLately ? alternative.environmentId : null;
   useEffect(() => {
     if (autoTarget === null || autoMovedRef.current === draftId) return;
     autoMovedRef.current = draftId;
+    autoMovedFrom.set(environmentId, Date.now());
     void startOn(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per draft and target
   }, [autoTarget, draftId]);
@@ -203,6 +213,7 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
   threadRef,
   driver,
   stopText,
+  stoppedAt,
   lastRequest,
   smartTarget,
   canContinueWithHistory,
@@ -212,6 +223,8 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
   driver: string | null;
   /** The turn's error, or the last reply when Claude Code put the stop line there. */
   stopText: string | null;
+  /** When the turn ended. */
+  stoppedAt: string | null;
   /** The person's last message — typed into a new chat, never sent by itself. */
   lastRequest: string;
   smartTarget: ModelSelection | null;
@@ -231,6 +244,7 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
     ? chatPlanLimit({
         driver,
         stopText,
+        stoppedAt,
         currentEnvironmentId: environmentId,
         computers,
         now,
