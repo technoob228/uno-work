@@ -74,6 +74,7 @@ import {
   selectThreadByRef,
   selectThreadsAcrossEnvironments,
 } from "~/store";
+import { useQueuedMessageStore } from "~/queuedMessageStore";
 import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
@@ -1174,6 +1175,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       if (threadRef) {
         disposeThreadDetailSubscriptionByKey(scopedThreadKey(threadRef));
         useComposerDraftStore.getState().clearDraftThread(threadRef);
+        useQueuedMessageStore.getState().clearThread(scopedThreadKey(threadRef));
         useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
         useTerminalStateStore.getState().removeTerminalState(threadRef);
       }

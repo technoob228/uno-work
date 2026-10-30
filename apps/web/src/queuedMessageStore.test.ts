@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   nextQueuedMessageToSend,
+  QUEUED_MESSAGE_HOLD_AFTER_MS,
+  QUEUED_MESSAGES_STORAGE_KEY,
+  restoreQueues,
   shouldQueueSend,
   useQueuedMessageStore,
 } from "./queuedMessageStore";
@@ -12,6 +15,70 @@ const queue = () => store().queuesByThreadKey[KEY] ?? [];
 
 beforeEach(() => {
   useQueuedMessageStore.setState({ queuesByThreadKey: {} });
+});
+
+describe("a reload", () => {
+  const storage = () => useQueuedMessageStore.persist.getOptions().storage!;
+
+  it("finds the queue where it was left, in order", async () => {
+    store().enqueue(KEY, "one");
+    store().enqueue(KEY, "two");
+    const beforeReload = store().queuesByThreadKey;
+    useQueuedMessageStore.setState({ queuesByThreadKey: {} });
+    await storage().setItem(QUEUED_MESSAGES_STORAGE_KEY, {
+      state: { queuesByThreadKey: beforeReload },
+      version: 1,
+    });
+    await useQueuedMessageStore.persist.rehydrate();
+    expect(queue().map((message) => message.text)).toEqual(["one", "two"]);
+  });
+
+  it("holds what waited too long: the person left, the chat moved on", () => {
+    const now = Date.parse("2026-10-30T12:00:00.000Z");
+    const fresh = new Date(now - 60_000).toISOString();
+    const old = new Date(now - QUEUED_MESSAGE_HOLD_AFTER_MS - 1).toISOString();
+    const restored = restoreQueues(
+      {
+        queuesByThreadKey: {
+          [KEY]: [
+            { id: "1", text: "fresh", createdAt: fresh },
+            { id: "2", text: "old", createdAt: old },
+          ],
+        },
+      },
+      now,
+    );
+    expect(restored[KEY]?.map((message) => [message.text, message.hold ?? false])).toEqual([
+      ["fresh", false],
+      ["old", true],
+    ]);
+  });
+
+  it("survives garbage in the storage", () => {
+    expect(restoreQueues(null, 0)).toEqual({});
+    expect(restoreQueues({ queuesByThreadKey: "x" }, 0)).toEqual({});
+    expect(restoreQueues({ queuesByThreadKey: { [KEY]: [{ id: 1 }] } }, 0)).toEqual({});
+  });
+
+  it("forgets the queue of a deleted chat", () => {
+    store().enqueue(KEY, "one");
+    store().clearThread(KEY);
+    expect(KEY in store().queuesByThreadKey).toBe(false);
+  });
+});
+
+describe("two tabs", () => {
+  it("lets one message leave once: a tab sees the other took it", async () => {
+    const entry = store().enqueue(KEY, "one");
+    const storage = useQueuedMessageStore.persist.getOptions().storage!;
+    // The other tab took it first: the storage no longer has it, this tab's copy still does.
+    await storage.setItem(QUEUED_MESSAGES_STORAGE_KEY, {
+      state: { queuesByThreadKey: {} },
+      version: 1,
+    });
+    expect(store().take(KEY, entry.id)).toBeNull();
+    expect(queue()).toEqual([]);
+  });
 });
 
 describe("queuedMessageStore", () => {
