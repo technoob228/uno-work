@@ -324,6 +324,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           personCalledAt: null,
           personCalledByThreadId: null,
           personCallReason: null,
+          pullRequests: [],
+          autoSettleDisabledAt: null,
           deletedAt: null,
           messages: [
             {

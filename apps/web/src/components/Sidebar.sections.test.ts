@@ -145,7 +145,7 @@ describe("resolveSidebarThreadSection", () => {
           syncedAt,
         },
       }) as NonNullable<SidebarThreadSummary["pullRequests"]>[number];
-    const section = (pullRequests: SidebarThreadSummary["pullRequests"]) =>
+    const section = (pullRequests: NonNullable<SidebarThreadSummary["pullRequests"]>) =>
       resolveSidebarThreadSection(makeThread("pr", { ...idle(30), pullRequests }), NOW);
     expect(section([link(ago(DAY_MS), "open")])).toBe("active");
     expect(section([link(ago(DAY_MS), "merged")])).toBe("settled");
