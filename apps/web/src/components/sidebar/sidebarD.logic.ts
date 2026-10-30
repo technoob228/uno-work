@@ -321,3 +321,20 @@ export function needsYouPlace(needsYou: number): {
   const count = Number.isFinite(needsYou) && needsYou > 0 ? Math.floor(needsYou) : 0;
   return { shown: count > 0, count };
 }
+
+/**
+ * Which names in the places row on top can grow out of their icons (Misha
+ * 29.10, "denser + a tooltip"): each one alone, beside every other item at
+ * rest, gaps included. A name that doesn't fit isn't cut ("Fil…"): that icon
+ * shows a tooltip instead. `name` is null for an item without one (Needs you).
+ */
+export function placeNamesThatFit(row: {
+  readonly width: number;
+  readonly gap: number;
+  readonly items: ReadonlyArray<{ readonly rest: number; readonly name: number | null }>;
+}): boolean[] {
+  const gaps = row.gap * Math.max(0, row.items.length - 1);
+  const atRest = row.items.reduce((sum, item) => sum + item.rest, gaps);
+  // Half a pixel for rounding: layout widths are fractional.
+  return row.items.map((item) => item.name !== null && atRest + item.name <= row.width + 0.5);
+}

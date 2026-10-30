@@ -1,7 +1,7 @@
 import "../../index.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { page, userEvent } from "vitest/browser";
+import { type Locator, page, userEvent } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
@@ -82,6 +82,9 @@ afterEach(() => {
   sidebarDPanel.closeNow();
 });
 
+const rect = (locator: Locator) => locator.element().getBoundingClientRect();
+const tooltip = () => document.querySelector('[data-slot="tooltip-popup"]');
+
 describe("sidebar D places", () => {
   it("shows Home, Files and Apps & sites as icons in one row, no Needs you when nothing waits", async () => {
     const screen = await mount(<SidebarDPlaces />);
@@ -96,7 +99,8 @@ describe("sidebar D places", () => {
     const widths = ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(
       (id) => screen.getByTestId(id).element().getBoundingClientRect().width,
     );
-    expect(widths).toEqual([32, 32, 32]);
+    // 28 px each (Misha 29.10: denser, so the names have room).
+    expect(widths).toEqual([28, 28, 28]);
     const tops = ["sidebar-nav-home", "sidebar-nav-files", "sidebar-nav-apps"].map(
       (id) => screen.getByTestId(id).element().getBoundingClientRect().top,
     );
@@ -127,19 +131,48 @@ describe("sidebar D places", () => {
     const screen = await mount(<SidebarDPlaces />);
     const apps = screen.getByTestId("sidebar-nav-apps");
     const files = screen.getByTestId("sidebar-nav-files");
-    const rect = (locator: typeof files) => locator.element().getBoundingClientRect();
     const gap = rect(apps).left - rect(files).right;
+    await expect.element(files).toHaveAttribute("data-name-fits", "true");
     await userEvent.hover(files);
     // "Files" in full; Apps & sites, to its right, moved over with it.
-    await expect.poll(() => rect(files).width).toBeGreaterThan(60);
+    await expect.poll(() => rect(files).width).toBeGreaterThan(50);
     expect(rect(apps).left - rect(files).right).toBeCloseTo(gap, 0);
     await expect.element(files).toHaveTextContent("Files");
+    // A name in full instead of a tooltip.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(tooltip()).toBeNull();
     // The row has no room for "Apps & sites": its name on hover is "Apps".
     await userEvent.hover(apps);
     await expect.element(apps).toHaveTextContent("Apps");
     await expect.element(apps).not.toHaveTextContent("Apps & sites");
     await expect.element(apps).toHaveAttribute("aria-label", "Apps & sites");
-    await expect.poll(() => files.element().getBoundingClientRect().width).toBe(32);
+    await expect.poll(() => files.element().getBoundingClientRect().width).toBe(28);
+  });
+
+  it("a name the row has no room for isn't cut: a tooltip names the icon instead", async () => {
+    // A narrow sidebar with Needs you up (Misha 29.10: "Fil…" on the stand).
+    needsYou = 1;
+    const screen = await mount(
+      <div style={{ width: 200 }}>
+        <SidebarDPlaces />
+      </div>,
+    );
+    const files = screen.getByTestId("sidebar-nav-files");
+    const dev = screen.getByTestId("sidebar-nav-dev-mode");
+    await expect.element(screen.getByTestId("sidebar-needs-you")).toBeVisible();
+    await expect.element(dev).toHaveAttribute("data-name-fits", "false");
+    // "Dev mode" doesn't fit beside the rest: it stays an icon and a tooltip names it.
+    await userEvent.hover(dev);
+    await expect.poll(tooltip, { timeout: 3_000 }).not.toBeNull();
+    expect(tooltip()!.textContent).toBe("Dev mode");
+    expect(rect(dev).width).toBe(28);
+    // "Files" still fits: in full, no tooltip; nothing leaves the row.
+    await expect.element(files).toHaveAttribute("data-name-fits", "true");
+    await userEvent.hover(files);
+    await expect.poll(() => rect(files).width).toBeGreaterThan(50);
+    await expect.poll(tooltip).toBeNull();
+    const row = screen.getByTestId("sidebar-places").element().getBoundingClientRect();
+    expect(rect(dev).right).toBeLessThanOrEqual(row.right);
   });
 
   it("turns Dev mode on and off from the end of the row", async () => {

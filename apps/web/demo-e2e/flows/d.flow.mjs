@@ -607,8 +607,20 @@ export const flows = [
         }),
       );
       if (new Set(tops).size !== 1) throw new Error(`places not in one row: ${tops}`);
-      await page.getByTestId("sidebar-nav-files").hover();
-      await tooltip(page).filter({ hasText: "Files" }).waitFor({ timeout: 5_000 });
+      // The name grows out of the icon when the row has room (Misha 29.10), else a tooltip.
+      const files = page.getByTestId("sidebar-nav-files");
+      await files.hover();
+      if ((await files.getAttribute("data-name-fits")) === "true") {
+        await page.waitForFunction(
+          () =>
+            (document.querySelector('[data-testid="sidebar-nav-files"]')?.getBoundingClientRect()
+              .width ?? 0) > 40,
+          null,
+          { timeout: 5_000 },
+        );
+      } else {
+        await tooltip(page).filter({ hasText: "Files" }).waitFor({ timeout: 5_000 });
+      }
     });
     await shot("places-hover");
     await step("no “New assistant” line, only “+” and the gear", async () => {
