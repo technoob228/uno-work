@@ -7,6 +7,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { createThreadSelectorAcrossEnvironments } from "../storeSelectors";
 import { useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { useDraftProjectRepair } from "../hooks/useDraftProjectRepair";
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
@@ -52,6 +53,8 @@ function DraftChatThreadRouteView() {
     }
     void navigate({ to: "/", replace: true });
   }, [canonicalThreadRef, draftSession, navigate]);
+
+  useDraftProjectRepair(canonicalThreadRef ? null : draftId, draftSession);
 
   if (canonicalThreadRef) {
     return (

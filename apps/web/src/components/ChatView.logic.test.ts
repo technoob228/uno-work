@@ -24,9 +24,63 @@ import {
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
+  resolveActiveProviderInstanceId,
 } from "./ChatView.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("resolveActiveProviderInstanceId", () => {
+  const providers = [
+    { instanceId: "codex", driver: "codex" },
+    { instanceId: "codex_work", driver: "codex" },
+    { instanceId: "opencode", driver: "opencode" },
+  ] as never;
+  const base = {
+    isLocalDraft: true,
+    sessionInstanceId: null,
+    threadInstanceId: "codex",
+    projectInstanceId: "codex",
+    pickedInstanceId: null,
+    selectedDriver: "opencode",
+    providers,
+  };
+
+  it("a new chat asks about what the composer shows, not the project's seed", () => {
+    expect(resolveActiveProviderInstanceId({ ...base, pickedInstanceId: "opencode" })).toBe(
+      "opencode",
+    );
+    // No pick, the composer passed over the logged-out seed: the harness's default.
+    expect(resolveActiveProviderInstanceId(base)).toBeNull();
+  });
+
+  it("a new chat keeps the project's own instance of the harness it is on", () => {
+    expect(
+      resolveActiveProviderInstanceId({
+        ...base,
+        threadInstanceId: "codex_work",
+        selectedDriver: "codex",
+      }),
+    ).toBe("codex_work");
+  });
+
+  it("a started chat asks about what it runs on", () => {
+    expect(
+      resolveActiveProviderInstanceId({
+        ...base,
+        isLocalDraft: false,
+        sessionInstanceId: "codex_work",
+        pickedInstanceId: "opencode",
+      }),
+    ).toBe("codex_work");
+    expect(
+      resolveActiveProviderInstanceId({
+        ...base,
+        isLocalDraft: false,
+        pickedInstanceId: "opencode",
+      }),
+    ).toBe("codex");
+  });
+});
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {

@@ -1328,6 +1328,18 @@ function removeDraftThreadReferences(
   };
 }
 
+/**
+ * A logical key that names a project: `<environment>:<projectId>`, the old
+ * format. Today a key can also be `<environment>:<path>` (a project's physical
+ * key, logicalProject.ts) — the same shape, and what follows the colon is no
+ * project id: taken for one, it turned a new chat into a dead one on reload
+ * (30.10: the chat's project "gone", "Sign in to Codex", nothing sends).
+ */
+function parseProjectRefFromLogicalKey(logicalProjectKey: string): ScopedProjectRef | null {
+  const projectRef = parseScopedProjectKey(logicalProjectKey);
+  return projectRef && !/[/\\]/.test(projectRef.projectId) ? projectRef : null;
+}
+
 function normalizePersistedDraftThreads(
   rawDraftThreadsByThreadId: unknown,
   rawProjectDraftThreadIdByProjectKey: unknown,
@@ -1449,7 +1461,7 @@ function normalizePersistedDraftThreads(
       if (typeof threadKeyOrId !== "string" || threadKeyOrId.length === 0) {
         continue;
       }
-      const projectRef = parseScopedProjectKey(logicalProjectKey);
+      const projectRef = parseProjectRefFromLogicalKey(logicalProjectKey);
       const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
       const threadKey = normalizeLegacyComposerStorageKey(threadKeyOrId);
       logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey] = threadKey;
@@ -1481,8 +1493,11 @@ function normalizePersistedDraftThreads(
           promotedTo: null,
         };
       } else if (
-        draftThreadsByThreadKey[threadKey]?.projectId !== projectRef.projectId ||
-        draftThreadsByThreadKey[threadKey]?.environmentId !== projectRef.environmentId
+        // A session saved with this very key knows its project better than the
+        // key does: several projects can share one logical key.
+        draftThreadsByThreadKey[threadKey]?.logicalProjectKey !== logicalProjectKey &&
+        (draftThreadsByThreadKey[threadKey]?.projectId !== projectRef.projectId ||
+          draftThreadsByThreadKey[threadKey]?.environmentId !== projectRef.environmentId)
       ) {
         draftThreadsByThreadKey[threadKey] = {
           ...draftThreadsByThreadKey[threadKey]!,
