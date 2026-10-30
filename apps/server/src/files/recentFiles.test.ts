@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentChangesFromActivities,
   addRecentOpened,
   agentChangesFromTurns,
   mergeRecentFiles,
@@ -86,6 +87,40 @@ describe("agentChangesFromTurns", () => {
         }),
         row({ filesJson: "{not json" }),
         row({ workspaceRoot: "relative", filesJson: JSON.stringify([{ path: "a" }]) }),
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("agentChangesFromActivities", () => {
+  const row = (data: unknown, extra: Record<string, unknown> = {}) => ({
+    threadId: "t1",
+    threadTitle: "Coffee shop",
+    worktreePath: null,
+    workspaceRoot: "/home/uno",
+    createdAt: "2026-10-30T10:00:00.000Z",
+    payloadJson: JSON.stringify({ itemType: "file_change", data, ...extra }),
+  });
+
+  it("finds a file an agent wrote in a chat without git", () => {
+    const changes = agentChangesFromActivities([
+      row({ tool: "write", state: { input: { filePath: "/home/uno/projects/utro/index.html" } } }),
+      row({ item: { changes: [{ path: "notes/plan.md" }] } }),
+    ]);
+    expect(changes.map((change) => change.path)).toEqual([
+      "/home/uno/projects/utro/index.html",
+      "/home/uno/notes/plan.md",
+    ]);
+    expect(changes[0]).toMatchObject({ threadId: "t1", threadTitle: "Coffee shop" });
+  });
+
+  it("skips failed calls, broken rows and paths outside the chat's folder", () => {
+    expect(
+      agentChangesFromActivities([
+        row({ input: { path: "a.txt" } }, { status: "failed" }),
+        row({ input: { path: "/etc/passwd" } }),
+        row({ input: { path: "../../etc/passwd" } }),
+        { ...row({}), payloadJson: "not json" },
       ]),
     ).toEqual([]);
   });

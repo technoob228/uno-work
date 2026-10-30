@@ -10,6 +10,8 @@ import {
   listFolder,
   moveEntries,
   renameEntry,
+  fileNameMatches,
+  fileNameNeedles,
   searchByName,
 } from "./fileManager.ts";
 import {
@@ -169,6 +171,23 @@ describe("mutations", () => {
     await expectRefusal(deleteEntries(root, [`${outside}/secret.txt`]), "outside_root");
     await expectRefusal(deleteEntries(root, [`${root}/escape/secret.txt`]), "outside_root");
     expect(fs.existsSync(nodePath.join(outside, "secret.txt"))).toBe(true);
+  });
+});
+
+describe("file name search words", () => {
+  it("finds a Latin folder by its Russian word", () => {
+    expect(fileNameMatches("utro-site", fileNameNeedles("утро"))).toBe(true);
+    expect(fileNameMatches("utro-site", fileNameNeedles("вечер"))).toBe(false);
+  });
+
+  it("finds Cyrillic names, in any case, in either Unicode form", () => {
+    expect(fileNameMatches("Меню кофейни.pdf", fileNameNeedles("меню"))).toBe(true);
+    expect(fileNameMatches("Чай\u0306.txt", fileNameNeedles("чай"))).toBe(true);
+    expect(fileNameMatches("чаи\u0306.txt", fileNameNeedles("чай"))).toBe(true);
+  });
+
+  it("leaves a Latin query as it is", () => {
+    expect(fileNameNeedles("  Report ")).toEqual(["report"]);
   });
 });
 

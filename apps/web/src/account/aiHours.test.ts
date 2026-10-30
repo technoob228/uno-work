@@ -39,6 +39,16 @@ const subscriptionWithHours = parseSubscription({
   ai_power: { multiplier: 1, usd_per_hour: 0.5 },
 });
 
+describe("aiTimeNote", () => {
+  it("at zero says what keeps working, not how minutes are counted", () => {
+    expect(aiTimeNote({ unlimited: false, leftMinutes: 0 })).toContain("own subscription");
+    expect(aiTimeNote({ unlimited: false, leftMinutes: 5 })).toContain("minutes the AI is working");
+    expect(aiTimeNote({ unlimited: true, leftMinutes: null })).toContain(
+      "minutes the AI is working",
+    );
+  });
+});
+
 describe("formatAiMinutes", () => {
   it("hours, minutes under an hour", () => {
     expect(formatAiMinutes(5220)).toBe("87 h");

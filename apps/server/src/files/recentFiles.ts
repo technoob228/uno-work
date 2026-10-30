@@ -111,6 +111,70 @@ export function agentChangesFromTurns(rows: ReadonlyArray<RecentTurnRow>): Recen
   return changes;
 }
 
+export interface RecentActivityRow {
+  readonly threadId: string;
+  readonly threadTitle: string;
+  readonly worktreePath: string | null;
+  readonly workspaceRoot: string | null;
+  /** ISO time the tool call finished. */
+  readonly createdAt: string;
+  readonly payloadJson: string;
+}
+
+const PATH_FIELDS = ["path", "filePath", "file_path", "relativePath", "filename", "newPath"];
+const NESTED_FIELDS = ["item", "state", "input", "data", "changes", "files", "edits", "patches"];
+const MAX_PATHS_IN_CALL = 12;
+
+/** The paths in a tool call's payload; each agent names them in its own way. */
+function collectPaths(value: unknown, found: Set<string>, depth = 0): void {
+  if (depth > 4 || found.size >= MAX_PATHS_IN_CALL || !value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const entry of value) collectPaths(entry, found, depth + 1);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  for (const field of PATH_FIELDS) {
+    const path = record[field];
+    if (typeof path === "string" && path.trim().length > 0) found.add(path.trim());
+  }
+  for (const field of NESTED_FIELDS) collectPaths(record[field], found, depth + 1);
+}
+
+/**
+ * The files agents wrote, read from the chats' tool calls: a chat outside git
+ * has no checkpoints, and the agent's files there would never show.
+ */
+export function agentChangesFromActivities(
+  rows: ReadonlyArray<RecentActivityRow>,
+): RecentAgentChange[] {
+  const changes: RecentAgentChange[] = [];
+  for (const row of rows) {
+    const base = row.worktreePath ?? row.workspaceRoot;
+    if (!base || !nodePath.isAbsolute(base)) continue;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(row.payloadJson);
+    } catch {
+      continue;
+    }
+    const { data, status } = (payload ?? {}) as { data?: unknown; status?: unknown };
+    if (status === "failed") continue;
+    const paths = new Set<string>();
+    collectPaths(data, paths);
+    for (const path of paths) {
+      const absolute = nodePath.resolve(base, path);
+      if (absolute !== base && !absolute.startsWith(`${base.replace(/\/+$/, "")}/`)) continue;
+      changes.push({
+        path: absolute,
+        at: row.createdAt,
+        threadId: row.threadId,
+        threadTitle: row.threadTitle,
+      });
+    }
+  }
+  return changes;
+}
+
 /**
  * Opened and agent-changed files as one list: newest first, one row per
  * file (its latest event wins), at most `limit`.

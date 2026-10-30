@@ -34,7 +34,7 @@ import {
   useStore,
 } from "../../store";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { formatAiMinutes } from "../../account/aiHours";
+import { aiTimeNote, formatAiMinutes } from "../../account/aiHours";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -391,12 +391,20 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
       ? "Unlimited AI"
       : `AI time ${formatAiMinutes(hours.leftMinutes)} left · never expires`
     : null;
+  const hoursBlock = hoursLabel ? (
+    <span className="flex max-w-72 flex-col gap-0.5">
+      <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span>
+      {hours && hours.leftMinutes === 0 ? (
+        <span className="text-xs text-muted-foreground" data-testid="ai-time-empty-note">
+          {aiTimeNote(hours)}
+        </span>
+      ) : null}
+    </span>
+  ) : null;
   if (oneWallet && typeof query.data?.balance === "number") {
     return (
       <span className="flex items-center gap-2">
-        {hoursLabel ? (
-          <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span>
-        ) : null}
+        {hoursBlock}
         <span
           className={cn(
             "tabular-nums",
@@ -412,7 +420,7 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
   if (query.isError || typeof query.data?.llm_balance !== "number") {
     return hoursLabel ? (
       <span className="flex items-center gap-2">
-        <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span>
+        {hoursBlock}
         {topUpLink}
       </span>
     ) : (
@@ -421,7 +429,7 @@ export function UnoGatewayBalance({ apiKey }: { readonly apiKey: string }) {
   }
   return (
     <span className="flex items-center gap-2">
-      {hoursLabel ? <span className="text-sm font-semibold tabular-nums">{hoursLabel}</span> : null}
+      {hoursBlock}
       {!hoursLabel || query.data.llm_balance > 0 ? (
         <span
           className={cn(

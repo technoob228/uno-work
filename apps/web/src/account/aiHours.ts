@@ -129,9 +129,20 @@ export function aiFastLine(summary: AiHoursSummary): string | null {
   return summary.fastStandardSpeed ? AI_SMART_USED_UP_LINE : AI_FAST_UNLIMITED_LINE;
 }
 
+/**
+ * "0 min left" with an agent still working reads as money leaving (qa 30.10).
+ * What works now can't be told from here, what doesn't count can.
+ */
+export const AI_TIME_EMPTY_NOTE =
+  "Agents on your own subscription or API key keep working: they don't use AI time.";
+
 /** The note next to AI time. */
-export function aiTimeNote(_summary?: AiHoursSummary): string {
-  return AI_TIME_NOTE;
+export function aiTimeNote(
+  summary?: Pick<AiHoursSummary, "unlimited" | "leftMinutes"> | null,
+): string {
+  return summary && !summary.unlimited && summary.leftMinutes !== null && summary.leftMinutes <= 0
+    ? AI_TIME_EMPTY_NOTE
+    : AI_TIME_NOTE;
 }
 
 /**

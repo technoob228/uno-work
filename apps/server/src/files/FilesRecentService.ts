@@ -34,16 +34,20 @@ import { FilesService } from "./FilesService.ts";
 import { isHiddenPath } from "./filesPaths.ts";
 import {
   addRecentOpened,
+  agentChangesFromActivities,
   agentChangesFromTurns,
   mergeRecentFiles,
   parseRecentOpened,
   type RecentOpened,
+  type RecentActivityRow,
   type RecentTurnRow,
 } from "./recentFiles.ts";
 
 const DEFAULT_LIST_LIMIT = 60;
 /** Turns read for agents' changes (the newest ones that changed anything). */
 const AGENT_TURNS_SCANNED = 300;
+const AGENT_THREADS_SCANNED = 40;
+const AGENT_ACTIVITIES_SCANNED = 300;
 /** Candidates stat'ed per list: a few more than asked, as some are gone. */
 const CANDIDATE_SLACK = 40;
 const STAT_CONCURRENCY = 16;
@@ -129,12 +133,40 @@ export const makeFilesRecentService = (options: { readonly filePath?: string } =
       Effect.orElseSucceed((): ReadonlyArray<RecentTurnRow> => []),
     );
 
+    // Only the latest chats: the table holds every tool call ever made.
+    const agentActivities = sql<RecentActivityRow>`
+      SELECT
+        activities.thread_id AS "threadId",
+        threads.title AS "threadTitle",
+        threads.worktree_path AS "worktreePath",
+        projects.workspace_root AS "workspaceRoot",
+        activities.created_at AS "createdAt",
+        activities.payload_json AS "payloadJson"
+      FROM (
+        SELECT thread_id, title, worktree_path, project_id
+        FROM projection_threads
+        WHERE deleted_at IS NULL
+        ORDER BY updated_at DESC
+        LIMIT ${AGENT_THREADS_SCANNED}
+      ) AS threads
+      JOIN projection_thread_activities AS activities ON activities.thread_id = threads.thread_id
+      JOIN projection_projects AS projects ON projects.project_id = threads.project_id
+      WHERE activities.kind = 'tool.completed'
+        AND json_extract(activities.payload_json, '$.itemType') = 'file_change'
+        AND projects.deleted_at IS NULL
+      ORDER BY activities.created_at DESC
+      LIMIT ${AGENT_ACTIVITIES_SCANNED}
+    `.pipe(Effect.orElseSucceed((): ReadonlyArray<RecentActivityRow> => []));
+
     const list: FilesRecentServiceShape["list"] = (input) =>
       Effect.gen(function* () {
         const limit = input.limit ?? DEFAULT_LIST_LIMIT;
         const root = yield* files.rootPath;
         const opened = yield* Ref.get(openedRef);
-        const changes = agentChangesFromTurns(yield* agentTurns);
+        const changes = [
+          ...agentChangesFromTurns(yield* agentTurns),
+          ...agentChangesFromActivities(yield* agentActivities),
+        ];
         const candidates = mergeRecentFiles(opened, changes, limit + CANDIDATE_SLACK);
         const entries = yield* Effect.forEach(
           candidates,
