@@ -112,6 +112,7 @@ import {
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegistry.ts";
 import { ThreadGoal } from "./goal/ThreadGoalService.ts";
+import { DatabaseCompactor } from "./maintenance/DatabaseCompactor.ts";
 import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -647,6 +648,7 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(ThreadSearch)({}),
           Layer.mock(ThreadGoal)({}),
+          Layer.mock(DatabaseCompactor)({}),
         ),
       ),
       Layer.provide(gitManagerLayer),

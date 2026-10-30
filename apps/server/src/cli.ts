@@ -24,6 +24,7 @@ import {
   SchemaTransformation,
 } from "effect";
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
+import { runDoctor } from "./maintenance/doctor.ts";
 import {
   FetchHttpClient,
   HttpClient,
@@ -1159,6 +1160,23 @@ const runServerCommand = (
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
   });
 
+const doctorCommand = Command.make("doctor", {
+  ...projectLocationFlags,
+  fix: Flag.boolean("fix").pipe(
+    Flag.withDescription("Compact the database and give space back to the disk. Close Work first."),
+    Flag.withDefault(false),
+  ),
+}).pipe(
+  Command.withDescription("Show how big the database is and what fills it; --fix compacts it."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const config = yield* resolveCliAuthConfig(flags, logLevel);
+      yield* runDoctor(config.dbPath, { fix: flags.fix });
+    }),
+  ),
+);
+
 const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
@@ -1229,6 +1247,7 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
     serveCommand,
     authCommand,
     projectCommand,
+    doctorCommand,
     assistantTurnCommand,
   ]),
 );

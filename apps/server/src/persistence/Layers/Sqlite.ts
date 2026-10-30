@@ -35,6 +35,8 @@ const setup = Layer.effectDiscard(
     // The CLI and the server can write from separate processes; wait for the
     // lock rather than fail with SQLITE_BUSY. Upstream t3code 0fe4fa40fe.
     yield* sql`PRAGMA busy_timeout = 5000;`;
+    // Takes hold on a new database only; an existing one needs `doctor --fix`.
+    yield* sql`PRAGMA auto_vacuum = INCREMENTAL;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
     // FULL fsyncs the WAL on every commit, on the main thread. Every provider
     // event is its own commit, so a slow or busy disk stalls the event loop
