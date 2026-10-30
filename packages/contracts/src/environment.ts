@@ -74,6 +74,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       deleted chat is removed on the server (0.0.157). Absent: clients hide
       the cleanup settings and keep asking "Delete the worktree too?". */
   worktreeCleanup: Schema.optionalKey(Schema.Boolean),
+  /** Upstream T3 capabilities the v2 phone adapter (compat/v2) serves:
+      pin / unpin, server-side read state (thread.visit, thread.mark-unread),
+      and the thread Stop button. Our own web ignores them. */
+  threadPinning: Schema.optionalKey(Schema.Boolean),
+  threadVisitedTracking: Schema.optionalKey(Schema.Boolean),
+  threadStop: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
@@ -94,6 +100,10 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
+  /** Upstream T3 negotiation: clients that speak orchestration protocol 2
+      (the store phone app) refuse a server without it. Our own web ignores it;
+      it opts into v2 per socket with ?orchestrationProtocol=2 (compat/v2). */
+  orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   capabilities: ExecutionEnvironmentCapabilities,
   /** Optional so daemons older than this field keep working. */
   machineKind: Schema.optionalKey(MachineKind),

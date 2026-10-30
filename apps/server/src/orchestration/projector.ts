@@ -26,6 +26,9 @@ import {
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
+  ThreadVisitedPayload,
+  ThreadReadPayload,
+  ThreadMarkedUnreadPayload,
   ThreadSnoozedPayload,
   ThreadUnarchivedPayload,
   ThreadUnsettledPayload,
@@ -43,6 +46,13 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   if (status === "error") return "error" as const;
   if (status === "missing") return "interrupted" as const;
   return "completed" as const;
+}
+
+/** The later of two ISO times (null counts as never). */
+export function laterIso(left: string | null, right: string): string {
+  if (left === null) return right;
+  const leftMs = Date.parse(left);
+  return Number.isFinite(leftMs) && leftMs >= Date.parse(right) ? left : right;
 }
 
 function updateThread(
@@ -276,6 +286,9 @@ export function projectEvent(
             snoozedAt: null,
             settledOverride: null,
             settledAt: null,
+            lastVisitedAt: null,
+            readAt: null,
+            readStateUpdatedAt: null,
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -405,6 +418,46 @@ export function projectEvent(
             settledAt: null,
             updatedAt: payload.updatedAt,
           }),
+        })),
+      );
+
+    case "thread.visited":
+      return decodeForEvent(ThreadVisitedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            lastVisitedAt: payload.lastVisitedAt,
+            readStateUpdatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.marked-unread":
+      return decodeForEvent(ThreadMarkedUnreadPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            lastVisitedAt: null,
+            readAt: null,
+            readStateUpdatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.read":
+      return decodeForEvent(ThreadReadPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId
+              ? {
+                  ...thread,
+                  readAt: payload.readAt,
+                  lastVisitedAt: laterIso(thread.lastVisitedAt ?? null, payload.readAt),
+                  readStateUpdatedAt: event.occurredAt,
+                }
+              : thread,
+          ),
         })),
       );
 
@@ -670,6 +723,26 @@ export function projectEvent(
         ]
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
           .slice(-MAX_THREAD_CHECKPOINTS);
+
+        // The checkpoint of a turn can land after the next turn has already
+        // started (the capture is slower than a quick follow-up message). Such
+        // a late checkpoint must not roll latestTurn back to the older turn:
+        // the decider would then see the newer user message as a queued turn
+        // start for two minutes (snooze/settle refused), and clients the
+        // wrong run.
+        const newerTurnStarted =
+          thread.latestTurn !== null &&
+          thread.latestTurn.turnId !== payload.turnId &&
+          Date.parse(thread.latestTurn.requestedAt) > Date.parse(payload.completedAt);
+        if (newerTurnStarted) {
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              checkpoints,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }
 
         return {
           ...nextBase,

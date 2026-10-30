@@ -40,10 +40,12 @@ const NOTETAKER: AppApiCaller = {
 
 interface World {
   google: { connected: boolean; needsReconnect: boolean } | null;
+  /** Outlook & Teams (`microsoft`); null = the console doesn't list it. */
+  microsoft: { connected: boolean; needsReconnect: boolean } | null;
   installed: "running" | null;
   installs: Array<{ templateId: string; allowLowMemory?: boolean }>;
   lowMemory: boolean;
-  calls: Array<{ tool: string; arguments: Record<string, unknown> }>;
+  calls: Array<{ provider?: string; tool: string; arguments: Record<string, unknown> }>;
   feed: string;
   inbox: InboxPost[];
   turns: AssistantEventTurnInput[];
@@ -54,6 +56,7 @@ interface World {
 
 const world = (): World => ({
   google: { connected: true, needsReconnect: false },
+  microsoft: null,
   installed: null,
   installs: [],
   lowMemory: false,
@@ -82,24 +85,45 @@ function layer(w: World, dir = mkdtempSync(join(tmpdir(), "assistant-calls-"))) 
           Effect.succeed({
             available: true,
             reason: null,
-            connectors: w.google
-              ? [
-                  {
-                    provider: "gmail",
-                    name: "Gmail & Calendar",
-                    description: "",
-                    available: true,
-                    connected: w.google.connected,
-                    needsReconnect: w.google.needsReconnect,
-                    account: "Misha@x.com",
-                    connectedAt: null,
-                    toolCount: 4,
-                  },
-                ]
-              : [],
+            connectors: [
+              ...(w.google
+                ? [
+                    {
+                      provider: "gmail",
+                      name: "Gmail & Calendar",
+                      description: "",
+                      available: true,
+                      connected: w.google.connected,
+                      needsReconnect: w.google.needsReconnect,
+                      account: "Misha@x.com",
+                      connectedAt: null,
+                      toolCount: 4,
+                    },
+                  ]
+                : []),
+              ...(w.microsoft
+                ? [
+                    {
+                      provider: "microsoft",
+                      name: "Outlook & Teams calendar",
+                      description: "",
+                      available: true,
+                      connected: w.microsoft.connected,
+                      needsReconnect: w.microsoft.needsReconnect,
+                      account: w.microsoft.connected ? "misha@corp.com" : null,
+                      connectedAt: null,
+                      toolCount: 1,
+                    },
+                  ]
+                : []),
+            ],
           }),
         call: (input) => {
-          w.calls.push({ tool: input.tool, arguments: input.arguments });
+          w.calls.push(
+            input.provider === "gmail"
+              ? { tool: input.tool, arguments: input.arguments }
+              : { provider: input.provider, tool: input.tool, arguments: input.arguments },
+          );
           return w.feed === "401"
             ? Effect.fail(new ConnectorsError(401, "unauthorized", "no"))
             : Effect.succeed({ content: [{ type: "text", text: w.feed }], isError: false });
@@ -252,6 +276,106 @@ describe("AssistantCallsService", () => {
     expect(anyway.ok).toBe(true);
   });
 
+  it("Join my calls takes Outlook & Teams when Google isn't there", async () => {
+    const w = world();
+    w.google = { connected: false, needsReconnect: false };
+    w.microsoft = { connected: true, needsReconnect: false };
+    const result = await run(
+      w,
+      withCalls((calls) => calls.enable({ projectId: "assistant-ada" })),
+    );
+    expect(result.ok).toBe(true);
+
+    const none = world();
+    none.google = null;
+    none.microsoft = { connected: true, needsReconnect: true };
+    const asked = await run(
+      none,
+      withCalls((calls) => calls.enable({ projectId: "assistant-ada" })),
+    );
+    expect(asked).toMatchObject({ ok: false, needs: "google" });
+  });
+
+  it("calendars for the notetaker without any assistant: list and both providers", async () => {
+    const w = world();
+    w.microsoft = { connected: false, needsReconnect: false };
+    await run(
+      w,
+      Effect.gen(function* () {
+        // No assistant has Join my calls on: the calendar still answers.
+        const list = yield* Effect.promise(() => appCallsBridge.calendars(NOTETAKER));
+        expect(list).toEqual({
+          status: 200,
+          body: {
+            calendars: [
+              {
+                provider: "gmail",
+                name: "Google Calendar",
+                available: true,
+                connected: true,
+                account: "Misha@x.com",
+                needsReconnect: false,
+              },
+              {
+                provider: "microsoft",
+                name: "Outlook & Teams",
+                available: true,
+                connected: false,
+                account: "",
+                needsReconnect: false,
+              },
+            ],
+          },
+        });
+        const other = yield* Effect.promise(() =>
+          appCallsBridge.calendars({ ...NOTETAKER, appId: "spy" }),
+        );
+        expect(other).toMatchObject({
+          status: 403,
+          body: { error: { code: "calendar_not_allowed" } },
+        });
+
+        const google = yield* Effect.promise(() =>
+          appCallsBridge.calendar(NOTETAKER, { from: null, to: null, provider: "gmail" }),
+        );
+        expect(google.status).toBe(200);
+
+        // Not connected: said before the console is asked.
+        const ms = yield* Effect.promise(() =>
+          appCallsBridge.calendar(NOTETAKER, { from: null, to: null, provider: "microsoft" }),
+        );
+        expect(ms).toMatchObject({
+          status: 424,
+          body: { error: { code: "microsoft_not_connected" } },
+        });
+        expect(w.calls).toEqual([{ tool: "calendar_feed", arguments: {} }]);
+
+        w.microsoft = { connected: true, needsReconnect: false };
+        const msFeed = yield* Effect.promise(() =>
+          appCallsBridge.calendar(NOTETAKER, {
+            from: "2026-10-29T00:00:00Z",
+            to: null,
+            provider: "microsoft",
+          }),
+        );
+        expect(msFeed.status).toBe(200);
+        expect(w.calls.at(-1)).toEqual({
+          provider: "microsoft",
+          tool: "calendar_feed",
+          arguments: { from: "2026-10-29T00:00:00Z" },
+        });
+        w.feed = "401";
+        const expired = yield* Effect.promise(() =>
+          appCallsBridge.calendar(NOTETAKER, { from: null, to: null, provider: "microsoft" }),
+        );
+        expect(expired).toMatchObject({
+          status: 424,
+          body: { error: { code: "microsoft_reconnect" } },
+        });
+      }),
+    );
+  });
+
   it("the notetaker's side: link, calendar, events → Inbox and the assistant's turn", async () => {
     const w = world();
     w.installed = "running";
@@ -280,7 +404,11 @@ describe("AssistantCallsService", () => {
         });
 
         const cal = yield* Effect.promise(() =>
-          appCallsBridge.calendar(NOTETAKER, { from: "2026-10-28T00:00:00Z", to: null }),
+          appCallsBridge.calendar(NOTETAKER, {
+            from: "2026-10-28T00:00:00Z",
+            to: null,
+            provider: "gmail",
+          }),
         );
         expect(cal).toEqual({ status: 200, body: { account: "misha@x.com", events: [] } });
         expect(w.calls).toEqual([
@@ -288,7 +416,7 @@ describe("AssistantCallsService", () => {
         ]);
         w.feed = "401";
         const expired = yield* Effect.promise(() =>
-          appCallsBridge.calendar(NOTETAKER, { from: null, to: null }),
+          appCallsBridge.calendar(NOTETAKER, { from: null, to: null, provider: "gmail" }),
         );
         expect(expired.status).toBe(424);
 

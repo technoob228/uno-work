@@ -42,6 +42,19 @@ describe("apps an assistant of this computer may open", () => {
     expect(connectorAccessDecision(access, "gmail", true)).toBe("allow");
   });
 
+  it("Outlook & Teams calendar only reads unless the person set it", async () => {
+    const stateDir = tempDir();
+    const open = await readAppAccess(stateDir, "assistant-ana");
+    expect(connectorAccessDecision(open, "microsoft", false)).toBe("allow");
+    expect(connectorAccessDecision(open, "microsoft", true)).toBe("read-only");
+    await writeAppAccess(stateDir, "assistant-ana", { gmail: "none" });
+    const set = await readAppAccess(stateDir, "assistant-ana");
+    expect(connectorAccessDecision(set, "microsoft", true)).toBe("read-only");
+    await writeAppAccess(stateDir, "assistant-ana", { microsoft: "none" });
+    const off = await readAppAccess(stateDir, "assistant-ana");
+    expect(connectorAccessDecision(off, "microsoft", false)).toBe("none");
+  });
+
   it("stores the person's levels and decides per call", async () => {
     const stateDir = tempDir();
     await writeAppAccess(stateDir, "assistant-ana", {

@@ -4,7 +4,12 @@ import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { isSendableConnectorPath, resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
+import {
+  isSendableConnectorPath,
+  resolveConnectorOutgoingFile,
+  sendableRoots,
+} from "./connectorOutgoingFiles.ts";
+import { queueOutgoingFile, QUEUED_FILE_TTL_MS, takeOutgoingFiles } from "./outgoingFileQueue.ts";
 
 describe("isSendableConnectorPath", () => {
   const root = "/work/project";
@@ -60,5 +65,70 @@ describe("resolveConnectorOutgoingFile", () => {
       false,
     );
     expect((await resolveConnectorOutgoingFile(path.join(dir, "report.txt"), [])).ok).toBe(false);
+  });
+});
+
+describe("sendableRoots", () => {
+  const home = "/home/me";
+  const projects = ["/home/me/projects/luckyip", "/srv/site"];
+
+  it("an assistant that reaches every project: the person's folders and all projects", () => {
+    const roots = sendableRoots({
+      threadRoot: "/home/me/.uno/assistants/uno",
+      home,
+      reach: "all",
+      allProjectRoots: projects,
+    });
+    expect(roots).toEqual(
+      expect.arrayContaining([
+        "/home/me/.uno/assistants/uno",
+        "/home/me/projects",
+        "/home/me/Documents",
+        "/home/me/Uploads",
+        "/srv/site",
+      ]),
+    );
+    expect(roots).not.toContain(home);
+    // The luckyip case: a doc in a project folder is sendable…
+    expect(isSendableConnectorPath("/home/me/projects/luckyip/docs/SUPPORT.md", roots)).toBe(true);
+    // …keys and hidden files never, nor the home itself.
+    for (const file of [
+      "/home/me/.ssh/id_ed25519",
+      "/home/me/projects/luckyip/.env",
+      "/home/me/projects/luckyip/prod.env",
+      "/home/me/Documents/server.pem",
+      "/home/me/Documents/id_rsa",
+      "/home/me/Downloads/credentials.json",
+      "/home/me/notes.txt",
+    ]) {
+      expect(isSendableConnectorPath(file, roots)).toBe(false);
+    }
+  });
+
+  it("only selected projects: those folders and the chat's own, nothing else", () => {
+    const roots = sendableRoots({
+      threadRoot: "/home/me/.uno/assistants/ana",
+      home,
+      reach: ["/srv/site"],
+      allProjectRoots: projects,
+    });
+    expect(isSendableConnectorPath("/srv/site/out/report.pdf", roots)).toBe(true);
+    expect(isSendableConnectorPath("/home/me/projects/luckyip/docs/SUPPORT.md", roots)).toBe(false);
+    expect(isSendableConnectorPath("/home/me/Documents/cv.pdf", roots)).toBe(false);
+  });
+});
+
+describe("outgoing file queue", () => {
+  it("files queued in a turn go with its answer, once", () => {
+    expect(queueOutgoingFile("t1", "/a.pdf", 1_000)).toBe(true);
+    expect(queueOutgoingFile("t1", "/a.pdf", 1_001)).toBe(true);
+    expect(queueOutgoingFile("t1", "/b.png", 1_002)).toBe(true);
+    expect(takeOutgoingFiles("t1", 2_000)).toEqual(["/a.pdf", "/b.png"]);
+    expect(takeOutgoingFiles("t1", 2_000)).toEqual([]);
+  });
+
+  it("stale files are dropped", () => {
+    queueOutgoingFile("t2", "/old.pdf", 0);
+    expect(takeOutgoingFiles("t2", QUEUED_FILE_TTL_MS + 1)).toEqual([]);
   });
 });

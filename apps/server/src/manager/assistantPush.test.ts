@@ -323,6 +323,34 @@ describe("texts", () => {
     );
   });
 
+  it("a chat that never started: said at once, asked, not switched", () => {
+    const failed = noticeFromProbe({
+      watch,
+      probe: probe("error", {
+        verdict: {
+          settled: true,
+          status: "error",
+          turn: null,
+          error: "Claude is not signed in.",
+          notStarted: true,
+        },
+        reply: null,
+      }),
+      title: "Читать README",
+      project: "shop-demo",
+      sentKeys: new Set<string>(),
+      nowMs,
+    });
+    expect(failed?.notice.notStarted).toBe(true);
+    const text = formatPushNotice([failed!.notice]);
+    expect(text).toContain("«Читать README» (threadId child-1) — did not start");
+    expect(text).toContain("Не стартовал");
+    expect(text).toContain("Do NOT start it again on another model");
+    expect(formatPushFallback([failed!.notice])).toBe(
+      "Не стартовал «Читать README»: Claude is not signed in.",
+    );
+  });
+
   it("the person's fallback names each chat, unchecked", () => {
     expect(formatPushFallback([notice("a", nowMs)])).toBe(
       "«Task a» finished after 2 min (not checked yet: the assistant could not look at it).",

@@ -8,6 +8,34 @@
 
 ---
 
+## v0.0.168 — 2026-10-30
+
+- Uno no longer says «запустил» for a chat that didn't start. Every "launched" in Uno's answer now stands for a chat that really exists; if none was started, Uno says so at once — in the app, in Telegram and in Slack.
+- When the AI you asked for isn't ready on this computer (for example Claude isn't signed in and Uno credits for it are off), Uno tells you right away in one line and asks: connect it, or run the chat on another AI? It no longer silently switches models or waits two minutes before giving up.
+
+---
+
+## v0.0.167 — 2026-10-30
+
+- The T3 Code app from the App Store and Google Play connects to Uno Work again (it stopped on 02.10, when the app moved to a newer protocol). On the phone you see your projects and chats, read them, write, start a new chat in a project, answer "allow?" and the agent's questions, and stop a reply. To pair: turn on Settings → Developer → Dev mode, open Settings → Phone → "Pair a mobile app (T3 Code)" and scan the code with the camera button inside the T3 Code app. Not on the phone yet: switching the model, attachments, and queueing a message while the agent is still answering.
+- Read and unread live on your computer now, not in one browser: a chat you opened or marked Read in Work shows as read on the phone and in other windows, and "Mark unread" on the phone brings the dot back in Work.
+- The sidebar no longer redraws itself on every agent update that changes nothing you can see — less work for the browser while agents run.
+
+---
+
+## v0.0.166 — 2026-10-30
+
+- Uno Notetaker sits next to Uno Drive: in the sidebar (Built in), on the Computer page and in the App Store. It isn't installed by itself — press Add once and it's there.
+- Notetaker uses the calendars already connected to your Uno account (Google Calendar) — nothing to paste, and no assistant needed. Connect opens from inside Notetaker.
+
+## v0.0.165 — 2026-10-30
+
+- Uno answers faster and stays on point: it hands real work to a separate chat in the right project, keeps its own context small, and starts fresh when its instructions change (instructions 2026-10-29.3).
+- Telegram buttons: when a chat needs your approval or asks you to pick an option, Telegram gets one message with buttons (Allow / Deny or the options); press one and the chat continues. Any chat can now send you text and files in Telegram or Slack, and your reply goes back to that chat.
+- Uno understands files you send it in Telegram (albums, forwards, replies to a file) and can send files from your projects back to you.
+
+---
+
 ## v0.0.164 — 2026-10-29
 
 - Claude Code no longer dies in the middle of a long task: when Claude moves a slow command (over 2 minutes) to the background, Uno Work now counts it as work in progress and keeps Claude running until the command finishes and Claude reports the result.

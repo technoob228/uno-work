@@ -28,6 +28,7 @@ const CONNECT_NAMES: Readonly<Record<string, string>> = {
   "google-drive": "Google Drive",
   notion: "Notion",
   github: "GitHub",
+  microsoft: "Outlook & Teams calendar",
   calls: "Join my calls",
 };
 

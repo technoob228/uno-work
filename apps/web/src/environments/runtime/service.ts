@@ -88,6 +88,7 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import { installThreadReadStateSync, mergeServerThreadReadState } from "../../threadReadStateSync";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -1132,7 +1133,11 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   const threadRef = threadId ? scopeThreadRef(environmentId, threadId) : null;
   const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
 
-  useStore.getState().applyShellEvent(event, environmentId);
+  // Read marks first: a summary built below then already has the server readAt,
+  // so a read-state-only upsert leaves the app store untouched.
+  if (event.kind === "thread-upserted") mergeServerThreadReadState(environmentId, [event.thread]);
+  const stateBefore = useStore.getState();
+  stateBefore.applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
   // Fire-after-commit: наблюдатели (мост панельных плагинов) видят уже
   // применённое событие и ничего не блокируют.
@@ -1141,6 +1146,13 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
     environmentId,
     removedThreadProjectId: previousThread?.projectId ?? null,
   });
+  if (event.kind === "thread-upserted" && useStore.getState() === stateBefore) {
+    // Nothing the app renders changed — typically only the server read mark
+    // moved (often our own thread.visit coming back). Stop: the UI syncs and
+    // subscription upkeep below re-rendered the sidebar and the open chat for
+    // nothing (bench 29.10, +2 commits per opened chat).
+    return;
+  }
 
   switch (event.kind) {
     case "project-upserted":
@@ -1171,6 +1183,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 }
 
 function createEnvironmentConnectionHandlers() {
+  installThreadReadStateSync();
   return {
     applyShellEvent,
     readShellResumeCursor: (environmentId: EnvironmentId) => {
@@ -1191,6 +1204,7 @@ function createEnvironmentConnectionHandlers() {
         return;
       }
 
+      mergeServerThreadReadState(environmentId, snapshot.threads);
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
       markAppliedProjectionSnapshot(environmentId, snapshot);
       reconcileThreadDetailSubscriptionsForEnvironment(

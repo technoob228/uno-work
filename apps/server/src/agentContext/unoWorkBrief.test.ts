@@ -41,8 +41,10 @@ describe("Uno Work environment brief", () => {
     // +40 for automations from any chat (29.10: "every day at 9" in a chat →
     // automation_create, not cron — T3's schedule_task); ~15 for
     // `chat_call_person` / `chat_person_not_needed` (Misha 28.10: chats
-    // agents start can be hidden, so an agent has to call the person into one).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2050);
+    // agents start can be hidden, so an agent has to call the person into one);
+    // ~20 for `messenger_send` with answer buttons (Misha 29.10: any chat writes to
+    // the person's Telegram and asks with buttons; the details are uno_guide("notify")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2080);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

@@ -4,6 +4,7 @@
  * that belong to this computer). Same sources and rules as the desktop
  * (`buildProgramTiles`); installs in progress stay a home-screen concern.
  */
+import type { UnoComputerAppTemplate } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
@@ -27,6 +28,15 @@ export interface ProgramTilesState {
   readonly loading: boolean;
   /** An Uno cloud computer with an account: the App Store is there. */
   readonly hasStore: boolean;
+  /** For the built-in tiles that install from the store (Uno Notetaker). */
+  readonly computer: {
+    readonly loading: boolean;
+    readonly linked: boolean;
+    readonly hasBox: boolean;
+    readonly computerOn: boolean;
+    /** The store's catalog; undefined while it is read or when it isn't there. */
+    readonly templates: ReadonlyArray<UnoComputerAppTemplate> | undefined;
+  };
 }
 
 export function useProgramTiles(): ProgramTilesState {
@@ -63,6 +73,13 @@ export function useProgramTiles(): ProgramTilesState {
     tiles,
     loading: machineAppsQuery.isPending || (hasBox && appsQuery.isPending),
     hasStore: hasBox && Boolean(stateQuery.data?.linked),
+    computer: {
+      loading: stateQuery.isPending,
+      linked: Boolean(stateQuery.data?.linked),
+      hasBox,
+      computerOn,
+      templates: catalogTemplates(appsQuery.data?.catalog),
+    },
   };
 }
 
@@ -74,4 +91,14 @@ export function originOf(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** The catalog's templates once it answered (an empty list when it can't); undefined while read. */
+export function catalogTemplates(
+  catalog:
+    | { readonly availability: string; readonly templates: ReadonlyArray<UnoComputerAppTemplate> }
+    | undefined,
+): ReadonlyArray<UnoComputerAppTemplate> | undefined {
+  if (!catalog) return undefined;
+  return catalog.availability === "ok" ? catalog.templates : [];
 }

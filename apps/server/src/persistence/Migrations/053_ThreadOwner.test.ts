@@ -3,15 +3,16 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
+import ThreadOwner from "./053_ThreadOwner.ts";
 import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("051_ThreadOwner", (it) => {
+layer("053_ThreadOwner", (it) => {
   it.effect("backfills who started a chat and the person's latest message", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 50 });
+      yield* runMigrations({ toMigrationInclusive: 52 });
 
       // A row with every required column filled, whatever the schema adds.
       const columns = yield* sql<{
@@ -80,7 +81,7 @@ layer("051_ThreadOwner", (it) => {
       yield* insertThread("thread-uno");
       yield* insertEvent("thread-uno", "thread.created", {}, { kind: "manager", tokenId: "t" });
 
-      yield* runMigrations({ toMigrationInclusive: 51 });
+      yield* runMigrations({ toMigrationInclusive: 53 });
 
       const rows = yield* sql<{
         readonly thread_id: string;
@@ -111,6 +112,72 @@ layer("051_ThreadOwner", (it) => {
           person_called_at: null,
         },
       ]);
+    }),
+  );
+
+  // 0.0.164-t3p.x stands: ThreadOwner recorded as 51, then the release's 52 and this 53.
+  it.effect("runs again as 53 on a machine that recorded it as 51, keeping its data", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`DROP TABLE IF EXISTS effect_sql_migrations`;
+      const tables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      `;
+      for (const table of tables) {
+        yield* sql.unsafe(`DROP TABLE "${table.name}"`);
+      }
+
+      yield* runMigrations({ toMigrationInclusive: 50 });
+      yield* ThreadOwner;
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (51, 'ThreadOwner')
+      `;
+
+      const columns = yield* sql<{
+        readonly name: string;
+        readonly type: string;
+        readonly notnull: number;
+        readonly dflt_value: unknown;
+      }>`PRAGMA table_info(projection_threads)`;
+      const values: Record<string, unknown> = {};
+      for (const column of columns) {
+        if (column.notnull === 1 && column.dflt_value === null) {
+          values[column.name] = column.type.toUpperCase().includes("INT") ? 0 : "x";
+        }
+      }
+      Object.assign(values, {
+        thread_id: "thread-stand",
+        started_by: "agent",
+        latest_person_message_at: "2026-10-29T10:00:00.000Z",
+        person_called_at: "2026-10-29T11:00:00.000Z",
+        person_called_by_thread_id: "thread-parent",
+        person_call_reason: "look at this",
+      });
+      yield* sql`INSERT INTO projection_threads ${sql.insert(values)}`;
+
+      const ran = yield* runMigrations();
+      assert.deepStrictEqual(
+        ran.map(([id]) => id),
+        [52, 53],
+      );
+
+      const rows = yield* sql`
+        SELECT started_by, latest_person_message_at, person_called_at,
+          person_called_by_thread_id, person_call_reason, last_visited_at
+        FROM projection_threads
+      `;
+      assert.deepStrictEqual(rows, [
+        {
+          started_by: "agent",
+          latest_person_message_at: "2026-10-29T10:00:00.000Z",
+          person_called_at: "2026-10-29T11:00:00.000Z",
+          person_called_by_thread_id: "thread-parent",
+          person_call_reason: "look at this",
+          last_visited_at: null,
+        },
+      ]);
+      assert.deepStrictEqual(yield* runMigrations(), []);
     }),
   );
 });

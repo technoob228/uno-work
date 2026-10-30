@@ -408,3 +408,92 @@ it.live(
     }),
   120_000,
 );
+
+// Canary 30.10: Uno answered «Принял, запустил …» with no chat_create behind it.
+// Uno turns stay under the 45 s dispatcher watchdog here.
+const FALSE_CLAIM = "Принял, запустил «Читать README в shop-demo» — напишу, когда будет готово.";
+/** The main thread as the Uno chat (the launch check runs there only). */
+const asUnoChat = () => {
+  const plain = world.detail.bind(world);
+  world.detail = () => ({ ...plain(), projectId: ASSISTANT_PROJECT_ID }) as never;
+};
+
+it.live(
+  "a «запустил» with no launch never reaches Telegram: one hidden check, then the honest line",
+  () =>
+    Effect.gen(function* () {
+      const dbPath = nodePath.join(tmpDir, "state.sqlite");
+      asUnoChat();
+      world.script = () => ({ durationMs: 20_000, answer: FALSE_CLAIM });
+      yield* daemonRun(
+        dbPath,
+        Effect.gen(function* () {
+          yield* connect;
+          const asked = say("прочитай файл README в проекте shop-demo");
+          expect(
+            yield* waitFor(
+              () => sent.some((entry) => entry.text.startsWith("Не запустил")),
+              real(10 * MINUTE),
+            ),
+          ).toBe(true);
+          expect(sent.find((entry) => entry.text.startsWith("Не запустил"))).toMatchObject({
+            text: "Не запустил — повтори или уточни.",
+            replyTo: asked,
+          });
+          expect(sent.some((entry) => entry.text.includes("запустил «"))).toBe(false);
+          // The one hidden check carried the request; no third turn.
+          expect(world.turnCount).toBe(2);
+          expect(world.dispatchedTexts[1]).toContain("(Uno Work) Launch check");
+          expect(world.dispatchedTexts[1]).toContain("прочитай файл README в проекте shop-demo");
+        }),
+      );
+    }),
+  120_000,
+);
+
+it.live(
+  "after the check Uno really starts the chat: the person gets that answer",
+  () =>
+    Effect.gen(function* () {
+      const dbPath = nodePath.join(tmpDir, "state.sqlite");
+      asUnoChat();
+      world.script = (text) => {
+        if (!text.includes("Launch check")) return { durationMs: 20_000, answer: FALSE_CLAIM };
+        world.activities.push({
+          id: `activity-create-${world.turnCount}` as never,
+          tone: "tool",
+          kind: "tool.completed",
+          summary: "mcp__uno_work__chat_create",
+          payload: {
+            status: "completed",
+            detail: JSON.stringify({
+              result: JSON.stringify({
+                ok: true,
+                threadId: "876c0451-6dd7-423c-a99e-b6b5a47045d2",
+              }),
+            }),
+          },
+          turnId: `turn-${world.turnCount}` as never,
+          createdAt: new Date().toISOString(),
+        });
+        return { durationMs: 20_000, answer: "ответ: запустил «Читать README в shop-demo»." };
+      };
+      yield* daemonRun(
+        dbPath,
+        Effect.gen(function* () {
+          yield* connect;
+          const asked = say("прочитай файл README в проекте shop-demo");
+          expect(yield* waitFor(() => answers().length > 0, real(10 * MINUTE))).toBe(true);
+          expect(answers()).toEqual([
+            expect.objectContaining({
+              text: "ответ: запустил «Читать README в shop-demo».",
+              replyTo: asked,
+            }),
+          ]);
+          expect(sent.some((entry) => entry.text === FALSE_CLAIM)).toBe(false);
+          expect(world.turnCount).toBe(2);
+        }),
+      );
+    }),
+  120_000,
+);

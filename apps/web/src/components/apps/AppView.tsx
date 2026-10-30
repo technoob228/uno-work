@@ -42,6 +42,7 @@ import { ProgramIcon } from "../computer/ComputerPrograms";
 import { computerLocalUrl } from "../computer/appPrimaryAction";
 import { appSignInApi, machineAppActionMutationOptions } from "../computer/computerQueries";
 import { useStartingAppId } from "../computer/useAppPrimaryAction";
+import { isNotetakerTile } from "../computer/notetakerApp";
 import { useProgramTiles } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -82,6 +83,8 @@ export function AppView() {
     return tiles.find((candidate) => belongsToComputer(url, [candidate.openUrl])) ?? null;
   }, [byKey, tiles, url]);
   const icon = search.icon ?? tile?.icon ?? null;
+  // Uno Notetaker's Connect buttons reach Uno Work's sign-in from its frame.
+  const notetaker = tile !== null && isNotetakerTile(tile);
   const known = useMemo(
     () =>
       url !== null &&
@@ -201,6 +204,7 @@ export function AppView() {
         name={name}
         icon={icon}
         reloadKey={reloadKey}
+        connectRequests={notetaker}
       />
     ) : !url ? (
       <Notice title="No app to open">Pick an app in the sidebar or on your Home screen.</Notice>
@@ -224,7 +228,14 @@ export function AppView() {
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     ) : (
-      <AppFrame url={url} name={name} icon={icon} reloadKey={reloadKey} firstSrc={firstSrc} />
+      <AppFrame
+        url={url}
+        name={name}
+        icon={icon}
+        reloadKey={reloadKey}
+        firstSrc={firstSrc}
+        connectRequests={notetaker}
+      />
     );
 
   if (fullscreen && app && known) {

@@ -72,8 +72,19 @@ import {
 } from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { toastManager } from "../../ui/toast";
-import { GmailMark, GoogleCalendarMark, GoogleDriveMark, NotionMark } from "../brandMarks";
-import { connectorSignedIn, connectorsGate, GITHUB_FOR_GIT_LINE } from "../connectorSignIn.logic";
+import {
+  GmailMark,
+  GoogleCalendarMark,
+  GoogleDriveMark,
+  MicrosoftMark,
+  NotionMark,
+} from "../brandMarks";
+import {
+  connectorShown,
+  connectorSignedIn,
+  connectorsGate,
+  GITHUB_FOR_GIT_LINE,
+} from "../connectorSignIn.logic";
 import { ConnectedBadge, SetupHeading, SetupShell, SoonBadge } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 import { maskServerUrl } from "../../connectors/connectorsCatalog.logic";
@@ -158,7 +169,21 @@ export const PROVIDERS: ReadonlyArray<ProviderMeta> = [
       </>
     ),
   },
+  // Only where the console offers it (`connectorShown`).
+  {
+    provider: "microsoft",
+    name: "Outlook & Teams calendar",
+    description: "Reads your Outlook calendar, Teams meetings too, for the Notetaker and your AI.",
+    logo: <MicrosoftMark className="size-4.5" />,
+  },
 ];
+
+/** The rows a connectors list shows, given what the console listed. */
+export function shownProviders(
+  connectors: ReadonlyArray<SetupConnector> | undefined,
+): ReadonlyArray<ProviderMeta> {
+  return PROVIDERS.filter((meta) => connectorShown(meta.provider, connectors ?? []));
+}
 
 function Row({
   logo,
@@ -1089,7 +1114,7 @@ export function ConnectorsList(
       {environmentId !== null && mailbox !== null ? (
         <AgentMailRow environmentId={environmentId} mailbox={mailbox} />
       ) : null}
-      {PROVIDERS.map((meta, index) =>
+      {shownProviders(connectors.data?.connectors).map((meta, index) =>
         meta.provider === "github" && githubViaMachine ? (
           <GitHubAccountRow
             key={meta.provider}

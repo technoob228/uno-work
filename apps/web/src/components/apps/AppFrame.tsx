@@ -13,7 +13,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 import { isElectron } from "../../env";
 import { ensureEnvironmentApi } from "../../environmentApi";
@@ -25,6 +25,7 @@ import { machineAppsQueryOptions } from "../computer/computerQueries";
 import { originOf } from "../computer/useProgramTiles";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
+import { AppConnectListener } from "./appConnectBridge";
 import { rememberOwnTabVerdict } from "./ownTabApps";
 
 /**
@@ -46,11 +47,17 @@ export function AppFrame({
   firstSrc = null,
   compact = false,
   portAddress = false,
+  connectRequests = false,
   className,
 }: {
   url: string;
   name: string;
   icon?: string | null;
+  /**
+   * The frame shows the installed Uno Notetaker: its "Connect" buttons may ask
+   * Uno Work for the calendar sign-in (`appConnectBridge.ts`).
+   */
+  connectRequests?: boolean;
   /** Bump to reload the app. */
   reloadKey?: number;
   /**
@@ -68,6 +75,9 @@ export function AppFrame({
   portAddress?: boolean;
   className?: string;
 }) {
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  // Electron's <webview> can't post to us: the app shows its own fallback there.
+  const listener = connectRequests ? <AppConnectListener frame={frameRef} /> : null;
   if (isElectron) {
     return (
       <webview
@@ -82,32 +92,41 @@ export function AppFrame({
   }
   if (portAddress) {
     return (
-      <iframe
-        key={`${url}#${reloadKey}`}
-        src={reloadKey === 0 && firstSrc ? firstSrc : url}
-        title={name}
-        allow={FRAME_ALLOW}
-        sandbox={FRAME_SANDBOX}
-        referrerPolicy="strict-origin-when-cross-origin"
-        className={cn("h-full w-full border-0 bg-background", className)}
-        data-testid="computer-app-frame"
-      />
+      <>
+        {listener}
+        <iframe
+          key={`${url}#${reloadKey}`}
+          ref={frameRef}
+          src={reloadKey === 0 && firstSrc ? firstSrc : url}
+          title={name}
+          allow={FRAME_ALLOW}
+          sandbox={FRAME_SANDBOX}
+          referrerPolicy="strict-origin-when-cross-origin"
+          className={cn("h-full w-full border-0 bg-background", className)}
+          data-testid="computer-app-frame"
+        />
+      </>
     );
   }
   return (
-    <BrowserAppFrame
-      url={url}
-      name={name}
-      icon={icon ?? null}
-      reloadKey={reloadKey}
-      firstSrc={firstSrc}
-      compact={compact}
-      className={className}
-    />
+    <>
+      {listener}
+      <BrowserAppFrame
+        frameRef={frameRef}
+        url={url}
+        name={name}
+        icon={icon ?? null}
+        reloadKey={reloadKey}
+        firstSrc={firstSrc}
+        compact={compact}
+        className={className}
+      />
+    </>
   );
 }
 
 function BrowserAppFrame({
+  frameRef,
   url,
   name,
   icon,
@@ -116,6 +135,7 @@ function BrowserAppFrame({
   compact,
   className,
 }: {
+  frameRef: RefObject<HTMLIFrameElement | null>;
   url: string;
   name: string;
   icon: string | null;
@@ -202,6 +222,7 @@ function BrowserAppFrame({
   return (
     <iframe
       key={`${url}#${reloadKey}`}
+      ref={frameRef}
       src={reloadKey === 0 && firstSrc ? firstSrc : url}
       title={name}
       allow={FRAME_ALLOW}

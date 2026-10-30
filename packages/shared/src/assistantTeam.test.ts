@@ -48,6 +48,9 @@ describe("grantBeyond (child ⊆ parent)", () => {
   it("Observer reads only, whatever the app level says", () => {
     const observer: TeamGrant = { preset: "observer", projects: "all", apps: {} };
     expect(grantAppLevel(observer, "notion")).toBe("read");
+    // Outlook & Teams calendar is read-only by default, even for Full.
+    expect(grantAppLevel(FULL, "microsoft")).toBe("read");
+    expect(grantAppLevel({ ...FULL, apps: { microsoft: "none" } }, "microsoft")).toBe("none");
     expect(grantBeyond(observer, { preset: "observer", projects: "all", apps: {} })).toEqual([]);
     expect(
       grantBeyond(observer, { preset: "helper", projects: "all", apps: { notion: "read" } }),

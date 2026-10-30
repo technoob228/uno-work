@@ -17,6 +17,7 @@ import * as nodePath from "node:path";
 
 import {
   ApprovalRequestId,
+  ASSISTANT_PROJECT_ID,
   type AssistantLlmProvider,
   type HermesSettings,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -77,6 +78,11 @@ import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
+  HERMES_DISPATCHER_COMPRESSION,
+  dispatcherPromptStamp,
+  resumableSessionId,
+  HERMES_DISPATCHER_DISABLED_TOOLSETS,
+  HERMES_DISPATCHER_MCP_TOOLS,
   type HermesLlmRoute,
   applyHermesLlmRoute,
   hermesProviderIdOf,
@@ -88,7 +94,12 @@ import {
   resolveHermesModeId,
   setHermesSessionMode,
 } from "../acp/HermesAcpSupport.ts";
-import { buildAssistantContextHint, buildHermesHandoffPrompt } from "../acp/hermesHandoff.ts";
+import {
+  buildAssistantContextHint,
+  buildHermesHandoffPrompt,
+  routingChangedNote,
+  routingTable,
+} from "../acp/hermesHandoff.ts";
 import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
@@ -250,6 +261,11 @@ interface HermesSessionContext {
   handoffPending: boolean;
   /** NOTES.md went into this session's system prompt (assistantContextHint): no second copy. */
   readonly notesInSystemPrompt: boolean;
+  /**
+   * The ROUTING.md table the model last saw (system prompt or a turn); null
+   * outside an assistant folder. A changed file rides along the next turn.
+   */
+  routingSeen: string | null | undefined;
   /** The last turn that has streamed assistant text (the 402 check looks at a turn's first text only). */
   replyTextTurnId: TurnId | undefined;
   /** The last turn whose `turn.completed` has gone out. */
@@ -286,11 +302,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseHermesResume(raw: unknown): { sessionId: string } | undefined {
+function parseHermesResume(raw: unknown): { sessionId: string; promptStamp?: string } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== HERMES_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
-  return { sessionId: raw.sessionId.trim() };
+  return {
+    sessionId: raw.sessionId.trim(),
+    ...(typeof raw.promptStamp === "string" ? { promptStamp: raw.promptStamp } : {}),
+  };
 }
 
 function selectAutoApprovedPermissionOption(
@@ -588,7 +607,7 @@ export function makeHermesAdapter(
           );
           let ctx!: HermesSessionContext;
 
-          const resumeSessionId = parseHermesResume(input.resumeCursor)?.sessionId;
+          const resumeCursor = parseHermesResume(input.resumeCursor);
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
@@ -658,6 +677,25 @@ export function makeHermesAdapter(
           // SOUL.md / USER.md / the newest NOTES.md in the system prompt: a
           // status or dispatch turn needs no file reads (assistantContextHint).
           const assistantContext = inAssistantWorkspace ? yield* readAssistantContext(cwd) : null;
+          // The Uno chat is a dispatcher: no terminal, files, browser or web
+          // of its own (HERMES_DISPATCHER_DISABLED_TOOLSETS). Other
+          // assistants keep Hermes' tools.
+          const dispatcherOnly =
+            inAssistantWorkspace && (yield* readMarkerProjectId(cwd)) === ASSISTANT_PROJECT_ID;
+          const promptStamp = dispatcherOnly
+            ? dispatcherPromptStamp(
+                yield* fileSystem
+                  .readFileString(nodePath.join(cwd, "AGENTS.md"))
+                  .pipe(Effect.orElseSucceed(() => "")),
+              )
+            : undefined;
+          const resumeSessionId = resumableSessionId(resumeCursor, promptStamp);
+          if (resumeCursor !== undefined && resumeSessionId === undefined) {
+            yield* Effect.logInfo(
+              "hermes: the Uno chat's instructions or tools changed — a fresh session",
+              { threadId: input.threadId },
+            );
+          }
           const hermesProvider = hermesProviderIdOf(llmRoute);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
@@ -681,6 +719,13 @@ export function makeHermesAdapter(
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
                   ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),
+                  ...(dispatcherOnly
+                    ? {
+                        disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+                        mcpToolsInclude: HERMES_DISPATCHER_MCP_TOOLS,
+                        compression: HERMES_DISPATCHER_COMPRESSION,
+                      }
+                    : {}),
                   speechToText: llmProvider === "uno",
                   // Hermes' own session titles off the chat model (see
                   // HERMES_TITLE_GENERATION_TIMEOUT_SECONDS). A brought key
@@ -760,6 +805,11 @@ export function makeHermesAdapter(
             // on a subscription, takes the gateway key out).
             ...(llmRoute ? applyHermesLlmRoute(baseEnvironment, llmRoute) : baseEnvironment),
             HERMES_HOME: threadHermesHome,
+            // The dispatcher hands work off: the 14k-character Uno Work brief
+            // (apps, widgets, sites…) is for the chats that do it. Its own
+            // files go in instead — the env hint wins over config.yaml's
+            // `agent.environment_hint`, so that one never reached it.
+            ...(dispatcherOnly ? { HERMES_ENVIRONMENT_HINT: assistantContext?.hint ?? "" } : {}),
           };
           // A restricted assistant's chat: `hermes acp` in the sandbox with this
           // chat's home and the shared one it links into; on the person's
@@ -888,6 +938,7 @@ export function makeHermesAdapter(
             resumeCursor: {
               schemaVersion: HERMES_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(promptStamp !== undefined ? { promptStamp } : {}),
             },
             createdAt: now,
             updatedAt: now,
@@ -916,6 +967,13 @@ export function makeHermesAdapter(
             hermesProvider,
             handoffPending: resumeSessionId === undefined || started.sessionId !== resumeSessionId,
             notesInSystemPrompt: assistantContext?.withNotes ?? false,
+            routingSeen: inAssistantWorkspace
+              ? routingTable(
+                  yield* fileSystem
+                    .readFileString(nodePath.join(cwd, "ROUTING.md"))
+                    .pipe(Effect.orElseSucceed(() => "")),
+                )
+              : undefined,
             replyTextTurnId: undefined,
             completedTurnId: undefined,
             billingFailure: undefined,
@@ -1068,13 +1126,19 @@ export function makeHermesAdapter(
         }).pipe(Effect.scoped),
       );
 
+    /** The assistant a workspace belongs to, by its marker (written by the daemon); null if none. */
+    const readMarkerProjectId = (cwd: string) =>
+      fileSystem.readFileString(nodePath.join(cwd, ASSISTANT_WORKSPACE_MARKER)).pipe(
+        Effect.map(assistantProjectIdOfMarker),
+        Effect.orElseSucceed(() => null),
+      );
+
     /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
     const readAssistantContext = (cwd: string) =>
       Effect.gen(function* () {
         const read = (name: string) =>
           fileSystem.readFileString(nodePath.join(cwd, name)).pipe(Effect.orElseSucceed(() => ""));
-        // The folder's marker names its assistant (written by the daemon).
-        const projectId = assistantProjectIdOfMarker(yield* read(ASSISTANT_WORKSPACE_MARKER));
+        const projectId = yield* readMarkerProjectId(cwd);
         const profile =
           projectId !== null && options?.assistantProfile
             ? yield* options.assistantProfile(projectId).pipe(Effect.orElseSucceed(() => null))
@@ -1166,10 +1230,20 @@ export function makeHermesAdapter(
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
         const userText = input.input?.trim() ?? "";
-        const handoffText = ctx.handoffPending
+        let handoffText = ctx.handoffPending
           ? yield* readHandoffPrompt(ctx, userText, input.contextMessages ?? [])
           : userText;
         ctx.handoffPending = false;
+        if (ctx.routingSeen !== undefined && ctx.session.cwd !== undefined) {
+          const routing = yield* fileSystem
+            .readFileString(nodePath.join(ctx.session.cwd, "ROUTING.md"))
+            .pipe(Effect.orElseSucceed(() => ""));
+          const changed = routingChangedNote(ctx.routingSeen, routing);
+          if (changed !== null) {
+            ctx.routingSeen = routingTable(routing);
+            handoffText = `${changed}\n\n${handoffText}`;
+          }
+        }
         if (handoffText.length > 0) {
           promptParts.push({ type: "text", text: handoffText });
         }

@@ -33,6 +33,7 @@ import type {
   FilesShare,
   InboxOpenTarget,
   RuntimeMode,
+  ServerProvider,
   ServerSettings,
   StorageCleanupReport,
   UnoBoxCreateJobStatus,
@@ -101,6 +102,7 @@ import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./poli
 import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
+import { normalizeButtonRows, type ButtonSpec } from "../manager/connectorButtons.ts";
 import { workAppLink } from "../workAddress.ts";
 
 export {
@@ -313,6 +315,21 @@ export interface UnoWorkToolDeps {
     readonly text: string;
     readonly kind: "info" | "warning" | "error";
   }) => Effect.Effect<{ readonly delivered: number }>;
+  /**
+   * `messenger_send`: this chat writes to the person's Telegram / Slack
+   * (ConnectorNotifyService.sendToPerson). Absent: older wiring, tests.
+   */
+  readonly messengerSend?: (input: {
+    readonly text: string;
+    readonly file?: string;
+    readonly buttons?: ReadonlyArray<
+      ReadonlyArray<{ readonly label: string; readonly value: string }>
+    >;
+  }) => Effect.Effect<{
+    readonly delivered: number;
+    readonly via: "telegram" | "slack" | "uno-bot" | "none";
+    readonly note: string | null;
+  }>;
   readonly openInApp: (input: {
     readonly view: "office" | "files";
     readonly path: string;
@@ -352,6 +369,12 @@ export interface UnoWorkToolDeps {
     }) => Effect.Effect<UnoBoxCreateJobStatus, { readonly message: string }>;
   };
   readonly settings: Effect.Effect<ServerSettings, { readonly message: string }>;
+  /**
+   * The harnesses of this computer as the app sees them (installed, signed
+   * in): `settings_read` says which are ready, so an assistant asked for
+   * "Claude" knows whether it can start one. Absent (tests): not reported.
+   */
+  readonly providers?: Effect.Effect<ReadonlyArray<ServerProvider>>;
   readonly readLogTail: (input: {
     readonly app: UnoMachineApp;
     readonly lines: number;
@@ -578,6 +601,28 @@ const str = (args: Record<string, unknown>, key: string): string | undefined =>
   typeof args[key] === "string" ? (args[key] as string) : undefined;
 const num = (args: Record<string, unknown>, key: string): number | undefined =>
   typeof args[key] === "number" ? (args[key] as number) : undefined;
+/**
+ * `messenger_send` buttons: a flat list; `row` on the buttons lays them out
+ * in rows (then the explicit rows count, in row order).
+ */
+const buttonRowOf = (entry: unknown): number | null =>
+  typeof entry === "object" &&
+  entry !== null &&
+  typeof (entry as { row?: unknown }).row === "number"
+    ? (entry as { row: number }).row
+    : null;
+const buttonRowsFromArgs = (raw: unknown): unknown => {
+  if (!Array.isArray(raw)) return raw;
+  const rowOf = buttonRowOf;
+  if (!raw.some((entry) => rowOf(entry) !== null)) return raw;
+  const rows = new Map<number, Array<unknown>>();
+  for (const entry of raw) {
+    const row = rowOf(entry) ?? 0;
+    rows.set(row, [...(rows.get(row) ?? []), entry]);
+  }
+  return [...rows.entries()].toSorted(([a], [b]) => a - b).map(([, entries]) => entries);
+};
+
 const bool = (args: Record<string, unknown>, key: string): boolean | undefined =>
   typeof args[key] === "boolean" ? (args[key] as boolean) : undefined;
 const strArray = (args: Record<string, unknown>, key: string): string[] | undefined =>
@@ -2385,7 +2430,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in a folder that is a project; provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). Returns the threadId (and the computer).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder of this computer's home (a folder that isn't a project yet becomes one); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). For an assistant, the person's routing rows (Source `you`) win over provider unless personAsked; a harness of theirs that isn't ready here fails with harness_not_ready — ask the person in one line, never start it on another model yourself. Returns the threadId (and the computer).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2403,6 +2448,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         projectId: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        taskType: {
+          type: "string",
+          description:
+            "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        personAsked: {
+          type: "boolean",
+          description:
+            'true only when the person named this harness/model in the conversation ("through Claude", "on Smart"): then provider/model win over their table.',
+        },
         computerId: {
           type: "string",
           description:
@@ -2435,6 +2490,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "projectId") ? { projectId: str(args, "projectId") } : {}),
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
+            ...(str(args, "taskType") ? { taskType: str(args, "taskType") } : {}),
+            ...(args["personAsked"] === true ? { personAsked: true } : {}),
             ...(args["computerId"] !== undefined && args["computerId"] !== null
               ? { computerId: args["computerId"] }
               : {}),
@@ -2602,6 +2659,75 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ok: true,
           inboxItemId: item.id,
           ...(messenger ? { messengerDelivered: messenger.delivered } : {}),
+        };
+      }),
+  },
+  {
+    name: "messenger_send",
+    group: "person",
+    description:
+      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons: a question with 2–4 answers → buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 3500 },
+        file: {
+          type: "string",
+          maxLength: 4096,
+          description: "Absolute or ~/ path of a file to send with it.",
+        },
+        buttons: {
+          type: "array",
+          maxItems: 12,
+          description:
+            'Answers as buttons: [{"label":"Yes, deploy","value":"Deploy it"}, {"label":"Not now"}]; value defaults to the label. Up to 3 short labels go side by side, else one per line; `row` (0, 1, …) lays them out yourself.',
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", minLength: 1, maxLength: 40 },
+              value: { type: "string", maxLength: 500 },
+              row: { type: "integer", minimum: 0, maximum: 5 },
+            },
+            required: ["label"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (deps.messengerSend === undefined) {
+          return yield* toolError("Messages to Telegram aren't available here; use notify.");
+        }
+        const text = str(args, "text")?.trim() ?? "";
+        if (text.length === 0) return yield* toolError("text is required.");
+        let buttons: ReadonlyArray<ReadonlyArray<ButtonSpec>> | undefined;
+        if (args.buttons !== undefined) {
+          const normalized = normalizeButtonRows(buttonRowsFromArgs(args.buttons));
+          if (!normalized.ok) return yield* toolError(`buttons: ${normalized.error}.`);
+          buttons = normalized.rows;
+        }
+        const file = str(args, "file")?.trim();
+        const result = yield* deps.messengerSend({
+          text,
+          ...(file ? { file } : {}),
+          ...(buttons ? { buttons } : {}),
+        });
+        if (result.delivered === 0) {
+          return yield* toolError(result.note ?? "Not delivered.");
+        }
+        return {
+          ok: true,
+          via: result.via,
+          ...(result.note ? { note: result.note } : {}),
+          ...(buttons && result.via === "telegram"
+            ? {
+                next: "End your turn now. The person's press (or reply) comes to this chat as their next message.",
+              }
+            : {}),
         };
       }),
   },
@@ -3811,12 +3937,19 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "settings_read",
     group: "settings",
     description:
-      "The Uno Work settings that shape what you may do: agent access to the Uno account, whether chats may start chats in other projects, which AI harnesses are enabled, the default AI for apps. Never includes keys.",
+      "The Uno Work settings that shape what you may do: agent access to the Uno account, whether chats may start chats in other projects, which AI harnesses are enabled — and which are ready on this computer (installed and signed in, e.g. claudeAgent = Claude), the default AI for apps. Never includes keys.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
       asToolError(deps.settings).pipe(
-        Effect.map((settings) => {
+        Effect.flatMap((settings) =>
+          Effect.gen(function* () {
+            const providers: ReadonlyArray<ServerProvider> | null =
+              deps.providers === undefined ? null : yield* deps.providers;
+            return { settings, providers };
+          }),
+        ),
+        Effect.map(({ settings, providers }) => {
           const access = accountAccess(settings);
           return {
             signedInToUno: access.linked,
@@ -3826,6 +3959,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             harnesses: Object.entries(settings.providerInstances)
               .filter(([, instance]) => instance.enabled !== false)
               .map(([id, instance]) => ({ id, driver: instance.driver })),
+            ...(providers === null ? {} : { harnessReadiness: harnessReadiness(providers) }),
             thisChat: {
               mode: deps.caller.runtimeMode,
               meaning:
@@ -4006,6 +4140,40 @@ const BROWSER_READ_COMMANDS: ReadonlySet<string> = new Set([
   "back",
   "forward",
 ]);
+
+/**
+ * Each harness of this computer in one line for `settings_read`: whether a
+ * chat can start on it now and, if not, the one step that fixes it. The
+ * person's "use Claude" is never silently swapped for another model (Misha
+ * 29.10): the assistant reads this and asks instead.
+ */
+export function harnessReadiness(providers: ReadonlyArray<ServerProvider>): ReadonlyArray<{
+  readonly id: string;
+  readonly driver: string;
+  readonly ready: boolean;
+  readonly fix?: string;
+}> {
+  return providers.map((provider) => {
+    const base = { id: String(provider.instanceId), driver: String(provider.driver) };
+    if (provider.availability === "unavailable" || !provider.installed) {
+      return { ...base, ready: false, fix: "not installed: Settings → Agents → install it" };
+    }
+    if (!provider.enabled || provider.status === "disabled") {
+      return { ...base, ready: false, fix: "turned off: Settings → Agents → turn it on" };
+    }
+    if (provider.auth.status === "unauthenticated") {
+      return { ...base, ready: false, fix: "not signed in: Settings → Agents → Sign in" };
+    }
+    if (provider.status === "error") {
+      return {
+        ...base,
+        ready: false,
+        fix: provider.message ?? "it reports an error: Settings → Agents",
+      };
+    }
+    return { ...base, ready: true };
+  });
+}
 
 export function isWorkerTool(name: string, args: Record<string, unknown>): boolean {
   if (name === "browser_command") {

@@ -122,6 +122,28 @@ describe("evaluateThreadWait", () => {
     ).toMatchObject({ settled: true, status: "needs_user" });
   });
 
+  it("a turn its harness refused to start settles at once as not started", () => {
+    // Canary 30.10: Claude not signed in → provider.turn.start.failed, the
+    // turn row stays pending with no session (read as "starting" for 2 min).
+    const pending = turnRow({ turnId: null, state: "pending", requestedAt: iso(5_000) });
+    const detail = "Claude is not signed in. Run `claude auth login` and try again.";
+    expect(
+      evaluateThreadWait({
+        ...base,
+        turns: [pending],
+        startFailure: { detail, at: iso(5_400) },
+      }),
+    ).toMatchObject({ settled: true, status: "error", error: detail, notStarted: true });
+    // A failure from an earlier request is not about this one.
+    expect(
+      evaluateThreadWait({
+        ...base,
+        turns: [pending],
+        startFailure: { detail, at: iso(4_000) },
+      }).settled,
+    ).toBe(false);
+  });
+
   it("treats a session that died after the request as an error, a stale one as not", () => {
     const pending = turnRow({ turnId: null, state: "pending", requestedAt: iso(5_000) });
     expect(

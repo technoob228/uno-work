@@ -67,6 +67,16 @@ describe("App Store storefront", () => {
     ]);
   });
 
+  it("puts Uno Notetaker first in Recommended, even when the console doesn't feature it", () => {
+    const catalog = [
+      app("nextcloud", { featured: true, rank: 1 }),
+      app("notetaker", { rank: 40, category: "productivity" }),
+      app("n8n", { rank: 2 }),
+    ];
+    expect(featuredTemplates(catalog, []).map((t) => t.id)).toEqual(["notetaker", "nextcloud"]);
+    expect(featuredTemplates([app("n8n")], []).map((t) => t.id)).toEqual([]);
+  });
+
   it("keeps an older console's order and shows its apps in one shelf", () => {
     const old = [app("uptime-kuma"), app("n8n")];
     expect(sortByRank(old).map((t) => t.id)).toEqual(["uptime-kuma", "n8n"]);

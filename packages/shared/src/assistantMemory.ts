@@ -378,6 +378,62 @@ export function thinkingOption(
   return null;
 }
 
+/**
+ * What the person's own rows (Source `you`) say a new chat runs on — the
+ * server applies it, so the model can't quietly start Smart where the table
+ * says Claude (Misha 29.10). A `taskType` that names a row picks that row;
+ * otherwise the person's rows must agree on one harness ("Claude
+ * everywhere"), and model / thinking are kept only where they agree too.
+ * null: no rule of the person's applies — the caller chooses as before.
+ */
+export interface PersonRoute {
+  /** Harness instance id or driver as the table writes it (`claudeAgent`, `codex_work`). */
+  readonly harness: string;
+  readonly model: string | null;
+  readonly thinking: RoutingThinking | null;
+  /** The row it came from, when one row decided. */
+  readonly taskType: string | null;
+}
+
+function isBlankCell(value: string): boolean {
+  return /^[\s—–-]*$/.test(value);
+}
+
+const taskKey = (rule: RoutingRule) => rule.taskType.trim().toLowerCase();
+
+/** The one value all of them share, or null. */
+const shared = <T>(values: ReadonlyArray<T>): T | null =>
+  values.every((value) => value === values[0]) ? (values[0] ?? null) : null;
+
+export function personRoute(content: string, taskType?: string): PersonRoute | null {
+  const rows = parseRouting(content).rules.filter(
+    (rule) =>
+      rule.source === "you" &&
+      !isBlankCell(rule.harness) &&
+      rule.harness.trim().toLowerCase() !== ROUTING_SELF_HARNESS,
+  );
+  if (rows.length === 0) return null;
+  const wanted = taskType?.trim().toLowerCase() ?? "";
+  if (wanted.length > 0) {
+    const row =
+      rows.find((rule) => taskKey(rule) === wanted) ??
+      rows.find((rule) => taskKey(rule).includes(wanted) || wanted.includes(taskKey(rule)));
+    if (row !== undefined) {
+      return {
+        harness: row.harness.trim(),
+        model: isBlankCell(row.model) ? null : row.model.trim(),
+        thinking: thinkingOf(row.effort),
+        taskType: row.taskType,
+      };
+    }
+  }
+  const harness = shared(rows.map((rule) => rule.harness.trim()));
+  if (harness === null) return null;
+  const model = shared(rows.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())));
+  const thinking = shared(rows.map((rule) => thinkingOf(rule.effort)));
+  return { harness, model, thinking, taskType: rows.length === 1 ? rows[0]!.taskType : null };
+}
+
 // ── Proposals to change the person's rules ───────────────────────────
 
 /**

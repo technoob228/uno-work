@@ -15,7 +15,8 @@ interface EnvironmentScoped {
 
 // ── Connectors ────────────────────────────────────────────────────────
 
-export type ConnectorProvider = "google-drive" | "gmail" | "notion" | "github";
+/** `microsoft` (Outlook & Teams calendar) only where the console offers it. */
+export type ConnectorProvider = "google-drive" | "gmail" | "notion" | "github" | "microsoft";
 
 export interface SetupConnector {
   readonly provider: ConnectorProvider;

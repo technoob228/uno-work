@@ -1400,6 +1400,10 @@ export const ManagerCreateThreadInput = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   runtimeMode: Schema.optional(RuntimeMode),
+  /** The assistant's routing row this task is (its Task type) — picks the person's row. */
+  taskType: Schema.optional(TrimmedNonEmptyString),
+  /** The person named this model in the conversation: it wins over their table. */
+  personAsked: Schema.optional(Schema.Boolean),
   /**
    * The computer the chat runs on: absent / `"this"` = this computer; a box
    * id, `"box-N"` or a computer's name (`account_overview`) = another

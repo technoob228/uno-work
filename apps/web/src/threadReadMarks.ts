@@ -80,3 +80,21 @@ export function writeThreadReadAt(
     // Storage is off or full: the mark still holds until the window closes.
   }
 }
+
+/** Several marks at once (server sync), one localStorage write. */
+export function writeThreadReadAts(
+  entries: ReadonlyArray<{ environmentId: string; threadId: string; readAt: string | null }>,
+): void {
+  if (entries.length === 0) return;
+  const marks = load();
+  for (const { environmentId, threadId, readAt } of entries) {
+    const key = threadReadMarkKey(environmentId, threadId);
+    if (readAt === null) delete marks[key];
+    else marks[key] = readAt;
+  }
+  try {
+    window.localStorage.setItem(THREAD_READ_MARKS_KEY, JSON.stringify(marks));
+  } catch {
+    // Storage is off or full: the marks still hold until the window closes.
+  }
+}

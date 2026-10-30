@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  anyCalendarSignedIn,
   applyCallsEvent,
+  calendarFeedFailure,
+  calendarsBody,
   botNameFor,
   callsBusy,
   callsWakeAt,
@@ -362,6 +365,71 @@ describe("assistantCalls", () => {
       expect(callsBusy(failed, t * 1000)).toBe(false);
       const stale = { ...on(), statuses: [status("s3", "recording", t - 5 * 3600)] };
       expect(callsBusy(stale, t * 1000)).toBe(false);
+    });
+  });
+});
+
+describe("the person's calendars", () => {
+  const row = (provider: string, connected: boolean, needsReconnect = false) => ({
+    provider,
+    available: true,
+    connected,
+    account: connected ? `${provider}@x.com` : null,
+    needsReconnect,
+  });
+
+  it("lists both calendars; one the console doesn't list is unavailable", () => {
+    expect(calendarsBody([row("gmail", true), row("notion", true)])).toEqual({
+      calendars: [
+        {
+          provider: "gmail",
+          name: "Google Calendar",
+          available: true,
+          connected: true,
+          account: "gmail@x.com",
+          needsReconnect: false,
+        },
+        {
+          provider: "microsoft",
+          name: "Outlook & Teams",
+          available: false,
+          connected: false,
+          account: "",
+          needsReconnect: false,
+        },
+      ],
+    });
+    expect(calendarsBody(null).calendars.every((c) => !c.available && !c.connected)).toBe(true);
+  });
+
+  it("any signed-in calendar is enough for Join my calls", () => {
+    expect(anyCalendarSignedIn([row("gmail", false), row("microsoft", true)])).toBe(true);
+    expect(anyCalendarSignedIn([row("gmail", true, true), row("microsoft", false)])).toBe(false);
+    expect(anyCalendarSignedIn(null)).toBe(false);
+  });
+
+  it("names the failure by provider", () => {
+    expect(calendarFeedFailure("gmail", { kind: "call", status: 401, message: "x" }).code).toBe(
+      "google_reconnect",
+    );
+    expect(calendarFeedFailure("microsoft", { kind: "call", status: 403, message: "x" }).code).toBe(
+      "microsoft_reconnect",
+    );
+    expect(calendarFeedFailure("microsoft", { kind: "call", status: 404, message: "x" })).toEqual({
+      status: 424,
+      code: "microsoft_not_connected",
+      message: "Outlook & Teams calendar isn't connected in Uno Work.",
+    });
+    expect(
+      calendarFeedFailure("gmail", { kind: "answer", message: "Gmail is not connected" }).code,
+    ).toBe("google_not_connected");
+    expect(
+      calendarFeedFailure("microsoft", { kind: "answer", message: "token expired" }).code,
+    ).toBe("microsoft_reconnect");
+    expect(calendarFeedFailure("gmail", { kind: "call", status: 500, message: "down" })).toEqual({
+      status: 502,
+      code: "calendar_unavailable",
+      message: "down",
     });
   });
 });

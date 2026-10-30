@@ -36,8 +36,10 @@ import {
   HiddenPrograms,
   ProgramIcon,
   primaryActionTitle,
+  NotetakerTile,
   TileShell,
   type BuiltInPrograms,
+  withoutBuiltInTiles,
 } from "../ComputerPrograms";
 import { appPrimaryAction } from "../appPrimaryAction";
 import type { ProgramTile } from "../programModel";
@@ -271,10 +273,12 @@ export function AppsWidget({
   const startingId = useStartingAppId();
   // Three rows of five: the built-ins, then the apps; the rest on demand.
   // (No "Uno" tile since 01.10: a new chat is the sidebar's New chat.)
-  const builtInCount = builtIns.onDrive !== undefined ? 4 : 3;
+  const builtInCount = 3 + (builtIns.onDrive !== undefined ? 1 : 0) + (builtIns.notetaker ? 1 : 0);
   const room = APPS_WIDGET_TILES - builtInCount;
-  const overflow = all || tiles.length <= room ? 0 : tiles.length - (room - 1);
-  const shownTiles = overflow > 0 ? tiles.slice(0, room - 1) : tiles;
+  // Uno Notetaker's own tile stands for it: not twice.
+  const ownTiles = withoutBuiltInTiles(tiles, builtIns);
+  const overflow = all || ownTiles.length <= room ? 0 : ownTiles.length - (room - 1);
+  const shownTiles = overflow > 0 ? ownTiles.slice(0, room - 1) : ownTiles;
   return (
     <div className="flex flex-col gap-2">
       <ul className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-5" aria-label="Apps">
@@ -305,6 +309,7 @@ export function AppsWidget({
             onClick={() => builtIns.onDrive?.()}
           />
         ) : null}
+        {builtIns.notetaker ? <NotetakerTile small notetaker={builtIns.notetaker} /> : null}
         <TileShell
           small
           label="Terminal"

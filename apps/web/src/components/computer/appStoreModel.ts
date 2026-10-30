@@ -104,15 +104,28 @@ export function applyStoreView(input: {
   });
 }
 
-/** "Recommended" on the front page: made by Uno or featured, never a developer tool. */
+/** Always first in "Recommended": Uno Notetaker, the built-in next to Uno Drive (29.10). */
+const PINNED_FEATURED = "notetaker";
+
+/**
+ * "Recommended" on the front page: made by Uno or featured, never a developer
+ * tool; Uno Notetaker first whatever the console says.
+ */
 export function featuredTemplates(
   templates: ReadonlyArray<UnoComputerAppTemplate>,
   categories: ReadonlyArray<UnoComputerAppCategory>,
 ): UnoComputerAppTemplate[] {
   const technical = new Set(categories.filter((c) => c.technical).map((c) => c.id));
-  return sortByRank(templates).filter(
-    (t) => (t.featured === true || t.madeByUno === true) && !technical.has(t.category),
-  );
+  const pinned = templates.filter((t) => t.id === PINNED_FEATURED);
+  return [
+    ...pinned,
+    ...sortByRank(templates).filter(
+      (t) =>
+        t.id !== PINNED_FEATURED &&
+        (t.featured === true || t.madeByUno === true) &&
+        !technical.has(t.category),
+    ),
+  ];
 }
 
 /**

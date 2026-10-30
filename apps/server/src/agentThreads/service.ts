@@ -24,6 +24,7 @@
 import {
   CommandId,
   MessageId,
+  type ModelSelection,
   type OrchestrationCommand,
   type OrchestrationCommandOrigin,
   type OrchestrationProjectShell,
@@ -47,6 +48,11 @@ import * as crypto from "node:crypto";
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
+import {
+  applyPersonRoute,
+  readPersonRoute,
+  selectionNotReadyMessage,
+} from "../manager/personRouting.ts";
 import type {
   RemoteChatStarted,
   RemoteChatStartInput,
@@ -145,6 +151,8 @@ export interface AgentThreadsDeps {
     caller: OrchestrationThreadShell,
   ) => Effect.Effect<AssistantAccessView | null>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  /** Settings `harnessUnoCredits` (Claude Code on Uno credits allowed here). Absent: {}. */
+  readonly getHarnessUnoCredits?: Effect.Effect<Readonly<Record<string, boolean>>>;
   /**
    * This computer's box id (null on a laptop): the only `computerId` a new
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
@@ -155,6 +163,20 @@ export interface AgentThreadsDeps {
    * only this computer (the old `checkTargetComputer` rule).
    */
   readonly remote?: AgentThreadsRemoteDeps;
+  /**
+   * A folder of this computer that is no project yet, made one now (an
+   * existing folder in the home folder, not hidden, not an assistant's) —
+   * so a task for ~/projects/<x> starts even when the person never added
+   * <x> to Uno Work (Misha 29.10, the luckyip case). Null: not such a folder.
+   * Only for a caller that reaches every project. Absent: no registration.
+   */
+  readonly registerFolder?: (cwd: string) => Effect.Effect<OrchestrationProjectShell | null>;
+  /**
+   * What a chat an assistant starts without naming a model runs on: the
+   * account's default AI when usable here (as create_thread). Absent / null:
+   * the project's default.
+   */
+  readonly personalDefault?: Effect.Effect<ModelSelection | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -471,6 +493,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           normalizeWorkspacePath(input.cwd),
         );
         if (Option.isNone(found)) {
+          // A brand-new project is one the caller may use only when it
+          // reaches every project (the person's "all projects").
+          const reachesAll = (yield* callerAccess(caller)).allowed(crypto.randomUUID());
+          const registered =
+            reachesAll && deps.registerFolder ? yield* deps.registerFolder(input.cwd) : null;
+          if (registered !== null) return registered;
           return yield* fail(
             404,
             "project_not_found",
@@ -604,11 +632,12 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const model = optionalString(body, "model", 500);
         const projectId = optionalString(body, "projectId", 500);
         const rawCwd = optionalString(body, "cwd", 4096);
-        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok) {
+        const taskType = optionalString(body, "taskType", 200);
+        if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok || !taskType.ok) {
           return yield* fail(
             400,
             "invalid_payload",
-            `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd" — строки.`,
+            `Поля "title" (до ${AGENT_THREAD_MAX_TITLE_CHARS} символов), "provider", "model", "projectId", "cwd", "taskType" — строки.`,
           );
         }
         if (deps.remote === undefined) {
@@ -655,7 +684,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         });
         const sameProject = project.id === caller.projectId;
 
+        // Order (personRouting.ts): the person's routing rows → what the
+        // model named (first when the person asked for it) → the account's
+        // default AI → the project's default.
         let modelSelection = sameProject ? caller.modelSelection : project.defaultModelSelection;
+        let requested: ModelSelection | null = null;
         if (provider.value !== undefined) {
           const providers = yield* deps.getProviders;
           const resolved = resolveProviderModelSelection({
@@ -664,16 +697,56 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             providers,
           });
           if (!resolved.ok) return yield* fail(400, "invalid_provider", resolved.message);
-          modelSelection = resolved.selection;
+          requested = resolved.selection;
         } else if (model.value !== undefined && modelSelection !== null) {
-          modelSelection = { instanceId: modelSelection.instanceId, model: model.value };
+          requested = { instanceId: modelSelection.instanceId, model: model.value };
         }
+        const assistantProjectId =
+          assistant?.projectId ?? (isAssistantConversation(caller) ? caller.projectId : null);
+        if (assistantProjectId !== null) {
+          const assistantProject = yield* deps.projections
+            .getProjectShellById(ProjectId.make(assistantProjectId))
+            .pipe(Effect.orElseSucceed(() => Option.none()));
+          const route = Option.isSome(assistantProject)
+            ? yield* Effect.promise(() =>
+                readPersonRoute(assistantProject.value.workspaceRoot, taskType.value),
+              )
+            : null;
+          const routed = applyPersonRoute({
+            route,
+            requested,
+            personAsked: body.personAsked === true,
+            providers: route === null ? [] : yield* deps.getProviders,
+          });
+          if (routed.kind === "not-ready") {
+            return yield* fail(409, "harness_not_ready", routed.message);
+          }
+          if (routed.kind === "selection") requested = routed.selection;
+          else if (
+            requested === null &&
+            deps.personalDefault !== undefined &&
+            caller.projectId === assistantProjectId
+          ) {
+            requested = yield* deps.personalDefault;
+          }
+        }
+        if (requested !== null) modelSelection = requested;
         if (modelSelection === null) {
           return yield* fail(
             400,
             "model_required",
             'У проекта нет модели по умолчанию — передай "provider" (например "codex" или "claudeAgent") и при желании "model".',
           );
+        }
+        // An assistant's chat on a harness that can't start here is not
+        // started at all: the model hears why and asks the person.
+        if (assistantProjectId !== null) {
+          const notReady = selectionNotReadyMessage(
+            modelSelection,
+            yield* deps.getProviders,
+            deps.getHarnessUnoCredits === undefined ? {} : yield* deps.getHarnessUnoCredits,
+          );
+          if (notReady !== null) return yield* fail(409, "harness_not_ready", notReady);
         }
 
         const inherited = sameProject
