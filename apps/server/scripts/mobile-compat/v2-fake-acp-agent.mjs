@@ -19,7 +19,8 @@ let nextId = 1_000;
 const pending = new Map();
 const cancelled = new Set();
 
-const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+const send = (message) =>
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const reply = (id, result) => send({ id, result });
 const notify = (method, params) => send({ method, params });
 const request = (method, params) =>

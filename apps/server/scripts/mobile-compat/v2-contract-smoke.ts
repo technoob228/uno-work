@@ -63,7 +63,11 @@ class StepFailed extends Error {}
 let diagnose: () => unknown = () => null;
 const fail = (step: string, detail: unknown): never => {
   const text =
-    detail instanceof Error ? (detail.stack ?? detail.message) : typeof detail === "string" ? detail : JSON.stringify(detail);
+    detail instanceof Error
+      ? (detail.stack ?? detail.message)
+      : typeof detail === "string"
+        ? detail
+        : JSON.stringify(detail);
   results.push({ step, ok: false, detail: text });
   console.log(`FAIL ${step}: ${text}`);
   try {
@@ -88,7 +92,9 @@ async function httpStep(step: string, run: () => Promise<unknown>) {
 const descriptorRaw = await httpStep("descriptor", async () =>
   (await fetch(`${BASE}/.well-known/t3/environment`)).json(),
 );
-const descriptor = await httpStep("descriptor", async () => decodeJson(ExecutionEnvironmentDescriptor)(descriptorRaw));
+const descriptor = await httpStep("descriptor", async () =>
+  decodeJson(ExecutionEnvironmentDescriptor)(descriptorRaw),
+);
 const incompatible = orchestrationProtocolCompatibilityError(descriptor);
 if (incompatible) fail("descriptor", incompatible.detail);
 pass("descriptor", {
@@ -116,7 +122,9 @@ pass("oauth/token", { scope: token.scope });
 const auth = { authorization: `Bearer ${token.access_token}` };
 
 const session = await httpStep("session", async () =>
-  decodeJson(AuthSessionState)(await (await fetch(`${BASE}/api/auth/session`, { headers: auth })).json()),
+  decodeJson(AuthSessionState)(
+    await (await fetch(`${BASE}/api/auth/session`, { headers: auth })).json(),
+  ),
 );
 if (!session.authenticated || !(session.scopes ?? []).includes("orchestration:operate")) {
   fail("session", { authenticated: session.authenticated, scopes: session.scopes });
@@ -139,7 +147,9 @@ const v1Shell = async () =>
 
 const ticketFor = async () =>
   decodeJson(AuthWebSocketTicketResult)(
-    await (await fetch(`${BASE}/api/auth/websocket-ticket`, { method: "POST", headers: auth })).json(),
+    await (
+      await fetch(`${BASE}/api/auth/websocket-ticket`, { method: "POST", headers: auth })
+    ).json(),
   );
 
 // ------------------------------------------------------------------ WS ----
@@ -155,7 +165,11 @@ const socketUrl = (ticket: string, protocol: "2" | null) => {
   return url.toString();
 };
 
-const waitFor = <A>(step: string, read: () => A | undefined | null | false, timeoutMs = STEP_TIMEOUT_MS) =>
+const waitFor = <A>(
+  step: string,
+  read: () => A | undefined | null | false,
+  timeoutMs = STEP_TIMEOUT_MS,
+) =>
   Effect.gen(function* () {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -194,7 +208,11 @@ const program = Effect.gen(function* () {
   const phone = yield* step("ws connect (protocol 2)", connect("2", "phone"));
   const config = yield* step("ws initial config", phone.initialConfig);
   const fake = config.providers.find((provider) => provider.instanceId === HARNESS);
-  if (!fake) fail("ws initial config", `provider ${HARNESS} not found: ${config.providers.map((p) => p.instanceId)}`);
+  if (!fake)
+    fail(
+      "ws initial config",
+      `provider ${HARNESS} not found: ${config.providers.map((p) => p.instanceId)}`,
+    );
   pass("ws initial config", { providers: config.providers.map((provider) => provider.instanceId) });
   yield* step("server.probe", phone.probe);
   pass("server.probe");
@@ -205,7 +223,9 @@ const program = Effect.gen(function* () {
   const shellItems: Array<any> = [];
   yield* client["orchestration.subscribeShell"]({ requestCompletionMarker: true }).pipe(
     Stream.runForEach((item) => Effect.sync(() => shellItems.push(item))),
-    Effect.catchCause((cause) => Effect.sync(() => shellItems.push({ kind: "error", cause: String(cause) }))),
+    Effect.catchCause((cause) =>
+      Effect.sync(() => shellItems.push({ kind: "error", cause: String(cause) })),
+    ),
     Effect.forkScoped,
   );
   yield* waitFor("subscribeShell", () =>
@@ -218,7 +238,8 @@ const program = Effect.gen(function* () {
   const project =
     shellSnapshot.projects.find((entry) => entry.title === "T3 smoke") ??
     shellSnapshot.projects.find((entry) => entry.id !== "assistant-home");
-  if (!project) fail("subscribeShell", "no project in the shell (start the daemon with a project folder)");
+  if (!project)
+    fail("subscribeShell", "no project in the shell (start the daemon with a project folder)");
   pass("subscribeShell", {
     projects: shellSnapshot.projects.length,
     threads: shellSnapshot.threads.length,
@@ -261,7 +282,9 @@ const program = Effect.gen(function* () {
     acceptDedupedBodies: true,
   }).pipe(
     Stream.runForEach((item) => Effect.sync(() => threadItems.push(item))),
-    Effect.catchCause((cause) => Effect.sync(() => threadItems.push({ kind: "error", cause: String(cause) }))),
+    Effect.catchCause((cause) =>
+      Effect.sync(() => threadItems.push({ kind: "error", cause: String(cause) })),
+    ),
     Effect.forkScoped,
   );
   yield* waitFor("subscribeThread", () =>
@@ -275,9 +298,12 @@ const program = Effect.gen(function* () {
     return {
       frames: threadItems.map((item) => item.kind),
       runs: p?.runs.map((run) => `${run.id}:${run.status}`),
-      requests: p?.runtimeRequests.map((request) => `${request.id}:${request.kind}:${request.status}`),
+      requests: p?.runtimeRequests.map(
+        (request) => `${request.id}:${request.kind}:${request.status}`,
+      ),
       items: p?.visibleTurnItems.map(
-        (row) => `${row.item.type}:${row.item.status}:${String(row.item.text ?? row.item.title ?? row.item.failure?.message ?? "").slice(0, 120)}`,
+        (row) =>
+          `${row.item.type}:${row.item.status}:${String(row.item.text ?? row.item.title ?? row.item.failure?.message ?? "").slice(0, 120)}`,
       ),
       shell: shellThread(threadId),
     };
@@ -302,7 +328,10 @@ const program = Effect.gen(function* () {
     });
   const runIdle = () => {
     const runs = projection()?.runs ?? [];
-    return runs.length > 0 && !["preparing", "queued", "starting", "running", "waiting"].includes(runs.at(-1).status);
+    return (
+      runs.length > 0 &&
+      !["preparing", "queued", "starting", "running", "waiting"].includes(runs.at(-1).status)
+    );
   };
 
   // ---- write + read the reply ---------------------------------------------
@@ -316,13 +345,23 @@ const program = Effect.gen(function* () {
   const request = yield* waitFor("approval requested", () =>
     (projection()?.runtimeRequests ?? []).find((entry) => entry.status === "pending"),
   );
-  const badge = yield* waitFor("approval badge in shell", () => shellThread(threadId)?.pendingRuntimeRequest);
-  pass("approval requested", { requestId: request.id, kind: request.kind, shellStatus: shellThread(threadId)?.status, badge: badge.id });
+  const badge = yield* waitFor(
+    "approval badge in shell",
+    () => shellThread(threadId)?.pendingRuntimeRequest,
+  );
+  pass("approval requested", {
+    requestId: request.id,
+    kind: request.kind,
+    shellStatus: shellThread(threadId)?.status,
+    badge: badge.id,
+  });
   yield* step(
     "runtime-request.respond",
     dispatch({ type: "runtime-request.respond", requestId: request.id, decision: "accept" }),
   );
-  yield* waitFor("approved reply", () => assistantTexts().some((text) => text.includes("approved")));
+  yield* waitFor("approved reply", () =>
+    assistantTexts().some((text) => text.includes("approved")),
+  );
   yield* waitFor("approved (run settled)", runIdle);
   pass("runtime-request.respond", { texts: assistantTexts() });
 
@@ -356,17 +395,25 @@ const program = Effect.gen(function* () {
   yield* step("Work initial config", work.initialConfig);
   yield* step(
     "thread.settle (Work)",
-    work.client["orchestration.dispatchCommand"]({ type: "thread.settle", commandId: randomUUID(), threadId }),
+    work.client["orchestration.dispatchCommand"]({
+      type: "thread.settle",
+      commandId: randomUUID(),
+      threadId,
+    }),
   );
-  yield* waitFor("settle visible on the phone", () => shellThread(threadId)?.settledOverride === "settled");
+  yield* waitFor(
+    "settle visible on the phone",
+    () => shellThread(threadId)?.settledOverride === "settled",
+  );
   pass("settle visible on the phone", { settledAt: shellThread(threadId).settledAt });
 
   // ---- read state ----------------------------------------------------------
   const visitedAt = new Date().toISOString();
   yield* step("thread.visit (phone)", dispatch({ type: "thread.visit", visitedAt, opened: true }));
   yield* waitFor("visit in shell", () => shellThread(threadId)?.lastVisitedAt);
-  const workVisited = yield* Effect.promise(async () =>
-    (await v1Shell()).threads.find((thread) => thread.id === threadId)?.lastVisitedAt ?? null,
+  const workVisited = yield* Effect.promise(
+    async () =>
+      (await v1Shell()).threads.find((thread) => thread.id === threadId)?.lastVisitedAt ?? null,
   );
   if (!workVisited) fail("visit visible in Work", "v1 shell row has no lastVisitedAt");
   pass("read state round trip", { visitedAt: workVisited });
@@ -391,8 +438,11 @@ const program = Effect.gen(function* () {
     () => msOf(shellThread(threadId)?.lastVisitedAt) >= Date.parse(readAt),
   );
   const readRow = yield* Effect.promise(workRow);
-  if (readRow?.readAt !== readAt) fail("Read in Work → read on the phone", { workReadAt: readRow?.readAt });
-  pass("Read in Work → read on the phone", { phoneLastVisitedAt: shellThread(threadId).lastVisitedAt });
+  if (readRow?.readAt !== readAt)
+    fail("Read in Work → read on the phone", { workReadAt: readRow?.readAt });
+  pass("Read in Work → read on the phone", {
+    phoneLastVisitedAt: shellThread(threadId).lastVisitedAt,
+  });
 
   // Mark unread on the phone → Work shows the chat unread (dot and Your turn).
   yield* step("thread.mark-unread (phone)", dispatch({ type: "thread.mark-unread" }));
@@ -408,10 +458,15 @@ const program = Effect.gen(function* () {
   if (!unreadRow || unreadRow.readStateUpdatedAt === readRow.readStateUpdatedAt) {
     fail("mark-unread on the phone → unread in Work", { row: unreadRow });
   }
-  pass("mark-unread on the phone → unread in Work", { readStateUpdatedAt: unreadRow.readStateUpdatedAt });
+  pass("mark-unread on the phone → unread in Work", {
+    readStateUpdatedAt: unreadRow.readStateUpdatedAt,
+  });
 
   // ---- unsupported command stays polite ------------------------------------
-  const refused = yield* dispatch({ type: "thread.model-selection.set", modelSelection: { instanceId: HARNESS, model: "x" } }).pipe(
+  const refused = yield* dispatch({
+    type: "thread.model-selection.set",
+    modelSelection: { instanceId: HARNESS, model: "x" },
+  }).pipe(
     Effect.flip,
     Effect.timeout(Duration.millis(10_000)),
     Effect.catchCause((cause) => Effect.sync(() => fail("polite refusal", String(cause)))),
