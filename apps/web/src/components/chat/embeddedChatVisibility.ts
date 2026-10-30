@@ -36,6 +36,9 @@ function isAnswerEntry(entry: TimelineEntry): boolean {
     // План — это вопрос к пользователю, а не шум.
     case "proposed-plan":
       return true;
+    // Страница агента — это и есть ответ.
+    case "html-render":
+      return true;
     case "message": {
       const { message } = entry;
       if (message.role === "user") return true;

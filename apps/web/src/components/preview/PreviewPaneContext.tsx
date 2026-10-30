@@ -64,6 +64,7 @@ let browserTabCounter = 0;
 
 export type PreviewFileKind =
   | "md"
+  | "mermaid"
   | "html"
   | "pdf"
   | "xlsx"
@@ -421,6 +422,7 @@ export const NO_PROJECT_KEY = "__no_project__";
 /** Формат, у которых есть и rendered-превью, и осмысленный исходник. */
 export const DUAL_VIEW_KINDS: ReadonlySet<PreviewFileKind> = new Set<PreviewFileKind>([
   "md",
+  "mermaid",
   "html",
   "svg",
   "csv",
@@ -1065,6 +1067,7 @@ const TEXT_EXTS = new Set([
 export function detectFileKind(name: string): PreviewFileKind {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   if (ext === "md" || ext === "markdown") return "md";
+  if (ext === "mmd" || ext === "mermaid") return "mermaid";
   if (ext === "html" || ext === "htm") return "html";
   if (ext === "pdf") return "pdf";
   if (ext === "csv" || ext === "tsv") return "csv";
