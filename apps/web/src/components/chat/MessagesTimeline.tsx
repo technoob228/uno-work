@@ -811,6 +811,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         </div>
       )}
 
+      {row.kind === "agent-switch" && (
+        <div className="flex justify-center px-4" data-testid="agent-switch-line">
+          <p className="max-w-[80%] text-center text-xs text-muted-foreground">{row.text}</p>
+        </div>
+      )}
+
       {row.kind === "support-draft" && (
         <div className="min-w-0">
           <SupportDraftCard draft={row.draft} />

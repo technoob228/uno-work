@@ -61,6 +61,7 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveHtmlRenderEntries,
+  deriveAgentSwitchEntries,
   deriveSupportDraftEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -201,6 +202,7 @@ import {
 import { ChatHeader } from "./chat/ChatHeader";
 import { DraftHeroHeadline, DraftHeroStarters } from "./chat/DraftHeroHeadline";
 import { ChatPlanLimitNotice, DraftPlanRoomNotice, PlanResumeLine } from "./chat/PlanRoomNotice";
+import { deriveProviderInstanceEntries } from "../providerInstances";
 import { unoSmartTarget } from "./chat/unoCreditsChoice.logic";
 import {
   isPlanLimitText,
@@ -239,6 +241,8 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   cloneComposerVideoForRetry,
+  agentMoveTarget,
+  chatAgentLock,
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
@@ -1344,11 +1348,17 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId && activeThread?.environmentId === primaryEnvironmentId
       ? primaryServerConfig
       : (activeEnvRuntimeState?.serverConfig ?? primaryServerConfig);
-  const lockedProvider = deriveLockedProvider({
+  // The agent a started chat runs on. Another pick moves the chat there with
+  // its history (orchestration/handoff.ts); only an assistant's chat is locked.
+  const chatProvider = deriveLockedProvider({
     thread: activeThread,
     selectedProvider: selectedProviderByThreadId,
     threadProvider,
     providerStatuses: serverConfig?.providers,
+  });
+  const lockedProvider = chatAgentLock({
+    chatProvider,
+    isAssistantChat: activeThread ? isAssistantConversation(activeThread) : false,
   });
   // Client/server version skew is a global notice now (StaleBundleNotice):
   // it offers the reload that actually fixes it, on every screen.
@@ -1492,7 +1502,7 @@ export default function ChatView(props: ChatViewProps) {
   // Uno gateway (or free OpenCode Zen), never on a logged-out Codex.
   const unlockedSelectedProvider = selectedProviderByThreadId
     ? resolveSelectableProvider(providerStatuses, selectedProviderByThreadId)
-    : resolveDefaultThreadProvider(providerStatuses, threadProvider);
+    : (chatProvider ?? resolveDefaultThreadProvider(providerStatuses, threadProvider));
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
@@ -1841,6 +1851,7 @@ export default function ChatView(props: ChatViewProps) {
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries, [
         ...deriveHtmlRenderEntries(threadActivities),
         ...deriveSupportDraftEntries(threadActivities),
+        ...deriveAgentSwitchEntries(threadActivities),
       ]),
     [activeThread?.proposedPlans, threadActivities, timelineMessages, workLogEntries],
   );
@@ -3299,6 +3310,23 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
+      return;
+    }
+    // Going around the queue (files, Send now) can't take the chat from an
+    // agent that is still working: the message would start nowhere.
+    if (
+      phase === "running" &&
+      agentMoveTarget({
+        entries: deriveProviderInstanceEntries(providerStatuses),
+        chatInstanceId: activeThread.session?.providerInstanceId,
+        selectedInstanceId: ctxSelectedModelSelection.instanceId,
+      })
+    ) {
+      setThreadError(
+        activeThread.id,
+        "The agent is still working. Wait for it or stop it, then send to move this chat.",
+      );
+      keepQueued();
       return;
     }
     if (!activeProject) {
@@ -5187,6 +5215,8 @@ export default function ChatView(props: ChatViewProps) {
                       runtimeMode={runtimeMode}
                       interactionMode={interactionMode}
                       lockedProvider={lockedProvider}
+                      chatProvider={chatProvider}
+                      holdsOutsideText={outsideText}
                       providerStatuses={providerStatuses as ServerProvider[]}
                       activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
                       activeThreadModelSelection={activeThread?.modelSelection}

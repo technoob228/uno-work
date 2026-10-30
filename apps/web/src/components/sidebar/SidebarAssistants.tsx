@@ -24,6 +24,7 @@
  * it. Without the team the block is behind Labs "Uno's chats in the sidebar"
  * (Sidebar.tsx).
  */
+import { inSpace, useSpaceScope } from "../../spaces";
 import { scopeProjectRef, scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -494,7 +495,9 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   const navigate = useNavigate();
   const homeEnvironmentId = useAccountHomeEnvironmentId();
   const { isMobile, setOpenMobile } = useSidebar();
-  const live = team.filter((member) => !member.revoked);
+  // Spaces on (Misha 28.10): only the assistants living on this space's computer.
+  const space = useSpaceScope();
+  const live = team.filter((member) => !member.revoked && inSpace(space, member.environmentId));
   const multiComputer = new Set(live.map((member) => member.environmentId)).size > 1;
   const header = assistantsHeaderState({ teamShown, hidden });
   const [showAllPersonas, setShowAllPersonas] = useState(false);

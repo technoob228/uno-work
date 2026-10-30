@@ -72,6 +72,12 @@ import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
 
 /** The computer this window works on, by the name the person knows it by. */
+/** "misha@example.com" → "Misha": the account button says whose it is. */
+function accountLabel(who: string | null): string | null {
+  const name = who?.split("@")[0]?.split(/[._\-\s]+/)[0];
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : null;
+}
+
 export function useSidebarDComputerName(): string {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -153,7 +159,9 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
     sidebarDPanel.closeNow();
   };
   const trigger = (
-    <SidebarDAccountTrigger label={props.computerName} who={who} variant={props.variant} />
+    // Variant C (28.10): the account is named after the person, not "the current computer" —
+    // the computers live in the chip at the top right.
+    <SidebarDAccountTrigger label={accountLabel(who) ?? props.computerName} who={who} variant={props.variant} />
   );
   const [fixWorkOpen, setFixWorkOpen] = useState(false);
   return (

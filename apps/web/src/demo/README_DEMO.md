@@ -112,3 +112,21 @@ Flows: `demo-e2e/flows/automations.flow.mjs` (`node demo-e2e/run.mjs auto-`; one
 Known gaps: the demo doesn't fake "Join my calls", so "After a call" always shows
 the hint to turn it on; Gmail is "Soon" only; a run's "Open chat" goes to the
 assistant's main chat (the daemon's "Automations" thread for personas isn't faked).
+## Multi-computer base (branch `demo/multi-computer-1028`)
+
+Misha 28.10: "the interface is tied to one computer while the sidebar piles
+every computer's chats together; computers keep falling off". The base for
+the variants (A spaces, B computers on Home, C computers top-right, D all +
+focus), each in `demo/multi-computer-<x>-1028`:
+
+- World params: `mac=online|asleep|flaky|offline` (flaky: the MacBook's socket
+  drops ~8 s every ~45 s, first ~20 s after start), `load=normal|busy`
+  (uno-work CPU ~90 %, disk 151/160 GB).
+- `assist/links.ts`: the link per computer — `window.__mcDemo.drop("mac", 10)`,
+  `__mcDemo.wake("product")` (the asleep Free computer turns "running" in the
+  account), `__mcDemo.up(key)`. The real reconnect logic of the page reacts.
+- `assist/metrics.ts`: each computer's live load (`uno.computer.localMetrics`), moving.
+- `assist/fixtures.ts`: a chat at work on uno-work ("Add refunds…") and on the
+  MacBook ("Rename screenshots…").
+- `assist/mcVariant.ts`: the variant's id/title/hint for the "what to look at" card.
+- Heavy jobs one at a time: `/tmp/mc-heavy.sh <cmd>` (vite build, tsc).

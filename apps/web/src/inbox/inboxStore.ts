@@ -4,6 +4,7 @@
  * `InboxListener`), merged newest first. Actions go back to the daemon of
  * the item's computer, which answers with the new list.
  */
+import { inSpace, useSpaceScope } from "../spaces";
 import {
   INBOX_NEEDS_YOU_KINDS,
   type EnvironmentId,
@@ -60,13 +61,23 @@ export function mergeInbox(
 
 export function useInboxEntries(): ReadonlyArray<InboxEntry> {
   const byEnvironment = useInboxStore((state) => state.byEnvironment);
-  return useMemo(() => mergeInbox(byEnvironment), [byEnvironment]);
+  // Spaces on (Misha 28.10): the Inbox is the space's computer's only.
+  const space = useSpaceScope();
+  return useMemo(
+    () => mergeInbox(byEnvironment).filter((item) => inSpace(space, item.environmentId)),
+    [byEnvironment, space],
+  );
 }
 
-/** Unread and not snoozed, on every connected computer. */
+/** Unread and not snoozed, on every connected computer (spaces on: the space's computer). */
 export function useInboxUnreadCount(): number {
+  const space = useSpaceScope();
   return useInboxStore((state) =>
-    Object.values(state.byEnvironment).reduce((sum, snapshot) => sum + snapshot.unread, 0),
+    Object.entries(state.byEnvironment).reduce(
+      (sum, [environmentId, snapshot]) =>
+        sum + (inSpace(space, environmentId) ? snapshot.unread : 0),
+      0,
+    ),
   );
 }
 

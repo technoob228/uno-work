@@ -7,8 +7,10 @@ import {
   type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationThread,
+  PROVIDER_DISPLAY_NAMES,
   type ProviderContextMessage,
   ProviderDriverKind,
+  ProviderInstanceId,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
@@ -40,6 +42,15 @@ import {
   readAssistantLlmProvider,
 } from "@t3tools/shared/assistantLlm";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
+import {
+  AGENT_SWITCH_ACTIVITY_KIND,
+  agentSwitchLine,
+  askHoldsOnAgent,
+  messageHoldsOutsideText,
+  type AgentSwitchActivityPayload,
+} from "@t3tools/shared/handoff";
+import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
+import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import {
@@ -54,12 +65,21 @@ import {
   launchesOfTurn,
   type LaunchFact,
 } from "../../manager/launchTruth.ts";
-import { applyHandoffSeed, buildAccountSwitchSeed, resolvePendingHandoffSeed } from "../handoff.ts";
+import {
+  agentSwitchStillOwed,
+  applyHandoffSeed,
+  buildAgentSwitchSeed,
+  handoffHistoryBudget,
+  handoffTokenCap,
+  latestAgentSwitch,
+  resolvePendingHandoffSeed,
+} from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { classifyOrchestrationErrorDetail as classifyProviderErrorDetail } from "../../provider/unoBilling.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -309,6 +329,8 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
   const sandboxPolicy = Option.getOrUndefined(yield* Effect.serviceOption(HarnessSandboxPolicy));
+  const providerRegistry = Option.getOrUndefined(yield* Effect.serviceOption(ProviderRegistry));
+  const handoffCap = handoffTokenCap(process.env.T3CODE_CONTEXT_HANDOFF_TOKEN_CAP);
   /**
    * Title and branch name come from a one-shot harness run (TextGeneration)
    * outside the chat's session — outside the assistant sandbox too, and fed
@@ -472,6 +494,21 @@ const make = Effect.gen(function* () {
       return yield* currentAssistantModelSelection(projectionSnapshotQuery);
     });
 
+  /**
+   * The next turn can't go on in the session it has: another driver, or an
+   * account that keeps its sessions elsewhere. An instance that's gone counts:
+   * nothing can resume it. Accounts of one home keep their session.
+   */
+  const leavesSession = (from: ProviderInstanceId, to: ProviderInstanceId) =>
+    Effect.all([providerService.getInstanceInfo(from), providerService.getInstanceInfo(to)]).pipe(
+      Effect.map(
+        ([left, next]) =>
+          left.driverKind !== next.driverKind ||
+          left.continuationIdentity.continuationKey !== next.continuationIdentity.continuationKey,
+      ),
+      Effect.orElseSucceed(() => true),
+    );
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -579,32 +616,46 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    const leftInstanceId = thread.session?.providerInstanceId;
     if (
-      thread.session !== null &&
       // The assistant chat's harness is the daemon's call (see above), not a
       // switch the person asked for.
       !isAssistantChat &&
+      leftInstanceId !== undefined &&
       requestedModelSelection !== undefined &&
-      requestedModelSelection.instanceId !== currentInstanceId
+      requestedModelSelection.instanceId !== leftInstanceId &&
+      (yield* leavesSession(leftInstanceId, requestedModelSelection.instanceId))
     ) {
-      if (currentInfo.driverKind !== desiredInfo.driverKind) {
+      // Another agent or account: its CLI can't resume this session. The new
+      // one starts fresh; the turn carries the history (agentSwitchForTurn).
+      if (
+        activeSession !== undefined &&
+        ((thread.session?.activeTurnId ?? null) !== null ||
+          (turnsInFlight.get(String(threadId)) ?? 0) > 0)
+      ) {
         return yield* new ProviderAdapterRequestError({
           provider: preferredProvider,
           method: "thread.turn.start",
-          detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
+          detail:
+            "The agent is still working in this chat. Wait for it or stop it, then send again.",
         });
       }
-      // Another account of the provider ("Continue with <account>"): its CLI
-      // can't resume this session, the picker doesn't offer it. The new one
-      // starts fresh; the turn carries the history (accountSwitchSeed).
       if (
-        activeSession !== undefined &&
-        currentInfo.continuationIdentity.continuationKey !==
-          desiredInfo.continuationIdentity.continuationKey
+        !askHoldsOnAgent({ instanceId: desiredInstanceId, driverKind: desiredDriverKind }) &&
+        (thread.runtimeMode === "approval-required" ||
+          thread.messages.some(messageHoldsOutsideText))
       ) {
-        yield* Effect.logInfo("provider command reactor switching a chat to another account", {
+        return yield* new ProviderAdapterRequestError({
+          provider: preferredProvider,
+          method: "thread.turn.start",
+          detail:
+            "This chat stays in Ask, and Uno Hermes can't ask before every command. Pick Claude, Codex or OpenCode.",
+        });
+      }
+      if (activeSession !== undefined) {
+        yield* Effect.logInfo("provider command reactor moving a chat to another session", {
           threadId,
-          currentInstanceId,
+          leftInstanceId,
           desiredInstanceId,
         });
         yield* providerService.stopSession({ threadId });
@@ -798,6 +849,8 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: ProviderInteractionMode;
+    /** The prompt already holds the history: a fresh session gets it once. */
+    readonly carriesHistory?: boolean;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(rawInput.threadId);
@@ -827,12 +880,17 @@ const make = Effect.gen(function* () {
     const normalizedInput = toNonEmptyProviderInput(
       appendChatAttachmentsNote(input.messageText, attachmentsNote(normalizedAttachments)),
     );
-    const contextMessages = buildProviderContextMessages({
-      messages: isUnoDispatcherThread(thread) ? yield* dispatcherHistory(thread) : thread.messages,
-      currentMessageText: input.messageText,
-      currentAttachments: normalizedAttachments,
-      attachmentsNote,
-    });
+    const contextMessages =
+      input.carriesHistory === true
+        ? []
+        : buildProviderContextMessages({
+            messages: isUnoDispatcherThread(thread)
+              ? yield* dispatcherHistory(thread)
+              : thread.messages,
+            currentMessageText: input.messageText,
+            currentAttachments: normalizedAttachments,
+            attachmentsNote,
+          });
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -1100,11 +1158,6 @@ const make = Effect.gen(function* () {
     // A message another thread's agent sent reaches the harness with a line
     // saying who it is from and how to answer (plan 22); the stored message
     // and the UI keep the clean text.
-    const accountSwitch = yield* accountSwitchSeedForTurn({
-      thread,
-      modelSelection: event.payload.modelSelection,
-      currentMessageId: message.id,
-    });
     const senderThreadId = message.sentByThreadId ?? null;
     const promptText =
       senderThreadId === null
@@ -1115,9 +1168,27 @@ const make = Effect.gen(function* () {
             recipientSpawnedByThreadId: thread.spawnedByThreadId,
             text: message.text,
           });
+    const agentSwitch = yield* agentSwitchForTurn({
+      thread,
+      modelSelection: event.payload.modelSelection,
+      currentMessageId: message.id,
+      promptText,
+      attachments: message.attachments,
+    });
+    // A chat holding a stranger's text stays in Ask on any agent it moves to.
+    if (agentSwitch?.narrowToAsk === true) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: serverCommandId("agent-switch-ask"),
+        threadId: thread.id,
+        runtimeMode: "approval-required",
+        createdAt: event.payload.createdAt,
+      });
+    }
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: applyHandoffSeed(pendingHandoffSeed ?? accountSwitch, promptText),
+      messageText: applyHandoffSeed(pendingHandoffSeed ?? agentSwitch?.seed ?? null, promptText),
+      ...(agentSwitch?.seed != null ? { carriesHistory: true } : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1132,6 +1203,36 @@ const make = Effect.gen(function* () {
     if (Option.isNone(sendTurnRequest)) {
       if (titleAfterTurn !== undefined) yield* titleAfterTurn.pipe(Effect.forkScoped);
       return;
+    }
+
+    // Once the new session is up: a start that failed moved nothing. The
+    // daemon's clock, as `agentSwitchStillOwed` compares it with the replies.
+    if (agentSwitch?.line != null) {
+      const switchedAt = new Date().toISOString();
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("agent-switched"),
+          threadId: thread.id,
+          activity: {
+            id: EventId.make(crypto.randomUUID()),
+            tone: "info",
+            kind: AGENT_SWITCH_ACTIVITY_KIND,
+            summary: agentSwitchLine(agentSwitch.line),
+            payload: agentSwitch.line,
+            turnId: null,
+            createdAt: switchedAt,
+          },
+          createdAt: switchedAt,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider command reactor couldn't note an agent switch", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
     }
 
     const inFlightKey = String(event.payload.threadId);
@@ -1150,31 +1251,96 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /** The window of the model the turn runs on, when the provider says. */
+  const contextWindowOf = (selection: ModelSelection) =>
+    providerRegistry === undefined
+      ? Effect.succeed(undefined)
+      : providerRegistry.getProviders.pipe(
+          Effect.map(
+            (providers) =>
+              providers
+                .find((provider) => provider.instanceId === selection.instanceId)
+                ?.models.find((model) => model.slug === selection.model)?.capabilities?.metadata
+                ?.contextLength,
+          ),
+        );
+
+  /** The name the person knows the agent by. */
+  const agentName = (instanceId: ProviderInstanceId) =>
+    providerService.getInstanceInfo(instanceId).pipe(
+      Effect.map((info) => ({
+        driverKind: info.driverKind as string,
+        name: info.displayName ?? PROVIDER_DISPLAY_NAMES[info.driverKind] ?? instanceId,
+      })),
+      Effect.orElseSucceed(() => ({ driverKind: null, name: String(instanceId) })),
+    );
+
   /**
-   * The chat moves to an account that can't resume its session: what it says
-   * in the new session's first prompt. Null for a turn that stays put, or
-   * moves between accounts of one home (Codex keeps its session then).
+   * The chat moves to an agent or account that can't resume its session: what
+   * it says in the new session's first prompt, and the line for the feed. Null
+   * for a turn that stays put. A turn after a first one that never finished
+   * (agentSwitchStillOwed) carries the history again, without a second line.
    */
-  const accountSwitchSeedForTurn = (input: {
+  const agentSwitchForTurn = (input: {
     readonly thread: OrchestrationThread;
     readonly modelSelection: ModelSelection | undefined;
     readonly currentMessageId: string;
+    readonly promptText: string;
+    readonly attachments: ReadonlyArray<ChatAttachment> | undefined;
   }) =>
     Effect.gen(function* () {
-      const previous = input.thread.session?.providerInstanceId;
-      const next = input.modelSelection?.instanceId;
-      if (previous === undefined || next === undefined || previous === next) return null;
-      const [from, to] = yield* Effect.all([
-        providerService.getInstanceInfo(previous),
-        providerService.getInstanceInfo(next),
-      ]);
-      if (from.driverKind !== to.driverKind) return null;
-      if (from.continuationIdentity.continuationKey === to.continuationIdentity.continuationKey) {
-        return null;
-      }
-      return buildAccountSwitchSeed({
-        messages: input.thread.messages.filter((entry) => entry.id !== input.currentMessageId),
+      const { thread } = input;
+      // Assistants have their own carry-over (hermesHandoff.ts).
+      if (isAssistantConversation(thread)) return null;
+      const previous = thread.session?.providerInstanceId;
+      if (previous === undefined) return null;
+      const live =
+        input.modelSelection === undefined &&
+        (yield* providerService.listSessions()).some((session) => session.threadId === thread.id);
+      const selection = input.modelSelection ?? thread.modelSelection;
+      const next = live ? previous : selection.instanceId;
+      const moved = next !== previous && (yield* leavesSession(previous, next));
+      if (!moved && !agentSwitchStillOwed(thread)) return null;
+
+      // Once the session already moved, it is the one before that who left.
+      const owedFrom = moved ? null : latestAgentSwitch(thread.activities)?.fromInstanceId;
+      const from = yield* agentName(owedFrom ? ProviderInstanceId.make(owedFrom) : previous);
+      const to = yield* agentName(next);
+      const holdsOutsideText = thread.messages.some(messageHoldsOutsideText);
+      const seed = buildAgentSwitchSeed({
+        threadId: thread.id,
+        thread,
+        currentMessageId: input.currentMessageId,
+        fromAgent: from.driverKind === to.driverKind ? null : from.name,
+        budget: handoffHistoryBudget({
+          tokenCap: handoffCap,
+          userText: input.promptText,
+          attachments: input.attachments,
+          contextWindow: yield* contextWindowOf(selection),
+        }),
+        holdsOutsideText,
       });
+      if (!moved) return { seed: seed?.text ?? null, line: null, narrowToAsk: false };
+      const message = thread.messages.find((entry) => entry.id === input.currentMessageId);
+      return {
+        seed: seed?.text ?? null,
+        narrowToAsk: holdsOutsideText && thread.runtimeMode !== "approval-required",
+        line: {
+          to: to.name,
+          toInstanceId: next,
+          fromInstanceId: previous,
+          carried: seed?.carried ?? 0,
+          total: seed?.total ?? 0,
+          turnCount: thread.checkpoints.reduce(
+            (count, checkpoint) => Math.max(count, checkpoint.checkpointTurnCount),
+            0,
+          ),
+          // "Continue with <account>" says it in its own note.
+          ...(message?.text === `${UNO_WORK_NOTE_PREFIX}${ACCOUNT_SWITCH_NOTE_BODY}`
+            ? { silent: true }
+            : {}),
+        } satisfies AgentSwitchActivityPayload,
+      };
     }).pipe(Effect.orElseSucceed(() => null));
 
   /**

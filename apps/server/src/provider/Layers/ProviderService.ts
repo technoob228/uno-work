@@ -1073,6 +1073,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           provider: routed.adapter.provider,
           providerInstanceId: routed.instanceId,
           status: "stopped",
+          ...(input.forgetResume === true ? { resumeCursor: null } : {}),
           runtimePayload: {
             activeTurnId: null,
           },

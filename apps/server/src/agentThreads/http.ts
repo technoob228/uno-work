@@ -3,7 +3,8 @@
  *
  * - `POST /api/threads`                   — spawn a thread and start its first turn;
  * - `GET  /api/threads`                   — `?scope=children|project|all`, default the caller's children;
- * - `GET  /api/threads/:threadId`         — status + last messages, `?limit`, `?waitMs` long-poll;
+ * - `GET  /api/threads/:threadId`         — status + last messages, `?limit`, `?waitMs` long-poll,
+ *                                            `?before` to page back, `?textOffset` to read on;
  * - `POST /api/threads/:threadId/messages` — send a turn to a child or a peer (409 when the
  *   person closed the chat to agents / is asked there, or the chat is busy; `waitMs` waits
  *   for a busy one);
@@ -169,6 +170,8 @@ export const agentThreadsGetRouteLayer = HttpRouter.add(
         threadId: params["threadId"],
         limit: searchParam(request, "limit"),
         waitMs: searchParam(request, "waitMs"),
+        before: searchParam(request, "before"),
+        textOffset: searchParam(request, "textOffset"),
       }),
     );
   }),

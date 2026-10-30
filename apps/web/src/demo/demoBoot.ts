@@ -5,6 +5,7 @@
  * the browser tests use). Nothing leaves the browser. Grown from the w0115
  * sidebar prototype (fix/w0115-sidebar-proto: protoBoot.ts).
  */
+import { AGENT_SWITCH_ACTIVITY_KIND, agentSwitchLine } from "@t3tools/shared/handoff";
 import {
   ASSISTANT_PROJECT_ID,
   ORCHESTRATION_WS_METHODS,
@@ -34,6 +35,8 @@ import {
 } from "./demoBrowser";
 import "./seedTabs";
 import { DEMO_ASSIST, useDemoStore } from "./demoFlag";
+import { isWoken, startLinks, trackClient } from "./assist/links";
+import { demoMetrics } from "./assist/metrics";
 import {
   type DemoInboxInput,
   type DemoQuestion,
@@ -131,6 +134,8 @@ function seedLocalStorage() {
       // p5: every computer in one sidebar, one list (no grouping).
       sidebarEnvironmentScope: "all",
       sidebarGroupLevels: [],
+      // Several computers: the spaces option as the world asks (Settings can change it live).
+      ...(DEMO_ASSIST ? { computerSpaces: WORLD.spaces === "on" } : {}),
     }),
   );
   const records = savedMachines().map((machine) => ({
@@ -368,6 +373,8 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     case WS_METHODS.unoComputerGetState:
       return computerStateFor(machine);
     case WS_METHODS.unoComputerLocalMetrics:
+      // Multi-computer variants: each computer's own live load (assist/metrics.ts).
+      if (DEMO_ASSIST) return demoMetrics(machine);
       return {
         hostname: machine.label,
         platform: machine.os,
@@ -595,7 +602,14 @@ function cloudState() {
       ? [
           box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
           ...(WORLD.account === "live"
-            ? [box(MACHINES.product.boxId!, MACHINES.product.label, "sleeping")]
+            ? [
+                box(
+                  MACHINES.product.boxId!,
+                  MACHINES.product.label,
+                  // Multi-computer variants: `__mcDemo.wake("product")` wakes it.
+                  isWoken("product") ? "running" : "sleeping",
+                ),
+              ]
             : []),
         ]
       : [
@@ -807,6 +821,7 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       }
       if (target && command.type === "thread.turn.start") {
         const message = command.message as { messageId: string; text: string };
+        recordAgentSwitch(target, command.modelSelection);
         if (typeof command.titleSeed === "string" && target.title === "New chat")
           target.title = command.titleSeed;
         startTurn(target, message.messageId, message.text);
@@ -830,6 +845,37 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
   touch(model);
   publishThread(machine, String(command.threadId));
   return { sequence: commandSequence };
+}
+
+/** The chat moved to another agent: the daemon's line in the feed (orchestration/handoff.ts). */
+function recordAgentSwitch(target: WireThread & Record<string, unknown>, selection: unknown) {
+  const next = selection as { instanceId: string; model: string } | undefined;
+  const session = target.session as { providerInstanceId?: string } | null;
+  const previous = session?.providerInstanceId ?? String(target.modelSelection.instanceId);
+  if (!next || next.instanceId === previous) return;
+  const names: Record<string, string> = { claudeAgent: "Claude", codex: "Codex" };
+  const total = (target.messages as unknown[]).length;
+  const to = names[next.instanceId] ?? next.instanceId;
+  const payload = {
+    to,
+    toInstanceId: next.instanceId,
+    fromInstanceId: previous,
+    carried: total,
+    total,
+    turnCount: 0,
+  };
+  const createdAt = new Date().toISOString();
+  (target.activities as Array<Record<string, unknown>>).push({
+    id: `activity-agent-switch-${commandSequence}`,
+    tone: "info",
+    kind: AGENT_SWITCH_ACTIVITY_KIND,
+    summary: agentSwitchLine(payload),
+    payload,
+    turnId: null,
+    createdAt,
+  });
+  target.modelSelection = next as never;
+  if (session) session.providerInstanceId = next.instanceId;
 }
 
 function startTurn(target: WireThread & Record<string, unknown>, messageId: string, text: string) {
@@ -1647,6 +1693,7 @@ export const assistDemo = {
 };
 
 function startAssist() {
+  startLinks();
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });
@@ -1688,6 +1735,8 @@ export async function startDemo(): Promise<void> {
         client.close(4000, "asleep");
         return;
       }
+      // Multi-computer variants: a flaky link closes this socket on its next drop.
+      if (DEMO_ASSIST) trackClient(machine.key, client);
       void harnessFor(machine).then((harness) => {
         harness.connect(client);
         client.addEventListener("message", (event) => {

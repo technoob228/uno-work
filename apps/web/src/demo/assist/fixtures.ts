@@ -195,8 +195,33 @@ function liveChats(world: AssistWorld): ChatSpec[] {
       ],
     },
   ];
+  // Multi-computer variants (28.10): one chat at work on each computer that's on.
+  chats.push({
+    id: "w-refunds",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Add refunds to the orders bot",
+    minutesAgo: 1,
+    runningFor: 260,
+    state: "running",
+    role: "solo",
+    now: "Running the bot's tests",
+    messages: [["user", "Add a /refund command to the orders bot: refund by order number."]],
+  });
   if (macOnline(world)) {
     chats.push(
+      {
+        id: "m-screens",
+        machine: "mac",
+        project: "p-mac-home",
+        title: "Rename screenshots by date",
+        minutesAgo: 1,
+        runningFor: 90,
+        state: "running",
+        role: "solo",
+        now: "Renamed 140 of 214",
+        messages: [["user", "Rename the screenshots on my Desktop by date, like 2026-10-28 14.03."]],
+      },
       {
         id: "m-landing-build",
         machine: "mac",

@@ -29,6 +29,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
+import { askHoldsOnAgent } from "@t3tools/shared/handoff";
 import { SCHEDULED_TASK_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { Context, Data, Effect, Layer, Option } from "effect";
 
@@ -56,7 +57,7 @@ export function canHoldOutsideText(
   projectId: string,
   modelSelection: { readonly instanceId: string },
 ): boolean {
-  return !isAssistantProjectId(projectId) && !/hermes/i.test(modelSelection.instanceId);
+  return !isAssistantProjectId(projectId) && askHoldsOnAgent(modelSelection);
 }
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */

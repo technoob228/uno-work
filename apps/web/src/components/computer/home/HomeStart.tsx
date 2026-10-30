@@ -51,6 +51,7 @@ import {
   useHomeThreads,
   useSkippedQuestionThreads,
 } from "./HomeThreads";
+import { useSpaceScope } from "../../../spaces";
 import {
   AiSpendWidget,
   AppsWidget,
@@ -270,7 +271,13 @@ export function HomeStart({
   /** A new chat with `prompt` typed in, not sent. */
   onAskUno: (prompt: string) => Promise<void>;
 }) {
-  const { threads, now } = useHomeThreads();
+  const { threads: allThreads, now } = useHomeThreads();
+  // Spaces on (Misha 28.10): Home is the space's — only its computer's chats.
+  const space = useSpaceScope();
+  const threads = useMemo(
+    () => (space ? allThreads.filter((thread) => thread.environmentId === space) : allThreads),
+    [allThreads, space],
+  );
   const skippedQuestions = useSkippedQuestionThreads(now);
   const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
   // The computer's chats haven't come yet: "Needs you" / "In progress" would

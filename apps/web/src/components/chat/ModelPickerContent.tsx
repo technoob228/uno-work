@@ -319,6 +319,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    */
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
+  /** A line over the list: what picking here does in a started chat. */
+  note?: string | null;
   /**
    * All configured provider instances in display order. Used to render
    * the sidebar (one button per instance) and to resolve display names
@@ -1240,6 +1242,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               isLocked && !showLockedInstanceSidebar ? "min-w-0" : showSidebar && "border-l",
             )}
           >
+            {props.note ? (
+              <p
+                className="border-b px-3 py-2 text-[11px] leading-snug text-muted-foreground"
+                data-testid="model-picker-note"
+              >
+                {props.note}
+              </p>
+            ) : null}
             {/* Search bar */}
             <div className="border-b px-3 py-2">
               <div className="flex items-center gap-1">

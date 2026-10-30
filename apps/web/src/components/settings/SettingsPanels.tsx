@@ -713,35 +713,38 @@ export function GeneralSettingsPanel({
               }
             />
 
-            <SettingsRow
-              title="Chats from all computers"
-              description="Show the chats of every computer you use in one sidebar. A project on another computer gets its computer's badge."
-              resetAction={
-                settings.sidebarEnvironmentScope !==
-                DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope ? (
-                  <SettingResetButton
-                    label="computers in the sidebar"
-                    onClick={() =>
-                      updateSettings({
-                        sidebarEnvironmentScope: DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope,
-                      })
+            {/* A space per computer shows one computer's chats only — these two don't apply. */}
+            {settings.computerSpaces ? null : (
+              <SettingsRow
+                title="Chats from all computers"
+                description="Show the chats of every computer you use in one sidebar. A project on another computer gets its computer's badge."
+                resetAction={
+                  settings.sidebarEnvironmentScope !==
+                  DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope ? (
+                    <SettingResetButton
+                      label="computers in the sidebar"
+                      onClick={() =>
+                        updateSettings({
+                          sidebarEnvironmentScope: DEFAULT_UNIFIED_SETTINGS.sidebarEnvironmentScope,
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <Switch
+                    checked={settings.sidebarEnvironmentScope === "all"}
+                    onCheckedChange={(checked) =>
+                      updateSettings({ sidebarEnvironmentScope: checked ? "all" : "active" })
                     }
+                    aria-label="Chats from all computers"
+                    data-testid="settings-sidebar-all-computers"
                   />
-                ) : null
-              }
-              control={
-                <Switch
-                  checked={settings.sidebarEnvironmentScope === "all"}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ sidebarEnvironmentScope: checked ? "all" : "active" })
-                  }
-                  aria-label="Chats from all computers"
-                  data-testid="settings-sidebar-all-computers"
-                />
-              }
-            />
+                }
+              />
+            )}
 
-            {settings.sidebarEnvironmentScope === "all" ? (
+            {!settings.computerSpaces && settings.sidebarEnvironmentScope === "all" ? (
               <SettingsRow
                 title="Group by computer"
                 description="Each computer gets its own heading in the sidebar, with its chats inside."
@@ -789,6 +792,30 @@ export function GeneralSettingsPanel({
             }
           />
         )}
+
+        {/* Several computers (Misha 28.10): a space per computer, off by default. */}
+        <SettingsRow
+          title="A separate space for each computer"
+          description="On: each computer is its own space — its chats, apps, Home and Inbox, nothing from the others. Switch spaces in the strip on the left or the computers chip at the top right. Off: everything together, every computer at a glance at the top right."
+          resetAction={
+            settings.computerSpaces !== DEFAULT_UNIFIED_SETTINGS.computerSpaces ? (
+              <SettingResetButton
+                label="computer spaces"
+                onClick={() =>
+                  updateSettings({ computerSpaces: DEFAULT_UNIFIED_SETTINGS.computerSpaces })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.computerSpaces}
+              onCheckedChange={(checked) => updateSettings({ computerSpaces: Boolean(checked) })}
+              aria-label="A separate space for each computer"
+              data-testid="settings-computer-spaces"
+            />
+          }
+        />
 
         <SettingsRow
           title="Hide working chats"

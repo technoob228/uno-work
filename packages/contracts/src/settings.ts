@@ -249,6 +249,11 @@ export const ClientSettingsSchema = Schema.Struct({
   // Status view: no Working section (Misha 30.10: running chats don't need the
   // person). The open chat stays; a chat waiting for the person is not "working".
   sidebarHideWorkingChats: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Several computers (Misha 28.10). Off — one space: every computer's chats
+  // together, all computers in the top-right chip. On — a space per computer,
+  // two universes that don't overlap: chats, apps, Home, Inbox are the active
+  // computer's; switched in the rail on the left or the top-right chip.
+  computerSpaces: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // How the sidebar groups chats since 0.0.138 (Misha 16.10): project,
   // status, computer in the order picked; [] — one list, newest first. Null —
   // not chosen yet: `sidebarInboxMode` above decides (status or project).

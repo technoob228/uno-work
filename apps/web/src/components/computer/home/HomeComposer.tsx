@@ -105,6 +105,7 @@ import {
   useNameAmongComputers,
   useSwitcherMachines,
 } from "../../computerSwitcher/useComputerSwitcher";
+import { useSpacesOn } from "../../../spaces";
 import { useStore } from "../../../store";
 import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
@@ -274,6 +275,8 @@ export function HomeComposer({
     setFolder(null);
   };
   const severalComputers = useSwitcherMachines().length > 1;
+  // A space is its computer: nothing to pick inside it.
+  const spacesOn = useSpacesOn();
   const assistantComputer = useNameAmongComputers(
     (assistant?.environmentId as EnvironmentId | undefined) ?? null,
   );
@@ -627,7 +630,7 @@ export function HomeComposer({
                     {assistantComputer}
                   </span>
                 ) : null
-              ) : minimal && !severalComputers ? null : (
+              ) : spacesOn || (minimal && !severalComputers) ? null : (
                 <NewChatComputerPicker
                   variant="chip"
                   environmentId={targetEnvironmentId}

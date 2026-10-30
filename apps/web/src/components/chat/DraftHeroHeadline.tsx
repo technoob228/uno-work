@@ -27,6 +27,7 @@ import { currentStaleBundlePage, switchReloadUrl } from "../../staleBundle";
 import { readStaleBundleMachine } from "../../staleBundleMachine";
 import { useHomeStarters } from "../computer/home/useHomeStarters";
 import { useHomeThreads } from "../computer/home/HomeThreads";
+import { useSpacesOn } from "../../spaces";
 import { useStartableAssistants } from "../assistants/useAssistantTeam";
 import { toastManager } from "../ui/toast";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
@@ -97,6 +98,8 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
       }}
     />
   );
+  // A space is its computer: a new chat in it has nowhere else to go.
+  const spacesOn = useSpacesOn();
   const computerPicker = (
     <NewChatComputerPicker
       variant="inline"
@@ -122,9 +125,9 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center px-2">
       <DraftHeroProjectHeading
         folderPicker={folderPicker}
-        computerPicker={assistant ? null : computerPicker}
+        computerPicker={assistant || spacesOn ? null : computerPicker}
         folderName={assistant ? assistant.profile.name : folder ? folder.name : "Home folder"}
-        computerName={assistant ? null : computerName}
+        computerName={assistant || spacesOn ? null : computerName}
         asksAssistant={assistant !== null}
         noProject={home !== null && isNoProjectRoot(projectCwd, home)}
       />

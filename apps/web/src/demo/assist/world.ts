@@ -24,8 +24,16 @@ export interface AssistWorld {
   readonly account: "live" | "new";
   /** The account's plan: Free computers fall asleep, Plus keeps uno-work on. */
   readonly tier: "free" | "plus";
-  /** The MacBook (live only): online, or asleep (its chats wait). */
-  readonly mac: "online" | "asleep";
+  /**
+   * The MacBook (live only): online; asleep (its chats wait); flaky — drops
+   * for a few seconds every ~45 s and comes back (Misha 28.10: "computers
+   * keep falling off"); offline — not reachable at all (lid closed, no Wi-Fi).
+   */
+  readonly mac: "online" | "asleep" | "flaky" | "offline";
+  /** Multi-computer variants (28.10): uno-work idles, or is busy (CPU ~90 %, disk almost full). */
+  readonly load: "normal" | "busy";
+  /** Settings → "A separate space for each computer" at the start (off by default). */
+  readonly spaces: "off" | "on";
   /** Telegram linked to Uno (the shared bot), or not yet. */
   readonly telegram: "off" | "on";
   /** The two modes (Misha 23.10): does it itself, or asks first (an Allow card). */
@@ -66,6 +74,8 @@ export const LIVE_WORLD: AssistWorld = {
   account: "live",
   tier: "plus",
   mac: "online",
+  load: "normal",
+  spaces: "off",
   telegram: "on",
   mode: "itself",
   platform: "cloud",
@@ -78,6 +88,8 @@ export const NEW_WORLD: AssistWorld = {
   account: "new",
   tier: "free",
   mac: "online",
+  load: "normal",
+  spaces: "off",
   telegram: "off",
   mode: "itself",
   platform: "cloud",
@@ -123,7 +135,9 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
   const next: AssistWorld = {
     account: start.account,
     tier: take("tier", ["free", "plus"] as const) ?? start.tier,
-    mac: take("mac", ["online", "asleep"] as const) ?? start.mac,
+    mac: take("mac", ["online", "asleep", "flaky", "offline"] as const) ?? start.mac,
+    load: take("load", ["normal", "busy"] as const) ?? start.load,
+    spaces: take("spaces", ["off", "on"] as const) ?? start.spaces,
     telegram: take("tg", ["off", "on"] as const) ?? start.telegram,
     mode: take("mode", ["itself", "asks-first"] as const) ?? start.mode,
     platform: take("platform", ["cloud", "desktop"] as const) ?? start.platform,
@@ -186,5 +200,6 @@ export function switchWorld(patch: Partial<AssistWorld>) {
 }
 
 export const isLive = (world: AssistWorld = WORLD) => world.account === "live";
+/** The MacBook has its chats (it's on, even if its link drops now and then). */
 export const macOnline = (world: AssistWorld = WORLD) =>
-  world.account === "live" && world.mac === "online";
+  world.account === "live" && (world.mac === "online" || world.mac === "flaky");
