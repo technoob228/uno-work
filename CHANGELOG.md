@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.167 — 2026-10-30
+
+- The T3 Code app from the App Store and Google Play connects to Uno Work again (it stopped on 02.10, when the app moved to a newer protocol). On the phone you see your projects and chats, read them, write, start a new chat in a project, answer "allow?" and the agent's questions, and stop a reply. To pair: turn on Settings → Developer → Dev mode, open Settings → Phone → "Pair a mobile app (T3 Code)" and scan the code with the camera button inside the T3 Code app. Not on the phone yet: switching the model, attachments, and queueing a message while the agent is still answering.
+- Read and unread live on your computer now, not in one browser: a chat you opened or marked Read in Work shows as read on the phone and in other windows, and "Mark unread" on the phone brings the dot back in Work.
+- The sidebar no longer redraws itself on every agent update that changes nothing you can see — less work for the browser while agents run.
+
+---
+
 ## v0.0.166 — 2026-10-30
 
 - Uno Notetaker sits next to Uno Drive: in the sidebar (Built in), on the Computer page and in the App Store. It isn't installed by itself — press Add once and it's there.

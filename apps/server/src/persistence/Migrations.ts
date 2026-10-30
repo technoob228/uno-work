@@ -127,7 +127,8 @@ export const migrationEntries = [
   [48, "ThreadAssistantRole", Migration0048],
   [49, "ThreadAgentsClosed", Migration0049],
   [50, "ManagerConnectorPendingReplies", Migration0050],
-  // 51 is reserved by feat/sidebar-project-icons-owner-1028 (ThreadOwner).
+  // 51 is skipped on purpose: the migrator only runs ids above the last applied one,
+  // so ThreadOwner (feat/t3-port-1029) must ship as 053, not 051.
   [52, "ProjectionThreadsLastVisited", Migration0052],
 ] as const;
 
