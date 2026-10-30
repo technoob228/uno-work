@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.168 — 2026-10-30
+
+- Uno no longer says «запустил» for a chat that didn't start. Every "launched" in Uno's answer now stands for a chat that really exists; if none was started, Uno says so at once — in the app, in Telegram and in Slack.
+- When the AI you asked for isn't ready on this computer (for example Claude isn't signed in and Uno credits for it are off), Uno tells you right away in one line and asks: connect it, or run the chat on another AI? It no longer silently switches models or waits two minutes before giving up.
+
+---
+
 ## v0.0.167 — 2026-10-30
 
 - The T3 Code app from the App Store and Google Play connects to Uno Work again (it stopped on 02.10, when the app moved to a newer protocol). On the phone you see your projects and chats, read them, write, start a new chat in a project, answer "allow?" and the agent's questions, and stop a reply. To pair: turn on Settings → Developer → Dev mode, open Settings → Phone → "Pair a mobile app (T3 Code)" and scan the code with the camera button inside the T3 Code app. Not on the phone yet: switching the model, attachments, and queueing a message while the agent is still answering.
