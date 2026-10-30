@@ -38,6 +38,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
+import { laterIso } from "../projector.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -581,6 +582,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             settledOverride: null,
             settledAt: null,
             lastVisitedAt: null,
+            readAt: null,
+            readStateUpdatedAt: null,
             spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
             controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -718,17 +721,27 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.visited":
-        case "thread.marked-unread": {
+        case "thread.marked-unread":
+        case "thread.read": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
           if (Option.isNone(existingRow)) {
             return;
           }
+          const row = existingRow.value;
           // Read state only: updatedAt stays, so reading never reorders.
           yield* projectionThreadRepository.upsert({
-            ...existingRow.value,
-            lastVisitedAt: event.type === "thread.visited" ? event.payload.lastVisitedAt : null,
+            ...row,
+            ...(event.type === "thread.visited"
+              ? { lastVisitedAt: event.payload.lastVisitedAt }
+              : event.type === "thread.read"
+                ? {
+                    readAt: event.payload.readAt,
+                    lastVisitedAt: laterIso(row.lastVisitedAt ?? null, event.payload.readAt),
+                  }
+                : { lastVisitedAt: null, readAt: null }),
+            readStateUpdatedAt: event.occurredAt,
           });
           return;
         }

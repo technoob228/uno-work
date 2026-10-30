@@ -135,4 +135,47 @@ describe("thread.visit / thread.mark-unread (server read state)", () => {
     expect(events.map((event) => event.type)).toEqual(["thread.marked-unread"]);
     expect(readModel.threads[0]!.lastVisitedAt).toBeNull();
   });
+
+  it("Read (Work) clears Your turn and moves the watermark up; mark-unread clears both", async () => {
+    const seeded = await seedThread();
+    const at = new Date(Date.now() + 1_000).toISOString();
+    const read: OrchestrationCommand = {
+      type: "thread.read",
+      commandId: CommandId.make("cmd-read"),
+      threadId: THREAD_ID,
+      readAt: at,
+    };
+    const { events, readModel } = await decideAndApply(seeded, read);
+    expect(events.map((event) => event.type)).toEqual(["thread.read"]);
+    const after = readModel.threads[0]!;
+    expect(after.readAt).toBe(at);
+    expect(after.lastVisitedAt).toBe(at);
+    expect(after.readStateUpdatedAt).not.toBeNull();
+    expect(after.updatedAt).toBe(seeded.threads[0]!.updatedAt);
+    // Repeated Read: no event.
+    expect(await decide(readModel, { ...read, commandId: CommandId.make("cmd-read-2") })).toEqual(
+      [],
+    );
+    const unread = await decideAndApply(readModel, {
+      type: "thread.mark-unread",
+      commandId: CommandId.make("cmd-unread-2"),
+      threadId: THREAD_ID,
+    });
+    expect(unread.events.map((event) => event.type)).toEqual(["thread.marked-unread"]);
+    expect(unread.readModel.threads[0]!.readAt).toBeNull();
+    expect(unread.readModel.threads[0]!.lastVisitedAt).toBeNull();
+  });
+
+  it("Read keeps a later visit", async () => {
+    const seeded = await seedThread();
+    const later = new Date(Date.now() + 5_000).toISOString();
+    const visited = await decideAndApply(seeded, visit(later));
+    const { readModel } = await decideAndApply(visited.readModel, {
+      type: "thread.read",
+      commandId: CommandId.make("cmd-read"),
+      threadId: THREAD_ID,
+      readAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    expect(readModel.threads[0]!.lastVisitedAt).toBe(later);
+  });
 });

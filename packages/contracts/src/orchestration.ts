@@ -501,6 +501,13 @@ export const OrchestrationThread = Schema.Struct({
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
   lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Work's manual "Read" (the chat stops asking for "Your turn"); null when
+  // never pressed or marked unread since (migration 052).
+  readAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // When any of the read state above last changed on the server (visit,
+  // Read, mark unread): clients adopt a server decision they have not seen
+  // yet, even when it lowers the mark (mark unread from another device).
+  readStateUpdatedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // The thread whose agent created this one (bridge `POST /api/threads`);
   // null for threads a human (or the manager) created. Immutable.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
@@ -572,6 +579,13 @@ export const OrchestrationThreadShell = Schema.Struct({
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
   lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Work's manual "Read" (the chat stops asking for "Your turn"); null when
+  // never pressed or marked unread since (migration 052).
+  readAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // When any of the read state above last changed on the server (visit,
+  // Read, mark unread): clients adopt a server decision they have not seen
+  // yet, even when it lowers the mark (mark unread from another device).
+  readStateUpdatedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.spawnedByThreadId / controller.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   controller: Schema.optional(ThreadController),
@@ -780,6 +794,15 @@ const ThreadMarkUnreadCommand = Schema.Struct({
   threadId: ThreadId,
 });
 
+// Work's manual "Read": clears "Your turn" and moves the visit watermark up to
+// readAt, so other clients (the phone) see the chat read too.
+const ThreadReadCommand = Schema.Struct({
+  type: Schema.Literal("thread.read"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  readAt: IsoDateTime,
+});
+
 // Handoff between the human and the spawning agent. A human may set either
 // value; an agent (origin kind "agent") may only release control to "human".
 // The app no longer offers "Hand back to agent" (0.0.115): the command stays
@@ -929,6 +952,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnsettleCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
+  ThreadReadCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -957,6 +981,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnsettleCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
+  ThreadReadCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1083,6 +1108,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unsettled",
   "thread.visited",
   "thread.marked-unread",
+  "thread.read",
   "thread.control-changed",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -1218,8 +1244,14 @@ export const ThreadVisitedPayload = Schema.Struct({
   lastVisitedAt: IsoDateTime,
 });
 
+// Clears both the visit watermark and the manual Read.
 export const ThreadMarkedUnreadPayload = Schema.Struct({
   threadId: ThreadId,
+});
+
+export const ThreadReadPayload = Schema.Struct({
+  threadId: ThreadId,
+  readAt: IsoDateTime,
 });
 
 export const ThreadControlChangedPayload = Schema.Struct({
@@ -1534,6 +1566,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.marked-unread"),
     payload: ThreadMarkedUnreadPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.read"),
+    payload: ThreadReadPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
