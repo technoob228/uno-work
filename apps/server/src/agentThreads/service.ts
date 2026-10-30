@@ -47,7 +47,11 @@ import * as crypto from "node:crypto";
 import { requireBridgeThread, type BridgeAuthorization } from "../browserBridge.ts";
 import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
-import { applyPersonRoute, readPersonRoute } from "../manager/personRouting.ts";
+import {
+  applyPersonRoute,
+  readPersonRoute,
+  selectionNotReadyMessage,
+} from "../manager/personRouting.ts";
 import type {
   RemoteChatStarted,
   RemoteChatStartInput,
@@ -146,6 +150,8 @@ export interface AgentThreadsDeps {
     caller: OrchestrationThreadShell,
   ) => Effect.Effect<AssistantAccessView | null>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  /** Settings `harnessUnoCredits` (Claude Code on Uno credits allowed here). Absent: {}. */
+  readonly getHarnessUnoCredits?: Effect.Effect<Readonly<Record<string, boolean>>>;
   /**
    * This computer's box id (null on a laptop): the only `computerId` a new
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
@@ -730,6 +736,16 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             "model_required",
             'У проекта нет модели по умолчанию — передай "provider" (например "codex" или "claudeAgent") и при желании "model".',
           );
+        }
+        // An assistant's chat on a harness that can't start here is not
+        // started at all: the model hears why and asks the person.
+        if (assistantProjectId !== null) {
+          const notReady = selectionNotReadyMessage(
+            modelSelection,
+            yield* deps.getProviders,
+            deps.getHarnessUnoCredits === undefined ? {} : yield* deps.getHarnessUnoCredits,
+          );
+          if (notReady !== null) return yield* fail(409, "harness_not_ready", notReady);
         }
 
         const inherited = sameProject

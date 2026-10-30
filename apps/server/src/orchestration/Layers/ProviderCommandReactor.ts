@@ -1,4 +1,5 @@
 import {
+  ASSISTANT_PROJECT_ID,
   type ChatAttachment,
   CommandId,
   EventId,
@@ -16,6 +17,8 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
+import * as os from "node:os";
+
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import {
   Cache,
@@ -45,6 +48,11 @@ import {
 } from "../../assistants/askCards.ts";
 import { agentMessageEnvelope } from "../../agentThreads/logic.ts";
 import { currentAssistantModelSelection } from "../../manager/assistantEngineSelection.ts";
+import {
+  annotateDispatcherHistory,
+  launchesOfTurn,
+  type LaunchFact,
+} from "../../manager/launchTruth.ts";
 import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -114,6 +122,17 @@ function sanitizeProviderContextText(value: string): string {
   }
   return `${compacted.slice(0, PROVIDER_CONTEXT_TEXT_MAX_CHARS)}\n[message truncated]`;
 }
+
+/** The Uno chat (the pinned assistant, a dispatcher): its history carries launch facts. */
+const isUnoDispatcherThread = (thread: OrchestrationThread): boolean =>
+  thread.projectId === ASSISTANT_PROJECT_ID && isAssistantConversation(thread);
+
+const homeRelative = (folder: string): string => {
+  const home = os.homedir();
+  return folder === home || folder.startsWith(`${home}/`)
+    ? `~${folder.slice(home.length)}`
+    : folder;
+};
 
 function buildProviderContextMessages(input: {
   readonly messages: ReadonlyArray<{
@@ -731,6 +750,55 @@ const make = Effect.gen(function* () {
     return startedSession.threadId;
   });
 
+  /**
+   * The Uno chat's messages as its fresh Hermes session hears them (the
+   * handoff): what each turn really started, from its tool calls and the read
+   * model, instead of bare "Принял, запустил" lines the model copied without
+   * calling chat_create (canary 2534, 30.10). See manager/launchTruth.ts.
+   */
+  const dispatcherHistory = Effect.fnUntraced(function* (thread: OrchestrationThread) {
+    const recentTurns = new Set(
+      thread.messages
+        .slice(-49)
+        .map((message) => message.turnId)
+        .filter((turnId): turnId is TurnId => turnId !== null),
+    );
+    const known = new Map<string, Partial<LaunchFact>>();
+    for (const activity of thread.activities) {
+      if (activity.turnId === null || !recentTurns.has(activity.turnId)) continue;
+      for (const fact of launchesOfTurn([activity], activity.turnId)) {
+        if (fact.threadId === null || known.has(fact.threadId)) continue;
+        const shell = yield* projectionSnapshotQuery
+          .getThreadShellById(ThreadId.make(fact.threadId))
+          .pipe(
+            Effect.map(Option.getOrUndefined),
+            Effect.orElseSucceed(() => undefined),
+          );
+        if (shell === undefined) continue;
+        const project = yield* resolveProject(shell.projectId).pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+        const folder = shell.worktreePath ?? project?.workspaceRoot ?? null;
+        known.set(fact.threadId, {
+          title: shell.title,
+          cwd: folder === null ? null : homeRelative(folder),
+          model: `${shell.modelSelection.instanceId}/${shell.modelSelection.model}`,
+        });
+      }
+    }
+    return annotateDispatcherHistory(thread.messages, thread.activities, (fact) => {
+      const found = fact.threadId === null ? undefined : known.get(fact.threadId);
+      return found === undefined
+        ? fact
+        : {
+            ...fact,
+            title: fact.title ?? found.title ?? null,
+            cwd: found.cwd ?? fact.cwd,
+            model: found.model ?? fact.model,
+          };
+    });
+  });
+
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (rawInput: {
     readonly threadId: ThreadId;
     readonly messageText: string;
@@ -767,7 +835,7 @@ const make = Effect.gen(function* () {
       appendChatAttachmentsNote(input.messageText, attachmentsNote(normalizedAttachments)),
     );
     const contextMessages = buildProviderContextMessages({
-      messages: thread.messages,
+      messages: isUnoDispatcherThread(thread) ? yield* dispatcherHistory(thread) : thread.messages,
       currentMessageText: input.messageText,
       currentAttachments: normalizedAttachments,
       attachmentsNote,

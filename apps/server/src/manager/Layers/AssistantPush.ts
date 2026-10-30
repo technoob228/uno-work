@@ -19,10 +19,12 @@
  * @module manager/Layers/AssistantPush
  */
 import {
+  ASSISTANT_PROJECT_ID,
   CommandId,
   MessageId,
   ProjectId,
   ThreadId,
+  TurnId,
   assistantTokenLabel,
   type OrchestrationEvent,
   type OrchestrationThreadShell,
@@ -51,6 +53,7 @@ import {
   formatPushFallback,
   formatPushNotice,
   guessConversation,
+  isAssistantConversationThread,
   markBatchSent,
   noticeFromProbe,
   noticeFromRemoteStatus,
@@ -65,6 +68,13 @@ import {
   type PushVia,
 } from "../assistantPush.ts";
 import { isThreadBusyForNewTurn, SYSTEM_TURN_ORIGIN_COMPONENT } from "../connectorReplies.ts";
+import { detectReplyLanguage } from "../connectorReplyText.ts";
+import {
+  decideLaunchTruth,
+  LAUNCH_CHECK_ORIGIN_COMPONENT,
+  launchCheckPromptText,
+  notLaunchedText,
+} from "../launchTruth.ts";
 import { makeThreadSettlementProbe } from "../threadSettlement.ts";
 import { eventTouchesThreads } from "../threadWait.ts";
 import { AssistantPushService, type AssistantPushServiceShape } from "../Services/AssistantPush.ts";
@@ -77,6 +87,22 @@ const TICK = Duration.seconds(1);
 const PROBE_EVERY_MS = 10_000;
 /** A reported chat stays "reported by its assistant" this long (late per-chat notices). */
 const REPORTED_HOLD_MS = 10 * 60_000;
+/** Uno's final text must sit still this long before the launch check reads it. */
+const LAUNCH_SETTLE_MS = 3_000;
+/** A Uno turn the launch check still has no answer for after this long is let go. */
+const LAUNCH_WATCH_MS = 3 * 60_000;
+
+/**
+ * A Uno turn in the app (not a Telegram / Slack message: their reply path
+ * checks those itself) whose answer the launch check reads (launchTruth.ts).
+ */
+interface LaunchWatch {
+  readonly messageId: string;
+  /** The person's message the chain started from (its text, once read). */
+  readonly original: string | null;
+  readonly checksMade: number;
+  readonly sinceMs: number;
+}
 
 const stateFile = (stateDir: string) => nodePath.join(stateDir, "assistants", "push-state.json");
 
@@ -147,6 +173,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       >
     >(new Map());
     const tokenAssistantRef = yield* Ref.make<ReadonlyMap<string, string | null>>(new Map());
+    const launchWatchesRef = yield* Ref.make<ReadonlyMap<string, LaunchWatch>>(new Map());
     // The event handler and the tick both change the state: one at a time.
     const lock = yield* Semaphore.make(1);
     const exclusive = lock.withPermits(1);
@@ -277,10 +304,197 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         );
       });
 
+    // ── the Uno chat's launch check (the app) ──
+
+    /** A turn of the Uno chat starts: watch its answer when it runs for the app. */
+    const noteUnoTurn = (
+      event: Extract<OrchestrationEvent, { type: "thread.turn-start-requested" }>,
+    ) =>
+      Effect.gen(function* () {
+        const threadId = event.payload.threadId;
+        const origin = event.metadata.origin;
+        const component = origin?.kind === "system" ? origin.component : null;
+        const known = (yield* Ref.get(launchWatchesRef)).get(threadId);
+        if (known !== undefined && known.messageId === event.payload.messageId) return;
+        const forTheApp =
+          origin === undefined ||
+          component === SYSTEM_TURN_ORIGIN_COMPONENT ||
+          component === LAUNCH_CHECK_ORIGIN_COMPONENT;
+        const shell = forTheApp ? yield* shellOf(threadId) : null;
+        const watched =
+          shell !== null &&
+          shell.projectId === ASSISTANT_PROJECT_ID &&
+          isAssistantConversationThread(toPushShell(shell));
+        const nowMs = yield* Clock.currentTimeMillis;
+        yield* Ref.update(launchWatchesRef, (map) => {
+          const next = new Map(map);
+          // Any other turn (Telegram, the person again) ends the old watch.
+          if (!watched) next.delete(threadId);
+          else
+            next.set(threadId, {
+              messageId: event.payload.messageId,
+              original: null,
+              checksMade: 0,
+              sinceMs: nowMs,
+            });
+          return next;
+        });
+      });
+
+    const forgetLaunchWatch = (threadId: string) =>
+      Ref.update(launchWatchesRef, (map) => {
+        if (!map.has(threadId)) return map;
+        const next = new Map(map);
+        next.delete(threadId);
+        return next;
+      });
+
+    /** Look at one watched Uno turn: still running, fine, or a claim with no launch. */
+    const checkUnoTurn = (threadId: string, watch: LaunchWatch, nowMs: number) =>
+      Effect.gen(function* () {
+        if (nowMs - watch.sinceMs > LAUNCH_WATCH_MS) return yield* forgetLaunchWatch(threadId);
+        const id = ThreadId.make(threadId);
+        const turns = yield* turnRepository
+          .listByThreadId({ threadId: id })
+          .pipe(Effect.orElseSucceed(() => []));
+        const turn = turns.find(
+          (entry) => entry.pendingMessageId === watch.messageId && entry.turnId !== null,
+        );
+        if (turn === undefined || turn.turnId === null) return;
+        if (turn.state === "pending" || turn.state === "running") return;
+        if (turn.state !== "completed") return yield* forgetLaunchWatch(threadId);
+        // A Telegram / Slack row owns it: their reply path checks it.
+        const rows = yield* pendingReplies
+          .listByThread({ threadId: id, limit: 20 })
+          .pipe(Effect.orElseSucceed(() => []));
+        if (rows.some((row) => row.userMessageId === watch.messageId)) {
+          return yield* forgetLaunchWatch(threadId);
+        }
+        const detail = Option.getOrNull(
+          yield* projections
+            .getThreadDetailById(id)
+            .pipe(Effect.orElseSucceed(() => Option.none())),
+        );
+        if (detail === null) return yield* forgetLaunchWatch(threadId);
+        const session = detail.session;
+        if (
+          session !== null &&
+          (session.status === "running" || session.status === "starting") &&
+          session.activeTurnId === turn.turnId
+        ) {
+          return;
+        }
+        const own = detail.messages.filter(
+          (message) =>
+            message.role === "assistant" &&
+            message.turnId === turn.turnId &&
+            message.text.trim().length > 0,
+        );
+        if (own.some((message) => message.streaming)) return;
+        const final = own.at(-1);
+        if (final === undefined) {
+          if (nowMs - Date.parse(turn.completedAt ?? turn.requestedAt) > 45_000) {
+            yield* forgetLaunchWatch(threadId);
+          }
+          return;
+        }
+        if (
+          nowMs - Math.max(Date.parse(final.updatedAt), Date.parse(turn.completedAt ?? "")) <
+          LAUNCH_SETTLE_MS
+        ) {
+          return;
+        }
+        const original =
+          watch.original ??
+          detail.messages.find((message) => message.id === watch.messageId)?.text ??
+          "";
+        const truth = decideLaunchTruth({
+          text: final.text,
+          activities: detail.activities,
+          turnId: turn.turnId,
+          checksMade: watch.checksMade,
+        });
+        if (truth.kind === "ok") return yield* forgetLaunchWatch(threadId);
+        if (truth.kind === "check") {
+          if (!(yield* conversationFree(id))) return;
+          const messageId = MessageId.make(crypto.randomUUID());
+          yield* Ref.update(launchWatchesRef, (map) =>
+            new Map(map).set(threadId, {
+              messageId,
+              original,
+              checksMade: watch.checksMade + 1,
+              sinceMs: nowMs,
+            }),
+          );
+          yield* engine.dispatch(
+            {
+              type: "thread.turn.start",
+              commandId: CommandId.make(`${LAUNCH_CHECK_ORIGIN_COMPONENT}:${crypto.randomUUID()}`),
+              threadId: id,
+              message: {
+                messageId,
+                role: "user",
+                text: launchCheckPromptText(original),
+                attachments: [],
+              },
+              runtimeMode: detail.runtimeMode,
+              interactionMode: detail.interactionMode,
+              createdAt: new Date(nowMs).toISOString(),
+            },
+            { origin: systemCommandOrigin(LAUNCH_CHECK_ORIGIN_COMPONENT, "launch claim, no call") },
+          );
+          yield* Effect.logInfo("uno launch check: a claim with no launch; asked Uno once").pipe(
+            Effect.annotateLogs({ threadId, turnId: turn.turnId }),
+          );
+          return;
+        }
+        // Claimed again with no call: the person reads the honest line.
+        const at = new Date(nowMs).toISOString();
+        const messageId = MessageId.make(crypto.randomUUID());
+        const turnId = TurnId.make(turn.turnId);
+        yield* engine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: CommandId.make(
+            `${LAUNCH_CHECK_ORIGIN_COMPONENT}:delta:${crypto.randomUUID()}`,
+          ),
+          threadId: id,
+          messageId,
+          delta: notLaunchedText(detectReplyLanguage(original, null)),
+          turnId,
+          createdAt: at,
+        });
+        yield* engine.dispatch({
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make(`${LAUNCH_CHECK_ORIGIN_COMPONENT}:done:${crypto.randomUUID()}`),
+          threadId: id,
+          messageId,
+          turnId,
+          createdAt: at,
+        });
+        yield* Effect.logWarning("uno launch check: claimed again with no launch; said so").pipe(
+          Effect.annotateLogs({ threadId, turnId: turn.turnId }),
+        );
+        yield* forgetLaunchWatch(threadId);
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("uno launch check failed on a turn").pipe(
+            Effect.annotateLogs({ threadId, cause }),
+            Effect.andThen(forgetLaunchWatch(threadId)),
+          ),
+        ),
+      );
+
+    const lookAtLaunches = (nowMs: number) =>
+      Effect.gen(function* () {
+        const watches = yield* Ref.get(launchWatchesRef);
+        for (const [threadId, watch] of watches) yield* checkUnoTurn(threadId, watch, nowMs);
+      });
+
     const handleEvent = (event: OrchestrationEvent) =>
       Effect.gen(function* () {
         if (event.type === "thread.turn-start-requested") {
           yield* exclusive(onTurnStart(event));
+          yield* noteUnoTurn(event);
           return;
         }
         if (event.type === "thread.archived" || event.type === "thread.deleted") {
@@ -546,6 +760,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       const nowMs = yield* Clock.currentTimeMillis;
       yield* lookAtWatches(nowMs);
       yield* flushOutbox(nowMs);
+      yield* lookAtLaunches(nowMs);
     }).pipe(
       exclusive,
       Effect.catchCause((cause) =>

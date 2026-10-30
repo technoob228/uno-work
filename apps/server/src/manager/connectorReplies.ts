@@ -64,7 +64,7 @@ import {
   type ProjectionTurn,
 } from "../persistence/Services/ProjectionTurns.ts";
 import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
-import { takeOutgoingFiles } from "./outgoingFileQueue.ts";
+import { queueOutgoingFile, takeOutgoingFiles } from "./outgoingFileQueue.ts";
 import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
 import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
 import {
@@ -77,6 +77,7 @@ import {
 import { UNO_WORK_OPEN_URL } from "./taskDoneNotify.ts";
 import { currentWorkAddress } from "../workAddress.ts";
 import { extractOutgoingFiles } from "./telegramMedia.ts";
+import { decideLaunchTruth, launchCheckPromptText, notLaunchedText } from "./launchTruth.ts";
 
 // ── Timings ─────────────────────────────────────────────────────────────
 
@@ -449,6 +450,12 @@ export interface PendingReplyMeta {
   readonly watchdogStoppedAt?: string;
   /** Uno turns of this row the watchdog stopped and ran again. */
   readonly watchdogRetries?: number;
+  /**
+   * Hidden launch checks made for this row: Uno's answer said it started a
+   * chat and its turn started none (`launchTruth.ts`). After one, a claim
+   * with no call reaches the person as {@link notLaunchedText}.
+   */
+  readonly launchChecks?: number;
   /** When the row's turn was first dispatched (a queued row waited before). */
   readonly dispatchedAt?: string;
   /**
@@ -1006,6 +1013,34 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         });
       });
 
+    // ── the Uno chat's launch check ──
+
+    /**
+     * Uno answered "запустил" and its turn started no chat: before anything
+     * reaches the person, ask it once (a quiet "(Uno Work)" note in the app)
+     * to call chat_create now or say it did not start it.
+     */
+    const launchCheck = (row: ConnectorPendingReply, turnId: string | null) =>
+      Effect.gen(function* () {
+        const meta = readMeta(row);
+        yield* Effect.logInfo(
+          `${transport.logPrefix} Uno said it started a chat but started none; asking it once`,
+        ).pipe(Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey, turnId }));
+        const messageId = MessageId.make(crypto.randomUUID());
+        const requestedAt = yield* dispatchTurn(
+          row,
+          launchCheckPromptText(meta.dispatch.text),
+          messageId,
+        );
+        return yield* save({
+          ...row,
+          userMessageId: messageId,
+          requestedAt,
+          turnId: null,
+          meta: { ...meta, launchChecks: (meta.launchChecks ?? 0) + 1 },
+        });
+      });
+
     const typingIfDue = (row: ConnectorPendingReply, nowMs: number) =>
       Effect.gen(function* () {
         const key = rowId(row);
@@ -1102,7 +1137,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         });
         // Files `send_file` queued in this turn go with its answer.
         const queuedFiles = decided.kind === "answer" ? takeOutgoingFiles(row.threadId) : [];
-        const verdict =
+        let verdict: ReplyVerdict =
           decided.kind === "answer" && queuedFiles.length > 0
             ? { ...decided, files: [...new Set([...decided.files, ...queuedFiles])] }
             : decided;
@@ -1138,6 +1173,27 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
               yield* watchdogStop(current, verdict.turnId);
               return;
             }
+          }
+        }
+        // The person never gets a "started" that started nothing (launchTruth.ts).
+        if (dispatcher && verdict.kind === "answer") {
+          const truth = decideLaunchTruth({
+            text: verdict.text,
+            activities: detail.activities,
+            turnId: verdict.turnId,
+            checksMade: readMeta(current).launchChecks ?? 0,
+          });
+          if (truth.kind === "check") {
+            // Files queued for this answer go with the answer after the check.
+            for (const file of queuedFiles) queueOutgoingFile(row.threadId, file);
+            yield* launchCheck(current, verdict.turnId);
+            return;
+          }
+          if (truth.kind === "correct") {
+            yield* Effect.logWarning(
+              `${transport.logPrefix} Uno claimed a launch again without one; telling the person it did not start`,
+            ).pipe(Effect.annotateLogs({ threadId: row.threadId, replyKey: row.replyKey }));
+            verdict = { ...verdict, text: notLaunchedText(current.language) };
           }
         }
         if (readMeta(current).systemTurn === true) {

@@ -71,6 +71,10 @@ const makeRequestContext = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       ),
     getProviders: providerRegistry.getProviders,
+    getHarnessUnoCredits: serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.harnessUnoCredits),
+      Effect.orElseSucceed(() => ({})),
+    ),
     ...(accountDefaultAi === null
       ? {}
       : { personalDefault: accountDefaultAi.spawnModelSelection() }),

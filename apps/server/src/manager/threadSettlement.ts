@@ -28,6 +28,26 @@ export type SettledProbe = {
   readonly pendingApprovals: ReadonlyArray<ManagerPendingApprovalSummary>;
 };
 
+/** The newest `provider.turn.start.failed` of a thread: why its turn never started. */
+export const latestStartFailure = (
+  activities: ReadonlyArray<{
+    readonly kind: string;
+    readonly createdAt: string;
+    readonly payload: unknown;
+  }>,
+): { readonly detail: string; readonly at: string } | null => {
+  const failure = activities.findLast((activity) => activity.kind === "provider.turn.start.failed");
+  if (failure === undefined) return null;
+  const detail = (failure.payload as { readonly detail?: unknown } | null)?.detail;
+  return {
+    detail:
+      typeof detail === "string" && detail.trim().length > 0
+        ? detail.trim()
+        : "The chat could not start.",
+    at: failure.createdAt,
+  };
+};
+
 /** `probe(threadId)`: one look at a thread — `null` while its turn is still in flight. */
 export const makeThreadSettlementProbe = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -68,7 +88,18 @@ export const makeThreadSettlementProbe = Effect.gen(function* () {
       const turns = yield* projectionTurnRepository.listByThreadId({ threadId });
       const nowMs = yield* Clock.currentTimeMillis;
       const session = shell.value.session;
+      // A turn that never got an id: did the harness refuse to start it?
+      const startFailure = turns.some((turn) => turn.state === "pending" && turn.turnId === null)
+        ? yield* projectionSnapshotQuery
+            .getThreadDetailById(threadId)
+            .pipe(
+              Effect.map((detail) =>
+                Option.isSome(detail) ? latestStartFailure(detail.value.activities) : null,
+              ),
+            )
+        : null;
       const verdict = evaluateThreadWait({
+        startFailure,
         hasPendingApprovals: shell.value.hasPendingApprovals,
         hasPendingUserInput: shell.value.hasPendingUserInput,
         session:

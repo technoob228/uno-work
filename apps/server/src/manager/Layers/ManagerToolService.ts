@@ -49,7 +49,7 @@ import {
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { applyPersonRoute, readPersonRoute } from "../personRouting.ts";
+import { applyPersonRoute, readPersonRoute, selectionNotReadyMessage } from "../personRouting.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
@@ -226,6 +226,7 @@ const makeManagerToolService = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   // Optional: test wirings without providers skip the person's routing rows.
   const providerRegistry = Option.getOrNull(yield* Effect.serviceOption(ProviderRegistry));
+  const settingsService = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
 
   /**
    * The model a chat the assistant starts runs on, after the person's
@@ -253,7 +254,23 @@ const makeManagerToolService = Effect.gen(function* () {
       if (routed.kind === "not-ready") {
         return yield* new ManagerInvalidRequestError({ detail: routed.message });
       }
-      return routed.kind === "selection" ? routed.selection : requested;
+      const selection = routed.kind === "selection" ? routed.selection : requested;
+      // Not started on a harness that can't take it here: the model asks.
+      const notReady =
+        selection === null
+          ? null
+          : selectionNotReadyMessage(
+              selection,
+              yield* providerRegistry.getProviders,
+              settingsService === null
+                ? {}
+                : yield* settingsService.getSettings.pipe(
+                    Effect.map((settings) => settings.harnessUnoCredits),
+                    Effect.orElseSucceed(() => ({})),
+                  ),
+            );
+      if (notReady !== null) return yield* new ManagerInvalidRequestError({ detail: notReady });
+      return selection;
     });
 
   const getAllowedThreadShell = (caller: ManagerCaller, threadId: ThreadId) =>
