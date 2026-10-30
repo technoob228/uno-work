@@ -11,6 +11,7 @@ import {
   type ThreadId,
   automationExecutorOf,
   describeAutomationTrigger,
+  isOutsideTrigger,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -20,6 +21,8 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   CircleXIcon,
+  CopyIcon,
+  FileTextIcon,
   GitPullRequestIcon,
   HistoryIcon,
   LoaderCircleIcon,
@@ -27,7 +30,9 @@ import {
   MoonIcon,
   MoreHorizontalIcon,
   PlayIcon,
+  RefreshCwIcon,
   VideoIcon,
+  WebhookIcon,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -39,7 +44,8 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
-import { type RunTone, executorLabel, runLine, statusProblem } from "./automations.logic";
+import { getAutomationHook, rotateAutomationHook } from "../../lib/automationsApi";
+import { type RunTone, askLine, executorLabel, runLine, statusProblem } from "./automations.logic";
 import { useAutomationActions, useAutomationRuns } from "./useAutomations";
 
 const TRIGGER_ICON = {
@@ -47,6 +53,8 @@ const TRIGGER_ICON = {
   "github.pull_request": GitPullRequestIcon,
   "call.ended": VideoIcon,
   "gmail.message": MailIcon,
+  webhook: WebhookIcon,
+  "site.form": FileTextIcon,
 } as const;
 
 const TONE_ICON: Record<RunTone, typeof CircleCheckIcon> = {
@@ -177,6 +185,123 @@ function RunHistory(props: {
           compact
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * A webhook's URL: asked from the computer on a click, copied, never kept on
+ * the screen. Only the person's session gets it; the list of automations
+ * doesn't carry it, so agents don't see it.
+ */
+function HookActions(props: {
+  readonly environmentId: string;
+  readonly automationId: number;
+  readonly signed: boolean;
+}) {
+  const scope = {
+    environmentId: props.environmentId as EnvironmentId,
+    id: props.automationId,
+  };
+  const [busy, setBusy] = useState<null | "url" | "secret" | "rotate">(null);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const copy = async (kind: "url" | "secret") => {
+    setBusy(kind);
+    try {
+      const hook = await getAutomationHook(scope);
+      await navigator.clipboard.writeText(kind === "url" ? hook.url : hook.signingSecret);
+      toastManager.add({
+        type: "success",
+        title: kind === "url" ? "URL copied" : "Signing secret copied",
+        description: "Anyone with the URL can start this automation.",
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't get the URL",
+        description: errorText(cause, "Its computer didn't answer."),
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const rotate = async () => {
+    setBusy("rotate");
+    try {
+      const hook = await rotateAutomationHook(scope);
+      await navigator.clipboard.writeText(hook.url);
+      toastManager.add({
+        type: "success",
+        title: "New URL copied",
+        description: "The old URL stopped working. Update the service that calls it.",
+      });
+      setConfirmRotate(false);
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Couldn't replace the URL",
+        description: errorText(cause, "Its computer didn't answer."),
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="automation-hook">
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={busy !== null}
+        onClick={() => void copy("url")}
+        data-testid="automation-hook-copy"
+      >
+        {busy === "url" ? (
+          <LoaderCircleIcon className="size-3 animate-spin" />
+        ) : (
+          <CopyIcon className="size-3" />
+        )}
+        Copy URL
+      </Button>
+      {props.signed ? (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => void copy("secret")}
+          data-testid="automation-hook-secret"
+        >
+          <CopyIcon className="size-3" />
+          Copy signing secret
+        </Button>
+      ) : null}
+      {confirmRotate ? (
+        <>
+          <span className="text-xs text-muted-foreground">The old URL stops working.</span>
+          <Button
+            size="xs"
+            variant="destructive"
+            disabled={busy !== null}
+            onClick={() => void rotate()}
+            data-testid="automation-hook-rotate-confirm"
+          >
+            Replace URL
+          </Button>
+          <Button size="xs" variant="ghost" onClick={() => setConfirmRotate(false)}>
+            Keep it
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={busy !== null}
+          onClick={() => setConfirmRotate(true)}
+          data-testid="automation-hook-rotate"
+        >
+          <RefreshCwIcon className="size-3" />
+          New URL
+        </Button>
+      )}
     </div>
   );
 }
@@ -337,30 +462,44 @@ export function AutomationCard(props: {
             computer={props.computer}
           />
         ) : null}
+        {isOutsideTrigger(automation.trigger) ? (
+          <p className="text-xs text-muted-foreground" data-testid="automation-ask-line">
+            {askLine(automation.trigger.ask !== false)}
+          </p>
+        ) : null}
+        {automation.trigger.kind === "webhook" ? (
+          <HookActions
+            environmentId={props.environmentId}
+            automationId={automation.id}
+            signed={automation.trigger.requireSignature === true}
+          />
+        ) : null}
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={busy !== null || !automation.enabled || problem !== null}
-            onClick={() =>
-              void task("run", async () => {
-                await actions.runNow(automation.id);
-                toastManager.add({
-                  type: "success",
-                  title: `${automation.assistantName} is on it`,
-                  description: "The result comes to its chat — and to Telegram, if it's linked.",
-                });
-              })
-            }
-            data-testid="automation-run-now"
-          >
-            {busy === "run" ? (
-              <LoaderCircleIcon className="size-3 animate-spin" />
-            ) : (
-              <PlayIcon className="size-3" />
-            )}
-            Run now
-          </Button>
+          {isOutsideTrigger(automation.trigger) ? null : (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy !== null || !automation.enabled || problem !== null}
+              onClick={() =>
+                void task("run", async () => {
+                  await actions.runNow(automation.id);
+                  toastManager.add({
+                    type: "success",
+                    title: `${automation.assistantName} is on it`,
+                    description: "The result comes to its chat — and to Telegram, if it's linked.",
+                  });
+                })
+              }
+              data-testid="automation-run-now"
+            >
+              {busy === "run" ? (
+                <LoaderCircleIcon className="size-3 animate-spin" />
+              ) : (
+                <PlayIcon className="size-3" />
+              )}
+              Run now
+            </Button>
+          )}
           <Button
             size="xs"
             variant="ghost"

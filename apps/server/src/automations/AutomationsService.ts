@@ -21,6 +21,7 @@ import {
   ProjectId,
   type Automation,
   type AutomationGithubReposResult,
+  type AutomationHook,
   type AutomationListResult,
   type AutomationExecutor,
   type AutomationRun,
@@ -106,6 +107,9 @@ export interface AutomationsServiceShape {
   readonly repos: (
     query: string,
   ) => Effect.Effect<AutomationGithubReposResult, AutomationClientError>;
+  /** A webhook's URL and signing secret. The web only: agents never get them. */
+  readonly hook: (id: number) => Effect.Effect<AutomationHook, AutomationClientError>;
+  readonly rotateHook: (id: number) => Effect.Effect<AutomationHook, AutomationClientError>;
   // An assistant's own tools: only its own automations.
   readonly toolCreate: (
     caller: ManagerCaller,
@@ -151,6 +155,12 @@ export interface AutomationChatTools {
   readonly update: (args: unknown) => Effect.Effect<unknown, AutomationClientError>;
   readonly remove: (args: unknown) => Effect.Effect<unknown, AutomationClientError>;
   readonly runNow: (args: unknown) => Effect.Effect<unknown, AutomationClientError>;
+  /** `site_forms_set {chat}`: a site's form starts this chat, or stops. Returns a line to say. */
+  readonly siteForm: (input: {
+    readonly slug: string;
+    readonly chat: string;
+    readonly instruction?: string | undefined;
+  }) => Effect.Effect<string, AutomationClientError>;
 }
 
 export class AutomationsService extends Context.Service<
@@ -176,6 +186,28 @@ const ChatCreateArgs = Schema.Struct({
 const ChatListArgs = Schema.Struct({
   scope: Schema.optional(Schema.Literals(["this_chat", "all"])),
 });
+
+/** What a site's form does when the person said nothing more. */
+export const SITE_FORM_DEFAULT_INSTRUCTION =
+  "Someone sent the form on the site. Read it and tell the person here what it says and what you suggest doing.";
+
+/**
+ * A trigger as an agent may set it. Ask mode for what comes from outside is
+ * the person's to turn off, in Automations: an agent reading a stranger's
+ * text must not be able to. A site's form goes through `site_forms_set`.
+ */
+export function agentTrigger(
+  trigger: AutomationTrigger,
+): Effect.Effect<AutomationTrigger, AutomationClientError> {
+  switch (trigger.kind) {
+    case "site.form":
+      return Effect.fail(invalid("A site's form starts a chat through site_forms_set {chat}."));
+    case "webhook":
+      return Effect.succeed({ kind: "webhook", ask: true });
+    default:
+      return Effect.succeed(trigger);
+  }
+}
 
 /** What `automation_list` shows an assistant: enough to change one, in words. */
 function toolView(automation: Automation) {
@@ -498,32 +530,43 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
         Effect.map((assistant): ResolvedChatCaller => ({ threadId: caller.threadId, assistant })),
       );
 
+    /** "A new chat each time" in this chat's project, set up like this chat. */
+    const newChatOf = (threadId: string) =>
+      projections.getThreadShellById(ThreadId.make(threadId)).pipe(
+        Effect.orElseSucceed(() => Option.none()),
+        Effect.flatMap((shell) =>
+          Option.isNone(shell)
+            ? Effect.fail(badExecutor("This chat isn't known yet; try again."))
+            : Effect.succeed({
+                kind: "new_chat" as const,
+                projectId: shell.value.projectId as string,
+                fromThreadId: threadId,
+              }),
+        ),
+      );
+
+    /** An agent's patch: a trigger only as `agentTrigger` lets it. */
+    const agentPatch = <A extends { readonly trigger?: AutomationTrigger | undefined }>(patch: A) =>
+      patch.trigger === undefined
+        ? Effect.succeed(patch)
+        : agentTrigger(patch.trigger).pipe(Effect.map((trigger) => ({ ...patch, trigger })));
+
     const chatTools = (who: AutomationChatCaller): AutomationChatTools => ({
       create: (args) =>
         Effect.gen(function* () {
           const caller = yield* resolve(who);
           const input = yield* decode(ChatCreateArgs, args);
+          const trigger = yield* agentTrigger(input.trigger);
           const executor: AutomationExecutor | undefined =
             caller.assistant !== null
               ? undefined
               : input.runIn === "new_chat"
-                ? yield* projections.getThreadShellById(ThreadId.make(caller.threadId)).pipe(
-                    Effect.orElseSucceed(() => Option.none()),
-                    Effect.flatMap((shell) =>
-                      Option.isNone(shell)
-                        ? Effect.fail(badExecutor("This chat isn't known yet; try again."))
-                        : Effect.succeed({
-                            kind: "new_chat" as const,
-                            projectId: shell.value.projectId as string,
-                            fromThreadId: caller.threadId,
-                          }),
-                    ),
-                  )
+                ? yield* newChatOf(caller.threadId)
                 : { kind: "chat" as const, threadId: caller.threadId };
           const automation = yield* createWith({
             ...(input.name !== undefined ? { name: input.name } : {}),
             instruction: input.instruction,
-            trigger: input.trigger,
+            trigger,
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
             ...(caller.assistant !== null ? { assistant: caller.assistant } : {}),
             ...(executor !== undefined ? { executor } : {}),
@@ -541,7 +584,8 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
       update: (args) =>
         Effect.gen(function* () {
           const caller = yield* resolve(who);
-          const { id, ...patch } = yield* decode(ToolUpdateArgs, args);
+          const { id, ...decoded } = yield* decode(ToolUpdateArgs, args);
+          const patch = yield* agentPatch(decoded);
           yield* ensureChatOwns(caller, id);
           const automation = yield* client.update(id, patch).pipe(Effect.mapError(forAssistant));
           return { updated: true, automation: toolView(automation) };
@@ -565,6 +609,37 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
             note: "It runs in a moment (Uno queues it); the result shows where it runs.",
           };
         }),
+      siteForm: ({ slug, chat, instruction }) =>
+        Effect.gen(function* () {
+          if (chat === "off") {
+            const all = yield* listAvailable;
+            const found = all.find(
+              (a) => a.trigger.kind === "site.form" && a.trigger.slug === slug,
+            );
+            if (found === undefined) return "This site's form wasn't starting a chat.";
+            yield* client.remove(found.id).pipe(Effect.mapError(forAssistant));
+            return "The form no longer starts a chat; its other channels stay.";
+          }
+          const caller = yield* resolve(who);
+          if (caller.assistant !== null) {
+            return yield* badExecutor(
+              "A site's form runs in a regular chat, not in an assistant's own conversation: set it up from the chat that should get the messages.",
+            );
+          }
+          const executor: AutomationExecutor =
+            chat === "new_chat"
+              ? yield* newChatOf(caller.threadId)
+              : { kind: "chat", threadId: caller.threadId };
+          yield* createWith({
+            name: `Form on ${slug}`,
+            instruction: instruction?.trim() || SITE_FORM_DEFAULT_INSTRUCTION,
+            trigger: { kind: "site.form", slug },
+            executor,
+          }).pipe(Effect.mapError(forAssistant));
+          return `Every answer of this form now starts ${
+            chat === "new_chat" ? "a new chat in this project" : "this chat"
+          } on this computer, in Ask mode: the agent reads and answers there, anything else waits for the person's Allow. The person can change it on the Automations page.`;
+        }),
     });
 
     const service: AutomationsServiceShape = {
@@ -586,6 +661,8 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
       runNow: (id) => client.runNow(id),
       runs: (id) => client.runs(id).pipe(Effect.map((runs) => ({ runs }))),
       repos: (query) => client.repos(query),
+      hook: (id) => client.hook(id),
+      rotateHook: (id) => client.rotateHook(id),
 
       toolCreate: (caller, args) =>
         Effect.gen(function* () {
@@ -594,7 +671,10 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
           const raw =
             typeof args === "object" && args !== null ? { ...(args as object), assistant } : args;
           const input = yield* decode(AutomationCreateInput, raw);
-          const automation = yield* createFor(assistant, input).pipe(Effect.mapError(forAssistant));
+          const trigger = yield* agentTrigger(input.trigger);
+          const automation = yield* createFor(assistant, { ...input, trigger }).pipe(
+            Effect.mapError(forAssistant),
+          );
           return { created: true, automation, tell: createdTell(automation) };
         }),
       toolList: (caller) =>
@@ -605,7 +685,8 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
       toolUpdate: (caller, args) =>
         Effect.gen(function* () {
           const assistant = yield* callerAssistant(caller);
-          const { id, ...patch } = yield* decode(ToolUpdateArgs, args);
+          const { id, ...decoded } = yield* decode(ToolUpdateArgs, args);
+          const patch = yield* agentPatch(decoded);
           yield* ensureOwn(assistant, id);
           const automation = yield* client.update(id, patch).pipe(Effect.mapError(forAssistant));
           return { updated: true, automation: toolView(automation) };

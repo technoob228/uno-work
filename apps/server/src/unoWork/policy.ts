@@ -54,6 +54,52 @@ export function decideUnoWorkGate(
   }
 }
 
+/**
+ * A chat holding a stranger's text (`automations/outsideThreads.ts`): these
+ * tools still run on their level; every other tool asks first. Only what reads
+ * this computer's state or speaks to the person: a stranger who steers the
+ * agent gets nothing out through them. Left out on purpose: `open_in_panel`
+ * (opens any URL), `site_publish`, `project_keys`, `request_secret`,
+ * `messenger_send` (a link in Telegram is fetched without a click, a button's
+ * value comes back as the person's words), `chat_status` and `app_logs` (other
+ * chats' text, an app's output).
+ */
+const OUTSIDE_TEXT_FREE_TOOLS: ReadonlySet<string> = new Set([
+  "computer_status",
+  "apps_list",
+  "files_list",
+  "cloud_list",
+  "drive_find",
+  "file_open",
+  "chats_list",
+  "chat_call_person",
+  "chat_person_not_needed",
+  "notify",
+  "sites_list",
+  "site_forms_get",
+  "db_list",
+  "account_overview",
+  "computer_create_status",
+  "settings_read",
+  "automations_list",
+  "uno_guide",
+]);
+
+export function outsideTextAsks(
+  tool: string,
+  args: Readonly<Record<string, unknown>> = {},
+): boolean {
+  // Only the Inbox line runs free: its button can open any URL, and its copy
+  // to the messenger is the path `messenger_send` asks for.
+  if (tool === "notify" && (args["open"] !== undefined || args["alsoMessenger"] === true)) {
+    return true;
+  }
+  return !OUTSIDE_TEXT_FREE_TOOLS.has(tool);
+}
+
+/** Said on the approval card when that is why it asks. */
+export const OUTSIDE_TEXT_NOTE = "Text from outside Uno is in this chat, so it asks first.";
+
 /** What the model reads when the person didn't allow a call. */
 export function refusalMessage(outcome: "denied" | "timeout", title: string): string {
   switch (outcome) {

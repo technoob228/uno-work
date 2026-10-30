@@ -19,6 +19,7 @@ import type {
   Automation,
   AutomationExecutor,
   AutomationGithubReposResult,
+  AutomationHook,
   AutomationListResult,
   AutomationRun,
   AutomationRunKind,
@@ -151,7 +152,13 @@ export function automationErrorMessage(
     case "GITHUB_PR_PERMISSION_MISSING":
       return `GitHub needs one more permission for Uno to comment on pull requests: accept it on GitHub${links.manageUrl ? ` — ${links.manageUrl}` : ""}.`;
     case "TRIGGER_NOT_SUPPORTED_YET":
-      return "That kind of automation is coming soon (new emails). For now: on a schedule, when a pull request opens or updates, or after a call.";
+      return "That kind of automation is coming soon (new emails). For now: on a schedule, when a pull request opens or updates, after a call, by webhook or from a site's form.";
+    case "HOOKS_DISABLED":
+      return "Webhooks and site forms aren't switched on for this Uno account yet.";
+    case "NOT_RUNNABLE":
+      return "This one runs when its URL is called or its form is sent, not by hand.";
+    case "SITE_FORM_TAKEN":
+      return "This site's form was being set up at the same moment. Try again.";
     case "AUTOMATIONS_LIMIT":
       return `The account already has as many automations as it may${said}. Delete one first.`;
     case "AUTOMATIONS_DISABLED":
@@ -231,6 +238,8 @@ const RUN_KINDS: ReadonlySet<string> = new Set<AutomationRunKind>([
   "github.pull_request",
   "manual",
   "call.ended",
+  "webhook",
+  "site.form",
 ]);
 
 /** The console's trigger (its keys are one word, so the same in both cases). */
@@ -264,6 +273,23 @@ export function parseTrigger(raw: unknown): AutomationTrigger | null {
     case "gmail.message": {
       const from = text(r["from"]);
       return { kind: "gmail.message", ...(from !== null ? { from } : {}) };
+    }
+    case "webhook":
+      return {
+        kind: "webhook",
+        ...(typeof r["ask"] === "boolean" ? { ask: r["ask"] } : {}),
+        ...(typeof r["require_signature"] === "boolean"
+          ? { requireSignature: r["require_signature"] }
+          : {}),
+      };
+    case "site.form": {
+      const slug = text(r["slug"]);
+      if (slug === null) return null;
+      return {
+        kind: "site.form",
+        slug,
+        ...(typeof r["ask"] === "boolean" ? { ask: r["ask"] } : {}),
+      };
     }
     default:
       return null;
@@ -316,6 +342,16 @@ export function executorToConsole(executor: AutomationExecutor): Record<string, 
         ...(executor.title ? { title: executor.title } : {}),
       };
   }
+}
+
+/** The console's name for `requireSignature`; the other keys are one word. */
+export function triggerToConsole(trigger: AutomationTrigger): Record<string, unknown> {
+  if (trigger.kind !== "webhook") return { ...trigger };
+  const { requireSignature, ...rest } = trigger;
+  return {
+    ...rest,
+    ...(requireSignature !== undefined ? { require_signature: requireSignature } : {}),
+  };
 }
 
 export function parseRun(raw: unknown): AutomationRun | null {
@@ -412,6 +448,20 @@ export function parseEvent(raw: unknown): AutomationEvent | null {
   };
 }
 
+export function parseHook(body: unknown): AutomationHook | null {
+  const r = record(body);
+  const url = text(r?.["url"]);
+  const signingSecret = text(r?.["signing_secret"]);
+  if (r === null || url === null || signingSecret === null) return null;
+  return {
+    url,
+    signingSecret,
+    requireSignature: r["require_signature"] === true,
+    perMinute: positiveInt(r["per_minute"]) ?? 60,
+    maxBodyBytes: positiveInt(r["max_body_bytes"]) ?? 0,
+  };
+}
+
 export function parseEvents(body: unknown): ReadonlyArray<AutomationEvent> {
   const list = record(body)?.["events"];
   if (!Array.isArray(list)) return [];
@@ -482,7 +532,7 @@ export function createBodyToConsole(input: AutomationCreateBody): Record<string,
     assistant_name: input.assistantName,
     name: input.name,
     instruction: input.instruction,
-    trigger: input.trigger,
+    trigger: triggerToConsole(input.trigger),
     ...(input.executor !== undefined ? { executor: executorToConsole(input.executor) } : {}),
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
   };
@@ -496,7 +546,7 @@ export function updateBodyToConsole(
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
     ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
-    ...(input.trigger !== undefined ? { trigger: input.trigger } : {}),
+    ...(input.trigger !== undefined ? { trigger: triggerToConsole(input.trigger) } : {}),
     ...(input.executor !== undefined ? { executor: executorToConsole(input.executor) } : {}),
   };
 }
@@ -562,6 +612,9 @@ export interface AutomationsClient {
   readonly repos: (
     query: string,
   ) => Effect.Effect<AutomationGithubReposResult, AutomationClientError>;
+  /** A webhook's URL: only for the person's own session. */
+  readonly hook: (id: number) => Effect.Effect<AutomationHook, AutomationClientError>;
+  readonly rotateHook: (id: number) => Effect.Effect<AutomationHook, AutomationClientError>;
   readonly events: (input: {
     readonly after: number;
     readonly waitSec: number;
@@ -666,6 +719,7 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
         available: true,
         reason: null,
         automations: parseAutomationList(body),
+        hooksEnabled: record(body)?.["hooks_enabled"] === true,
       }),
     ),
     Effect.catch((error) =>
@@ -677,6 +731,19 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
     ),
     Effect.map(withVerdict),
   );
+
+  const oneHook = (body: unknown) => {
+    const parsed = parseHook(body);
+    return parsed === null
+      ? Effect.fail(
+          new AutomationClientError({
+            status: 502,
+            code: "CONSOLE_UNREACHABLE",
+            message: "The Uno console answered without the URL. Try again in a minute.",
+          }),
+        )
+      : Effect.succeed(parsed);
+  };
 
   return {
     list,
@@ -738,6 +805,9 @@ export function makeAutomationsClient(deps: AutomationsClientDeps): AutomationsC
             : Effect.fail(refusal);
         }),
       ),
+    hook: (id) => expectOk("GET", `automations/${id}/hook`).pipe(Effect.flatMap(oneHook)),
+    rotateHook: (id) =>
+      expectOk("POST", `automations/${id}/hook/rotate`, {}).pipe(Effect.flatMap(oneHook)),
     events: ({ after, waitSec }) => {
       const wait = Math.min(25, Math.max(0, Math.floor(waitSec)));
       return expectOk(

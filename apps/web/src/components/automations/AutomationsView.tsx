@@ -3,7 +3,7 @@
  * connected computer — grouped by assistant, with "New automation" and a
  * choice of who does it. The same cards as on an assistant's page.
  */
-import type { Automation } from "@t3tools/contracts";
+import { type Automation, isAssistantProjectId } from "@t3tools/contracts";
 import { Navigate, useNavigate } from "@tanstack/react-router";
 import {
   ChevronRightIcon,
@@ -13,14 +13,20 @@ import {
   WorkflowIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { type TeamMember, useAssistantTeam } from "../assistants/useAssistantTeam";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../../store";
 import { AutomationCard } from "./AutomationCard";
-import { AutomationDialog } from "./AutomationDialog";
+import { AutomationDialog, type AutomationChatChoice } from "./AutomationDialog";
 import { choiceOfMember } from "./AutomationsSection";
 import { emptyHint, groupByAssistant, unavailableLine } from "./automations.logic";
 import { useAutomationsAcross, useAutomationsGate } from "./useAutomations";
@@ -86,6 +92,31 @@ function AutomationsScreen(props: { readonly search: AutomationsRouteSearch }) {
     );
   });
   const anyAvailable = choices.some((choice) => choice.available);
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  // Chats a form can go to: the latest ones on computers that run automations.
+  const chatChoices = useMemo<ReadonlyArray<AutomationChatChoice>>(() => {
+    const titles = new Map(projects.map((p) => [`${p.environmentId}:${p.id}`, p.name]));
+    return threads
+      .filter(
+        (thread) =>
+          thread.archivedAt === null &&
+          byEnv.get(thread.environmentId)?.data?.available === true &&
+          !isAssistantProjectId(thread.projectId),
+      )
+      .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 30)
+      .map((thread) => ({
+        environmentId: thread.environmentId,
+        threadId: thread.id,
+        title: thread.title,
+        projectId: thread.projectId,
+        projectTitle: titles.get(`${thread.environmentId}:${thread.projectId}`) ?? "its project",
+        computer: labelOf(thread.environmentId),
+      }));
+    // byEnv and labelOf follow `computers` and `members`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, threads, computers, members]);
   const laptops = computers.filter(
     (computer) =>
       computer.data && !computer.data.available && unavailableLine(computer.data.reason),
@@ -244,6 +275,7 @@ function AutomationsScreen(props: { readonly search: AutomationsRouteSearch }) {
         open={dialog !== null}
         onClose={() => setDialog(null)}
         choices={choices}
+        chatChoices={chatChoices}
         automation={dialog?.automation ?? null}
         automationEnvironmentId={dialog?.environmentId ?? null}
       />

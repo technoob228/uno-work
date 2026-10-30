@@ -23,6 +23,7 @@ import {
   CommandId,
   MessageId,
   ThreadId,
+  isAssistantProjectId,
   type ManagerAssistantTurnInput,
   type ManagerAssistantTurnResult,
   type ProjectId,
@@ -42,6 +43,21 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistantAccess.ts";
 import { assistantProjectOfCaller } from "./schedules.ts";
+
+const OUTSIDE_TEXT_REFUSED =
+  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or Hermes, which runs commands without asking). Pick a chat on Claude, Codex or OpenCode.";
+
+/**
+ * Ask mode must hold for a stranger's text. It doesn't in an assistant's
+ * project (its `uno-manager` tools run at once) nor on Hermes, whose modes
+ * cover only edits: a shell command asks only on its dangerous-pattern list.
+ */
+export function canHoldOutsideText(
+  projectId: string,
+  modelSelection: { readonly instanceId: string },
+): boolean {
+  return !isAssistantProjectId(projectId) && !/hermes/i.test(modelSelection.instanceId);
+}
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */
 export const SCHEDULED_THREAD_TITLE = "Scheduled tasks";
@@ -118,6 +134,15 @@ export interface ChatTurnInput {
   readonly timeoutSec?: number;
   /** Who started it, for the command origin ("automation 12"). */
   readonly reason: string;
+  /**
+   * The message carries a stranger's text (a site form, a webhook): the chat
+   * goes to Ask mode, whatever its mode was, and stays there until the person
+   * changes it. `onThread` runs before the turn starts.
+   */
+  readonly ask?: boolean;
+  readonly onThread?: (threadId: string) => Effect.Effect<void>;
+  /** How long to wait for a busy chat (default 5 minutes). */
+  readonly busyWaitMs?: number;
 }
 
 export interface ChatTurnResult {
@@ -195,6 +220,28 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         return threadId;
       });
 
+    /**
+     * Ask mode for a chat about to read a stranger's text. The turn itself
+     * can't do it: `thread.turn.start` runs in the thread's stored mode,
+     * whatever the command says. After the wait for idle, because a mode
+     * change restarts the harness session.
+     */
+    const narrowToAsk = (threadId: ThreadId, reason: string) =>
+      Effect.gen(function* () {
+        const shell = yield* projections.getThreadShellById(threadId);
+        if (Option.isSome(shell) && shell.value.runtimeMode === "approval-required") return;
+        yield* engine.dispatch(
+          {
+            type: "thread.runtime-mode.set",
+            commandId: CommandId.make(`automation:${crypto.randomUUID()}`),
+            threadId,
+            runtimeMode: "approval-required",
+            createdAt: new Date().toISOString(),
+          },
+          { origin: systemCommandOrigin("automations", reason) },
+        );
+      });
+
     const sessionBusy = (threadId: ThreadId) =>
       projections.getThreadDetailById(threadId).pipe(
         Effect.map((detail) => {
@@ -205,9 +252,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         Effect.orElseSucceed(() => false),
       );
 
-    const waitUntilIdle = (threadId: ThreadId) =>
+    const waitUntilIdle = (threadId: ThreadId, busyWaitMs = BUSY_WAIT_MS) =>
       Effect.gen(function* () {
-        const deadline = Date.now() + BUSY_WAIT_MS;
+        const deadline = Date.now() + busyWaitMs;
         while (yield* sessionBusy(threadId)) {
           if (Date.now() >= deadline) {
             return yield* turnError(
@@ -400,7 +447,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
       );
 
     /** The chat a run of `target` goes into (a new one is created here). */
-    const chatOf = (target: ChatTurnTarget, reason: string) =>
+    const chatOf = (target: ChatTurnTarget, reason: string, ask: boolean) =>
       Effect.gen(function* () {
         const snapshot = yield* projections.getShellSnapshot();
         if (target.kind === "chat") {
@@ -410,6 +457,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               404,
               "The chat this automation runs in was deleted or archived — pick another chat for it or delete it.",
             );
+          }
+          if (ask && !canHoldOutsideText(thread.projectId, thread.modelSelection)) {
+            return yield* turnError(409, OUTSIDE_TEXT_REFUSED);
           }
           return thread.id;
         }
@@ -434,6 +484,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             "The project has no chat to copy a model from: open one chat in it first.",
           );
         }
+        if (ask && !canHoldOutsideText(project.id, modelSelection)) {
+          return yield* turnError(409, OUTSIDE_TEXT_REFUSED);
+        }
         const threadId = ThreadId.make(crypto.randomUUID());
         yield* engine.dispatch(
           {
@@ -443,7 +496,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             projectId: project.id,
             title: target.title,
             modelSelection,
-            runtimeMode: template?.runtimeMode ?? "approval-required",
+            runtimeMode: ask ? "approval-required" : (template?.runtimeMode ?? "approval-required"),
             interactionMode: template?.interactionMode ?? "default",
             branch: null,
             worktreePath: null,
@@ -457,8 +510,11 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const runInChat = (input: ChatTurnInput) =>
       Effect.gen(function* () {
         const deadlineMs = Date.now() + (input.timeoutSec ?? 30 * 60) * 1_000;
-        const threadId = yield* chatOf(input.target, input.reason);
-        yield* waitUntilIdle(threadId);
+        const ask = input.ask === true;
+        const threadId = yield* chatOf(input.target, input.reason, ask);
+        if (input.onThread) yield* input.onThread(threadId);
+        yield* waitUntilIdle(threadId, input.busyWaitMs);
+        if (ask) yield* narrowToAsk(threadId, input.reason);
         const shell = yield* projections
           .getThreadShellById(threadId)
           .pipe(Effect.orElseSucceed(() => Option.none()));
@@ -473,8 +529,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             commandId: CommandId.make(`automation:${crypto.randomUUID()}`),
             threadId,
             message: { messageId, role: "user", text: input.prompt, attachments: [] },
-            // The chat's own mode — what the person chose for it; never widened.
-            runtimeMode: shell.value.runtimeMode,
+            // The chat's own mode — what the person chose for it; never
+            // widened. A stranger's text narrows it to Ask.
+            runtimeMode: ask ? "approval-required" : shell.value.runtimeMode,
             interactionMode: shell.value.interactionMode,
             createdAt: requestedAtIso,
           },

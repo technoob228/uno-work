@@ -8,6 +8,9 @@ import {
   makeAutomationsClient,
   parseAutomation,
   parseEvent,
+  parseHook,
+  parseTrigger,
+  triggerToConsole,
   parseExecutor,
   readConsoleError,
   updateBodyToConsole,
@@ -153,6 +156,35 @@ describe("console answers → Work's camelCase", () => {
       payload: { slot: "2026-10-28T07:00:00Z", label: "Weekdays at 09:00" },
       createdAt: "2026-10-28T07:00:01Z",
     });
+  });
+});
+
+describe("outside triggers", () => {
+  it("reads and writes require_signature, keeps ask", () => {
+    expect(parseTrigger({ kind: "webhook", ask: false, require_signature: true })).toEqual({
+      kind: "webhook",
+      ask: false,
+      requireSignature: true,
+    });
+    expect(parseTrigger({ kind: "site.form", slug: "report" })).toEqual({
+      kind: "site.form",
+      slug: "report",
+    });
+    expect(parseTrigger({ kind: "site.form" })).toBeNull();
+    expect(triggerToConsole({ kind: "webhook", ask: true, requireSignature: true })).toEqual({
+      kind: "webhook",
+      ask: true,
+      require_signature: true,
+    });
+  });
+
+  it("a hook without a URL is no hook", () => {
+    expect(parseHook({ url: "https://x", signing_secret: "s" })).toMatchObject({
+      url: "https://x",
+      signingSecret: "s",
+      requireSignature: false,
+    });
+    expect(parseHook({ signing_secret: "s" })).toBeNull();
   });
 });
 

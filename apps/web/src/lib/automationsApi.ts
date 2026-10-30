@@ -12,6 +12,7 @@ import type {
   Automation,
   AutomationCreateInput,
   AutomationGithubReposResult,
+  AutomationHook,
   AutomationListResult,
   AutomationRun,
   AutomationRunsResult,
@@ -159,6 +160,25 @@ export async function listAutomationRuns(
     pathname: `${ROOT}/${input.id}/runs`,
   });
   return body.runs ?? [];
+}
+
+/** A webhook's URL and signing secret: read when asked, never kept on the screen. */
+export function getAutomationHook(
+  input: Scoped & { readonly id: number },
+): Promise<AutomationHook> {
+  return call({ environmentId: input.environmentId, pathname: `${ROOT}/${input.id}/hook` });
+}
+
+/** A new URL and secret; the old ones stop at once. */
+export function rotateAutomationHook(
+  input: Scoped & { readonly id: number },
+): Promise<AutomationHook> {
+  return call({
+    environmentId: input.environmentId,
+    pathname: `${ROOT}/${input.id}/hook/rotate`,
+    method: "POST",
+    body: {},
+  });
 }
 
 /** Repositories the Uno GitHub app sees (the picker), and whether GitHub is connected at all. */

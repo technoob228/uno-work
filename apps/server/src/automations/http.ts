@@ -9,6 +9,8 @@
  * - `POST   /api/manager/automations/:id/run`        → {run}
  * - `GET    /api/manager/automations/:id/runs`       → AutomationRunsResult
  * - `GET    /api/manager/automations/github/repos?q=` → AutomationGithubReposResult
+ * - `GET    /api/manager/automations/:id/hook`       → AutomationHook (a webhook's URL)
+ * - `POST   /api/manager/automations/:id/hook/rotate` → AutomationHook (a new URL)
  *
  * A refusal answers `{error: {code, message, manageUrl?, connectUrl?}}` with
  * the console's status (502 when it didn't answer, 409 NOT_CLOUD_COMPUTER on
@@ -25,6 +27,10 @@ import { AutomationsService, type AutomationsServiceShape } from "./AutomationsS
 import { automationErrorBody, type AutomationClientError } from "./consoleClient.ts";
 
 const json = (body: unknown, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
+
+/** A webhook's URL and signing secret: no cache keeps them. */
+const secretJson = (body: unknown) =>
+  HttpServerResponse.setHeader(json(body), "Cache-Control", "no-store");
 
 const refused = (error: AutomationClientError) => json(automationErrorBody(error), error.status);
 
@@ -156,6 +162,34 @@ export const automationsRunsRouteLayer = HttpRouter.add(
   ),
 );
 
+export const automationsHookRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/automations/:id/hook",
+  route((automations) =>
+    Effect.gen(function* () {
+      const id = yield* automationId;
+      return yield* automations.hook(id).pipe(
+        Effect.map((hook) => secretJson(hook)),
+        Effect.catch((error) => Effect.succeed(refused(error))),
+      );
+    }),
+  ),
+);
+
+export const automationsHookRotateRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/automations/:id/hook/rotate",
+  route((automations) =>
+    Effect.gen(function* () {
+      const id = yield* automationId;
+      return yield* automations.rotateHook(id).pipe(
+        Effect.map((hook) => secretJson(hook)),
+        Effect.catch((error) => Effect.succeed(refused(error))),
+      );
+    }),
+  ),
+);
+
 export const automationsRouteLayers = [
   automationsListRouteLayer,
   automationsCreateRouteLayer,
@@ -165,4 +199,6 @@ export const automationsRouteLayers = [
   automationsDeleteRouteLayer,
   automationsRunRouteLayer,
   automationsRunsRouteLayer,
+  automationsHookRouteLayer,
+  automationsHookRotateRouteLayer,
 ] as const;

@@ -23,12 +23,14 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
   CalendarClockIcon,
+  FileTextIcon,
   GitPullRequestIcon,
   HandIcon,
   LoaderCircleIcon,
   MailIcon,
   MessageSquareIcon,
   VideoIcon,
+  WebhookIcon,
   ZapIcon,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -56,6 +58,7 @@ import {
   type AutomationDraft,
   EMPTY_DRAFT,
   type EventSource,
+  askLine,
   autoName,
   browserTimeZone,
   draftOf,
@@ -66,7 +69,7 @@ import {
   suggestionsFor,
   triggerOf,
 } from "./automations.logic";
-import { AUTOMATIONS_KEY, useAutomationActions } from "./useAutomations";
+import { AUTOMATIONS_KEY, useAutomationActions, useAutomationsOn } from "./useAutomations";
 
 /** An assistant the automation can be for. */
 export interface AutomationAssistantChoice {
@@ -94,6 +97,11 @@ export interface AutomationChatContext {
   readonly title: string;
   readonly projectId: string;
   readonly projectTitle: string;
+}
+
+/** A chat the Automations screen offers for a form: picks the computer too. */
+export interface AutomationChatChoice extends AutomationChatContext {
+  readonly computer: string;
 }
 
 const THIS_CHAT = "chat:this";
@@ -355,6 +363,8 @@ export function AutomationDialog(props: {
   readonly automationEnvironmentId?: string | null;
   /** Opened from a chat: it can run it itself (the default then). */
   readonly chat?: AutomationChatContext | null;
+  /** Opened elsewhere: chats a form can go to, on every computer. */
+  readonly chatChoices?: ReadonlyArray<AutomationChatChoice>;
   readonly onSaved?: (automation: Automation, environmentId: string) => void;
 }) {
   // Mounted fresh each time it opens: the draft starts from the automation or empty.
@@ -367,7 +377,12 @@ export function AutomationDialog(props: {
 
 function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
   const editing = props.automation ?? null;
-  const chat = props.chat ?? null;
+  const [pickedChatKey, setPickedChatKey] = useState("");
+  const chatChoices = props.chatChoices ?? [];
+  const chat: AutomationChatContext | null =
+    props.chat ??
+    chatChoices.find((item) => `${item.environmentId}:${item.threadId}` === pickedChatKey) ??
+    null;
   const editingExecutor = editing ? automationExecutorOf(editing) : null;
   const firstUsable = props.choices.find((choice) => choice.available);
   const [who, setWho] = useState<string>(() =>
@@ -428,10 +443,18 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
     setFailure(null);
     setDraft((current) => ({ ...current, ...patch }));
   };
+  const formEvent = draft.when === "event" && draft.source === "form";
+  const outsideEvent = formEvent || (draft.when === "event" && draft.source === "webhook");
   const problem =
     inChat && draft.when === "event" && draft.source === "call"
       ? "After a call is for an assistant."
-      : draftProblem(draft);
+      : outsideEvent && (!inChat || executor === null)
+        ? "Pick a chat for it."
+        : draftProblem(draft);
+  const listed = useAutomationsOn(environmentId);
+  // Webhooks and forms show only where the console has them on, or when
+  // this one already is one.
+  const hooksOn = listed.data?.hooksEnabled === true || (editing !== null && outsideEvent);
   const name = nameTouched && draft.name.trim() ? draft.name.trim() : autoName(draft);
   const kind = triggerOf(draft, timezone).kind;
   const assistantName = doer;
@@ -689,6 +712,101 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                   name={choice.name}
                 />
               ) : null}
+              {hooksOn ? (
+                <>
+                  <SourceRow
+                    on={draft.source === "webhook"}
+                    icon={<WebhookIcon className="size-4" />}
+                    title="A webhook"
+                    hint="Another service calls a secret URL. It goes to one chat."
+                    onClick={() => set({ source: "webhook" })}
+                    testId="automation-source-webhook"
+                  />
+                  <SourceRow
+                    on={formEvent}
+                    icon={<FileTextIcon className="size-4" />}
+                    title="A form on your site"
+                    hint="Someone sends the form. It goes to one chat."
+                    onClick={() => set({ source: "form" })}
+                    testId="automation-source-form"
+                  />
+                  {outsideEvent ? (
+                    <div className="flex flex-col gap-1.5 pl-1">
+                      {formEvent ? (
+                        <Input
+                          value={draft.slug}
+                          onChange={(event) => set({ slug: event.target.value })}
+                          disabled={editing !== null}
+                          placeholder="Site name, e.g. report"
+                          aria-label="Site"
+                          autoComplete="off"
+                          spellCheck={false}
+                          data-testid="automation-site"
+                        />
+                      ) : null}
+                      {!editing && !props.chat ? (
+                        <select
+                          value={pickedChatKey}
+                          onChange={(event) => {
+                            setPickedChatKey(event.target.value);
+                            setWho(THIS_CHAT);
+                            setFailure(null);
+                          }}
+                          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+                          aria-label="Chat"
+                          data-testid="automation-chat-pick"
+                        >
+                          <option value="">Pick a chat…</option>
+                          {chatChoices.map((item) => (
+                            <option
+                              key={`${item.environmentId}:${item.threadId}`}
+                              value={`${item.environmentId}:${item.threadId}`}
+                            >
+                              {item.title} · {item.computer}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {outsideEvent && inChat ? (
+                    <label
+                      className="flex cursor-pointer items-start gap-2 pl-1 text-xs text-muted-foreground"
+                      data-testid="automation-ask"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={draft.ask}
+                        onChange={(event) => set({ ask: event.target.checked })}
+                        data-testid="automation-ask-toggle"
+                      />
+                      <span>
+                        <span className="text-foreground">Ask me first</span> — the text comes from
+                        outside, so the agent changes nothing without your Allow.
+                      </span>
+                    </label>
+                  ) : null}
+                  {draft.when === "event" && draft.source === "webhook" ? (
+                    <label
+                      className="flex cursor-pointer items-start gap-2 pl-1 text-xs text-muted-foreground"
+                      data-testid="automation-signature"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={draft.requireSignature}
+                        onChange={(event) => set({ requireSignature: event.target.checked })}
+                        data-testid="automation-signature-toggle"
+                      />
+                      <span>
+                        <span className="text-foreground">Require a signature</span> — requests
+                        without it are refused. GitHub signs its webhooks this way.
+                      </span>
+                    </label>
+                  ) : null}
+                </>
+              ) : null}
               <SourceRow
                 on={draft.source === "gmail"}
                 icon={<MailIcon className="size-4" />}
@@ -751,11 +869,13 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
             data-testid="automation-mode-line"
           >
             <MessageSquareIcon className="size-3.5 text-amber-500" />
-            {who === THIS_CHAT
-              ? "Runs in this chat, with what it already knows, in the chat's own mode"
-              : "Opens a new chat in the project each time, set up like this one"}
+            {outsideEvent
+              ? askLine(draft.ask)
+              : who === THIS_CHAT
+                ? "Runs in this chat, with what it already knows, in the chat's own mode"
+                : "Opens a new chat in the project each time, set up like this one"}
           </p>
-        ) : choice ? (
+        ) : choice && !outsideEvent ? (
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"
             data-testid="automation-mode-line"
@@ -835,5 +955,9 @@ function triggerLabel(saved: Automation, fallback: ReturnType<typeof triggerOf>)
       return "after each call";
     case "gmail.message":
       return "on new email";
+    case "webhook":
+      return "when its webhook is called";
+    case "site.form":
+      return `when someone sends the form on ${trigger.slug}`;
   }
 }

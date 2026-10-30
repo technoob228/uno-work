@@ -114,6 +114,7 @@ import { isAssistantConversationThread } from "../manager/assistantPush.ts";
 import { readIncomingRemoteChats, remoteStarterOf } from "../remoteComputers/remoteChatStore.ts";
 import { AssistantPushService, type AssistantPushChat } from "../manager/Services/AssistantPush.ts";
 import { AutomationsService } from "../automations/AutomationsService.ts";
+import { OutsideThreads } from "../automations/outsideThreads.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
 
@@ -380,6 +381,7 @@ const makeDeps = (input: {
     }).pipe(Effect.orElseSucceed(() => null));
     const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
     const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
+    const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
@@ -461,6 +463,8 @@ const makeDeps = (input: {
           owner !== null && presetAsksFirst(owner.preset) ? { name: owner.title } : null,
         ),
       ),
+      // A stranger's text is in this chat: everything but a few reads asks.
+      ...(outsideThreads ? { outsideText: outsideThreads.has(input.threadId) } : {}),
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
         Effect.map((owner) =>

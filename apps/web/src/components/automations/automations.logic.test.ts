@@ -13,8 +13,10 @@ import {
   emptyHint,
   groupByAssistant,
   isRepoName,
+  isSlug,
   modeLine,
   normalizeRepo,
+  normalizeSlug,
   runIsActive,
   runLine,
   statusProblem,
@@ -341,5 +343,45 @@ describe("a chat's automations (29.10)", () => {
       [{ environmentId: "e", projectId: "assistant-bolt" }],
     );
     expect(groups.map((g) => g.assistantName)).toEqual(["Bolt", "Chats"]);
+  });
+});
+
+describe("webhooks and forms", () => {
+  const event = { ...EMPTY_DRAFT, when: "event" as const, instruction: "Read it" };
+
+  it("a form takes a site's name or address, and asks by default", () => {
+    expect(normalizeSlug(" https://Report.uno4.me/page?x=1 ")).toBe("report");
+    expect(isSlug("report")).toBe(true);
+    expect(isSlug("../x")).toBe(false);
+    expect(triggerOf({ ...event, source: "form", slug: "report" }, "UTC")).toEqual({
+      kind: "site.form",
+      slug: "report",
+      ask: true,
+    });
+    expect(draftProblem({ ...event, source: "form", slug: "" })).toBe("Enter the site's name.");
+    expect(autoName({ ...event, source: "form", slug: "report" })).toBe("Form on report");
+  });
+
+  it("a webhook carries its ask and signature, and comes back the same", () => {
+    const trigger = triggerOf(
+      { ...event, source: "webhook", ask: false, requireSignature: true },
+      "UTC",
+    );
+    expect(trigger).toEqual({ kind: "webhook", ask: false, requireSignature: true });
+    const back = draftOf({
+      trigger,
+      instruction: "Read it",
+      name: "CI",
+    } as Parameters<typeof draftOf>[0]);
+    expect(back).toMatchObject({ source: "webhook", ask: false, requireSignature: true });
+  });
+
+  it("a stored trigger without `ask` reads as asking", () => {
+    const back = draftOf({
+      trigger: { kind: "site.form", slug: "report" },
+      instruction: "x",
+      name: "x",
+    } as Parameters<typeof draftOf>[0]);
+    expect(back.ask).toBe(true);
   });
 });

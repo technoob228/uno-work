@@ -11,6 +11,7 @@ import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurn
 import {
   AssistantScheduledTurns,
   SCHEDULED_THREAD_TITLE,
+  canHoldOutsideText,
   isNoReply,
   makeAssistantScheduledTurns,
   wrapScheduledPrompt,
@@ -34,14 +35,18 @@ interface World {
   reply: string | null;
 }
 
-function makeLayer(world: World, options: { mainChat: boolean; projectId: string }) {
+function makeLayer(
+  world: World,
+  options: { mainChat: boolean; projectId: string; chatProjectId?: string },
+) {
   let requestedAt: string | null = null;
   let requestedMessageId: string | null = null;
   const threads = options.mainChat
     ? [
         {
           id: MAIN,
-          projectId: ProjectId.make("assistant-home"),
+          projectId: ProjectId.make(options.chatProjectId ?? "assistant-home"),
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
           title: "Uno",
           assistantRole: "chat",
           archivedAt: null,
@@ -232,6 +237,62 @@ describe("scheduled assistant turn", () => {
       ),
     );
     expect(event).toMatchObject({ status: "delivered", reply: "Reviewed PR #12: two nits." });
+  });
+
+  describe("a stranger's text (a form, a webhook)", () => {
+    const inChat = (world: World, ask: boolean, marks: string[], chatProjectId = "p-work") =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const turns = yield* AssistantScheduledTurns;
+          return yield* turns.runInChat!({
+            target: { kind: "chat", threadId: MAIN },
+            prompt: "[Automation …]",
+            timeoutSec: 30,
+            reason: "automation 7",
+            ...(ask ? { ask: true, onThread: (id) => Effect.sync(() => void marks.push(id)) } : {}),
+          });
+        }).pipe(
+          Effect.provide(
+            makeLayer(world, { mainChat: true, projectId: "assistant-home", chatProjectId }),
+          ),
+        ),
+      );
+
+    it("puts a Full access chat in Ask before the turn, marked first", async () => {
+      const world = freshWorld("Read it.");
+      const marks: string[] = [];
+      await inChat(world, true, marks);
+      expect(marks).toEqual([MAIN]);
+      expect(world.dispatched.map((command) => command.type)).toEqual([
+        "thread.runtime-mode.set",
+        "thread.turn.start",
+      ]);
+      expect(world.dispatched[0]).toMatchObject({
+        threadId: MAIN,
+        runtimeMode: "approval-required",
+      });
+    });
+
+    it("leaves a chat alone when no stranger's text is in it", async () => {
+      const world = freshWorld("Done.");
+      await inChat(world, false, []);
+      expect(world.dispatched.map((command) => command.type)).toEqual(["thread.turn.start"]);
+    });
+
+    it("refuses a chat that can't ask: an assistant's, or on Hermes", () => {
+      const codex = { instanceId: "codex" };
+      expect(canHoldOutsideText("p-work", codex)).toBe(true);
+      expect(canHoldOutsideText("p-work", { instanceId: "claudeAgent" })).toBe(true);
+      expect(canHoldOutsideText("assistant-home", codex)).toBe(false);
+      expect(canHoldOutsideText("assistant-ada", codex)).toBe(false);
+      expect(canHoldOutsideText("p-work", { instanceId: "hermes" })).toBe(false);
+    });
+
+    it("an assistant's chat gets no turn", async () => {
+      const world = freshWorld("Read it.");
+      await expect(inChat(world, true, [], "assistant-home")).rejects.toThrow();
+      expect(world.dispatched).toEqual([]);
+    });
   });
 
   it("stays silent on NO_REPLY", async () => {

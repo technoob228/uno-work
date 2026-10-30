@@ -32,7 +32,7 @@ import {
   type ConsoleReply,
   type ConsoleRequest,
 } from "./consoleClient.ts";
-import { decideUnoWorkGate } from "./policy.ts";
+import { decideUnoWorkGate, outsideTextAsks } from "./policy.ts";
 import {
   BOT_STARTING_NEXT,
   BOT_WAITING_FOR_TOKEN_NEXT,
@@ -425,6 +425,16 @@ describe("uno-work tool catalogue", () => {
       "sensitive",
     );
     expect(toolLevel(tool("site_forms_set"), { slug: "a", webhookUrl: "" })).toBe("safe");
+    // A form that starts this computer's agent always waits for the person.
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", chat: "this_chat" })).toBe("sensitive");
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", chat: "new_chat" })).toBe("sensitive");
+    expect(toolLevel(tool("site_forms_set"), { slug: "a", chat: "off" })).toBe("safe");
+    expect(toolLevel(tool("automation_create"), { trigger: { kind: "webhook" } })).toBe(
+      "sensitive",
+    );
+    expect(
+      toolLevel(tool("automation_create"), { trigger: { kind: "schedule", cron: "0 9 * * *" } }),
+    ).toBe("change");
     expect(toolLevel(tool("browser_command"), { command: "screenshot" })).toBe("safe");
     expect(toolLevel(tool("browser_command"), { command: "evaluate" })).toBe("change");
   });
@@ -534,6 +544,48 @@ describe("approval gate", () => {
     // …but for an "Cautious" assistant even a "safe" outward call asks.
     expect(decideUnoWorkGate("safe", "full-access", true)).toBe("ask");
     expect(decideUnoWorkGate("change", "auto-accept-edits", true)).toBe("ask");
+  });
+
+  it("a chat with a stranger's text: every tool but a few reads asks, whatever the mode", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "full-access", approval: "denied" });
+    const tainted = { ...deps, outsideText: Effect.succeed(true) };
+    // A way out that is "safe" in a plain chat: it asks here, and says why.
+    const published = await run("site_publish", tainted, { path: "~/site", slug: "menu" });
+    expect(published._tag).toBe("Failure");
+    expect(recorded.approvals).toHaveLength(1);
+    expect(recorded.approvals[0]!.detail).toContain("Text from outside Uno");
+    for (const name of [
+      "open_in_panel",
+      "project_keys",
+      "request_secret",
+      "browser_command",
+      "site_set_password",
+      "automation_create",
+      "messenger_send",
+      "chat_status",
+      "app_logs",
+    ]) {
+      expect(outsideTextAsks(name), name).toBe(true);
+    }
+    // The Inbox line stays; a button to any URL and the messenger copy ask.
+    expect(outsideTextAsks("notify", { open: { url: "https://x.test" } })).toBe(true);
+    expect(outsideTextAsks("notify", { alsoMessenger: true })).toBe(true);
+    // Reads of this computer and telling the person stay.
+    for (const name of ["computer_status", "files_list", "notify", "uno_guide"]) {
+      expect(outsideTextAsks(name), name).toBe(false);
+    }
+    recorded.approvals.length = 0;
+    const status = await run("computer_status", tainted, {});
+    expect(status._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
+    // No stranger's text: the usual gate.
+    const clean = await run(
+      "app_stop",
+      { ...deps, outsideText: Effect.succeed(false) },
+      { appId: "notes" },
+    );
+    expect(clean._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
   });
 
   it('"Cautious": a site that would go up on its own waits, and a declined one never does', async () => {

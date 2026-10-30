@@ -48,7 +48,7 @@ import type {
   UnoMachineAppActionInput,
   UnoMachineApps,
 } from "@t3tools/contracts";
-import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
+import { AUTOMATION_INSTRUCTION_MAX_CHARS, clampUnoAgentAccessLevel } from "@t3tools/contracts";
 import { Data, Duration, Effect } from "effect";
 
 import {
@@ -100,7 +100,13 @@ import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { htmlRenderTools } from "./htmlTools.ts";
 import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
-import { decideUnoWorkGate, refusalMessage, type UnoWorkToolLevel } from "./policy.ts";
+import {
+  decideUnoWorkGate,
+  OUTSIDE_TEXT_NOTE,
+  outsideTextAsks,
+  refusalMessage,
+  type UnoWorkToolLevel,
+} from "./policy.ts";
 import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/assistantPreset";
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
@@ -215,6 +221,12 @@ export interface UnoWorkToolDeps {
    * for the person's Allow (`asksFirstCategory`). Absent: no assistant rules.
    */
   readonly asksFirst?: Effect.Effect<{ readonly name: string } | null>;
+  /**
+   * The calling chat holds a stranger's text (a site form, a webhook, in Ask
+   * mode): every tool but a few reads waits for the person's Allow. Absent:
+   * no such chats here.
+   */
+  readonly outsideText?: Effect.Effect<boolean>;
   /**
    * The keys of the chat's project ("On all my computers": kept in the Uno
    * vault, written into its `.env` on every computer). `refusal`: the
@@ -3559,15 +3571,29 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           maxLength: 2048,
           description: 'https URL that receives each answer as JSON, or "" to switch it off.',
         },
+        chat: {
+          type: "string",
+          enum: ["this_chat", "new_chat", "off"],
+          description:
+            'Each answer also starts work here: "this_chat" (a new message in this chat), "new_chat" (a new chat in this project each time), "off" stops that. Email and the other channels stay as they are.',
+        },
+        chatInstruction: {
+          type: "string",
+          maxLength: AUTOMATION_INSTRUCTION_MAX_CHARS,
+          description:
+            'With chat: what to do with each answer, e.g. "Read the note and propose the change to the report".',
+        },
       },
       required: ["slug"],
       additionalProperties: false,
     },
     // Answers to the person's own email / Telegram (email confirms by link)
-    // run; an outside webhook URL waits for the person's Allow.
+    // run; an outside webhook URL waits for the person's Allow, and so does a
+    // form that starts this computer's agent.
     level: (args) => {
       const webhook = str(args, "webhookUrl")?.trim();
-      return webhook ? "sensitive" : "safe";
+      const chat = str(args, "chat");
+      return webhook || (chat !== undefined && chat !== "off") ? "sensitive" : "safe";
     },
     approvalTitle: (args) => `Send form answers of site “${str(args, "slug")}”`,
     approvalDetail: (args) => {
@@ -3577,6 +3603,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       if (email !== undefined) parts.push(email === "" ? "email: off" : `to email ${email}`);
       if (webhook !== undefined) parts.push(webhook === "" ? "webhook: off" : `to ${webhook}`);
       if (bool(args, "telegram") === true) parts.push("to your Telegram (you open a link)");
+      const chat = str(args, "chat");
+      if (chat === "this_chat") parts.push("start this chat in Ask mode");
+      if (chat === "new_chat") parts.push("start a new chat in Ask mode each time");
+      if (chat === "off") parts.push("stop starting a chat");
+      const instruction = str(args, "chatInstruction")?.trim();
+      if (instruction && chat !== "off") parts.push(`what it does: ${instruction}`);
       return parts.join(" · ") || undefined;
     },
     run: (deps, args) =>
@@ -3585,8 +3617,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const email = str(args, "email")?.trim();
         const webhook = str(args, "webhookUrl")?.trim();
         const telegram = bool(args, "telegram") === true;
-        if (email === undefined && webhook === undefined && !telegram) {
-          return yield* toolError("Say where answers go: email, telegram or webhookUrl.");
+        const chat = str(args, "chat");
+        if (email === undefined && webhook === undefined && !telegram && chat === undefined) {
+          return yield* toolError("Say where answers go: email, telegram, webhookUrl or chat.");
         }
         if (webhook && !webhook.startsWith("https://")) {
           return yield* toolError("webhookUrl must start with https://.");
@@ -3631,6 +3664,24 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }
         const delivery = view ? formsDelivery(view) : undefined;
         const notes: string[] = [];
+        if (chat !== undefined) {
+          if (deps.automations === undefined) {
+            return yield* toolError(
+              "This Uno Work can't start a chat from a form. Tell the person; email and Telegram still work.",
+            );
+          }
+          const tools = deps.automations;
+          const said = yield* tools
+            .siteForm({
+              slug,
+              chat,
+              ...(str(args, "chatInstruction")
+                ? { instruction: str(args, "chatInstruction") }
+                : {}),
+            })
+            .pipe(Effect.mapError((error) => toolError(error.message)));
+          notes.push(said);
+        }
         if (delivery?.email && delivery.email.confirmed === false) {
           notes.push(
             `A confirmation email went to ${String(delivery.email.to)}: answers arrive there after someone clicks the link in it.`,
@@ -3646,6 +3697,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         );
         return {
           slug,
+          ...(chat !== undefined ? { chat } : {}),
           ...(delivery ? { delivery } : {}),
           ...(telegramLink ? { telegramLink } : {}),
           note: notes.join(" "),
@@ -4052,7 +4104,9 @@ export function runUnoWorkTool(
     if (tool.prepare) yield* tool.prepare(deps, args);
     const outward = asksFirstCategory(tool.name, args);
     const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
-    if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
+    const outside =
+      outsideTextAsks(tool.name, args) && deps.outsideText ? yield* deps.outsideText : false;
+    if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null || outside) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
       const appName =
@@ -4069,9 +4123,13 @@ export function runUnoWorkTool(
       const ownDetail = tool.approvalDetail?.(described);
       // Why it asks although the chat's mode would let it run: say so.
       const detail =
-        asking !== null
-          ? [ownDetail, `${asking.name} is Cautious, so it asks first.`].filter(Boolean).join(" · ")
-          : ownDetail;
+        [
+          ownDetail,
+          asking !== null ? `${asking.name} is Cautious, so it asks first.` : null,
+          outside ? OUTSIDE_TEXT_NOTE : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined;
       const clientAction = tool.approvalClientAction?.(args);
       const outcome = yield* askPerson(deps, {
         tool: tool.name,
@@ -4327,6 +4385,8 @@ export function connectorMcpTool(
         }
         // An "Cautious" assistant asks before any change in a connected app.
         const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
+        // A chat with a stranger's text: reading the person's apps asks too.
+        const outside = deps.outsideText ? yield* deps.outsideText : false;
         // The console validates the arguments against its own schema.
         const call = Effect.gen(function* () {
           const result = yield* connectors.call({
@@ -4337,7 +4397,9 @@ export function connectorMcpTool(
           if (result.isError) return yield* toolError(connectorErrorText(result));
           return new McpContent(result.content);
         });
-        if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null) === "ask") {
+        if (
+          decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null || outside) === "ask"
+        ) {
           const described = describeConnectorArgs(args);
           const title = `${tool.providerName}: ${tool.name}`;
           const outcome = yield* askPerson(deps, {
@@ -4345,11 +4407,13 @@ export function connectorMcpTool(
             level,
             title,
             detail:
-              asking !== null
-                ? [described, `${asking.name} is Cautious, so it asks first.`]
-                    .filter(Boolean)
-                    .join(" · ")
-                : described,
+              [
+                described,
+                asking !== null ? `${asking.name} is Cautious, so it asks first.` : null,
+                outside ? OUTSIDE_TEXT_NOTE : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined,
             later: lateRun(deps, title, call),
           });
           if (outcome === "queued") {

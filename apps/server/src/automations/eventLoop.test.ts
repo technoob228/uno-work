@@ -374,6 +374,65 @@ describe("an automation a chat runs (29.10)", () => {
     expect(world.results[0]!.body).toMatchObject({ state: "failed", threadId: "thread-new" });
   });
 
+  it("a form runs in Ask mode, marks the chat, waits long for a busy one", async () => {
+    const chatTurns: ChatTurnInput[] = [];
+    const { world, loop } = stand({
+      runChatTurn: (input) =>
+        Effect.sync(() => {
+          chatTurns.push(input);
+          return { status: "answered" as const, threadId: "thread-7", reply: "Noted." };
+        }),
+    });
+    world.queue = [
+      event(31, {
+        assistant: "",
+        assistantName: "",
+        name: "Form on report",
+        executor: { kind: "chat", threadId: "thread-7" },
+        kind: "site.form",
+        payload: { ask: true, slug: "report", fields: [{ name: "m", value: "hi" }] },
+      }),
+    ];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(chatTurns[0]).toMatchObject({ ask: true });
+    expect(chatTurns[0]!.busyWaitMs).toBeGreaterThan(5 * 60_000);
+    expect(chatTurns[0]!.prompt).toContain("<outside_input_");
+  });
+
+  it("a stranger's text never reaches an assistant", async () => {
+    const { world, loop } = stand();
+    world.queue = [event(33, { kind: "webhook", payload: { ask: true, body: "x" } })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(world.turns).toEqual([]);
+    expect(world.results[0]!.body.state).toBe("failed");
+  });
+
+  it("the person turned Ask off: the chat's own mode", async () => {
+    const chatTurns: ChatTurnInput[] = [];
+    const { world, loop } = stand({
+      runChatTurn: (input) =>
+        Effect.sync(() => {
+          chatTurns.push(input);
+          return { status: "answered" as const, threadId: "thread-7", reply: "Done." };
+        }),
+    });
+    world.queue = [
+      event(32, {
+        assistant: "",
+        assistantName: "",
+        executor: { kind: "chat", threadId: "thread-7" },
+        kind: "webhook",
+        payload: { ask: false, body: "x" },
+      }),
+    ];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(chatTurns[0]!.ask).toBeUndefined();
+    expect(chatTurns[0]!.prompt).toContain("<outside_input_");
+  });
+
   it("an older wiring without chat turns fails the run with a note", async () => {
     const { world, loop } = stand();
     world.queue = [event(23, { assistant: "", executor: { kind: "chat", threadId: "t" } })];

@@ -398,6 +398,108 @@ describe("uno-manager MCP automation tools", () => {
   });
 });
 
+describe("outside triggers: what an agent may not do", () => {
+  const chat = () => ({ threadId: "thread-7", assistant: Effect.succeed<string | null>(null) });
+
+  it("a webhook from an agent always asks: its `ask: false` is dropped", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    const result = await run((service) =>
+      service.chatTools(chat()).create({
+        instruction: "Look at it",
+        trigger: { kind: "webhook", ask: false, requireSignature: true },
+      }),
+    );
+    expect(result._tag).toBe("Success");
+    expect((calls[0]!.body as { trigger: unknown }).trigger).toEqual({
+      kind: "webhook",
+      ask: true,
+    });
+  });
+
+  it("automation_update can't open Ask mode", async () => {
+    const own = automation({
+      assistant: "",
+      executor: { kind: "chat", thread_id: "thread-7" },
+      trigger: { kind: "webhook", ask: true },
+    });
+    const { calls, run } = setup((method) =>
+      method === "GET" ? json(200, { automations: [own] }) : json(200, own),
+    );
+    await run((service) =>
+      service.chatTools(chat()).update({ id: own.id, trigger: { kind: "webhook", ask: false } }),
+    );
+    const patch = calls.find((call) => call.method === "PATCH");
+    expect((patch!.body as { trigger: unknown }).trigger).toEqual({ kind: "webhook", ask: true });
+  });
+
+  it("a form isn't set through automation_create", async () => {
+    const { calls, run } = setup(() => json(201, automation()));
+    const result = await run((service) =>
+      service.chatTools(chat()).create({
+        instruction: "x",
+        trigger: { kind: "site.form", slug: "report", ask: false },
+      }),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("site_forms_set {chat}: this chat, asks by default, then off", async () => {
+    const made = automation({
+      assistant: "",
+      trigger: { kind: "site.form", slug: "report" },
+      executor: { kind: "chat", thread_id: "thread-7" },
+    });
+    const { calls, run } = setup((method) =>
+      method === "GET" ? json(200, { automations: [made] }) : json(201, made),
+    );
+    const on = await run((service) =>
+      service.chatTools(chat()).siteForm({ slug: "report", chat: "this_chat" }),
+    );
+    expect(on._tag).toBe("Success");
+    expect(calls[0]!.body).toMatchObject({
+      trigger: { kind: "site.form", slug: "report" },
+      executor: { kind: "chat", thread_id: "thread-7" },
+    });
+    expect(JSON.stringify(calls[0]!.body)).not.toContain('"ask":false');
+    const off = await run((service) =>
+      service.chatTools(chat()).siteForm({ slug: "report", chat: "off" }),
+    );
+    expect(off._tag).toBe("Success");
+    expect(calls.some((call) => call.method === "DELETE")).toBe(true);
+  });
+
+  it("an assistant's own conversation can't take a form", async () => {
+    const { calls, run } = setup(() => json(201, automation()));
+    const result = await run((service) =>
+      service
+        .chatTools({ threadId: "thread-7", assistant: Effect.succeed("assistant-ada") })
+        .siteForm({ slug: "report", chat: "this_chat" }),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("the URL reaches the web only: the list and tools don't carry it", async () => {
+    const hook = {
+      url: "https://api.test/api/v1/hooks/1/secret",
+      signing_secret: "whsec_x",
+      require_signature: false,
+      per_minute: 60,
+      max_body_bytes: 262144,
+    };
+    const { calls, run } = setup((_m, p) =>
+      p.endsWith("/hook") ? json(200, hook) : json(200, { automations: [] }),
+    );
+    const result = await run((service) => service.hook(1));
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { url: hook.url, signingSecret: "whsec_x", perMinute: 60 },
+    });
+    expect(calls[0]!.path).toBe("/api/v1/boxes/7/work/automations/1/hook");
+  });
+});
+
 describe("uno-work automation_* from a chat (29.10)", () => {
   const chat = (assistant: string | null = null) => ({
     threadId: "thread-7",

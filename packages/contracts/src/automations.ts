@@ -73,11 +73,37 @@ export const AutomationGmailTrigger = Schema.Struct({
 });
 export type AutomationGmailTrigger = typeof AutomationGmailTrigger.Type;
 
+/**
+ * Its own secret URL (30.10). The URL is never here: the person reads it with
+ * `GET /api/manager/automations/:id/hook`. `ask` (absent: true): a run works in
+ * Ask mode, whatever the chat's mode — only the person turns it off.
+ * `requireSignature`: refuse a request without a valid signature of its body.
+ */
+export const AutomationWebhookTrigger = Schema.Struct({
+  kind: Schema.Literal("webhook"),
+  ask: Schema.optional(Schema.Boolean),
+  requireSignature: Schema.optional(Schema.Boolean),
+});
+export type AutomationWebhookTrigger = typeof AutomationWebhookTrigger.Type;
+
+/**
+ * A form of the person's site (30.10): one site, one chat. Runs only in a
+ * chat, never an assistant; `ask` as above.
+ */
+export const AutomationSiteFormTrigger = Schema.Struct({
+  kind: Schema.Literal("site.form"),
+  slug: TrimmedNonEmptyString.check(Schema.isMaxLength(63)),
+  ask: Schema.optional(Schema.Boolean),
+});
+export type AutomationSiteFormTrigger = typeof AutomationSiteFormTrigger.Type;
+
 export const AutomationTrigger = Schema.Union([
   AutomationScheduleTrigger,
   AutomationPullRequestTrigger,
   AutomationCallEndedTrigger,
   AutomationGmailTrigger,
+  AutomationWebhookTrigger,
+  AutomationSiteFormTrigger,
 ]);
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 export type AutomationTriggerKind = AutomationTrigger["kind"];
@@ -108,6 +134,13 @@ export const AutomationExecutor = Schema.Union([
 ]);
 export type AutomationExecutor = typeof AutomationExecutor.Type;
 export type AutomationExecutorKind = AutomationExecutor["kind"];
+
+/** A trigger that starts from the outside: its text comes from a stranger. */
+export function isOutsideTrigger(
+  trigger: AutomationTrigger,
+): trigger is AutomationWebhookTrigger | AutomationSiteFormTrigger {
+  return trigger.kind === "webhook" || trigger.kind === "site.form";
+}
 
 /** Its executor (absent on an older daemon's answer: the assistant). */
 export function automationExecutorOf(automation: {
@@ -153,6 +186,8 @@ export const AutomationRunKind = Schema.Literals([
   "github.pull_request",
   "manual",
   "call.ended",
+  "webhook",
+  "site.form",
 ]);
 export type AutomationRunKind = typeof AutomationRunKind.Type;
 
@@ -160,7 +195,7 @@ export const AutomationRun = Schema.Struct({
   id: PositiveInt,
   automationId: PositiveInt,
   kind: AutomationRunKind,
-  /** "PR #12 · Fix login" / "Weekdays at 09:00" / "Run now". */
+  /** "PR #12 · Fix login" / "Weekdays at 09:00" / "Run now" / "Form on report". */
   title: Schema.String,
   url: Schema.NullOr(Schema.String),
   state: AutomationRunState,
@@ -219,8 +254,20 @@ export const AutomationListResult = Schema.Struct({
    * of Automations only where some computer says true (gating, 28.10).
    */
   consoleEnabled: Schema.optional(Schema.Boolean),
+  /** Webhooks and site forms are on for this account (`WORK_HOOKS`). */
+  hooksEnabled: Schema.optional(Schema.Boolean),
 });
 export type AutomationListResult = typeof AutomationListResult.Type;
+
+/** `GET /api/manager/automations/:id/hook`: the person's session only. */
+export const AutomationHook = Schema.Struct({
+  url: Schema.String,
+  signingSecret: Schema.String,
+  requireSignature: Schema.Boolean,
+  perMinute: Schema.Number,
+  maxBodyBytes: Schema.Number,
+});
+export type AutomationHook = typeof AutomationHook.Type;
 
 /** `POST /api/manager/automations` (web) and `automation_create` (assistant). */
 export const AutomationCreateInput = Schema.Struct({
@@ -262,6 +309,9 @@ export const AutomationErrorCode = Schema.Literals([
   "NO_OPEN_PR",
   "NOT_FOUND",
   "CONSOLE_UNREACHABLE",
+  "HOOKS_DISABLED",
+  "NOT_RUNNABLE",
+  "SITE_FORM_TAKEN",
 ]);
 export type AutomationErrorCode = typeof AutomationErrorCode.Type;
 
@@ -411,5 +461,9 @@ export function describeAutomationTrigger(trigger: AutomationTrigger): string {
       return "After each call it joins";
     case "gmail.message":
       return trigger.from ? `When an email arrives from ${trigger.from}` : "When an email arrives";
+    case "webhook":
+      return "When its webhook is called";
+    case "site.form":
+      return `When someone sends the form on ${trigger.slug}`;
   }
 }
