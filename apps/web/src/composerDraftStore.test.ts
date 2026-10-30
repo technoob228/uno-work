@@ -490,6 +490,70 @@ describe("composerDraftStore terminal contexts", () => {
     ]);
   });
 
+  it("keeps a draft's project through a reload when its logical key is a path", () => {
+    // New chat in a folder that is a project already: the key is the project's
+    // physical key, `<environment>:<path>`. It reads like `<environment>:<id>`.
+    const logicalProjectKey = `${TEST_ENVIRONMENT_ID}:/home/person`;
+    const realProjectId = ProjectId.make("9d1f7a52-home");
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const merged = persistApi.getOptions().merge(
+      {
+        draftsByThreadKey: {},
+        draftThreadsByThreadKey: {
+          "draft-home": {
+            threadId: "thread-home",
+            environmentId: TEST_ENVIRONMENT_ID,
+            projectId: realProjectId,
+            logicalProjectKey,
+            createdAt: "2026-10-30T12:00:00.000Z",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+            promotedTo: null,
+          },
+        },
+        logicalProjectDraftThreadKeyByLogicalProjectKey: { [logicalProjectKey]: "draft-home" },
+        hermesDefaultApplied: true,
+      },
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(merged.draftThreadsByThreadKey["draft-home"]).toMatchObject({
+      projectId: realProjectId,
+      logicalProjectKey,
+    });
+  });
+
+  it("makes no draft out of a path-shaped key with no session behind it", () => {
+    const logicalProjectKey = `${TEST_ENVIRONMENT_ID}:/home/person`;
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const merged = persistApi.getOptions().merge(
+      {
+        draftsByThreadKey: {},
+        draftThreadsByThreadKey: {},
+        logicalProjectDraftThreadKeyByLogicalProjectKey: { [logicalProjectKey]: "draft-gone" },
+        hermesDefaultApplied: true,
+      },
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(merged.draftThreadsByThreadKey["draft-gone"]).toBeUndefined();
+  });
+
   it("sanitizes malformed persisted drafts during merge", () => {
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {

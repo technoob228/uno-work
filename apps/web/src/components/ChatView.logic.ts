@@ -5,6 +5,7 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ScopedThreadRef,
+  type ServerProvider,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
@@ -62,6 +63,30 @@ export function buildLocalDraftThread(
     activities: [],
     proposedPlans: [],
   };
+}
+
+/**
+ * The harness whose sign-in the chat speaks about. A started chat: the one it
+ * runs on. A new chat isn't on anything yet: the one the composer shows, so a
+ * draft on Smart never asks to sign in to the project's seeded Codex. Null:
+ * the harness's default instance.
+ */
+export function resolveActiveProviderInstanceId(input: {
+  readonly isLocalDraft: boolean;
+  readonly sessionInstanceId: string | null | undefined;
+  readonly threadInstanceId: string | null | undefined;
+  readonly projectInstanceId: string | null | undefined;
+  /** What the person (or New chat) picked in the composer. */
+  readonly pickedInstanceId: string | null;
+  /** The harness the composer resolved for a chat with no pick. */
+  readonly selectedDriver: string;
+  readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
+}): string | null {
+  const saved = input.threadInstanceId ?? input.projectInstanceId ?? null;
+  if (!input.isLocalDraft) return input.sessionInstanceId ?? saved;
+  if (input.pickedInstanceId) return input.pickedInstanceId;
+  const savedDriver = input.providers.find((status) => status.instanceId === saved)?.driver;
+  return savedDriver === input.selectedDriver ? saved : null;
 }
 
 export function shouldWriteThreadErrorToCurrentServerThread(input: {

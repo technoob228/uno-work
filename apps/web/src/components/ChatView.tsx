@@ -197,6 +197,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  resolveActiveProviderInstanceId,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -1864,11 +1865,15 @@ export default function ChatView(props: ChatViewProps) {
   // `codex_personal`) surfaces its own status/message in the banner rather
   // than the default Codex's. Falls back to first-match-by-kind when no
   // saved instance id is available or the instance no longer exists.
-  const activeProviderInstanceId =
-    activeThread?.session?.providerInstanceId ??
-    activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
-    null;
+  const activeProviderInstanceId = resolveActiveProviderInstanceId({
+    isLocalDraft: isLocalDraftThread,
+    sessionInstanceId: activeThread?.session?.providerInstanceId,
+    threadInstanceId: activeThread?.modelSelection.instanceId,
+    projectInstanceId: activeProject?.defaultModelSelection?.instanceId,
+    pickedInstanceId: composerActiveProvider,
+    selectedDriver: selectedProvider,
+    providers: providerStatuses,
+  });
   const activeProviderStatus = useMemo(() => {
     if (activeProviderInstanceId) {
       return (
@@ -3094,7 +3099,10 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
-    if (!activeProject) return;
+    if (!activeProject) {
+      setThreadError(activeThread.id, "This chat's folder isn't here. Start a new chat to send it.");
+      return;
+    }
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
