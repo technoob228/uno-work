@@ -58,7 +58,13 @@ function PlanLimitRow({
   );
 }
 
-export function PlanLimitsAccountBlock({ account, now }: { account: PlanLimitsAccount; now: number }) {
+export function PlanLimitsAccountBlock({
+  account,
+  now,
+}: {
+  account: PlanLimitsAccount;
+  now: number;
+}) {
   const Icon = account.provider === "claude" ? ClaudeAI : OpenAI;
   const stale = planStaleText(account, now);
   const problem = planProblemText(account);

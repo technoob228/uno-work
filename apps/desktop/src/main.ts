@@ -3094,7 +3094,6 @@ app.on("open-url", (event, url) => {
   openPromptLink(url);
 });
 
-
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
   const configuredBackendPort = resolveConfiguredDesktopBackendPort(process.env.T3CODE_PORT);

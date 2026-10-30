@@ -38,10 +38,7 @@ describe("buildThreadTranscript", () => {
     const text = buildThreadTranscript({
       title: "T",
       maxChars: 120,
-      messages: [
-        message("user", "old ".repeat(40)),
-        message("assistant", "new reply"),
-      ] as never,
+      messages: [message("user", "old ".repeat(40)), message("assistant", "new reply")] as never,
     });
     expect(text).not.toContain("old old");
     expect(text).toContain("new reply");
