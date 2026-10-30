@@ -294,22 +294,31 @@ function displayInHome(dir: string, home: string): string {
   return dir === home ? "~" : displayManifestDir(dir, home);
 }
 
+/** An app's https address and who it lets in. */
+export interface AppHttpsLink {
+  readonly url: string;
+  /** Open to the internet (or an IP list) rather than behind the owner's Uno sign-in. */
+  readonly open: boolean;
+}
+
 /**
- * The control plane's `GET /boxes/{id}/app-links`: each web app's private
- * https address (Uno sign-in, owner only), keyed by its port. Only ready
- * addresses (`url` set); anything else — an older control plane, the account
- * without the flag — is an empty map.
+ * The control plane's `GET /boxes/{id}/app-links`: each app's https address,
+ * keyed by its port. A published port's address is open, any other one sits
+ * behind the owner's Uno sign-in; an unknown `access` counts as the latter, so
+ * a private address is never shown as public. Only ready addresses (`url`
+ * set); anything else — an older control plane, the account without the
+ * flag — is an empty map.
  */
-export function parseAppLinks(value: unknown): ReadonlyMap<number, string> {
-  const links = new Map<number, string>();
+export function parseAppLinks(value: unknown): ReadonlyMap<number, AppHttpsLink> {
+  const links = new Map<number, AppHttpsLink>();
   const list =
     value && typeof value === "object" ? (value as { links?: unknown }).links : undefined;
   if (!Array.isArray(list)) return links;
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
-    const { port, url } = item as { port?: unknown; url?: unknown };
+    const { port, url, access } = item as { port?: unknown; url?: unknown; access?: unknown };
     if (typeof port === "number" && typeof url === "string" && url.startsWith("https://")) {
-      links.set(port, url);
+      links.set(port, { url, open: access === "public" || access === "allowlist" });
     }
   }
   return links;
@@ -319,14 +328,14 @@ function toPublic(
   app: KnownApp,
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
-  privateLinks: ReadonlyMap<number, string> = new Map(),
+  appLinks: ReadonlyMap<number, AppHttpsLink> = new Map(),
 ): UnoMachineApp {
   const { control: _control, manifest: _manifest, code, botTokenReady: _token, ...rest } = app;
-  const privateUrl = app.http && app.port !== null ? (privateLinks.get(app.port) ?? null) : null;
+  const link = app.http && app.port !== null ? appLinks.get(app.port) : undefined;
   return {
     ...rest,
-    publication: publicationFor(app, forwards, hostname),
-    ...(privateUrl ? { privateUrl } : {}),
+    publication: publicationFor(app, forwards, hostname, link?.open ? link.url : null),
+    ...(link && !link.open ? { privateUrl: link.url } : {}),
     ...(app.source === "manifest"
       ? {
           codeDir: code?.display ?? null,
@@ -352,8 +361,8 @@ interface CloudView {
   readonly boxId: number | null;
   readonly apiKey: string;
   readonly forwards: ReadonlyArray<PortForward>;
-  /** Private https addresses of web apps, by port (see parseAppLinks). */
-  readonly privateLinks?: ReadonlyMap<number, string>;
+  /** Https addresses of apps, by port (see parseAppLinks). */
+  readonly appLinks?: ReadonlyMap<number, AppHttpsLink>;
   readonly hostname: string | null;
   readonly blockedReason: string | null;
 }
@@ -600,7 +609,7 @@ export const makeMachineAppsService = (
             apiKey,
             forwards:
               portsResult.status === "fulfilled" ? parsePortForwards(portsResult.value) : [],
-            privateLinks:
+            appLinks:
               linksResult.status === "fulfilled" ? parseAppLinks(linksResult.value) : new Map(),
             hostname,
             blockedReason: null,
@@ -615,7 +624,7 @@ export const makeMachineAppsService = (
       cloud: CloudView,
     ): UnoMachineApps => ({
       apps: scanned.apps.map((app) =>
-        toPublic(app, cloud.forwards, cloud.hostname, cloud.privateLinks),
+        toPublic(app, cloud.forwards, cloud.hostname, cloud.appLinks),
       ),
       manifestDir: displayManifestDir(manifestDir, home),
       scannedAt: new Date().toISOString(),
