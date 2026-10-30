@@ -685,11 +685,12 @@ export const flows = [
     await page.mouse.move(900, 650);
     await page.waitForTimeout(500);
     await shot("list-with-computer");
-    await step("one switch in the chats' menu hides them", async () => {
+    // One filter (Misha 29.10): Only mine hides them too, while they don't wait for the person.
+    await step("Only mine in the chats' menu hides them", async () => {
       await page.getByTestId("sidebar-d-view-trigger").click();
-      await page.getByTestId("sidebar-d-assistant-chats").click();
+      await page.getByTestId("sidebar-d-only-mine").click();
       await page.keyboard.press("Escape");
-      await page.getByTestId("sidebar-d-view-trigger").filter({ hasText: "Your chats" }).waitFor();
+      await page.getByTestId("sidebar-d-view-trigger").filter({ hasText: "My chats" }).waitFor();
       await page.waitForTimeout(400);
       const left = (await startedBy("Uno").count()) + (await startedBy("Bolt").count());
       // The open chat stays (Bolt's channel is not a started chat).

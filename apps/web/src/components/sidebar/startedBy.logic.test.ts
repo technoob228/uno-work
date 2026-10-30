@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   type StartedByThread,
-  passesAssistantChatsFilter,
   resolveStartedBy,
   startedByElsewhere,
   startedByKey,
@@ -125,21 +124,6 @@ describe("resolveStartedBy — the daemon's list", () => {
       assistantName,
     });
     expect(startedByLabel(result.get(startedByKey("work", "fresh"))!)).toBe("Started by Mia");
-  });
-});
-
-describe("the Assistants' chats filter", () => {
-  const base = { hidden: true, startedByAssistant: true, isOpen: false, pinned: false };
-  it("hides what assistants started, keeps the person's own", () => {
-    expect(passesAssistantChatsFilter(base)).toBe(false);
-    expect(passesAssistantChatsFilter({ ...base, startedByAssistant: false })).toBe(true);
-  });
-  it("never hides the open chat or a pinned one", () => {
-    expect(passesAssistantChatsFilter({ ...base, isOpen: true })).toBe(true);
-    expect(passesAssistantChatsFilter({ ...base, pinned: true })).toBe(true);
-  });
-  it("shown: everything passes", () => {
-    expect(passesAssistantChatsFilter({ ...base, hidden: false })).toBe(true);
   });
 });
 

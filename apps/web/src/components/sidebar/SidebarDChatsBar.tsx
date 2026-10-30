@@ -10,7 +10,8 @@
  * project, By status, By computer — and "Customize…" for Misha's Group by
  * with the order of levels (icp3/sidebar-v2); Projects and Computers as
  * submenus with checkboxes; Only mine (Misha 28.10) hides the chats agents,
- * Uno or apps run on their own (Sidebar.owner). A filter is said in the title
+ * Uno, assistants or apps run on their own (Sidebar.owner; 29.10: 0.0.161's
+ * "Chats assistants started" went into it). A filter is said in the title
  * only, with × next to it to clear.
  *
  * Where grouping is picked is a switch of the mock (`sidebarViewSwitch`):
@@ -24,7 +25,6 @@
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  BotIcon,
   ChevronDownIcon,
   CircleDashedIcon,
   FolderIcon,
@@ -317,14 +317,6 @@ export function SidebarDChatsBar(props: {
   onlyMine: boolean;
   onOnlyMineChange: (onlyMine: boolean) => void;
   onClearFilters: () => void;
-  /**
-   * "Assistants' chats" (Misha 28.10): one switch that hides the chats an
-   * assistant started; null — no assistants on the account, no switch.
-   */
-  assistantChatsFilter?: {
-    readonly hidden: boolean;
-    readonly onChange: (hidden: boolean) => void;
-  } | null;
   onNewChat: (event: ReactMouseEvent) => void;
   /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
   newChatShortcutLabel: string | null;
@@ -333,12 +325,8 @@ export function SidebarDChatsBar(props: {
   const open = useSidebarDViewMenu((state) => state.open);
   const setOpen = useSidebarDViewMenu((state) => state.setOpen);
   const showComputers = props.multiComputer && props.computers.length > 1;
-  const assistantChats = props.assistantChatsFilter ?? null;
   const filtered =
-    props.onlyMine ||
-    props.pickedProjects !== null ||
-    props.pickedComputers !== null ||
-    assistantChats?.hidden === true;
+    props.onlyMine || props.pickedProjects !== null || props.pickedComputers !== null;
   const levels = props.multiComputer
     ? props.levels
     : props.levels.filter((level) => level !== "computer");
@@ -421,17 +409,13 @@ export function SidebarDChatsBar(props: {
               </MenuItem>
             )}
             <MenuSeparator />
+            {/* No hint under it (Misha 29.10: "don't litter"). */}
             <MenuCheckboxItem
               checked={props.onlyMine}
               onCheckedChange={(checked) => props.onOnlyMineChange(checked)}
               data-testid="sidebar-d-only-mine"
             >
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate">Only mine</span>
-                <span className="text-xs text-muted-foreground">
-                  Hide chats agents run on their own
-                </span>
-              </span>
+              Only mine
             </MenuCheckboxItem>
             <PickSubmenu
               label="Projects"
@@ -450,21 +434,6 @@ export function SidebarDChatsBar(props: {
                 picked={props.pickedComputers}
                 onChange={props.onComputersChange}
               />
-            ) : null}
-            {assistantChats ? (
-              <>
-                <MenuSeparator />
-                <MenuCheckboxItem
-                  checked={!assistantChats.hidden}
-                  onCheckedChange={(checked) => assistantChats.onChange(!checked)}
-                  data-testid="sidebar-d-assistant-chats"
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <BotIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">Chats assistants started</span>
-                  </span>
-                </MenuCheckboxItem>
-              </>
             ) : null}
           </MenuPopup>
         </Menu>

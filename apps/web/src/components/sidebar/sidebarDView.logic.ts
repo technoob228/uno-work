@@ -164,9 +164,8 @@ export function passes(picked: ReadonlyArray<string> | null, id: string): boolea
 /**
  * The title over the list says which chats it shows (critics 16.10: it is a
  * button, and "All projects" lied — it lists chats): "All chats", "Chats ·
- * landing", "Chats · 2 projects", "Chats · landing · MacBook"; with the
- * assistants' chats hidden "Your chats"; with Only mine (Misha 28.10) "My
- * chats", "My chats · landing". The grouping is seen in the list itself; the
+ * landing", "Chats · 2 projects", "Chats · landing · MacBook"; with Only
+ * mine (Misha 28.10) "My chats", "My chats · landing". The grouping is seen in the list itself; the
  * filter is said here only (no second chip).
  */
 export function sidebarDTitle(input: {
@@ -174,8 +173,6 @@ export function sidebarDTitle(input: {
   readonly projectNames: ReadonlyArray<string> | null;
   /** Names of the picked computers; null = all. */
   readonly computerNames: ReadonlyArray<string> | null;
-  /** The chats assistants started are hidden (28.10). */
-  readonly assistantChatsHidden?: boolean;
   /** Only the chats that are the person's now (Sidebar.owner). */
   readonly onlyMine?: boolean;
 }): string {
@@ -189,12 +186,8 @@ export function sidebarDTitle(input: {
       computerNames.length === 1 ? computerNames[0]! : `${computerNames.length} computers`,
     );
   }
-  // Only mine goes further (agents', Uno's and apps' chats too): its title wins.
   if (input.onlyMine === true) {
     return parts.length === 0 ? "My chats" : `My chats · ${parts.join(" · ")}`;
-  }
-  if (input.assistantChatsHidden) {
-    return parts.length === 0 ? "Your chats" : `Your chats · ${parts.join(" · ")}`;
   }
   return parts.length === 0 ? "All chats" : `Chats · ${parts.join(" · ")}`;
 }
