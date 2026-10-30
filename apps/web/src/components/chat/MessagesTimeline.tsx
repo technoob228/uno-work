@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
+import { stripGoalMarker } from "@t3tools/shared/threadGoal";
 import { AutomationMessageRow } from "../automations/AutomationMessageRow";
 import {
   createContext,
@@ -47,6 +48,8 @@ import {
 } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
+import type { ThreadFindMatch } from "./threadFind";
+import { useThreadFindReveal } from "./useThreadFindReveal";
 import {
   BotIcon,
   CheckIcon,
@@ -54,6 +57,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  EllipsisIcon,
   FileIcon,
   FileVideoIcon,
   GlobeIcon,
@@ -67,6 +71,8 @@ import {
   WrenchIcon,
   ZapIcon,
 } from "lucide-react";
+import { readLocalApi } from "../../localApi";
+import { chatFileEntry, COPY_TO_CLOUD_LABEL, useCopyFileToCloud } from "./useCopyFileToCloud";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -148,6 +154,8 @@ const EMPTY_REQUEST_IDS: ReadonlyArray<ApprovalRequestId> = [];
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
+// Room for the find bar, so even the first message can sit below it.
+const TIMELINE_LIST_HEADER_FINDING = <div className="h-14" />;
 // Taller than the fade above the composer (ChatView): the last line ends clear of it.
 const TIMELINE_LIST_FOOTER = <div className="h-8" />;
 
@@ -185,6 +193,10 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /** The chat's latest turn: a finished one folds into "Worked for …". */
   latestTurn?: TimelineLatestTurn | null;
+  /** Find in chat (⌘F): what to highlight, and the match to bring into view. */
+  findQuery?: string;
+  findMatch?: ThreadFindMatch | null;
+  findNavigationId?: number;
   /**
    * The chat's state at the very end of the feed, as quiet lines (a failed
    * turn and its "Try again"), instead of a plate above the chat.
@@ -251,6 +263,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   onIsAtEndChange,
   latestTurn = null,
+  findQuery = "",
+  findMatch = null,
+  findNavigationId = 0,
   pendingApprovals = EMPTY_PENDING_APPROVALS,
   respondingRequestIds = EMPTY_REQUEST_IDS,
   onRespondToApproval,
@@ -328,6 +343,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+
+  const findRowIndex = findMatch
+    ? rows.findIndex((row) => row.kind === "message" && row.message.id === findMatch.messageId)
+    : -1;
+  const onFindMissingRow = useCallback(
+    (match: ThreadFindMatch) => {
+      // A note inside a finished turn hides in its fold until the turn opens.
+      const entry = timelineEntries.find(
+        (candidate) => candidate.kind === "message" && candidate.message.id === match.messageId,
+      );
+      const turnId = entry?.kind === "message" ? entry.message.turnId : null;
+      if (!turnId) return;
+      setExpandedTurnIds((current) =>
+        current.has(turnId) ? current : new Set(current).add(turnId),
+      );
+    },
+    [timelineEntries],
+  );
+  useThreadFindReveal({
+    listRef,
+    query: findQuery,
+    match: findMatch,
+    navigationId: findNavigationId,
+    rowIndex: findRowIndex,
+    onMissingRow: onFindMissingRow,
+  });
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -440,7 +481,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onScroll={handleScroll}
         onItemSizeChanged={handleItemSizeChanged}
         className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-        ListHeaderComponent={TIMELINE_LIST_HEADER}
+        ListHeaderComponent={
+          findQuery.length > 0 ? TIMELINE_LIST_HEADER_FINDING : TIMELINE_LIST_HEADER
+        }
         ListFooterComponent={
           endOfFeed ? (
             <div className="mx-auto w-full min-w-0 max-w-3xl">
@@ -671,10 +714,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   ) : (
                     (displayedUserMessage.visibleText.trim().length > 0 ||
                       terminalContexts.length > 0) && (
-                      <UserMessageBody
-                        text={displayedUserMessage.visibleText}
-                        terminalContexts={terminalContexts}
-                      />
+                      <div data-thread-find-text>
+                        <UserMessageBody
+                          text={displayedUserMessage.visibleText}
+                          terminalContexts={terminalContexts}
+                        />
+                      </div>
                     )
                   )}
                 </div>
@@ -717,7 +762,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         row.message.role === "assistant" &&
         (() => {
           // Any harness can leak the final-answer marker; it is never shown.
-          const cleanText = cleanUnoFinalAnswerText(row.message.text ?? "");
+          const cleanText = stripGoalMarker(cleanUnoFinalAnswerText(row.message.text ?? ""));
           const messageText = cleanText || (row.message.streaming ? "" : "(empty response)");
           const assistantTurnStillInProgress =
             ctx.activeTurnInProgress &&
@@ -741,7 +786,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <div {...{ [REPLY_QUOTE_SOURCE_ATTRIBUTE]: "" }}>
+                <div {...{ [REPLY_QUOTE_SOURCE_ATTRIBUTE]: "" }} data-thread-find-text>
                   <ChatMarkdown
                     text={messageText}
                     cwd={ctx.markdownCwd}
@@ -1574,6 +1619,38 @@ const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {
   const { file } = props;
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const { openFile } = usePreviewPane();
+  const cloudCopy = useCopyFileToCloud(activeThreadEnvironmentId);
+  const openBeside = () =>
+    openFile({
+      id: file.path,
+      name: file.name,
+      kind: detectFileKind(file.name),
+      content: "",
+      path: file.path,
+      environmentId: activeThreadEnvironmentId,
+    });
+  const showMenu = async (position: { readonly x: number; readonly y: number }) => {
+    const api = readLocalApi();
+    if (!api?.contextMenu) return;
+    const clicked = await api.contextMenu.show(
+      [
+        { id: "open" as const, label: "Open beside the chat" },
+        { id: "cloud" as const, label: COPY_TO_CLOUD_LABEL },
+      ],
+      position,
+    );
+    if (clicked === "open") openBeside();
+    if (clicked === "cloud") {
+      cloudCopy.open(
+        chatFileEntry({
+          path: file.path,
+          kind: "file",
+          name: file.name,
+          sizeBytes: file.sizeBytes,
+        }),
+      );
+    }
+  };
   const body = (
     <>
       <FileIcon className="size-4 shrink-0 text-foreground/70" />
@@ -1592,23 +1669,34 @@ const UserFileAttachmentChip = memo(function UserFileAttachmentChip(props: {
     return <div className={className}>{body}</div>;
   }
   return (
-    <button
-      type="button"
-      className={cn(className, "cursor-pointer hover:bg-background")}
-      title={file.path}
-      onClick={() =>
-        openFile({
-          id: file.path,
-          name: file.name,
-          kind: detectFileKind(file.name),
-          content: "",
-          path: file.path,
-          environmentId: activeThreadEnvironmentId,
-        })
-      }
-    >
-      {body}
-    </button>
+    <div className="group/attachment relative min-w-0">
+      <button
+        type="button"
+        className={cn(className, "w-full cursor-pointer pe-8 hover:bg-background")}
+        title={file.path}
+        data-testid="chat-attachment-chip"
+        onClick={openBeside}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void showMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
+        {body}
+      </button>
+      <button
+        type="button"
+        aria-label={`More for ${file.name}`}
+        className="absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/attachment:opacity-100 pointer-coarse:opacity-100"
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          void showMenu({ x: box.left, y: box.bottom });
+        }}
+      >
+        <EllipsisIcon className="size-3.5" />
+      </button>
+      {cloudCopy.dialog}
+    </div>
   );
 });
 

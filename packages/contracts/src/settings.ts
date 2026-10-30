@@ -9,7 +9,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { DEFAULT_RUNTIME_MODE, ModelSelection, RuntimeMode } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -870,6 +870,34 @@ export interface BranchNamingOptions {
 /** Same as WORKTREE_BRANCH_PREFIX: an untouched setting names branches as before. */
 export const DEFAULT_BRANCH_NAME_PREFIX = "t3code";
 
+/**
+ * The settings a person can set for one project (Settings → the "Applying
+ * settings for" sentence). Same names as the computer-wide settings, so one
+ * lookup answers both. Saved on each computer, by that computer's project id.
+ */
+export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+  "defaultModelSelection",
+  "defaultRuntimeMode",
+  "defaultThreadEnvMode",
+  "branchNamingMode",
+  "branchNamePrefix",
+  "branchNameInstructions",
+  "sidebarAutoSettleOnMerge",
+] as const;
+export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
+
+/** Absent keys inherit from the computer. Each present key replaces the whole setting. */
+export const ProjectSettingsOverrides = Schema.Struct({
+  defaultModelSelection: Schema.optionalKey(ModelSelection),
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  branchNamingMode: Schema.optionalKey(BranchNamingMode),
+  branchNamePrefix: Schema.optionalKey(TrimmedString),
+  branchNameInstructions: Schema.optionalKey(TrimmedString),
+  sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+} satisfies Record<ProjectScopedServerSettingKey, unknown>);
+export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
@@ -909,6 +937,18 @@ export const ServerSettings = Schema.Struct({
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
+  ),
+  // The model and access new chats start with on this computer. Null model:
+  // not set here, the app's "New chats start on" and the last pick decide.
+  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  defaultRuntimeMode: RuntimeMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
+  ),
+  // Per project, by project id on this computer — see `ProjectSettingsOverrides`.
+  projectSettingsOverrides: Schema.Record(Schema.String, ProjectSettingsOverrides).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // A chat stopped by the limit of the person's own AI plan goes on by itself
@@ -1083,6 +1123,12 @@ export const ServerSettingsPatch = Schema.Struct({
   mcpServers: Schema.optionalKey(Schema.Array(UnoMcpServer)),
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  // By project id; null drops that project's overrides. An entry replaces the old one.
+  projectSettingsOverrides: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.NullOr(ProjectSettingsOverrides)),
+  ),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   resumeAfterPlanLimit: Schema.optionalKey(Schema.Boolean),
   multipleAccounts: Schema.optionalKey(Schema.Boolean),

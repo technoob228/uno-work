@@ -9,6 +9,7 @@
  * them as it would real computers; `CHAT_META` adds what the variants need
  * on top (who coordinates whom, what exactly a chat asks for).
  */
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   ASSISTANT_PROJECT_ID,
   DEFAULT_SERVER_SETTINGS,
@@ -20,8 +21,10 @@ import {
   type InboxItem,
   type OrchestrationReadModel,
   type ServerConfig,
+  type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { DEMO_ASSIST } from "./demoFlag";
 import { timelineShowcaseThreads } from "./timelineShowcase";
@@ -190,6 +193,17 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
   } as ExecutionEnvironmentDescriptor;
 }
 
+/** What was changed in Settings for each demo computer, kept for the page's life. */
+const demoMachineSettings = new Map<string, Record<string, unknown>>();
+
+export function applyDemoMachineSettings(machine: DemoMachine, patch: ServerSettingsPatch) {
+  const next = applyServerSettingsPatch(serverConfigFor(machine).settings, patch);
+  const changed = Object.fromEntries(
+    Object.keys(patch).map((key) => [key, next[key as keyof typeof next]]),
+  );
+  demoMachineSettings.set(machine.key, { ...demoMachineSettings.get(machine.key), ...changed });
+}
+
 export function serverConfigFor(machine: DemoMachine): ServerConfig {
   return {
     environment: descriptorFor(machine),
@@ -201,7 +215,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
     },
     cwd: machine.home,
     keybindingsConfigPath: `${machine.home}/.t3code-keybindings.json`,
-    keybindings: [],
+    keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     issues: [],
     providers: [
       {
@@ -248,6 +262,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
       // p9: a tool server of Misha's own in Settings → Connectors.
       mcpServers: [{ name: "context7", url: "https://mcp.context7.com/mcp", enabled: true }],
       ...demoPlanSettings(),
+      ...demoMachineSettings.get(machine.key),
     },
   } as unknown as ServerConfig;
 }

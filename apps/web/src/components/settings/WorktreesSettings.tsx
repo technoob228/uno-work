@@ -11,23 +11,20 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import {
-  useEnvironmentSettings,
-  useUpdateEnvironmentSettings,
-} from "~/environments/settings/serverSettings";
-
 import { selectSidebarThreadsForEnvironment, useStore } from "../../store";
 import { formatWorktreePathForDisplay } from "../../worktreeCleanup";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { toastManager } from "../ui/toast";
 import { ChatCopiesCleanupSection } from "./ChatCopiesCleanup";
+import { PerComputerNote } from "./NewChatDefaultsRows";
 import {
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { useSettingsScope } from "./SettingsScopeContext";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const NAMING_MODES: Record<
   BranchNamingMode,
@@ -47,30 +44,22 @@ const NAMING_MODES: Record<
   },
 };
 
-function BranchNamingSection(props: { readonly environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(props.environmentId) ?? DEFAULT_UNIFIED_SETTINGS;
-  const { updateSettings } = useUpdateEnvironmentSettings(props.environmentId);
-  const save = useCallback(
-    (patch: Parameters<typeof updateSettings>[0]) => {
-      void updateSettings(patch).catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not save",
-          description: error instanceof Error ? error.message : String(error),
-        });
-      });
-    },
-    [updateSettings],
-  );
+function BranchNamingSection() {
+  const { scope } = useSettingsScope();
+  const settings = useScopedSettings();
+  const save = useUpdateScopedSettings();
   const mode = settings.branchNamingMode;
   const defaults = DEFAULT_UNIFIED_SETTINGS;
+  // On a project the row's source icon resets it to the inherited value.
+  const canResetToDefault = scope.kind !== "project";
   return (
     <SettingsSection title="Branches">
       <SettingsRow
         title="Branch naming"
         description={NAMING_MODES[mode].description}
+        settingKeys={["branchNamingMode"]}
         resetAction={
-          mode !== defaults.branchNamingMode ? (
+          canResetToDefault && mode !== defaults.branchNamingMode ? (
             <SettingResetButton
               label="branch naming"
               onClick={() => save({ branchNamingMode: defaults.branchNamingMode })}
@@ -101,8 +90,9 @@ function BranchNamingSection(props: { readonly environmentId: EnvironmentId }) {
         <SettingsRow
           title="Branch prefix"
           description="Leave empty for no prefix."
+          settingKeys={["branchNamePrefix"]}
           resetAction={
-            settings.branchNamePrefix !== defaults.branchNamePrefix ? (
+            canResetToDefault && settings.branchNamePrefix !== defaults.branchNamePrefix ? (
               <SettingResetButton
                 label="branch prefix"
                 onClick={() => save({ branchNamePrefix: defaults.branchNamePrefix })}
@@ -126,6 +116,7 @@ function BranchNamingSection(props: { readonly environmentId: EnvironmentId }) {
         <SettingsRow
           title="Instructions"
           description="No prefix or suffix is added to the name."
+          settingKeys={["branchNameInstructions"]}
           control={
             <DraftInput
               className="w-full sm:w-72"
@@ -186,11 +177,18 @@ function CopiesSection(props: { readonly environmentId: EnvironmentId }) {
 }
 
 export function WorktreesSettingsPanel(props: { readonly environmentId: EnvironmentId }) {
+  const { wideScope } = useSettingsScope();
   return (
     <SettingsPageContainer>
-      <BranchNamingSection environmentId={props.environmentId} />
-      <ChatCopiesCleanupSection environmentId={props.environmentId} />
-      <CopiesSection environmentId={props.environmentId} />
+      <BranchNamingSection />
+      {wideScope ? (
+        <PerComputerNote what="Chat copies" />
+      ) : (
+        <>
+          <ChatCopiesCleanupSection environmentId={props.environmentId} />
+          <CopiesSection environmentId={props.environmentId} />
+        </>
+      )}
     </SettingsPageContainer>
   );
 }

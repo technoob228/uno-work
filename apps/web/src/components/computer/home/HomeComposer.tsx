@@ -73,6 +73,7 @@ import {
 } from "../../../composerDraftStore";
 import {
   useEnvironmentProviders,
+  useEnvironmentSettings,
   useEnvironmentServerConfig,
 } from "../../../environments/settings/serverSettings";
 import { useSettings } from "../../../hooks/useSettings";
@@ -140,7 +141,8 @@ export interface HomeStartOptions {
   readonly assistant?: ScopedProjectRef | null;
   /** Null = nothing usable to pick; the chat falls back to its own default. */
   readonly modelSelection: ModelSelection | null;
-  readonly runtimeMode: RuntimeMode;
+  /** Null: what Settings say for this computer and folder. */
+  readonly runtimeMode: RuntimeMode | null;
   /** Pictures attached on Home; they go into the new chat's first message. */
   readonly images?: ReadonlyArray<ComposerImageAttachment>;
   /** Other files attached on Home (saved to ~/Uploads when the chat sends). */
@@ -160,7 +162,13 @@ export function useHomeModelPicker(
   options: { readonly ownAgentStart?: boolean } = {},
 ) {
   const providers = useEnvironmentProviders(environmentId);
-  const settings = useSettings();
+  const clientSettings = useSettings();
+  // The model set for this computer is the chosen computer's, not this window's.
+  const computerModel = useEnvironmentSettings(environmentId)?.defaultModelSelection ?? null;
+  const settings = useMemo(
+    () => ({ ...clientSettings, defaultModelSelection: computerModel }),
+    [clientSettings, computerModel],
+  );
   // Home's box for someone who came for their own agent starts on it, not on
   // Uno's own harness (Settings' pickers keep the plain default).
   const ownAgent = useOwnAgentStart(options.ownAgentStart === true);
@@ -263,7 +271,10 @@ export function HomeComposer({
   const assistants = useStartableAssistants();
   const [assistant, setAssistant] = useState<TeamMember | null>(null);
   const [starting, setStarting] = useState(false);
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
+  // Null until the person picks here: Settings decide.
+  const [pickedRuntimeMode, setRuntimeMode] = useState<RuntimeMode | null>(null);
+  const computerRuntimeMode = useEnvironmentSettings(environmentId ?? null)?.defaultRuntimeMode;
+  const runtimeMode = pickedRuntimeMode ?? computerRuntimeMode ?? DEFAULT_RUNTIME_MODE;
   const [pickerOpen, setPickerOpen] = useState(false);
   // "on [computer ▾]" picks Home's computer: outside a chat there is one, and the
   // new chat, Terminal, Files and Apps all go to it until another one is picked.
@@ -469,7 +480,7 @@ export function HomeComposer({
             }
           : {}),
         modelSelection: picker.selection,
-        runtimeMode,
+        runtimeMode: pickedRuntimeMode,
         images,
         files,
         ...(recording ? { recordingKey: recording.threadKey } : {}),

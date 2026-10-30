@@ -51,11 +51,12 @@ import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { AssistantAiChoice } from "../assistants/AssistantAiChoice";
 import { useTeamShown } from "../assistants/useAssistantTeam";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { NewChatAccessRow, NewChatModelRow } from "./NewChatDefaultsRows";
+import { useSettingsScope } from "./SettingsScopeContext";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
 import { resolveProviderPaneKind } from "../chat/modelPickerProviderPane";
 import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 import { useHomeModelPicker } from "../computer/home/HomeComposer";
-import { newChatModelSelection } from "../computer/home/homeStartModel";
 import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { OpenCodeKeyForm } from "../harness/OpenCodeKeyForm";
 import { useHarnessSetup } from "../harness/useHarnessSetup";
@@ -285,98 +286,12 @@ function DefaultAiSection({ environmentId }: { readonly environmentId: Environme
   );
 }
 
-const NEW_CHAT_START_LAST = "last";
-const NEW_CHAT_START_FIXED = "fixed";
-
-/**
- * "New chats start on" (Misha 15.10: "I must be the one who chooses"). Unset —
- * the model last picked in any chat, as before. Set — every new chat starts on
- * it, wherever it is started; a pick inside a chat changes only that chat.
- */
-function NewChatModelRow({ environmentId }: { readonly environmentId: EnvironmentId | null }) {
-  const picker = useHomeModelPicker(environmentId);
-  const providers = useEnvironmentProviders(environmentId);
-  const settings = useSettings();
-  const { updateSettings } = useUpdateSettings();
-  const chosen = settings.newChatModelSelection;
-  const usable = chosen !== null && newChatModelSelection({ providers, settings }) !== null;
-  const save = (next: ModelSelection | null) =>
-    void updateSettings({ newChatModelSelection: next }).catch((error: unknown) =>
-      toastManager.add({
-        type: "error",
-        title: "Couldn't save the model for new chats",
-        description: error instanceof Error ? error.message : String(error),
-      }),
-    );
-  const shown = chosen ?? picker.selection;
-  return (
-    <SettingsRow
-      title="New chats start on"
-      description={
-        chosen
-          ? "Every new chat starts on this model. Picking another one inside a chat changes only that chat."
-          : "The model you picked last, in any chat. Or choose one that every new chat starts on."
-      }
-      status={
-        chosen && !usable
-          ? "Not available on this computer now, so new chats start on the last one you picked."
-          : null
-      }
-      control={
-        shown ? (
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            <Select
-              value={chosen ? NEW_CHAT_START_FIXED : NEW_CHAT_START_LAST}
-              onValueChange={(value) => {
-                if (value === NEW_CHAT_START_LAST) save(null);
-                // Starts on what a new chat gets now; the effort stays the chat's.
-                else if (!chosen && picker.selection)
-                  save({
-                    instanceId: picker.selection.instanceId,
-                    model: picker.selection.model,
-                  });
-              }}
-            >
-              <SelectTrigger
-                className="w-full sm:w-44"
-                aria-label="New chats start on"
-                data-testid="settings-new-chat-start"
-              >
-                <SelectValue>{chosen ? "Always this model" : "The last one I picked"}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value={NEW_CHAT_START_LAST}>
-                  The last one I picked
-                </SelectItem>
-                <SelectItem hideIndicator value={NEW_CHAT_START_FIXED}>
-                  Always this model
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-            {chosen ? (
-              <ProviderModelPicker
-                compact
-                activeInstanceId={chosen.instanceId}
-                model={chosen.model}
-                lockedProvider={null}
-                instanceEntries={picker.instanceEntries}
-                environmentId={environmentId}
-                modelOptionsByInstance={picker.modelOptionsByInstance}
-                onInstanceModelChange={(instanceId, model) => save({ instanceId, model })}
-                triggerVariant="outline"
-              />
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-xs text-muted-foreground">No AI on this computer yet</span>
-        )
-      }
-    />
-  );
-}
-
 export function AiSettings() {
   const { environmentId } = useActiveMachine();
+  const { singleComputer, allEnvironments } = useSettingsScope();
+  const activeComputerLabel =
+    allEnvironments.find((entry) => entry.environmentId === environmentId)?.label ??
+    "this computer";
   const apiKey = useActiveUnoKey();
   const picker = useHomeModelPicker(environmentId);
   const setup = useHarnessSetup(environmentId);
@@ -459,16 +374,26 @@ export function AiSettings() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="AI">
+      <SettingsSection title="New chats">
         <NewChatModelRow environmentId={environmentId} />
-        {apiKey ? (
+        <NewChatAccessRow />
+      </SettingsSection>
+
+      {singleComputer ? null : (
+        <p className="px-1 text-sm text-muted-foreground">
+          Everything below is on {activeComputerLabel}.
+        </p>
+      )}
+
+      {apiKey ? (
+        <SettingsSection title="AI">
           <SettingsRow
             title="Uno AI"
             description="AI time this month, premium credit and your balance."
             control={<UnoGatewayBalance apiKey={apiKey} />}
           />
-        ) : null}
-      </SettingsSection>
+        </SettingsSection>
+      ) : null}
 
       <AiPlansSection />
 

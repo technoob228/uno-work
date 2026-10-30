@@ -74,7 +74,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void navigate({ to, replace: true });
+      // The scope picked in the sentence follows the person between pages.
+      void navigate({ to, search: (previous) => previous, replace: true });
     },
     [isMobile, navigate, setOpenMobile],
   );

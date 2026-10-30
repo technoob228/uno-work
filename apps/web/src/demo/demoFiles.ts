@@ -343,6 +343,15 @@ export function answerFileRpc(machine: DemoMachine, body: NormalizedWsRpcRequest
           downloadLimitBytes: 50_000_000,
         },
       };
+    case WS_METHODS.filesCloudState:
+      return {
+        available: true,
+        message: null,
+        usedBytes: 2_400_000_000,
+        quotaBytes: 50_000_000_000,
+        overQuota: false,
+        buckets: [{ id: 7, name: "my-files", usedBytes: 2_400_000_000 }],
+      };
     case WS_METHODS.filesCloudCopyToCloud: {
       const paths = Array.isArray(body.paths) ? body.paths : [];
       // Long enough to see "Uploading to Cloud storage…".

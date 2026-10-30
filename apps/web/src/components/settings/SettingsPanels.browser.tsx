@@ -33,6 +33,7 @@ import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/ser
 import { useUiStateStore } from "../../uiStateStore";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { EnvironmentGeneralSettings } from "./EnvironmentGeneralSettings";
+import { SettingsScopeProvider } from "./SettingsScopeContext";
 import { EnvironmentProvidersPanel } from "./EnvironmentProvidersPanel";
 import { GeneralSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
@@ -730,7 +731,9 @@ describe("GeneralSettingsPanel observability", () => {
     mounted = await render(
       <QueryClientProvider client={testQueryClient()}>
         <AppAtomRegistryProvider>
-          <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+          <SettingsScopeProvider search={{ machine: "environment-local" }} onChange={() => {}}>
+            <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+          </SettingsScopeProvider>
         </AppAtomRegistryProvider>
       </QueryClientProvider>,
     );
@@ -1078,7 +1081,9 @@ describe("GeneralSettingsPanel observability", () => {
     mounted = await render(
       <QueryClientProvider client={testQueryClient()}>
         <AppAtomRegistryProvider>
-          <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+          <SettingsScopeProvider search={{ machine: "environment-local" }} onChange={() => {}}>
+            <EnvironmentGeneralSettings environmentId={EnvironmentId.make("environment-local")} />
+          </SettingsScopeProvider>
         </AppAtomRegistryProvider>
       </QueryClientProvider>,
     );

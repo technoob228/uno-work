@@ -33,6 +33,7 @@ import {
   type OwnAgentStart,
 } from "../components/computer/home/homeStartModel";
 import { useOwnAgentStart } from "../components/computer/home/useOwnAgentStart";
+import { readNewChatDefaults } from "../newChatDefaults";
 import { createStarterProject } from "../starterProject";
 import { useDefaultEnvironment } from "./useDefaultEnvironment";
 import { getClientSettings, useSettings } from "./useSettings";
@@ -47,6 +48,7 @@ import { getClientSettings, useSettings } from "./useSettings";
 function newChatStartSelection(
   projectRef: ScopedProjectRef,
   projectDefault: ModelSelection | null,
+  projectChoice: ModelSelection | null,
   ownAgent: OwnAgentStart | null,
 ): ModelSelection | null {
   if (isAssistantProjectId(projectRef.projectId)) return null;
@@ -54,6 +56,7 @@ function newChatStartSelection(
   return newThreadStartSelection({
     stickyActiveProvider: useComposerDraftStore.getState().stickyActiveProvider,
     projectDefault,
+    projectChoice,
     providers: config?.providers ?? [],
     settings: { ...DEFAULT_UNIFIED_SETTINGS, ...config?.settings, ...getClientSettings() },
     ownAgent,
@@ -104,11 +107,17 @@ function useNewThreadState() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
+      const defaults = readNewChatDefaults(projectRef);
       const startOn = newChatStartSelection(
         projectRef,
         project?.defaultModelSelection ?? null,
+        defaults.projectModel,
         ownAgent,
       );
+      // An assistant works in its own mode, whatever new chats default to.
+      const startMode =
+        options?.runtimeMode ??
+        (isAssistantProjectId(projectRef.projectId) ? DEFAULT_RUNTIME_MODE : defaults.runtimeMode);
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
@@ -148,6 +157,16 @@ function useNewThreadState() {
             (kept?.terminalContexts.length ?? 0) === 0
           ) {
             setModelSelection(storedDraftThread.draftId, startOn);
+          }
+          // Same for access: an empty kept draft follows the setting.
+          if (
+            !onScreen &&
+            (kept?.prompt.trim() ?? "") === "" &&
+            (kept?.images.length ?? 0) === 0 &&
+            (kept?.terminalContexts.length ?? 0) === 0 &&
+            (kept?.runtimeMode ?? storedDraftThread.runtimeMode) !== startMode
+          ) {
+            setRuntimeMode(storedDraftThread.draftId, startMode);
           }
           useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
           if (
@@ -199,14 +218,16 @@ function useNewThreadState() {
           createdAt,
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
-          envMode: options?.envMode ?? "local",
-          runtimeMode: options?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          envMode: options?.envMode ?? defaults.envMode,
+          runtimeMode: startMode,
         });
         applyStickyState(draftId);
         if (startOn) setModelSelection(draftId, startOn);
         // The composer shows the mode the chat will run in (an assistant's
-        // chat: its own mode), not the default it would otherwise start from.
-        if (options?.runtimeMode) setRuntimeMode(draftId, options.runtimeMode);
+        // chat: its own mode; else what Settings say for this project).
+        if (options?.runtimeMode || startMode !== DEFAULT_RUNTIME_MODE) {
+          setRuntimeMode(draftId, startMode);
+        }
         useStore.getState().setActiveEnvironmentId(projectRef.environmentId);
 
         await router.navigate({

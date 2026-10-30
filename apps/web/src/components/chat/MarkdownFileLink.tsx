@@ -25,6 +25,7 @@ import { makeFilesTabFile, usePreviewPane } from "../preview/PreviewPaneContext"
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useFileMention } from "./fileMentionStore";
+import { chatFileEntry, COPY_TO_CLOUD_LABEL, useCopyFileToCloud } from "./useCopyFileToCloud";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
 /** What a chip needs to know about the answer it sits in. */
@@ -109,7 +110,10 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   className,
 }: MarkdownFileLinkProps) {
   const { environmentId, theme } = useContext(FileMentionContext);
+  const { currentChatEnvironmentId } = usePreviewPane();
   const openInPanel = useOpenInPanel(environmentId);
+  const cloudCopy = useCopyFileToCloud(environmentId ?? currentChatEnvironmentId ?? null);
+  const openCloudCopy = cloudCopy.open;
 
   const handleContextMenu = useCallback(
     async (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -124,6 +128,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
           { id: "open" as const, label: "Open beside the chat" },
           ...(kind === "file" ? [{ id: "folder" as const, label: "Show in Files" }] : []),
           ...(onThisDevice ? [{ id: "editor" as const, label: "Open in editor" }] : []),
+          { id: "cloud" as const, label: COPY_TO_CLOUD_LABEL },
           { id: "copy" as const, label: "Copy full path" },
         ],
         { x: event.clientX, y: event.clientY },
@@ -131,6 +136,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
       if (clicked === "open") openInPanel(path, kind);
       if (clicked === "folder") openInPanel(dirname(path), "directory");
       if (clicked === "copy") copyPath(path, "Full path");
+      if (clicked === "cloud") openCloudCopy(chatFileEntry({ path, kind }));
       if (clicked === "editor") {
         void openInPreferredEditor(api, path).catch((error) => {
           toastManager.add(
@@ -143,44 +149,47 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         });
       }
     },
-    [environmentId, kind, openInPanel, path],
+    [environmentId, kind, openCloudCopy, openInPanel, path],
   );
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <a
-            href={href}
-            className={cn("chat-markdown-file-link", className)}
-            data-testid="chat-file-chip"
-            data-file-kind={kind}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              openInPanel(path, kind);
-            }}
-            onContextMenu={handleContextMenu}
-          >
-            <VscodeEntryIcon
-              pathValue={path}
-              kind={kind}
-              theme={theme}
-              className="chat-markdown-file-link-icon size-3.5 shrink-0"
-            />
-            <span className="chat-markdown-file-link-label truncate">{label}</span>
-          </a>
-        }
-      />
-      <TooltipPopup
-        side="top"
-        className="max-w-[min(40rem,calc(100vw-2rem))] font-mono text-[11px] leading-tight"
-      >
-        <div className="markdown-file-link-tooltip-scroll overflow-x-auto whitespace-nowrap">
-          {path}
-        </div>
-      </TooltipPopup>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <a
+              href={href}
+              className={cn("chat-markdown-file-link", className)}
+              data-testid="chat-file-chip"
+              data-file-kind={kind}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openInPanel(path, kind);
+              }}
+              onContextMenu={handleContextMenu}
+            >
+              <VscodeEntryIcon
+                pathValue={path}
+                kind={kind}
+                theme={theme}
+                className="chat-markdown-file-link-icon size-3.5 shrink-0"
+              />
+              <span className="chat-markdown-file-link-label truncate">{label}</span>
+            </a>
+          }
+        />
+        <TooltipPopup
+          side="top"
+          className="max-w-[min(40rem,calc(100vw-2rem))] font-mono text-[11px] leading-tight"
+        >
+          <div className="markdown-file-link-tooltip-scroll overflow-x-auto whitespace-nowrap">
+            {path}
+          </div>
+        </TooltipPopup>
+      </Tooltip>
+      {cloudCopy.dialog}
+    </>
   );
 });
 

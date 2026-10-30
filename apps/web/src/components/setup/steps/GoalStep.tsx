@@ -21,7 +21,6 @@
  * old eight steps stay under Settings → "Full setup".
  */
 import type { EnvironmentId } from "@t3tools/contracts";
-import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
@@ -630,7 +629,7 @@ function SiteResult() {
       await launchers.startTask(prompt, {
         folder,
         modelSelection: null,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
+        runtimeMode: null,
       });
     } catch (cause) {
       setPhase({
@@ -824,7 +823,7 @@ function BotResult() {
       await launchers.startTask(goalFirstPrompt("bot", { description }), {
         folder,
         modelSelection: null,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
+        runtimeMode: null,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Couldn't start Uno.");

@@ -79,6 +79,9 @@ import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
 import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
 import { PlanLimitsServiceLive } from "./planLimits/PlanLimitsService.ts";
 import { PlanResumeLive } from "./planResume/PlanResumeService.ts";
+import { ThreadGoalLive } from "./goal/ThreadGoalService.ts";
+import { DatabaseCompactorLive } from "./maintenance/DatabaseCompactor.ts";
+import { ThreadSearchLive } from "./search/ThreadSearch.ts";
 import { ThreadPullRequestsLive } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
@@ -492,6 +495,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // A chat stopped at the plan's limit goes on after the reset; needs the
       // engine and plan limits provided further down this pipe.
       PlanResumeLive,
+      ThreadSearchLive,
+      // `/goal`: turns on until the goal is met; needs the engine and providers.
+      ThreadGoalLive,
+      DatabaseCompactorLive,
       // Dev mode: a chat's PR row and auto-settle after the merge; reads
       // through the source-control providers provided further down this pipe.
       ThreadPullRequestsLive,

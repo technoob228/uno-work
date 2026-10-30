@@ -18,6 +18,7 @@ import {
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { deepMerge } from "@t3tools/shared/Struct";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { createModelCapabilities } from "@t3tools/shared/model";
 
 import { BrowserBridgeTest } from "../../browserBridge.ts";
@@ -267,7 +268,7 @@ function makeMutableServerSettingsService(
       updateSettings: (patch) =>
         Effect.gen(function* () {
           const current = yield* Ref.get(settingsRef);
-          const next = Schema.decodeSync(ServerSettings)(deepMerge(current, patch));
+          const next = Schema.decodeSync(ServerSettings)(applyServerSettingsPatch(current, patch));
           yield* Ref.set(settingsRef, next);
           yield* PubSub.publish(changes, next);
           return next;

@@ -230,6 +230,17 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  OrchestrationSetThreadGoalInput,
+  OrchestrationStopThreadGoalInput,
+  OrchestrationThreadGoalError,
+} from "./threadGoal.ts";
+import {
+  OrchestrationFindInThreadError,
+  OrchestrationFindInThreadInput,
+  OrchestrationSearchThreadsError,
+  OrchestrationSearchThreadsInput,
+} from "./threadSearch.ts";
+import {
   PluginIssuePanelUrlInput,
   PluginIssuePanelUrlResult,
   PluginResolvePanelThreadInput,
@@ -1377,6 +1388,30 @@ export const WsOrchestrationGetThreadTranscriptRpc = Rpc.make(
     error: OrchestrationGetThreadTranscriptError,
   },
 );
+
+export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
+  payload: OrchestrationSearchThreadsInput,
+  success: OrchestrationRpcSchemas.searchThreads.output,
+  error: OrchestrationSearchThreadsError,
+});
+
+export const WsOrchestrationFindInThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.findInThread, {
+  payload: OrchestrationFindInThreadInput,
+  success: OrchestrationRpcSchemas.findInThread.output,
+  error: OrchestrationFindInThreadError,
+});
+
+export const WsOrchestrationSetThreadGoalRpc = Rpc.make(ORCHESTRATION_WS_METHODS.setThreadGoal, {
+  payload: OrchestrationSetThreadGoalInput,
+  success: OrchestrationRpcSchemas.setThreadGoal.output,
+  error: OrchestrationThreadGoalError,
+});
+
+export const WsOrchestrationStopThreadGoalRpc = Rpc.make(ORCHESTRATION_WS_METHODS.stopThreadGoal, {
+  payload: OrchestrationStopThreadGoalInput,
+  success: OrchestrationRpcSchemas.stopThreadGoal.output,
+  error: OrchestrationThreadGoalError,
+});
 
 export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTurnDiff, {
   payload: OrchestrationGetTurnDiffInput,
@@ -2590,6 +2625,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationRegenerateThreadTitleRpc,
   WsOrchestrationGetThreadTranscriptRpc,
+  WsOrchestrationSearchThreadsRpc,
+  WsOrchestrationFindInThreadRpc,
+  WsOrchestrationSetThreadGoalRpc,
+  WsOrchestrationStopThreadGoalRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,

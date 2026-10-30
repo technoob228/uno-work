@@ -7,7 +7,6 @@
  * in" when it started before Hermes was checked, 16.10 — see
  * unoDefaultSelection.logic.ts).
  */
-import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
 import type { ModelSelection } from "@t3tools/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -38,7 +37,7 @@ export function useUnoDefaultSelection(): {
   );
   const startOptions = useCallback((): HomeStartOptions => {
     if (selection) setSticky(selection);
-    return { folder: null, modelSelection: selection, runtimeMode: DEFAULT_RUNTIME_MODE };
+    return { folder: null, modelSelection: selection, runtimeMode: null };
   }, [selection, setSticky]);
   return { ready: settled, selection, startOptions };
 }

@@ -1154,6 +1154,7 @@ export const ChatComposer = memo(
     const isAssistantChat = activeThread ? isAssistantConversation(activeThread) : false;
     // Variant D: a persona's channel says its own name, not Uno's.
     const persona = useTeammateOfThread(environmentId, activeThread?.id ?? "");
+    const goalAvailable = !isAssistantChat && !holdsOutsideText;
     const assistantLlm = useAssistantLlm(isAssistantChat ? environmentId : null);
     const assistantEngine = isAssistantChat && assistantLlm.supported;
     const assistantSendBlock = assistantEngine
@@ -1325,6 +1326,17 @@ export const ChatComposer = memo(
             label: "/model",
             description: "Switch the model for this chat",
           },
+          ...(goalAvailable
+            ? ([
+                {
+                  id: "slash:goal",
+                  type: "slash-command",
+                  command: "goal",
+                  label: "/goal",
+                  description: "Keep working until a goal is met",
+                },
+              ] as const)
+            : []),
           ...(chatPlanLimits.accounts.length > 0
             ? ([
                 {
@@ -1355,16 +1367,17 @@ export const ChatComposer = memo(
               ] as const)
             : []),
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-        const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
-          (command) => ({
+        const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? [])
+          // `/goal` is ours on every agent.
+          .filter((command) => command.name !== "goal")
+          .map((command) => ({
             id: `provider-slash-command:${selectedProvider}:${command.name}`,
             type: "provider-slash-command" as const,
             provider: selectedProvider,
             command,
             label: `/${command.name}`,
             description: command.description ?? command.input?.hint ?? "Run agent command",
-          }),
-        );
+          }));
         const query = composerTrigger.query.trim().toLowerCase();
         const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
         if (!query) {
@@ -1392,6 +1405,7 @@ export const ChatComposer = memo(
     }, [
       composerTrigger,
       planModeUiEnabled,
+      goalAvailable,
       chatPlanLimits.accounts.length,
       selectedProvider,
       selectedProviderStatus,
@@ -2177,6 +2191,13 @@ export const ChatComposer = memo(
               setComposerHighlightedItemId(null);
               setIsComposerModelPickerOpen(true);
             }
+            return;
+          }
+          if (item.command === "goal") {
+            const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/goal ", {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            });
+            if (applied) setComposerHighlightedItemId(null);
             return;
           }
           if (item.command === "limits") {

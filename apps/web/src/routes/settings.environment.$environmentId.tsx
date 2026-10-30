@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 
+import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 import { EnvironmentScopeBanner } from "../environments/scope/EnvironmentScopeBanner";
 import { useEnvironmentScope } from "../environments/scope/scopes";
 
@@ -13,14 +14,19 @@ import { useEnvironmentScope } from "../environments/scope/scopes";
 function EnvironmentSettingsLayout() {
   const { environmentId } = Route.useParams();
   const scope = useEnvironmentScope(environmentId as EnvironmentId);
+  // All computers picked in the sentence: this page isn't about this one computer.
+  const { search, singleComputer } = useSettingsScope();
+  const allComputers = search.machine === undefined && !singleComputer;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-6 pt-6 sm:px-8">
-        <div className="mx-auto w-full max-w-3xl">
-          <EnvironmentScopeBanner scope={scope} environmentId={environmentId as EnvironmentId} />
+      {allComputers ? null : (
+        <div className="px-6 pt-6 sm:px-8">
+          <div className="mx-auto w-full max-w-3xl">
+            <EnvironmentScopeBanner scope={scope} environmentId={environmentId as EnvironmentId} />
+          </div>
         </div>
-      </div>
+      )}
       <Outlet />
     </div>
   );

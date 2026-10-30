@@ -13,6 +13,7 @@ import {
   isAssistantProjectId,
   type InboxItem,
   type RuntimeMode,
+  type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { pendingPlanResume } from "@t3tools/shared/planLimitRules";
@@ -23,6 +24,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
+import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
 import { addSecretRequest } from "../secretRequestStore";
 import {
@@ -96,6 +98,7 @@ import {
   descriptorFor,
   machineByEnv,
   readModelFor,
+  applyDemoMachineSettings,
   serverConfigFor,
   toShellSnapshot,
   toShellThread,
@@ -302,6 +305,13 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     const vaultAnswer = answerVaultRpc(machine.environmentId, String(tag), body);
     if (vaultAnswer !== undefined) return vaultAnswer;
   }
+  const searchAnswer = answerThreadSearchRpc(
+    modelFor(machine).threads,
+    String(tag),
+    body,
+    (threadId) => publishThread(machine, threadId),
+  );
+  if (searchAnswer !== undefined) return searchAnswer;
   // p9: the vault's entries for the teammate's access (assistantsFixtures.ts).
   const teamAnswer = answerTeamRpc(String(body._tag));
   if (teamAnswer !== undefined) return teamAnswer;
@@ -389,8 +399,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     case WS_METHODS.unoComputerPlanLimits:
       return planLimitsFor(machine.key);
     case WS_METHODS.serverUpdateSettings: {
-      if (!DEMO_ACCOUNTS) return {};
-      applyDemoPlanSettings((body as { patch?: Record<string, unknown> }).patch ?? {});
+      const patch = (body as { patch?: Record<string, unknown> }).patch ?? {};
+      if (DEMO_ACCOUNTS) applyDemoPlanSettings(patch);
+      applyDemoMachineSettings(machine, patch as ServerSettingsPatch);
       emitDemoConfig(machine);
       return serverConfigFor(machine).settings;
     }

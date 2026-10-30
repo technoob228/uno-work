@@ -361,13 +361,25 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     projectId,
     title: "Launch report and the page",
     messages: [
-      message(
-        `${files}-u1`,
-        "user",
-        "Put together the launch report and tell me where everything is.",
-        at(t3, 0),
-        null,
-      ),
+      {
+        ...message(
+          `${files}-u1`,
+          "user",
+          "Put together the launch report and tell me where everything is.",
+          at(t3, 0),
+          null,
+        ),
+        attachments: [
+          {
+            type: "file",
+            id: `${files}-brief`,
+            name: "launch-brief.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 482_000,
+            path: "/home/uno/UnoWork/Reports/launch-brief.pdf",
+          },
+        ],
+      },
       message(`${files}-a1`, "assistant", FILES_ANSWER, at(t3, 79), filesTurn),
     ],
     activities: [

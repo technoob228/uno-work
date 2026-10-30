@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./threadGoal": {
+      "types": "./src/threadGoal.ts",
+      "import": "./src/threadGoal.ts"
+    },
+    "./threadSearch": {
+      "types": "./src/threadSearch.ts",
+      "import": "./src/threadSearch.ts"
+    },
     "./customHarness": {
       "types": "./src/customHarness.ts",
       "import": "./src/customHarness.ts"
@@ -79,6 +87,10 @@
     "./Struct": {
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
+    },
+    "./projectSettings": {
+      "types": "./src/projectSettings.ts",
+      "import": "./src/projectSettings.ts"
     },
     "./serverSettings": {
       "types": "./src/serverSettings.ts",

@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   DEFAULT_MODEL,
   type EnvironmentId,
@@ -27,6 +27,7 @@ import {
   MessageSquareIcon,
   SettingsIcon,
   SquarePenIcon,
+  TextSearchIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -52,6 +53,7 @@ import {
 } from "../environments/runtime";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
+import { newChatEnvMode } from "../newChatDefaults";
 import { readLocalApi } from "../localApi";
 import {
   getSourceControlDiscoverySnapshot,
@@ -112,9 +114,16 @@ import {
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
 } from "./CommandPalette.logic";
+import { formatRelativeTimeLabel } from "../timestampFormat";
+import {
+  longestMessageSearchToken,
+  threadSearchHighlightParts,
+} from "@t3tools/shared/threadSearch";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { usePreviewPane } from "./preview/PreviewPaneContext";
 import { CommandPaletteResults } from "./CommandPaletteResults";
+import { useMessageSearch } from "./useMessageSearch";
+import { useThreadFindStore } from "../threadFindStore";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
@@ -392,6 +401,25 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
 }
 
+const MESSAGE_RESULT_LIMIT = 8;
+
+function SearchSnippet({ text, query }: { text: string; query: string }) {
+  return (
+    <>
+      {threadSearchHighlightParts(text, query).map((part, index) =>
+        part.match ? (
+          // oxlint-disable-next-line react/no-array-index-key -- parts have no identity of their own and never reorder
+          <mark key={index} className="bg-transparent font-medium text-foreground">
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
+}
+
 function CommandPaletteDialog() {
   const open = useCommandPaletteStore((store) => store.open);
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
@@ -433,6 +461,10 @@ function OpenCommandPaletteDialog() {
   } = useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const threadEnvironmentIds = useMemo(
+    () => [...new Set(threads.map((thread) => thread.environmentId))],
+    [threads],
+  );
   const keybindings = useServerKeybindings();
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
@@ -667,17 +699,10 @@ function OpenCommandPaletteDialog() {
         return;
       }
 
-      await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
-        envMode: settings.defaultThreadEnvMode,
-      });
+      const projectRef = scopeProjectRef(project.environmentId, project.id);
+      await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) });
     },
-    [
-      handleNewThread,
-      navigate,
-      settings.defaultThreadEnvMode,
-      settings.sidebarThreadSortOrder,
-      threads,
-    ],
+    [handleNewThread, navigate, settings.sidebarThreadSortOrder, threads],
   );
 
   const projectSearchItems = useMemo(
@@ -715,21 +740,14 @@ function OpenCommandPaletteDialog() {
               activeDraftThread,
               activeThread,
               defaultProjectRef,
-              defaultThreadEnvMode: settings.defaultThreadEnvMode,
+              defaultThreadEnvMode: newChatEnvMode,
               handleNewThread,
             },
             scopeProjectRef(project.environmentId, project.id),
           );
         },
       }),
-    [
-      activeDraftThread,
-      activeThread,
-      defaultProjectRef,
-      handleNewThread,
-      projects,
-      settings.defaultThreadEnvMode,
-    ],
+    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, projects],
   );
 
   const allThreadItems = useMemo(
@@ -872,7 +890,7 @@ function OpenCommandPaletteDialog() {
           filterIgnored: true,
         });
         await handleNewThread(scopeProjectRef(environmentId, projectId), {
-          envMode: settings.defaultThreadEnvMode,
+          envMode: newChatEnvMode({ environmentId, projectId }),
         }).catch(() => undefined);
       } catch (error) {
         toastManager.add(
@@ -884,7 +902,7 @@ function OpenCommandPaletteDialog() {
         );
       }
     },
-    [handleNewThread, settings.addProjectBaseDirectory, settings.defaultThreadEnvMode],
+    [handleNewThread, settings.addProjectBaseDirectory],
   );
 
   const buildAddProjectSourceGroups = useCallback(
@@ -1168,7 +1186,7 @@ function OpenCommandPaletteDialog() {
             activeDraftThread,
             activeThread,
             defaultProjectRef,
-            defaultThreadEnvMode: settings.defaultThreadEnvMode,
+            defaultThreadEnvMode: newChatEnvMode,
             handleNewThread,
             activeEnvironmentId,
             createStarterProject,
@@ -1265,12 +1283,51 @@ function OpenCommandPaletteDialog() {
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   const activeGroups = currentView ? currentView.groups : rootGroups;
 
+  const messageSearch = useMessageSearch({
+    query: deferredQuery,
+    environmentIds: threadEnvironmentIds,
+    enabled: currentView === null && !isActionsOnly && !isBrowsing,
+  });
+  const messageSearchItems = useMemo(() => {
+    const threadByKey = new Map(
+      threads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread,
+      ]),
+    );
+    return messageSearch.matches.slice(0, MESSAGE_RESULT_LIMIT).flatMap((match) => {
+      const ref = scopeThreadRef(match.environmentId, match.threadId);
+      const thread = threadByKey.get(scopedThreadKey(ref));
+      if (!thread) return [];
+      const item: CommandPaletteActionItem = {
+        kind: "action",
+        value: `message:${match.environmentId}:${match.messageId}`,
+        searchTerms: [],
+        title: thread.title,
+        description: match.snippet,
+        descriptionContent: <SearchSnippet text={match.snippet} query={messageSearch.query} />,
+        timestamp: formatRelativeTimeLabel(match.messageCreatedAt),
+        icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useThreadFindStore.getState().jumpTo({
+            threadKey: scopedThreadKey(ref),
+            query: longestMessageSearchToken(messageSearch.query),
+            messageId: match.messageId,
+          });
+          await navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
+        },
+      };
+      return [item];
+    });
+  }, [messageSearch.matches, messageSearch.query, navigate, threads]);
+
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
+    messageSearchItems,
   });
 
   const handleAddProject = useCallback(
@@ -1322,9 +1379,10 @@ function OpenCommandPaletteDialog() {
             ),
           });
         } else {
-          await handleNewThread(scopeProjectRef(existing.environmentId, existing.id), {
-            envMode: settings.defaultThreadEnvMode,
-          }).catch(() => undefined);
+          const projectRef = scopeProjectRef(existing.environmentId, existing.id);
+          await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) }).catch(
+            () => undefined,
+          );
         }
         setOpen(false);
         return;
@@ -1345,9 +1403,10 @@ function OpenCommandPaletteDialog() {
           },
           createdAt: new Date().toISOString(),
         });
-        await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
-          envMode: settings.defaultThreadEnvMode,
-        }).catch(() => undefined);
+        const projectRef = scopeProjectRef(browseEnvironmentId, projectId);
+        await handleNewThread(projectRef, { envMode: newChatEnvMode(projectRef) }).catch(
+          () => undefined,
+        );
         setOpen(false);
       } catch (error) {
         toastManager.add(
@@ -1367,7 +1426,6 @@ function OpenCommandPaletteDialog() {
       navigate,
       projects,
       setOpen,
-      settings.defaultThreadEnvMode,
       settings.sidebarThreadSortOrder,
       threads,
     ],
@@ -1883,7 +1941,11 @@ function OpenCommandPaletteDialog() {
                         emptyStateMessage:
                           "Press Enter to create this folder and add it as a project.",
                       }
-                    : {})}
+                    : messageSearch.searching
+                      ? { emptyStateMessage: "Searching messages…" }
+                      : messageSearch.indexing
+                        ? { emptyStateMessage: "Older messages are still being indexed." }
+                        : {})}
           />
         </CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">

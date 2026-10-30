@@ -1,4 +1,8 @@
-import { ServerSettings, type ServerSettingsPatch } from "@t3tools/contracts";
+import {
+  type ProjectSettingsOverrides,
+  ServerSettings,
+  type ServerSettingsPatch,
+} from "@t3tools/contracts";
 import { Schema } from "effect";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
@@ -65,6 +69,19 @@ function mergeModelSelectionOptionsById(input: {
   return [...merged.entries()].map(([id, value]) => ({ id, value }));
 }
 
+/** An entry replaces the project's old one; null removes it. */
+function mergeProjectSettingsOverridesPatch(
+  current: Readonly<Record<string, ProjectSettingsOverrides>>,
+  patch: Readonly<Record<string, ProjectSettingsOverrides | null>>,
+): Record<string, ProjectSettingsOverrides> {
+  const next = new Map(Object.entries(current));
+  for (const [projectId, entry] of Object.entries(patch)) {
+    if (entry === null) next.delete(projectId);
+    else next.set(projectId, entry);
+  }
+  return Object.fromEntries(next);
+}
+
 /**
  * Applies a server settings patch while treating textGenerationModelSelection as
  * replace-on-provider/model updates. This prevents stale nested options from
@@ -75,7 +92,8 @@ export function applyServerSettingsPatch(
   patch: ServerSettingsPatch,
 ): ServerSettings {
   const selectionPatch = patch.textGenerationModelSelection;
-  const next = deepMerge(current, patch);
+  const { projectSettingsOverrides, ...rest } = patch;
+  const next = deepMerge(current, rest);
   // Arrays and instance maps are replaced whole: deepMerge would merge an
   // array index by index and leave removed entries behind.
   const nextWithReplacements = {
@@ -86,6 +104,18 @@ export function applyServerSettingsPatch(
     ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
     ...(patch.setup !== undefined ? { setup: patch.setup } : {}),
     ...(patch.mcpServers !== undefined ? { mcpServers: patch.mcpServers } : {}),
+    // A new model must not keep the previous model's options.
+    ...(patch.defaultModelSelection !== undefined
+      ? { defaultModelSelection: patch.defaultModelSelection }
+      : {}),
+    ...(projectSettingsOverrides !== undefined
+      ? {
+          projectSettingsOverrides: mergeProjectSettingsOverridesPatch(
+            current.projectSettingsOverrides,
+            projectSettingsOverrides,
+          ),
+        }
+      : {}),
   };
   if (!selectionPatch) {
     return nextWithReplacements;
