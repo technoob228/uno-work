@@ -1484,10 +1484,12 @@ export const ChatComposer = memo(
       if (composerTriggerKind === "skill") {
         return "No skills found. Try / to browse agent commands.";
       }
-      return composerTriggerKind === "path"
-        ? "No matching files or folders."
+      if (composerTriggerKind === "path") return "No matching files or folders.";
+      // /limits reads a Claude or Codex plan: Uno AI's own limit lives in Settings.
+      return composerTrigger?.query.trim().toLowerCase() === "limits"
+        ? "With Uno AI, your AI time is in Settings, Account & plan."
         : "No matching command.";
-    }, [composerTriggerKind]);
+    }, [composerTrigger?.query, composerTriggerKind]);
 
     // ------------------------------------------------------------------
     // Provider traits UI

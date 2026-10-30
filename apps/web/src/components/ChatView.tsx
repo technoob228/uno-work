@@ -5103,7 +5103,8 @@ export default function ChatView(props: ChatViewProps) {
                         onEdit={onEditQueued}
                         onDelete={onDeleteQueued}
                       />
-                      {threadErrorNotice("feed")}
+                      {/* The last turn's line goes once a new turn is on its way. */}
+                      {phase === "running" ? null : threadErrorNotice("feed")}
                       {planLimitStopText !== null && isServerThread ? (
                         <ChatPlanLimitNotice
                           environmentId={activeThread.environmentId}

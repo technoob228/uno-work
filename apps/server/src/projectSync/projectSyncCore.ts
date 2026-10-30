@@ -938,6 +938,14 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         throw new ProjectSyncFailure("This project isn't on all your computers.");
       const engine = await deps.engine();
       const dir = folderOf(project);
+      if (localOnly) {
+        // Paths out of the project stay the engine's to refuse.
+        const target = path.resolve(dir, relative);
+        const inside = target.startsWith(`${path.resolve(dir)}${path.sep}`);
+        if (inside && !(await stat(target).then(() => true, () => false))) {
+          throw new ProjectSyncFailure("There's no file or folder with that name in this project.");
+        }
+      }
       const ctx = await engineCtx();
       // The engine refuses while a sync holds the folder: the choice waits its turn.
       for (let waited = 0; scheduler.isRunning(projectId) && waited < LOCAL_ONLY_WAIT_MS; ) {

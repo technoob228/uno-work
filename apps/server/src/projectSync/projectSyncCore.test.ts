@@ -432,6 +432,10 @@ describe("versions, files, keys in files", { timeout: 120_000 }, () => {
     // Right after: the sync it started in the background doesn't get in the way.
     expect((await laptop.core.setLocalOnly(id, "movie.mov", false)).synced).toBe(2);
     await laptop.core.syncNow(id);
+    // A name that isn't there says so: the field used to clear and nothing happened.
+    await expect(laptop.core.setLocalOnly(id, "no-such-file.mov", true)).rejects.toThrow(
+      "no file or folder with that name",
+    );
   });
 
   it("the engine's key patterns are the daemon's", async () => {
